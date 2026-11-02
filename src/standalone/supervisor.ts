@@ -1,3 +1,4 @@
+import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { EventEmitter } from "node:events";
@@ -18,7 +19,10 @@ import type {
   TerminationVerification,
   TerminationVerifier,
 } from "./recovery-types.js";
-import { MacProcessTerminationVerifier } from "./termination.js";
+import {
+  MacProcessTerminationVerifier,
+  PROCESS_STILL_PRESENT,
+} from "./termination.js";
 
 export interface SupervisorClock {
   monotonicNow(): number;
@@ -42,6 +46,7 @@ export interface StopObservation {
 
 export interface ExecutionSupervisorOptions {
   clock?: SupervisorClock;
+  hasPendingCallbacks?: (workId: string) => boolean;
   observationMs?: number;
   /** How long planned shutdown waits for interrupted turns to report; default 5000. */
   shutdownWaitMs?: number;
@@ -142,6 +147,7 @@ export class ExecutionSupervisor {
   private readonly observationControllers = new Set<AbortController>();
   private readonly interruptRequests = new Set<Promise<void>>();
   private readonly knownRisk = new Set<string>();
+  private readonly hasPendingCallbacks: (workId: string) => boolean;
 
   constructor(
     private readonly state: ExecutionState,
@@ -152,6 +158,7 @@ export class ExecutionSupervisor {
     options: ExecutionSupervisorOptions = {},
     private readonly terminationVerifier: TerminationVerifier = new MacProcessTerminationVerifier(),
   ) {
+    this.hasPendingCallbacks = options.hasPendingCallbacks ?? (() => false);
     this.clock = options.clock ?? defaultClock;
     this.observationMs = options.observationMs ?? 3000;
     if (!Number.isSafeInteger(this.observationMs) || this.observationMs <= 0)
@@ -233,33 +240,119 @@ export class ExecutionSupervisor {
     | { verification: Extract<TerminationVerification, { kind: "verified" }> }
     | { refusal: string }
   > {
-    let verification: TerminationVerification;
-    try {
-      verification = await this.terminationVerifier.verify(processIdentity);
-    } catch {
-      this.recordObservation(workId, "termination-unknown");
-      return { refusal: "Original process termination could not be verified" };
-    }
-    if (verification.kind !== "verified") {
-      const conflict = verification.kind === "conflict";
+    const result = await this.terminationProof(processIdentity);
+    if ("refusal" in result) {
       this.recordObservation(
         workId,
-        conflict ? "termination-conflict" : "termination-unknown",
+        result.blocker === "termination-unknown"
+          ? "termination-unknown"
+          : "termination-conflict",
       );
-      return {
-        refusal: conflict
-          ? "Process termination evidence conflicts with the stored identity"
-          : "Original process termination could not be verified",
-      };
-    }
-    if (!exactProcessIdentity(processIdentity, verification.processIdentity)) {
-      this.recordObservation(workId, "termination-conflict");
-      return {
-        refusal: "Verified termination proof has a different process identity",
-      };
+      return { refusal: result.refusal };
     }
     this.recordObservation(workId, "termination-verified");
-    return { verification };
+    return result;
+  }
+
+  /** Same bounded proof interpretation for advisory reads and mutating verification. */
+  private async terminationProof(
+    processIdentity: RuntimeProcessIdentity,
+  ): Promise<
+    | { verification: Extract<TerminationVerification, { kind: "verified" }> }
+    | {
+        refusal: string;
+        blocker:
+          | "termination-live"
+          | "termination-conflict"
+          | "termination-unknown";
+      }
+  > {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const raw = await Promise.race([
+        this.terminationVerifier.verify(processIdentity),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Termination verification timed out")),
+            7000,
+          );
+        }),
+      ]);
+      const verification = z
+        .discriminatedUnion("kind", [
+          z
+            .object({
+              kind: z.literal("verified"),
+              processIdentity: processIdentitySchema,
+              verifiedAt: z.string().datetime({ offset: true }),
+              method: z.literal("mac-pid-absent-same-boot"),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.enum(["conflict", "unknown"]),
+              reason: z.string(),
+            })
+            .strict(),
+        ])
+        .parse(raw);
+      if (verification.kind !== "verified")
+        return {
+          blocker:
+            verification.kind === "unknown"
+              ? "termination-unknown"
+              : verification.reason === PROCESS_STILL_PRESENT
+                ? "termination-live"
+                : "termination-conflict",
+          refusal:
+            verification.kind === "conflict"
+              ? "Process termination evidence conflicts with the stored identity"
+              : "Original process termination could not be verified",
+        };
+      if (!exactProcessIdentity(processIdentity, verification.processIdentity))
+        return {
+          blocker: "termination-conflict",
+          refusal:
+            "Verified termination proof has a different process identity",
+        };
+      return { verification };
+    } catch {
+      return {
+        blocker: "termination-unknown",
+        refusal: "Original process termination could not be verified",
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private boundTurnBlockers(
+    workId: string,
+    assignmentId: string,
+  ): BoundTurnRecoveryBlocker[] {
+    const blocked = this.state.boundTurnRecoveryBlockers(workId, assignmentId);
+    if (this.hasPendingCallbacks(workId)) blocked.push("callback-pending");
+    return blocked;
+  }
+
+  /** Advisory only: no observations, ownership release or runtime/model calls. */
+  async boundTurnRecoveryEligibility(
+    workId: string,
+    assignmentId: string,
+  ): Promise<BoundTurnRecoveryBlocker[]> {
+    const blocked = this.boundTurnBlockers(workId, assignmentId);
+    if (blocked.length) return blocked;
+    const before = this.state.recoveryIdentity(workId);
+    if (!before?.processIdentity) return ["bound-identity-missing"];
+    const result = await this.terminationProof(before.processIdentity);
+    const after = this.state.recoveryIdentity(workId);
+    const left = inspectionIdentity(before),
+      right = after && inspectionIdentity(after);
+    if (!left || !right || !exactExecutionIdentity(left, right))
+      return ["identity-changed"];
+    const current = this.boundTurnBlockers(workId, assignmentId);
+    if (current.length) return current;
+    return "refusal" in result ? [result.blocker] : [];
   }
 
   recordObservation(
@@ -272,7 +365,7 @@ export class ExecutionSupervisor {
 
   async resolveHeldExecution(
     receipt: RecoveryReceipt,
-    command?: { key: string; receipt: RecoveryReceipt },
+    command?: { key: string; receipt: RecoveryReceipt; assignmentId?: string },
   ) {
     const value = recoveryReceiptSchema.parse(receipt);
     const stored = this.state.recoveryIdentity(value.workId);
@@ -288,6 +381,16 @@ export class ExecutionSupervisor {
         "Recovery receipt generation or execution identity does not match",
       );
 
+    if (command && value.kind === "bound-turn") {
+      const blocked = this.boundTurnBlockers(
+        value.workId,
+        command.assignmentId ?? "",
+      );
+      if (blocked.length)
+        throw new RecoveryRejectedError(
+          `Bound-turn recovery blocked: ${blocked.join(", ")}`,
+        );
+    }
     const confirmed = await this.confirmTermination(
       value.workId,
       stored.processIdentity,
@@ -295,6 +398,16 @@ export class ExecutionSupervisor {
     if ("refusal" in confirmed)
       throw new RecoveryRejectedError(confirmed.refusal);
     const { verification } = confirmed;
+    if (command && value.kind === "bound-turn") {
+      const blocked = this.boundTurnBlockers(
+        value.workId,
+        command.assignmentId ?? "",
+      );
+      if (blocked.length)
+        throw new RecoveryRejectedError(
+          `Bound-turn recovery blocked: ${blocked.join(", ")}`,
+        );
+    }
     return this.state.resolveHeldExecution(value, verification, command);
   }
 
@@ -400,6 +513,7 @@ export class ExecutionSupervisor {
 
   noteSurvivor(workId: string): void {
     this.knownRisk.add(workId);
+    this.recordObservation(workId, "known-survivor");
     this.state.recordStopAnomaly(
       workId,
       "Known unfinished execution remains after terminal status",

@@ -111,6 +111,7 @@ const evidenceFileSchemas: Record<
     .strict(),
   "pre-turn-recover": receiptAssertions,
   "no-turn-recover": receiptAssertions,
+  "bound-turn-recover": receiptAssertions,
 };
 
 /** Reads and strictly validates an operator evidence file for one path. */

@@ -83,6 +83,8 @@ function processIsAbsent(processId: number): boolean | undefined {
 }
 
 /** Reasons of a `conflict` that still prove the original process is gone. */
+export const PROCESS_STILL_PRESENT =
+  "Original execution process is still present";
 export const PROCESS_IDENTIFIER_REUSED =
   "Original process identifier is now reused";
 export const HOST_BOOT_DIFFERS =
@@ -141,7 +143,7 @@ export class MacProcessTerminationVerifier implements TerminationVerifier {
     if (currentBirth === parsed.data.processStartedAt)
       return {
         kind: "conflict",
-        reason: "Original execution process is still present",
+        reason: PROCESS_STILL_PRESENT,
       };
     return {
       kind: "conflict",

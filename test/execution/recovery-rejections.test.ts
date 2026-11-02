@@ -1,3 +1,5 @@
+import { boundWorld } from "./bound-turn-recovery-fixture.js";
+import { until } from "../fixtures/until.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -504,3 +506,174 @@ test("core recovery bodies accept and reject exactly what the standalone schemas
   // Neither accepts a missing key in the standalone form.
   assert.equal(historicalNoTurnAdoptionSchema.safeParse(noTurn).success, false);
 });
+
+for (const harness of ["codex", "claude"] as const)
+  test(`${harness}: bound receipts refuse stale identities and forged assertions`, async (t) => {
+    const w = await boundWorld(t, harness);
+    const base = w.recovery();
+    for (const changed of [
+      { workRevision: base.receipt.workRevision + 1 },
+      { requestSequence: base.receipt.requestSequence + 1 },
+      { threadId: "another-thread" },
+      { turnId: "another-turn" },
+      {
+        processIdentity: {
+          ...base.receipt.processIdentity,
+          processId: "other",
+        },
+      },
+      {
+        processIdentity: {
+          ...base.receipt.processIdentity,
+          processStartedAt: "reused birth",
+        },
+      },
+      {
+        processIdentity: {
+          ...base.receipt.processIdentity,
+          bootId: "another boot",
+        },
+      },
+    ])
+      await rejected(
+        () =>
+          w.s.f.service.recoverBoundTurnExecution({
+            ...base,
+            key: randomUUID(),
+            receipt: { ...base.receipt, ...changed },
+          }),
+        /identity does not match/,
+      );
+    await rejected(
+      () =>
+        w.s.f.service.recoverBoundTurnExecution({
+          ...base,
+          assignmentId: randomUUID(),
+        }),
+      /context-unavailable/,
+    );
+    assert.equal(w.checks(), 0);
+    for (const changed of [
+      { effects: undefined },
+      { workspace: undefined },
+      { termination: { kind: "acknowledged" } },
+      { effects: "unsettled" },
+      { witnessId: randomUUID() },
+      { kind: undefined },
+    ]) {
+      await assert.rejects(async () =>
+        w.s.f.service.recoverBoundTurnExecution({
+          ...base,
+          key: randomUUID(),
+          receipt: { ...base.receipt, ...changed },
+        } as never),
+      );
+    }
+    for (const mode of [
+      "unknown",
+      "live",
+      "conflict",
+      "other-identity",
+    ] as const) {
+      w.setMode(mode);
+      await rejected(
+        () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
+        /termination|proof/i,
+      );
+    }
+    const record = w.s.f.service
+      .recoveryForTask(w.g.taskId)
+      .find((r) => r.workId === w.g.workId);
+    assert.ok(record?.holds.writer && record.holds.capacity);
+    assert.equal(record?.receipt, null);
+    assert.equal(w.runtime.turnInvocations.length, 1);
+  });
+
+for (const risk of ["callback", "pending-effect", "survivor"] as const)
+  test(`bound recovery rejects ${risk} and persists known survivor refusal across restart`, async (t) => {
+    const w = await boundWorld(t);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    if (risk === "callback")
+      w.s.f.service.registerExecutionCallback(w.g.workId, pending);
+    if (risk === "pending-effect")
+      w.s.f.seedPersistedState((db) =>
+        db
+          .prepare(
+            "INSERT INTO execution_pending_effects (workId,effectKey,state,reason) VALUES (?,'external-write','pending','pending')",
+          )
+          .run(w.g.workId),
+      );
+    if (risk === "survivor")
+      w.s.f.service.holdKnownSurvivor(w.g.workId, "owned unfinished fixture");
+    await rejected(
+      () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
+      /callback-pending|pending-effects|known-survivor/,
+    );
+    assert.equal(w.checks(), 0);
+    release();
+    if (risk === "survivor") {
+      await w.s.restart();
+      await rejected(
+        () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
+        /known-survivor/,
+      );
+      assert.equal(w.checks(), 0);
+    }
+    assert.equal(
+      w.s.f.service
+        .recoveryForTask(w.g.taskId)
+        .find((r) => r.workId === w.g.workId)?.receipt,
+      null,
+    );
+  });
+
+for (const risk of ["callback", "effect", "revision"] as const)
+  test(`bound recovery rechecks ${risk} after asynchronous exit verification`, async (t) => {
+    const w = await boundWorld(t);
+    let release!: () => void;
+    w.setGate(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const attempt = w.s.f.service.recoverBoundTurnExecution(w.recovery());
+    await until(() => w.checks() === 1, "verification in flight");
+    let finish!: () => void;
+    if (risk === "callback")
+      w.s.f.service.registerExecutionCallback(
+        w.g.workId,
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+      );
+    if (risk === "effect")
+      w.s.f.seedPersistedState((db) =>
+        db
+          .prepare(
+            "INSERT INTO execution_pending_effects (workId,effectKey,state,reason) VALUES (?,'late-external','pending','late')",
+          )
+          .run(w.g.workId),
+      );
+    if (risk === "revision")
+      w.s.f.seedPersistedState((db) =>
+        db
+          .prepare(
+            "UPDATE task_work_revisions SET workRevision=workRevision+1 WHERE workId=?",
+          )
+          .run(w.g.workId),
+      );
+    release();
+    await rejected(
+      () => attempt,
+      /callback-pending|pending-effects|identity-changed/,
+    );
+    finish?.();
+    const record = w.s.f.service
+      .recoveryForTask(w.g.taskId)
+      .find((r) => r.workId === w.g.workId);
+    assert.ok(record?.holds.writer && record.holds.capacity);
+    assert.equal(record?.receipt, null);
+  });

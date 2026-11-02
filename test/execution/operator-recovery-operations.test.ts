@@ -1,3 +1,4 @@
+import { boundWorld } from "./bound-turn-recovery-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -128,4 +129,57 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     });
     assert.equal((await read(type, key)).status, 200, "restored");
   }
+});
+
+test("bound receipt readback is scoped to its command type, assignment and stored material", async (t) => {
+  const w = await boundWorld(t);
+  const ro = (await w.s.issue("read", "bound-readback")).token;
+  const command = { type: "recovery.bound-turn.recover", ...w.recovery() };
+  const read = async (type = command.type, assignment = w.g.assignmentId) => {
+    const query = new URLSearchParams({
+      type,
+      key: command.key,
+      scope: `assignment:${assignment}`,
+    });
+    const response = await w.s.bearer(ro, `/api/operator/operations?${query}`);
+    return { status: response.status, body: await response.json() };
+  };
+  assert.deepEqual((await read()).body.data, { state: "not-recorded" });
+  const result = await w.s.f.service.recoverBoundTurnExecution(
+    w.recovery(command.key),
+  );
+  const receipt = (await read()).body.data;
+  assert.equal(receipt.state, "recorded");
+  assert.equal(receipt.receipt.receiptId, result.id);
+  assert.deepEqual((await read("recovery.pre-turn.recover")).body.data, {
+    state: "not-recorded",
+  });
+  assert.deepEqual((await read(command.type, randomUUID())).body.data, {
+    state: "not-recorded",
+  });
+  await w.s.restart();
+  assert.deepEqual((await read()).body.data, receipt);
+  w.s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE execution_pre_turn_commands SET payloadMaterial=? WHERE commandKey=?",
+      )
+      .run(
+        JSON.stringify({ ...w.recovery(command.key), key: randomUUID() }),
+        command.key,
+      ),
+  );
+  assert.equal(
+    (await read()).status,
+    409,
+    "stored payload must name its own key",
+  );
+  w.s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE execution_pre_turn_commands SET payloadMaterial='null' WHERE commandKey=?",
+      )
+      .run(command.key),
+  );
+  assert.equal((await read()).status, 409);
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  boundTurnRecoveryBodySchema,
   historicalNoTurnAdoptionBodySchema,
   historicalPreTurnAdoptionBodySchema,
   noTurnRecoveryBodySchema,
@@ -44,6 +45,12 @@ export class ArchivedResumeRejectedError extends Error {
 }
 
 const key = z.string().uuid();
+export const boundTurnRecoveryCommandSchema = boundTurnRecoveryBodySchema
+  .extend({ key })
+  .strict();
+export type BoundTurnRecoveryCommand = z.infer<
+  typeof boundTurnRecoveryCommandSchema
+>;
 export const historicalPreTurnAdoptionSchema =
   historicalPreTurnAdoptionBodySchema
     .extend({ key })

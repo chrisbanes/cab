@@ -240,6 +240,8 @@ import {
 } from "./power.js";
 import {
   ArchivedResumeRejectedError,
+  type BoundTurnRecoveryCommand,
+  boundTurnRecoveryCommandSchema,
   type HistoricalNoTurnAdoption,
   type HistoricalPreTurnAdoption,
   type NoTurnRecoveryCommand,
@@ -248,6 +250,7 @@ import {
   preTurnRecoveryCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import type {
   RecoveryReceipt,
   RecoveryRecord,
@@ -802,6 +805,14 @@ export class StandaloneService {
   private readonly nativeWaiters = new Map<
     string,
     { workId: string; interactionId: string; resolve: () => void }
+  >();
+  private readonly boundRecoveryRequests = new Map<
+    string,
+    {
+      material: string;
+      generation: ExecutionState;
+      result: Promise<{ id: string; workId: string; state: "reconciled" }>;
+    }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
   /** Drafting commands in flight, by key. */
@@ -1537,7 +1548,11 @@ export class StandaloneService {
               ),
           };
         },
-        this.options.supervisor,
+        {
+          ...this.options.supervisor,
+          hasPendingCallbacks: (workId) =>
+            (this.callbacks.get(workId)?.size ?? 0) > 0,
+        },
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
       acquire("supervisor", supervisor);
@@ -3065,6 +3080,50 @@ export class StandaloneService {
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
     return this.started().supervisor.resolveHeldExecution(receipt);
+  }
+  boundTurnRecoveryEligibility(workId: string, assignmentId: string) {
+    return this.started().supervisor.boundTurnRecoveryEligibility(
+      workId,
+      assignmentId,
+    );
+  }
+  recoverBoundTurnExecution(command: BoundTurnRecoveryCommand) {
+    const value = boundTurnRecoveryCommandSchema.parse(command);
+    const { state, supervisor } = this.started();
+    const replay = state.preTurnCommandReplay("recover-bound-turn", value);
+    if (replay)
+      return Promise.resolve(
+        z
+          .object({
+            id: z.string().uuid(),
+            workId: z.string().min(1),
+            state: z.literal("reconciled"),
+          })
+          .strict()
+          .parse(replay),
+      );
+    const material = canonicalMaterial(value);
+    const pending = this.boundRecoveryRequests.get(value.key);
+    if (pending) {
+      if (pending.material !== material || pending.generation !== state)
+        throw new RecoveryRejectedError(
+          "Recovery command key is already pending with different material or service generation",
+        );
+      return pending.result;
+    }
+    const result: Promise<{ id: string; workId: string; state: "reconciled" }> =
+      Promise.resolve()
+        .then(() => supervisor.resolveHeldExecution(value.receipt, value))
+        .finally(() => {
+          if (this.boundRecoveryRequests.get(value.key)?.result === result)
+            this.boundRecoveryRequests.delete(value.key);
+        });
+    this.boundRecoveryRequests.set(value.key, {
+      material,
+      generation: state,
+      result,
+    });
+    return result;
   }
   adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption) {
     return this.started().state.adoptHistoricalPreTurnRejection(command);

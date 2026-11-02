@@ -1,3 +1,4 @@
+import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import { DomainConflictError, TaskNotOpenError } from "../core/domain.js";
@@ -472,6 +473,8 @@ function recoveryReason(kind: string): string {
       return "Execution identity evidence conflicted";
     case "no-proof":
       return "No exact execution identity could be proven";
+    case "known-survivor":
+      return "Known unfinished execution remains unresolved";
     case "termination-verified":
       return "Original process termination was independently verified";
     case "termination-conflict":
@@ -3044,6 +3047,7 @@ export class ExecutionState {
    */
   recoveryMaterial(workId: string):
     | {
+        bound: RecoveryExecutionIdentity | undefined;
         preTurn: Record<string, string | number | null> | undefined;
         noTurn: Record<string, string | number | null> | undefined;
         intent: { state: string; reason: string | null };
@@ -3069,6 +3073,7 @@ export class ExecutionState {
           | undefined)
       : undefined;
     return {
+      bound: this.recoveryIdentity(workId),
       preTurn: this.preTurnContext(workId),
       noTurn: this.noTurnContext(workId),
       intent: { state: intent.state, reason: intent.reason },
@@ -4173,6 +4178,7 @@ export class ExecutionState {
         "conflicting",
         "no-proof",
         "unknown",
+        "known-survivor",
         "termination-verified",
         "termination-conflict",
         "termination-unknown",
@@ -4501,17 +4507,86 @@ export class ExecutionState {
     });
   }
 
+  /** Read-only ownership/effect checks shared by bound recovery eligibility and its transaction. */
+  boundTurnRecoveryBlockers(
+    workId: string,
+    assignmentId: string,
+  ): BoundTurnRecoveryBlocker[] {
+    if (!this.hasTurnRequests) return ["context-unavailable"];
+    const binding = this.taskBinding(workId);
+    if (!binding || binding.assignmentId !== assignmentId)
+      return ["context-unavailable"];
+    const record = this.recoveryFor(
+      assignmentId,
+      binding.assignmentVersion,
+      workId,
+    )[0];
+    if (!record) return ["context-unavailable"];
+    const blocked: BoundTurnRecoveryBlocker[] = [];
+    const current = this.db
+      .prepare(`SELECT identity.threadId, identity.turnId,
+      revision.workRevision AS actualRevision, revision.assignmentId,
+      request.sequence AS actualSequence, request.assignmentId AS requestAssignmentId,
+      intent.threadId AS actualThreadId, intent.turnId AS actualTurnId
+      FROM execution_recovery_identities identity
+      JOIN execution_intents intent ON intent.workId=identity.workId
+      LEFT JOIN task_work_revisions revision ON revision.workId=identity.workId
+      LEFT JOIN turn_requests request ON request.workId=identity.workId WHERE identity.workId=?`)
+      .get(workId) as Record<string, unknown> | undefined;
+    if (!current?.threadId || !current.turnId)
+      blocked.push("bound-identity-missing");
+    if (
+      current?.actualRevision !== record.generation.workRevision ||
+      current?.actualSequence !== record.generation.requestSequence ||
+      current?.assignmentId !== assignmentId ||
+      current?.requestAssignmentId !== assignmentId ||
+      current?.threadId !== current?.actualThreadId ||
+      current?.turnId !== current?.actualTurnId
+    )
+      blocked.push("identity-changed");
+    if (record.receipt || record.intent.state === "reconciled")
+      blocked.push("already-reconciled");
+    else if (record.intent.state !== "held" || record.request?.state !== "held")
+      blocked.push("not-held");
+    if (!record.holds.writer || !record.holds.capacity)
+      blocked.push("ownership-released");
+    if (
+      !record.intent.threadId ||
+      !record.intent.turnId ||
+      !record.processIdentity ||
+      record.generation.workRevision === null
+    )
+      blocked.push("bound-identity-missing");
+    if (record.preTurnRejection || record.noTurnSubmission)
+      blocked.push("other-witness");
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
+        )
+        .get(workId)
+    )
+      blocked.push("pending-effects");
+    if (record.observations.some((o) => o.kind === "known-survivor"))
+      blocked.push("known-survivor");
+    return [...new Set(blocked)];
+  }
+
   resolveHeldExecution(
     receipt: RecoveryReceipt,
     verification: VerifiedTermination,
-    command?: { key: string; receipt: RecoveryReceipt },
+    command?: { key: string; receipt: RecoveryReceipt; assignmentId?: string },
   ): { id: string; workId: string; state: "reconciled" } {
     const value = recoveryReceiptSchema.parse(receipt);
     const proof = verifiedTerminationSchema.parse(verification);
     return transaction(this.db, () => {
       if (command) {
         const replay = this.preTurnCommandReplay(
-          value.kind === "no-turn-submission" ? "recover-no-turn" : "recover",
+          value.kind === "bound-turn"
+            ? "recover-bound-turn"
+            : value.kind === "no-turn-submission"
+              ? "recover-no-turn"
+              : "recover",
           command,
         );
         if (replay) {
@@ -4527,6 +4602,16 @@ export class ExecutionState {
         }
       }
 
+      if (command && value.kind === "bound-turn") {
+        const blocked = this.boundTurnRecoveryBlockers(
+          value.workId,
+          command.assignmentId ?? "",
+        );
+        if (blocked.length)
+          throw new RecoveryRejectedError(
+            `Bound-turn recovery blocked: ${blocked.join(", ")}`,
+          );
+      }
       const intent = this.db
         .prepare(`SELECT id, state, threadId, turnId
         FROM execution_intents WHERE workId = ?`)
@@ -4720,7 +4805,11 @@ export class ExecutionState {
         );
       if (command)
         this.recordPreTurnCommand(
-          value.kind === "no-turn-submission" ? "recover-no-turn" : "recover",
+          value.kind === "bound-turn"
+            ? "recover-bound-turn"
+            : value.kind === "no-turn-submission"
+              ? "recover-no-turn"
+              : "recover",
           command,
           {
             id: receiptId,

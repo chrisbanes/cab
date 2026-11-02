@@ -1,3 +1,5 @@
+import { until } from "../fixtures/until.js";
+import { boundWorld } from "./bound-turn-recovery-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -105,6 +107,7 @@ test("a held no-turn generation exposes its exact identity, eligibility and bloc
     "pre-turn-recover": "context-unavailable,witness-missing",
     "no-turn-adopt": "eligible",
     "no-turn-recover": "witness-missing",
+    "bound-turn-recover": "bound-identity-missing",
   });
   assert.equal(record.holds.writer && record.holds.capacity, true);
 
@@ -173,6 +176,7 @@ test("historical and runtime-captured pre-turn generations expose predecessor id
     "pre-turn-recover": "witness-missing",
     "no-turn-adopt": "context-unavailable",
     "no-turn-recover": "context-unavailable,witness-missing",
+    "bound-turn-recover": "bound-identity-missing",
   });
 
   const runtime = await world(t, "pre-turn-runtime");
@@ -354,4 +358,123 @@ test("assignment recovery caps each assignment while retaining task-wide sibling
     },
   });
   assert.equal(r.status, 409);
+});
+
+for (const harness of ["codex", "claude"] as const)
+  test(`${harness} bound recovery options verify exit without mutating ownership`, async (t) => {
+    const w = await boundWorld(t, harness);
+    const ro = (await w.s.issue("read", "bound-options")).token;
+    const read = async () => {
+      const response = await w.s.bearer(
+        ro,
+        `/api/operator/assignments/${w.g.assignmentId}/recovery-options`,
+      );
+      assert.equal(response.status, 200, await response.clone().text());
+      return recoveryOptionsSchema.parse(await response.json()).data;
+    };
+    for (const [mode, blocker] of [
+      ["live", "termination-live"],
+      ["unknown", "termination-unknown"],
+      ["conflict", "termination-conflict"],
+      ["other-identity", "termination-conflict"],
+      ["verified", undefined],
+    ] as const) {
+      w.setMode(mode);
+      const data = await read();
+      const record = data.records.find((r) => r.workId === w.g.workId);
+      assert.ok(record);
+      assert.deepEqual(record.process, w.g.processIdentity);
+      assert.equal(record.threadId, w.g.threadId);
+      assert.equal(record.turnId, w.g.turnId);
+      const bound = record.paths.find((p) => p.path === "bound-turn-recover");
+      assert.equal(bound?.eligible, blocker === undefined);
+      assert.deepEqual(bound?.blockedBy, blocker ? [blocker] : []);
+      assert.ok(record.holds.writer && record.holds.capacity);
+      assert.equal(w.runtime.turnInvocations.length, 1);
+    }
+  });
+
+test("bound recovery redaction and missing identity refuse without invoking the verifier", async (t) => {
+  const w = await boundWorld(t, "codex", ["synthetic-no-turn"]);
+  const response = await w.s.sessionGet(
+    `/api/operator/assignments/${w.g.assignmentId}/recovery-options`,
+  );
+  const data = recoveryOptionsSchema.parse(await response.json()).data;
+  const record = data.records.find((r) => r.workId === w.g.workId);
+  assert.equal(record?.process, null);
+  assert.ok(
+    record?.paths
+      .find((p) => p.path === "bound-turn-recover")
+      ?.blockedBy.includes("identity-withheld"),
+  );
+  assert.equal(w.checks(), 0);
+});
+
+for (const column of ["process", "threadId", "turnId"] as const)
+  test(`bound recovery explicitly reports missing ${column}`, async (t) => {
+    const w = await boundWorld(t);
+    w.s.f.seedPersistedState((db) =>
+      db
+        .prepare(
+          `UPDATE execution_recovery_identities SET ${column === "process" ? "processId=NULL,processStartedAt=NULL,bootId=NULL" : `${column}=NULL`} WHERE workId=?`,
+        )
+        .run(w.g.workId),
+    );
+    const response = await w.s.sessionGet(
+      `/api/operator/assignments/${w.g.assignmentId}/recovery-options`,
+    );
+    assert.equal(response.status, 200, await response.clone().text());
+    const data = recoveryOptionsSchema.parse(await response.json()).data;
+    const bound = data.records
+      .find((r) => r.workId === w.g.workId)
+      ?.paths.find((p) => p.path === "bound-turn-recover");
+    assert.equal(bound?.eligible, false);
+    assert.ok(bound?.blockedBy.includes("bound-identity-missing"));
+    assert.equal(w.checks(), 0);
+  });
+
+test("bound eligibility refuses a generation changed while verification was pending", async (t) => {
+  const w = await boundWorld(t);
+  let release!: () => void;
+  w.setGate(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const read = w.s.f.service.boundTurnRecoveryEligibility(
+    w.g.workId,
+    w.g.assignmentId,
+  );
+  await until(() => w.checks() === 1, "eligibility verification pending");
+  w.s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE task_work_revisions SET workRevision=workRevision+1 WHERE workId=?",
+      )
+      .run(w.g.workId),
+  );
+  release();
+  assert.deepEqual(await read, ["identity-changed"]);
+});
+
+test("bound eligibility has a finite termination-verifier deadline", {
+  timeout: 10000,
+}, async (t) => {
+  const w = await boundWorld(t);
+  w.setMode("hang");
+  const started = Date.now();
+  assert.deepEqual(
+    await w.s.f.service.boundTurnRecoveryEligibility(
+      w.g.workId,
+      w.g.assignmentId,
+    ),
+    ["termination-unknown"],
+  );
+  assert.ok(Date.now() - started < 8000);
+  assert.equal(
+    w.s.f.service
+      .recoveryForTask(w.g.taskId)
+      .find((r) => r.workId === w.g.workId)?.receipt,
+    null,
+  );
 });

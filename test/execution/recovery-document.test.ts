@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { CliError } from "../../src/cli/connections.js";
 import {
+  readEvidenceFile,
   readRecoveryDocument,
   writeRecoveryDocument,
 } from "../../src/cli/recovery-document.js";
@@ -77,4 +78,44 @@ test("a missing or open recovery document names the prepare command or the chmod
   const mode = await refusal(open);
   assert.match(mode.message, /its mode is 0640; it must be 0600/);
   assert.equal(mode.extra.fix, `chmod 600 ${open}`);
+});
+
+test("bound recovery evidence requires every termination, effects and workspace assertion", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-bound-evidence-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const receipt = {
+    termination: { kind: "process-exit" },
+    effects: "settled",
+    workspace: "preserved",
+  };
+  const file = join(root, "evidence.json");
+  const write = (value: unknown) =>
+    writeFileSync(
+      file,
+      JSON.stringify({
+        schema: "cab.cli.recovery-evidence/v1",
+        receipt: value,
+      }),
+      { mode: 0o600 },
+    );
+  write(receipt);
+  assert.deepEqual(await readEvidenceFile(file, "bound-turn-recover"), {
+    receipt,
+  });
+  for (const key of ["termination", "effects", "workspace"] as const) {
+    const { [key]: _omitted, ...incomplete } = receipt;
+    write(incomplete);
+    await assert.rejects(
+      readEvidenceFile(file, "bound-turn-recover"),
+      /Nothing is inferred/,
+    );
+  }
+  for (const extra of [
+    { effects: "unsettled" },
+    { termination: { kind: "acknowledged" } },
+    { force: true },
+  ]) {
+    write({ ...receipt, ...extra });
+    await assert.rejects(readEvidenceFile(file, "bound-turn-recover"));
+  }
 });

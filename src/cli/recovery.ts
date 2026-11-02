@@ -83,6 +83,8 @@ function recordLines(r: RecordView): string[] {
       ],
       ["State", `intent ${r.intentState}; request ${r.requestState ?? "none"}`],
       ["Holds", holdsText(r.holds)],
+      ["Thread", r.threadId ?? "(unavailable)"],
+      ["Turn", r.turnId ?? "(unavailable)"],
       [
         "Process",
         r.process
@@ -216,6 +218,18 @@ function buildCommand(
       writerSequence: record.writerSequence,
       retainedReason: record.retainedReason,
       ...evidence,
+    };
+  if (path === "bound-turn-recover")
+    return {
+      type,
+      assignmentId,
+      receipt: {
+        kind: "bound-turn",
+        ...generation,
+        threadId: record.threadId,
+        turnId: record.turnId,
+        ...(evidence.receipt as Record<string, unknown>),
+      },
     };
   return {
     type,
@@ -408,6 +422,8 @@ const NEXT_STEP: Record<RecoveryPath, string> = {
     "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
   "no-turn-recover":
     "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
+  "bound-turn-recover":
+    "Not resumed; nothing was dispatched. Continue explicitly with a new 'cab task message' only when all independent holds allow it.",
   "conversation-replace":
     "Not resumed; nothing was dispatched. The conversation is replaced; do not replace it again. Continue with a new 'cab task message'.",
 };
@@ -417,6 +433,7 @@ const EFFECT: Record<RecoveryPath, Effect> = {
   "no-turn-adopt": "saved",
   "pre-turn-recover": "completed",
   "no-turn-recover": "completed",
+  "bound-turn-recover": "completed",
   "conversation-replace": "saved",
 };
 
