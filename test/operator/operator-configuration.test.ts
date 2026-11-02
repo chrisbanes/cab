@@ -4067,3 +4067,79 @@ test("a retried per-repository save replays only with the credential reference i
     "env:DELIVERY_RETRY_FIRST",
   );
 });
+
+test("a retried per-repository save replays only the exact request, kept-row references included", async (t) => {
+  const { f, api, projectId, hidden } = await hiddenRepositoryFixture(t);
+  const withheld = [{ name: hidden }, { name: `env:${hidden}` }];
+  f.service.domain().execute({
+    ...deliveryInput(projectId, {
+      expectedVersion: f.service.delivery().configuration(projectId).version,
+      credentialRef: `env:${hidden}`,
+      grants: [
+        { action: "issue.comment", repositoryId: hidden, mode: "approval" },
+        { action: "issue.labels", repositoryId: hidden, mode: "approval" },
+      ],
+      requiredChecks: [],
+      repositories: [{ repositoryId: "visible", requiredChecks: withheld }],
+    }),
+    actor: "operator",
+  } as never);
+  const version = f.service.delivery().configuration(projectId).version;
+  const key = randomUUID();
+  const kept = (
+    section: "delivery-grants" | "delivery-checks",
+    index: number,
+  ) => ({
+    savedRow: {
+      projectId,
+      section,
+      version,
+      index,
+      ...(section === "delivery-checks" ? { repositoryId: "visible" } : {}),
+    },
+    keep: true,
+  });
+  const send = (grant: number, check: number) =>
+    api.execute(
+      deliveryInput(projectId, {
+        key,
+        expectedVersion: version,
+        preserveBranchPrefix: true,
+        grants: [kept("delivery-grants", grant)],
+        repositories: [
+          {
+            repositoryId: "visible",
+            mergeMethod: "squash",
+            requiredChecks: [kept("delivery-checks", check)],
+          },
+        ],
+      }),
+    );
+  const first = await send(0, 0);
+  const after = f.service.delivery().configuration(projectId);
+  assert.deepEqual(after.grants, [
+    { action: "issue.comment", repositoryId: hidden, mode: "approval" },
+  ]);
+  assert.deepEqual(after.repositories?.[0]?.requiredChecks, [withheld[0]]);
+  assert.deepEqual(await send(0, 0), first);
+  // Another saved row was never applied under this key, so pointing at it is a different request.
+  for (const [grant, check] of [
+    [1, 0],
+    [0, 1],
+  ] as const)
+    await assert.rejects(send(grant, check), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual([error.status, error.code], [409, "conflict"]);
+      return true;
+    });
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  // The recorded receipt carries no request digest.
+  const recorded = await api.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key,
+    }),
+  );
+  assert.doesNotMatch(JSON.stringify(recorded), /requestDigest/);
+});

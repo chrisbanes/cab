@@ -117,6 +117,11 @@ const commandSchema = z.discriminatedUnion("type", [
       expectedVersion: z.number().int().positive(),
       ...deliveryPolicySchema.shape,
       repositories: repositorySettingsSchema.optional(),
+      /** The operator request's digest, recorded so a retry of a per-repository save can be matched. */
+      requestDigest: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
     })
     .strict(),
   z
@@ -3050,13 +3055,15 @@ export class DomainStore {
           type: _type,
           projectId,
           expectedVersion,
+          requestDigest,
           ...policy
         } = command;
-        return new DeliveryStore(this.db).configureWithinTransaction(
+        const result = new DeliveryStore(this.db).configureWithinTransaction(
           projectId,
           expectedVersion,
           policy,
         );
+        return requestDigest ? { ...result, requestDigest } : result;
       }
       case "status-mapping.configure": {
         this.operator(command);

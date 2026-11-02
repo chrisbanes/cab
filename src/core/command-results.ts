@@ -129,6 +129,11 @@ export const deliveryCommandResultSchema = deliveryPolicySchema
   .extend({
     // Results recorded before per-repository settings have none.
     repositories: repositorySettingsSchema.optional(),
+    /** The digest of the operator request a per-repository save recorded; never part of a receipt. */
+    requestDigest: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     version: positiveInteger,
     credentialConfigured: z.boolean(),
   })
