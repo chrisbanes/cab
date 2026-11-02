@@ -1130,6 +1130,7 @@ test("aggregate failure accounting follows complete dependencies and retains own
     "unfinished",
     "unexpected-diagnostic",
     "unexpected-step",
+    "malformed-step",
   ]) {
     const jobs = completeAggregateJobs();
     const check = jobs.find((job) => job.name === "check");
@@ -1166,7 +1167,14 @@ test("aggregate failure accounting follows complete dependencies and retains own
           });
         if (url.includes("head_sha="))
           return apiResponse({ workflow_runs: [] });
-        if (url.includes("/attempts/1/jobs")) return apiResponse({ jobs });
+        if (url.includes("/attempts/1/jobs"))
+          return apiResponse({
+            jobs: jobs.map((job) =>
+              variant === "malformed-step" && job.name === "check"
+                ? { ...job, steps: [null] }
+                : job,
+            ),
+          });
         if (url.endsWith(`/jobs/${check.id}/logs`)) {
           if (variant === "unavailable")
             return { ok: false, status: 410, headers: new Map(), body: "" };

@@ -406,6 +406,14 @@ function accountAggregateFailure(attempt, logs) {
     check.failures.length ||
     !Array.isArray(check.steps) ||
     !check.steps.length ||
+    !check.steps.every(
+      (step) =>
+        step &&
+        typeof step === "object" &&
+        typeof step.name === "string" &&
+        typeof step.status === "string" &&
+        typeof step.conclusion === "string",
+    ) ||
     check.steps.some((step) => step.status !== "completed") ||
     check.steps.filter((step) => step.conclusion === "failure").length !== 1 ||
     check.steps.some(
