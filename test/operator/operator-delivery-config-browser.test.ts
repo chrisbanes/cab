@@ -485,6 +485,8 @@ test("Delivery warns before reducing a public grant while its mapping view is wi
     .getByLabel("Authority", { exact: true })
     .selectOption("approval");
   await page.getByRole("alert").waitFor();
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "delivery-withheld-mapping-warning");
   assert.equal(posts, 0);
   await page.getByRole("button", { name: "Discard changes" }).click();
   await page.getByRole("alert").waitFor({ state: "hidden" });
