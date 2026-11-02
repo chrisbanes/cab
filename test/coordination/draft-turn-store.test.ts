@@ -15,6 +15,9 @@ const ask = (threadId: string, turnId: string) => ({
   arguments: { question: "Which repository?" },
 });
 
+const unfinished = (scheduler: SchedulerStore) =>
+  scheduler.unfinishedDraftTurns(task).map((request) => request.workId);
+
 /** The lead's bound work with its request; the lead assignment stays pending. */
 function leadTurn(
   f: ReturnType<typeof coordinationFixture>,
@@ -54,7 +57,7 @@ test("a draft turn keeps the lead pending and still binds its callbacks", () => 
     const scheduler = new SchedulerStore(f.db);
     const lead = leadTurn(f, scheduler, "draft", true);
     assert.equal(scheduler.hasOrdinaryAssignmentWork(lead), false);
-    assert.equal(scheduler.activeDraftTurn(task)?.workId, "work-draft");
+    assert.deepEqual(unfinished(scheduler), ["work-draft"]);
     f.coordination.requestQuestion(ask("thread-draft", "turn-draft"));
     assert.equal(f.coordination.interactions(task).length, 1);
     assert.equal(
@@ -68,13 +71,30 @@ test("a draft turn keeps the lead pending and still binds its callbacks", () => 
   }
 });
 
+test("every unfinished draft request of a task is listed, oldest first", () => {
+  const f = coordinationFixture();
+  try {
+    const scheduler = new SchedulerStore(f.db);
+    leadTurn(f, scheduler, "older", true);
+    f.db
+      .prepare(
+        "UPDATE turn_requests SET state='held' WHERE workId='work-older'",
+      )
+      .run();
+    leadTurn(f, scheduler, "newer", true);
+    assert.deepEqual(unfinished(scheduler), ["work-older", "work-newer"]);
+  } finally {
+    f.close();
+  }
+});
+
 test("an ordinary turn of a pending lead is not bound and counts as ordinary work", () => {
   const f = coordinationFixture();
   try {
     const scheduler = new SchedulerStore(f.db);
     const lead = leadTurn(f, scheduler, "ordinary", false);
     assert.equal(scheduler.hasOrdinaryAssignmentWork(lead), true);
-    assert.equal(scheduler.activeDraftTurn(task), undefined);
+    assert.deepEqual(unfinished(scheduler), []);
     assert.throws(() =>
       f.coordination.requestQuestion(ask("thread-ordinary", "turn-ordinary")),
     );
@@ -160,7 +180,7 @@ test("a draft request stores its task digest and a refusal before it ran finishe
         "UPDATE turn_requests SET state='held' WHERE workId='work-draft'",
       )
       .run();
-    assert.equal(scheduler.activeDraftTurn(task)?.workId, "work-draft");
+    assert.deepEqual(unfinished(scheduler), ["work-draft"]);
     f.db
       .prepare(
         "UPDATE turn_requests SET state='active' WHERE workId='work-draft'",
@@ -173,7 +193,7 @@ test("a draft request stores its task digest and a refusal before it ran finishe
       state.isNeverAdmittedRefusedAssignmentWork("work-draft"),
       true,
     );
-    assert.equal(scheduler.activeDraftTurn(task), undefined);
+    assert.deepEqual(unfinished(scheduler), []);
     // Evidence of a stop target means it is not never-admitted history.
     f.db
       .prepare(

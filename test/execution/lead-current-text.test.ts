@@ -932,3 +932,103 @@ test("a specialist's prompt never carries the issue brief", async (t) => {
   assert.match(w.prompts[1] ?? "", /^Specialist brief/);
   assert.doesNotMatch(w.prompts[1] ?? "", /Secret plan|Issue brief/);
 });
+
+/** An unready task with a configured lead, ready for draft turns. */
+async function draftWorld(t: { after: (fn: () => Promise<void>) => void }) {
+  const w = await liveTextWorld([]);
+  t.after(() => w.close());
+  knowBlockers(w);
+  await w.service.provisionTask(w.taskId);
+  w.unpause();
+  return { w };
+}
+
+// An unready issue's blockers are read only once it is Ready; a draft turn needs them known.
+const knowBlockers = (w: World) =>
+  w.service.githubSources().reconcileBlockers("I_1", {
+    complete: true,
+    blockers: [],
+    reason: null,
+  });
+
+// A restart replaces the service, so the operator API is built per use.
+const operator = (w: World) => new OperatorApi(w.service, [w.root]);
+
+/** Starts a draft turn through the operator command and waits for its prompt. */
+async function startDraft(
+  { w }: Awaited<ReturnType<typeof draftWorld>>,
+  message: string,
+  prompts: number,
+) {
+  const receipt = await operator(w).execute({
+    type: "task.draft-turn",
+    key: randomUUID(),
+    taskId: w.taskId,
+    expectedVersion: Number(w.domain.task(w.taskId).version),
+    message,
+  });
+  assert.equal(receipt.kind, "draft-turn");
+  await w.until(() => w.prompts.length === prompts, message);
+}
+
+const draftAvailability = async ({
+  w,
+}: Awaited<ReturnType<typeof draftWorld>>) =>
+  (await operator(w).readTask(w.taskId)).data.draftTurn;
+
+test("a draft turn's completed transient-failure retry makes draft turns available again", async (t) => {
+  const d = await draftWorld(t);
+  const { w } = d;
+  await startDraft(d, "First question.", 1);
+  // A retry needs the turn's result effect settled, and a draft turn cannot report a result
+  // (it is not Ready), so in production its transient failure stays held and is never retried.
+  // Settle the effect directly to reach the rows a retry writes, which availability reads.
+  databaseOf(w.service)
+    .prepare(
+      "UPDATE execution_pending_effects SET state = 'settled' WHERE effectKey = 'assignment-result'",
+    )
+    .run();
+  w.failTransiently("turn-1");
+  await w.until(() => w.prompts.length === 2, "retried draft turn");
+  assert.equal(
+    w.service.turnRequests().find((r) => r.workId.startsWith("retry:"))
+      ?.draftTurn,
+    true,
+  );
+  assert.deepEqual(await draftAvailability(d), {
+    available: false,
+    reason: "draft-turn-active",
+  });
+  w.end("turn-2");
+  await idle(w);
+  assert.deepEqual(await draftAvailability(d), { available: true });
+  await startDraft(d, "Second question.", 3);
+  assert.match(w.prompts[2] ?? "", /Second question\./);
+});
+
+test("a draft turn that a planned shutdown requeued makes draft turns available once it completes", async (t) => {
+  const d = await draftWorld(t);
+  const { w } = d;
+  await startDraft(d, "First question.", 1);
+  await w.restart();
+  // The restarted service has read no blockers of the unready issue, so the requeue waits;
+  // a project pause and resume re-admits it once they are known.
+  knowBlockers(w);
+  w.pause();
+  w.unpause();
+  await w.until(() => w.prompts.length === 2, "requeued draft turn");
+  assert.equal(
+    w.service.turnRequests().find((r) => r.workId.startsWith("shutdown:"))
+      ?.draftTurn,
+    true,
+  );
+  assert.deepEqual(await draftAvailability(d), {
+    available: false,
+    reason: "draft-turn-active",
+  });
+  w.end("turn-2");
+  await idle(w);
+  assert.deepEqual(await draftAvailability(d), { available: true });
+  await startDraft(d, "Second question.", 3);
+  assert.match(w.prompts[2] ?? "", /Second question\./);
+});
