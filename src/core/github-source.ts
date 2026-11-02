@@ -1,4 +1,5 @@
 import { DeliveryStore } from "./delivery.js";
+import { composeIssueBrief, type IssueCommentsRead } from "./issue-brief.js";
 import { LeadTextStore } from "./lead-text.js";
 import { TaskReviewStore } from "./task-review.js";
 import { randomUUID } from "node:crypto";
@@ -122,6 +123,8 @@ export interface IssueReference {
   repositoryName: string;
   number: number;
 }
+
+export type { IssueCommentsRead } from "./issue-brief.js";
 
 export interface GitHubObservationBinding {
   projectId: string;
@@ -814,6 +817,91 @@ export class GitHubSourceStore {
     });
   }
 
+  /** Whether a per-issue read made under `binding` still describes the imported `issue`. */
+  private boundIssue(
+    nodeId: string,
+    issue: Row,
+    binding?: GitHubObservationBinding & {
+      selectionId: string;
+      reference: IssueReference;
+    },
+  ): boolean {
+    return (
+      !binding ||
+      (this.currentBinding(binding, binding.selectionId) &&
+        nodeId === binding.reference.nodeId &&
+        issue.repositoryId === binding.reference.repositoryId &&
+        issue.repositoryName === binding.reference.repositoryName &&
+        Number(issue.issueNumber) === binding.reference.number &&
+        Boolean(
+          this.db
+            .prepare(
+              `SELECT 1 FROM source_memberships WHERE projectId = ? AND selectionId = ? AND ${itemIs()}`,
+            )
+            .get(binding.projectId, binding.selectionId, ...this.key(nodeId)),
+        ))
+    );
+  }
+
+  /** The task's stored issue brief, or null when it has none. */
+  issueBrief(taskId: string): { text: string; truncated: boolean } | null {
+    const row = this.db
+      .prepare(
+        `SELECT b.brief, b.truncated FROM source_issue_briefs b JOIN external_items e ON ${sameItem("b", "e")} WHERE e.taskId = ?`,
+      )
+      .get(taskId) as Row | undefined;
+    return row
+      ? { text: String(row.brief), truncated: Number(row.truncated) === 1 }
+      : null;
+  }
+
+  /**
+   * Stores the issue brief a complete comment read composes; a changed brief is a live text
+   * change (a new source revision, no hold or version bump). An incomplete read keeps the
+   * stored brief. Returns false when the read's binding is stale.
+   */
+  reconcileIssueBrief(
+    nodeId: string,
+    read: IssueCommentsRead,
+    binding?: GitHubObservationBinding & {
+      selectionId: string;
+      reference: IssueReference;
+    },
+  ): boolean {
+    return transaction(this.db, () => {
+      const issue = this.issue(nodeId);
+      if (!issue) throw new Error("Unknown imported issue");
+      if (!this.boundIssue(nodeId, issue, binding)) return false;
+      if (!read.complete) return true;
+      const taskId = String(issue.taskId);
+      const next = composeIssueBrief(read.comments);
+      const stored = this.issueBrief(taskId);
+      if (stored?.text === next?.text && stored?.truncated === next?.truncated)
+        return true;
+      if (next)
+        this.db
+          .prepare(
+            `INSERT INTO source_issue_briefs (provider, instance, externalId, brief, truncated) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(provider, instance, externalId) DO UPDATE SET brief = excluded.brief, truncated = excluded.truncated`,
+          )
+          .run(...this.key(nodeId), next.text, Number(next.truncated));
+      else
+        this.db
+          .prepare(`DELETE FROM source_issue_briefs WHERE ${itemIs()}`)
+          .run(...this.key(nodeId));
+      if (stored?.text !== next?.text)
+        new TaskReviewStore(this.db).captureSource(
+          taskId,
+          this.tracker.provider === "jira" ? "jira" : "github",
+          {
+            title: String(issue.observedTitle),
+            body: String(issue.observedBody),
+          },
+        );
+      return true;
+    });
+  }
+
   reconcileBlockers(
     nodeId: string,
     snapshot: BlockerSnapshot,
@@ -825,21 +913,7 @@ export class GitHubSourceStore {
     return transaction(this.db, () => {
       const issue = this.issue(nodeId);
       if (!issue) throw new Error("Unknown imported issue");
-      if (
-        binding &&
-        (!this.currentBinding(binding, binding.selectionId) ||
-          nodeId !== binding.reference.nodeId ||
-          issue.repositoryId !== binding.reference.repositoryId ||
-          issue.repositoryName !== binding.reference.repositoryName ||
-          Number(issue.issueNumber) !== binding.reference.number ||
-          !this.db
-            .prepare(
-              `SELECT 1 FROM source_memberships WHERE projectId = ? AND selectionId = ? AND ${itemIs()}`,
-            )
-            .get(binding.projectId, binding.selectionId, ...this.key(nodeId)))
-      ) {
-        return false;
-      }
+      if (!this.boundIssue(nodeId, issue, binding)) return false;
       if (snapshot.complete) {
         this.db
           .prepare(`DELETE FROM source_native_blockers WHERE ${itemIs()}`)

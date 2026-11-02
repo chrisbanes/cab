@@ -8,6 +8,7 @@ import {
   redactionExclusionLimits,
   withinRedactionLimits,
 } from "./redaction-limits.js";
+import { issueBriefByteLimit } from "./issue-brief.js";
 import { transaction, type Database } from "./store.js";
 import {
   contextCaptureSchema,
@@ -344,6 +345,7 @@ export class TaskReviewStore {
   private safe(
     value: string,
     snapshot: { excluded: readonly string[] | undefined } = this.snapshot(),
+    limit = 16000,
   ): string | null {
     const excluded = snapshot.excluded;
     if (excluded === undefined || excluded.some((v) => value.includes(v)))
@@ -359,7 +361,7 @@ export class TaskReviewStore {
         (c) => c.charCodeAt(0) >= 32 || [9, 10, 13].includes(c.charCodeAt(0)),
       )
       .join("");
-    return sanitized.length > 16000 ? null : sanitized;
+    return sanitized.length > limit ? null : sanitized;
   }
   captureSources(
     entries: readonly {
@@ -411,9 +413,30 @@ export class TaskReviewStore {
           : this.safe(originalTitle, snapshot),
       body =
         originalBody.length > 16000 ? null : this.safe(originalBody, snapshot);
+    // Every capture path reads the stored brief, so a revision never flips on who captured it.
+    const brief =
+      kind === "local"
+        ? undefined
+        : (
+            this.db
+              .prepare(
+                "SELECT b.brief FROM source_issue_briefs b JOIN external_items e ON e.provider = b.provider AND e.instance = b.instance AND e.externalId = b.externalId WHERE e.taskId = ?",
+              )
+              .get(taskId) as { brief: string } | undefined
+          )?.brief;
+    // Without an issue brief the digest keeps its original form, so existing revisions hold.
     const digest = createHash("sha256")
       .update(
-        JSON.stringify({ kind, title: originalTitle, body: originalBody }),
+        JSON.stringify(
+          brief === undefined
+            ? { kind, title: originalTitle, body: originalBody }
+            : {
+                kind,
+                title: originalTitle,
+                body: originalBody,
+                issueBrief: brief,
+              },
+        ),
       )
       .digest("hex");
     const latest = this.sources(taskId).at(-1);
@@ -439,6 +462,10 @@ export class TaskReviewStore {
       kind,
       title,
       body,
+      issueBrief:
+        brief === undefined
+          ? null
+          : this.safe(brief, snapshot, issueBriefByteLimit),
       digest,
       createdAt: Date.now(),
       criteria,

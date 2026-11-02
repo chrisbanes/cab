@@ -112,6 +112,8 @@ export const sourceSnapshotSchema = z
     kind: z.enum(["local", "github", "jira"]),
     title: text.nullable(),
     body: text.nullable(),
+    /** Absent from records captured before issue briefs; null when the task has none or it is withheld. */
+    issueBrief: z.string().max(32768).nullable().optional(),
     digest: z.string().length(64),
     createdAt: z.number(),
     criteria: z

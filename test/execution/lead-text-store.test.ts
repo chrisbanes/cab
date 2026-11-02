@@ -79,6 +79,7 @@ test("only a confirmed submission defines the lead's last seen text", () => {
     assert.deepEqual(w.store.confirmed("lead", "thread"), {
       title: "A",
       outcome: "Body A",
+      issueBrief: null,
       sourceRevision: 1,
     });
     // A later submission whose response was lost stays unconfirmed: A remains seen.
@@ -91,6 +92,7 @@ test("only a confirmed submission defines the lead's last seen text", () => {
     assert.deepEqual(w.store.confirmed("lead", "thread"), {
       title: "B",
       outcome: "Body B",
+      issueBrief: null,
       sourceRevision: 2,
     });
   } finally {
@@ -183,13 +185,17 @@ test("an upgrade anchors finished imported work at the text observed then, witho
 });
 
 test("the lead task section carries the full text and a diff only when it changed", () => {
-  const a = { title: "Title", outcome: "One\nTwo\nThree" };
+  const a = { title: "Title", outcome: "One\nTwo\nThree", issueBrief: null };
   assert.equal(
     leadTaskSection(a, undefined),
     "Task: Title\nOutcome: One\nTwo\nThree",
   );
   assert.equal(leadTaskSection(a, { ...a }), leadTaskSection(a, undefined));
-  const b = { title: "Retitled", outcome: "One\nTwo, revised\nThree\n" };
+  const b = {
+    title: "Retitled",
+    outcome: "One\nTwo, revised\nThree\n",
+    issueBrief: null,
+  };
   const section = leadTaskSection(b, a);
   assert.ok(
     section.startsWith("Task: Retitled\nOutcome: One\nTwo, revised\nThree\n"),
@@ -212,8 +218,8 @@ test("the lead task section carries the full text and a diff only when it change
   // Unicode and a moved line.
   assert.deepEqual(
     issueTextDiff(
-      { title: "t", outcome: "α\nβ\nγ" },
-      { title: "t", outcome: "β\nγ\nα 🚀" },
+      { title: "t", outcome: "α\nβ\nγ", issueBrief: null },
+      { title: "t", outcome: "β\nγ\nα 🚀", issueBrief: null },
     ),
     ["Outcome:", "- α", "+ α 🚀"],
   );
@@ -222,8 +228,8 @@ test("the lead task section carries the full text and a diff only when it change
 test("the issue diff is capped by lines and bytes with a visible marker, and a huge middle stays bounded", () => {
   const many = Array.from({ length: 500 }, (_, i) => `line ${i}`).join("\n");
   const byLines = issueTextDiff(
-    { title: "t", outcome: "" },
-    { title: "t", outcome: many },
+    { title: "t", outcome: "", issueBrief: null },
+    { title: "t", outcome: many, issueBrief: null },
   );
   assert.equal(byLines.length, issueDiffLineLimit);
   assert.equal(byLines.at(-1), issueDiffTruncated);
@@ -232,8 +238,8 @@ test("the issue diff is capped by lines and bytes with a visible marker, and a h
     (_, i) => `${i} ${"é".repeat(200)}`,
   ).join("\n");
   const byBytes = issueTextDiff(
-    { title: "t", outcome: "" },
-    { title: "t", outcome: wide },
+    { title: "t", outcome: "", issueBrief: null },
+    { title: "t", outcome: wide, issueBrief: null },
   );
   assert.equal(byBytes.at(-1), issueDiffTruncated);
   assert.ok(
@@ -241,8 +247,8 @@ test("the issue diff is capped by lines and bytes with a visible marker, and a h
   );
   // A long single line is dropped whole, never cut.
   const long = issueTextDiff(
-    { title: "t", outcome: "" },
-    { title: "t", outcome: "x".repeat(20_000) },
+    { title: "t", outcome: "", issueBrief: null },
+    { title: "t", outcome: "x".repeat(20_000), issueBrief: null },
   );
   assert.deepEqual(long, ["Outcome:", "- ", issueDiffTruncated]);
   // Thousands of distinct lines each side fall back to remove-then-add quickly.
@@ -250,8 +256,8 @@ test("the issue diff is capped by lines and bytes with a visible marker, and a h
     after = Array.from({ length: 5000 }, (_, i) => `b${i}`).join("\n");
   const started = performance.now();
   const bounded = issueTextDiff(
-    { title: "t", outcome: before },
-    { title: "t", outcome: after },
+    { title: "t", outcome: before, issueBrief: null },
+    { title: "t", outcome: after, issueBrief: null },
   );
   assert.ok(performance.now() - started < 1000);
   assert.deepEqual(bounded.slice(0, 3), ["Outcome:", "- a0", "- a1"]);
@@ -312,4 +318,66 @@ test("a Done transition never moves a lead's handback anchor", () => {
   } finally {
     w.db.close();
   }
+});
+
+test("lead text carries the issue brief, and a brief-only revision after a handback flags it", () => {
+  const w = world();
+  try {
+    w.db
+      .prepare(
+        "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels) VALUES ('github', 'github.com', 'I_1', ?, 'R_1', 'org/repo', 1, 'A', 'Body A', 'open', '[]')",
+      )
+      .run(w.taskId);
+    submit(w, "w1", 1);
+    w.store.confirm("w1", "thread", "turn-1");
+    w.store.recordHandback(w.taskId, "handback", "w1");
+    assert.equal(w.store.current(w.taskId).issueBrief, null);
+    w.db
+      .prepare(
+        "INSERT INTO source_issue_briefs VALUES ('github', 'github.com', 'I_1', '## Agent Brief\nB', 0)",
+      )
+      .run();
+    new TaskReviewStore(w.db).captureSource(w.taskId, "github", {
+      title: "A",
+      body: "Body A",
+    });
+    assert.equal(w.store.current(w.taskId).issueBrief, "## Agent Brief\nB");
+    assert.equal(w.store.changedSinceHandback(w.taskId), true);
+    submit(w, "w2", 2);
+    w.store.confirm("w2", "thread", "turn-2");
+    assert.deepEqual(w.store.confirmed("lead", "thread"), {
+      title: "A",
+      outcome: "Body A",
+      issueBrief: "## Agent Brief\nB",
+      sourceRevision: 2,
+    });
+  } finally {
+    w.db.close();
+  }
+});
+
+test("the lead task section carries the issue brief after the outcome, and a brief-only change diffs only it", () => {
+  const a = { title: "T", outcome: "O", issueBrief: "## Agent Brief\nB" };
+  assert.equal(
+    leadTaskSection(a, { ...a }),
+    "Task: T\nOutcome: O\n\nIssue brief (the issue's trusted brief comment and the notes after it):\n## Agent Brief\nB",
+  );
+  const b = { ...a, issueBrief: `${a.issueBrief}\n\n--- Later note ---\n\nN` };
+  assert.deepEqual(issueTextDiff(a, b), [
+    "Issue brief:",
+    "+ ",
+    "+ --- Later note ---",
+    "+ ",
+    "+ N",
+  ]);
+  assert.ok(leadTaskSection(b, a).endsWith(issueTextDiff(a, b).join("\n")));
+  // A removed brief diffs as removed lines; the section then has no brief.
+  assert.deepEqual(issueTextDiff(a, { ...a, issueBrief: null }), [
+    "Issue brief:",
+    "- ## Agent Brief",
+    "- B",
+  ]);
+  assert.ok(
+    !leadTaskSection({ ...a, issueBrief: null }, a).includes("Issue brief ("),
+  );
 });
