@@ -269,7 +269,14 @@ export async function runGitLabQualification(
         mode: delivery.configuration(w.f.projectId).mode,
         credentialRef: null,
         grants: delivery.configuration(w.f.projectId).grants,
-        requiredChecks: [{ name: "pipeline" }],
+        requiredChecks: [],
+        repositories: [
+          {
+            repositoryId,
+            mergeMethod: "squash",
+            requiredChecks: [{ name: "pipeline" }],
+          },
+        ],
       } as never);
     };
     const workspaceOf = async (w: World) => {
@@ -618,9 +625,9 @@ export async function runGitLabQualification(
         "pipeline success",
         () => bound(b)?.observation.mergeBlockers.length === 0,
       );
-      const allowed = bound(b)?.observation.allowedMethods ?? [];
-      const method = allowed.includes("squash") ? "squash" : "merge";
-      assert.ok(allowed.includes(method));
+      // The method the repository is configured with; the gate refuses any other.
+      const method = "squash";
+      assert.ok(bound(b)?.observation.allowedMethods.includes(method));
       await drain();
       guard.allowMerge(mr.number);
       await act(b, mergeAction(method));

@@ -984,8 +984,9 @@ export class OperatorApi {
       label: "Unavailable saved row" as const,
       savedRow: { projectId, section, version: configuration.version, index },
     });
+    const { repositories: _repositories, ...policy } = configuration;
     return {
-      ...configuration,
+      ...policy,
       ...(configuration.branchPrefix !== undefined &&
       !this.disclosable(configuration.branchPrefix, excluded)
         ? { branchPrefix: null, branchPrefixUnavailable: true as const }
@@ -8474,12 +8475,17 @@ export class OperatorApi {
         c.key,
         c.projectId,
       );
-    const command = (policy: z.output<typeof deliveryPolicySchema>) => ({
+    const command = ({
+      repositories,
+      ...policy
+    }: z.output<typeof deliveryPolicySchema>) => ({
       type: c.type,
       key: c.key,
       projectId: c.projectId,
       expectedVersion: c.expectedVersion,
       ...policy,
+      // Absent when empty, so commands recorded before per-repository settings keep their hash.
+      ...(repositories.length ? { repositories } : {}),
       actor: "operator" as const,
     });
     const prefix =

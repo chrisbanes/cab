@@ -9,6 +9,7 @@ import {
   type ProviderActionObservation,
   isRuntimeDeliveryCaller,
   prObservationSchema,
+  repositoryDeliverySettings,
 } from "../core/delivery.js";
 import { isGitLabProjectPath } from "../core/github-source.js";
 import {
@@ -24,6 +25,7 @@ import {
 import type {
   CodeHostDeliveryProvider,
   CodeHostProviderFactory,
+  RepositoryRequirements,
 } from "./code-host.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { pushTaskCommit } from "./git-push.js";
@@ -33,6 +35,7 @@ import {
   type PublicationContext,
   type PushFunction,
   mergeGateReasons,
+  requiredCheckSources,
 } from "./github-delivery.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
 import {
@@ -105,7 +108,24 @@ const projectSchema = z.object({
   path_with_namespace: z.string(),
   squash_option: z.string().nullish(),
   merge_trains_enabled: z.boolean().nullish(),
+  /** "Pipelines must succeed": GitLab then requires the pipeline before merging. */
+  only_allow_merge_if_pipeline_succeeds: z.boolean().nullish(),
 });
+/** What the project's settings require before a merge, and which merge methods they allow. */
+function projectRequirements(
+  project: z.output<typeof projectSchema>,
+): RepositoryRequirements {
+  return {
+    hostChecks: project.only_allow_merge_if_pipeline_succeeds
+      ? [{ name: "pipeline" }]
+      : [],
+    // The project's merge method decides the commit shape; rebase is a separate API cab does not call.
+    allowedMethods: [
+      ...(project.squash_option === "always" ? [] : (["merge"] as const)),
+      ...(project.squash_option === "never" ? [] : (["squash"] as const)),
+    ],
+  };
+}
 /** A merge train car's status; only the status is read. */
 const trainCarSchema = z.object({ status: z.string() });
 /** A car still holding the merge request in the train. */
@@ -551,7 +571,8 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         throw new Error("provider-head-changed");
       if (
         observation.mergeBlockers.length ||
-        !observation.allowedMethods.includes(action.method)
+        action.method !==
+          repositoryDeliverySettings(policy, repositoryId).mergeMethod
       )
         throw new Error("provider-merge-gates-held");
       return {
@@ -855,6 +876,11 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         : "provider-effect-unproved",
     );
   }
+  async repositoryRequirements(
+    repositoryId: string,
+  ): Promise<RepositoryRequirements> {
+    return projectRequirements(await this.projectInfo(repositoryId, true));
+  }
   async inspectPr(
     identity: PrIdentity,
     policy: DeliveryPolicy,
@@ -919,11 +945,8 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           },
         ]
       : [];
-    // The project's merge method decides the commit shape; rebase is a separate API cab does not call.
-    const allowedMethods: PrDeliveryObservation["allowedMethods"] = [
-      ...(project.squash_option === "always" ? [] : (["merge"] as const)),
-      ...(project.squash_option === "never" ? [] : (["squash"] as const)),
-    ];
+    const { hostChecks, allowedMethods } = projectRequirements(project);
+    const { mergeMethod, cabChecks } = repositoryDeliverySettings(policy, id);
     // GitLab's own verdict covers approvals, discussions and pipelines; cab's required checks still apply.
     const mergeBlockers = mergeGateReasons({
       draft: mr.draft,
@@ -940,7 +963,9 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       deployments: [],
       requiredEnvironments: [],
       checks,
-      requiredChecks: policy.requiredChecks,
+      hostChecks,
+      cabChecks,
+      configuredMethod: mergeMethod,
       unsupportedRules: [],
       allowedMethods,
     });
@@ -969,6 +994,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       feedback,
       reviewThreads,
       mergeBlockers,
+      requiredChecks: requiredCheckSources(hostChecks, cabChecks),
       closedIssueNodeIds: [],
       allowedMethods,
     });

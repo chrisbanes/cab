@@ -14,7 +14,11 @@ import {
   jiraCredentialReferencesSchema,
   glabReferenceMatchesHost,
 } from "./credential-reference.js";
-import { DeliveryStore, deliveryPolicySchema } from "./delivery.js";
+import {
+  DeliveryStore,
+  deliveryPolicySchema,
+  repositorySettingsSchema,
+} from "./delivery.js";
 import {
   DomainConflictError,
   DomainNotFoundError,
@@ -112,6 +116,7 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       expectedVersion: z.number().int().positive(),
       ...deliveryPolicySchema.shape,
+      repositories: repositorySettingsSchema.optional(),
     })
     .strict(),
   z

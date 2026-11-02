@@ -69,7 +69,14 @@ export async function gitlabWorld(
     mode: "reviewable-pr",
     credentialRef: null,
     grants: delivery.configuration(world.f.projectId).grants,
-    requiredChecks: [{ name: "pipeline" }],
+    requiredChecks: [],
+    repositories: [
+      {
+        repositoryId,
+        mergeMethod: "squash",
+        requiredChecks: [{ name: "pipeline" }],
+      },
+    ],
   });
   return { ...world, remote, pushes, adopts, script };
 }

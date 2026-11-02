@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { canonicalMaterial, deliveryPolicySchema } from "./delivery.js";
+import {
+  canonicalMaterial,
+  deliveryPolicySchema,
+  repositorySettingsSchema,
+} from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
 import { executionHarnessSchema } from "./execution-runtime.js";
 import { linkedRepositorySchema } from "./github-source.js";
@@ -122,7 +126,12 @@ export const routingCommandResultSchema = z
 
 export const deliveryCommandResultSchema = deliveryPolicySchema
   .omit({ credentialRef: true })
-  .extend({ version: positiveInteger, credentialConfigured: z.boolean() })
+  .extend({
+    // Results recorded before per-repository settings have none.
+    repositories: repositorySettingsSchema.optional(),
+    version: positiveInteger,
+    credentialConfigured: z.boolean(),
+  })
   .strict();
 
 export const statusMappingCommandResultSchema = z

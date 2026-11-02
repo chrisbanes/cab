@@ -6,6 +6,7 @@ import {
   DeliveryStore,
   externalActionArgumentsSchema,
   materialDigest,
+  repositoryDeliverySettings,
   type PrDeliveryObservation,
 } from "../../src/core/delivery.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
@@ -1034,5 +1035,79 @@ test("persisted runtime, operator and service records parse and hash as they alw
     }
   } finally {
     w.db.close();
+  }
+});
+
+test("a policy stored with a project-wide check list reads with no repository entries and applies it to every repository", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const projectId = randomUUID();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "A",
+      leadProfileId: null,
+    });
+    const delivery = new DeliveryStore(db);
+    delivery.migrate();
+    db.prepare("INSERT INTO delivery_policies VALUES (?, ?, ?)").run(
+      projectId,
+      3,
+      JSON.stringify({
+        mode: "through-merge",
+        credentialRef: null,
+        grants: [],
+        requiredChecks: [{ name: "build" }],
+      }),
+    );
+    const policy = delivery.configuration(projectId);
+    assert.deepEqual(policy.repositories, []);
+    for (const repositoryId of ["R1", "42"])
+      assert.deepEqual(repositoryDeliverySettings(policy, repositoryId), {
+        mergeMethod: undefined,
+        cabChecks: [{ name: "build" }],
+      });
+    const configure = (repositories: unknown) =>
+      domain.execute({
+        type: "delivery.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: 3,
+        mode: "through-merge",
+        credentialRef: null,
+        grants: [],
+        requiredChecks: [],
+        repositories,
+      } as never);
+    assert.throws(
+      () =>
+        configure([
+          { repositoryId: "R1", requiredChecks: [] },
+          { repositoryId: "R1", mergeMethod: "squash", requiredChecks: [] },
+        ]),
+      /Each repository appears once/,
+    );
+    configure([
+      {
+        repositoryId: "R1",
+        mergeMethod: "squash",
+        requiredChecks: [{ name: "build" }],
+      },
+    ]);
+    const saved = delivery.configuration(projectId);
+    assert.deepEqual([saved.version, saved.requiredChecks], [4, []]);
+    assert.deepEqual(repositoryDeliverySettings(saved, "R1"), {
+      mergeMethod: "squash",
+      cabChecks: [{ name: "build" }],
+    });
+    assert.deepEqual(repositoryDeliverySettings(saved, "R2").cabChecks, []);
+  } finally {
+    db.close();
   }
 });

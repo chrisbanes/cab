@@ -21,7 +21,10 @@ import {
 } from "./github-http.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
-import type { CodeHostDeliveryProvider } from "./code-host.js";
+import type {
+  CodeHostDeliveryProvider,
+  RepositoryRequirements,
+} from "./code-host.js";
 import type { IssueTrackerWriter } from "./issue-tracker.js";
 import {
   type BranchRemote,
@@ -35,11 +38,13 @@ import {
 import {
   actionObservationSchema,
   prObservationSchema,
+  repositoryDeliverySettings,
   type DeliveryActionRecord,
   type DeliveryPolicy,
   type ExternalAction,
   type PrDeliveryObservation,
   type ProviderActionObservation,
+  type RequiredCheck,
 } from "../core/delivery.js";
 export type {
   PrDeliveryObservation,
@@ -169,7 +174,10 @@ export function mergeGateReasons(g: {
   deployments: Array<{ environment: string; sha: string; success: boolean }>;
   requiredEnvironments: string[];
   checks: PrDeliveryObservation["checks"];
-  requiredChecks: DeliveryPolicy["requiredChecks"];
+  /** What the code host requires; with cab's checks, empty means nothing guards the merge. */
+  hostChecks: RequiredCheck[];
+  cabChecks: RequiredCheck[];
+  configuredMethod: string | undefined;
   unsupportedRules: string[];
   allowedMethods: string[];
 }): string[] {
@@ -190,7 +198,9 @@ export function mergeGateReasons(g: {
   )
     reasons.push("review-not-satisfied");
   if (g.unresolvedThreads) reasons.push("unresolved-review-thread");
-  for (const check of g.requiredChecks)
+  if (!g.hostChecks.length && !g.cabChecks.length)
+    reasons.push("no-required-checks");
+  for (const check of [...g.hostChecks, ...g.cabChecks])
     if (
       !g.checks.some(
         (c) =>
@@ -210,7 +220,19 @@ export function mergeGateReasons(g: {
     )
       reasons.push(`deployment-${environment}-unproved`);
   if (!g.allowedMethods.length) reasons.push("merge-method-unavailable");
+  if (!g.configuredMethod || !g.allowedMethods.includes(g.configuredMethod))
+    reasons.push("merge-method-not-configured");
   return [...new Set(reasons)];
+}
+/** The observation's record of the checks the gate required, by source. */
+export function requiredCheckSources(
+  hostChecks: RequiredCheck[],
+  cabChecks: RequiredCheck[],
+): NonNullable<PrDeliveryObservation["requiredChecks"]> {
+  return [
+    ...hostChecks.map((c) => ({ ...c, source: "code-host" as const })),
+    ...cabChecks.map((c) => ({ ...c, source: "cab" as const })),
+  ];
 }
 
 /** Narrow GitHub.com transport; every effect is settled by an independent read. */
@@ -309,6 +331,7 @@ export class GitHubHttpDeliveryProvider
         allow_merge_commit: z.boolean(),
         allow_squash_merge: z.boolean(),
         allow_rebase_merge: z.boolean(),
+        default_branch: name.optional(),
       })
       .parse((await this.request(path)).json);
     if (repo.node_id !== id || repo.full_name !== data.node.nameWithOwner)
@@ -316,6 +339,7 @@ export class GitHubHttpDeliveryProvider
     return {
       path,
       owner: data.node.nameWithOwner.split("/")[0] ?? "",
+      defaultBranch: repo.default_branch,
       methods: [
         ...(repo.allow_merge_commit ? ["merge"] : []),
         ...(repo.allow_squash_merge ? ["squash"] : []),
@@ -659,6 +683,200 @@ export class GitHubHttpDeliveryProvider
     throw new Error("provider-field-pagination-incomplete");
   }
 
+  /**
+   * What `ref`'s rulesets and classic protection require. `approved` says whether the PR's review
+   * is approved, and `classicAbsent` whether GraphQL showed no classic protection rule, so a 404 means none.
+   */
+  private async branchRequirements(
+    repo: { path: string; methods: PrDeliveryObservation["allowedMethods"] },
+    ref: string,
+    approved: boolean,
+    classicAbsent: boolean,
+  ) {
+    const hostChecks: RequiredCheck[] = [];
+    let requireThreads = false;
+    let allowedMethods = [...repo.methods];
+    const unsupportedRules: string[] = [];
+    let strict = false;
+    const environments: string[] = [];
+    const rules = z
+      .array(z.object({ type: name, parameters: z.unknown().optional() }))
+      .parse(
+        (
+          await this.request(
+            `${repo.path}/rules/branches/${encodeURIComponent(ref)}`,
+          )
+        ).json,
+      );
+    for (const rule of rules) {
+      if (rule.type === "required_status_checks") {
+        const p = z
+          .object({
+            strict_required_status_checks_policy: z.boolean(),
+            required_status_checks: z.array(
+              z.object({
+                context: name,
+                integration_id: z.number().int().nullable().optional(),
+              }),
+            ),
+          })
+          .parse(rule.parameters);
+        strict ||= p.strict_required_status_checks_policy;
+        hostChecks.push(
+          ...p.required_status_checks.map((c) => ({
+            name: c.context,
+            ...(c.integration_id && c.integration_id > 0
+              ? { appId: c.integration_id }
+              : {}),
+          })),
+        );
+      } else if (rule.type === "pull_request") {
+        const p = z
+          .object({
+            required_approving_review_count: z.number().int(),
+            required_review_thread_resolution: z.boolean(),
+            allowed_merge_methods: z
+              .array(z.enum(["merge", "squash", "rebase"]))
+              .min(1)
+              .optional(),
+            require_code_owner_review: z.boolean().optional(),
+            require_last_push_approval: z.boolean().optional(),
+            required_reviewers: z.array(z.unknown()).optional(),
+          })
+          .parse(rule.parameters);
+        requireThreads ||= p.required_review_thread_resolution;
+        if (p.allowed_merge_methods)
+          allowedMethods = allowedMethods.filter((m) =>
+            p.allowed_merge_methods?.includes(m),
+          );
+        if (p.required_reviewers?.length)
+          unsupportedRules.push("required-reviewer-proof-unsupported");
+        if (
+          (p.required_approving_review_count > 0 ||
+            p.require_code_owner_review ||
+            p.require_last_push_approval) &&
+          !approved
+        )
+          unsupportedRules.push("required-review-unproved");
+      } else if (rule.type === "required_deployments")
+        environments.push(
+          ...z
+            .object({ required_deployment_environments: z.array(name) })
+            .parse(rule.parameters).required_deployment_environments,
+        );
+      else if (rule.type === "merge_queue")
+        unsupportedRules.push("merge-queue-required");
+      else if (
+        !["deletion", "non_fast_forward", "creation"].includes(rule.type)
+      )
+        unsupportedRules.push(`unsupported-rule-${rule.type}`);
+    }
+    try {
+      const protection = z
+        .object({
+          required_status_checks: z
+            .object({
+              strict: z.boolean(),
+              checks: z.array(
+                z.object({
+                  context: name,
+                  app_id: z.number().int().nullable(),
+                }),
+              ),
+            })
+            .nullable()
+            .optional(),
+          required_pull_request_reviews: z
+            .object({
+              required_approving_review_count: z.number().int(),
+              require_code_owner_reviews: z.boolean().optional(),
+              require_last_push_approval: z.boolean().optional(),
+            })
+            .nullable()
+            .optional(),
+          restrictions: z.object({}).passthrough().nullable().optional(),
+          required_signatures: z.object({ enabled: z.boolean() }).optional(),
+          required_linear_history: z
+            .object({ enabled: z.boolean() })
+            .optional(),
+          lock_branch: z.object({ enabled: z.boolean() }).optional(),
+          required_conversation_resolution: z
+            .object({ enabled: z.boolean() })
+            .optional(),
+        })
+        .parse(
+          (
+            await this.request(
+              `${repo.path}/branches/${encodeURIComponent(ref)}/protection`,
+            )
+          ).json,
+        );
+      if (protection.restrictions)
+        unsupportedRules.push("classic-update-restriction-unproved");
+      if (protection.required_signatures?.enabled)
+        unsupportedRules.push("classic-signature-proof-unsupported");
+      if (protection.lock_branch?.enabled)
+        unsupportedRules.push("classic-locked-branch");
+      if (protection.required_linear_history?.enabled)
+        allowedMethods = allowedMethods.filter((method) => method !== "merge");
+      strict ||= protection.required_status_checks?.strict ?? false;
+      requireThreads ||=
+        protection.required_conversation_resolution?.enabled ?? false;
+      hostChecks.push(
+        ...(protection.required_status_checks?.checks ?? []).map((c) => ({
+          name: c.context,
+          ...(c.app_id && c.app_id > 0 ? { appId: c.app_id } : {}),
+        })),
+      );
+      if (
+        ((protection.required_pull_request_reviews
+          ?.required_approving_review_count ?? 0) > 0 ||
+          protection.required_pull_request_reviews
+            ?.require_code_owner_reviews ||
+          protection.required_pull_request_reviews
+            ?.require_last_push_approval) &&
+        !approved
+      )
+        unsupportedRules.push("required-review-unproved");
+    } catch (error) {
+      if (
+        !(
+          error instanceof ProviderFailure &&
+          error.status === 404 &&
+          classicAbsent
+        )
+      )
+        unsupportedRules.push("classic-protection-unproved");
+    }
+    return {
+      hostChecks,
+      requireThreads,
+      allowedMethods,
+      unsupportedRules,
+      strict,
+      environments,
+    };
+  }
+  async repositoryRequirements(
+    repositoryId: string,
+  ): Promise<RepositoryRequirements> {
+    const repo = await this.repository(repositoryId);
+    if (!repo.defaultBranch) throw new Error("provider-default-branch-unknown");
+    // Without a PR there is no GraphQL rule to tell "unprotected" from "unreadable", so a 404 reads as
+    // unprotected. The merge gate still proves classic protection from GraphQL on every merge.
+    const branch = await this.branchRequirements(
+      repo,
+      repo.defaultBranch,
+      true,
+      true,
+    );
+    if (branch.unsupportedRules.includes("classic-protection-unproved"))
+      throw new Error("provider-protection-unproved");
+    return {
+      hostChecks: branch.hostChecks,
+      allowedMethods: branch.allowedMethods,
+    };
+  }
   async inspectPr(
     identity: PrIdentity,
     policy: DeliveryPolicy,
@@ -852,167 +1070,32 @@ export class GitHubHttpDeliveryProvider
     }
     reviewThreads.sort((a, b) => a.nodeId.localeCompare(b.nodeId));
     const unresolved = reviewThreads.some((t) => !t.isResolved);
-    const requirements = [...policy.requiredChecks];
-    let requireThreads = false;
-    let allowedMethods = [...repo.methods];
-    const unsupportedRules: string[] = [];
-    let strict =
-      graph.baseRef?.branchProtectionRule?.requiresStrictStatusChecks ?? false;
+    const branch = await this.branchRequirements(
+      repo,
+      raw.base.ref,
+      graph.reviewDecision === "APPROVED",
+      graph.baseRef?.branchProtectionRule === null,
+    );
+    const { hostChecks, requireThreads, allowedMethods } = branch;
+    const unsupportedRules = [
+      ...(!graph.baseRef || graph.baseRef.target.oid !== raw.base.sha
+        ? ["base-ref-current-unproved"]
+        : []),
+      ...branch.unsupportedRules,
+    ];
+    const strict =
+      (graph.baseRef?.branchProtectionRule?.requiresStrictStatusChecks ??
+        false) ||
+      branch.strict;
     const environments = [
       ...(graph.baseRef?.branchProtectionRule?.requiredDeploymentEnvironments ??
         []),
+      ...branch.environments,
     ];
-    if (!graph.baseRef || graph.baseRef.target.oid !== raw.base.sha)
-      unsupportedRules.push("base-ref-current-unproved");
-    const rules = z
-      .array(z.object({ type: name, parameters: z.unknown().optional() }))
-      .parse(
-        (
-          await this.request(
-            `${repo.path}/rules/branches/${encodeURIComponent(raw.base.ref)}`,
-          )
-        ).json,
-      );
-    for (const rule of rules) {
-      if (rule.type === "required_status_checks") {
-        const p = z
-          .object({
-            strict_required_status_checks_policy: z.boolean(),
-            required_status_checks: z.array(
-              z.object({
-                context: name,
-                integration_id: z.number().int().nullable().optional(),
-              }),
-            ),
-          })
-          .parse(rule.parameters);
-        strict ||= p.strict_required_status_checks_policy;
-        requirements.push(
-          ...p.required_status_checks.map((c) => ({
-            name: c.context,
-            ...(c.integration_id && c.integration_id > 0
-              ? { appId: c.integration_id }
-              : {}),
-          })),
-        );
-      } else if (rule.type === "pull_request") {
-        const p = z
-          .object({
-            required_approving_review_count: z.number().int(),
-            required_review_thread_resolution: z.boolean(),
-            allowed_merge_methods: z
-              .array(z.enum(["merge", "squash", "rebase"]))
-              .min(1)
-              .optional(),
-            require_code_owner_review: z.boolean().optional(),
-            require_last_push_approval: z.boolean().optional(),
-            required_reviewers: z.array(z.unknown()).optional(),
-          })
-          .parse(rule.parameters);
-        requireThreads ||= p.required_review_thread_resolution;
-        if (p.allowed_merge_methods)
-          allowedMethods = allowedMethods.filter((m) =>
-            p.allowed_merge_methods?.includes(m),
-          );
-        if (p.required_reviewers?.length)
-          unsupportedRules.push("required-reviewer-proof-unsupported");
-        if (
-          (p.required_approving_review_count > 0 ||
-            p.require_code_owner_review ||
-            p.require_last_push_approval) &&
-          graph.reviewDecision !== "APPROVED"
-        )
-          unsupportedRules.push("required-review-unproved");
-      } else if (rule.type === "required_deployments")
-        environments.push(
-          ...z
-            .object({ required_deployment_environments: z.array(name) })
-            .parse(rule.parameters).required_deployment_environments,
-        );
-      else if (rule.type === "merge_queue")
-        unsupportedRules.push("merge-queue-required");
-      else if (
-        !["deletion", "non_fast_forward", "creation"].includes(rule.type)
-      )
-        unsupportedRules.push(`unsupported-rule-${rule.type}`);
-    }
-    try {
-      const protection = z
-        .object({
-          required_status_checks: z
-            .object({
-              strict: z.boolean(),
-              checks: z.array(
-                z.object({
-                  context: name,
-                  app_id: z.number().int().nullable(),
-                }),
-              ),
-            })
-            .nullable()
-            .optional(),
-          required_pull_request_reviews: z
-            .object({
-              required_approving_review_count: z.number().int(),
-              require_code_owner_reviews: z.boolean().optional(),
-              require_last_push_approval: z.boolean().optional(),
-            })
-            .nullable()
-            .optional(),
-          restrictions: z.object({}).passthrough().nullable().optional(),
-          required_signatures: z.object({ enabled: z.boolean() }).optional(),
-          required_linear_history: z
-            .object({ enabled: z.boolean() })
-            .optional(),
-          lock_branch: z.object({ enabled: z.boolean() }).optional(),
-          required_conversation_resolution: z
-            .object({ enabled: z.boolean() })
-            .optional(),
-        })
-        .parse(
-          (
-            await this.request(
-              `${repo.path}/branches/${encodeURIComponent(raw.base.ref)}/protection`,
-            )
-          ).json,
-        );
-      if (protection.restrictions)
-        unsupportedRules.push("classic-update-restriction-unproved");
-      if (protection.required_signatures?.enabled)
-        unsupportedRules.push("classic-signature-proof-unsupported");
-      if (protection.lock_branch?.enabled)
-        unsupportedRules.push("classic-locked-branch");
-      if (protection.required_linear_history?.enabled)
-        allowedMethods = allowedMethods.filter((method) => method !== "merge");
-      strict ||= protection.required_status_checks?.strict ?? false;
-      requireThreads ||=
-        protection.required_conversation_resolution?.enabled ?? false;
-      requirements.push(
-        ...(protection.required_status_checks?.checks ?? []).map((c) => ({
-          name: c.context,
-          ...(c.app_id && c.app_id > 0 ? { appId: c.app_id } : {}),
-        })),
-      );
-      if (
-        ((protection.required_pull_request_reviews
-          ?.required_approving_review_count ?? 0) > 0 ||
-          protection.required_pull_request_reviews
-            ?.require_code_owner_reviews ||
-          protection.required_pull_request_reviews
-            ?.require_last_push_approval) &&
-        graph.reviewDecision !== "APPROVED"
-      )
-        unsupportedRules.push("required-review-unproved");
-    } catch (error) {
-      if (
-        !(
-          error instanceof ProviderFailure &&
-          error.status === 404 &&
-          graph.baseRef?.branchProtectionRule === null
-        )
-      )
-        unsupportedRules.push("classic-protection-unproved");
-    }
+    const { mergeMethod, cabChecks } = repositoryDeliverySettings(
+      policy,
+      identity.repositoryId,
+    );
     if (
       graph.baseRef?.branchProtectionRule?.requiresDeployments &&
       !environments.length
@@ -1058,7 +1141,9 @@ export class GitHubHttpDeliveryProvider
       requiredEnvironments: [...new Set(environments)],
       deployments,
       checks,
-      requiredChecks: requirements,
+      hostChecks,
+      cabChecks,
+      configuredMethod: mergeMethod,
       unsupportedRules,
       allowedMethods,
     });
@@ -1116,6 +1201,7 @@ export class GitHubHttpDeliveryProvider
       feedback,
       reviewThreads,
       mergeBlockers,
+      requiredChecks: requiredCheckSources(hostChecks, cabChecks),
       closedIssueNodeIds: graph.closingIssuesReferences.pageInfo.hasNextPage
         ? []
         : graph.closingIssuesReferences.nodes
@@ -1210,7 +1296,9 @@ export class GitHubHttpDeliveryProvider
       if (
         action.kind === "pr.merge" &&
         (observation.mergeBlockers.length ||
-          !observation.allowedMethods.includes(action.method))
+          action.method !==
+            repositoryDeliverySettings(policy, action.target.repositoryId)
+              .mergeMethod)
       )
         throw new Error("provider-merge-gates-held");
       return {

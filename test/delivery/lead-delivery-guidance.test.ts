@@ -49,3 +49,33 @@ test("no linked repositories still states the escalation rule", () => {
   assert.match(text, /No linked repositories/);
   assert.match(text, /three unsuccessful repairs[\s\S]*conflicting direction/);
 });
+
+test("merge guidance names the repository's configured method, or says pr.merge is held without one", () => {
+  const repositories = [
+    { repositoryId: "R1", mergeMethod: "squash" as const, requiredChecks: [] },
+  ];
+  for (const level of ["merge-when-ready", "merge-with-approval"] as const) {
+    const grants = repositoryLevelGrants("R1", level);
+    assert.match(
+      leadDeliveryGuidance({ mode: "through-merge", grants, repositories }, [
+        "R1",
+      ]),
+      /R1: Merge .*pr\.merge with the squash method/,
+    );
+    assert.match(
+      leadDeliveryGuidance({ mode: "through-merge", grants }, ["R1"]),
+      /R1: Merge .*No merge method is configured, so pr\.merge is held until the operator sets one\./,
+    );
+  }
+  assert.match(
+    leadDeliveryGuidance(
+      {
+        mode: "through-merge",
+        grants: [{ action: "pr.merge", repositoryId: "R1", mode: "allow" }],
+        repositories,
+      },
+      ["R1"],
+    ),
+    /R1: Custom: .*Merge with the squash method\./,
+  );
+});

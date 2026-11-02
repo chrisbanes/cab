@@ -627,7 +627,8 @@ test("a merge request is observed as the same facts on every unchanged read", as
       ],
       feedback: undefined,
       reviewThreads: undefined,
-      mergeBlockers: [],
+      mergeBlockers: ["no-required-checks", "merge-method-not-configured"],
+      requiredChecks: [],
       closedIssueNodeIds: [],
       allowedMethods: ["merge", "squash"],
     },
@@ -1128,7 +1129,21 @@ const pipelineOf = (status: string) => ({
   started_at: null,
   finished_at: null,
 });
-const checked = { requiredChecks: [{ name: "pipeline" }] } as DeliveryPolicy;
+// The legacy project-wide list still applies; the repository's entry sets the method.
+const checked = {
+  requiredChecks: [{ name: "pipeline" }],
+  repositories: [{ repositoryId, mergeMethod: "squash", requiredChecks: [] }],
+} as unknown as DeliveryPolicy;
+const ready = (mergeMethod: "merge" | "squash" = "squash") =>
+  ({
+    requiredChecks: [],
+    repositories: [
+      { repositoryId, mergeMethod, requiredChecks: [{ name: "pipeline" }] },
+    ],
+  }) as unknown as DeliveryPolicy;
+/** A merge request whose head pipeline passed, so `ready()` holds nothing. */
+const passing = () =>
+  mergeRequestWorld({ head_pipeline: pipelineOf("success") });
 const trainProject = {
   id: 42,
   path_with_namespace: "Group/Sub/App",
@@ -1173,7 +1188,10 @@ test("a merge request is mergeable only when GitLab says so and cab's required c
   assert.deepEqual(await blockers({ head_pipeline: pipelineOf("failed") }), [
     "check-pipeline-unproved",
   ]);
-  assert.deepEqual(await blockers({ head_pipeline: null }, policy), []);
+  assert.deepEqual(await blockers({ head_pipeline: null }, policy), [
+    "no-required-checks",
+    "merge-method-not-configured",
+  ]);
 });
 
 test("the project's squash setting decides the allowed merge methods, and rebase is never allowed", async () => {
@@ -1199,14 +1217,17 @@ test("the project's squash setting decides the allowed merge methods, and rebase
 });
 
 test("a merge is held before any write while a gate or the method refuses it, or the head moved", async () => {
-  const w = mergeRequestWorld({ detailed_merge_status: "ci_still_running" });
+  const w = mergeRequestWorld({
+    detailed_merge_status: "ci_still_running",
+    head_pipeline: pipelineOf("success"),
+  });
   await assert.rejects(
-    w.provider.preflight(merge(), policy),
+    w.provider.preflight(merge(), ready()),
     /provider-merge-gates-held/,
   );
   w.state.mergeRequests[0]!.detailed_merge_status = "mergeable";
   await assert.rejects(
-    w.provider.preflight(merge("rebase"), policy),
+    w.provider.preflight(merge("rebase"), ready()),
     /provider-merge-gates-held/,
   );
   w.state.project = {
@@ -1215,21 +1236,78 @@ test("a merge is held before any write while a gate or the method refuses it, or
     squash_option: "always",
   };
   await assert.rejects(
-    w.provider.preflight(merge("merge"), policy),
+    w.provider.preflight(merge("merge"), ready()),
     /provider-merge-gates-held/,
   );
   w.state.mergeRequests[0]!.sha = old;
   await assert.rejects(
-    w.provider.preflight(merge("squash"), policy),
+    w.provider.preflight(merge("squash"), ready()),
     /provider-head-changed/,
   );
   assert.equal(w.requests.filter((r) => r.init.method !== "GET").length, 0);
 });
 
+test('"Pipelines must succeed" makes the pipeline a code-host check; without it or a cab check the merge is held', async () => {
+  const w = passing();
+  const methodOnly = {
+    requiredChecks: [],
+    repositories: [{ repositoryId, mergeMethod: "squash", requiredChecks: [] }],
+  } as unknown as DeliveryPolicy;
+  w.state.project = {
+    id: 42,
+    path_with_namespace: "Group/Sub/App",
+    only_allow_merge_if_pipeline_succeeds: true,
+  };
+  const required = await w.provider.inspectPr(identity, methodOnly);
+  assert.deepEqual(required.mergeBlockers, []);
+  assert.deepEqual(required.requiredChecks, [
+    { name: "pipeline", source: "code-host" },
+  ]);
+  assert.deepEqual(await w.provider.repositoryRequirements(repositoryId), {
+    hostChecks: [{ name: "pipeline" }],
+    allowedMethods: ["merge", "squash"],
+  });
+  await w.provider.preflight(merge("squash"), methodOnly);
+  // The setting turned off between saves: the merge's fresh project read holds it.
+  w.state.project = {
+    id: 42,
+    path_with_namespace: "Group/Sub/App",
+    only_allow_merge_if_pipeline_succeeds: false,
+  };
+  await assert.rejects(
+    w.provider.preflight(merge("squash"), methodOnly),
+    /provider-merge-gates-held/,
+  );
+  assert.deepEqual(
+    (await w.provider.inspectPr(identity, methodOnly)).mergeBlockers,
+    ["no-required-checks"],
+  );
+  assert.deepEqual(
+    (await w.provider.inspectPr(identity, ready())).requiredChecks,
+    [{ name: "pipeline", source: "cab" }],
+  );
+  // A configured method the project no longer allows is not configured.
+  w.state.project = {
+    id: 42,
+    path_with_namespace: "Group/Sub/App",
+    squash_option: "always",
+  };
+  assert.deepEqual(
+    (await w.provider.inspectPr(identity, ready("merge"))).mergeBlockers,
+    ["merge-method-not-configured"],
+  );
+  await assert.rejects(
+    w.provider.preflight(merge("merge"), ready("merge")),
+    /provider-merge-gates-held/,
+  );
+  assert.equal(w.merges.length, 0);
+  assert.equal(w.requests.filter((r) => r.init.method !== "GET").length, 0);
+});
+
 test("a merge sends the expected head and never auto-merge, and settles only on a merged read", async () => {
-  const w = mergeRequestWorld();
+  const w = passing();
   const action = merge("squash");
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, ready());
   assert.equal(before.mergeTrain, false);
   const done = await w.provider.performAction(record(action, before));
   assert.deepEqual(w.merges, [
@@ -1242,10 +1320,10 @@ test("a merge sends the expected head and never auto-merge, and settles only on 
     headSha: commit,
     merged: true,
   });
-  const direct = mergeRequestWorld();
+  const direct = passing();
   const plain = merge("merge");
   await direct.provider.performAction(
-    record(plain, await direct.provider.preflight(plain, policy)),
+    record(plain, await direct.provider.preflight(plain, ready("merge"))),
   );
   assert.deepEqual(direct.merges[0]?.body, {
     sha: commit,
@@ -1256,9 +1334,9 @@ test("a merge sends the expected head and never auto-merge, and settles only on 
 });
 
 test("a rejected merge is a definitive failure, and a lost response is settled by a read without a second write", async () => {
-  const rejected = mergeRequestWorld();
+  const rejected = passing();
   const action = merge();
-  const before = await rejected.provider.preflight(action, policy);
+  const before = await rejected.provider.preflight(action, ready());
   // The request stopped being mergeable after preflight: GitLab answers 405.
   rejected.state.mergeRequests[0]!.detailed_merge_status = "conflict";
   const refused = await rejected.provider.performAction(record(action, before));
@@ -1272,9 +1350,9 @@ test("a rejected merge is a definitive failure, and a lost response is settled b
   const moved = await rejected.provider.performAction(record(action, before));
   assert.equal(moved.reason, "provider-http-409");
 
-  const lost = mergeRequestWorld();
+  const lost = passing();
   lost.state.loseMergeResponse = true;
-  const rec = record(action, await lost.provider.preflight(action, policy));
+  const rec = record(action, await lost.provider.preflight(action, ready()));
   const unknown = await lost.provider.performAction(rec);
   assert.deepEqual(
     [unknown.state, unknown.reason],
@@ -1287,7 +1365,7 @@ test("a rejected merge is a definitive failure, and a lost response is settled b
   assert.equal(lost.merges.length, 1);
 
   // A write whose response is lost before it took effect stays unproved while the read shows the request open.
-  const unseen = mergeRequestWorld();
+  const unseen = passing();
   unseen.state.intercept = (method, path) => {
     if (method === "PUT" && path.endsWith("/merge"))
       throw new TypeError("fetch failed");
@@ -1295,7 +1373,7 @@ test("a rejected merge is a definitive failure, and a lost response is settled b
   };
   const unseenRec = record(
     action,
-    await unseen.provider.preflight(action, policy),
+    await unseen.provider.preflight(action, ready()),
   );
   const open = await unseen.provider.performAction(unseenRec);
   assert.deepEqual(
@@ -1311,9 +1389,9 @@ test("a rejected merge is a definitive failure, and a lost response is settled b
 });
 
 test("a request GitLab holds for auto-merge stays unproved with the operator to recover", async () => {
-  const w = mergeRequestWorld();
+  const w = passing();
   const action = merge();
-  const rec = record(action, await w.provider.preflight(action, policy));
+  const rec = record(action, await w.provider.preflight(action, ready()));
   w.state.mergeRequests[0]!.merge_when_pipeline_succeeds = true;
   const seen = await w.provider.inspectAction(rec);
   assert.deepEqual(
@@ -1323,10 +1401,10 @@ test("a request GitLab holds for auto-merge stays unproved with the operator to 
 });
 
 test("a merge train merge joins the train, stays pending, and ends merged or dropped", async () => {
-  const w = mergeRequestWorld();
+  const w = passing();
   w.state.project = trainProject;
   const action = merge();
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, ready());
   assert.equal(before.mergeTrain, true);
   const first = await w.provider.performAction(record(action, before));
   assert.deepEqual(w.merges, [
@@ -1356,7 +1434,7 @@ test("a merge train merge joins the train, stays pending, and ends merged or dro
   assert.equal(w.merges.length, 1);
 
   // The request leaves the train and stays open: dropped, but only after the train was seen holding it.
-  const dropped = mergeRequestWorld();
+  const dropped = passing();
   dropped.state.project = trainProject;
   const start = await dropped.provider.performAction(record(action, before));
   const seen = record(action, before, {
@@ -1399,7 +1477,7 @@ test("a merge train merge joins the train, stays pending, and ends merged or dro
   dropped.state.mergeRequests[0]!.state = "merged";
   assert.equal((await dropped.provider.inspectAction(seen)).state, "uncertain");
   // A failed read keeps the train's evidence, so a later drop is still concluded.
-  const flaky = mergeRequestWorld();
+  const flaky = passing();
   flaky.state.project = trainProject;
   const held = await flaky.provider.performAction(record(action, before));
   const heldRec = record(action, before, {
@@ -1422,7 +1500,7 @@ test("a merge train merge joins the train, stays pending, and ends merged or dro
   );
 
   // A car that was never seen proves nothing: the request may not have been added yet.
-  const unseen = mergeRequestWorld();
+  const unseen = passing();
   unseen.state.project = trainProject;
   for (const observation of [
     null,
