@@ -1737,6 +1737,22 @@ test("source.review resumes a source hold through the command flow and refuses d
   });
   assert.equal(resumed.source?.review?.decision, "resume-source-hold");
   assert.ok(!resumed.admission.reasons.includes("source-held"));
+  // A hold reactivated later keeps the task version and raises the hold's revision.
+  source.recordDeliveryClosureUnavailable("I1");
+  const reheld = await read();
+  assert.equal(reheld.task.version, resumed.task.version);
+  assert.deepEqual(reheld.source?.hold, {
+    active: true,
+    revision: (held.source?.hold?.revision ?? 0) + 1,
+    reasonCode: "source-held",
+    reason: "closure-read-unavailable",
+  });
+  // Put the resumed state back for the checks below.
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE source_holds SET active = 0 WHERE externalId = 'I1'")
+      .run(),
+  );
   // With no active hold, a second decision at the current version is refused.
   await assert.rejects(api.execute(resume(resumed.task.version)), refused);
   // A stored reason outside the set reads as null rather than passing through.

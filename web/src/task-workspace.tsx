@@ -756,7 +756,10 @@ export function TaskWorkspace({
     onRefresh?.();
   };
   const [startedAgain, setStartedAgain] = useState<string | null>(null);
-  const [resumedSource, setResumedSource] = useState<string | null>(null);
+  const [resumedSource, setResumedSource] = useState<{
+    taskId: string;
+    revision: number;
+  } | null>(null);
   // The header's Reset task sits outside this page and asks it to reread.
   const refreshRef = useRef(refreshAll);
   refreshRef.current = refreshAll;
@@ -2207,12 +2210,20 @@ export function TaskWorkspace({
                   />
                 )}
                 {/* Kept once sent, so the answer outlives the hold it cleared. */}
-                {(data.source?.hold?.active || resumedSource === taskId) && (
+                {(data.source?.hold?.active ||
+                  resumedSource?.taskId === taskId) && (
                   <SourceHoldCard
                     client={client}
                     session={session}
                     task={data}
-                    onSend={() => setResumedSource(taskId)}
+                    answered={
+                      resumedSource?.taskId === taskId
+                        ? resumedSource.revision
+                        : null
+                    }
+                    onSend={(revision) =>
+                      setResumedSource({ taskId, revision })
+                    }
                     onChanged={refreshAll}
                   />
                 )}

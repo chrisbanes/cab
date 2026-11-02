@@ -27,6 +27,7 @@ export function SourceHoldCard({
   task,
   onChanged,
   onSend,
+  answered,
 }: {
   client: OperatorClient;
   session: Session;
@@ -34,7 +35,9 @@ export function SourceHoldCard({
   /** Rereads the task after a recorded resume or a conflict. */
   onChanged: () => void;
   /** A resume was sent. The container keeps this mounted so its answer outlives the hold. */
-  onSend?: () => void;
+  onSend?: (revision: number) => void;
+  /** The hold revision the last sent resume answered; a hold with a higher one is a new decision. */
+  answered: number | null;
 }) {
   const taskId = task.task.id,
     source = task.source,
@@ -52,12 +55,12 @@ export function SourceHoldCard({
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
-  // A recorded resume answers only the hold it cleared: a later hold bumps the version past it.
+  // A recorded resume answers only the hold it cleared: a hold reactivated later has a higher revision.
   const resolve =
     !hold?.active ||
     (outcome?.kind === "recorded" &&
-      outcome.command.type === "source.review" &&
-      task.task.version <= outcome.command.expectedVersion + 1);
+      answered !== null &&
+      hold.revision <= answered);
   // Nothing left to decide and nothing to report.
   if (resolve && !outcome) return null;
   return (
@@ -80,7 +83,7 @@ export function SourceHoldCard({
               variant="secondary"
               disabled={Boolean(sending)}
               onClick={() => {
-                onSend?.();
+                onSend?.(hold?.revision ?? 0);
                 void send(
                   operatorCommandSchema.parse({
                     type: "source.review",
@@ -100,7 +103,8 @@ export function SourceHoldCard({
       )}
       <SendFeedback
         entry={entry}
-        outcome={outcome}
+        // The confirmation of an earlier hold is not this hold's.
+        outcome={outcome?.kind === "recorded" && !resolve ? null : outcome}
         recorded="Source hold resumed. Only that hold was cleared; other holds remain."
         conflict="Not resumed: the task or its source changed, or the source is not open and ready yet."
         check={() => void send()}

@@ -123,6 +123,24 @@ test("a source hold shows its reason and text with only Resume source hold, refu
   await inspector
     .getByText(/Last source decision · Resumed source hold/)
     .waitFor();
+  // A hold reactivated later, at the same task version, is a new decision with its own reason.
+  const version = f.service.domain().task(imported.taskId).version;
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE source_holds SET active = 1, reason = 'closure-read-unavailable', generation = generation + 1 WHERE externalId = 'I-COMMENT'",
+      )
+      .run(),
+  );
+  assert.equal(f.service.domain().task(imported.taskId).version, version);
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
+  await card
+    .getByText(/could not read whether it closed the issue itself/)
+    .waitFor();
+  assert.equal(await resume(page).count(), 1);
+  assert.equal(await card.getByText(/Source hold resumed/).count(), 0);
   const domain = f.service.domain().task(imported.taskId);
   assert.equal(domain.title, "Imported comment task");
   assert.equal(domain.outcome, "Supplied GitHub brief");
