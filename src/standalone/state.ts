@@ -71,6 +71,8 @@ const stopTargetColumns = `(
 const legacyUncertainInterruptReason =
   "Codex interrupt request outcome is uncertain";
 const legacyFailedInterruptReason = "Codex interrupt request failed";
+/** Durable pending effect of a known unfinished execution; it refuses bound recovery. */
+const knownSurvivorEffect = "known-survivor";
 
 const recoveryReceiptColumns = `(
       id TEXT PRIMARY KEY,
@@ -3558,6 +3560,34 @@ export class ExecutionState {
     };
   }
 
+  /**
+   * A known unfinished execution: its durable survivor marker and the holds it imposes commit
+   * together, so no committed hold lacks the evidence that refuses recovery after a restart.
+   * Only the recovery it refuses settles the marker.
+   */
+  holdKnownSurvivor(input: {
+    workId: string;
+    reason: string;
+    reconciledContinuation: boolean;
+    holdIds: readonly string[];
+  }): void {
+    const reason = z.string().min(1).max(1000).parse(input.reason);
+    transaction(this.db, () => {
+      this.db
+        .prepare(`INSERT INTO execution_pending_effects (workId, effectKey, state, reason)
+        VALUES (?, ?, 'pending', ?)
+        ON CONFLICT(workId, effectKey) DO UPDATE SET state = 'pending', reason = excluded.reason`)
+        .run(
+          z.string().min(1).max(512).parse(input.workId),
+          knownSurvivorEffect,
+          reason,
+        );
+      if (input.reconciledContinuation)
+        this.holdReconciledContinuationSurvivor(input.workId, reason);
+      for (const id of input.holdIds) this.holdTerminalConflict(id, reason);
+    });
+  }
+
   /** A post-continuation survivor invalidates recovery without rewriting its history. */
   holdReconciledContinuationSurvivor(workId: string, reason: string): void {
     this.db
@@ -4559,15 +4589,17 @@ export class ExecutionState {
       blocked.push("bound-identity-missing");
     if (record.preTurnRejection || record.noTurnSubmission)
       blocked.push("other-witness");
-    if (
-      this.db
-        .prepare(
-          "SELECT 1 FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
-        )
-        .get(workId)
-    )
+    const effects = this.db
+      .prepare(
+        "SELECT effectKey FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
+      )
+      .all(workId) as { effectKey: string }[];
+    if (effects.some((e) => e.effectKey !== knownSurvivorEffect))
       blocked.push("pending-effects");
-    if (record.observations.some((o) => o.kind === "known-survivor"))
+    if (
+      effects.some((e) => e.effectKey === knownSurvivorEffect) ||
+      record.observations.some((o) => o.kind === "known-survivor")
+    )
       blocked.push("known-survivor");
     return [...new Set(blocked)];
   }

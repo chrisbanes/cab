@@ -676,18 +676,26 @@ function harnessForWork(
   return state.workHarness(workId);
 }
 
+/** The writer and successors whose ownership a terminal conflict or survivor retracts. */
+function retractableIds(state: ExecutionState, writer: ExecutionIntent) {
+  return state
+    .writerAndSuccessors(writer.workId)
+    .filter(
+      (item) =>
+        item.state === "completed" ||
+        item.state === "submitting" ||
+        item.state === "running",
+    )
+    .map((item) => item.id);
+}
+
 function retractWriterAndSuccessors(
   state: ExecutionState,
   writer: ExecutionIntent,
   reason: string,
 ): void {
-  for (const item of state.writerAndSuccessors(writer.workId))
-    if (
-      item.state === "completed" ||
-      item.state === "submitting" ||
-      item.state === "running"
-    )
-      state.holdTerminalConflict(item.id, reason);
+  for (const id of retractableIds(state, writer))
+    state.holdTerminalConflict(id, reason);
 }
 
 /**
@@ -5088,26 +5096,25 @@ export class StandaloneService {
     if (!intent || intent.state === "ready")
       throw new Error("No active execution to hold");
     const holdReason = `Known unfinished execution: ${reason}`;
+    // Refuses recovery in this process before any write; the durable marker and holds
+    // then commit together, and only then is the evidence recorded.
     supervisor.noteSurvivor(workId);
-    if (
-      intent.state === "reconciled" &&
-      coordination.recoveryDispositionForWork(workId) === "operator-reconciled"
-    ) {
-      state.holdReconciledContinuationSurvivor(workId, holdReason);
-    }
-    retractWriterAndSuccessors(state, intent, holdReason);
+    state.holdKnownSurvivor({
+      workId,
+      reason: holdReason,
+      reconciledContinuation:
+        intent.state === "reconciled" &&
+        coordination.recoveryDispositionForWork(workId) ===
+          "operator-reconciled",
+      holdIds: retractableIds(state, intent),
+    });
+    supervisor.recordSurvivorEvidence(workId);
   }
 
   registerExecutionCallback(workId: string, callback: Promise<unknown>): void {
     const { state: executions, coordination } = this.started();
     const state = executions.byWorkId(workId)?.state;
-    if (
-      state === "completed" ||
-      (state === "reconciled" &&
-        coordination.recoveryDispositionForWork(workId) ===
-          "operator-reconciled")
-    )
-      this.holdKnownSurvivor(workId, "late cab callback");
+    // Tracked first: a failed hold write must not leave the callback unseen.
     const set = this.callbacks.get(workId) ?? new Set<Promise<unknown>>();
     set.add(callback);
     this.callbacks.set(workId, set);
@@ -5117,6 +5124,13 @@ export class StandaloneService {
         if (set.size === 0) this.callbacks.delete(workId);
       })
       .catch(() => {});
+    if (
+      state === "completed" ||
+      (state === "reconciled" &&
+        coordination.recoveryDispositionForWork(workId) ===
+          "operator-reconciled")
+    )
+      this.holdKnownSurvivor(workId, "late cab callback");
   }
 
   private handleUserInputRequest(

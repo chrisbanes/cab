@@ -630,6 +630,77 @@ for (const risk of ["callback", "pending-effect", "survivor"] as const)
     );
   });
 
+test("a known survivor whose observation write fails still refuses bound recovery, in process and after restart", async (t) => {
+  const w = await boundWorld(t);
+  w.s.f.seedPersistedState((db) =>
+    db.exec(`CREATE TRIGGER fail_survivor_observation
+      BEFORE INSERT ON execution_recovery_observations WHEN NEW.kind = 'known-survivor'
+      BEGIN SELECT RAISE(ABORT, 'observation write failed'); END`),
+  );
+  w.s.f.service.holdKnownSurvivor(w.g.workId, "observation write fails");
+  const refused = async () => {
+    assert.ok(
+      (
+        await w.s.f.service.boundTurnRecoveryEligibility(
+          w.g.workId,
+          w.g.assignmentId,
+        )
+      ).includes("known-survivor"),
+    );
+    await rejected(
+      () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
+      /known-survivor/,
+    );
+  };
+  await refused();
+  w.s.f.seedPersistedState((db) =>
+    assert.equal(
+      db
+        .prepare(
+          "SELECT count(*) AS n FROM execution_recovery_observations WHERE workId = ? AND kind = 'known-survivor'",
+        )
+        .get(w.g.workId)?.n,
+      0,
+      "the observation really failed",
+    ),
+  );
+  await w.s.restart();
+  await refused();
+  assert.equal(w.checks(), 0, "no termination check before refusal");
+  assert.equal(
+    w.s.f.service
+      .recoveryForTask(w.g.taskId)
+      .find((r) => r.workId === w.g.workId)?.receipt,
+    null,
+  );
+});
+
+test("a survivor hold whose durable write fails still refuses bound recovery in the same process", async (t) => {
+  const w = await boundWorld(t);
+  w.s.f.seedPersistedState((db) =>
+    db.exec(`CREATE TRIGGER fail_survivor_marker
+      BEFORE INSERT ON execution_pending_effects WHEN NEW.effectKey = 'known-survivor'
+      BEGIN SELECT RAISE(ABORT, 'survivor marker write failed'); END`),
+  );
+  assert.throws(
+    () => w.s.f.service.holdKnownSurvivor(w.g.workId, "marker write fails"),
+    /survivor marker write failed/,
+  );
+  assert.ok(
+    (
+      await w.s.f.service.boundTurnRecoveryEligibility(
+        w.g.workId,
+        w.g.assignmentId,
+      )
+    ).includes("known-survivor"),
+  );
+  await rejected(
+    () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
+    /known-survivor/,
+  );
+  assert.equal(w.checks(), 0);
+});
+
 for (const risk of ["callback", "effect", "revision"] as const)
   test(`bound recovery rechecks ${risk} after asynchronous exit verification`, async (t) => {
     const w = await boundWorld(t);

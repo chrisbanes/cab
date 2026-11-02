@@ -147,6 +147,7 @@ export class ExecutionSupervisor {
   private readonly observationControllers = new Set<AbortController>();
   private readonly interruptRequests = new Set<Promise<void>>();
   private readonly knownRisk = new Set<string>();
+  private readonly survivors = new Set<string>();
   private readonly hasPendingCallbacks: (workId: string) => boolean;
 
   constructor(
@@ -332,7 +333,9 @@ export class ExecutionSupervisor {
   ): BoundTurnRecoveryBlocker[] {
     const blocked = this.state.boundTurnRecoveryBlockers(workId, assignmentId);
     if (this.hasPendingCallbacks(workId)) blocked.push("callback-pending");
-    return blocked;
+    // Holds even when no durable survivor evidence could be written in this process.
+    if (this.survivors.has(workId)) blocked.push("known-survivor");
+    return [...new Set(blocked)];
   }
 
   /** Advisory only: no observations, ownership release or runtime/model calls. */
@@ -511,13 +514,18 @@ export class ExecutionSupervisor {
     });
   }
 
+  /** In memory first, so recovery in this process is refused before any write can fail. */
   noteSurvivor(workId: string): void {
     this.knownRisk.add(workId);
+    this.survivors.add(workId);
+  }
+
+  /** After the durable hold: the stop anomaly, then best-effort inspection evidence. */
+  recordSurvivorEvidence(workId: string): void {
     this.state.recordStopAnomaly(
       workId,
       "Known unfinished execution remains after terminal status",
     );
-    // Evidence only: a failed write must not skip the caller's hold or callback tracking.
     try {
       this.recordObservation(workId, "known-survivor");
     } catch {}
