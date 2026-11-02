@@ -182,3 +182,69 @@ test("a stacked dependency that cannot reconcile is reported once while the othe
   assert.ok(reported[0]?.error, "the sanitized cause");
   assert.equal(f.service.list().length > 0, true, "the service keeps running");
 });
+
+test("a push whose parent head moves between its proof and the push is refused, first or retried", async (t) => {
+  const f = await stackedDeliveryFixture(t);
+  const [B, D] = f.tasks as [string, string];
+  await f.waitTurn(B);
+  const first = await start(f, B, D);
+  const setParent = (head: string, restack: "current" | "pending") =>
+    f.readDb((db) =>
+      db
+        .prepare(
+          "UPDATE stacked_dependencies SET parentHead = ?, restack = ?, restackFromSha = (SELECT lastPushedSha FROM delivery_task_branches WHERE taskId = ?) WHERE taskId = ?",
+        )
+        .run(head, restack, D, D),
+    );
+  const outcome = (r: { text: string }) =>
+    /External action [^:]+: ([a-z-]+)(?: \(([^)]+)\))?/
+      .exec(r.text)
+      ?.slice(1, 3);
+  const pushedHeads = () => Object.values(f.remote);
+
+  // First attempt: proved against `first`; as a reconcile would during the provider's await,
+  // the parent head moves on before the push.
+  const work = await f.commit(D, "work");
+  const before = pushedHeads();
+  f.onNextPreflight(() => setParent("1".repeat(40), "pending"));
+  assert.deepEqual(outcome(await f.push(D, work)), [
+    "confirmed-failure",
+    "push-base-moved",
+  ]);
+  assert.deepEqual(pushedHeads(), before, "nothing pushed");
+  // Back on `first`, the refused push is retried, proved again and sent.
+  setParent(first, "current");
+  await f.service.refreshGitHub();
+  assert.equal(f.branchOf(D)?.lastPushedSha, work);
+  const sentBefore = pushedHeads();
+
+  // Retry: a retryable failure stays confirmed-failure while reconcile proves it again.
+  const more = await f.commit(D, "more");
+  f.failNextPush();
+  assert.deepEqual(outcome(await f.push(D, more)), [
+    "confirmed-failure",
+    "provider-retryable",
+  ]);
+  // This time B really moved, so the reconcile keeps the new head.
+  f.onNextPreflight(() => {
+    f.readDb((db) =>
+      db
+        .prepare(
+          "UPDATE delivery_task_branches SET lastPushedSha = ? WHERE taskId = ?",
+        )
+        .run("2".repeat(40), B),
+    );
+    setParent("2".repeat(40), "pending");
+  });
+  await f.service.refreshGitHub();
+  const retried = f.service
+    .delivery()
+    .actions(D)
+    .filter((a) => a.request.action.kind === "branch.push")
+    .at(-1);
+  assert.equal(retried?.observation?.reason, "push-base-moved");
+  assert.ok(retried && retried.attempts > 0, "it was the retry");
+  assert.deepEqual(pushedHeads(), sentBefore, "nothing pushed");
+  assert.equal(f.branchOf(D)?.lastPushedSha, work);
+  assert.equal(f.service.domain().stackFacts(D)?.restack, "pending");
+});

@@ -93,10 +93,19 @@ export async function stackedDeliveryFixture(
   });
 
   const remote: Record<string, string> = {};
+  /** Runs once when the next branch push reaches provider preflight, after its proof. */
+  let nextPreflight: (() => void) | undefined;
+  /** The next branch push fails with a retryable no-effect failure. */
+  let failNext = false;
   const prs = new Map<string, PrDeliveryObservation>();
   const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
     ...unusedIssueInspection,
     async preflight(action, _policy, publication) {
+      if (publication && nextPreflight) {
+        const hook = nextPreflight;
+        nextPreflight = undefined;
+        hook();
+      }
       return publication
         ? {
             branch: publication.branch,
@@ -111,6 +120,15 @@ export async function stackedDeliveryFixture(
       if (action.kind !== "branch.push" && action.kind !== "branch.force-push")
         throw new Error(`unexpected ${action.kind}`);
       const branch = String(record.beforeState?.branch);
+      if (failNext) {
+        failNext = false;
+        return {
+          state: "confirmed-failure",
+          reason: "provider-retryable",
+          receipt: null,
+          retryable: true,
+        };
+      }
       remote[branch] = action.commitSha;
       return {
         state: "confirmed-success",
@@ -420,6 +438,12 @@ export async function stackedDeliveryFixture(
     return turn;
   };
   return {
+    onNextPreflight: (hook: () => void) => {
+      nextPreflight = hook;
+    },
+    failNextPush: () => {
+      failNext = true;
+    },
     turnWith,
     root,
     source,

@@ -1286,6 +1286,12 @@ export class StandaloneService {
             identity,
           ),
         taskWorkspace,
+        stackedBase: (taskId, repositoryId) => {
+          const stacked = domain.stackedDependency(taskId);
+          return stacked?.repositoryId === repositoryId
+            ? stacked.parentHead
+            : null;
+        },
         verifyPush: async ({
           taskId,
           repositoryId,
