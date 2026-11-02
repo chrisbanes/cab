@@ -345,6 +345,13 @@ import {
   type WorkspaceManagerOptions,
 } from "./workspaces.js";
 
+/** Admission reasons a later provider read clears; a re-observed requeue waits on these. */
+const reobservationPending = new Set([
+  "imported-blockers-unknown",
+  "source-unknown",
+  "project-paused",
+]);
+
 const immutableRevisionMismatches = new Set([
   "assignment-revision-changed",
   "assignment-instructions-changed",
@@ -640,6 +647,11 @@ interface Started {
   schedulerStore: SchedulerStore;
   wakeQueries: SchedulerWakeQueries;
   inboxStartup: InboxStartupReconciliation;
+  /**
+   * Imported tasks' versions just before startup's provider invalidation. A shutdown
+   * requeue captured at that version may take the re-observed one once, when admissible.
+   */
+  reobservedTaskVersions: Map<string, number>;
   supervisor: ExecutionSupervisor;
   scheduler: TurnScheduler;
   /** Absent when power supervision is disabled. */
@@ -997,6 +1009,7 @@ export class StandaloneService {
       domain.migrate();
       const githubSources = new GitHubSourceStore(db);
       githubSources.migrate();
+      const reobservedTaskVersions = githubSources.importedTaskVersions();
       githubSources.invalidateProviderObservations();
       const githubSynchronizer = acquire(
         "githubSynchronizer",
@@ -1702,6 +1715,7 @@ export class StandaloneService {
         schedulerStore,
         wakeQueries,
         inboxStartup,
+        reobservedTaskVersions,
         supervisor,
         scheduler,
         power,
@@ -7537,6 +7551,65 @@ export class StandaloneService {
       );
   }
 
+  /**
+   * Startup's provider re-observation revises imported tasks. A planned-shutdown requeue
+   * captured at the version read just before that invalidation holds a one-time allowance:
+   * once the task is admissible again its capture takes the re-observed version; while the
+   * provider read is incomplete it waits; any other change holds it (see `validate` below).
+   * Draft turns, local tasks, inbox requests and first turns keep their own rules.
+   */
+  private reobservedAllowance(request: TurnRequest): boolean {
+    const { state, reobservedTaskVersions } = this.started();
+    if (
+      request.kind !== "assignment" ||
+      request.draftTurn ||
+      !request.taskId ||
+      !request.assignmentId ||
+      reobservedTaskVersions.get(String(request.taskId)) !==
+        request.taskVersion ||
+      state.shutdownRequeue(request.workId) === undefined
+    )
+      return false;
+    const domain = this.domain();
+    return (
+      domain.importedTask(String(request.taskId)) !== undefined &&
+      Number(domain.task(String(request.taskId)).version) !==
+        request.taskVersion
+    );
+  }
+
+  private resolveReobservedRequeue(request: TurnRequest): TurnRequest {
+    const { assignmentVersion, instructionsRevision, profileRevision } =
+      request;
+    if (
+      request.state !== "queued" ||
+      assignmentVersion === null ||
+      instructionsRevision === null ||
+      profileRevision === null ||
+      !this.reobservedAllowance(request)
+    )
+      return request;
+    const { schedulerStore: store, reobservedTaskVersions } = this.started();
+    const taskVersion = Number(
+      this.domain().task(String(request.taskId)).version,
+    );
+    const captured = {
+      assignmentVersion,
+      instructionsRevision,
+      profileRevision,
+    };
+    if (
+      this.domain().assignmentAdmission(String(request.assignmentId), {
+        taskVersion,
+        ...captured,
+      }).reasons.length > 0
+    )
+      return request;
+    store.recapture(request.workId, { taskVersion, ...captured });
+    reobservedTaskVersions.delete(String(request.taskId));
+    return store.byWorkId(request.workId);
+  }
+
   /** Whether the next attempt re-captures this mismatch, so the turn waits instead. */
   private firstTurnResolves(request: TurnRequest, reason: string): boolean {
     if (!this.firstTurnRecapturable(request)) return false;
@@ -7566,7 +7639,10 @@ export class StandaloneService {
       return;
     const state = this.started().state;
     const store = this.started().schedulerStore;
-    const request = this.resolveFirstTurnRevisions(queued);
+    const request = this.resolveReobservedRequeue(
+      this.resolveFirstTurnRevisions(queued),
+    );
+    let reobservedHold = false;
     let workspaceKey: string;
     let context: TaskExecutionContext | undefined;
     let validateAssignment: (() => string[]) | undefined;
@@ -7642,6 +7718,25 @@ export class StandaloneService {
                         draftTaskDigest(domain.task(binding.taskId))))
                 ),
             );
+          if (this.reobservedAllowance(request)) {
+            // Hold with the structural reasons, not the revision the re-observation caused.
+            // Only an incomplete provider read keeps waiting. If nothing else remains the
+            // next attempt re-captures, so the revision reason stays as a wait.
+            const structural = reasons.filter(
+              (reason) => reason !== "task-revision-changed",
+            );
+            if (structural.length > 0) {
+              if (
+                structural.some((reason) => !reobservationPending.has(reason))
+              ) {
+                this.started().reobservedTaskVersions.delete(
+                  String(request.taskId),
+                );
+                reobservedHold = true;
+              }
+              reasons.splice(0, reasons.length, ...structural);
+            }
+          }
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");
           // Refused here, before any writer or capacity is held, so Reset task can replace it.
@@ -7856,10 +7951,15 @@ export class StandaloneService {
           ? {
               validate: validateAssignment,
               refuse: (reasons) =>
+                reobservedHold ||
                 reasons.some(
                   (reason) =>
                     immutableRevisionMismatches.has(reason) &&
-                    !this.firstTurnResolves(request, reason),
+                    !this.firstTurnResolves(request, reason) &&
+                    !(
+                      reason === "task-revision-changed" &&
+                      this.reobservedAllowance(request)
+                    ),
                 ),
             }
           : {}),
