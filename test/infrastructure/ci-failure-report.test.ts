@@ -398,6 +398,7 @@ test("collection retains failed attempt before latest success and captures attem
     calls.push({ url, options });
     if (url.includes("/workflows/ci.yml/runs"))
       return apiResponse({ workflow_runs: [runRecord(), runRecord()] });
+    if (url.includes("head_sha=")) return apiResponse({ workflow_runs: [] });
     if (url.includes("attempts/1/jobs"))
       return apiResponse({
         jobs: [
@@ -448,10 +449,7 @@ test("collection retains failed attempt before latest success and captures attem
   );
   assert.equal(report.runs[0].attempts[1].startedAt, "2026-11-01T10:02:00Z");
   assert.match(report.runs[0].attempts[0].url, /attempts\/1$/);
-  assert.equal(
-    calls.filter((c) => c.url.includes("/workflows/ci.yml/runs")).length,
-    1,
-  );
+  assert.equal(calls.filter((c) => c.url.includes("?created=")).length, 1);
   assert.ok(
     calls.find((c) => c.url.endsWith("/jobs/101/logs"))?.options?.rawLogs,
   );
@@ -588,4 +586,291 @@ test("malformed run records fail closed and workflow API failures are visible", 
     }),
     /503/,
   );
+});
+
+test("only an exact guard with positively verified Renovate SDK upgrade is excluded", async () => {
+  const guardRun = runRecord({
+    id: 30,
+    head_sha: "guard-sha",
+    run_attempt: 1,
+    conclusion: "failure",
+  });
+  const validPr = {
+    number: 77,
+    html_url: "https://github.com/chrisbanes/cab/pull/77",
+    user: { login: "renovate[bot]", type: "Bot" },
+    head: { sha: "guard-sha" },
+    merged: false,
+  };
+  const patchText =
+    '-    "@anthropic-ai/claude-agent-sdk": "0.3.300",\n+    "@anthropic-ai/claude-agent-sdk": "0.3.301",';
+  const makeTransport = (variant: string) => async (url: string) => {
+    if (url.includes("?created="))
+      return apiResponse({ workflow_runs: [guardRun] });
+    if (url.includes("attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 301,
+            name: "shard",
+            status: "completed",
+            conclusion: "failure",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/30/job/301",
+          },
+        ],
+      });
+    if (url.endsWith("/jobs/301/logs"))
+      return apiResponse(
+        `✖ the pinned SDK is the qualified version (10ms)${variant === "mixed" ? "\n✖ another failing assertion (8ms)" : ""}`,
+      );
+    if (url.includes("/commits/guard-sha/pulls")) {
+      if (variant === "missing-pr") return apiResponse([]);
+      const pr = {
+        ...validPr,
+        user:
+          variant === "ordinary"
+            ? { login: "someone", type: "User" }
+            : validPr.user,
+        head: { sha: variant === "changed-head" ? "other" : "guard-sha" },
+      };
+      return apiResponse([pr]);
+    }
+    if (url.endsWith("/pulls/77/files?per_page=100")) {
+      if (variant === "files-unavailable") throw Error("fixture API failure");
+      const patch =
+        variant === "wrong-sdk"
+          ? '- "other": "0.3.300"\n+ "other": "0.3.301"'
+          : variant === "downgrade"
+            ? '- "@anthropic-ai/claude-agent-sdk": "0.3.301"\n+ "@anthropic-ai/claude-agent-sdk": "0.3.300"'
+            : patchText;
+      return apiResponse([{ filename: "package.json", patch }]);
+    }
+    if (url.includes("head_sha=")) return apiResponse({ workflow_runs: [] });
+    throw Error(`unexpected ${url}`);
+  };
+  for (const variant of [
+    "ordinary",
+    "wrong-sdk",
+    "downgrade",
+    "missing-pr",
+    "changed-head",
+    "files-unavailable",
+    "mixed",
+  ]) {
+    const report = await api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: makeTransport(variant),
+    });
+    assert.equal(
+      report.excludedEvidence.length,
+      variant === "mixed" ? 1 : 0,
+      variant,
+    );
+    assert.equal(report.observedFailures, 1, variant);
+    assert.equal(report.confirmedUnrelated, 0, variant);
+    if (variant === "files-unavailable")
+      assert.ok(
+        report.coverageRuns[0].coverage.some(
+          (entry: { reason: string }) =>
+            entry.reason === "renovate-metadata-unavailable",
+        ),
+      );
+    if (variant === "mixed") assert.equal(report.unclassified, 1);
+  }
+  const verified = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport: makeTransport("verified"),
+  });
+  assert.equal(verified.excludedEvidence.length, 1);
+  assert.equal(verified.observedFailures, 0);
+  assert.equal(verified.confirmedUnrelated, 0);
+});
+
+test("same-SHA report separates later runs and later attempts within the inclusive horizon", async () => {
+  const sourceRun = runRecord({
+    id: 40,
+    head_sha: "same-head",
+    run_attempt: 2,
+    conclusion: "success",
+    created_at: "2026-11-01T09:00:00Z",
+  });
+  const laterRun = runRecord({
+    id: 41,
+    head_branch: "renovate/topic",
+    event: "pull_request",
+    head_sha: "same-head",
+    run_attempt: 1,
+    conclusion: "success",
+    created_at: "2026-11-01T23:59:59.999999Z",
+    html_url: "https://github.com/chrisbanes/cab/actions/runs/41",
+  });
+  const beyond = {
+    ...laterRun,
+    id: 42,
+    created_at: "2026-11-02T00:00:00Z",
+    html_url: "https://github.com/chrisbanes/cab/actions/runs/42",
+  };
+  const transport = async (url: string) => {
+    if (url.includes("?created="))
+      return apiResponse({ workflow_runs: [sourceRun] });
+    if (url.includes("head_sha="))
+      return apiResponse({ workflow_runs: [sourceRun, laterRun, beyond] });
+    if (url.includes("attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 401,
+            name: "shard",
+            status: "completed",
+            conclusion: "failure",
+            started_at: "2026-11-01T10:00:00Z",
+            completed_at: "2026-11-01T10:01:00Z",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/40/job/401",
+          },
+        ],
+      });
+    if (url.endsWith("/jobs/401/logs"))
+      return apiResponse("✖ a test failed (5ms)");
+    if (url.includes("attempts/2/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 402,
+            name: "check",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-11-01T10:02:00Z",
+            completed_at: "2026-11-01T10:03:00Z",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/40/job/402",
+          },
+        ],
+      });
+    throw Error(`unexpected ${url}`);
+  };
+  const report = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport,
+  });
+  const corroboration = report.sameShaCorroboration[0];
+  assert.equal(
+    corroboration.laterPasses.some(
+      (pass: { kind: string }) => pass.kind === "later-attempt",
+    ),
+    true,
+  );
+  assert.equal(
+    corroboration.laterPasses.some(
+      (pass: { passingRunId: number }) => pass.passingRunId === 41,
+    ),
+    true,
+  );
+  assert.equal(
+    corroboration.laterPasses.some(
+      (pass: { passingRunId: number }) => pass.passingRunId === 42,
+    ),
+    false,
+  );
+  assert.equal(report.denominator, 1);
+  assert.equal(report.observedFailures, 1);
+});
+
+test("same-run success with missing chronology is not reported as a later pass", async () => {
+  const sourceRun = runRecord({
+    id: 50,
+    head_sha: "missing-time",
+    run_attempt: 2,
+    conclusion: "success",
+  });
+  const transport = async (url: string) => {
+    if (url.includes("?created="))
+      return apiResponse({ workflow_runs: [sourceRun] });
+    if (url.includes("head_sha=")) return apiResponse({ workflow_runs: [] });
+    if (url.includes("attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 501,
+            name: "shard",
+            status: "completed",
+            conclusion: "failure",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/50/job/501",
+          },
+        ],
+      });
+    if (url.endsWith("/jobs/501/logs"))
+      return apiResponse("✖ test fails (2ms)");
+    if (url.includes("attempts/2/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 502,
+            name: "check",
+            status: "completed",
+            conclusion: "success",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/50/job/502",
+          },
+        ],
+      });
+    throw Error("unexpected endpoint");
+  };
+  const report = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport,
+  });
+  assert.deepEqual(report.sameShaCorroboration[0].laterPasses, []);
+});
+
+test("same-SHA lookup failures and 1000-result caps remain explicit coverage", async () => {
+  const sourceRun = runRecord({
+    id: 60,
+    head_sha: "capped-sha",
+    run_attempt: 1,
+    conclusion: "failure",
+  });
+  const makeTransport = (mode: string) => async (url: string) => {
+    if (url.includes("?created="))
+      return apiResponse({ workflow_runs: [sourceRun] });
+    if (url.includes("attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 601,
+            name: "shard",
+            status: "completed",
+            conclusion: "failure",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/60/job/601",
+          },
+        ],
+      });
+    if (url.endsWith("/jobs/601/logs"))
+      return apiResponse("✖ failed spec (2ms)");
+    if (url.includes("head_sha=")) {
+      if (mode === "unavailable") throw Error("lookup failed");
+      return apiResponse({ workflow_runs: Array(1000).fill({ id: 99 }) });
+    }
+    throw Error("unexpected endpoint");
+  };
+  for (const mode of ["unavailable", "capped"]) {
+    const report = await api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: makeTransport(mode),
+    });
+    assert.equal(
+      report.sameShaCorroboration[0].status,
+      mode === "capped" ? "lookup-capped" : "lookup-unavailable",
+    );
+    assert.equal(report.runs[0].incomplete, true);
+    assert.equal(report.verdict, "insufficient-evidence");
+  }
 });

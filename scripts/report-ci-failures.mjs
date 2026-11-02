@@ -51,6 +51,10 @@ export function parseFailureLog(log) {
 
 function sanitizeLog(value) {
   return value
+    .replace(
+      new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g"),
+      "",
+    )
     .replace(/[\s\S]/g, (character) => {
       const code = character.charCodeAt(0);
       return (code < 32 && code !== 9 && code !== 10 && code !== 13) ||
@@ -151,6 +155,9 @@ export function aggregateFailureReport({
   return {
     since,
     until,
+    windowDays: dateDays(since, until),
+    comparisonHorizonUntil: until,
+    targetRate: 1 / 20,
     denominator,
     observedFailures: failedEligible.length,
     confirmedUnrelated: unrelated,
@@ -211,6 +218,212 @@ function safeGithubUrl(value, owner, repo) {
   } catch {
     return false;
   }
+}
+
+function validTimestamp(value) {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  );
+}
+
+function versionTuple(value) {
+  const match =
+    typeof value === "string" && value.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function isSdkVersionIncrease(patch) {
+  if (typeof patch !== "string" || patch.length === 0) return false;
+  const removed = [
+    ...patch.matchAll(
+      /^[-]\s*"@anthropic-ai\/claude-agent-sdk"\s*:\s*"([^"]+)"/gm,
+    ),
+  ]
+    .map((m) => versionTuple(m[1]))
+    .filter(Boolean);
+  const added = [
+    ...patch.matchAll(
+      /^[+]\s*"@anthropic-ai\/claude-agent-sdk"\s*:\s*"([^"]+)"/gm,
+    ),
+  ]
+    .map((m) => versionTuple(m[1]))
+    .filter(Boolean);
+  return (
+    removed.length === 1 &&
+    added.length === 1 &&
+    added[0].some(
+      (part, i) =>
+        part !== removed[0][i] &&
+        added[0].slice(0, i).every((x, j) => x === removed[0][j]) &&
+        part > removed[0][i],
+    )
+  );
+}
+
+async function collectSameShaCorroboration({
+  runs,
+  base,
+  transport,
+  until,
+  owner,
+  repo,
+}) {
+  const failures = runs.filter(
+    (run) =>
+      run.classification !== "excluded-evidence" &&
+      (run.hasFailedJob || run.conclusion === "failure"),
+  );
+  const bySha = new Map();
+  for (const failure of failures) {
+    if (!bySha.has(failure.sha)) bySha.set(failure.sha, []);
+    bySha.get(failure.sha).push(failure);
+  }
+  const results = [];
+  for (const [sha, failedRuns] of bySha) {
+    try {
+      const lookup = await paginateActions(
+        `${base}/actions/workflows/ci.yml/runs?head_sha=${encodeURIComponent(sha)}&per_page=100`,
+        transport,
+        { queryKind: "head-runs" },
+      );
+      const lookupRuns = new Map(lookup.items.map((r) => [r.id, r]));
+      for (const failedRun of failedRuns) {
+        const laterPasses = [];
+        for (const attempt of failedRun.attempts) {
+          if (attempt.conclusion !== "failure" || !attempt.completedAt)
+            continue;
+          for (const laterAttempt of failedRun.attempts) {
+            if (
+              laterAttempt.number > attempt.number &&
+              laterAttempt.conclusion === "success" &&
+              laterAttempt.startedAt &&
+              laterAttempt.completedAt &&
+              laterAttempt.startedAt > attempt.completedAt
+            )
+              laterPasses.push({
+                kind: "later-attempt",
+                runId: failedRun.id,
+                failedAttempt: attempt.number,
+                passingAttempt: laterAttempt.number,
+                failureRunUrl: failedRun.url,
+                failureAttemptUrl: attempt.url,
+                passingAttemptUrl: laterAttempt.url,
+                failedAt: attempt.completedAt,
+                passedAt: laterAttempt.completedAt,
+              });
+          }
+        }
+        for (const candidate of lookupRuns.values()) {
+          if (
+            candidate.id === failedRun.id ||
+            candidate.head_sha !== sha ||
+            candidate.conclusion !== "success" ||
+            candidate.status !== "completed" ||
+            !validTimestamp(candidate.created_at) ||
+            candidate.created_at.slice(0, 10) > until ||
+            !(candidate.created_at > failedRun.createdAt) ||
+            !safeGithubUrl(candidate.html_url, owner, repo)
+          )
+            continue;
+          laterPasses.push({
+            kind: "later-run",
+            runId: failedRun.id,
+            passingRunId: candidate.id,
+            failureRunUrl: failedRun.url,
+            passingRunUrl: candidate.html_url,
+            failedAt: failedRun.createdAt,
+            passedAt: candidate.created_at,
+            interpretation:
+              "same-head corroboration; not a cause classification",
+          });
+        }
+        results.push({
+          sha,
+          failureRunId: failedRun.id,
+          status: lookup.capped ? "lookup-capped" : "complete-through-until",
+          horizonUntil: until,
+          laterPasses,
+        });
+      }
+      if (lookup.capped)
+        for (const run of failedRuns) {
+          run.coverage.push({ reason: "same-sha-run-lookup-capped", sha });
+          run.incomplete = true;
+        }
+    } catch {
+      for (const run of failedRuns) {
+        run.coverage.push({ reason: "same-sha-run-lookup-unavailable", sha });
+        run.incomplete = true;
+        results.push({
+          sha,
+          failureRunId: run.id,
+          status: "lookup-unavailable",
+          horizonUntil: until,
+          laterPasses: [],
+        });
+      }
+    }
+  }
+  return results;
+}
+
+async function verifiedRenovateSdkBump({
+  sha,
+  base,
+  transport,
+  cache,
+  owner,
+  repo,
+}) {
+  if (cache.has(sha)) return cache.get(sha);
+  const result = (async () => {
+    try {
+      const pulls = await paginateActions(
+        `${base}/commits/${encodeURIComponent(sha)}/pulls?per_page=100`,
+        transport,
+      );
+      if (pulls.capped)
+        return { verified: false, reason: "pull-request-list-capped" };
+      for (const pr of pulls.items) {
+        if (pr.user?.login !== "renovate[bot]" || pr.user?.type !== "Bot")
+          continue;
+        const matchesHead = pr.head?.sha === sha;
+        const matchesMerge = pr.merged === true && pr.merge_commit_sha === sha;
+        if (!matchesHead && !matchesMerge) continue;
+        if (
+          !Number.isSafeInteger(pr.number) ||
+          !safeGithubUrl(pr.html_url, owner, repo)
+        )
+          continue;
+        const files = await paginateActions(
+          `${base}/pulls/${pr.number}/files?per_page=100`,
+          transport,
+          { queryKind: "pull-files" },
+        );
+        if (files.capped)
+          return {
+            verified: false,
+            reason: "pull-files-capped",
+            url: pr.html_url,
+          };
+        if (
+          files.items.some(
+            (file) =>
+              file.filename === "package.json" &&
+              isSdkVersionIncrease(file.patch),
+          )
+        )
+          return { verified: true, url: pr.html_url, number: pr.number };
+      }
+      return { verified: false, reason: "no-verified-renovate-sdk-bump" };
+    } catch {
+      return { verified: false, reason: "renovate-metadata-unavailable" };
+    }
+  })();
+  cache.set(sha, result);
+  return result;
 }
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -328,9 +541,16 @@ export async function paginateActions(
     const response = await transport(next);
     if (!response.ok) throw Error(`GitHub API returned ${response.status}`);
     const body = responseJson(response);
-    if (!Array.isArray(body.workflow_runs) && !Array.isArray(body.jobs))
+    if (
+      !Array.isArray(body) &&
+      !Array.isArray(body.workflow_runs) &&
+      !Array.isArray(body.jobs) &&
+      !Array.isArray(body.files)
+    )
       throw Error("Malformed Actions response");
-    const batch = body.workflow_runs ?? body.jobs;
+    const batch = Array.isArray(body)
+      ? body
+      : (body.workflow_runs ?? body.jobs ?? body.files);
     items.push(...batch);
     const link = nextLink(
       response.headers?.get?.("link") ??
@@ -338,14 +558,15 @@ export async function paginateActions(
         response.headers?.get?.("LINK") ??
         response.headers?.link,
     );
-    if (!link)
-      return {
-        items,
-        capped: queryKind === "workflow-runs" && items.length >= 1000,
-      };
+    const limit =
+      queryKind === "workflow-runs" || queryKind === "head-runs"
+        ? 1000
+        : queryKind === "pull-files"
+          ? 3000
+          : Infinity;
+    if (!link) return { items, capped: items.length >= limit };
     next = new URL(link, next).href;
-    if (queryKind === "workflow-runs" && items.length >= 1000)
-      return { items, capped: true };
+    if (items.length >= limit) return { items, capped: true };
   }
 }
 
@@ -361,7 +582,7 @@ export async function renderReport({
   top = Number(top);
   const base = `${API}/repos/${owner}/${repo}`;
   const query = await paginateActions(
-    `${base}/actions/workflows/ci.yml/runs?created=${since}..${until}`,
+    `${base}/actions/workflows/ci.yml/runs?created=${since}..${until}&per_page=100`,
     transport,
     { queryKind: "workflow-runs" },
   );
@@ -369,13 +590,14 @@ export async function renderReport({
     ...new Map(query.items.map((run) => [run.id, run])).values(),
   ];
   const runs = [];
+  const renovateCache = new Map();
   for (const raw of rawRuns) {
     if (
       !Number.isSafeInteger(raw.id) ||
       (raw.head_branch !== null && typeof raw.head_branch !== "string") ||
       typeof raw.event !== "string" ||
       typeof raw.head_sha !== "string" ||
-      typeof raw.created_at !== "string" ||
+      !validTimestamp(raw.created_at) ||
       typeof raw.status !== "string" ||
       !Number.isSafeInteger(raw.run_attempt) ||
       raw.run_attempt < 1 ||
@@ -410,9 +632,15 @@ export async function renderReport({
       run.attempts.push(attemptInfo);
       try {
         const jobsResult = await paginateActions(
-          `${base}/actions/runs/${raw.id}/attempts/${attempt}/jobs`,
+          `${base}/actions/runs/${raw.id}/attempts/${attempt}/jobs?per_page=100`,
           transport,
         );
+        if (jobsResult.items.length === 0)
+          run.coverage.push({
+            reason: "attempt-has-no-jobs",
+            attempt,
+            attemptUrl: attemptInfo.url,
+          });
         for (const job of jobsResult.items) {
           if (
             !Number.isSafeInteger(job.id) ||
@@ -435,19 +663,48 @@ export async function renderReport({
             attempt,
             status: job.status,
             conclusion: job.conclusion,
-            startedAt: job.started_at ?? null,
-            completedAt: job.completed_at ?? null,
+            startedAt:
+              job.started_at == null
+                ? null
+                : validTimestamp(job.started_at)
+                  ? job.started_at
+                  : null,
+            completedAt:
+              job.completed_at == null
+                ? null
+                : validTimestamp(job.completed_at)
+                  ? job.completed_at
+                  : null,
             failures: [],
             coverage: [],
           };
+          if (
+            (job.started_at != null && !validTimestamp(job.started_at)) ||
+            (job.completed_at != null && !validTimestamp(job.completed_at))
+          )
+            run.coverage.push({
+              reason: "malformed-job-timestamp",
+              attempt,
+              jobId: job.id,
+              jobUrl: job.html_url,
+            });
+          if (job.status !== "completed" || job.conclusion == null)
+            run.coverage.push({
+              reason: "job-incomplete",
+              attempt,
+              jobId: job.id,
+              jobUrl: job.html_url,
+              status: job.status,
+              conclusion: job.conclusion,
+            });
           attemptInfo.jobs.push(jobRecord);
           if (
-            job.started_at &&
+            validTimestamp(job.started_at) &&
             (!attemptInfo.startedAt || job.started_at < attemptInfo.startedAt)
           )
             attemptInfo.startedAt = job.started_at;
           if (
-            job.completed_at &&
+            validTimestamp(job.completed_at) &&
             (!attemptInfo.completedAt ||
               job.completed_at > attemptInfo.completedAt)
           )
@@ -503,10 +760,24 @@ export async function renderReport({
           attemptUrl: attemptInfo.url,
         });
       }
+      const jobs = attemptInfo.jobs;
+      const check = jobs.find((job) => job.name.toLowerCase() === "check");
+      if (
+        jobs.length &&
+        jobs.every(
+          (job) =>
+            job.status === "completed" &&
+            ["success", "failure", "cancelled", "skipped"].includes(
+              job.conclusion,
+            ),
+        ) &&
+        check?.conclusion === "success" &&
+        jobs.every((job) => !["failure", "cancelled"].includes(job.conclusion))
+      )
+        attemptInfo.conclusion = "success";
+      else if (jobs.some((job) => job.conclusion === "failure"))
+        attemptInfo.conclusion = "failure";
     }
-    const conclusions = run.attempts.flatMap((a) =>
-      a.jobs.map((j) => j.conclusion),
-    );
     if (!["success", "failure"].includes(raw.conclusion))
       run.coverage.push({
         reason:
@@ -519,7 +790,60 @@ export async function renderReport({
         conclusion: raw.conclusion,
         runUrl: raw.html_url,
       });
-    run.hasFailedJob = conclusions.includes("failure");
+    run.hasFailedJob = run.attempts.some((attempt) =>
+      attempt.jobs.some((job) => job.conclusion === "failure"),
+    );
+    run.excludedEvidence = [];
+    const guardEntries = run.attempts.flatMap((attempt) =>
+      attempt.failures.filter(
+        (item) => item.failure.name === guard && !item.failure.unknown,
+      ),
+    );
+    if (guardEntries.length) {
+      const metadata = await verifiedRenovateSdkBump({
+        sha: run.sha,
+        base,
+        transport,
+        cache: renovateCache,
+        owner,
+        repo,
+      });
+      if (metadata.verified) {
+        for (const attempt of run.attempts) {
+          attempt.failures = attempt.failures.filter((item) => {
+            if (item.failure.name !== guard || item.failure.unknown)
+              return true;
+            run.excludedEvidence.push({
+              runId: run.id,
+              attempt: attempt.number,
+              jobId: item.jobId,
+              jobUrl: item.url,
+              pullRequestUrl: metadata.url,
+              reason: "verified-renovate-sdk-qualification-guard",
+            });
+            return false;
+          });
+          for (const job of attempt.jobs)
+            job.failures = job.failures.filter(
+              (failure) => failure.name !== guard || failure.unknown,
+            );
+        }
+      } else {
+        run.coverage.push({
+          reason: metadata.reason,
+          subject: "renovate-sdk-guard",
+          sha: run.sha,
+          pullRequestUrl: metadata.url ?? null,
+        });
+      }
+    }
+    run.hasFailedJob = run.attempts.some((attempt) =>
+      attempt.jobs.some(
+        (job) =>
+          job.conclusion === "failure" &&
+          (job.failures.length > 0 || job.coverage.length > 0),
+      ),
+    );
     run.incomplete = run.coverage.length > 0;
     run.attempts = run.attempts.map((a) => ({
       ...a,
@@ -527,11 +851,28 @@ export async function renderReport({
     }));
     run.classification = run.hasFailedJob
       ? "unclassified"
-      : run.incomplete
-        ? "incomplete"
-        : "clean";
+      : run.excludedEvidence.length && !run.incomplete
+        ? "excluded-evidence"
+        : run.incomplete
+          ? "incomplete"
+          : "clean";
     runs.push(run);
   }
+  const sameShaCorroboration = await collectSameShaCorroboration({
+    runs,
+    base,
+    transport,
+    until,
+    owner,
+    repo,
+  });
+  if (query.capped)
+    for (const run of runs.filter(
+      (item) => item.branch === "main" && item.event === "push",
+    )) {
+      run.incomplete = true;
+      run.coverage.push({ reason: "workflow-run-query-capped" });
+    }
   const report = aggregateFailureReport({
     since,
     until,
@@ -539,6 +880,8 @@ export async function renderReport({
     complete: !query.capped,
   });
   report.capped = query.capped;
+  report.excludedEvidence = runs.flatMap((run) => run.excludedEvidence);
+  report.sameShaCorroboration = sameShaCorroboration;
   report.top = topFailing(report.runs, top);
   return report;
 }
@@ -559,6 +902,7 @@ function topFailing(runs, limit) {
         current.links.push({
           url: item.url,
           run: run.url,
+          attemptUrl: item.attemptUrl,
           attempt: attempt.number,
         });
         counts.set(key, current);
@@ -566,11 +910,18 @@ function topFailing(runs, limit) {
   return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, limit);
 }
 
+function sanitizeOutput(value) {
+  if (typeof value === "string") return sanitizeLog(value);
+  if (Array.isArray(value)) return value.map(sanitizeOutput);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeOutput(item)]),
+    );
+  return value;
+}
+
 export function formatReport(report) {
-  return JSON.stringify(report, null, 2).replace(/[\s\S]/g, (character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || code === 127 ? "" : character;
-  });
+  return JSON.stringify(sanitizeOutput(report), null, 2);
 }
 
 function args(argv) {
