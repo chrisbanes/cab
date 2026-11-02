@@ -1,4 +1,5 @@
 import { DeliveryStore } from "./delivery.js";
+import { LeadTextStore } from "./lead-text.js";
 import { TaskReviewStore } from "./task-review.js";
 import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
@@ -555,6 +556,7 @@ export class GitHubSourceStore {
           String(task.nodeId),
           new Date().toISOString(),
         );
+      new LeadTextStore(this.db).recordHandback(taskId, "done");
       return true;
     });
   }
@@ -942,6 +944,8 @@ export class GitHubSourceStore {
         supplied: { title: string; body: string };
       }[] = [];
       const sourceKind = this.tracker.provider === "jira" ? "jira" : "github";
+      // Tasks imported Done: later edits are changes since that handback.
+      const importedDone: string[] = [];
       for (const issue of snapshot.issues) {
         if (issue.providerInstance !== this.tracker.instance)
           throw new Error("Provider identity mismatch");
@@ -998,12 +1002,14 @@ export class GitHubSourceStore {
               issue.status ? JSON.stringify(issue.status) : null,
               issue.selectFields ? JSON.stringify(issue.selectFields) : null,
             );
-          if (issue.state === "closed")
+          if (issue.state === "closed") {
             this.db
               .prepare(
                 "INSERT INTO source_completions (taskId, provider, instance, externalId, completedAt) VALUES (?, ?, ?, ?, ?)",
               )
               .run(taskId, ...this.key(issue.nodeId), new Date().toISOString());
+            importedDone.push(taskId);
+          }
         } else {
           taskId = String(existing.taskId);
           this.adoptText(taskId, issue);
@@ -1045,6 +1051,9 @@ export class GitHubSourceStore {
         if (snapshot.complete) this.releaseSourceHold(taskId);
       }
       new TaskReviewStore(this.db).captureSources(sourceCaptures);
+      const leadText = new LeadTextStore(this.db);
+      for (const taskId of importedDone)
+        leadText.recordHandback(taskId, "done");
       if (snapshot.complete) {
         const old = this.db
           .prepare(

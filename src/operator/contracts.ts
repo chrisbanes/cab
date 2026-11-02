@@ -1682,6 +1682,11 @@ export const taskSchema = envelope(
           version: revision,
           state: taskState,
           ready: z.boolean(),
+          /**
+           * The imported issue's text changed after the last handback or Done transition.
+           * Informational: it gates and reopens nothing.
+           */
+          issueChangedSinceHandback: z.boolean(),
         })
         .strict(),
       lead: z.object({ profileId: uuid, name: safeText }).strict().nullable(),

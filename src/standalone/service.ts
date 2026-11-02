@@ -8,6 +8,8 @@ import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { LeadTextStore } from "../core/lead-text.js";
+import { leadTaskSection, type TaskText } from "./lead-text-prompt.js";
 import { z } from "zod";
 import {
   credentialFreeEnvironment,
@@ -490,6 +492,18 @@ const unionExclusions = (
   start: readonly string[] | undefined,
   current: readonly string[] | undefined,
 ) => (start && current ? [...new Set([...start, ...current])] : undefined);
+
+const reportingRepairInstruction =
+  "Reporting repair: the previous successful turn ended without a saved result or durable waiting action. Continue this assignment and record a result or request a durable next action before ending.";
+
+/** An assignment's bound inbox batch, as its request presents it. */
+const inboxSection = (delivery: InboxDelivery) =>
+  `Durable assignment inbox through event ${delivery.highWaterSequence}:\n${delivery.events
+    .map((event) => `- ${event.eventType}: ${event.payload}`)
+    .join("\n")}`;
+
+/** A lead turn's current task text and the text its last confirmed turn carried. */
+type LeadTurnText = { current: TaskText; confirmed: TaskText | undefined };
 
 /** The exact submitted prompt; captured segments cannot drift from it. */
 const joinPromptParts = (parts: readonly PromptPart[]) =>
@@ -7189,7 +7203,7 @@ export class StandaloneService {
         task.state !== "open"
       )
         continue;
-      const prompt = `${String(assignment.brief)}\n\nReporting repair: the previous successful turn ended without a saved result or durable waiting action. Continue this assignment and record a result or request a durable next action before ending.`;
+      const prompt = `${String(assignment.brief)}\n\n${reportingRepairInstruction}`;
       store.createAssignment(
         {
           taskId: repair.taskId,
@@ -7223,10 +7237,75 @@ export class StandaloneService {
       ? `Current task (revision ${currentTask.version}): ${currentTask.title}\nCurrent outcome: ${currentTask.outcome}\n\nPreserved assignment brief:\n`
       : "";
     if (!delivery) return `${context}${brief}`;
-    const events = delivery.events.map(
-      (event) => `- ${event.eventType}: ${event.payload}`,
-    );
-    return `${context}${brief}\n\nDurable assignment inbox through event ${delivery.highWaterSequence}:\n${events.join("\n")}`;
+    return `${context}${brief}\n\n${inboxSection(delivery)}`;
+  }
+
+  /** Whether the assignment has ever started a runtime turn. */
+  assignmentHasStartedExecution(assignmentId: string): boolean {
+    return this.started().state.assignmentHasStartedExecution(assignmentId);
+  }
+
+  /** Lead turn text and handback anchors; see `LeadTextStore`. */
+  leadText(): LeadTextStore {
+    this.started();
+    if (!this.db) throw new Error("Service database is not open");
+    return new LeadTextStore(this.db);
+  }
+
+  /**
+   * Records the task text a generated lead turn is about to submit and returns it with the text
+   * the lead's last confirmed turn carried. Specialists, direct and explicitly submitted
+   * prompts carry their own text.
+   */
+  private prepareLeadText(
+    request: TurnRequest,
+    threadId: string,
+  ): LeadTurnText | undefined {
+    const { taskId, assignmentId } = request;
+    if (
+      request.kind !== "assignment" ||
+      !taskId ||
+      !assignmentId ||
+      request.requestKey.startsWith("task:") ||
+      !this.domain()
+        .leadBindings()
+        .some(
+          (binding) =>
+            binding.taskId === taskId && binding.assignmentId === assignmentId,
+        )
+    )
+      return undefined;
+    const store = this.leadText();
+    const current = store.current(taskId);
+    const confirmed = store.confirmed(assignmentId);
+    store.prepare({
+      workId: request.workId,
+      taskId,
+      assignmentId,
+      requestSequence: request.sequence,
+      threadId,
+      text: current,
+    });
+    return { current, confirmed };
+  }
+
+  /**
+   * A lead request built from the task's current text and the material already bound to its
+   * work: the inbox batch (including a draft turn's operator message) and any reporting repair.
+   * The lead's frozen brief is not used.
+   */
+  private leadRequestText(request: TurnRequest, text: LeadTurnText): string {
+    const coordination = this.started().coordination;
+    const parts = [leadTaskSection(text.current, text.confirmed)];
+    const delivery = coordination.deliveryForWork(request.workId);
+    if (delivery) parts.push(inboxSection(delivery));
+    if (
+      coordination
+        .reportingRepairs(String(request.taskId))
+        .some((repair) => repair.repairWorkId === request.workId)
+    )
+      parts.push(reportingRepairInstruction);
+    return parts.join("\n\n");
   }
 
   /**
@@ -7236,6 +7315,7 @@ export class StandaloneService {
   private executionPromptParts(
     request: TurnRequest,
     seen?: { project: number | null; profile: number | null },
+    leadText?: LeadTurnText,
   ): PromptPart[] {
     if (request.kind === "drafting") {
       const run = this.started().drafting.require(
@@ -7361,7 +7441,12 @@ export class StandaloneService {
         })
       : "Unavailable: no retained source capture for this work";
     return [
-      { name: "request", text: request.prompt },
+      {
+        name: "request",
+        text: leadText
+          ? this.leadRequestText(request, leadText)
+          : request.prompt,
+      },
       ...(request.draftTurn
         ? [{ name: "draft-turn" as const, text: draftTurnInstruction }]
         : []),
@@ -7624,8 +7709,19 @@ export class StandaloneService {
   private firstTurnResolves(request: TurnRequest, reason: string): boolean {
     if (!this.firstTurnRecapturable(request)) return false;
     return reason === "task-revision-changed"
-      ? this.domain().importedTask(String(request.taskId)) !== undefined
+      ? this.domain().importedTask(String(request.taskId)) !== undefined &&
+          !this.draftTextChanged(request)
       : reason.startsWith("assignment-");
+  }
+
+  /** A draft turn asked about text the task no longer has; re-capture cannot fix that. */
+  private draftTextChanged(request: TurnRequest): boolean {
+    return (
+      request.draftTurn &&
+      request.draftTaskDigest !== null &&
+      request.draftTaskDigest !==
+        draftTaskDigest(this.domain().task(String(request.taskId)))
+    );
   }
 
   /** Whether a resumed Codex conversation predates cab's Codex home; other runtimes never do. */
@@ -7747,6 +7843,12 @@ export class StandaloneService {
               reasons.splice(0, reasons.length, ...structural);
             }
           }
+          // Text edits bump no revision, so a draft turn compares its captured text directly.
+          if (
+            this.draftTextChanged(request) &&
+            !reasons.includes("task-revision-changed")
+          )
+            reasons.push("task-revision-changed");
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");
           // Refused here, before any writer or capacity is held, so Reset task can replace it.
@@ -8290,6 +8392,8 @@ export class StandaloneService {
         previous?.state === "completed"
           ? state.taskBinding(previous.workId)
           : undefined;
+      // Captured synchronously with the prompt: the text submitted is the text recorded.
+      const leadText = this.prepareLeadText(request, threadId);
       const promptParts = this.executionPromptParts(
         request,
         previous?.threadId
@@ -8298,6 +8402,7 @@ export class StandaloneService {
               profile: resumed?.profileRevision ?? null,
             }
           : undefined,
+        leadText,
       );
       const prompt = joinPromptParts(promptParts);
       // Synchronous and caught: recorded before submission, never delaying it.
@@ -8439,6 +8544,12 @@ export class StandaloneService {
           );
         throw new Error("Turn binding was held or changed");
       }
+      if (leadText)
+        try {
+          this.leadText().confirm(request.workId, threadId, turnId);
+        } catch {
+          // Unconfirmed text is not seen: the lead's next turn repeats the diff.
+        }
       if (turnCapture && comparisonStore) {
         try {
           if (

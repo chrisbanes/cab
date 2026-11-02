@@ -46,6 +46,7 @@ import {
   type RuntimeDeliveryCaller,
 } from "./delivery.js";
 import { transaction, type Database } from "./store.js";
+import { LeadTextStore } from "./lead-text.js";
 import { LocalReviewStore } from "./local-review.js";
 
 // Results are unique per exact work; work revisions restart per conversation.
@@ -2512,6 +2513,11 @@ export class CoordinationStore {
           Number(lead.taskVersion),
           JSON.stringify(reviewed),
         );
+      new LeadTextStore(this.db).recordHandback(
+        String(lead.taskId),
+        "handback",
+        String(lead.workId),
+      );
       this.db
         .prepare(`UPDATE execution_pending_effects SET state = 'pending',
           reason = 'Lead completion has not been finalized'
@@ -2697,11 +2703,25 @@ export class CoordinationStore {
           reportedResult &&
           !completionRequest &&
           !this.hasOutstandingAssignmentWork(work, assignmentId)
-        )
-          this.db
+        ) {
+          const completed = this.db
             .prepare(`UPDATE domain_assignments SET state = 'completed'
               WHERE id = ? AND version = ? AND state = 'running'`)
-            .run(assignmentId, assignmentVersion);
+            .run(assignmentId, assignmentVersion) as {
+            changes: number | bigint;
+          };
+          // A lead's result-only handback anchors the text its work carried.
+          const taskId = String(binding.taskId);
+          if (
+            Number(completed.changes) > 0 &&
+            this.one(
+              "SELECT 1 AS lead FROM task_lead_bindings WHERE taskId = ? AND assignmentId = ?",
+              taskId,
+              assignmentId,
+            )
+          )
+            new LeadTextStore(this.db).recordHandback(taskId, "handback", work);
+        }
         return undefined;
       }
 

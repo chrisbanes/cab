@@ -13,6 +13,7 @@ import {
   type ReadinessCondition,
 } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
+import { LeadTextStore } from "../../src/core/lead-text.js";
 import { Store } from "../../src/core/store.js";
 import { TaskReviewStore } from "../../src/core/task-review.js";
 import {
@@ -675,6 +676,34 @@ test("switching skip to done imports a previously skipped closed issue as Done",
     assert.equal(w.hold(), undefined);
   } finally {
     w.close();
+  }
+});
+
+test("an edit after a provider-completed or imported Done flags the issue as changed since handback, without reopening", () => {
+  for (const path of ["completed", "imported"] as const) {
+    const w = closedIssueWorld("done");
+    try {
+      const leadText = new LeadTextStore(w.db);
+      let taskId: string;
+      if (path === "imported")
+        taskId = String(w.observe({ state: "closed" })?.id);
+      else {
+        taskId = String(w.observe({})?.id);
+        w.observe({ state: "closed" });
+        assert.equal(
+          w.sources.completeFromProviderClosure(taskId, () => true),
+          true,
+        );
+      }
+      assert.equal(w.domain.task(taskId).state, "done", path);
+      assert.equal(leadText.changedSinceHandback(taskId), false, path);
+      w.observe({ state: "closed", body: "Edited after Done" });
+      assert.equal(leadText.changedSinceHandback(taskId), true, path);
+      assert.equal(w.domain.task(taskId).outcome, "Edited after Done");
+      assert.equal(w.domain.task(taskId).state, "done", path);
+    } finally {
+      w.close();
+    }
   }
 });
 

@@ -1,4 +1,5 @@
 import { ApprovalReview } from "./approval-review.js";
+import { IssueChangedSinceHandback } from "./issue-change-notice.js";
 import { useSendEntry } from "./command-send.js";
 import {
   AssignmentMessage,
@@ -2015,6 +2016,9 @@ export function TaskWorkspace({
         )}
         <TabPanel tab="overview" active={state.tab}>
           <div className="task-overview">
+            <IssueChangedSinceHandback
+              changed={data.task.issueChangedSinceHandback}
+            />
             <div className="task-columns">
               <section
                 id="decisions"

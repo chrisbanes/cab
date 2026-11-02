@@ -408,6 +408,33 @@ test("an assignment's admission reasons sit after the power hold and revoked rep
   assert.deepEqual(one({ assignments: [] }), []);
 });
 
+test("a never-started assignment shows no profile or instructions staleness, which its first turn refreshes", () => {
+  const stale = [
+    "assignment-profile-revision-stale",
+    "assignment-instructions-revision-stale",
+  ];
+  assert.deepEqual(
+    one({ assignments: [{ ...assignment(stale), started: false }] }),
+    [],
+  );
+  // A started assignment keeps both waits.
+  assert.deepEqual(
+    one({ assignments: [{ ...assignment(stale), started: true }] }).map(
+      (wait) => wait.code,
+    ),
+    ["assignment-profile-stale", "assignment-instructions-stale"],
+  );
+  // A revoked profile still blocks a never-started assignment.
+  assert.deepEqual(
+    one({
+      assignments: [
+        { ...assignment(["profile-revoked", ...stale]), started: false },
+      ],
+    }).map((wait) => wait.code),
+    ["assignment-profile-revoked"],
+  );
+});
+
 test("an unmapped assignment reason is never dropped and shares the one admission-blocked wait", () => {
   assert.deepEqual(
     one({

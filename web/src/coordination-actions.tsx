@@ -17,6 +17,7 @@ import {
 import { Button, ShortId } from "./components.js";
 import { codeHostName } from "./delivery-presentation.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
+import { IssueChangedSinceHandback } from "./issue-change-notice.js";
 import { Textarea } from "./ui/textarea.js";
 
 type Task = TaskRead["data"];
@@ -176,6 +177,9 @@ function HandbackSettlementCard({
       className="handback-settlement"
       data-record-id={`settlement:${b.revision}`}
     >
+      <IssueChangedSinceHandback
+        changed={task.task.issueChangedSinceHandback}
+      />
       {current ? (
         <p role="status">
           {current === "accepted" ? (

@@ -2700,6 +2700,7 @@ export class OperatorApi {
                 excluded,
               ),
               reasons,
+              started: this.service.assignmentHasStartedExecution(assignmentId),
             },
           ]
         : [];
@@ -3837,6 +3838,9 @@ export class OperatorApi {
         version: Number(t.version),
         state: t.state,
         ready: Boolean(t.ready),
+        issueChangedSinceHandback: this.service
+          .leadText()
+          .changedSinceHandback(taskId),
       },
       lead: profile
         ? {

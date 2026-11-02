@@ -66,6 +66,7 @@ import {
   type StoredRepositoryLink,
 } from "./repository-links.js";
 import { extractLegacyRepositoryLinks } from "./github-source-migration.js";
+import { LeadTextStore } from "./lead-text.js";
 import { upgradeReadinessConditions } from "./readiness-condition-migration.js";
 import {
   itemIs,
@@ -905,6 +906,7 @@ export class DomainStore {
           WHERE id IN (SELECT taskId FROM imported_tasks)`);
       }
       upgradeReadinessConditions(this.db);
+      new LeadTextStore(this.db).migrate();
     });
   }
 

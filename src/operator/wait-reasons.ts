@@ -155,8 +155,16 @@ export interface WaitFacts {
     profileId: string;
     profileName: string | null;
     reasons: readonly string[];
+    /** False when the assignment has never started a turn; omitted when unknown. */
+    started?: boolean;
   }[];
 }
+
+/** Revisions a never-started assignment's first-turn admission takes as they are now. */
+const refreshedAtFirstTurn = new Set([
+  "assignment-profile-revision-stale",
+  "assignment-instructions-revision-stale",
+]);
 
 /**
  * Assignment-only admission reasons; `openProfile` is the Fix, the others have none.
@@ -261,6 +269,7 @@ export function deriveWaits(f: WaitFacts): Wait[] {
     });
   for (const a of f.assignments ?? [])
     for (const reason of a.reasons) {
+      if (a.started === false && refreshedAtFirstTurn.has(reason)) continue;
       const wait = assignmentReasonWaits.get(reason);
       if (!wait) add("admission-blocked", null);
       else
