@@ -60,5 +60,12 @@
       "engine": "webkit",
       "origin": "operator-task-detail-browser: Stop confirmation, desktop"
     }
-  ]
+  ],
+  "fullCheck": {
+    "commit": "1e421ab9",
+    "tests": 4602,
+    "pass": 4600,
+    "fail": 0,
+    "skipped": 2
+  }
 }

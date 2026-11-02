@@ -64,12 +64,12 @@ Old bookmarks of `/runtime/task/:id` still work until removal; after an approved
 
 ## Validation
 
-All runs on Node 26.13.0 / npm 12.2.1 at `3f4b5a5a`, local macOS, Playwright Chromium 1248 and WebKit 2370.
+Node 26.13.0 / npm 12.2.1 on local macOS, with Playwright Chromium 1248 and WebKit 2370.
 
+- At `1e421ab9`, a complete `npm run check` (static checks, build, every runtime profile, both browser engines) passed **4,600 of 4,602 tests**: 0 failed, 0 cancelled, 2 skipped. An earlier full attempt was cut off by the runner's 15-minute deadline while another checkout's suite ran concurrently. Before the cut-off it exposed two retained-page readers and one tab-list assertion, repaired in `1e421ab9`. The serialized rerun is the result recorded here.
 - `npm run typecheck`, `npm run lint` (one pre-existing info) and `npm run format:check` pass.
-- `npm run test:built -- --suite=operator,execution,coordination --profile=service`: the first run surfaced the expected retained-link assertions and a targeted-read bound regression (repaired, see "Read bound"); the affected files then passed.
-- Direct browser runs, both engines: `operator-task-detail-browser` and `operator-runtime-recovery-browser` 59/59; `operator-task-execution-browser` 2/2; `operator-task-stop-browser`, `operator-task-restart-browser` and `operator-task-browser` passed in the run before the final header repair.
-- The full `npm run check` result is recorded in the handback for this candidate.
+- `node --check` passes for `live-journey-ui.mjs`, `live-sleep.mjs`, `live-operator.mjs` and `live-journey.mjs`. None was run live.
+- Captures come from direct browser runs at production web source `892ac9db`. Each image was inspected.
 
 ## Limits
 
