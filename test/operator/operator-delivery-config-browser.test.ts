@@ -516,7 +516,7 @@ const acceptMerge = (page: Page) =>
 test("shepherd levels share the advanced draft and confirm upward changes with keyboard focus", async (_t, journey) => {
   const { page } = await startSettings(journey, path);
   await page
-    .getByText("This linked repository has no delivery grants.", {
+    .getByText("This linked repository has no code-host grants.", {
       exact: true,
     })
     .waitFor();
@@ -576,6 +576,13 @@ test("shepherd levels share the advanced draft and confirm upward changes with k
     .getByRole("button", { name: "Discard changes", exact: true })
     .click();
   assert.equal(await levelControl(page).inputValue(), "merge-when-ready");
+  await page.getByLabel("Completion mode").selectOption("reviewable-pr");
+  await page
+    .getByText(
+      "Completion mode is Reviewable PR, so the lead stops at a reviewable pull request.",
+      { exact: true },
+    )
+    .waitFor();
 });
 
 test("advanced edits use the same upward warning and refresh invalidates a pending proposal", async (_t, journey) => {

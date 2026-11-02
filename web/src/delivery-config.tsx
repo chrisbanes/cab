@@ -88,6 +88,8 @@ export function DeliveryTab(p: TabProps) {
     if (confirmed !== currentFingerprint) setConfirmed(null);
     if (pending && pending.base !== currentFingerprint) setPending(null);
   }, [currentFingerprint, confirmed, pending]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a refused level choice is stale once the draft changes.
+  useEffect(() => setLevelError(""), [currentFingerprint]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: confirmation never survives a session or project change.
   useEffect(() => {
     setConfirmed(null);
@@ -244,15 +246,7 @@ export function DeliveryTab(p: TabProps) {
           d,
           p.client,
           p.session,
-          Object.keys(errors).length
-            ? {}
-            : {
-                type: "delivery.configure",
-                key: v.key,
-                projectId: p.projectId,
-                expectedVersion: Number(v.expectedVersion),
-                ...deliveryPolicySubmission(draft),
-              },
+          Object.keys(errors).length ? {} : command(draft),
           p.refreshConfiguration,
           errors,
         );
@@ -369,8 +363,15 @@ export function DeliveryTab(p: TabProps) {
                       {link.repositoryId ?? "Unavailable repository"}
                     </h3>
                     <p>{deliveryLevelLabels[level]}</p>
+                    {level === "merge-when-ready" &&
+                      draft.mode !== "through-merge" && (
+                        <p>
+                          Completion mode is Reviewable PR, so the lead stops at
+                          a reviewable pull request.
+                        </p>
+                      )}
                     {level === "not-set-up" && (
-                      <p>This linked repository has no delivery grants.</p>
+                      <p>This linked repository has no code-host grants.</p>
                     )}
                     {level === "unavailable" && (
                       <p>
