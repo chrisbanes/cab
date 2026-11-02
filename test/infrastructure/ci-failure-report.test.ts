@@ -362,7 +362,7 @@ test("pagination refuses endpoint changes, added filters and repeated pages", as
 });
 
 test("Renovate exclusion requires exact guard evidence", () => {
-  const line = { raw: "the pinned SDK is the qualified version" };
+  const line = { name: "the pinned SDK is the qualified version" };
   assert.equal(
     api.classifyRunEvidence({}, [line], false).classification,
     "unclassified",
@@ -731,7 +731,7 @@ test("same-SHA report separates later runs and later attempts within the inclusi
     head_sha: "same-head",
     run_attempt: 1,
     conclusion: "success",
-    created_at: "2026-11-01T23:59:59.999999Z",
+    created_at: "2026-11-01T11:00:00Z",
     html_url: "https://github.com/chrisbanes/cab/actions/runs/41",
   });
   const beyond = {
@@ -745,6 +745,21 @@ test("same-SHA report separates later runs and later attempts within the inclusi
       return apiResponse({ workflow_runs: [sourceRun] });
     if (url.includes("head_sha="))
       return apiResponse({ workflow_runs: [sourceRun, laterRun, beyond] });
+    if (url.includes("/runs/41/attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 410,
+            name: "check",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-11-01T12:00:00Z",
+            completed_at: "2026-11-01T23:59:59.999999Z",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/41/job/410",
+          },
+        ],
+      });
     if (url.includes("attempts/1/jobs"))
       return apiResponse({
         jobs: [
@@ -1050,5 +1065,298 @@ test("same-SHA lookup failures and 1000-result caps remain explicit coverage", a
     );
     assert.equal(report.runs[0].incomplete, true);
     assert.equal(report.verdict, "insufficient-evidence");
+  }
+});
+
+function completeAggregateJobs() {
+  const names = [
+    "changes",
+    "quality",
+    "workspaces-1",
+    "execution-2",
+    "operator-2",
+    "service-2",
+    "integrations-1",
+    "service-1",
+    "operator-1",
+    "execution-1",
+    "check",
+  ];
+  return names.map((name, index) => ({
+    id: 700 + index,
+    name,
+    status: "completed",
+    conclusion:
+      name === "execution-2" || name === "check" ? "failure" : "success",
+    started_at: "2026-11-01T10:00:00Z",
+    completed_at: "2026-11-01T10:01:00Z",
+    html_url: `https://github.com/chrisbanes/cab/actions/runs/70/job/${700 + index}`,
+    steps:
+      name === "check"
+        ? [
+            {
+              name: "Run actions/checkout@v7",
+              status: "completed",
+              conclusion: "success",
+            },
+            {
+              name: "Require every applicable job to succeed",
+              status: "completed",
+              conclusion: "failure",
+            },
+            {
+              name: "Complete job",
+              status: "completed",
+              conclusion: "success",
+            },
+          ]
+        : [],
+  }));
+}
+
+const aggregateLog =
+  "2026-11-01T10:00:00Z ##[group]Run node scripts/check-ci-results.mjs\n2026-11-01T10:00:00Z RUN_CHECKS: true\n2026-11-01T10:00:00Z ##[endgroup]\n2026-11-01T10:00:01Z suites: expected success, observed failure\n2026-11-01T10:00:01Z ##[error]Process completed with exit code 1.";
+
+test("aggregate failure accounting follows complete dependencies and retains owning failures", async () => {
+  for (const variant of [
+    "guard",
+    "ordinary",
+    "mixed",
+    "checkout",
+    "syntax",
+    "unavailable",
+    "missing-dependency",
+    "extra-job",
+    "unfinished",
+    "unexpected-diagnostic",
+    "unexpected-step",
+  ]) {
+    const jobs = completeAggregateJobs();
+    const check = jobs.find((job) => job.name === "check");
+    assert.ok(check);
+    if (variant === "checkout") {
+      check.steps[0]!.conclusion = "failure";
+      check.steps[1]!.conclusion = "success";
+    }
+    if (variant === "unexpected-step")
+      check.steps[1]!.name = "Different command";
+    if (variant === "missing-dependency")
+      jobs.splice(
+        jobs.findIndex((job) => job.name === "service-1"),
+        1,
+      );
+    if (variant === "extra-job")
+      jobs.push({ ...jobs[0]!, id: 999, name: "historical-extra-job" });
+    if (variant === "unfinished") jobs[0]!.status = "in_progress";
+    const ordinary = variant === "ordinary" || variant === "mixed";
+    const report = await api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: async (url: string) => {
+        if (url.includes("created="))
+          return apiResponse({
+            workflow_runs: [
+              runRecord({
+                id: 70,
+                head_sha: "aggregate-head",
+                run_attempt: 1,
+                conclusion: "failure",
+              }),
+            ],
+          });
+        if (url.includes("head_sha="))
+          return apiResponse({ workflow_runs: [] });
+        if (url.includes("/attempts/1/jobs")) return apiResponse({ jobs });
+        if (url.endsWith(`/jobs/${check.id}/logs`)) {
+          if (variant === "unavailable")
+            return { ok: false, status: 410, headers: new Map(), body: "" };
+          return apiResponse(
+            variant === "syntax"
+              ? "SyntaxError: Unexpected token"
+              : variant === "unexpected-diagnostic"
+                ? aggregateLog.replace("observed failure", "observed mystery")
+                : aggregateLog,
+          );
+        }
+        if (url.endsWith("/jobs/703/logs"))
+          return apiResponse(
+            `${ordinary ? "✖ independent test fails (5ms)" : "✖ the pinned SDK is the qualified version (5ms)"}${variant === "mixed" ? "\n✖ the pinned SDK is the qualified version (5ms)" : ""}`,
+          );
+        if (url.includes("/commits/aggregate-head/pulls"))
+          return apiResponse([
+            {
+              number: 77,
+              user: { login: "renovate[bot]", type: "Bot" },
+              head: { sha: "aggregate-head" },
+              html_url: "https://github.com/chrisbanes/cab/pull/77",
+            },
+          ]);
+        if (url.includes("/pulls/77/files"))
+          return apiResponse([
+            {
+              filename: "package.json",
+              patch:
+                '- "@anthropic-ai/claude-agent-sdk": "0.3.300",\n+ "@anthropic-ai/claude-agent-sdk": "0.3.301",',
+            },
+          ]);
+        throw Error(`Unexpected fixture endpoint ${url}`);
+      },
+    });
+    const positive = ["guard", "ordinary", "mixed"].includes(variant);
+    const aggregate = report.runs[0].attempts[0].jobs.find(
+      (job: { name: string }) => job.name === "check",
+    );
+    assert.equal(Boolean(aggregate.accountedFor), positive, variant);
+    assert.equal(report.observedFailures, variant === "guard" ? 0 : 1, variant);
+    assert.equal(report.incomplete, positive ? 0 : 1, variant);
+    assert.equal(report.confirmedUnrelated, 0, variant);
+    if (positive) {
+      assert.deepEqual(aggregate.accountedFor.diagnostics, [
+        "suites: expected success, observed failure",
+      ]);
+      assert.equal(aggregate.accountedFor.dependencies.length, 10);
+      assert.ok(aggregate.url);
+    }
+    if (ordinary) assert.equal(report.top[0].test, "independent test fails");
+  }
+});
+
+test("cross-run passes use verified attempt completion and preserve an earlier eligible pass", async () => {
+  for (const variant of [
+    "future",
+    "eligible",
+    "missing",
+    "invalid",
+    "earlier-pass",
+    "newer-lookup",
+    "newer-unavailable",
+    "equal-precision",
+  ]) {
+    const source = runRecord({
+      id: 80,
+      head_sha: "timed-head",
+      run_attempt: 1,
+      conclusion: "failure",
+      created_at: "2026-11-01T09:00:00Z",
+      html_url: "https://github.com/chrisbanes/cab/actions/runs/80",
+    });
+    const candidate = runRecord({
+      id: 81,
+      head_sha: "timed-head",
+      head_branch: "topic",
+      event: "pull_request",
+      run_attempt: variant === "earlier-pass" ? 2 : 1,
+      created_at: "2026-11-01T09:30:00Z",
+      html_url: "https://github.com/chrisbanes/cab/actions/runs/81",
+    });
+    const calls: string[] = [];
+    const report = await api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: async (url: string) => {
+        calls.push(url);
+        if (url.includes("created="))
+          return apiResponse({ workflow_runs: [source, candidate] });
+        if (url.includes("head_sha="))
+          return apiResponse({
+            workflow_runs: [
+              {
+                ...candidate,
+                run_attempt: variant.startsWith("newer-")
+                  ? 2
+                  : candidate.run_attempt,
+              },
+            ],
+          });
+        if (url.includes("/runs/80/attempts/1/jobs"))
+          return apiResponse({
+            jobs: [
+              {
+                id: 801,
+                name: "execution-2",
+                status: "completed",
+                conclusion: "failure",
+                started_at: "2026-11-01T09:59:00Z",
+                completed_at: "2026-11-01T10:00:00.500Z",
+                html_url:
+                  "https://github.com/chrisbanes/cab/actions/runs/80/job/801",
+              },
+            ],
+          });
+        if (url.endsWith("/jobs/801/logs"))
+          return apiResponse("✖ test fails (1ms)");
+        if (url.includes("/runs/81/attempts/")) {
+          if (variant === "newer-unavailable" && url.includes("attempts/2"))
+            throw Error("New attempt unavailable");
+          const future = variant === "future" || url.includes("attempts/2");
+          const completedAt =
+            variant === "missing"
+              ? null
+              : variant === "invalid"
+                ? "2026-11-01T09:00:00Z"
+                : variant === "equal-precision"
+                  ? "2026-11-01T10:00:00.5000Z"
+                  : future
+                    ? "2026-11-02T00:02:00Z"
+                    : "2026-11-01T12:01:00.200Z";
+          return apiResponse({
+            jobs: [
+              {
+                id: url.includes("attempts/2") ? 812 : 811,
+                name: "check",
+                status: "completed",
+                conclusion: "success",
+                started_at:
+                  variant === "equal-precision"
+                    ? "2026-11-01T10:00:00.400Z"
+                    : future
+                      ? "2026-11-01T23:59:00Z"
+                      : "2026-11-01T12:00:00Z",
+                completed_at: completedAt,
+                html_url:
+                  "https://github.com/chrisbanes/cab/actions/runs/81/job/811",
+              },
+            ],
+          });
+        }
+        throw Error(`Unexpected endpoint ${url}`);
+      },
+    });
+    const evidence = report.sameShaCorroboration.find(
+      (item: { failureRunId: number }) => item.failureRunId === 80,
+    );
+    assert.ok(evidence, variant);
+    const eligible = [
+      "eligible",
+      "earlier-pass",
+      "newer-lookup",
+      "newer-unavailable",
+    ].includes(variant);
+    assert.equal(evidence.laterPasses.length, eligible ? 1 : 0, variant);
+    if (eligible) {
+      assert.equal(
+        evidence.laterPasses[0].passedAt,
+        "2026-11-01T12:01:00.200Z",
+      );
+      assert.equal(
+        evidence.laterPasses[0].failedAt,
+        "2026-11-01T10:00:00.500Z",
+      );
+      assert.equal(evidence.laterPasses[0].passingAttempt, 1);
+      assert.match(evidence.laterPasses[0].passingAttemptUrl, /attempts\/1$/);
+    } else
+      assert.ok(
+        evidence.timingGaps.some(
+          (item: { passingAttemptUrl?: string }) => item.passingAttemptUrl,
+        ),
+        variant,
+      );
+    const expectedReads =
+      variant === "earlier-pass" || variant.startsWith("newer-") ? 2 : 1;
+    assert.equal(
+      calls.filter((url) => url.includes("/runs/81/attempts/")).length,
+      expectedReads,
+      variant,
+    );
   }
 });

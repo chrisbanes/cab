@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { ciFailures } from "./check-ci-results.mjs";
 
 const API = "https://api.github.com";
 const guard = "the pinned SDK is the qualified version";
@@ -80,7 +81,8 @@ export function dedupeAttemptFailures(entries) {
 
 export function classifyRunEvidence(run, failures, renovateSdkBump = false) {
   const retained = failures.filter(
-    (failure) => !(renovateSdkBump && failure.raw?.trim() === guard),
+    (failure) =>
+      !(renovateSdkBump && failure.name === guard && !failure.unknown),
   );
   return {
     ...run,
@@ -237,6 +239,256 @@ function validTimestamp(value) {
   );
 }
 
+function attemptChronology(attempt) {
+  const jobs = attempt.jobs;
+  return (
+    attempt.metadataComplete !== false &&
+    jobs.length > 0 &&
+    jobs.every(
+      (job) =>
+        job.status === "completed" &&
+        ["success", "failure", "skipped", "cancelled"].includes(
+          job.conclusion,
+        ) &&
+        validTimestamp(job.startedAt) &&
+        validTimestamp(job.completedAt) &&
+        Date.parse(job.startedAt) <= Date.parse(job.completedAt),
+    )
+  );
+}
+
+async function candidateAttempts(
+  candidate,
+  collected,
+  base,
+  transport,
+  cache,
+  owner,
+  repo,
+) {
+  if (cache.has(candidate.id)) return cache.get(candidate.id);
+  const loading = (async () => {
+    if (
+      !Number.isSafeInteger(candidate.run_attempt) ||
+      candidate.run_attempt < 1
+    )
+      throw Error("Missing candidate attempt identity");
+    const existing = collected.find(
+      (run) => run.id === candidate.id && run.sha === candidate.head_sha,
+    );
+    const attempts = [];
+    for (
+      let number = 1;
+      number <= Math.max(candidate.run_attempt, existing?.attempts.length ?? 0);
+      number++
+    ) {
+      const retained = existing?.attempts.find(
+        (attempt) => attempt.number === number,
+      );
+      if (
+        retained &&
+        !(
+          number === candidate.run_attempt &&
+          candidate.status === "completed" &&
+          candidate.conclusion === "success" &&
+          retained.conclusion !== "success"
+        )
+      ) {
+        attempts.push(retained);
+        continue;
+      }
+      try {
+        const response = await paginateActions(
+          `${base}/actions/runs/${candidate.id}/attempts/${number}/jobs?per_page=100`,
+          transport,
+        );
+        const jobs = response.items.map((job) => {
+          if (
+            !Number.isSafeInteger(job.id) ||
+            typeof job.name !== "string" ||
+            typeof job.status !== "string" ||
+            !safeGithubUrl(job.html_url, owner, repo)
+          )
+            throw Error("Malformed candidate job");
+          return {
+            id: job.id,
+            name: job.name,
+            status: job.status,
+            conclusion: job.conclusion,
+            url: job.html_url,
+            startedAt: job.started_at,
+            completedAt: job.completed_at,
+          };
+        });
+        const attempt = {
+          number,
+          url: `${candidate.html_url}/attempts/${number}`,
+          jobs,
+          metadataComplete: true,
+        };
+        if (attemptChronology(attempt)) {
+          attempt.startedAt = jobs.reduce(
+            (a, job) =>
+              Date.parse(job.startedAt) < Date.parse(a) ? job.startedAt : a,
+            jobs[0].startedAt,
+          );
+          attempt.completedAt = jobs.reduce(
+            (a, job) =>
+              Date.parse(job.completedAt) > Date.parse(a) ? job.completedAt : a,
+            jobs[0].completedAt,
+          );
+        }
+        if (
+          jobs.some(
+            (job) =>
+              job.name.toLowerCase() === "check" &&
+              job.conclusion === "success",
+          ) &&
+          jobs.every(
+            (job) =>
+              job.status === "completed" &&
+              ["success", "skipped"].includes(job.conclusion),
+          )
+        )
+          attempt.conclusion = "success";
+        attempts.push(attempt);
+      } catch {
+        attempts.push({
+          number,
+          url: `${candidate.html_url}/attempts/${number}`,
+          jobs: [],
+          metadataComplete: false,
+          collectionError: true,
+        });
+      }
+    }
+    return attempts;
+  })();
+  cache.set(candidate.id, loading);
+  return loading;
+}
+
+function accountAggregateFailure(attempt, logs) {
+  // Only this retrieved topology is qualified; historical or extra jobs remain unknown.
+  const lanes = [
+    "integrations-1",
+    "execution-1",
+    "execution-2",
+    "workspaces-1",
+    "operator-1",
+    "operator-2",
+    "service-1",
+    "service-2",
+  ];
+  const names = ["changes", "quality", ...lanes, "check"];
+  const jobs = attempt.jobs;
+  if (
+    jobs.length !== names.length ||
+    new Set(jobs.map((job) => job.id)).size !== jobs.length ||
+    names.some(
+      (name) => jobs.filter((job) => job.name === name).length !== 1,
+    ) ||
+    jobs.some(
+      (job) =>
+        job.status !== "completed" ||
+        !["success", "failure"].includes(job.conclusion),
+    )
+  )
+    return;
+  const check = jobs.find((job) => job.name === "check");
+  if (
+    jobs.find((job) => job.name === "changes").conclusion !== "success" ||
+    jobs.find((job) => job.name === "quality").conclusion !== "success"
+  )
+    return;
+  if (
+    check.conclusion !== "failure" ||
+    check.failures.length ||
+    !Array.isArray(check.steps) ||
+    !check.steps.length ||
+    check.steps.some((step) => step.status !== "completed") ||
+    check.steps.filter((step) => step.conclusion === "failure").length !== 1 ||
+    check.steps.some(
+      (step) => !["success", "failure"].includes(step.conclusion),
+    ) ||
+    !check.steps.some(
+      (step) =>
+        step.name === "Require every applicable job to succeed" &&
+        step.conclusion === "failure",
+    )
+  )
+    return;
+  if (
+    check.steps.filter(
+      (step) => step.name === "Require every applicable job to succeed",
+    ).length !== 1 ||
+    !check.steps.some(
+      (step) =>
+        step.name === "Run actions/checkout@v7" &&
+        step.conclusion === "success",
+    ) ||
+    !check.steps.some(
+      (step) => step.name === "Complete job" && step.conclusion === "success",
+    )
+  )
+    return;
+  const log = logs.get(check.id);
+  if (!log) return;
+  const lines = sanitizeLog(log)
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\d{4}-\d\d-\d\dT\S+Z\s*/, "").trim())
+    .filter(Boolean);
+  const command = lines.indexOf(
+    "##[group]Run node scripts/check-ci-results.mjs",
+  );
+  const groupEnd = lines.indexOf("##[endgroup]", command + 1);
+  const exit = lines.indexOf(
+    "##[error]Process completed with exit code 1.",
+    groupEnd + 1,
+  );
+  if (
+    command < 0 ||
+    groupEnd < 0 ||
+    exit < 0 ||
+    lines.filter((line) => line.startsWith("##[error]")).length !== 1 ||
+    !lines.slice(command, groupEnd).includes("RUN_CHECKS: true")
+  )
+    return;
+  const needs = {
+    changes: { result: jobs.find((job) => job.name === "changes").conclusion },
+    quality: { result: jobs.find((job) => job.name === "quality").conclusion },
+    suites: {
+      result: jobs.some(
+        (job) => lanes.includes(job.name) && job.conclusion === "failure",
+      )
+        ? "failure"
+        : "success",
+    },
+  };
+  const diagnostics = ciFailures(needs);
+  if (
+    !diagnostics.length ||
+    JSON.stringify(lines.slice(groupEnd + 1, exit)) !==
+      JSON.stringify(diagnostics)
+  )
+    return;
+  check.accountedFor = {
+    reason: "verified-aggregate-dependency-failure",
+    diagnostics,
+    dependencies: jobs
+      .filter((job) => job.id !== check.id)
+      .map((job) => ({
+        id: job.id,
+        name: job.name,
+        conclusion: job.conclusion,
+        url: job.url,
+      })),
+  };
+  check.coverage = check.coverage.filter(
+    (entry) => entry.reason !== "failed-job-log-without-test-marker",
+  );
+}
+
 function versionTuple(value) {
   const match =
     typeof value === "string" && value.match(/^(\d+)\.(\d+)\.(\d+)$/);
@@ -290,6 +542,7 @@ async function collectSameShaCorroboration({
     bySha.get(failure.sha).push(failure);
   }
   const results = [];
+  const attemptCache = new Map();
   for (const [sha, failedRuns] of bySha) {
     try {
       const lookup = await paginateActions(
@@ -300,13 +553,24 @@ async function collectSameShaCorroboration({
       const lookupRuns = new Map(lookup.items.map((r) => [r.id, r]));
       for (const failedRun of failedRuns) {
         const laterPasses = [];
+        const timingGaps = [];
+        const failedAttempts = failedRun.attempts.filter(
+          (attempt) =>
+            attempt.conclusion === "failure" && attemptChronology(attempt),
+        );
+        if (!failedAttempts.length)
+          timingGaps.push({
+            reason: "failure-attempt-timing-unavailable",
+            failureRunUrl: failedRun.url,
+          });
         for (const attempt of failedRun.attempts) {
-          if (attempt.conclusion !== "failure" || !attempt.completedAt)
+          if (attempt.conclusion !== "failure" || !attemptChronology(attempt))
             continue;
           for (const laterAttempt of failedRun.attempts) {
             if (
               laterAttempt.number > attempt.number &&
               laterAttempt.conclusion === "success" &&
+              attemptChronology(laterAttempt) &&
               laterAttempt.startedAt &&
               laterAttempt.completedAt &&
               laterAttempt.completedAt.slice(0, 10) <= until &&
@@ -329,9 +593,8 @@ async function collectSameShaCorroboration({
         for (const candidate of lookupRuns.values()) {
           if (
             candidate.id === failedRun.id ||
+            !Number.isSafeInteger(candidate.id) ||
             candidate.head_sha !== sha ||
-            candidate.conclusion !== "success" ||
-            candidate.status !== "completed" ||
             !validTimestamp(candidate.created_at) ||
             candidate.created_at.slice(0, 10) > until ||
             !(
@@ -340,17 +603,97 @@ async function collectSameShaCorroboration({
             !safeGithubUrl(candidate.html_url, owner, repo)
           )
             continue;
-          laterPasses.push({
-            kind: "later-run",
-            runId: failedRun.id,
-            passingRunId: candidate.id,
-            failureRunUrl: failedRun.url,
-            passingRunUrl: candidate.html_url,
-            failedAt: failedRun.createdAt,
-            passedAt: candidate.created_at,
-            interpretation:
-              "same-head corroboration; not a cause classification",
-          });
+          try {
+            const attempts = await candidateAttempts(
+              candidate,
+              runs,
+              base,
+              transport,
+              attemptCache,
+              owner,
+              repo,
+            );
+            let verifiedPass = false;
+            for (const passingAttempt of attempts) {
+              if (passingAttempt.collectionError)
+                timingGaps.push({
+                  reason: "candidate-attempt-jobs-unavailable",
+                  passingRunUrl: candidate.html_url,
+                  passingAttemptUrl: passingAttempt.url,
+                });
+              if (passingAttempt.conclusion !== "success") continue;
+              if (!attemptChronology(passingAttempt)) {
+                timingGaps.push({
+                  reason: "passing-attempt-timing-unavailable",
+                  passingRunUrl: candidate.html_url,
+                  passingAttemptUrl: passingAttempt.url,
+                });
+                continue;
+              }
+              if (
+                Date.parse(passingAttempt.startedAt) <
+                Date.parse(candidate.created_at)
+              ) {
+                timingGaps.push({
+                  reason: "passing-attempt-precedes-run-creation",
+                  passingRunUrl: candidate.html_url,
+                  passingAttemptUrl: passingAttempt.url,
+                });
+                continue;
+              }
+              if (passingAttempt.completedAt.slice(0, 10) > until) {
+                timingGaps.push({
+                  reason: "passing-attempt-after-horizon",
+                  passingRunUrl: candidate.html_url,
+                  passingAttemptUrl: passingAttempt.url,
+                  completedAt: passingAttempt.completedAt,
+                });
+                continue;
+              }
+              for (const failedAttempt of failedAttempts) {
+                if (
+                  Date.parse(passingAttempt.completedAt) <=
+                  Date.parse(failedAttempt.completedAt)
+                ) {
+                  timingGaps.push({
+                    reason: "passing-completion-not-after-failure",
+                    failureAttemptUrl: failedAttempt.url,
+                    passingAttemptUrl: passingAttempt.url,
+                  });
+                  continue;
+                }
+                verifiedPass = true;
+                laterPasses.push({
+                  kind: "later-run",
+                  runId: failedRun.id,
+                  passingRunId: candidate.id,
+                  failedAttempt: failedAttempt.number,
+                  passingAttempt: passingAttempt.number,
+                  failureRunUrl: failedRun.url,
+                  failureAttemptUrl: failedAttempt.url,
+                  passingRunUrl: candidate.html_url,
+                  passingAttemptUrl: passingAttempt.url,
+                  failedAt: failedAttempt.completedAt,
+                  passedAt: passingAttempt.completedAt,
+                  interpretation:
+                    "same-head corroboration; not a cause classification",
+                });
+              }
+            }
+            if (
+              !verifiedPass &&
+              !attempts.some((attempt) => attempt.conclusion === "success")
+            )
+              timingGaps.push({
+                reason: "candidate-has-no-verified-passing-attempt",
+                passingRunUrl: candidate.html_url,
+              });
+          } catch {
+            timingGaps.push({
+              reason: "candidate-attempt-jobs-unavailable",
+              passingRunUrl: candidate.html_url,
+            });
+          }
         }
         results.push({
           sha,
@@ -358,6 +701,7 @@ async function collectSameShaCorroboration({
           status: lookup.capped ? "lookup-capped" : "complete-through-until",
           horizonUntil: until,
           laterPasses,
+          timingGaps,
         });
       }
       if (lookup.capped)
@@ -644,6 +988,7 @@ export async function renderReport({
         completedAt: null,
       };
       run.attempts.push(attemptInfo);
+      const failedJobLogs = new Map();
       try {
         const jobsResult = await paginateActions(
           `${base}/actions/runs/${raw.id}/attempts/${attempt}/jobs?per_page=100`,
@@ -677,6 +1022,7 @@ export async function renderReport({
             attempt,
             status: job.status,
             conclusion: job.conclusion,
+            steps: job.steps,
             startedAt:
               job.started_at == null
                 ? null
@@ -742,6 +1088,9 @@ export async function renderReport({
               { rawLogs: true },
             );
             if (!response.ok) throw Error(`log ${response.status}`);
+            if (typeof response.body !== "string")
+              throw Error("Malformed log response");
+            failedJobLogs.set(job.id, response.body);
             const parsedFailures = parseFailureLog(response.body);
             jobRecord.failures = parsedFailures;
             if (parsedFailures.length === 0) {
@@ -782,6 +1131,26 @@ export async function renderReport({
           attemptUrl: attemptInfo.url,
         });
       }
+      accountAggregateFailure(attemptInfo, failedJobLogs);
+      run.coverage = run.coverage.filter(
+        (entry) =>
+          !(
+            entry.reason === "failed-job-log-without-test-marker" &&
+            attemptInfo.jobs.some(
+              (job) => job.id === entry.jobId && job.accountedFor,
+            )
+          ),
+      );
+      attemptInfo.metadataComplete = !run.coverage.some(
+        (entry) =>
+          entry.attempt === attempt &&
+          [
+            "malformed-job",
+            "attempt-jobs-unavailable",
+            "attempt-has-no-jobs",
+            "malformed-job-timestamp",
+          ].includes(entry.reason),
+      );
       const jobs = attemptInfo.jobs;
       const check = jobs.find((job) => job.name.toLowerCase() === "check");
       if (
@@ -846,9 +1215,7 @@ export async function renderReport({
             return false;
           });
           for (const job of attempt.jobs)
-            job.failures = job.failures.filter(
-              (failure) => failure.name !== guard || failure.unknown,
-            );
+            job.failures = classifyRunEvidence({}, job.failures, true).failures;
         }
       } else {
         run.coverage.push({
@@ -863,6 +1230,7 @@ export async function renderReport({
       attempt.jobs.some(
         (job) =>
           job.conclusion === "failure" &&
+          !job.accountedFor &&
           (job.failures.length > 0 || job.coverage.length > 0),
       ),
     );
