@@ -195,6 +195,20 @@ requires delivery and preservation evidence and refuses unresolved task work.
 These service contracts do not provide physical process containment. An untracked
 detached child may overlap a later writer after qualified normal success.
 
+Bound-turn recovery uses `recoverBoundTurnExecution` with scope `recover-bound-turn`.
+The wrapper reads durable replay before verifying, shares identical concurrent
+requests, and calls only `Supervisor.resolveHeldExecution` to atomically record
+its receipt and release the exact writer/capacity ownership. Options use a bounded,
+read-only termination check; submission verifies again. Unknown/live/conflicting
+process proof, pending callbacks/effects and stale identities fail closed.
+SPA assignment recovery and retained `/runtime/control/bound-turn/recover` controls
+collect the same assertions and require review/cancel/confirm. After an uncertain
+reply, GET `/api/operator/operations` for the original assignment/type/key precedes
+any exact-body retry. Independent holds remain and reconciliation dispatches nothing.
+The retained factory receives the same privacy-aware `OperatorApi` as the SPA.
+Offline signal fixtures exercise real adapter child spawns without model turns;
+real-runtime signal/recovery qualification remains separate from browser coverage.
+
 ## Operator CLI
 
 The packaged `cab` executable (`package.json` `bin`, built to
@@ -639,7 +653,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      revision, holds and up to the 20 newest recovery generations: work ID,
      generation, intent and request state, process identity, held reason,
      predecessor, witnesses, observations and receipt, and for each path
-     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`,
+     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`, `bound-turn-recover`,
      plus `conversation-replace` for the assignment) whether it is eligible, what
      blocks it and the inputs it requires. Eligibility is advisory; the service
      re-checks everything. A string that redaction would change is withheld (gap
@@ -662,7 +676,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      `true`); `no-turn-adopt` — `evidence` (the same plus `invocationLedgerSha256`)
      and `attestation` (`completeSynchronousWriteAheadLedger`,
      `noStartTurnInvocation`, `independentlyReviewed`, `idleThreadMayExist`);
-     either recovery — `receipt` (`termination: {"kind":"process-exit"}`,
+     each recovery — `receipt` (`termination: {"kind":"process-exit"}`,
      `effects: "settled"`, `workspace: "preserved"|"reconciled"`). A missing,
      `false`, extra or malformed item exits 2 before any request; there is no
      `--yes`, `--confirm`, `--force` or attestation flag. An ineligible path exits 4

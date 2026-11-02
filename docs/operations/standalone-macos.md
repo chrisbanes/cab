@@ -566,6 +566,26 @@ turn so new that App Server still refuses the interrupt ("no active turn to
 interrupt"). Drafting runs and direct `run` turns keep that hold too. The wait
 plus runtime stop stays under launchd's default 20-second exit timeout.
 
+Runtime and probe children own isolated process groups with piped stdio; cab keeps
+handles and awaits exit. Ctrl-C cannot directly fan out to those children before
+cab's protocol interrupt. This is not descendant containment, and repeated signals
+are not a guarantee of clean drain.
+
+For a held bound turn, use `cab recovery get ASSIGNMENT_ID`, then
+`cab recovery prepare bound-turn-recover ASSIGNMENT_ID --work WORK_ID --out FILE
+--evidence-file EVIDENCE_FILE` and `cab recovery submit --file FILE`. The evidence
+file's `receipt` asserts `termination: {"kind":"process-exit"}`, `effects: "settled"`
+and `workspace: "preserved"` or `"reconciled"`. The read supplies the exact generation,
+thread, turn and runtime process identity; the service independently verifies exit.
+Settings → Runtime lists assignment recovery destinations; task detail's Recovery
+link and retained `/runtime/assignment/:id` expose the same reviewable operation.
+Review the exact identity and permanent effect before confirming; Cancel records
+nothing. On refusal or lost reply keep the original evidence/key, check the original
+operation receipt, then retry only that exact command if no receipt is recorded.
+Reconciliation cannot be undone and starts no work. Task Stop, project pause,
+approvals and delivery holds remain; inspect and resolve each deliberately before
+an explicit continuation. Never infer termination from silence or an interrupt ack.
+
 Restart state lives in memory, so a service restart starts afresh. The "next at"
 time is the service's local time on the `/runtime` page and the browser's or
 CLI's local time elsewhere. A browser subscribed to

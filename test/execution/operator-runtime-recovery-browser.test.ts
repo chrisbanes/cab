@@ -4,6 +4,8 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { holdPills } from "../../web/src/settings-view.js";
 import { openOverviewCard } from "../fixtures/task-tabs.js";
 import {
@@ -83,7 +85,7 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
   await captureBrowserEvidence(page, "1366-runtime");
 });
 
-test("Assignment recovery is read-only, shows the uncertainty alert and five independent holds", async (_t, journey) => {
+test("Assignment recovery shows the uncertainty alert and five independent holds", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/assignments/:assignment/recovery",
@@ -191,10 +193,18 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
     `/assignment/${ids.assignmentId}`,
   ]);
   assert.equal(await page.locator("main form").count(), 0);
-  assert.deepEqual(await page.locator("main button").allInnerTexts(), [
-    "Refresh",
-  ]);
-  assert.equal((await page.content()).includes("PRIVATE"), false);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Review reconciliation", exact: true })
+      .isDisabled(),
+    true,
+  );
+  // Options now deliberately expose exact opaque process/thread/turn identities;
+  // private prompt, reason and workspace prose must still never reach the page.
+  assert.doesNotMatch(
+    await page.content(),
+    /PRIVATE (?:RECOVERY PROMPT|RECOVERY REASON|OBSERVATION REASON)|\/PRIVATE\/RECOVERY\/PATH/,
+  );
 
   await page
     .getByRole("link", { name: "Inspect execution", exact: true })
@@ -398,4 +408,409 @@ test("phone recovery shows Recovery, current holds and the next step", async (_t
   assert.equal(await page.getByText("Copy desktop link").count(), 0);
   await noPageOverflow(page);
   await captureBrowserEvidence(page, "390-recovery");
+});
+
+for (const engine of ["chromium", "webkit"] as const) {
+  test(
+    `bound-turn review keeps proof on cancel, refusal and lost reply (${engine})`,
+    { browserEngine: engine },
+    async (_t, journey) => {
+      const { webkit, chromium } = await import("playwright");
+      const { page, f, ids } = await startSettings(
+        journey,
+        "/app/assignments/:assignment/recovery",
+        { width: 1366, height: 900 },
+        () => (engine === "webkit" ? webkit : chromium).launch(),
+      );
+      let posts: Array<Record<string, unknown>> = [],
+        reads = 0,
+        recorded = false,
+        refuse = true,
+        readUnavailable = true;
+      const responseReceipt = (c: Record<string, unknown>) => ({
+        kind: "recovery-resolution",
+        key: c.key,
+        recorded: true,
+        path: "bound-turn-recover",
+        assignmentId: c.assignmentId,
+        workId: (c.receipt as { workId: string }).workId,
+        receiptId: "14f1b0e1-3597-4469-9489-c3685e36684b",
+        state: "reconciled",
+      });
+      await page.route("**/recovery-options", async (route) => {
+        const result = await route.fetch();
+        const body = await result.json();
+        const record = body.data.records[0];
+        body.data.gaps = [];
+        record.workId = "reviewed-work";
+        record.threadId = "exact-thread";
+        record.turnId = "exact-turn";
+        record.process = {
+          processId: "12345",
+          processStartedAt: "exact-birth",
+          bootId: "exact-boot",
+        };
+        record.paths = [
+          { path: "bound-turn-recover", eligible: true, blockedBy: [] },
+        ];
+        body.data.records = [record];
+        await route.fulfill({ json: body });
+      });
+      await page.route("**/api/operator/commands", async (route) => {
+        const c = route.request().postDataJSON();
+        posts.push(c);
+        if (refuse)
+          await route.fulfill({
+            status: 409,
+            json: { error: { code: "conflict", message: "State changed" } },
+          });
+        else {
+          recorded = true;
+          await route.abort("failed");
+        }
+      });
+      await page.route("**/api/operator/operations?**", async (route) => {
+        reads++;
+        const query = new URL(route.request().url()).searchParams;
+        assert.equal(query.get("scope"), `assignment:${ids.assignmentId}`);
+        assert.equal(query.get("key"), posts[0]?.key);
+        if (readUnavailable) {
+          await route.fulfill({
+            status: 503,
+            json: {
+              error: { code: "unavailable", message: "Read unavailable" },
+            },
+          });
+          return;
+        }
+        await route.fulfill({
+          json: {
+            data: recorded
+              ? { state: "recorded", receipt: responseReceipt(posts[0]!) }
+              : { state: "not-recorded" },
+            observedAt: Date.now(),
+          },
+        });
+      });
+      await page.reload();
+      const panel = page.locator(".settings-panel").filter({
+        has: page.getByRole("heading", {
+          name: "Reconcile a bound turn",
+          exact: true,
+        }),
+      });
+      await panel.getByText(/Eligible for review/).waitFor();
+      await panel
+        .getByLabel("I independently confirmed this exact process exited")
+        .check();
+      await panel.getByLabel("All effects and callbacks are settled").check();
+      await panel.getByLabel("Workspace disposition").selectOption("preserved");
+      const review = panel.getByRole("button", {
+        name: "Review reconciliation",
+        exact: true,
+      });
+      await review.click();
+      const dialog = page.getByRole("alertdialog");
+      await dialog
+        .getByRole("button", { name: "Cancel", exact: true })
+        .waitFor();
+      assert.equal(
+        await dialog
+          .getByRole("button", { name: "Cancel", exact: true })
+          .evaluate((e) => e === document.activeElement),
+        true,
+      );
+      await captureBrowserEvidence(page, `1366-bound-review-${engine}`);
+      await page.setViewportSize(phone);
+      await noPageOverflow(page);
+      await captureBrowserEvidence(page, `390-bound-review-${engine}`);
+      await page.keyboard.press("Enter");
+      await dialog.waitFor({ state: "hidden" });
+      assert.equal(posts.length, 0);
+      await page.setViewportSize({ width: 1366, height: 900 });
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Review reconciliation",
+      );
+      assert.equal(
+        await review.evaluate((e) => e === document.activeElement),
+        true,
+      );
+      assert.equal(
+        await panel
+          .getByLabel("All effects and callbacks are settled")
+          .isChecked(),
+        true,
+      );
+      await review.click();
+      await dialog
+        .getByRole("button", { name: "Confirm reconciliation" })
+        .click();
+      await panel.getByText(/Recovery refused/).waitFor();
+      assert.equal(posts.length, 1);
+      assert.equal(
+        await panel.getByLabel("Workspace disposition").isDisabled(),
+        true,
+      );
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "Retry exact recovery" })
+          .count(),
+        0,
+      );
+      await panel
+        .getByRole("button", { name: "Check original receipt" })
+        .click();
+      await panel.getByText(/Receipt readback unavailable/).waitFor();
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "Retry exact recovery" })
+          .count(),
+        0,
+      );
+      readUnavailable = false;
+      await panel
+        .getByRole("button", { name: "Check original receipt" })
+        .click();
+      await panel
+        .getByRole("button", { name: "Retry exact recovery" })
+        .waitFor();
+      assert.equal(reads, 2);
+      refuse = false;
+      await panel.getByRole("button", { name: "Retry exact recovery" }).click();
+      await panel.getByText(/Outcome unknown/).waitFor();
+      assert.deepEqual(posts[1], posts[0]);
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "Retry exact recovery" })
+          .count(),
+        0,
+      );
+      await panel.locator("details").evaluate((e) => {
+        (e as HTMLDetailsElement).open = true;
+      });
+      await captureBrowserEvidence(page, `1366-bound-recovery-${engine}`);
+      await page.setViewportSize(phone);
+      await panel.scrollIntoViewIfNeeded();
+      await noPageOverflow(page);
+      await captureBrowserEvidence(page, `390-bound-recovery-${engine}`);
+      await page.route("**/recovery-options", async (route) => {
+        const result = await route.fetch(),
+          body = await result.json();
+        body.data.records = [];
+        await route.fulfill({ json: body });
+      });
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await panel.getByText(/identity changed/).waitFor();
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "Check original receipt" })
+          .count(),
+        1,
+      );
+      await panel
+        .getByRole("button", { name: "Check original receipt" })
+        .click();
+      await panel.getByText(/Execution reconciled/).waitFor();
+      assert.equal(reads, 3);
+      assert.equal(posts.length, 2);
+      assert.equal(f.runtime.turns, 0);
+      assert.equal(
+        await panel
+          .getByRole("button", { name: "Check original receipt" })
+          .count(),
+        0,
+      );
+    },
+  );
+}
+
+test("bound recovery blocks redacted, missing and refreshed identities without transferring proof", async (_t, journey) => {
+  const { page, f } = await startSettings(
+    journey,
+    "/app/assignments/:assignment/recovery",
+  );
+  let mode: "redacted" | "missing" | "eligible" | "changed" = "redacted",
+    posts = 0;
+  await page.route("**/recovery-options", async (route) => {
+    const result = await route.fetch(),
+      body = await result.json(),
+      r = body.data.records[0];
+    body.data.gaps = mode === "redacted" ? ["content-redacted"] : [];
+    r.workId = "fixed-work";
+    r.threadId = "fixed-thread";
+    r.turnId = mode === "changed" ? "changed-turn" : "fixed-turn";
+    r.process =
+      mode === "missing"
+        ? null
+        : {
+            processId: "12345",
+            processStartedAt: "fixed-birth",
+            bootId: "fixed-boot",
+          };
+    r.paths = [
+      {
+        path: "bound-turn-recover",
+        eligible: mode !== "missing",
+        blockedBy: mode === "missing" ? ["bound-identity-missing"] : [],
+      },
+    ];
+    body.data.records = [r];
+    await route.fulfill({ json: body });
+  });
+  await page.route("**/api/operator/commands", (route) => {
+    posts++;
+    return route.abort();
+  });
+  const panel = page.locator(".settings-panel").filter({
+    has: page.getByRole("heading", {
+      name: "Reconcile a bound turn",
+      exact: true,
+    }),
+  });
+  await page.reload();
+  await panel.getByText(/content-redacted/).waitFor();
+  await page.setViewportSize(phone);
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "390-bound-blocked");
+  await page.setViewportSize({ width: 1366, height: 900 });
+  assert.equal(
+    await panel
+      .getByRole("button", { name: "Review reconciliation", exact: true })
+      .isDisabled(),
+    true,
+  );
+  mode = "missing";
+  await page.reload();
+  await panel.getByText(/bound-identity-missing/).waitFor();
+  assert.equal(
+    await panel
+      .getByLabel("I independently confirmed this exact process exited")
+      .isDisabled(),
+    true,
+  );
+  mode = "eligible";
+  await page.reload();
+  await panel.getByText(/Eligible for review/).waitFor();
+  await panel
+    .getByLabel("I independently confirmed this exact process exited")
+    .check();
+  await panel.getByLabel("All effects and callbacks are settled").check();
+  await panel.getByLabel("Workspace disposition").selectOption("preserved");
+  await panel
+    .getByRole("button", { name: "Review reconciliation", exact: true })
+    .click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  mode = "changed";
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await panel.getByText(/identity changed/).waitFor();
+  assert.equal(
+    await panel
+      .getByRole("button", { name: "Review reconciliation", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await panel.getByLabel("All effects and callbacks are settled").isChecked(),
+    true,
+  );
+  assert.equal(posts, 0);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("retained HTML review cancels without a write and keeps the original request on refusal", async (_t, journey) => {
+  const { page, f, ids, web } = await startSettings(
+    journey,
+    "/app/assignments/:assignment/recovery",
+  );
+  const api = new OperatorApi(f.service, [f.directory]);
+  const options = await api.readRecoveryOptions(ids.assignmentId);
+  const r = options.data.records[0]!;
+  r.workId = "retained-review-work";
+  r.threadId = "retained-thread";
+  r.turnId = "retained-turn";
+  r.process = {
+    processId: "23456",
+    processStartedAt: "retained-birth",
+    bootId: "retained-boot",
+  };
+  r.paths = [{ path: "bound-turn-recover", eligible: true, blockedBy: [] }];
+  options.data.records = [r];
+  options.data.gaps = [];
+  // Browser coverage of native HTML/forms. T3 and the adjacent retained-handler test own real mutation rules.
+  const routes = runtimeOperatorRoutes(f.service, {
+    readRecoveryOptions: async () => options,
+    readOperation: (q) => api.readOperation(q),
+  });
+  const template = await (
+    await page.request.get(
+      `${web.origin}/runtime/assignment/${ids.assignmentId}`,
+    )
+  ).text();
+  const submitted: string[] = [];
+  await page.route("**/runtime/**", async (route) => {
+    const url = new URL(route.request().url()),
+      path = url.pathname;
+    const matched = routes.find(
+      (r) =>
+        r.method === route.request().method() &&
+        (r.path === path ||
+          (r.path === "/runtime/assignment/:assignmentId" &&
+            path === `/runtime/assignment/${ids.assignmentId}`)),
+    );
+    if (!matched) return route.continue();
+    const fields = Object.fromEntries(
+      new URLSearchParams(route.request().postData() ?? ""),
+    );
+    delete fields.csrfToken;
+    if (path.endsWith("/recover")) submitted.push(fields.payload!);
+    const result = await matched.handler({
+      params: { assignmentId: ids.assignmentId },
+      fields,
+      csrfToken: "fixture-csrf",
+    });
+    assert.equal(result.kind, "html");
+    if (result.kind !== "html") throw Error("Expected retained HTML");
+    await route.fulfill({
+      contentType: "text/html",
+      body: template.replace(/<main>[\s\S]*<\/main>/, result.body),
+    });
+  });
+  await page.goto(`${web.origin}/runtime/assignment/${ids.assignmentId}`);
+  const prepare = async () => {
+    await page
+      .getByLabel("I independently confirmed this exact process exited")
+      .check();
+    await page.getByLabel("All effects and callbacks are settled").check();
+    await page.getByLabel("Workspace disposition").selectOption("preserved");
+    await page.getByRole("button", { name: "Review reconciliation" }).focus();
+    await page.keyboard.press("Enter");
+    await page
+      .getByRole("heading", { name: "Bound-turn reconciliation" })
+      .waitFor();
+  };
+  await prepare();
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.textContent === "Cancel and return to evidence",
+  );
+  await captureBrowserEvidence(page, "1366-retained-review");
+  await page.setViewportSize(phone);
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "390-retained-review");
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Review reconciliation" }).waitFor();
+  assert.equal(submitted.length, 0);
+  await prepare();
+  await page.getByRole("button", { name: "Confirm reconciliation" }).focus();
+  await page.keyboard.press("Enter");
+  await page.getByText(/Recovery refused or outcome unknown/).waitFor();
+  assert.equal(submitted.length, 1);
+  const original = JSON.parse(submitted[0]!);
+  await page.getByRole("button", { name: "Check original receipt" }).click();
+  await page.getByText(/No receipt is recorded/).waitFor();
+  await page.getByRole("button", { name: "Confirm reconciliation" }).click();
+  await page.getByText(/Recovery refused or outcome unknown/).waitFor();
+  assert.deepEqual(JSON.parse(submitted[1]!), original);
+  assert.equal(f.runtime.turns, 0);
 });

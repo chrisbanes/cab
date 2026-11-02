@@ -199,13 +199,13 @@ export async function main(
       if (!operatorAuth)
         throw new Error("Operator authentication is unavailable");
       const routes = new OperatorRouteRegistry();
-      routes.registerSlot("runtime", runtimeOperatorRoutes(service));
       const bundle = await OperatorWebBundle.open(
         fileURLToPath(new URL("../../operator", import.meta.url)),
       );
       if (await consumeFatalFailure()) return;
       const authFile = process.env.CAB_OPERATOR_AUTH_FILE ?? "";
       const api = new OperatorApi(service, [dataDir, authFile]);
+      routes.registerSlot("runtime", runtimeOperatorRoutes(service, api));
       const readiness = serviceReadiness(service, api, { dataDir, authFile });
       // The VAPID key sits beside the operator auth file; an unusable one only turns push off.
       const push = await OperatorPush.open({

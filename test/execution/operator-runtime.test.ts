@@ -11,6 +11,8 @@ import type { Runtime } from "../../src/standalone/codex.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { boundWorld } from "./bound-turn-recovery-fixture.js";
 import { until } from "../fixtures/until.js";
 
 const runtime: Runtime = {
@@ -1210,4 +1212,75 @@ test("instruction apply refreshes the selected assignment revision once", async 
       /PRIVATE_ASSIGNMENT_PROMPT/,
       "assignment prompts stay out of the operator route",
     );
+});
+
+test("retained bound-turn controls review without writes, retain refusal and read original receipt before exact retry", async (t) => {
+  const w = await boundWorld(t),
+    service = w.s.f.service;
+  const api = new OperatorApi(service, [w.s.f.directory]);
+  const routes = runtimeOperatorRoutes(service, api);
+  const call = async (
+    path: string,
+    fields: Record<string, string> = {},
+    params: Record<string, string> = {},
+  ) => {
+    const result = await routes
+      .find((r) => r.path === path)!
+      .handler({ fields, params, csrfToken: "fixture-csrf" });
+    assert.equal(result.kind, "html");
+    return result.kind === "html" ? result.body : "";
+  };
+  const page = await call(
+    "/runtime/assignment/:assignmentId",
+    {},
+    { assignmentId: w.g.assignmentId },
+  );
+  assert.match(page, /Eligible for review/);
+  assert.match(page, /birth .*boot/);
+  const original = w.recovery();
+  const payload = JSON.stringify(original);
+  const fields = {
+    payload,
+    termination: "confirmed",
+    effects: "settled",
+    workspace: "preserved",
+  };
+  const review = await call("/runtime/control/bound-turn/review", fields);
+  assert.match(review, /cannot be undone/);
+  assert.match(review, /Cancel and return to evidence/);
+  assert.equal(service.recoveryForTask(w.g.taskId)[0]?.receipt, null);
+  const stale = structuredClone(original);
+  stale.receipt.turnId = "another-turn";
+  await assert.rejects(
+    () =>
+      call("/runtime/control/bound-turn/review", {
+        ...fields,
+        payload: JSON.stringify(stale),
+      }),
+    /identity changed/,
+  );
+  w.setMode("live");
+  const refused = await call("/runtime/control/bound-turn/recover", {
+    payload,
+    confirmed: "yes",
+  });
+  assert.match(refused, /Check original receipt/);
+  assert.doesNotMatch(refused, /<button>Confirm reconciliation/);
+  assert.match(refused, new RegExp(original.key));
+  assert.equal(service.recoveryForTask(w.g.taskId)[0]?.holds.writer, true);
+  const absent = await call("/runtime/control/bound-turn/check", { payload });
+  assert.match(absent, /No receipt is recorded/);
+  assert.match(absent, /Confirm reconciliation/);
+  w.setMode("verified");
+  const accepted = await call("/runtime/control/bound-turn/recover", {
+    payload,
+    confirmed: "yes",
+  });
+  assert.match(accepted, /Execution reconciled/);
+  const checks = w.checks();
+  const readback = await call("/runtime/control/bound-turn/check", { payload });
+  assert.match(readback, /Execution reconciled/);
+  assert.doesNotMatch(readback, /<button>Confirm reconciliation/);
+  assert.equal(w.checks(), checks);
+  assert.equal(w.runtime.turnInvocations.length, 1);
 });
