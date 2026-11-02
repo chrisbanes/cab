@@ -8539,6 +8539,8 @@ export class OperatorApi {
         c.key,
         c.projectId,
       );
+    // Per-repository settings are recorded only when the command carries them: the domain keeps the
+    // saved entries otherwise, so a command without them hashes the same before and after the upgrade.
     const command = ({
       repositories,
       ...policy
@@ -8548,8 +8550,7 @@ export class OperatorApi {
       projectId: c.projectId,
       expectedVersion: c.expectedVersion,
       ...policy,
-      // Absent when empty, so commands recorded before per-repository settings keep their hash.
-      ...(repositories.length ? { repositories } : {}),
+      ...(c.repositories ? { repositories } : {}),
       actor: "operator" as const,
     });
     const prefix =
@@ -8712,7 +8713,7 @@ export class OperatorApi {
               ),
           ),
         ]
-      : current.repositories;
+      : [];
     if (
       !c.preserveBranchPrefix &&
       c.branchPrefix !== undefined &&

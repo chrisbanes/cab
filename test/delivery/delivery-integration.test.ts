@@ -1290,6 +1290,7 @@ test("the configuration read reports each linked repository's code-host requirem
       credentialRef: null,
       grants: configuration().grants,
       requiredChecks: [{ name: "pipeline" }],
+      repositories: [],
     });
     assert.deepEqual(configuration().repositories, []);
     const legacy = await read();

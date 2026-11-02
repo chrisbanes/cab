@@ -2662,7 +2662,14 @@ export class DeliveryStore {
       throw new DomainConflictError(
         "Version conflict: delivery policy changed",
       );
-    const policy = deliveryPolicySchema.parse(input);
+    // A command without per-repository settings keeps the saved ones; parsing alone would empty them.
+    const policy = deliveryPolicySchema.parse(
+      input &&
+        typeof input === "object" &&
+        !Object.hasOwn(input, "repositories")
+        ? { ...input, repositories: current.repositories ?? [] }
+        : input,
+    );
     for (const [index, grant] of policy.grants.entries()) {
       if (
         grant.action === "project.field" &&

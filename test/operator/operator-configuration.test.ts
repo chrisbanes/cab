@@ -3840,3 +3840,87 @@ test("advanced submission preserves opaque grants checks and prefix alongside pu
   assert.equal(persisted.version, saved.version + 1);
   assert.equal(f.runtime.turns, 0);
 });
+
+/** A project with a linked repository the operator cannot see (its ID is a credential's name) and a visible one. */
+async function hiddenRepositoryFixture(t: TestContext) {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const hiddenPath = join(f.directory, "hidden-repository"),
+    visiblePath = join(f.directory, "visible-repository");
+  await checkout(hiddenPath, "https://github.com/acme/hidden.git");
+  await checkout(visiblePath, "https://github.com/acme/visible.git");
+  const hidden = "HIDDEN_REPOSITORY_ID",
+    previous = process.env[hidden];
+  process.env[hidden] = "hidden-repository-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env[hidden];
+    else process.env[hidden] = previous;
+  });
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: hidden,
+        path: hiddenPath,
+        ref: "main",
+      },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "visible",
+        path: visiblePath,
+        ref: "main",
+      },
+    ],
+  });
+  const policy = (
+    requiredChecks: Array<{ name: string }>,
+    repositories?: unknown[],
+  ) =>
+    f.service.domain().execute({
+      ...deliveryInput(projectId, {
+        expectedVersion: f.service.delivery().configuration(projectId).version,
+        credentialRef: `env:${hidden}`,
+        requiredChecks,
+        ...(repositories ? { repositories } : {}),
+      }),
+      actor: "operator",
+    } as never);
+  const save = (repositories: unknown[], key = randomUUID()) =>
+    api.execute(
+      deliveryInput(projectId, {
+        key,
+        expectedVersion: f.service.delivery().configuration(projectId).version,
+        repositories,
+      }),
+    );
+  const visible = {
+    repositoryId: "visible",
+    mergeMethod: "squash",
+    requiredChecks: [{ name: "build" }],
+  };
+  return { f, api, projectId, hidden, policy, save, visible };
+}
+
+test("a retried command without per-repository settings replays on a project that has them", async (t) => {
+  const { f, api, projectId, save, visible } = await hiddenRepositoryFixture(t);
+  await save([visible]);
+  const before = f.service.delivery().configuration(projectId);
+  const retry = deliveryInput(projectId, {
+    expectedVersion: before.version,
+    credentialRef: null,
+    requiredChecks: [{ name: "lint" }],
+  });
+  const first = await api.execute(retry);
+  const after = f.service.delivery().configuration(projectId);
+  assert.deepEqual(after.repositories, before.repositories);
+  assert.deepEqual(await api.execute(retry), first);
+  assert.equal(
+    f.service.delivery().configuration(projectId).version,
+    after.version,
+  );
+});

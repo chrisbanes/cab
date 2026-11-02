@@ -1107,6 +1107,25 @@ test("a policy stored with a project-wide check list reads with no repository en
       cabChecks: [{ name: "build" }],
     });
     assert.deepEqual(repositoryDeliverySettings(saved, "R2").cabChecks, []);
+    // A command that omits per-repository settings keeps the saved entries.
+    domain.execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 4,
+      mode: "through-merge",
+      credentialRef: null,
+      grants: [],
+      requiredChecks: [{ name: "lint" }],
+    });
+    assert.deepEqual(
+      delivery.configuration(projectId).repositories,
+      saved.repositories,
+    );
+    assert.deepEqual(delivery.configuration(projectId).requiredChecks, [
+      { name: "lint" },
+    ]);
   } finally {
     db.close();
   }
