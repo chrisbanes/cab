@@ -2528,3 +2528,50 @@ test("a sync imports an open task's issue brief from its counted comments, keeps
     db.close();
   }
 });
+
+test("a rate limit hit by issue brief reads never costs a selection its blocker reads", async () => {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  try {
+    addGitHubProject(domain);
+    const issues = [issue, { ...issue, nodeId: "I_2", number: 2 }];
+    const blockerReads: string[] = [];
+    const commentReads: string[] = [];
+    const reader: GitHubSourceReader = {
+      async readSelection() {
+        return { complete: true, issues, reason: null };
+      },
+      async readBlockers(reference) {
+        blockerReads.push(reference.nodeId);
+        return { complete: true, blockers: [], reason: null };
+      },
+      async readIssueStatus() {
+        return { status: "open" };
+      },
+      async readIssueComments(reference) {
+        commentReads.push(reference.nodeId);
+        return {
+          complete: false,
+          comments: [],
+          reason: "rate-limited",
+          resumeAt: Date.now() + 60_000,
+        };
+      },
+    };
+    await new GitHubSynchronizer(domain, sources, () => reader).refresh();
+    assert.deepEqual(blockerReads, ["I_1", "I_2"]);
+    // The first brief read paused the credential; the second is not attempted.
+    assert.deepEqual(commentReads, ["I_1"]);
+    for (const nodeId of ["I_1", "I_2"])
+      assert.equal(
+        domain.task(String(sources.issue(nodeId)?.taskId)).importedBlockers,
+        "clear",
+      );
+  } finally {
+    db.close();
+  }
+});

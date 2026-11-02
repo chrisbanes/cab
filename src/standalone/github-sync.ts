@@ -150,6 +150,41 @@ export class GitHubSynchronizer {
             repositoryName: issue.repositoryName,
             number: issue.number,
           };
+          const reads = this.readsBlockers(issue);
+          if (!reads) continue;
+          // Paused and unread issues are recorded as unknown, never left with an
+          // earlier "clear" that a later readiness could admit before its read.
+          const blockers: BlockerSnapshot =
+            reads === "unneeded"
+              ? { complete: false, blockers: [], reason: "task-unready" }
+              : !(reader instanceof CredentialGitHubSourceReader) &&
+                  this.paused(credentialRef)
+                ? { complete: false, blockers: [], reason: "rate-limited" }
+                : await reader.readBlockers(reference).catch(() => ({
+                    complete: false,
+                    blockers: [],
+                    reason: "reader-error",
+                  }));
+          if (this.stopped) return;
+          if (!(reader instanceof CredentialGitHubSourceReader))
+            this.notePause(credentialRef, blockers);
+          this.sources.reconcileBlockers(issue.nodeId, blockers, {
+            projectId,
+            configVersion: config.version,
+            credentialRef: config.credentialRef,
+            selectionId: selection.id,
+            reference,
+          });
+        }
+        // Issue briefs are read after every blocker read, so a rate limit they hit never
+        // leaves this selection's blockers unknown and stalls admission.
+        for (const issue of snapshot.issues) {
+          const reference: IssueReference = {
+            nodeId: issue.nodeId,
+            repositoryId: issue.repositoryId,
+            repositoryName: issue.repositoryName,
+            number: issue.number,
+          };
           // Only an open task reads its issue brief, once per pass; Done tasks keep their last one.
           if (
             reader.readIssueComments &&
@@ -177,31 +212,6 @@ export class GitHubSynchronizer {
               reference,
             });
           }
-          const reads = this.readsBlockers(issue);
-          if (!reads) continue;
-          // Paused and unread issues are recorded as unknown, never left with an
-          // earlier "clear" that a later readiness could admit before its read.
-          const blockers: BlockerSnapshot =
-            reads === "unneeded"
-              ? { complete: false, blockers: [], reason: "task-unready" }
-              : !(reader instanceof CredentialGitHubSourceReader) &&
-                  this.paused(credentialRef)
-                ? { complete: false, blockers: [], reason: "rate-limited" }
-                : await reader.readBlockers(reference).catch(() => ({
-                    complete: false,
-                    blockers: [],
-                    reason: "reader-error",
-                  }));
-          if (this.stopped) return;
-          if (!(reader instanceof CredentialGitHubSourceReader))
-            this.notePause(credentialRef, blockers);
-          this.sources.reconcileBlockers(issue.nodeId, blockers, {
-            projectId,
-            configVersion: config.version,
-            credentialRef: config.credentialRef,
-            selectionId: selection.id,
-            reference,
-          });
         }
       }
     }
