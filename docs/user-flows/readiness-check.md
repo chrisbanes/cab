@@ -1,6 +1,7 @@
 # Readiness check
 
-**Status:** implemented. `cab service install` runs it after it signs the CLI in; the
+**Status:** implemented. `cab service install` runs it through local CLI access (or the
+saved or explicitly provisioned token connection) once the service answers; the
 procedure is in [standalone macOS operations](../operations/standalone-macos.md).
 The Getting started Runtime row and first-task Fix actions that read these checks
 are planned.
