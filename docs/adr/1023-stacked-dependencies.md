@@ -52,7 +52,8 @@ belong to #1435–#1437.
   The lead rebases and publishes with `branch.force-push` under the project's grant
   (`allow` or `approval`); no new action kind or permission exists. When the dependent's own
   push lands, the restack is current and the workspace's recorded starting point moves to the
-  parent head. A chain restacks bottom-up because each restack waits for the push below it.
+  parent head. A head that moves back to the commit the dependent last settled on settles
+  the restack at once, since there is nothing to rebase. A chain restacks bottom-up because each restack waits for the push below it.
   The reconcile runs on every scheduler wake and at start, so a missed event is recomputed.
 
 ## Considered options

@@ -648,14 +648,16 @@ test("a local dependent's operator-set imported-blocker flag still holds a stack
   assert.deepEqual(f.reasons(D), ["imported-blockers-blocked"]);
 });
 
-test("a stacked-dependency table without restack numbers gains them on migrate", (t) => {
+test("a stacked-dependency table without later columns gains them on migrate", (t) => {
   const f = fixture(t);
   f.stacking(true);
   f.depend(D, B);
   f.publish(B);
   f.domain.recordStackedDependency(D);
   f.domain.ensureLeadAssignment(D);
-  f.db.exec("ALTER TABLE stacked_dependencies DROP COLUMN restackSeq");
+  f.db.exec(
+    "ALTER TABLE stacked_dependencies DROP COLUMN restackSeq; ALTER TABLE stacked_dependencies DROP COLUMN settledHead",
+  );
   f.domain.migrate();
   const queued: string[] = [];
   f.publish(B, { pushed: head("b") });
@@ -665,4 +667,41 @@ test("a stacked-dependency table without restack numbers gains them on migrate",
   });
   assert.deepEqual(queued, [`restack:R1:1:${head("b")}`]);
   f.domain.migrate();
+});
+
+test("a parent head that returns to the dependent's starting point settles the restack", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  f.domain.ensureLeadAssignment(D);
+  // D's own work, proved against the recorded head a.
+  f.publish(D, { pushed: head("d") });
+  const queued: string[] = [];
+  const advanced: string[] = [];
+  const reconcile = () =>
+    f.domain.reconcileRestacks({
+      queue: (_task, reason, identity) => queued.push(`${identity} ${reason}`),
+      advance: (_task, _repo, commit) => advanced.push(commit),
+    });
+  f.publish(B, { pushed: head("b") });
+  reconcile();
+  assert.equal(f.domain.stackFacts(D)?.restack, "pending");
+  // Back on a before D restacked: D's unchanged commit already starts from it.
+  f.publish(B, { pushed: head("a") });
+  reconcile();
+  const stack = f.domain.stackFacts(D);
+  assert.equal(stack?.parentHead, head("a"));
+  assert.equal(stack?.restack, "current");
+  assert.equal(queued.length, 2);
+  assert.match(queued[1] ?? "", /moved back to a{40}.*No restack is needed/);
+  assert.deepEqual(advanced, [], "the starting point never moved");
+  // Republishing the same commit changes nothing, and the next move restacks as usual.
+  reconcile();
+  assert.equal(f.domain.stackFacts(D)?.restack, "current");
+  f.publish(B, { pushed: head("c") });
+  reconcile();
+  assert.equal(f.domain.stackFacts(D)?.restack, "pending");
+  assert.match(queued[2] ?? "", /^restack:R1:3:c{40} .*Rebase/);
 });

@@ -31,7 +31,7 @@ export const stackingTables = `
   CREATE TABLE IF NOT EXISTS stacked_dependencies (
     taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id),
     blockerTaskId TEXT NOT NULL UNIQUE REFERENCES domain_tasks(id),
-    repositoryId TEXT NOT NULL, parentHead TEXT NOT NULL,
+    repositoryId TEXT NOT NULL, parentHead TEXT NOT NULL, settledHead TEXT,
     restack TEXT NOT NULL CHECK(restack IN ('current','pending')),
     restackFromSha TEXT, restackSeq INTEGER NOT NULL DEFAULT 0,
     recordedAt INTEGER NOT NULL

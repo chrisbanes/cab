@@ -793,17 +793,20 @@ export class DomainStore {
       );
       migrateSourceStorage(this.db);
       this.db.exec(stackingTables);
-      // Stacked dependencies written before numbered restack notices have none yet.
-      if (
-        !(
-          this.db
-            .prepare("PRAGMA table_info(stacked_dependencies)")
-            .all() as Row[]
-        ).some((column) => column.name === "restackSeq")
-      )
-        this.db.exec(
-          "ALTER TABLE stacked_dependencies ADD COLUMN restackSeq INTEGER NOT NULL DEFAULT 0",
-        );
+      // Stacked dependencies written before these columns existed have none yet.
+      const stackedColumns = (
+        this.db
+          .prepare("PRAGMA table_info(stacked_dependencies)")
+          .all() as Row[]
+      ).map((column) => column.name);
+      for (const [name, definition] of [
+        ["restackSeq", "INTEGER NOT NULL DEFAULT 0"],
+        ["settledHead", "TEXT"],
+      ])
+        if (!stackedColumns.includes(name))
+          this.db.exec(
+            `ALTER TABLE stacked_dependencies ADD COLUMN ${name} ${definition}`,
+          );
       const seedRecords = !this.one(
         "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'task_dependency_records'",
       );
@@ -2249,9 +2252,16 @@ export class DomainStore {
       if (!head) throw new DomainConflictError("Blocker has no pushed head");
       this.db
         .prepare(
-          "INSERT INTO stacked_dependencies (taskId, blockerTaskId, repositoryId, parentHead, restack, restackFromSha, recordedAt) VALUES (?, ?, ?, ?, 'current', NULL, ?)",
+          "INSERT INTO stacked_dependencies (taskId, blockerTaskId, repositoryId, parentHead, settledHead, restack, restackFromSha, recordedAt) VALUES (?, ?, ?, ?, ?, 'current', NULL, ?)",
         )
-        .run(taskId, facts.blockerTaskId, facts.repositoryId, head, Date.now());
+        .run(
+          taskId,
+          facts.blockerTaskId,
+          facts.repositoryId,
+          head,
+          head,
+          Date.now(),
+        );
       return this.stackedDependency(taskId);
     });
   }
@@ -2284,11 +2294,14 @@ export class DomainStore {
         // The push was proved to descend from parentHead, its starting point.
         this.db
           .prepare(
-            "UPDATE stacked_dependencies SET restack = 'current', restackFromSha = NULL WHERE taskId = ?",
+            "UPDATE stacked_dependencies SET restack = 'current', restackFromSha = NULL, settledHead = parentHead WHERE taskId = ?",
           )
           .run(taskId);
         effects.advance(taskId, repositoryId, parentHead);
       }
+      // The head the dependent's last push was proved against: no push is unresolved when the
+      // head moves, and one that lands while pending settles it first.
+      const settled = landed ? parentHead : row.settledHead;
       const blocker = String(row.blockerTaskId);
       const head = this.blocksDependents(blocker)
         ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
@@ -2305,14 +2318,23 @@ export class DomainStore {
         );
       if (moved && head && apply) {
         parentHead = head;
+        // Back on the head the branch already starts from: nothing to rebase, so it is settled.
+        const back = head === settled;
         this.db
           .prepare(
-            "UPDATE stacked_dependencies SET parentHead = ?, restack = 'pending', restackFromSha = ?, restackSeq = restackSeq + 1 WHERE taskId = ?",
+            "UPDATE stacked_dependencies SET parentHead = ?, restack = ?, restackFromSha = ?, restackSeq = restackSeq + 1 WHERE taskId = ?",
           )
-          .run(parentHead, own, taskId);
+          .run(
+            parentHead,
+            back ? "current" : "pending",
+            back ? null : own,
+            taskId,
+          );
         effects.queue(
           taskId,
-          `The blocker's branch moved to ${parentHead}. Rebase this task's branch onto ${parentHead} and publish it with branch.force-push (branch.push if it was never pushed); the push must descend from ${parentHead}.`,
+          back
+            ? `The blocker's branch moved back to ${parentHead}, which this task's branch already starts from. No restack is needed; disregard the earlier restack request.`
+            : `The blocker's branch moved to ${parentHead}. Rebase this task's branch onto ${parentHead} and publish it with branch.force-push (branch.push if it was never pushed); the push must descend from ${parentHead}.`,
           // Numbered, so a head that returns to an earlier commit is still announced.
           `restack:${repositoryId}:${Number(row.restackSeq) + 1}:${parentHead}`,
         );
