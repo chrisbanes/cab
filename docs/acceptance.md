@@ -201,8 +201,15 @@ only, redirects, managed refusal before reads/HTTP, and diagnostic redaction.
 Shared route/session/CSRF, revision, receipt, approval and hold tests remain the
 authority evidence. This is same-OS-account trust, not process isolation.
 
-Installed-service discovery and lifecycle integration remain outstanding in the
-sibling of #1413. Foreground evidence does not qualify that integration, npm
+Installed-service discovery and lifecycle integration are covered offline by
+`test/operations/installation-discovery.test.ts` (protected record discovery,
+explicit record selection, adoption and token precedence against real services),
+`test/operations/service-lifecycle.test.ts` (local default install, saved-selection
+preservation, token-install refusals) and `test/operations/npm-service-lifecycle.test.ts`
+(a spawned installed service: local install doctor, restart and upgrade through
+the same local selection, and a revoked selected token refusing before the job
+stops). The bounded live installed and foreground smoke on a disposable label is
+still required evidence for this integration. None of this qualifies npm
 publication, a production deployment or cutover. The required final-head `check`
 CI context remains a merge gate even when local checks pass.
 

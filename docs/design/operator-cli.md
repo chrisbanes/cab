@@ -246,10 +246,32 @@ trust, with no claim of isolation from another process under that account.
 Resolution preserves `--connection`, `CAB_CONNECTION`, saved default and sole saved
 connection, in that order. Ambiguity, invalid selection, missing token, scope,
 expiry, revocation, logout or service failure never falls back. Only when no
-connection resolves does discovery use `CAB_LOCAL_STATE` (a data directory) or
-`~/Library/Application Support/cab/data`. No directory or port scanning occurs.
-Installed-service record discovery and lifecycle adoption remain outstanding in
-the sibling of #1413; existing installation/token setup remains unchanged.
+connection resolves does discovery use `CAB_LOCAL_STATE` (a data directory), then
+the default install record
+`~/Library/Application Support/cab/launchd/local.cab.service.json`, and only when
+that record is absent, `~/Library/Application Support/cab/data`. The record is a
+pointer, not authority: its private directory and owner-only regular file are
+checked, it must describe its own canonical `STATE/launchd/LABEL.json` →
+`STATE/data` layout and a numeric loopback origin, the service's published local
+origin must equal the recorded one, and the live installation identity must equal
+the material's. A present record that fails any check fails the command; nothing
+falls through to another installation, and no directory or port scanning occurs.
+`--local-installation RECORD_FILE` selects any other installation by its exact
+record and requires `--local`, except on
+`cab connection local NAME --local-installation RECORD_FILE`; it cannot be combined
+with `--local-state`.
+
+`cab service install` gives the CLI local access by default: it mints no token,
+opens no sign-in session and saves no connection, asking for a new browser password
+only when the auth file is missing. Its doctor runs through the selected saved
+connection unchanged, or with none, local access to the install's own record. A
+selected token connection for another origin, or an unresolvable selection, is
+reported and never replaced. `--access token` or `--token-file PATH` keeps the
+explicit 90-day read-token setup, refusing a connection name that is already saved.
+`service upgrade` selects its connection once for the whole operation (with none
+saved, local access to the managed install record), reads readiness through it
+before stopping the job, and reloads rotated local material for each post-start
+read without reselecting.
 
 `--local` deliberately selects local access ahead of saved/environment selection;
 it cannot be combined with `--connection` or token-login options.

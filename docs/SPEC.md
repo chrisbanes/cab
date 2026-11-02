@@ -94,8 +94,12 @@ Saved token selection, scope, expiry, revocation and logout retain priority and
 never fall back on failure. Local access preserves route, session, CSRF, revision,
 receipt, approval and hold rules; managed assignments are refused before secret
 reads or authenticated HTTP. This trusts the OS account and claims no process
-isolation. Installed-service discovery and lifecycle integration remain outstanding
-in the sibling of #1413. Settings issues, lists, rotates and revokes CLI credentials,
+isolation. With no saved selection the CLI discovers the default installed service
+from its protected install record, checked against the published loopback origin and
+live installation identity; `--local --local-installation RECORD_FILE` selects any
+other installation. `cab service install` uses local access by default, minting no
+token, and keeps an explicit `--access token` / `--token-file` setup; doctor and
+upgrade readiness use the selected connection's mode. Settings issues, lists, rotates and revokes CLI credentials,
 and the packaged `cab` executable supports `auth login|status|logout`,
 `connection list|use|remove`, project and profile list/get/instructions/revisions,
 task list/search/get/messages, assignment get/history/instructions, result
