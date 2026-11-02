@@ -455,8 +455,8 @@ function GeneralTab(p: TabProps) {
               </DraftField>
             )}
             <p className="metadata muted">
-              {diagnosticCaptureLine(data.diagnosticCapture)}{" "}
-              {diagnosticCaptureAppliesNote}
+              {diagnosticCaptureLine(data.diagnosticCapture)}
+              {data.diagnosticCapture && ` ${diagnosticCaptureAppliesNote}`}
             </p>
             <PrivateTextField
               draft={d}

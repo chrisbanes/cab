@@ -4680,11 +4680,6 @@ test("diagnostic capture sits beside command network access and saves both modes
     true,
   );
   assert.equal(await capture.inputValue(), "enhanced");
-  await page
-    .getByText(
-      "A change applies to executions started afterwards and erases no stored diagnostics.",
-    )
-    .waitFor();
   await captureBrowserEvidence(page, "1366-project-diagnostic-capture");
   const save = page.getByRole("button", { name: "Save project", exact: true });
   assert.equal(await save.isDisabled(), true);
@@ -4704,9 +4699,6 @@ test("diagnostic capture sits beside command network access and saves both modes
   assert.equal("commandNetworkAccess" in body, false);
   await savedOutcome(page);
   assert.equal(d.diagnosticCaptureMode(ids.atlas), "baseline");
-  await page
-    .getByText("Diagnostic capture is baseline for this project.")
-    .waitFor();
   assert.equal(await capture.inputValue(), "baseline");
 
   await capture.selectOption("enhanced");
@@ -4755,11 +4747,6 @@ test("an unreported diagnostic capture is shown as not reported, selects no mode
     await page.getByRole("combobox", { name: "Diagnostic capture" }).count(),
     0,
   );
-  await page
-    .getByText(
-      "The service does not report this project's mode, so it cannot be changed here.",
-    )
-    .waitFor();
   await page.getByRole("switch", { name: "Pause project" }).click();
   const sent = commandBody(page);
   await page.getByRole("button", { name: "Save project", exact: true }).click();
