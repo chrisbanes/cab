@@ -276,3 +276,71 @@ test("switching a GitHub project to Jira drops its GitHub readiness rule", async
   await w.ok("rw", ["project", "apply", "--file", out]);
   assert.equal(w.d.jiraConfiguration(w.projectId)?.readiness, null);
 });
+
+test("Jira closed-issue policy previews without mutation, applies, and preserves an omitted edit", async (t) => {
+  const w = await world(t);
+  const prepare = async (mode?: string) => {
+    const out = join(w.h.dir, `policy-${randomUUID()}.json`);
+    const result = await w.ok("ro", [
+      "project",
+      "prepare-source",
+      w.projectId,
+      "--out",
+      out,
+      "--edit-file",
+      w.file(
+        "policy-edit.json",
+        JSON.stringify({
+          jira: {
+            instance: site,
+            selections: [{ jql: "q" }],
+            ...(mode === undefined ? {} : { closedIssues: mode }),
+          },
+        }),
+      ),
+    ]);
+    return { out, result, doc: JSON.parse(readFileSync(out, "utf8")) };
+  };
+  const done = await prepare("done");
+  assert.equal(w.d.jiraConfiguration(w.projectId), null);
+  assert.equal(done.doc.command.closedIssues, "done");
+  assert.ok(JSON.stringify(done.result).includes("closedIssues"));
+  assert.ok(JSON.stringify(done.result).includes("Treat closure as Done"));
+  await w.ok("rw", ["project", "apply", "--file", done.out]);
+  assert.equal(
+    (await w.ok("ro", ["project", "sources", w.projectId])).data.source
+      .closedIssues,
+    "done",
+  );
+  const omitted = await prepare();
+  assert.equal("closedIssues" in omitted.doc.command, false);
+  assert.equal(
+    JSON.stringify(omitted.doc.preview).includes("closedIssues"),
+    false,
+  );
+  await w.ok("rw", ["project", "apply", "--file", omitted.out]);
+  assert.equal(w.d.jiraConfiguration(w.projectId)?.closedIssues, "done");
+  const skip = await prepare("skip");
+  assert.equal(skip.doc.command.closedIssues, "skip");
+  await w.ok("rw", ["project", "apply", "--file", skip.out]);
+  assert.equal(
+    (await w.ok("ro", ["project", "sources", w.projectId])).data.source
+      .closedIssues,
+    "skip",
+  );
+  const invalid = await w.cli("ro", [
+    "project",
+    "prepare-source",
+    w.projectId,
+    "--out",
+    join(w.h.dir, "invalid.json"),
+    "--edit-file",
+    w.file(
+      "invalid-edit.json",
+      JSON.stringify({
+        jira: { instance: site, selections: [], closedIssues: "closed" },
+      }),
+    ),
+  ]);
+  assert.notEqual(invalid.code, 0);
+});

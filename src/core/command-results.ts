@@ -159,6 +159,13 @@ export const jiraConfigurationCommandResultSchema = jiraConfigurationSchema
   .extend({ version: positiveInteger })
   .strict();
 
+const legacyJiraConfigurationCommandResultSchema =
+  jiraConfigurationCommandResultSchema
+    .extend({
+      closedIssues: jiraConfigurationSchema.shape.closedIssues.optional(),
+    })
+    .strict();
+
 export const githubActivationCommandResultSchema = z
   .object({
     projectId: id,
@@ -216,7 +223,7 @@ export interface DomainCommandResultMap {
   "github.configure": z.output<
     typeof legacyGithubConfigurationCommandResultSchema
   >;
-  "jira.configure": z.output<typeof jiraConfigurationCommandResultSchema>;
+  "jira.configure": z.output<typeof legacyJiraConfigurationCommandResultSchema>;
   "github.activate": z.output<typeof legacyGithubActivationCommandResultSchema>;
   "github.place": z.output<typeof taskCommandResultSchema>;
   "source.review": z.output<typeof taskCommandResultSchema>;
@@ -375,7 +382,12 @@ function parseCommandOutcome(
     case "jira.configure":
       return {
         type,
-        result: parseUnchanged(jiraConfigurationCommandResultSchema, value),
+        result: parseUnchanged<DomainCommandResultMap["jira.configure"]>(
+          fresh
+            ? jiraConfigurationCommandResultSchema
+            : legacyJiraConfigurationCommandResultSchema,
+          value,
+        ),
       };
     case "github.activate":
       return {

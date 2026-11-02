@@ -274,6 +274,7 @@ export type GitHubSelection = z.output<typeof selectionSchema>;
 export const jiraConfigurationSchema = z
   .object({
     instance: jiraInstanceSchema,
+    closedIssues: closedIssuesSchema,
     selections: z
       .array(jiraSelectionSchema)
       .max(30)

@@ -310,3 +310,24 @@ test("an unmet label condition still reports readiness-lost after cab's own clos
   await f.service.refreshGitHub();
   assert.equal(f.store.hold(issueId)?.reason, "readiness-lost");
 });
+
+test("Done mode cannot treat an unpinned own-close attribution mismatch as provider completion", async (t) => {
+  const f = await fixture(t);
+  const saved = f.service.domain().jiraConfiguration(f.projectId)!;
+  f.service.domain().execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: saved.version,
+    instance: saved.instance,
+    selections: saved.selections,
+    closedIssues: "done",
+  });
+  closeAs(f, otherAccountId);
+  assert.equal(f.store.deliveryClosure(issueId), undefined);
+  await f.service.refreshGitHub();
+  assert.equal(f.store.hold(issueId)?.reason, "closure-attribution-unproved");
+  assert.equal(f.service.domain().task(f.taskId).state, "open");
+  assert.equal(f.store.providerCompletion(f.taskId), undefined);
+});

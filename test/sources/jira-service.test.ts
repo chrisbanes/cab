@@ -744,3 +744,57 @@ test("a project without select-field conditions never hides another project's ob
     !f.service.domain().admission(taskId).reasons.includes("task-unready"),
   );
 });
+
+test("Jira policy reads default Skip, explicit Done and omitted edits under the version fence", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  // A switch must not inherit an unused GitHub source's Done policy.
+  await f.api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: 1,
+    selections: [],
+    readiness: null,
+    closedIssues: "done",
+  });
+  const save = (
+    closedIssues?: "skip" | "done",
+    expectedVersion = f.service.domain().jiraConfiguration(f.projectId)
+      ?.version ?? 2,
+  ) =>
+    f.api.execute({
+      type: "jira.configure",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion,
+      instance: site,
+      selections: [],
+      ...(closedIssues === undefined ? {} : { closedIssues }),
+    });
+  await save();
+  assert.equal(
+    (await f.api.readProjectConfiguration(f.projectId)).data.source
+      .closedIssues,
+    "skip",
+  );
+  await save("done");
+  await save();
+  assert.equal(
+    (await f.api.readProjectConfiguration(f.projectId)).data.source
+      .closedIssues,
+    "done",
+  );
+  await assert.rejects(save("skip", 3), { status: 409 });
+  assert.equal(
+    (await f.api.readProjectConfiguration(f.projectId)).data.source
+      .closedIssues,
+    "done",
+  );
+  await save("skip");
+  assert.equal(
+    (await f.api.readProjectConfiguration(f.projectId)).data.source
+      .closedIssues,
+    "skip",
+  );
+});
