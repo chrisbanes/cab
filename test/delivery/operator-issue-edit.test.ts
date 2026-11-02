@@ -82,6 +82,13 @@ test("a reviewed, approved operator edit is one issue.edit that the next sync ob
   const synced = f.service.githubSources().issue("I1");
   assert.equal(synced?.observedTitle, edit.title);
   assert.equal(synced?.observedBody, edit.body);
+  // Live text: the task takes the confirmed edit, and nothing holds it.
+  const task = f.service.domain().task(f.taskId);
+  assert.deepEqual([task.title, task.outcome], [edit.title, edit.body]);
+  assert.equal(f.service.githubSources().hold("I1"), undefined);
+  assert.ok(
+    !f.service.domain().admission(f.taskId).reasons.includes("source-hold"),
+  );
 });
 
 test("without an edit grant nothing is approved or sent", async (t) => {
