@@ -857,6 +857,107 @@ test("later-pass chronology excludes future attempts and equal timestamps with d
   }
 });
 
+test("earlier cancelled or unsupported job outcomes remain incomplete after a successful rerun", async () => {
+  for (const conclusion of [
+    "cancelled",
+    "timed_out",
+    "action_required",
+    "neutral",
+    "unknown-result",
+  ]) {
+    const report = await api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: async (url: string) => {
+        if (url.includes("created="))
+          return apiResponse({
+            workflow_runs: [
+              runRecord({ run_attempt: 2, conclusion: "success" }),
+            ],
+          });
+        if (url.includes("head_sha="))
+          return apiResponse({ workflow_runs: [] });
+        const later = url.includes("attempts/2");
+        return apiResponse({
+          jobs: [
+            {
+              id: later ? 2 : 1,
+              name: "check",
+              status: "completed",
+              conclusion: later ? "success" : conclusion,
+              html_url: `https://github.com/chrisbanes/cab/actions/runs/10/job/${later ? 2 : 1}`,
+            },
+          ],
+        });
+      },
+    });
+    assert.equal(report.verdict, "insufficient-evidence", conclusion);
+    assert.equal(report.incomplete, 1, conclusion);
+    assert.equal(
+      report.coverageRuns[0].coverage[0].reason,
+      "job-conclusion-unresolved",
+    );
+    assert.equal(report.coverageRuns[0].coverage[0].conclusion, conclusion);
+    assert.ok(report.coverageRuns[0].coverage[0].jobUrl);
+  }
+});
+
+test("attempt chronology uses numeric extrema across multiple job timestamps", async () => {
+  const report = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport: async (url: string) => {
+      if (url.includes("created="))
+        return apiResponse({
+          workflow_runs: [runRecord({ run_attempt: 2, conclusion: "success" })],
+        });
+      if (url.includes("head_sha=")) return apiResponse({ workflow_runs: [] });
+      if (url.endsWith("/logs")) return apiResponse("✖ failure (1ms)");
+      if (url.includes("attempts/1"))
+        return apiResponse({
+          jobs: [
+            {
+              id: 1,
+              name: "operator-2",
+              status: "completed",
+              conclusion: "failure",
+              started_at: "2026-11-01T09:59:00Z",
+              completed_at: "2026-11-01T10:00:00.200Z",
+              html_url:
+                "https://github.com/chrisbanes/cab/actions/runs/10/job/1",
+            },
+          ],
+        });
+      return apiResponse({
+        jobs: [
+          {
+            id: 2,
+            name: "check",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-11-01T10:00:00.500Z",
+            completed_at: "2026-11-01T10:01:00Z",
+            html_url: "https://github.com/chrisbanes/cab/actions/runs/10/job/2",
+          },
+          {
+            id: 3,
+            name: "operator-2",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-11-01T10:00:00Z",
+            completed_at: "2026-11-01T10:01:00.500Z",
+            html_url: "https://github.com/chrisbanes/cab/actions/runs/10/job/3",
+          },
+        ],
+      });
+    },
+  });
+  const attempts = report.runs[0].attempts;
+  assert.equal(attempts[1].startedAt, "2026-11-01T10:00:00Z");
+  assert.equal(attempts[1].completedAt, "2026-11-01T10:01:00.500Z");
+  assert.deepEqual(report.sameShaCorroboration[0].laterPasses, []);
+});
+
 test("same-run success with missing chronology is not reported as a later pass", async () => {
   const sourceRun = runRecord({
     id: 50,

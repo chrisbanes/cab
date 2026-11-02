@@ -702,9 +702,15 @@ export async function renderReport({
               jobId: job.id,
               jobUrl: job.html_url,
             });
-          if (job.status !== "completed" || job.conclusion == null)
+          if (
+            job.status !== "completed" ||
+            !["success", "failure", "skipped"].includes(job.conclusion)
+          )
             run.coverage.push({
-              reason: "job-incomplete",
+              reason:
+                job.status !== "completed" || job.conclusion == null
+                  ? "job-incomplete"
+                  : "job-conclusion-unresolved",
               attempt,
               jobId: job.id,
               jobUrl: job.html_url,
@@ -714,13 +720,15 @@ export async function renderReport({
           attemptInfo.jobs.push(jobRecord);
           if (
             validTimestamp(job.started_at) &&
-            (!attemptInfo.startedAt || job.started_at < attemptInfo.startedAt)
+            (!attemptInfo.startedAt ||
+              Date.parse(job.started_at) < Date.parse(attemptInfo.startedAt))
           )
             attemptInfo.startedAt = job.started_at;
           if (
             validTimestamp(job.completed_at) &&
             (!attemptInfo.completedAt ||
-              job.completed_at > attemptInfo.completedAt)
+              Date.parse(job.completed_at) >
+                Date.parse(attemptInfo.completedAt))
           )
             attemptInfo.completedAt = job.completed_at;
           if (job.status !== "completed" || job.conclusion === null)
