@@ -157,6 +157,7 @@ import {
   taskMessagePageSchema,
   taskRecordQuerySchema,
   taskResultPageSchema,
+  sourceHoldReasonSchema,
   taskSchema,
   taskTimelineSchema,
   taskToolOutputSchema,
@@ -4945,6 +4946,10 @@ export class OperatorApi {
             active: Boolean(hold.active),
             revision: Number(hold.generation),
             reasonCode: "source-held",
+            // Stored text is persisted data: an inactive or unrecognised reason reads as null.
+            reason: hold.active
+              ? (sourceHoldReasonSchema.safeParse(hold.reason).data ?? null)
+              : null,
           }
         : null,
     };

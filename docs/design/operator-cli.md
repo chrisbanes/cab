@@ -560,8 +560,9 @@ confirmation material, reused keys with other material, changed authority, held
 admission, a task without a bound issue) are `409`, and an approval without a grant
 is `403`; other failures stay `command-outcome-unknown`. Posted comments carry a
 hidden `<!-- cab-operation:ID -->` marker that the provider read-back matches.
-Installation-wide source refresh, `source.review` and a list of pending comment
-reviews are not CLI commands.
+Installation-wide source refresh and a list of pending comment reviews are not CLI
+commands. `source.review` (Resume source hold) has a JSON command for the web task
+workspace but no CLI command.
 
 `delivery settle TASK_ID --decision accepted|closed` sends `delivery.settle`, and
 `result deliver TASK_ID RESULT_ID` sends `result.recipient`, both scoped `task:<id>`

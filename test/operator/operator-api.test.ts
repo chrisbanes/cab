@@ -20,7 +20,11 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
-import { inboxReadSchema, taskSchema } from "../../src/operator/contracts.js";
+import {
+  inboxReadSchema,
+  operatorCommandSchema,
+  taskSchema,
+} from "../../src/operator/contracts.js";
 import { executionPolicy } from "../../src/standalone/codex.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { CoordinationView } from "../../src/standalone/coordination-view.js";
@@ -1560,6 +1564,142 @@ test("imported projections validate provider fields and distinguish attempted sy
     "partial-sync",
   );
   assert.doesNotMatch(JSON.stringify(read), /PRIVATE PROVIDER ERROR/);
+});
+test("source.review resumes a source hold through the command flow and refuses definitely", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const d = f.service.domain();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    credentialRef: "env:UI02_SYNTHETIC_REFERENCE",
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R1",
+        owner: "owner",
+        name: "repo",
+      },
+    ],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
+  });
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+  const source = f.service.githubSources();
+  const issue = (state: "open" | "closed", labels: string[]) => ({
+    providerInstance: "github.com",
+    nodeId: "I1",
+    repositoryId: "R1",
+    repositoryName: "owner/repo",
+    number: 42,
+    title: "Imported",
+    body: "The outcome",
+    state,
+    labels,
+    projectFields: [],
+  });
+  const sync = (state: "open" | "closed", labels = ["ready"]) =>
+    source.reconcileSelection(ids.projectId, "repo", {
+      complete: true,
+      reason: null,
+      issues: [issue(state, labels)],
+    });
+  sync("open");
+  const taskId = String(source.issue("I1")?.taskId);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const read = async () => (await api.readTask(taskId)).data;
+  const resume = (expectedVersion: number, id = taskId) => ({
+    type: "source.review" as const,
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: id,
+    expectedVersion,
+    decision: "resume-source-hold" as const,
+  });
+  const refused = (error: unknown) =>
+    error instanceof OperatorApiError &&
+    error.status === 409 &&
+    error.code === "conflict";
+
+  assert.equal((await read()).source?.hold, null);
+  // Readiness lost holds the task, and the read names why.
+  sync("open", []);
+  assert.deepEqual((await read()).source?.hold, {
+    active: true,
+    revision: 1,
+    reasonCode: "source-held",
+    reason: "readiness-lost",
+  });
+  // Closing replaces the hold; reopening does not release a closure hold.
+  sync("open");
+  sync("closed");
+  assert.equal((await read()).source?.hold?.reason, "closed");
+  // An active hold while the source is closed is refused, not left unknown.
+  await assert.rejects(
+    api.execute(resume((await read()).task.version)),
+    refused,
+  );
+  sync("open");
+  const held = await read();
+  assert.equal(held.source?.hold?.active, true);
+  assert.ok(held.admission.reasons.includes("source-held"));
+
+  // A stale version, and a local task, are definite refusals.
+  await assert.rejects(api.execute(resume(held.task.version - 1)), refused);
+  await assert.rejects(
+    api.execute(resume(Number(d.task(ids.taskId).version), ids.taskId)),
+    refused,
+  );
+  // Only the one decision parses.
+  assert.equal(
+    operatorCommandSchema.safeParse({
+      ...resume(held.task.version),
+      decision: "clarification",
+    }).success,
+    false,
+  );
+
+  const command = resume(held.task.version);
+  const receipt = await api.execute(command);
+  assert.equal(receipt.kind, "domain");
+  assert.deepEqual(await api.execute(command), receipt);
+  const resumed = await read();
+  assert.equal(resumed.task.version, held.task.version + 1);
+  assert.deepEqual(resumed.source?.hold, {
+    active: false,
+    revision: held.source?.hold?.revision,
+    reasonCode: "source-held",
+    reason: null,
+  });
+  assert.equal(resumed.source?.review?.decision, "resume-source-hold");
+  assert.ok(!resumed.admission.reasons.includes("source-held"));
+  // With no active hold, a second decision at the current version is refused.
+  await assert.rejects(api.execute(resume(resumed.task.version)), refused);
+  // A stored reason outside the set reads as null rather than passing through.
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE source_holds SET active = 1, reason = 'changed-text' WHERE externalId = 'I1'",
+      )
+      .run(),
+  );
+  const unknown = (await read()).source?.hold;
+  assert.equal(unknown?.active, true);
+  assert.equal(unknown?.reason, null);
 });
 test("the task read carries an imported task's issue brief apart from its outcome, with its truncation", async (t) => {
   const f = await createOperatorFixture();
