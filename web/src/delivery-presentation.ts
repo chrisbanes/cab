@@ -36,6 +36,18 @@ export const deliveryBlockerSentence = (code: string, codeHost?: CodeHost) =>
     "Delivery is waiting on a condition this version can't describe.",
   );
 
+const mergeBlockerSentences: Record<string, string> = {
+  "no-required-checks":
+    "No required checks: neither the code host nor cab requires a check, so the merge is held.",
+  "merge-method-not-configured":
+    "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
+};
+/** A merge-gate code as a sentence when it has one; any other code is shown as it is. */
+export const mergeBlockerText = (code: string) =>
+  Object.hasOwn(mergeBlockerSentences, code)
+    ? mergeBlockerSentences[code]!
+    : code;
+
 /** What a code-host action acts on, named for its host; null for an action that is not one. */
 export function codeHostActionLabel(
   action: string,

@@ -5889,6 +5889,9 @@ export class OperatorApi {
             observedAt: b.observedAt,
             readError: this.safe(b.readError, excluded),
             omittedCheckCount: Math.max(0, b.observation.checks.length - 128),
+            mergeBlockers: b.observation.mergeBlockers
+              .slice(0, 64)
+              .map((code) => this.safe(code, excluded)),
             omittedFeedbackCount: Math.max(
               0,
               (b.observation.feedback?.length ?? 0) - 128,

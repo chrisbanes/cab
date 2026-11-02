@@ -1568,6 +1568,8 @@ export const deliveryReadSchema = z
         readError: safeText,
         omittedCheckCount: z.number().int().nonnegative(),
         omittedFeedbackCount: z.number().int().nonnegative(),
+        /** What holds a merge on the last read, as merge-gate codes; absent from older servers. */
+        mergeBlockers: z.array(safeText).max(64).optional(),
         checks: z
           .array(
             z

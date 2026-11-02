@@ -5,6 +5,7 @@ import {
   codeHostActionLabel,
   deliveryActionLine,
   deliveryBlockerSentence,
+  mergeBlockerText,
   pullRequestReference,
   pullRequestRepository,
   pullRequestStateLabel,
@@ -33,6 +34,23 @@ test("delivery blockers read as sentences and unknown codes fall back", () => {
     assert.equal(deliveryBlockerSentence(code), sentence);
   for (const code of ["delivery-new-unknown-code", "constructor", ""])
     assert.equal(deliveryBlockerSentence(code), fallback);
+});
+
+test("merge blockers without a check or a method read as sentences, and other codes pass through", () => {
+  assert.equal(
+    mergeBlockerText("no-required-checks"),
+    "No required checks: neither the code host nor cab requires a check, so the merge is held.",
+  );
+  assert.equal(
+    mergeBlockerText("merge-method-not-configured"),
+    "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
+  );
+  for (const code of [
+    "check-build-unproved",
+    "merge-status-checking",
+    "constructor",
+  ])
+    assert.equal(mergeBlockerText(code), code);
 });
 
 test("pull request state labels cover open, draft, closed and merged", () => {

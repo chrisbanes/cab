@@ -168,6 +168,13 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
         ]
       : []),
     ...(b ? [`Feedback items: ${b.feedback.length}`] : []),
+    ...(b?.mergeBlockers?.length
+      ? [
+          "",
+          "Merge blockers:",
+          ...b.mergeBlockers.map((code) => `  ${unavailable(code)}`),
+        ]
+      : []),
     ...(d?.blockers.length
       ? ["", "Blockers:", ...d.blockers.map((x) => `  ${x}`)]
       : []),

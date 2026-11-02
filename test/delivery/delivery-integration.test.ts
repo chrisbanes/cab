@@ -125,6 +125,8 @@ test("the delivery read links an imported task's pull request in its own reposit
     assert.equal(read?.binding?.url, "https://github.com/org/repo/pull/7");
     assert.equal(read.binding.repositoryName, "org/repo");
     assert.equal(read.binding.draft, false);
+    // The fixture's repository has a method and cab's check passed, so nothing holds the merge.
+    assert.deepEqual(read.binding.mergeBlockers, []);
   } finally {
     await f.close();
   }
