@@ -776,25 +776,37 @@ export function adoptJiraRows(
     row.id === null ? [] : [row.id],
   );
   let dropped = 0;
-  const drafted = String(values.jql ?? "")
+  const queries = String(values.jql ?? "")
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean)
-    .flatMap((jql, index) => {
-      const id = ids[index] ?? "";
-      if (id && !visible.includes(id)) {
-        dropped++;
-        return [];
-      }
-      return [{ id, jql }];
-    });
+    .filter(Boolean);
+  // Positional ids shrink on review; deletion intent must survive the next conflict.
+  const removedIds = new Set(
+    Array.isArray(values.removedJqlIds) ? values.removedJqlIds : [],
+  );
+  for (const id of ids.slice(queries.length)) if (id) removedIds.add(id);
+  for (const id of removedIds) {
+    if (!visible.includes(id)) {
+      removedIds.delete(id);
+      dropped++;
+    }
+  }
+  const drafted = queries.flatMap((jql, index) => {
+    const id = ids[index] ?? "";
+    if (id && !visible.includes(id)) {
+      dropped++;
+      return [];
+    }
+    return [{ id, jql }];
+  });
+  for (const row of drafted) removedIds.delete(row.id);
   const latest = loaded.jql
     .split("\n")
     .filter(Boolean)
     .flatMap((jql, index) => {
       const id = loaded.jqlIds[index]!;
       // An original id without a draft query was deliberately removed.
-      return ids.includes(id) || drafted.some((row) => row.id === id)
+      return removedIds.has(id) || drafted.some((row) => row.id === id)
         ? []
         : [{ id, jql }];
     });
@@ -804,7 +816,11 @@ export function adoptJiraRows(
       const reference = JSON.parse(String(row.savedRow)) as { index: number };
       const id = source.selections[reference.index]?.id;
       // A still-public identity is already edited or removed in the query field.
-      return id === null || id === undefined || !ids.includes(id);
+      return (
+        id === null ||
+        id === undefined ||
+        (!removedIds.has(id) && !drafted.some((entry) => entry.id === id))
+      );
     })
     .map((row) =>
       previous.some((old) => old.savedRow === row.savedRow && old.removed)
@@ -821,5 +837,6 @@ export function adoptJiraRows(
     selections: JSON.stringify(placeholders),
     jql: [...drafted, ...latest].map((row) => row.jql).join("\n"),
     jqlIds: [...drafted, ...latest].map((row) => row.id),
+    removedJqlIds: [...removedIds],
   };
 }

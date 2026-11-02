@@ -1747,6 +1747,66 @@ test("Jira review retains query deletions and edits while adding only newly save
   }
 });
 
+test("Jira deletion intent survives successive conflicts and still adopts newly saved queries", () => {
+  const source = {
+    ...config().source,
+    tracker: "jira" as const,
+    selections: ["S-1", "S-2"].map((id) => ({
+      id,
+      kind: "jql" as const,
+      descriptor: null,
+      active: true,
+    })),
+  };
+  const known = {
+    jql: source.selections.map(({ id }) => ({ id, jql: `project = ${id}` })),
+  };
+  for (const jql of ["project = EDITED", ""]) {
+    const { dropped: _firstDropped, ...first } = adoptJiraRows(
+      source,
+      {
+        selections: "[]",
+        jqlIds: ["S-1", "S-2"],
+        jql,
+      },
+      known,
+    );
+    const { dropped: _secondDropped, ...second } = adoptJiraRows(
+      source,
+      first,
+      known,
+    );
+    assert.deepEqual(second.jqlIds, first.jqlIds);
+    assert.equal(second.jql, jql);
+    const latest = {
+      ...source,
+      selections: [
+        ...source.selections,
+        { ...source.selections[0]!, id: "S-3" },
+      ],
+    };
+    const latestKnown = {
+      jql: [...known.jql, { id: "S-3", jql: "project = NEW" }],
+    };
+    const { dropped: _thirdDropped, ...third } = adoptJiraRows(
+      latest,
+      second,
+      latestKnown,
+    );
+    assert.deepEqual(third.jqlIds, jql ? ["S-1", "S-3"] : ["S-3"]);
+    assert.equal(third.jql, [jql, "project = NEW"].filter(Boolean).join("\n"));
+    const { dropped: _fourthDropped, ...fourth } = adoptJiraRows(
+      latest,
+      third,
+      latestKnown,
+    );
+    assert.deepEqual(
+      jiraSelections(latest, fourth),
+      jiraSelections(latest, third),
+    );
+  }
+});
+
 test("Jira review while private queries load does not keep an explicit identity twice or restore its deletion", () => {
   const source = {
     ...config().source,
@@ -1765,6 +1825,20 @@ test("Jira review while private queries load does not keep an explicit identity 
     jql: "project = EDITED",
   });
   assert.deepEqual(jiraSelections(source, adopted), [
+    { id: "S-1", kind: "jql", jql: "project = EDITED" },
+  ]);
+  // A formerly public deletion cannot remove a now-opaque row by position.
+  const hidden = {
+    ...source,
+    selections: source.selections.map((row, index) =>
+      index === 1 ? { ...row, id: null } : row,
+    ),
+  };
+  const { dropped, ...reviewed } = adoptJiraRows(hidden, adopted);
+  assert.equal(dropped, 1);
+  assert.deepEqual(reviewed.removedJqlIds, []);
+  assert.deepEqual(jiraSelections(hidden, reviewed), [
+    { savedRow: source.selections[1]!.savedRow, keep: true },
     { id: "S-1", kind: "jql", jql: "project = EDITED" },
   ]);
 });

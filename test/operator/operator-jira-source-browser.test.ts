@@ -32,6 +32,8 @@ for (const schedule of [
   "deleted query",
   "untouched query",
   "private read pending",
+  "two partial conflicts",
+  "two complete conflicts",
 ] as const) {
   test(`Jira conflict review preserves query intent: ${schedule}`, async (_t, journey) => {
     for (const [name, value] of Object.entries(variables)) {
@@ -89,7 +91,7 @@ for (const schedule of [
     else
       await page
         .getByLabel("JQL queries, one per line")
-        .fill("project = EDITED");
+        .fill(schedule === "two complete conflicts" ? "" : "project = EDITED");
     const latest = original.map((row, index) =>
       index === 0 ? { ...row, jql: "project = LATEST" } : row,
     );
@@ -151,8 +153,41 @@ for (const schedule of [
       const expected =
         schedule === "untouched query"
           ? "project = LATEST\nproject = SECOND"
-          : "project = EDITED";
+          : schedule === "two complete conflicts"
+            ? ""
+            : "project = EDITED";
       await waitForQueries(page, expected);
+      if (
+        schedule === "two partial conflicts" ||
+        schedule === "two complete conflicts"
+      ) {
+        domain.execute({
+          type: "jira.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: 3,
+          instance: site,
+          selections: latest,
+        });
+        const nextRead = page.waitForResponse((r) =>
+          r.url().endsWith(`/projects/${projectId}/private-values`),
+        );
+        const conflict = page.waitForResponse(
+          (r) =>
+            r.url().endsWith("/api/operator/commands") &&
+            r.request().method() === "POST",
+        );
+        await page
+          .getByRole("button", { name: "Save Jira source", exact: true })
+          .click();
+        assert.equal((await conflict).status(), 409);
+        await (await nextRead).finished();
+        await page
+          .getByRole("button", { name: "Review changes", exact: true })
+          .click();
+        await waitForQueries(page, expected);
+      }
       const saved = page.waitForResponse(
         (r) =>
           r.url().endsWith("/api/operator/commands") &&
@@ -166,7 +201,9 @@ for (const schedule of [
         domain.jiraConfiguration(projectId)!.selections,
         schedule === "untouched query"
           ? latest
-          : [{ ...original[0]!, jql: "project = EDITED" }],
+          : schedule === "two complete conflicts"
+            ? []
+            : [{ ...original[0]!, jql: "project = EDITED" }],
       );
       assert.equal(
         domain.jiraConfiguration(projectId)!.closedIssues,

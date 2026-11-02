@@ -272,6 +272,7 @@ export function JiraSourceTab(
     instance: saved ? String(data.source.instance ?? "") : "",
     closedIssues: saved ? data.source.closedIssues : "skip",
     ...loadedQueries,
+    removedJqlIds: [] as string[],
     readinessMode: rule?.mode ?? "all",
     readiness: savedRuleLines,
     key: key(),
@@ -554,12 +555,13 @@ export function JiraSourceTab(
               review={() => {
                 if (locked(d)) return;
                 d.adoptLatest(data.source.version, initial, [
-                  ["jql", "jqlIds"],
+                  ["jql", "jqlIds", "removedJqlIds"],
                 ]);
                 const adopted = adoptJiraRows(data.source, d.values, known);
                 d.set("selections", adopted.selections);
                 d.set("jql", adopted.jql);
                 d.set("jqlIds", adopted.jqlIds);
+                d.set("removedJqlIds", adopted.removedJqlIds);
                 if (adopted.dropped)
                   d.notice =
                     "Loaded the latest version. Edits or removals of unavailable sources were discarded.";
