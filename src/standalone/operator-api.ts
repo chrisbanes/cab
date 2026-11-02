@@ -6431,6 +6431,7 @@ export class OperatorApi {
           g.selections,
           active,
           Boolean(jira),
+          excluded,
         ),
         repositories: {
           version: links.version,
@@ -6565,6 +6566,7 @@ export class OperatorApi {
     selections: ReturnType<DomainStore["githubConfiguration"]>["selections"],
     active: string[],
     jira: boolean,
+    excluded: readonly string[] | undefined,
   ) {
     const d = this.domain(),
       view = d.statusMapping(projectId),
@@ -6577,54 +6579,77 @@ export class OperatorApi {
       view.mapping && isJiraMapping(view.mapping) === jira
         ? view.mapping
         : null;
-    if (jira)
-      return {
-        tracker: "jira" as const,
-        version: view.version,
-        // A Jira project always has the source the mapping binds to.
-        availability: "available" as const,
-        mapping,
-        granted: [
-          ...new Set(
-            grants.flatMap((g) =>
-              g.action === "issue.status" ? (g.statusIds ?? []) : [],
+    const result = jira
+      ? {
+          tracker: "jira" as const,
+          version: view.version,
+          // A Jira project always has the source the mapping binds to.
+          availability: "available" as const,
+          mapping,
+          granted: [
+            ...new Set(
+              grants.flatMap((g) =>
+                g.action === "issue.status" ? (g.statusIds ?? []) : [],
+              ),
             ),
+          ],
+        }
+      : {
+          version: view.version,
+          // A mapping left by the other tracker is not shown, so availability is that of no mapping.
+          availability:
+            view.mapping && !mapping
+              ? selections.some((s) => s.kind === "project")
+                ? ("available" as const)
+                : ("unavailable" as const)
+              : view.availability,
+          mapping,
+          selections: selections.flatMap((s) =>
+            s.kind === "project"
+              ? [
+                  {
+                    id: s.id,
+                    projectNodeId: s.projectNodeId,
+                    active: active.includes(s.id),
+                  },
+                ]
+              : [],
           ),
-        ],
-      };
-    return {
-      version: view.version,
-      // A mapping left by the other tracker is not shown, so availability is that of no mapping.
-      availability:
-        view.mapping && !mapping
-          ? selections.some((s) => s.kind === "project")
-            ? ("available" as const)
-            : ("unavailable" as const)
-          : view.availability,
-      mapping,
-      selections: selections.flatMap((s) =>
-        s.kind === "project"
-          ? [
-              {
-                id: s.id,
-                projectNodeId: s.projectNodeId,
-                active: active.includes(s.id),
-              },
-            ]
-          : [],
-      ),
-      granted: grants.flatMap((g) =>
-        g.action === "project.field" && g.projectNodeId && g.fieldNodeId
-          ? [
-              {
-                projectNodeId: g.projectNodeId,
-                fieldNodeId: g.fieldNodeId,
-                optionNodeIds: g.optionNodeIds ?? [],
-              },
-            ]
-          : [],
-      ),
-    };
+          granted: grants.flatMap((g) =>
+            g.action === "project.field" && g.projectNodeId && g.fieldNodeId
+              ? [
+                  {
+                    projectNodeId: g.projectNodeId,
+                    fieldNodeId: g.fieldNodeId,
+                    optionNodeIds: g.optionNodeIds ?? [],
+                  },
+                ]
+              : [],
+          ),
+        };
+    // Withhold the optional view as a whole: absent data cannot masquerade as an editable empty mapping.
+    const publicMapping = result.mapping
+      ? {
+          ...result.mapping,
+          events: Object.values(result.mapping.events).filter(
+            (id): id is string => id !== null,
+          ),
+        }
+      : {};
+    if (
+      !this.deliveryRowDisclosable(publicMapping, excluded) ||
+      !result.granted.every((grant) =>
+        typeof grant === "string"
+          ? this.disclosable(grant, excluded)
+          : this.deliveryRowDisclosable(grant, excluded),
+      ) ||
+      ("selections" in result &&
+        !result.selections.every((selection) =>
+          this.deliveryRowDisclosable(selection, excluded),
+        ))
+    )
+      return undefined;
+    return result;
   }
   async readRuntimeSettings() {
     return this.readWithExclusionFence(() => this.readRuntimeSettingsOnce());

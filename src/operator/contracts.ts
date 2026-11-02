@@ -3525,7 +3525,7 @@ const githubStatusMappingViewSchema = z
           .object({
             projectNodeId: text,
             fieldNodeId: text,
-            optionNodeIds: z.array(text).max(256),
+            optionNodeIds: z.array(text),
           })
           .strict(),
       )
