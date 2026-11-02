@@ -16,6 +16,7 @@ import { projectWriteCommands } from "./configure-project.js";
 import { repositoryWriteCommands } from "./configure-repositories.js";
 import { routingWriteCommands } from "./configure-routing.js";
 import { deliveryBrowseCommands, deliveryWriteCommands } from "./delivery.js";
+import { deliveryConfigureCommands } from "./delivery-configure.js";
 import { deliveryPublishCommands } from "./delivery-publish.js";
 import { operationCommands } from "./operation.js";
 import { recoveryBrowseCommands, recoveryWriteCommands } from "./recovery.js";
@@ -54,6 +55,7 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...taskControlCommands,
   ...sourceWriteCommands,
   ...deliveryWriteCommands,
+  ...deliveryConfigureCommands,
   ...deliveryPublishCommands,
   ...recoveryWriteCommands,
   ...runtimeWriteCommands,

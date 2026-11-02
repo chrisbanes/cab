@@ -25,7 +25,6 @@ import {
   DraftCheck,
   DraftOutcome,
   DraftField,
-  ReferenceInput,
   locked,
   reloadDraft,
   submitDraft,
@@ -44,8 +43,11 @@ import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import { Alert } from "./ui/alert.js";
 
+import { ghLoginCopy } from "./discovery-credential.js";
 import {
   codeHostChecksSummary,
+  deliveryCredentialLimit,
+  deliveryCredentialSummary,
   deliveryLevelLabels,
   deliveryMergeWarning,
   mergeMethodLabels,
@@ -201,7 +203,9 @@ function DeliveryPolicyForm(p: TabProps) {
   if (draft.credentialIntent !== "preserve")
     lines.push(
       draft.credentialIntent === "set"
-        ? "Credential reference: set new environment reference"
+        ? draft.credentialInput === "gh:github.com"
+          ? "Credential reference: set GitHub CLI login"
+          : "Credential reference: set new environment reference"
         : "Credential reference: cleared",
     );
   const isLocked = locked(d);
@@ -271,6 +275,19 @@ function DeliveryPolicyForm(p: TabProps) {
       ),
   );
   const links = p.data.repositories.links;
+  // Derived from the draft, so a project the migration skipped offers it and a set-up one does not.
+  const unset = links.flatMap((link) =>
+    link.repositoryId !== null &&
+    deliveryLevelView(draft.grants, link.repositoryId) === "not-set-up"
+      ? [link.repositoryId]
+      : [],
+  );
+  // Withheld when the level could not be applied: a hidden saved grant or the 256-row limit refuses it.
+  const notSetUp =
+    draft.grants.some((row) => "savedRow" in row) ||
+    draft.grants.length + 7 * unset.length > 256
+      ? []
+      : unset;
   const apply = (next: DeliveryPolicyDraft) => {
     d.set(
       "grants",
@@ -432,12 +449,46 @@ function DeliveryPolicyForm(p: TabProps) {
               />
             )}
             <p className="metadata muted">
-              {saved.credentialConfigured
-                ? "A delivery credential is configured."
-                : "No delivery credential is configured."}{" "}
+              {deliveryCredentialSummary(
+                saved.credentialConfigured,
+                saved.credential,
+              )}{" "}
               Saved references and values are never shown.
             </p>
-            <ReferenceInput draft={d} />
+            <DraftField
+              draft={d}
+              field="referenceMode"
+              label="Credential reference change"
+            >
+              <option value="preserve">Preserve current reference</option>
+              {saved.credential?.gh.state === "signed-in" ? (
+                <option value="gh">
+                  GitHub CLI · @{saved.credential.gh.login}
+                </option>
+              ) : (
+                <option value="gh">GitHub CLI login</option>
+              )}
+              <option value="set">Set new environment reference</option>
+              <option value="clear">Clear reference</option>
+            </DraftField>
+            {v.referenceMode === "gh" && saved.credential && (
+              <p className="metadata" role="status">
+                {ghLoginCopy(saved.credential.gh)}. Detection does not select
+                this login; save to choose it.
+              </p>
+            )}
+            {v.referenceMode === "set" && (
+              <DraftField
+                draft={d}
+                field="credentialRef"
+                label="New environment reference"
+              />
+            )}
+            <p className="metadata muted">
+              Use env:NAME for an environment reference; its value stays
+              server-side. GitLab repositories use the installation's GitLab
+              credential. {deliveryCredentialLimit}
+            </p>
           </Panel>
           <Panel
             title="Repository shepherd levels"
@@ -526,6 +577,28 @@ function DeliveryPolicyForm(p: TabProps) {
                 );
               })}
               {!links.length && <p>No linked repositories.</p>}
+              {notSetUp.length > 0 && (
+                <section
+                  className="settings-row"
+                  aria-label="Repositories not set up"
+                >
+                  <h3 className="small-heading">Repositories not set up</h3>
+                  <p>
+                    {notSetUp.join(", ")} can't push branches or open pull
+                    requests yet. Apply Open PRs, then save.
+                  </p>
+                  <Button
+                    id="apply-open-prs"
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      choose(notSetUp, "open-prs", "apply-open-prs")
+                    }
+                  >
+                    Apply Open PRs
+                  </Button>
+                </section>
+              )}
               <section
                 className="settings-row"
                 aria-label="All linked repositories"

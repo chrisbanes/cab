@@ -854,12 +854,12 @@ export class OperatorApi {
           d.routingCredentialReference(id),
           d.deliveryCredentialReference(id),
         ])
-          if (ref) {
+          if (ref?.startsWith("env:")) {
             const envKey = ref.slice(4);
             add(ref, envKey);
             const value = process.env[envKey];
             if (value) add(value);
-          }
+          } else if (ref) add(ref);
         if (links.length > 128) return null;
         for (const repo of links) add(repo.path, repo.gitCommonDirectory);
       }
@@ -6465,9 +6465,14 @@ export class OperatorApi {
       g = d.githubConfiguration(projectId),
       links = d.repositoryLinks(projectId),
       jira = d.jiraConfiguration(projectId),
+      scope = new GhLoginScope(),
+      // Started now so the gh probe overlaps the other reads; omitted, never guessed, when it fails.
+      deliveryCredential = this.service
+        .deliveryCredentialStatus(projectId, scope)
+        .catch(() => undefined),
       credential = jira
         ? undefined
-        : await this.service.gitHubSourceCredentialStatus(projectId),
+        : await this.service.gitHubSourceCredentialStatus(projectId, scope),
       excluded = withhold ? undefined : await this.exclusions(projectId),
       r = d.routing(projectId),
       active = d.githubActiveSelectionIds(projectId);
@@ -6510,12 +6515,15 @@ export class OperatorApi {
           availability:
             this.service.routingAvailability(projectId).reason ?? "available",
         },
-        delivery: await this.safeDeliveryConfiguration(
-          projectId,
-          this.service.delivery().publicConfiguration(projectId),
-          links.links.map((link) => link.repositoryId),
-          excluded,
-        ),
+        delivery: {
+          ...(await this.safeDeliveryConfiguration(
+            projectId,
+            this.service.delivery().publicConfiguration(projectId),
+            links.links.map((link) => link.repositoryId),
+            excluded,
+          )),
+          credential: await deliveryCredential,
+        },
         statusMapping: this.statusMappingView(
           projectId,
           g.selections,

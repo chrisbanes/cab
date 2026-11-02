@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { deliveryWorld, publicationWorld } from "../fixtures/operator-cli.js";
+import {
+  deliveryWorld,
+  loginCli,
+  publicationWorld,
+  startCliService,
+} from "../fixtures/operator-cli.js";
 import { labelAndFieldReady } from "../fixtures/task-publication.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
@@ -729,4 +736,360 @@ test("delivery settle sends nothing for a read-only credential, bad flags or a t
   assert.match(refused.json().error.message, /no reviewable pull request/);
   assert.equal(wire.posts, 0);
   assert.equal(settlementRows(w), 0);
+});
+
+/** A project linked to R1 and R2, served to the CLI with a read and a read-write connection. */
+async function configureWorld(t: Parameters<typeof startCliService>[0]) {
+  const s = await startCliService(t);
+  s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE project_repository_links SET version = 2, links = ? WHERE projectId = ?",
+      )
+      .run(
+        JSON.stringify(
+          ["R1", "R2"].map((repositoryId) => ({
+            repositoryId,
+            path: `/tmp/${repositoryId}`,
+            ref: "main",
+            gitCommonDirectory: `/tmp/${repositoryId}/.git`,
+            codeHost: "github",
+            host: "github.com",
+          })),
+        ),
+        s.projectId,
+      ),
+  );
+  const o = await loginCli(t, s);
+  const delivery = () => s.f.service.delivery().configuration(s.projectId);
+  const doc = () => join(o.h.dir, `${randomUUID()}.json`);
+  const journal = () => {
+    const path = join(o.h.configDir, "requests.jsonl");
+    return existsSync(path)
+      ? readFileSync(path, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l) as Json)
+      : [];
+  };
+  return { ...o, s, delivery, doc, journal, project: s.projectId };
+}
+
+test("delivery configure refuses bad flags before writing a document", async (t) => {
+  const w = await configureWorld(t);
+  const out = w.doc();
+  const refused = async (code: number, ...args: string[]) => {
+    const r = await w.cli("ro", [
+      "delivery",
+      "configure",
+      w.project,
+      "--out",
+      out,
+      ...args,
+    ]);
+    assert.equal(r.code, code, `${args.join(" ")}: ${r.err}${r.out}`);
+    assert.equal(existsSync(out), false, args.join(" "));
+  };
+  await refused(2, "--repository", "R1", "--level", "everything");
+  await refused(2, "--repository", "R1", "--merge-method", "fast-forward");
+  // Per-repository flags need a repository, and a repository needs a flag.
+  await refused(2, "--level", "open-prs");
+  await refused(2, "--repository", "R1");
+  await refused(
+    2,
+    "--repository",
+    "R1",
+    "--required-check",
+    "ci",
+    "--required-checks",
+    "none",
+  );
+  await refused(2, "--credential-ref", "gh:example.com");
+  await refused(2, "--credential-ref", "GH_TOKEN");
+  await refused(2, "--branch-prefix", "x", "--branch-prefix-default");
+  await refused(2, "--repository", "R9", "--level", "open-prs");
+  await refused(
+    2,
+    "--repository",
+    "R1",
+    "--repository",
+    "R1",
+    "--level",
+    "open-prs",
+  );
+  assert.equal(w.delivery().grants.length, 0);
+  assert.deepEqual(w.journal(), []);
+});
+
+test("delivery configure prepares the exact delivery.configure, applies once and reads back", async (t) => {
+  const w = await configureWorld(t);
+  const doc = w.doc();
+  const before = w.delivery();
+  const prepared = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R1",
+    "--level",
+    "merge-when-ready",
+    "--merge-method",
+    "squash",
+    "--required-check",
+    "ci",
+    "--credential-ref",
+    "gh:github.com",
+    "--branch-prefix",
+    "cab/",
+    "--out",
+    doc,
+  ]);
+  assert.equal(prepared.code, 0, prepared.err + prepared.out);
+  assert.deepEqual(w.journal(), [], "prepare sends nothing");
+  assert.equal(w.delivery().version, before.version);
+  const document = prepared.json().data.document;
+  assert.equal(document.kind, "delivery.configure");
+  assert.equal(document.expected.version, before.version);
+  assert.deepEqual(
+    document.preview.changes.map((c: Json) => c.field),
+    [
+      "level R1",
+      "mode",
+      "mergeMethod R1",
+      "requiredChecks R1",
+      "credentialRef",
+      "branchPrefix",
+    ],
+  );
+  const { command } = document;
+  assert.equal(command.mode, "through-merge");
+  assert.equal(command.credentialRef, "gh:github.com");
+  assert.equal(command.branchPrefix, "cab/");
+  assert.deepEqual(command.requiredChecks, []);
+  assert.deepEqual(
+    command.grants.map((g: Json) => `${g.repositoryId}:${g.action}:${g.mode}`),
+    [
+      "R1:branch.push:allow",
+      "R1:branch.force-push:approval",
+      "R1:pr.create:allow",
+      "R1:pr.edit:allow",
+      "R1:pr.ready:allow",
+      "R1:pr.thread.reply:allow",
+      "R1:pr.thread.resolve:allow",
+      "R1:pr.merge:allow",
+    ],
+  );
+  assert.deepEqual(command.repositories, [
+    {
+      repositoryId: "R1",
+      mergeMethod: "squash",
+      requiredChecks: [{ name: "ci" }],
+    },
+    { repositoryId: "R2", requiredChecks: [] },
+  ]);
+  assert.match(document.preview.notes.join(" "), /same OS user/);
+
+  const human = await w.h.run([
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R2",
+    "--level",
+    "open-prs",
+    "--out",
+    w.doc(),
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /Prepared delivery\.configure for project:/);
+  assert.match(human.out, /level R2: not-set-up -> open-prs/);
+
+  const applied = await w.cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(applied.code, 0, applied.err + applied.out);
+  const receipt = applied.json().data.receipt;
+  assert.equal(receipt.result.commandType, "delivery.configure");
+  assert.equal(receipt.result.credentialConfigured, true);
+  assert.equal(applied.json().request.scope, `project:${w.project}`);
+  assert.deepEqual(
+    w.journal().map((l) => l.state),
+    ["sending", "recorded"],
+  );
+  const after = w.delivery();
+  assert.equal(after.version, before.version + 1);
+  assert.equal(after.mode, "through-merge");
+  assert.equal(after.credentialRef, "gh:github.com");
+  assert.equal(after.branchPrefix, "cab/");
+  assert.equal(
+    after.repositories?.find((r) => r.repositoryId === "R1")?.mergeMethod,
+    "squash",
+  );
+  const read = await w.cli("ro", ["project", "get", w.project]);
+  assert.equal(
+    read.json().data.delivery.grants.length,
+    8,
+    "the read shows the level",
+  );
+  const recorded = await w.cli("ro", [
+    "operation",
+    "get",
+    receipt.key,
+    "--scope",
+    `project:${w.project}`,
+    "--type",
+    "delivery.configure",
+  ]);
+  assert.deepEqual(recorded.json().data, { state: "recorded", receipt });
+
+  // The same document replays its recorded receipt without another version.
+  const again = await w.cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(again.code, 0, again.err + again.out);
+  assert.equal(w.delivery().version, after.version);
+  assert.equal(again.json().data.replayed, true);
+});
+
+test("delivery configure keeps what it was not asked to change and reports no change and conflicts", async (t) => {
+  const w = await configureWorld(t);
+  const first = w.doc();
+  let r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R1",
+    "--repository",
+    "R2",
+    "--level",
+    "open-prs",
+    "--required-check",
+    "ci",
+    "--branch-prefix",
+    "cab/",
+    "--out",
+    first,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  r = await w.cli("rw", ["project", "apply", "--file", first]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const saved = w.delivery();
+
+  // Asking for what is already saved is no change, and writes no document.
+  const noop = w.doc();
+  r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R1",
+    "--level",
+    "open-prs",
+    "--out",
+    noop,
+  ]);
+  assert.equal(r.code, 2, r.err + r.out);
+  assert.match(r.json().error.message, /No change/);
+  assert.equal(existsSync(noop), false);
+
+  // An unrelated change keeps the level, checks and prefix.
+  const keepDoc = w.doc();
+  r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R1",
+    "--merge-method",
+    "rebase",
+    "--out",
+    keepDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.document.command.branchPrefix, "cab/");
+  assert.deepEqual(
+    r.json().data.document.preview.changes.map((c: Json) => c.field),
+    ["mergeMethod R1"],
+  );
+  r = await w.cli("rw", ["project", "apply", "--file", keepDoc]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const kept = w.delivery();
+  assert.deepEqual(kept.grants, saved.grants);
+  assert.equal(kept.branchPrefix, "cab/");
+  assert.deepEqual(
+    kept.repositories?.find((x) => x.repositoryId === "R1")?.requiredChecks,
+    [{ name: "ci" }],
+  );
+
+  // Clearing the checks and the prefix.
+  const clearDoc = w.doc();
+  r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R1",
+    "--required-checks",
+    "none",
+    "--branch-prefix-default",
+    "--credential-ref",
+    "none",
+    "--out",
+    clearDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  r = await w.cli("rw", ["project", "apply", "--file", clearDoc]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const cleared = w.delivery();
+  assert.equal(cleared.branchPrefix, undefined);
+  assert.equal(cleared.credentialRef, null);
+  assert.deepEqual(
+    cleared.repositories?.find((x) => x.repositoryId === "R1")?.requiredChecks,
+    [],
+  );
+
+  // A stale expected version conflicts; so does an apply after another change.
+  r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R1",
+    "--merge-method",
+    "merge",
+    "--expected-version",
+    "1",
+    "--out",
+    w.doc(),
+  ]);
+  assert.equal(r.code, 4, r.err + r.out);
+  const stale = w.doc();
+  r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R2",
+    "--merge-method",
+    "merge",
+    "--out",
+    stale,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const other = w.doc();
+  r = await w.cli("ro", [
+    "delivery",
+    "configure",
+    w.project,
+    "--repository",
+    "R2",
+    "--merge-method",
+    "squash",
+    "--out",
+    other,
+  ]);
+  r = await w.cli("rw", ["project", "apply", "--file", other]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const version = w.delivery().version;
+  r = await w.cli("rw", ["project", "apply", "--file", stale]);
+  assert.equal(r.code, 4, r.err + r.out);
+  assert.equal(w.delivery().version, version);
 });

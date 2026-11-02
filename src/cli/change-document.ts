@@ -16,6 +16,7 @@ export const changeKinds = [
   "project.create",
   "project.configure",
   "routing.configure",
+  "delivery.configure",
   "capacity.configure",
   "github.configure",
   "jira.configure",

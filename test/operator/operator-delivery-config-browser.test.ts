@@ -5,6 +5,7 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import { createFakeGh } from "../fixtures/fake-gh.js";
 import {
   startSettings,
   phone,
@@ -956,4 +957,91 @@ test("each repository edits its merge method and additional checks, with suggest
     );
   await page.evaluate(() => window.scrollTo(0, 0));
   await captureBrowserEvidence(page, "delivery-repository-checks");
+});
+
+test("Delivery offers the detected GitHub CLI login, saves it, and states that it is usable and who can reach it", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page, f, ids } = await startSettings(
+    journey,
+    path,
+    undefined,
+    undefined,
+    { serviceOptions: { ghExecutable: gh.executable } },
+  );
+  await page.getByRole("heading", { name: "Delivery", exact: true }).waitFor();
+  await page.getByText("No delivery credential is configured.").waitFor();
+  const choice = page.getByLabel("Credential reference change");
+  assert.deepEqual(await choice.locator("option").allInnerTexts(), [
+    "Preserve current reference",
+    "GitHub CLI · @octo",
+    "Set new environment reference",
+    "Clear reference",
+  ]);
+  await choice.selectOption("gh");
+  await page
+    .getByText(
+      "Signed in to github.com as @octo. Detection does not select this login; save to choose it.",
+    )
+    .waitFor();
+  assert.match(
+    await page.getByRole("region", { name: "Changes to save" }).innerText(),
+    /Credential reference: set GitHub CLI login/,
+  );
+  const command = body(page);
+  await save(page).click();
+  assert.equal((await command).credentialRef, "gh:github.com");
+  await savedOutcome(page);
+  assert.equal(
+    f.service.delivery().configuration(ids.atlas).credentialRef,
+    "gh:github.com",
+  );
+  await page.getByText("GitHub CLI · @octo · usable").waitFor();
+  await page
+    .getByText(
+      "Agents running as the same OS user can reach this host's GitHub CLI login.",
+    )
+    .waitFor();
+  assert.doesNotMatch(await page.locator("body").innerText(), /gho_/);
+  // When the login goes away the tab says why, without a token or a fallback.
+  gh.set("not-signed-in");
+  await read(page);
+  await page
+    .getByText(
+      "GitHub CLI · unavailable: GitHub CLI is not signed in on the service host.",
+    )
+    .waitFor();
+  await captureBrowserEvidence(page, "delivery-gh-credential");
+});
+
+test("Delivery offers Apply Open PRs for repositories that are Not set up, until they are set up", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  const region = page.getByRole("region", {
+    name: "Repositories not set up",
+    exact: true,
+  });
+  await region.waitFor();
+  await region
+    .getByText("acme/atlas can't push branches or open pull requests yet.", {
+      exact: false,
+    })
+    .waitFor();
+  const apply = page.getByRole("button", {
+    name: "Apply Open PRs",
+    exact: true,
+  });
+  await apply.click();
+  assert.equal(await levelControl(page).inputValue(), "open-prs");
+  // It is a draft until saved, and it takes no merge confirmation.
+  assert.equal(f.service.delivery().configuration(ids.atlas).grants.length, 0);
+  assert.equal(await region.count(), 0);
+  const command = body(page);
+  await save(page).click();
+  assert.equal(((await command).grants as unknown[]).length, 7);
+  await savedOutcome(page);
+  assert.equal(f.service.delivery().configuration(ids.atlas).grants.length, 7);
+  assert.equal(await apply.count(), 0);
+  await read(page);
+  assert.equal(await apply.count(), 0);
+  await captureBrowserEvidence(page, "delivery-apply-open-prs");
 });

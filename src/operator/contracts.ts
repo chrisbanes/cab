@@ -19,6 +19,7 @@ import {
   envCredentialReference,
   gitLabCredentialReference,
   glabReferenceMatchesHost,
+  sourceCredentialReference,
 } from "../core/credential-reference.js";
 import {
   githubStatusMappingSchema,
@@ -2275,12 +2276,45 @@ const unavailableDeliveryRowSchema = z
     savedRow: deliverySavedRowSchema,
   })
   .strict();
+/** The GitHub CLI login for github.com, detected on every status read. Never the token. */
+export const ghLoginStateSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("signed-in"),
+      login: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.enum(["not-installed", "not-signed-in", "unreadable"]),
+    })
+    .strict(),
+]);
+export const sourceCredentialReasonSchema = z.enum([
+  "missing-credential",
+  "invalid-credential-reference",
+  "gh-not-installed",
+  "gh-not-signed-in",
+  "gh-unreadable",
+]);
+export const sourceCredentialStatusSchema = z
+  .object({
+    configured: z.boolean(),
+    source: z.enum(["env", "gh"]).nullable(),
+    usable: z.boolean(),
+    reason: sourceCredentialReasonSchema.nullable(),
+    gh: ghLoginStateSchema,
+  })
+  .strict();
+
 /** Exact visible policy rows or opaque references to rows withheld by the exclusion boundary. */
 export const deliveryConfigurationSchema = z
   .object({
     version: revision,
     mode: z.enum(["reviewable-pr", "through-merge"]),
     credentialConfigured: z.boolean(),
+    /** How the delivery credential resolves now; never the token. Absent from older servers. */
+    credential: sourceCredentialStatusSchema.optional(),
     branchPrefix: z.string().max(64).nullable().optional(),
     branchPrefixUnavailable: z.literal(true).optional(),
     grants: z
@@ -2712,8 +2746,19 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .strict()
         .optional(),
       sourceCredentialRef: z.literal("gh:github.com").optional(),
+      deliveryDefault: z
+        .object({ credentialRef: z.literal("gh:github.com").optional() })
+        .strict()
+        .optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (command) => !command.deliveryDefault || command.repositories?.length,
+      {
+        path: ["deliveryDefault"],
+        message: "A delivery default needs repositories",
+      },
+    ),
   z
     .object({
       ...domainBase,
@@ -2779,7 +2824,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("delivery.configure"),
       expectedVersion: revision,
       mode: z.enum(["reviewable-pr", "through-merge"]),
-      credentialRef: envCredentialReference.nullable().optional(),
+      credentialRef: sourceCredentialReference.nullable().optional(),
       branchPrefix: z.string().max(64).optional(),
       preserveBranchPrefix: z.literal(true).optional(),
       grants: z
@@ -3582,37 +3627,6 @@ export const recoveryOptionsSchema = envelope(
     })
     .strict(),
 );
-/** The GitHub CLI login for github.com, detected on every status read. Never the token. */
-export const ghLoginStateSchema = z.discriminatedUnion("state", [
-  z
-    .object({
-      state: z.literal("signed-in"),
-      login: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/),
-    })
-    .strict(),
-  z
-    .object({
-      state: z.enum(["not-installed", "not-signed-in", "unreadable"]),
-    })
-    .strict(),
-]);
-export const sourceCredentialReasonSchema = z.enum([
-  "missing-credential",
-  "invalid-credential-reference",
-  "gh-not-installed",
-  "gh-not-signed-in",
-  "gh-unreadable",
-]);
-export const sourceCredentialStatusSchema = z
-  .object({
-    configured: z.boolean(),
-    source: z.enum(["env", "gh"]).nullable(),
-    usable: z.boolean(),
-    reason: sourceCredentialReasonSchema.nullable(),
-    gh: ghLoginStateSchema,
-  })
-  .strict();
-
 export const sourceObservationSchema = envelope(
   z
     .object({

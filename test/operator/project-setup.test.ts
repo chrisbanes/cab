@@ -19,6 +19,7 @@ import {
   DomainPolicyError,
   DomainStore,
 } from "../../src/core/domain.js";
+import { repositoryDeliveryLevel } from "../../src/core/delivery-levels.js";
 import {
   parseGitHubOrigin,
   type RepositoryVerifier,
@@ -338,6 +339,89 @@ test("creates without the setup credential, and existing sources, are never re-d
     );
   }
   assert.deepEqual(counts(), recorded);
+});
+
+test("guided create records the delivery default with the project, and only when sent", async (t) => {
+  const { f, home, api, counts } = await setupWorld(t);
+  const delivery = (command: { projectId: unknown }) =>
+    f.service.delivery().configuration(String(command.projectId));
+  const level = (command: { projectId: unknown }, id: string) =>
+    repositoryDeliveryLevel(delivery(command).grants, id);
+
+  // A signed-in login: Open PRs on each repository, and the login for delivery.
+  const signedIn = create({
+    repositories: [atlas("~/src/atlas"), glRow("~/src/gitlab")],
+    deliveryDefault: { credentialRef: "gh:github.com" },
+  });
+  const receipt = await api.execute(signedIn);
+  assert.equal(delivery(signedIn).version, 1);
+  assert.equal(delivery(signedIn).mode, "reviewable-pr");
+  assert.equal(delivery(signedIn).credentialRef, "gh:github.com");
+  assert.equal(level(signedIn, "R_atlas"), "open-prs");
+  assert.equal(level(signedIn, "42"), "open-prs");
+  assert.equal(delivery(signedIn).grants.length, 14);
+  const read = await api.readProjectConfiguration(String(signedIn.projectId));
+  assert.equal(read.data.delivery?.credentialConfigured, true);
+
+  // No login: Open PRs and no credential.
+  const noLogin = create({
+    repositories: [atlas("~/src/atlas")],
+    deliveryDefault: {},
+  });
+  await api.execute(noLogin);
+  assert.equal(delivery(noLogin).credentialRef, null);
+  assert.equal(level(noLogin, "R_atlas"), "open-prs");
+
+  // The fallback and CLI shape sends no default, so nothing is granted.
+  const none = create({ repositories: [atlas("~/src/atlas")] });
+  await api.execute(none);
+  assert.equal(delivery(none).version, 1);
+  assert.deepEqual(delivery(none).grants, []);
+  assert.equal(delivery(none).credentialRef, null);
+  assert.equal(
+    f.service.domain().repositoryLinks(String(none.projectId)).links.length,
+    1,
+    "linking alone grants nothing",
+  );
+
+  // A default needs repositories, at both schemas, and records nothing.
+  const before = counts();
+  for (const deliveryDefault of [{}, { credentialRef: "gh:github.com" }]) {
+    await assert.rejects(
+      api.execute(create({ deliveryDefault })),
+      (e) => e instanceof Error && e.name === "ZodError",
+    );
+    await assert.rejects(
+      f.service.domain().createProject({
+        ...create({ deliveryDefault }),
+        actor: "operator",
+      } as never),
+      (e) => e instanceof Error && e.name === "ZodError",
+    );
+  }
+  for (const deliveryDefault of [{ credentialRef: "env:X" }, { merge: true }])
+    await assert.rejects(
+      api.execute(
+        create({ repositories: [atlas("~/src/atlas")], deliveryDefault }),
+      ),
+      (e) => e instanceof Error && e.name === "ZodError",
+    );
+  assert.deepEqual(counts(), before);
+
+  // The exact replay returns the same receipt, before and after a restart.
+  assert.deepEqual(await api.execute(signedIn), receipt);
+  await f.service.stop();
+  await f.service.start();
+  assert.equal(delivery(signedIn).version, 1);
+  assert.equal(level(signedIn, "R_atlas"), "open-prs");
+  const reopened = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    { home: home.home },
+  );
+  assert.deepEqual(await reopened.execute(signedIn), receipt);
 });
 
 test("origin and ref checks report one field, keep nothing and never echo credentials", async (t) => {

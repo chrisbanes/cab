@@ -2,6 +2,7 @@
 import {
   type CheckoutVerification,
   type ComposerOptions,
+  type deliveryConfigurationSchema,
   type DiscoveryUnavailableReason,
   executionHarnessLabels,
   type FolderListing,
@@ -16,6 +17,7 @@ import { sourceCredentialExplanation } from "../../src/operator/source-credentia
 import type { z } from "zod";
 import { unavailableAlert } from "./execution-runtime.js";
 import { addClaudeHref } from "./settings-sections.js";
+import { isCodeHostGrant } from "../../src/core/delivery-levels.js";
 
 /** One repository row. A typed row keeps its raw `text`; a discovered row carries the node ID. */
 export interface SetupRow {
@@ -150,6 +152,15 @@ export function buildProjectCreate(
     // without a repository has no source to use it, and setup shows the line only with one.
     ...(sourceGh?.state === "signed-in" && included.length
       ? { sourceCredentialRef: "gh:github.com" }
+      : {}),
+    // Guided setup grants Open PRs on what it links, and delivers with the same login when it is usable.
+    ...(included.length
+      ? {
+          deliveryDefault:
+            sourceGh?.state === "signed-in"
+              ? { credentialRef: "gh:github.com" }
+              : {},
+        }
       : {}),
   } as OperatorCommand;
   return { command, rowIndex: included };
@@ -377,6 +388,81 @@ export function setupSourceCredentialCopy(
   return sourceGh?.state === "signed-in"
     ? `GitHub source credential: GitHub CLI · @${sourceGh.login}. Change or clear it later in the project's GitHub source settings.`
     : `GitHub source credential: none. ${sourceGh ? "No usable GitHub CLI login was detected" : "The GitHub CLI login could not be checked"}, so the source starts without a credential and won't sync until one is set in its GitHub source settings.`;
+}
+
+/** The delivery default guided setup will record, stated before Create. */
+export function setupDeliveryCopy(
+  /** `undefined` while the read is pending; `null` after a failed read. */
+  sourceGh: z.infer<typeof ghLoginStateSchema> | null | undefined,
+  /** Whether a GitHub repository is listed; GitLab delivery uses the installation's GitLab credential. */
+  github: boolean,
+) {
+  const level =
+    "Delivery: Open PRs on each repository. cab can push task branches, open and update pull requests and answer review threads; it can't merge, and a force-push needs your approval.";
+  const later = "Change it later in the project's Delivery settings.";
+  if (!github)
+    return `${level} GitLab delivery uses the installation's GitLab credential. ${later}`;
+  if (sourceGh === undefined) return `${level} Checking the GitHub CLI login…`;
+  return sourceGh?.state === "signed-in"
+    ? `${level} Delivery credential: GitHub CLI · @${sourceGh.login}. ${later}`
+    : `${level} Delivery credential: none. ${sourceGh ? "No usable GitHub CLI login was detected" : "The GitHub CLI login could not be checked"}, so cab can't push or open pull requests on GitHub until one is set. ${later}`;
+}
+
+/**
+ * The delivery default from the configuration read. Informational only; it never
+ * blocks Resume. `undefined` is still loading, `null` a failed read; once read, a
+ * project with no linked repository has nothing to say. The caller omits the line
+ * for a project created without repositories.
+ */
+export function deliveryReadyLine(
+  projectId: string,
+  delivery:
+    | Pick<
+        z.infer<typeof deliveryConfigurationSchema>,
+        "credentialConfigured" | "credential" | "grants"
+      >
+    | null
+    | undefined,
+  links: readonly { repositoryId: string | null; codeHost: string }[],
+): WaitItem | null {
+  if (delivery === undefined) return { text: "Delivery: checking…" };
+  if (delivery === null) return { text: "Delivery: status unavailable." };
+  if (!links.length) return null;
+  const link = {
+    label: "Delivery settings",
+    href: `/app/projects/${projectId}/settings?tab=delivery`,
+  };
+  const unset = links.filter(
+    (l) =>
+      l.repositoryId === null ||
+      !delivery.grants.some(
+        (g) =>
+          "action" in g &&
+          g.repositoryId === l.repositoryId &&
+          isCodeHostGrant(g),
+      ),
+  ).length;
+  const github = links.some((l) => l.codeHost === "github");
+  const status = delivery.credential;
+  const problems = [
+    ...(unset
+      ? [
+          `${unset} linked ${unset === 1 ? "repository has" : "repositories have"} no delivery authority, so cab can't push or open pull requests there.`,
+        ]
+      : []),
+    ...(github && !delivery.credentialConfigured
+      ? ["No GitHub delivery credential is set."]
+      : github && status && !status.usable
+        ? ["The GitHub delivery credential isn't usable."]
+        : []),
+  ];
+  if (problems.length) return { text: `Delivery: ${problems.join(" ")}`, link };
+  return {
+    text:
+      github && status?.source === "gh" && status.gh.state === "signed-in"
+        ? `Delivery: granted · GitHub CLI · @${status.gh.login}`
+        : "Delivery: granted",
+  };
 }
 
 /**

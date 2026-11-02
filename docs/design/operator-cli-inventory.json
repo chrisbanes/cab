@@ -1342,6 +1342,20 @@
       "gap": "Refresh is installation-wide (stated in the output). Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
+      "id": "delivery configure",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI01", "CLI03"],
+      "evidence": ["test/delivery/operator-cli-delivery.test.ts"],
+      "effect": "Writes a delivery.configure change document for the project's delivery policy: per-repository level (Open PRs, Merge with approval, Merge when ready), merge method and additional required checks, the credential (env:NAME, gh:github.com or none) and the branch prefix. Saved grants, checks and prefix it is not asked to change are kept; it sends no write, and project apply sends the document.",
+      "denial": "n/a: prepare sends no write; an unknown level or merge method, a per-repository flag without --repository, --required-check with --required-checks none, a malformed --credential-ref, a repeated or unlinked repository and a no-op each exit 2 with no document.",
+      "revision": "--expected-version or a stale delivery policy version exits 4 with no document; an edit between prepare and apply exits 4 not-applied.",
+      "retry": "n/a: prepare is local; apply replay is covered by project apply.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI against a real loopback service with fixture runtimes and no live code host: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
       "id": "delivery settle",
       "kind": "command",
       "area": "result/artifact/delivery",

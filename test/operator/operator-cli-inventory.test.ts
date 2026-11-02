@@ -81,6 +81,7 @@ const documentedWrites = [
   "project preview-source",
   "project place-task",
   "delivery refresh",
+  "delivery configure",
   "delivery settle",
   "delivery review-comment",
   "delivery confirm-comment",

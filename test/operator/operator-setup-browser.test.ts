@@ -1618,6 +1618,38 @@ test("Setup records the signed-in GitHub CLI login as the source credential and 
   assert.equal(await resume.isEnabled(), true);
 });
 
+test("Setup states and records the Open PRs delivery default with the signed-in GitHub CLI login", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    ghExecutable: gh.executable,
+  });
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  const line = page.getByText(
+    /^Delivery: Open PRs on each repository\. .*can't merge.*Delivery credential: GitHub CLI · @octo\. /,
+  );
+  assert.equal(await line.count(), 0);
+  await addRepository(page);
+  await line.waitFor();
+  const { ready, projectId, resume } = await createProject(page, sent);
+  assert.deepEqual(
+    sent.find((c) => c.type === "project.create")?.deliveryDefault,
+    { credentialRef: "gh:github.com" },
+  );
+  const policy = f.service.delivery().configuration(projectId);
+  assert.equal(policy.version, 1);
+  assert.equal(policy.credentialRef, "gh:github.com");
+  assert.equal(policy.mode, "reviewable-pr");
+  assert.equal(policy.grants.length, 7);
+  await ready
+    .getByText("Delivery: granted · GitHub CLI · @octo", { exact: true })
+    .waitFor();
+  await resume.waitFor();
+  assert.equal(await resume.isEnabled(), true);
+});
+
 test("Setup records no source credential without a signed-in GitHub CLI login", async (_t, journey) => {
   const gh = createFakeGh("not-signed-in");
   journey.cleanup(async () => gh.close(), "fake-gh.close");
@@ -1628,9 +1660,30 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
   const sent = sentCommands(page);
   await addRepository(page);
   await page.getByText(/^GitHub source credential: none\. /).waitFor();
+  await page
+    .getByText(
+      /^Delivery: Open PRs on each repository\. .*Delivery credential: none\. No usable GitHub CLI login was detected/,
+    )
+    .waitFor();
   const { ready, projectId, resume } = await createProject(page, sent);
   const create = sent.find((c) => c.type === "project.create");
   assert.equal(create && "sourceCredentialRef" in create, false);
+  assert.deepEqual(create?.deliveryDefault, {});
+  // Open PRs is granted, but nothing can reach GitHub: the ready check says so and links to the tab.
+  const missing = ready.getByText(
+    "Delivery: No GitHub delivery credential is set.",
+  );
+  await missing.waitFor();
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "Delivery settings" })
+      .getAttribute("href"),
+    `/app/projects/${projectId}/settings?tab=delivery`,
+  );
+  assert.equal(
+    f.service.delivery().configuration(projectId).credentialRef,
+    null,
+  );
   const line = ready.getByText(
     "GitHub source credential: not set. The source won't sync until one is set.",
   );
@@ -1668,6 +1721,24 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     .getByText("GitHub source credential: GitHub CLI · @octo", { exact: true })
     .waitFor();
   await line.waitFor({ state: "detached" });
+  // The delivery credential is still missing, so there is still something to check again.
+  await missing.waitFor();
+  d.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: "gh:github.com",
+    grants: f.service.delivery().configuration(projectId).grants,
+    requiredChecks: [],
+  });
+  await ready.getByRole("button", { name: "Check again" }).click();
+  await ready
+    .getByText("Delivery: granted · GitHub CLI · @octo", { exact: true })
+    .waitFor();
+  await missing.waitFor({ state: "detached" });
   assert.equal(
     await ready.getByRole("button", { name: "Check again" }).count(),
     0,

@@ -208,7 +208,7 @@ export function ghEnvironment(
     : { names: [], values: [] };
   const delivery = domain.projects().flatMap((p) => {
     const ref = domain.deliveryCredentialReference(String(p.id));
-    return ref ? [ref.slice(4)] : [];
+    return ref?.startsWith("env:") ? [ref.slice(4)] : [];
   });
   const discoveryRef = domain.discoveryCredentialReference();
   const reference = options ? options.reference : discoveryRef;

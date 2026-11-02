@@ -471,6 +471,11 @@ test("profile and project instructions can be given inline or on stdin", async (
       create("Inline", "--instructions", "Be brief\n'$(x)'"),
     );
     assert.equal(k.stored(inline), "Be brief\n'$(x)'", k.area);
+    // The CLI sends no delivery default, so a project it creates is granted nothing.
+    if (k.area === "project") {
+      assert.deepEqual(d.deliveryConfiguration(inline).grants, []);
+      assert.equal(d.deliveryCredentialReference(inline), null);
+    }
     const piped = await created(create("Piped", "--instructions", "-"), {
       stdin: stdinOf("From stdin\n"),
     });

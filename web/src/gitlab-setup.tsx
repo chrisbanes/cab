@@ -57,6 +57,8 @@ export function withGitLabRepositories(
   return {
     command: {
       ...command,
+      // Open PRs on the GitLab repositories too; GitLab delivery uses the installation credential.
+      deliveryDefault: command.deliveryDefault ?? {},
       repositories: [
         ...(command.repositories ?? []),
         ...included.map((i) => {

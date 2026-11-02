@@ -232,3 +232,32 @@ export const noRequiredChecksWarning = (codeHost: CodeHost | undefined) =>
   `No required checks: neither ${codeHostName(codeHost)} nor cab requires a check, so cab holds every merge for this repository. Add an additional required check or a code-host rule.`;
 export const unconfirmedChecksNote =
   "Whether any check is required can't be confirmed until the code host's requirements can be read.";
+
+export const deliveryCredentialLimit =
+  "Agents running as the same OS user can reach this host's GitHub CLI login.";
+const deliveryCredentialReasons: Record<string, string> = {
+  "missing-credential": "the service environment has no value for it",
+  "invalid-credential-reference": "the saved reference is not valid",
+  "gh-not-installed": "GitHub CLI is not installed on the service host",
+  "gh-not-signed-in": "GitHub CLI is not signed in on the service host",
+  "gh-unreadable": "the service cannot read the GitHub CLI login",
+};
+/** The saved GitHub delivery credential as one line, from the configuration read. */
+export function deliveryCredentialSummary(
+  configured: boolean,
+  status:
+    | {
+        source: "env" | "gh" | null;
+        usable: boolean;
+        reason: string | null;
+        gh: { state: string; login?: string };
+      }
+    | undefined,
+): string {
+  if (!configured) return "No delivery credential is configured.";
+  if (!status) return "A delivery credential is configured.";
+  const kind = status.source === "gh" ? "GitHub CLI" : "Environment variable";
+  if (status.usable)
+    return `${kind}${status.gh.login && status.source === "gh" ? ` · @${status.gh.login}` : ""} · usable`;
+  return `${kind} · unavailable: ${(status.reason && deliveryCredentialReasons[status.reason]) ?? "status unavailable"}.`;
+}

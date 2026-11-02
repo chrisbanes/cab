@@ -99,3 +99,33 @@ export function repositoryLevelGrants(
     repositoryId,
   }));
 }
+
+/** Gives the repository exactly the level's rows, replacing only its level actions; other grants stay. */
+export function applyRepositoryLevel(
+  grants: readonly Grant[],
+  repositoryId: string,
+  level: Exclude<RepositoryDeliveryLevel, "not-set-up" | "custom">,
+): Grant[] {
+  if (repositoryDeliveryLevel(grants, repositoryId) === level)
+    return [...grants];
+  return [
+    ...grants.filter(
+      (grant) =>
+        grant.repositoryId !== repositoryId ||
+        !(repositoryLevelActions as readonly string[]).includes(grant.action),
+    ),
+    ...repositoryLevelGrants(repositoryId, level),
+  ];
+}
+
+/** Through merge exactly when some repository's grants derive a merge level. */
+export function deliveryModeFor(
+  grants: readonly Grant[],
+): DeliveryPolicy["mode"] {
+  return [...new Set(grants.map((grant) => grant.repositoryId))].some((id) => {
+    const level = repositoryDeliveryLevel(grants, id);
+    return level === "merge-with-approval" || level === "merge-when-ready";
+  })
+    ? "through-merge"
+    : "reviewable-pr";
+}
