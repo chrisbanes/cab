@@ -513,11 +513,14 @@ export class ExecutionSupervisor {
 
   noteSurvivor(workId: string): void {
     this.knownRisk.add(workId);
-    this.recordObservation(workId, "known-survivor");
     this.state.recordStopAnomaly(
       workId,
       "Known unfinished execution remains after terminal status",
     );
+    // Evidence only: a failed write must not skip the caller's hold or callback tracking.
+    try {
+      this.recordObservation(workId, "known-survivor");
+    } catch {}
   }
 
   noteAnomaly(workId: string): void {
