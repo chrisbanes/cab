@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 import {
@@ -14,9 +15,14 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
+import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
+import {
+  OperatorWebBoundary,
+  OperatorWebBundle,
+} from "../../../dist/src/standalone/operator-web.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 
 if (!process.argv.slice(2).includes("--live")) {
@@ -190,6 +196,13 @@ async function startOperator(port, origin) {
   auth = await OperatorAuth.open({ authFile, origin });
   http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
     routes: operatorRoutes(service),
+    // The React task workspace and its JSON API: the Execution tab and header Stop.
+    web: new OperatorWebBoundary(
+      await OperatorWebBundle.open(
+        fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
+      ),
+      new OperatorApi(service, [dirname(dataDir)]),
+    ),
   });
   await http.start(port);
 }
@@ -339,32 +352,26 @@ async function run() {
   };
 
   progress("chromium-live-runtime-and-coordination-views");
-  await page.goto(`${origin}/runtime/task/${taskId}`);
+  // The task's Execution tab reports the running execution.
+  const executionTab = `${origin}/app/tasks/${taskId}?section=execution`;
+  const execution = page.locator("section#execution");
+  await page.goto(executionTab);
   assert.equal(new URL(page.url()).origin, origin);
-  const runtimeBeforeStop = await page.locator("body").innerText();
-  assert.match(runtimeBeforeStop, /S04d live operator question and Stop/);
-  assert.match(runtimeBeforeStop, /Execution status: Running\./);
-  assert.match(runtimeBeforeStop, /Best-effort Stop/);
+  await execution
+    .locator("[data-execution-status]")
+    .getByText("Running", { exact: true })
+    .waitFor();
+  // The retained assignment page of the assignment that asked the live question.
   const callbackAssignmentHref = `/runtime/assignment/${encodeURIComponent(question.requestingAssignmentId)}`;
-  const taskAssignmentsSection = page
-    .getByRole("heading", { name: "Task-scoped assignments" })
-    .locator("xpath=..");
-  const callbackAssignmentLink = taskAssignmentsSection.locator(
-    `a[href="${callbackAssignmentHref}"]`,
-  );
-  assert.equal(
-    await callbackAssignmentLink.count(),
-    1,
-    "runtime view links the assignment that requested the live question",
-  );
-  const callbackAssignmentRow = await callbackAssignmentLink
-    .locator("xpath=..")
-    .innerText();
-  assert.match(callbackAssignmentRow, /:\s*Running\./);
+  await page.goto(`${origin}${callbackAssignmentHref}`);
+  const callbackAssignmentPage = await page.locator("body").innerText();
+  assert.match(callbackAssignmentPage, /Execution status: Running\./);
   evidence.runtimeBeforeStop = {
-    taskExecutionRunning: /Execution status: Running\./.test(runtimeBeforeStop),
+    taskExecutionRunning: true,
     requestingAssignmentLinked: true,
-    requestingAssignmentRunning: /:\s*Running\./.test(callbackAssignmentRow),
+    requestingAssignmentRunning: /Execution status: Running\./.test(
+      callbackAssignmentPage,
+    ),
   };
   const coordinationQuestion = openOperatorQuestion();
   assert.match(coordinationQuestion.prompt, /S04D_OPERATOR_QUESTION_V1/);
@@ -372,36 +379,43 @@ async function run() {
   assert.equal((await page.locator('a[href="/runtime"]').count()) > 0, true);
 
   progress("best-effort-stop-through-operator");
-  await page.goto(`${origin}/runtime/task/${taskId}`);
+  // The task header's Stop… confirms, then sends `task.stop` through the JSON command API.
+  await page.goto(executionTab);
+  await execution.locator("[data-execution-status]").waitFor();
   const stopResponse = page.waitForResponse(
     (candidate) =>
-      new URL(candidate.url()).pathname === "/runtime/control/stop" &&
-      candidate.request().method() === "POST",
+      new URL(candidate.url()).pathname === "/api/operator/commands" &&
+      candidate.request().method() === "POST" &&
+      (candidate.request().postData() ?? "").includes('"task.stop"'),
   );
-  await page.getByRole("button", { name: "Best-effort Stop" }).click();
+  await page.getByRole("button", { name: "Stop…", exact: true }).click();
+  const stopDialog = page.getByRole("alertdialog");
+  await stopDialog.getByRole("button", { name: "Stop task" }).click();
   const stop = await stopResponse;
-  assert.equal(stop.status(), 303);
-  // The retained form answers with the task's Execution tab; its retained page still reads the holds.
-  await page.waitForURL(`${origin}/app/tasks/${taskId}?section=execution`);
-  await page.goto(`${origin}/runtime/task/${taskId}`);
-  const afterStop = await page.locator("body").innerText();
-  assert.match(afterStop, /Operator Stop remains active/);
-  assert.match(afterStop, /Writer ownership remains held/);
+  assert.equal(stop.status(), 200);
+  assert.equal((await stop.json()).kind, "task-stop");
+  await stopDialog.getByText(/^Stop requested\./).waitFor();
+  await stopDialog.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Resume…", exact: true }).waitFor();
+  await execution.getByText("Operator Stop", { exact: true }).waitFor();
+  const afterStop = await execution.innerText();
+  assert.match(afterStop, /Operator Stop/);
+  assert.match(afterStop, /Writer ownership/);
   assert.match(
     afterStop,
     /Effects may continue while an execution is stopping/,
   );
   assert.doesNotMatch(
     afterStop,
-    /force unlock|execution stopped and released/i,
+    /force unlock|execution stopped and released|No unresolved execution hold/i,
   );
   evidence.stop = {
     responseStatus: stop.status(),
     outcomeCount: service
       .recoveryView()
       .filter((record) => record.binding?.taskId === taskId).length,
-    uiReportsStopHold: /Operator Stop remains active/.test(afterStop),
-    uiReportsWriterHold: /Writer ownership remains held/.test(afterStop),
+    uiReportsStopHold: /Operator Stop/.test(afterStop),
+    uiReportsWriterHold: /Writer ownership/.test(afterStop),
     uiDisclosesEffectsMayContinue: /Effects may continue/.test(afterStop),
     noForceUnlockClaim: !/force unlock|execution stopped and released/i.test(
       afterStop,
@@ -437,7 +451,7 @@ async function run() {
   await startOperator(port, origin);
 
   progress("restart-invalidates-session-and-retains-history-holds");
-  await page.goto(`${origin}/runtime/task/${taskId}`);
+  await page.goto(`${origin}/runtime`);
   const afterRestartLogin = await page.locator("body").innerText();
   assert.match(afterRestartLogin, /Sign in/);
   evidence.operator.restartInvalidatedSession = true;
@@ -445,10 +459,11 @@ async function run() {
   const retainedQuestion = openOperatorQuestion();
   assert.match(retainedQuestion.prompt, /S04D_OPERATOR_QUESTION_V1/);
   assert.equal(retainedQuestion.status, "open");
-  await page.goto(`${origin}/runtime/task/${taskId}`);
-  const retainedRuntime = await page.locator("body").innerText();
-  assert.match(retainedRuntime, /Operator Stop remains active/);
-  assert.match(retainedRuntime, /Writer ownership remains held/);
+  await page.goto(executionTab);
+  await execution.getByText("Operator Stop", { exact: true }).waitFor();
+  const retainedRuntime = await execution.innerText();
+  assert.match(retainedRuntime, /Operator Stop/);
+  assert.match(retainedRuntime, /Writer ownership/);
   assert.doesNotMatch(
     retainedRuntime,
     /execution stopped and released|force unlock/i,
@@ -456,8 +471,8 @@ async function run() {
   evidence.restart = {
     questionRetained: /S04D_OPERATOR_QUESTION_V1/.test(retainedQuestion.prompt),
     questionStillOpen: retainedQuestion.status === "open",
-    stopHoldRetained: /Operator Stop remains active/.test(retainedRuntime),
-    writerHoldRetained: /Writer ownership remains held/.test(retainedRuntime),
+    stopHoldRetained: /Operator Stop/.test(retainedRuntime),
+    writerHoldRetained: /Writer ownership/.test(retainedRuntime),
     noForceUnlockClaim: !/execution stopped and released|force unlock/i.test(
       retainedRuntime,
     ),

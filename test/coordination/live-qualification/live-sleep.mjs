@@ -1311,7 +1311,10 @@ async function runLiveJourney(approval) {
         ),
     );
     evidence.operator.liveQuestionVisible = true;
-    await page.goto(`${origin}/runtime/task/${activeTaskId}`);
+    // The retained page of the task's (lead) assignment: its status and the task's holds.
+    const activeAssignmentPage = () =>
+      `${origin}/runtime/assignment/${String(service.domain().assignments(activeTaskId)[0]?.id)}`;
+    await page.goto(activeAssignmentPage());
     assert.match(
       await page.locator("body").innerText(),
       /Execution status: Running\./,
@@ -1444,7 +1447,7 @@ async function runLiveJourney(approval) {
       throw fail("duplicate-or-replacement-execution-observed");
 
     progress("authenticated-recovery-view");
-    await page.goto(`${origin}/runtime/task/${activeTaskId}`);
+    await page.goto(activeAssignmentPage());
     const recoveryBody = await page.locator("body").innerText();
     assert.match(recoveryBody, /Execution state is uncertain/);
     assert.match(recoveryBody, /Writer ownership remains held/);
