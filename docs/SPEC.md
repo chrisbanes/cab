@@ -320,17 +320,22 @@ counts when its author association is `OWNER`, `MEMBER` or `COLLABORATOR`; on Ji
 comment counts, read as Markdown through the ADF conversion. cab's own comments never
 count: on GitHub they carry the `<!-- cab-operation:` marker in the body, on Jira the
 `cab-operation` comment property. Accepted limit: on Jira, anyone who can comment on the
-issue can shape the task, since commenting already needs access to the project. The
+issue can shape the task. That includes Jira Service Management portal customers and,
+where a permission scheme lets anonymous users comment, people outside the project. The
 issue brief is untrusted source text like the outcome: it grants no cab permission and
 selects no tool, policy or route. It is capped at 32 KB (UTF-8, markers included): the
 oldest later notes are dropped first behind `[… N earlier notes omitted …]`, and the
-brief itself is cut on a code point, ending `[… issue brief truncated …]`, only when it
-alone does not fit. Each sync reads the comments of the issues whose imported task is
+brief itself is cut on a code point, followed by `[… issue brief truncated …]` and, when
+later notes exist, the omitted-notes marker after it, only when it alone does not fit.
+Each sync reads the comments of the issues whose imported task is
 open, after a complete selection read; a Done task keeps its last issue brief. A comment
 read that fails, is rate-limited or reaches its page bound keeps the stored issue brief
 and never empties it. An issue brief change is a live text change, as above: a new source
 revision, no hold, no admission reason and no version change. A task without an issue
-brief keeps the source revisions it had before issue briefs existed. The task read
+brief keeps the source revisions it had before issue briefs existed. On upgrade, the
+first sync imports an issue's existing brief as a source change: an open task that was
+already handed back gets the informational changed-since-handback flag, and its lead's
+next turn shows the brief as added. Done tasks are not read, so they are unaffected. The task read
 carries it as `issueBrief` with `issueBriefTruncated`, beside the outcome; the task view
 shows it in its own Issue brief section and `cab task get` prints it after the outcome.
 
