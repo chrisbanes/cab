@@ -12,6 +12,8 @@ import {
   apiErrorSchema,
   type sourceCredentialReasonSchema,
   commandReceiptSchema,
+  operationReadSchema,
+  type operationTypeSchema,
   operatorCommandSchema,
   sessionSchema,
   type CommandReceipt,
@@ -112,6 +114,20 @@ export class OperatorClient {
   }
   read<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal) {
     return this.request(path, schema, signal ? { signal } : {});
+  }
+  operation(
+    query: {
+      scope: string;
+      type: z.infer<typeof operationTypeSchema>;
+      key: string;
+    },
+    signal?: AbortSignal,
+  ) {
+    return this.read(
+      `/api/operator/operations?${new URLSearchParams(query)}`,
+      operationReadSchema,
+      signal,
+    );
   }
   session() {
     return this.read("/api/operator/session", sessionSchema);

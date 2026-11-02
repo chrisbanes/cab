@@ -1287,3 +1287,517 @@ test("a discovery credential save elsewhere is unsettled until it is confirmed",
   offer.purge();
   assert.equal(notified, seen);
 });
+
+const deliverySave = () => ({
+  type: "delivery.configure" as const,
+  key: randomUUID(),
+  projectId: randomUUID(),
+  expectedVersion: 3,
+  mode: "reviewable-pr" as const,
+  grants: [],
+  requiredChecks: [],
+});
+const deliveryReceipt = (command: ReturnType<typeof deliverySave>) => ({
+  kind: "configuration" as const,
+  key: command.key,
+  recorded: true as const,
+  result: {
+    commandType: "delivery.configure" as const,
+    resourceId: command.projectId,
+    version: command.expectedVersion + 1,
+    credentialConfigured: true,
+  },
+});
+const recordedOperation = (receipt: unknown) => ({
+  data: { state: "recorded", receipt },
+  observedAt: 42,
+});
+const missingOperation = { data: { state: "not-recorded" }, observedAt: 42 };
+
+test("delivery Check reads the original operation before any resend and records exactly one matching receipt", async () => {
+  const command = deliverySave(),
+    receipt = deliveryReceipt(command);
+  const calls: { path: string; body: string | undefined }[] = [];
+  let saved = 0;
+  const draft = new ConfigurationDraft(
+    () => {},
+    (value) => {
+      saved++;
+      assert.deepEqual(value, receipt);
+      assert.equal(draft.phase, "recorded");
+      assert.deepEqual(draft.receipt, receipt);
+      void draft.reconcile(client, "csrf");
+    },
+  );
+  const client = new OperatorClient(async (path, init) => {
+    calls.push({
+      path: String(path),
+      body: init?.body === undefined ? undefined : String(init.body),
+    });
+    if (init?.method === "POST") throw Error("lost save response");
+    assert.equal(init?.credentials, "same-origin");
+    const query = new URL(String(path), "http://fixture").searchParams;
+    assert.deepEqual(Object.fromEntries(query), {
+      scope: `project:${command.projectId}`,
+      type: command.type,
+      key: command.key,
+    });
+    return Response.json(recordedOperation(receipt));
+  });
+  draft.set("credentialRef", "NEW PRIVATE INPUT");
+  await draft.submit(client, command, "csrf");
+  const bytes = draft.bytes;
+  assert.equal(draft.phase, "unknown");
+  await draft.reconcile(client, "csrf");
+  await draft.reconcile(client, "csrf");
+  assert.equal(saved, 1);
+  assert.equal(draft.phase, "recorded");
+  assert.equal(draft.notice, outcomeCopy.saved);
+  assert.ok(draft.savedAt !== null);
+  assert.equal(draft.details.version, command.expectedVersion + 1);
+  assert.equal(draft.bytes, bytes);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.body, bytes);
+  assert.equal(calls[1]?.body, undefined);
+  let focus = 0;
+  draft.afterRender(() => focus++);
+  assert.equal(focus, 0);
+  draft.committed(draft.revision);
+  assert.equal(focus, 1);
+});
+
+test("delivery not-recorded permits only an identical frozen retry and later refusals keep uncertainty", async () => {
+  for (const retry of [
+    "recorded",
+    "lost",
+    "invalid-input",
+    "conflict",
+  ] as const) {
+    const command = deliverySave(),
+      receipt = deliveryReceipt(command);
+    const calls: string[] = [],
+      bodies: string[] = [];
+    let posts = 0,
+      reads = 0;
+    const client = new OperatorClient(async (_path, init) => {
+      if (init?.method === "POST") {
+        calls.push("POST");
+        bodies.push(String(init.body));
+        if (++posts === 1 || retry === "lost") throw Error("lost");
+        if (retry === "recorded") return Response.json(receipt);
+        return Response.json(
+          { error: { code: retry, message: "Refused" } },
+          { status: retry === "conflict" ? 409 : 400 },
+        );
+      }
+      calls.push("GET");
+      return Response.json(
+        ++reads === 1 ? missingOperation : recordedOperation(receipt),
+      );
+    });
+    const draft = new ConfigurationDraft();
+    draft.initialize({
+      credentialRef: "PRIVATE ENTERED TEXT",
+      expectedVersion: "3",
+      key: command.key,
+    });
+    await draft.submit(client, command, "old-csrf");
+    const bytes = draft.bytes;
+    // A detached view or changed caller input cannot change the frozen retry.
+    const view = draft.frozen;
+    assert.ok(view?.type === "delivery.configure");
+    view.expectedVersion = 99;
+    command.expectedVersion = 88;
+    await draft.reconcile(client, "fresh-csrf");
+    assert.deepEqual(calls, ["POST", "GET", "POST"]);
+    assert.deepEqual(bodies, [bytes, bytes]);
+    assert.equal(draft.bytes, bytes);
+    if (retry !== "recorded") {
+      assert.equal(draft.phase, "unknown");
+      assert.equal(draft.set("credentialRef", "changed"), false);
+      draft.adoptVersion(30);
+      draft.startOperation({ credentialRef: "changed" });
+      assert.equal(draft.values.credentialRef, "PRIVATE ENTERED TEXT");
+      assert.equal(draft.frozen?.key, command.key);
+      await draft.reconcile(client, "csrf");
+      assert.deepEqual(calls, ["POST", "GET", "POST", "GET"]);
+    }
+    assert.equal(draft.phase, "recorded");
+  }
+});
+
+test("delivery Check failures malformed reads and schema-valid mismatches keep the original unknown save", async () => {
+  const command = deliverySave(),
+    receipt = deliveryReceipt(command);
+  const wrongType = {
+    ...receipt,
+    result: {
+      commandType: "project.configure",
+      resourceId: command.projectId,
+      version: 4,
+      paused: false,
+      leadProfileId: null,
+      instructionsRevision: 1,
+    },
+  };
+  const responses = [
+    () => {
+      throw Error("GET failed");
+    },
+    () => new Response("invalid JSON", { status: 200 }),
+    () => Response.json({ data: { state: "not-recorded" } }),
+    () =>
+      Response.json(
+        recordedOperation({
+          ...receipt,
+          result: {
+            ...receipt.result,
+            credentialRef: "env:UNEXPECTED_PRIVATE",
+          },
+        }),
+      ),
+    () => Response.json(recordedOperation({ ...receipt, key: randomUUID() })),
+    () => Response.json(recordedOperation(wrongType)),
+    () =>
+      Response.json(
+        recordedOperation({
+          ...receipt,
+          result: { ...receipt.result, resourceId: randomUUID() },
+        }),
+      ),
+    () =>
+      Response.json(
+        recordedOperation({
+          ...receipt,
+          result: { ...receipt.result, version: 3 },
+        }),
+      ),
+    () =>
+      Response.json(
+        recordedOperation({
+          ...receipt,
+          result: { ...receipt.result, version: 20 },
+        }),
+      ),
+    ...[401, 403, 409, 503].map(
+      (status) => () =>
+        Response.json(
+          {
+            error: {
+              code: status === 401 ? "unauthenticated" : "unavailable",
+              message: "Unavailable",
+            },
+          },
+          { status },
+        ),
+    ),
+  ];
+  for (const respond of responses) {
+    let posts = 0,
+      saved = 0;
+    const draft = new ConfigurationDraft(
+      () => {},
+      () => saved++,
+    );
+    draft.set("credentialRef", "PRIVATE ENTERED INPUT");
+    let complete = false;
+    const client = new OperatorClient(async (_path, init) => {
+      if (init?.method === "POST") {
+        posts++;
+        throw Error("lost");
+      }
+      return complete ? Response.json(recordedOperation(receipt)) : respond();
+    });
+    await draft.submit(client, command, "csrf");
+    const bytes = draft.bytes;
+    await draft.reconcile(client, "csrf");
+    assert.equal(draft.phase, "unknown");
+    assert.equal(draft.receipt, null);
+    assert.equal(draft.savedAt, null);
+    assert.equal(saved, 0);
+    assert.equal(posts, 1);
+    assert.equal(draft.bytes, bytes);
+    assert.equal(draft.set("credentialRef", "changed"), false);
+    draft.adoptVersion(20);
+    assert.equal(draft.frozen?.key, command.key);
+    assert.equal(draft.values.credentialRef, "PRIVATE ENTERED INPUT");
+    complete = true;
+    await draft.reconcile(client, "csrf");
+    assert.equal(draft.phase, "recorded");
+    assert.equal(saved, 1);
+    assert.equal(posts, 1);
+  }
+});
+
+test("delivery concurrent Check calls share one lookup and a saved callback purge cannot revive the draft", async () => {
+  for (const purgeOnSaved of [false, true]) {
+    const command = deliverySave(),
+      receipt = deliveryReceipt(command);
+    let finish!: (response: Response) => void;
+    let reads = 0,
+      posts = 0,
+      saved = 0;
+    const client = new OperatorClient(async (_path, init) => {
+      if (init?.method === "POST") {
+        posts++;
+        throw Error("lost");
+      }
+      reads++;
+      return new Promise<Response>((done) => {
+        finish = done;
+      });
+    });
+    const draft = new ConfigurationDraft(
+      () => {},
+      () => {
+        saved++;
+        if (purgeOnSaved) draft.purge();
+      },
+    );
+    draft.set("credentialRef", "PRIVATE");
+    await draft.submit(client, command, "csrf");
+    const first = draft.reconcile(client, "csrf");
+    await draft.reconcile(client, "csrf");
+    assert.equal(draft.phase, "pending");
+    assert.equal(draft.set("credentialRef", "changed"), false);
+    assert.equal(reads, 1);
+    finish(Response.json(recordedOperation(receipt)));
+    await first;
+    assert.equal(saved, 1);
+    assert.equal(posts, 1);
+    assert.equal(reads, 1);
+    if (purgeOnSaved) {
+      assert.equal(draft.phase, "editing");
+      assert.deepEqual(draft.values, {});
+      assert.equal(draft.frozen, null);
+      assert.equal(draft.receipt, null);
+      assert.equal(draft.savedAt, null);
+      assert.equal(draft.notice, "");
+    } else assert.equal(draft.phase, "recorded");
+  }
+});
+
+test("delivery purged lookup completions cannot resend or settle a replacement private session draft", async () => {
+  for (const completion of [
+    "recorded",
+    "not-recorded",
+    "401",
+    "malformed",
+  ] as const) {
+    const command = deliverySave(),
+      receipt = deliveryReceipt(command);
+    const drafts = new ConfigurationDrafts();
+    const key = `delivery.configure:${command.projectId}`;
+    const draft = drafts.get(key, () => {});
+    let finish!: (response: Response) => void;
+    let posts = 0,
+      expired = 0;
+    const client = new OperatorClient(
+      async (_path, init) => {
+        if (init?.method === "POST") {
+          posts++;
+          throw Error("lost");
+        }
+        return new Promise<Response>((done) => {
+          finish = done;
+        });
+      },
+      () => {
+        expired++;
+        drafts.purge();
+      },
+    );
+    draft.set("credentialRef", "OLD PRIVATE");
+    await draft.submit(client, command, "old-csrf");
+    const checking = draft.reconcile(client, "old-csrf");
+    client.invalidateAuthentication();
+    drafts.purge();
+    const replacement = drafts.get(key, () => {});
+    replacement.set("credentialRef", "NEW PRIVATE");
+    finish(
+      completion === "recorded"
+        ? Response.json(recordedOperation(receipt))
+        : completion === "not-recorded"
+          ? Response.json(missingOperation)
+          : completion === "401"
+            ? Response.json({}, { status: 401 })
+            : Response.json({ invalid: true }),
+    );
+    await checking;
+    assert.equal(posts, 1);
+    assert.equal(expired, 0);
+    assert.equal(draft.phase, "editing");
+    assert.deepEqual(draft.values, {});
+    assert.equal(draft.frozen, null);
+    assert.equal(drafts.saved(key), undefined);
+    assert.equal(replacement.values.credentialRef, "NEW PRIVATE");
+    assert.equal(replacement.phase, "editing");
+  }
+});
+
+test("delivery authentication changes without purge cannot accept old POST or GET authority or resend", async () => {
+  for (const stage of ["POST", "GET-recorded", "GET-not-recorded"] as const) {
+    const command = deliverySave(),
+      receipt = deliveryReceipt(command);
+    let finish!: (response: Response) => void;
+    let posts = 0,
+      saved = 0;
+    const client = new OperatorClient(async (_path, init) => {
+      if (init?.method === "POST") {
+        if (++posts === 1 && stage !== "POST") throw Error("lost");
+      }
+      return new Promise<Response>((done) => {
+        finish = done;
+      });
+    });
+    const draft = new ConfigurationDraft(
+      () => {},
+      () => saved++,
+    );
+    const initial = draft.submit(client, command, "old-csrf");
+    let pending = initial;
+    if (stage !== "POST") {
+      await initial;
+      pending = draft.reconcile(client, "old-csrf");
+    }
+    client.invalidateAuthentication();
+    finish(
+      Response.json(
+        stage === "POST"
+          ? receipt
+          : stage === "GET-recorded"
+            ? recordedOperation(receipt)
+            : missingOperation,
+      ),
+    );
+    await pending;
+    assert.equal(posts, 1);
+    assert.equal(saved, 0);
+    assert.equal(draft.phase, "unknown");
+    assert.equal(draft.frozen?.key, command.key);
+    assert.equal(draft.set("credentialRef", "changed"), false);
+  }
+});
+
+test("delivery Check current-session expiry purges private input before a lookup can settle", async () => {
+  const command = deliverySave();
+  const drafts = new ConfigurationDrafts();
+  const draft = drafts.get("delivery", () => {});
+  let expired = 0,
+    posts = 0;
+  const client = new OperatorClient(
+    async (_path, init) => {
+      if (init?.method === "POST") {
+        posts++;
+        throw Error("lost");
+      }
+      return Response.json({}, { status: 401 });
+    },
+    () => {
+      expired++;
+      drafts.purge();
+    },
+  );
+  draft.set("credentialRef", "PRIVATE");
+  await draft.submit(client, command, "csrf");
+  await draft.reconcile(client, "csrf");
+  assert.equal(expired, 1);
+  assert.equal(posts, 1);
+  assert.equal(draft.phase, "editing");
+  assert.deepEqual(draft.values, {});
+  assert.equal(draft.frozen, null);
+  assert.equal(draft.receipt, null);
+});
+
+test("delivery render-triggered purge prevents a pending Check from issuing a lookup", async () => {
+  const command = deliverySave();
+  let posts = 0;
+  const client = new OperatorClient(async (_path, init) => {
+    assert.equal(init?.method, "POST");
+    posts++;
+    throw Error("lost");
+  });
+  const draft = new ConfigurationDraft();
+  await draft.submit(client, command, "csrf");
+  draft.bind(() => {
+    if (draft.phase === "pending") draft.purge();
+  });
+  await draft.reconcile(client, "csrf");
+  assert.equal(posts, 1);
+  assert.equal(draft.phase, "editing");
+  assert.equal(draft.frozen, null);
+});
+
+test("delivery typed operation read recovers the original version after lost save later credential change and SQLite reopen", async (t) => {
+  const { createOperatorFixture } = await import("../fixtures/operator-web.js");
+  const { OperatorApi } = await import("../../src/standalone/operator-api.js");
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  let api = new OperatorApi(f.service, [f.directory]);
+  const command = deliverySave();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId: command.projectId,
+    name: "Delivery",
+    leadProfileId: null,
+  });
+  const configure = (expectedVersion: number, credentialRef: string) => ({
+    ...command,
+    key: randomUUID(),
+    expectedVersion,
+    credentialRef,
+  });
+  await api.execute(configure(1, "env:ORIGINAL_DELIVERY"));
+  command.expectedVersion = 2;
+  const calls: string[] = [];
+  let saved = 0;
+  let refreshed:
+    | ReturnType<InstanceType<typeof OperatorApi>["readProjectConfiguration"]>
+    | undefined;
+  const draft = new ConfigurationDraft(
+    () => {},
+    () => {
+      saved++;
+      refreshed = api.readProjectConfiguration(command.projectId);
+    },
+  );
+  const client = new OperatorClient(async (path, init) => {
+    assert.equal(init?.credentials, "same-origin");
+    if (init?.method === "POST") {
+      calls.push("POST");
+      await api.execute(JSON.parse(String(init.body)));
+      throw Error("saved response lost");
+    }
+    calls.push("GET");
+    const query = new URL(String(path), "http://fixture").searchParams;
+    return Response.json(await api.readOperation(query));
+  });
+  draft.initialize({
+    key: command.key,
+    expectedVersion: "2",
+    credentialRef: "",
+  });
+  await draft.submit(client, command, "csrf");
+  assert.equal(draft.phase, "unknown");
+  const bytes = draft.bytes;
+  await api.execute(configure(3, "env:LATER_DELIVERY"));
+  await f.reopen();
+  api = new OperatorApi(f.service, [f.directory]);
+  await draft.reconcile(client, "csrf");
+  assert.deepEqual(calls, ["POST", "GET"]);
+  assert.equal(saved, 1);
+  assert.equal(draft.phase, "recorded");
+  assert.equal(draft.details.version, 3);
+  assert.equal(draft.bytes, bytes);
+  assert.equal((await refreshed)?.data.delivery?.version, 4);
+  assert.equal(
+    f.service.delivery().configuration(command.projectId).version,
+    4,
+  );
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(command.projectId),
+    "env:LATER_DELIVERY",
+  );
+  assert.equal(f.runtime.turns, 0);
+});

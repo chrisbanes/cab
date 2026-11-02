@@ -4,7 +4,7 @@ import {
   type OperatorCommand,
   type CommandReceipt,
 } from "../../src/operator/contracts.js";
-import type { OperatorClient } from "./api.js";
+import { ClientError, type CommandState, type OperatorClient } from "./api.js";
 import { sameText } from "./settings-changes.js";
 import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
@@ -504,17 +504,53 @@ export class ConfigurationDraft {
   }
   async reconcile(client: OperatorClient, csrf: string) {
     if (this.phase !== "unknown" || !this.frozen) return;
-    await this.send(client, csrf);
+    await this.send(client, csrf, true);
   }
-  private async send(client: OperatorClient, csrf: string) {
+  private async send(
+    client: OperatorClient,
+    csrf: string,
+    checkReceipt = false,
+  ) {
     const c = this.lifecycle.begin();
     if (!c) return;
     const generation = this.generation;
+    const currentAuthentication = client.captureAuthenticationScope();
     this.phase = "pending";
     this.savedAt = null;
     this.changed();
-    const result = await client.command(c, csrf);
     if (generation !== this.generation) return;
+    let result: CommandState;
+    if (c.type === "delivery.configure" && !currentAuthentication()) {
+      result = { state: "unknown", command: c, code: "unauthenticated" };
+    } else if (checkReceipt && c.type === "delivery.configure") {
+      try {
+        const operation = await client.operation({
+          scope: `project:${c.projectId}`,
+          type: c.type,
+          key: c.key,
+        });
+        if (generation !== this.generation) return;
+        if (!currentAuthentication()) {
+          result = { state: "unknown", command: c, code: "unauthenticated" };
+        } else if (operation.data.state === "recorded") {
+          result = { state: "recorded", receipt: operation.data.receipt };
+        } else {
+          // A missing receipt does not rule out an in-flight commit. Retry only these frozen bytes/key.
+          result = await client.command(c, csrf);
+        }
+      } catch (error) {
+        result = {
+          state: "unknown",
+          command: c,
+          code: error instanceof ClientError ? error.code : "unavailable",
+        };
+      }
+    } else {
+      result = await client.command(c, csrf);
+    }
+    if (generation !== this.generation) return;
+    if (c.type === "delivery.configure" && !currentAuthentication())
+      result = { state: "unknown", command: c, code: "unauthenticated" };
     const disposition = this.lifecycle.settle(
       result,
       matchesConfigurationReceipt,
@@ -541,6 +577,7 @@ export class ConfigurationDraft {
     if (disposition === "recorded") {
       this.phase = "recorded";
       if (this.receipt) this.onSaved(this.receipt);
+      if (generation !== this.generation) return;
       this.savedAt = Date.now();
       this.notice = outcomeCopy.saved;
     } else if (disposition === "unknown") {
