@@ -2027,6 +2027,8 @@ conditions; observed PR auto-closure is reconciled, not assumed to complete all 
 Writes record confirmed success, confirmed failure or uncertainty; local edits
 cannot masquerade as confirmed remote updates.
 
+The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 17 scoped action kinds and required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The retained `/project/:id` editor and its links remain available.
+
 The service implements operator-owned, versioned project delivery policy. Absent
 action grants deny writes; imported identity and repository access supply no write
 authority. Configured delivery credentials stay in service memory and are excluded

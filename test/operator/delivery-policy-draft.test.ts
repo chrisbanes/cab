@@ -398,3 +398,283 @@ test("change text excludes credential input and reports policy changes only", ()
     /SECRET/,
   );
 });
+
+test("opaque rows and prefix round-trip through editor values without synthetic identity or UI keys", async () => {
+  const { deliveryEditorValues, deliveryEditorDraft, deliveryFieldErrors } =
+    await import("../../web/src/delivery-policy-draft.js");
+  const savedRow = {
+    projectId: "p",
+    section: "delivery-grants" as const,
+    version: 7,
+    index: 0,
+  };
+  const unavailable = {
+    kind: "unavailable" as const,
+    label: "Unavailable saved row" as const,
+    savedRow,
+  };
+  const saved = seed({
+    branchPrefix: null,
+    branchPrefixUnavailable: true,
+    grants: [
+      unavailable,
+      {
+        action: "issue.comment",
+        repositoryId: "r",
+        mode: "allow",
+        optionNodeIds: [],
+      },
+    ],
+    requiredChecks: [
+      {
+        kind: "unavailable",
+        label: "Unavailable saved row",
+        savedRow: { ...savedRow, section: "delivery-checks" },
+      },
+      { name: "Build", appId: 42 },
+    ],
+  });
+  const values = deliveryEditorValues(saved);
+  const draft = deliveryEditorDraft(values);
+  assert.deepEqual(deliveryFieldErrors(draft), {});
+  const submitted = deliveryPolicySubmission(draft);
+  assert.deepEqual(submitted, {
+    mode: "through-merge",
+    preserveBranchPrefix: true,
+    grants: [{ savedRow, keep: true }, saved.grants[1]],
+    requiredChecks: [
+      { savedRow: { ...savedRow, section: "delivery-checks" }, keep: true },
+      { name: "Build", appId: 42 },
+    ],
+  });
+  assert.doesNotMatch(
+    JSON.stringify(submitted),
+    /rowKey|credential|unavailable/,
+  );
+  assert.deepEqual(deliveryPolicyChangeText(saved, draft), []);
+  values.grants = JSON.stringify(JSON.parse(String(values.grants)).slice(1));
+  assert.deepEqual(
+    deliveryPolicySubmission(deliveryEditorDraft(values)).grants,
+    [saved.grants[1]],
+  );
+  assert.deepEqual(
+    deliveryPolicySubmission(deliveryEditorDraft(deliveryEditorValues(saved))),
+    submitted,
+  );
+});
+
+test("editor preserves missing versus empty prefix and optional lists, and maps keyed errors to numeric fields", async () => {
+  const { deliveryEditorValues, deliveryEditorDraft, deliveryFieldErrors } =
+    await import("../../web/src/delivery-policy-draft.js");
+  for (const prefix of [undefined, ""]) {
+    const saved = seed({
+      grants: [
+        {
+          action: "issue.comment",
+          repositoryId: "r",
+          mode: "allow",
+          optionNodeIds: [],
+          projectNodeId: "P",
+          fieldNodeId: "F",
+        },
+      ],
+    });
+    if (prefix === undefined) delete saved.branchPrefix;
+    else saved.branchPrefix = prefix;
+    const result = deliveryPolicySubmission(
+      deliveryEditorDraft(deliveryEditorValues(saved)),
+    );
+    assert.equal(Object.hasOwn(result, "branchPrefix"), prefix !== undefined);
+    assert.deepEqual(result.grants, saved.grants);
+  }
+  const draft = deliveryPolicyDraft(
+    seed({
+      grants: [{ action: "project.field", repositoryId: "", mode: "allow" }],
+      requiredChecks: [{ name: "", appId: 0 }],
+    }),
+  );
+  draft.credentialIntent = "set";
+  assert.deepEqual(Object.keys(deliveryFieldErrors(draft)), [
+    "grants.0.repositoryId",
+    "grants.0.projectNodeId",
+    "grants.0.fieldNodeId",
+    "grants.0.optionNodeIds",
+    "requiredChecks.0.name",
+    "requiredChecks.0.appId",
+    "credentialRef",
+  ]);
+});
+
+test("configured mapping warning compares exact scopes and target options, not unrelated grants", async () => {
+  const { deliveryMappingCoverageLoss } = await import(
+    "../../web/src/delivery-policy-draft.js"
+  );
+  const saved = seed({
+    grants: [
+      {
+        action: "project.field",
+        mode: "allow",
+        repositoryId: "r",
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: ["O", "other"],
+      },
+    ],
+  });
+  const view = {
+    version: 1,
+    availability: "available" as const,
+    mapping: {
+      selectionId: "s",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      events: { turnStarted: "O", handedBack: null, held: null, done: null },
+    },
+    selections: [],
+    granted: [
+      { projectNodeId: "P", fieldNodeId: "F", optionNodeIds: ["O", "other"] },
+    ],
+  };
+  assert.equal(deliveryMappingCoverageLoss(saved, seed(), view), true);
+  assert.equal(
+    deliveryMappingCoverageLoss(
+      saved,
+      {
+        ...saved,
+        grants: [
+          {
+            action: "project.field",
+            mode: "allow",
+            repositoryId: "r",
+            projectNodeId: "P",
+            fieldNodeId: "F",
+            optionNodeIds: ["O"],
+          },
+        ],
+      },
+      view,
+    ),
+    false,
+  );
+  assert.equal(
+    deliveryMappingCoverageLoss(saved, seed(), { ...view, mapping: null }),
+    false,
+  );
+  assert.equal(
+    deliveryMappingCoverageLoss(saved, seed(), {
+      ...view,
+      mapping: { ...view.mapping, fieldNodeId: "different" },
+    }),
+    false,
+  );
+  const jiraSaved = seed({
+    grants: [
+      {
+        action: "issue.status",
+        mode: "allow",
+        repositoryId: "jira-container",
+        statusIds: ["O"],
+      },
+    ],
+  });
+  const jiraView = {
+    tracker: "jira" as const,
+    version: 1,
+    availability: "available" as const,
+    mapping: { tracker: "jira" as const, events: view.mapping.events },
+    granted: ["O"],
+  };
+  assert.equal(
+    deliveryMappingCoverageLoss(
+      jiraSaved,
+      {
+        ...jiraSaved,
+        grants: [
+          {
+            action: "issue.status",
+            mode: "allow",
+            repositoryId: "other-container",
+            statusIds: ["O"],
+          },
+        ],
+      },
+      jiraView,
+    ),
+    true,
+  );
+  assert.equal(
+    deliveryMappingCoverageLoss(
+      jiraSaved,
+      { ...jiraSaved, grants: [...jiraSaved.grants, ...jiraSaved.grants] },
+      jiraView,
+    ),
+    false,
+  );
+});
+
+test("all actions keep every accepted supplemental scope and duplicate check through the editor adapter", async () => {
+  const { deliveryEditorValues, deliveryEditorDraft, deliveryFieldErrors } =
+    await import("../../web/src/delivery-policy-draft.js");
+  for (const action of actionKinds) {
+    const saved = seed({
+      grants: [
+        {
+          action,
+          repositoryId: "tracker",
+          mode: action === "branch.adopt" ? "approval" : "allow",
+          projectNodeId: "P",
+          fieldNodeId: "F",
+          optionNodeIds: action === "project.field" ? ["O", "O"] : [],
+          ...(action === "issue.status" ? { statusIds: ["S", "S"] } : {}),
+        },
+      ],
+      requiredChecks: [
+        { name: "Build" },
+        { name: "Build", appId: 42 },
+        { name: "Build", appId: 42 },
+      ],
+    });
+    const draft = deliveryEditorDraft(deliveryEditorValues(saved));
+    assert.deepEqual(deliveryFieldErrors(draft), {}, action);
+    const result = deliveryPolicySubmission(draft);
+    assert.deepEqual(
+      result,
+      {
+        mode: saved.mode,
+        branchPrefix: "",
+        grants: saved.grants,
+        requiredChecks: saved.requiredChecks,
+      },
+      action,
+    );
+    deliveryPolicySchema.parse({ ...result, credentialRef: null });
+  }
+});
+
+test("reviewing a newer policy cannot rebind an old unavailable ordinal", async () => {
+  const { deliveryEditorValues, deliveryEditorDraft, deliveryFieldErrors } =
+    await import("../../web/src/delivery-policy-draft.js");
+  const saved = seed({
+    grants: [
+      {
+        kind: "unavailable",
+        label: "Unavailable saved row",
+        savedRow: {
+          projectId: "p",
+          section: "delivery-grants",
+          version: 7,
+          index: 0,
+        },
+      },
+    ],
+  });
+  const values = deliveryEditorValues(saved);
+  values.expectedVersion = "8";
+  assert.match(
+    deliveryFieldErrors(deliveryEditorDraft(values))["grants.0.savedRow"]!,
+    /older version/,
+  );
+  const row = deliveryPolicySubmission(deliveryEditorDraft(values)).grants[0];
+  assert.ok(row && "savedRow" in row);
+  assert.equal(row.savedRow.version, 7);
+});

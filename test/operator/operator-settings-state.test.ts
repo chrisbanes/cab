@@ -1945,3 +1945,39 @@ test("opaque source unknown save recovers original receipt after later replaceme
   assert.equal(f.service.domain().githubConfiguration(projectId).version, 4);
   assert.equal(f.runtime.turns, 0);
 });
+
+test("delivery JSON row comparison ignores UI keys but retains optional presence, order and duplicates", () => {
+  const d = new ConfigurationDraft();
+  const grant = {
+    action: "issue.comment",
+    repositoryId: "r",
+    mode: "approval",
+    rowKey: "first",
+  };
+  d.initialize({
+    key: randomUUID(),
+    expectedVersion: "1",
+    grants: JSON.stringify([grant, grant]),
+    requiredChecks: JSON.stringify([
+      { name: "Build", appId: "42", rowKey: "check" },
+    ]),
+  });
+  d.set(
+    "grants",
+    JSON.stringify([
+      { ...grant, rowKey: "new" },
+      { ...grant, rowKey: "new-2" },
+    ]),
+  );
+  d.set(
+    "requiredChecks",
+    JSON.stringify([{ rowKey: "other", appId: "42", name: "Build" }]),
+  );
+  assert.equal(d.dirty, false);
+  d.set("grants", JSON.stringify([{ ...grant, optionNodeIds: [] }, grant]));
+  assert.equal(d.dirty, true);
+  d.set("grants", JSON.stringify([grant, grant]));
+  assert.equal(d.dirty, false);
+  d.set("grants", JSON.stringify([grant]));
+  assert.equal(d.dirty, true);
+});

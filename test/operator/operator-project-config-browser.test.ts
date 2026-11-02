@@ -93,7 +93,7 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
   });
-  assert.equal(await tabs.getByRole("link").count(), 5);
+  assert.equal(await tabs.getByRole("link").count(), 6);
   assert.equal(
     await tabs
       .getByRole("link", { name: "General" })
@@ -2883,7 +2883,9 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
   });
   await page.reload();
   await page
-    .getByText("Saved readiness is unavailable; add a condition to replace it.")
+    .getByText(
+      "Saved readiness is unavailable and is kept when saving. Add a condition to replace it.",
+    )
     .waitFor();
   assert.equal(await noRule.count(), 0);
   assert.equal(await save.isDisabled(), true);

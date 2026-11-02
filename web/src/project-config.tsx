@@ -52,6 +52,7 @@ import {
   usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
+import { DeliveryTab } from "./delivery-config.js";
 import { RepositoryTab } from "./repository-config.js";
 import { SourceTab } from "./source-config.js";
 import { readinessAnchor } from "./observation-counts.js";
@@ -190,6 +191,13 @@ export function ProjectConfiguration(
                 observations={observations}
               />
             </>
+          ) : tab === "delivery" ? (
+            <DeliveryTab
+              {...p}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
           ) : tab === "sync" ? (
             <SyncTab
               {...p}
@@ -244,6 +252,13 @@ function statusLine(
     return withSaved(
       "Repository links are the checkouts workspaces and delivery use.",
       saved("repositories.configure", data.repositories.version),
+    );
+  if (tab === "delivery")
+    return withSaved(
+      data.delivery?.credentialConfigured
+        ? "Delivery credential configured."
+        : "No delivery credential configured.",
+      data.delivery ? saved("delivery.configure", data.delivery.version) : null,
     );
   if (tab === "github")
     return [

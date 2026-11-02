@@ -37,6 +37,7 @@ export const projectTabs = [
   { id: "routing", label: "Routing" },
   { id: "repositories", label: "Repositories" },
   { id: "github", label: "GitHub source" },
+  { id: "delivery", label: "Delivery" },
   { id: "sync", label: "Sync & placement" },
 ] as const;
 export type ProjectTab = (typeof projectTabs)[number]["id"];
