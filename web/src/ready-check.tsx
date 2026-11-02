@@ -15,6 +15,7 @@ import type { ObservationResource } from "./sync-placement.js";
 import {
   type ReadinessRead,
   readyCheckItems,
+  deliveryReadyLine,
   sourceCredentialLine,
 } from "./setup-model.js";
 import type { TabProps } from "./project-config.js";
@@ -124,6 +125,15 @@ export function ReadyCheck({
     projectId,
     configuration.state.error ? null : configuration.state.data?.data.source,
   );
+  const delivery = created.repositories?.length
+    ? deliveryReadyLine(
+        projectId,
+        configuration.state.error
+          ? null
+          : configuration.state.data?.data.delivery,
+        configuration.state.data?.data.repositories.links ?? [],
+      )
+    : null;
   // Only a project with a repository records a source credential; a repository-free
   // project shows no credential line and has none to check again.
   // The source credential line concerns GitHub sources only.
@@ -132,8 +142,10 @@ export function ReadyCheck({
   );
   // A source fixed in another tab is re-read by Check again, as readiness items are.
   const recheckCredential =
-    withRepositories &&
-    (Boolean(credential.link) || Boolean(configuration.state.error));
+    (withRepositories && Boolean(credential.link)) ||
+    Boolean(delivery?.link) ||
+    (Boolean(created.repositories?.length) &&
+      Boolean(configuration.state.error));
   // Its own key: the project configuration General tab loads into `project.configure:<id>`.
   const resume = useDraft(p.drafts, `project.resume:${projectId}`);
   // A recorded create is version 1 (see matchesConfigurationReceipt).
@@ -217,6 +229,24 @@ export function ReadyCheck({
               )}
             </li>
           )}
+          {delivery && (
+            <li>
+              {delivery.text}
+              {delivery.link && (
+                <>
+                  {" "}
+                  <ActionLink
+                    variant="secondary"
+                    href={delivery.link.href}
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    {delivery.link.label}
+                  </ActionLink>
+                </>
+              )}
+            </li>
+          )}
         </ul>
       </DraftMessage>
       {created.githubProject && configuration.state.data && (
@@ -294,7 +324,8 @@ export function ReadyCheck({
             )}
             <p className="metadata muted">
               {(items.some((item) => item.link) ||
-                (withRepositories && credential.link)) &&
+                (withRepositories && credential.link) ||
+                delivery?.link) &&
                 "Links open in a new tab. "}
               Fix the item, then check again here. If you leave this page,
               resume later with the Pause project switch in project

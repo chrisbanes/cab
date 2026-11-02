@@ -753,6 +753,10 @@ function providerCredentialExclusions(domain: DomainStore) {
         (project) =>
           domain.githubConfiguration(String(project.id)).credentialRef,
       ),
+    // A delivery `gh:github.com` reference excludes gh's token values like a source reference.
+    ...domain
+      .projects()
+      .map((project) => domain.deliveryCredentialReference(String(project.id))),
     ...domain.pendingCredentialReferences(),
   ];
   const excluded = [
@@ -781,7 +785,8 @@ function secretEnvironmentValues(): string[] {
 
 /** An `env:NAME` credential reference, its variable name and the variable's value. */
 function credentialReferenceValues(ref: string | null | undefined): string[] {
-  return ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [];
+  if (!ref?.startsWith("env:")) return ref ? [ref] : [];
+  return [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""];
 }
 
 const backgroundDiagnosticTimeoutMs = 50;
@@ -1179,6 +1184,15 @@ export class StandaloneService {
       });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
+      // Once per store; coordination and domain tables exist by now, which its skip rules read.
+      deliveryStore.applyOpenPrsDefault(
+        domain.projects().map((project) => ({
+          projectId: String(project.id),
+          repositoryIds: domain
+            .repositoryLinks(String(project.id))
+            .links.map((link) => link.repositoryId),
+        })),
+      );
       const statusMappings = new StatusMappingStore(db);
       const taskPublications = new TaskPublicationStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
@@ -1212,6 +1226,10 @@ export class StandaloneService {
       const retryWaits = new AbortController();
       this.retryWaits = retryWaits;
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
+        gh: () => ({
+          executable: this.options.ghExecutable,
+          environment: ghEnvironment(domain, { reference: "gh:github.com" }),
+        }),
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
           : {}),
@@ -1386,12 +1404,24 @@ export class StandaloneService {
                         material: request.action,
                       }),
                   ),
-        activationAllowed: (policy) =>
-          !policy.credentialRef ||
-          (!runtimeSpawnSnapshot?.[policy.credentialRef.slice(4)] &&
-            !Object.values(runtimeSpawnSnapshot ?? {}).includes(
-              process.env[policy.credentialRef.slice(4)] ?? "",
-            )),
+        activationAllowed: (policy) => {
+          if (!policy.credentialRef) return true;
+          // A `gh:github.com` reference keeps the old snapshot's gh variables and token values out too.
+          const excluded =
+            policy.credentialRef === "gh:github.com"
+              ? credentialReferenceExclusions(policy.credentialRef)
+              : {
+                  names: [policy.credentialRef.slice(4)],
+                  values: [process.env[policy.credentialRef.slice(4)] ?? ""],
+                };
+          const snapshot = runtimeSpawnSnapshot ?? {};
+          return (
+            !excluded.names.some((name) => snapshot[name]) &&
+            !Object.values(snapshot).some((value) =>
+              excluded.values.includes(value ?? ""),
+            )
+          );
+        },
       });
       acquire("deliveryCoordinator", deliveryCoordinator);
       const publicationDriver = new TaskPublicationDriver(
@@ -1411,7 +1441,7 @@ export class StandaloneService {
       const deliveryCredentialNames = () =>
         domain.projects().flatMap((p) => {
           const ref = deliveryStore.configuration(String(p.id)).credentialRef;
-          return ref ? [ref.slice(4)] : [];
+          return ref?.startsWith("env:") ? [ref.slice(4)] : [];
         });
       const claudeTokenExcluded = () => {
         const ref = domain.claudeTokenReference();
@@ -1423,7 +1453,10 @@ export class StandaloneService {
         domain.discoveryCredentialReference(),
         ...domain
           .projects()
-          .map((p) => domain.githubConfiguration(String(p.id)).credentialRef),
+          .flatMap((p) => [
+            domain.githubConfiguration(String(p.id)).credentialRef,
+            deliveryStore.configuration(String(p.id)).credentialRef,
+          ]),
       ];
       if (startupGhReferences.includes("gh:github.com"))
         await ghToken({
@@ -3565,6 +3598,22 @@ export class StandaloneService {
         status.reason,
       );
     return status;
+  }
+
+  /** How the project's delivery credential resolves now, by the source credential's own status rules. */
+  async deliveryCredentialStatus(projectId: string, scope?: GhLoginScope) {
+    return gitHubSourceCredentialStatus(
+      this.domain().deliveryCredentialReference(projectId),
+      {
+        gh: () => ({
+          executable: this.options.ghExecutable,
+          environment: ghEnvironment(this.domain(), {
+            reference: "gh:github.com",
+          }),
+        }),
+      },
+      scope,
+    );
   }
 
   /** Includes lifetime gh values even after every source/discovery reference has been cleared. */

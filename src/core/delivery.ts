@@ -7,6 +7,8 @@ import {
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { sourceCredentialReference } from "./credential-reference.js";
+import { applyRepositoryLevel, isCodeHostGrant } from "./delivery-levels.js";
 import { githubIssueTracker } from "./github-source-contracts.js";
 import {
   itemIs,
@@ -127,10 +129,7 @@ export const repositorySettingsSchema = z
 export const deliveryPolicySchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
-    credentialRef: z
-      .string()
-      .regex(/^env:[A-Z][A-Z0-9_]*$/)
-      .nullable(),
+    credentialRef: sourceCredentialReference.nullable(),
     /** Absent on policies persisted before publication existed; `defaultBranchPrefix` then applies. */
     branchPrefix: z.string().refine(validBranchPrefix).optional(),
     grants: z
@@ -800,6 +799,7 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_attempts (
       operationId TEXT NOT NULL REFERENCES delivery_actions(operationId), attempt INTEGER NOT NULL,
       beforeJson TEXT NOT NULL, observationJson TEXT, PRIMARY KEY(operationId,attempt));
+    CREATE TABLE IF NOT EXISTS delivery_migrations (migrationId TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS delivery_closure_versions (
       operationId TEXT PRIMARY KEY REFERENCES delivery_actions(operationId),
       taskId TEXT NOT NULL REFERENCES domain_tasks(id), baseVersion INTEGER NOT NULL, version INTEGER NOT NULL);
@@ -2654,6 +2654,83 @@ export class DeliveryStore {
   publicConfiguration(projectId: string) {
     const { credentialRef, ...policy } = this.configuration(projectId);
     return { ...policy, credentialConfigured: credentialRef !== null };
+  }
+  /** Guided setup's default, written with the project it belongs to: Open PRs on each repository and the optional credential, at version 1. */
+  recordDefaultWithinTransaction(
+    projectId: string,
+    repositoryIds: readonly string[],
+    credentialRef: DeliveryPolicy["credentialRef"],
+  ): void {
+    const policy = deliveryPolicySchema.parse({
+      mode: "reviewable-pr",
+      credentialRef,
+      grants: repositoryIds.reduce<DeliveryPolicy["grants"]>(
+        (grants, id) => applyRepositoryLevel(grants, id, "open-prs"),
+        [],
+      ),
+      requiredChecks: [],
+      repositories: [],
+    });
+    this.db
+      .prepare("INSERT INTO delivery_policies VALUES (?, 1, ?)")
+      .run(projectId, canonicalMaterial(policy));
+  }
+  /**
+   * Once per store: gives each project's linked repositories without code-host grants the Open PRs
+   * level. Nothing is removed or downgraded and the mode, credential and prefix stay. A project with
+   * an open pull request, an open approval or an unresolved action is skipped, because the version
+   * bump would invalidate the settlements and approvals bound to its policy version.
+   */
+  applyOpenPrsDefault(
+    projects: readonly { projectId: string; repositoryIds: string[] }[],
+  ): void {
+    const migrationId = "open-prs-default-v1";
+    this.transaction(() => {
+      if (
+        this.db
+          .prepare("SELECT 1 FROM delivery_migrations WHERE migrationId=?")
+          .get(migrationId)
+      )
+        return;
+      for (const { projectId, repositoryIds } of projects) {
+        if (this.inFlight(projectId)) continue;
+        const { version, ...policy } = this.configuration(projectId);
+        const unset = [...new Set(repositoryIds)].filter(
+          (id) =>
+            !policy.grants.some(
+              (grant) => isCodeHostGrant(grant) && grant.repositoryId === id,
+            ),
+        );
+        if (!unset.length) continue;
+        const grants = unset.reduce(
+          (current, id) => applyRepositoryLevel(current, id, "open-prs"),
+          policy.grants,
+        );
+        // Never truncate: a project that would exceed the cap keeps its policy and can apply the level by hand.
+        if (grants.length > 256) continue;
+        this.db
+          .prepare(
+            "INSERT INTO delivery_policies VALUES (?, ?, ?) ON CONFLICT(projectId) DO UPDATE SET version=excluded.version, policyJson=excluded.policyJson",
+          )
+          .run(
+            projectId,
+            version + 1,
+            canonicalMaterial(
+              deliveryPolicySchema.parse({ ...policy, grants }),
+            ),
+          );
+      }
+      this.db
+        .prepare("INSERT INTO delivery_migrations VALUES (?)")
+        .run(migrationId);
+    });
+  }
+  private inFlight(projectId: string): boolean {
+    return [
+      "SELECT 1 FROM delivery_pr_bindings b JOIN domain_tasks t ON t.id=b.taskId WHERE t.projectId=? AND json_extract(b.recordJson,'$.observation.state')='OPEN'",
+      "SELECT 1 FROM coordination_interactions i JOIN domain_tasks t ON t.id=i.taskId WHERE t.projectId=? AND i.kind='approval' AND i.status='open'",
+      "SELECT 1 FROM delivery_actions a JOIN domain_tasks t ON t.id=a.taskId WHERE t.projectId=? AND json_extract(a.recordJson,'$.state') IN ('prepared','attempting','uncertain')",
+    ].some((sql) => this.db.prepare(sql).get(projectId) !== undefined);
   }
   configureWithinTransaction(
     projectId: string,

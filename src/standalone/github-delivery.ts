@@ -240,12 +240,22 @@ export class GitHubHttpDeliveryProvider
   implements CodeHostDeliveryProvider, IssueTrackerWriter
 {
   constructor(
-    private readonly credential: string,
+    credential: string | (() => Promise<string | undefined>),
     private readonly fetcher: typeof fetch = fetch,
     private readonly push: PushFunction = pushTaskCommit,
     private readonly adopt: AdoptFunction = adoptOutsideHead,
     private readonly host = "github.com",
-  ) {}
+  ) {
+    this.resolveCredential =
+      typeof credential === "string" ? async () => credential : credential;
+  }
+  private readonly resolveCredential: () => Promise<string | undefined>;
+  private resolved?: Promise<string | undefined>;
+  /** Resolved on first use and kept for this instance only; every delivery action builds its own provider. */
+  private credential(): Promise<string | undefined> {
+    this.resolved ??= this.resolveCredential().catch(() => undefined);
+    return this.resolved;
+  }
   private async request(
     path: string,
     method = "GET",
@@ -253,7 +263,8 @@ export class GitHubHttpDeliveryProvider
   ): Promise<{ json: unknown; response: Response }> {
     const url = new URL(path, api);
     if (url.origin !== api) throw new Error("provider-origin-mismatch");
-    if (!this.credential) throw new Error("provider-credential-unavailable");
+    const credential = await this.credential();
+    if (!credential) throw new Error("provider-credential-unavailable");
     const response = await githubFetch(
       this.fetcher,
       url.href,
@@ -262,7 +273,7 @@ export class GitHubHttpDeliveryProvider
         signal: AbortSignal.timeout(15000),
         headers: {
           Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${this.credential}`,
+          Authorization: `Bearer ${credential}`,
           "X-GitHub-Api-Version": "2022-11-28",
           "Content-Type": "application/json",
         },
@@ -1511,19 +1522,19 @@ export class GitHubHttpDeliveryProvider
       .join("/");
     return {
       readRef: (branch) => this.optionalRef(path, branch),
-      push: (request) =>
+      push: async (request) =>
         this.push({
           ...request,
           host: this.host,
           nameWithOwner,
-          token: this.credential,
+          token: (await this.credential()) ?? "",
         }),
-      adopt: (request) =>
+      adopt: async (request) =>
         this.adopt({
           ...request,
           host: this.host,
           nameWithOwner,
-          token: this.credential,
+          token: (await this.credential()) ?? "",
         }),
     };
   }

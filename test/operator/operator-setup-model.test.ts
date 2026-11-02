@@ -29,6 +29,8 @@ import {
   type SetupDraftPhase,
   rowsFromDraft,
   rowsToDraft,
+  deliveryReadyLine,
+  setupDeliveryCopy,
   setupSourceCredentialCopy,
   sourceCredentialLine,
   typedRepositoryId,
@@ -110,6 +112,7 @@ test("typed repositories and rows build the one create command", () => {
       },
     ],
     githubProject: { projectNodeId: "PVT_atlas" },
+    deliveryDefault: {},
   });
   assert.equal(operatorCommandSchema.safeParse(command).success, true);
   assert.deepEqual(rowsFromDraft(rowsToDraft(rows)), rows);
@@ -715,6 +718,176 @@ test("the ready check states the recorded source credential with a settings link
     assert.deepEqual(sourceCredentialLine(id, unavailable), {
       text: "GitHub source credential: status unavailable.",
     });
+});
+
+test("setup sends a delivery default with any repository, and the login only when signed in", () => {
+  const rows = [
+    {
+      ...typeRepository(emptyRow("typed"), "acme/atlas"),
+      ref: "main",
+      path: "~/src/atlas",
+    },
+  ];
+  const deliveryOf = (gh: Parameters<typeof buildProjectCreate>[3]) =>
+    (
+      buildProjectCreate(values, rows, "", gh).command as {
+        deliveryDefault?: unknown;
+      }
+    ).deliveryDefault;
+  assert.deepEqual(deliveryOf({ state: "signed-in", login: "octo" }), {
+    credentialRef: "gh:github.com",
+  });
+  for (const gh of [
+    undefined,
+    null,
+    { state: "not-signed-in" as const },
+    { state: "unreadable" as const },
+    { state: "not-installed" as const },
+  ])
+    assert.deepEqual(deliveryOf(gh), {});
+  const signedIn = buildProjectCreate(values, rows, "", {
+    state: "signed-in",
+    login: "octo",
+  }).command;
+  assert.equal(operatorCommandSchema.safeParse(signedIn).success, true);
+  // A repository-free project has nothing to grant, so no default is sent.
+  const free = buildProjectCreate(values, [emptyRow("discovered")], "", {
+    state: "signed-in",
+    login: "octo",
+  });
+  assert.equal("deliveryDefault" in free.command, false);
+  assert.equal(operatorCommandSchema.safeParse(free.command).success, true);
+});
+
+test("setup states the delivery default and its credential before Create", () => {
+  const signedIn = { state: "signed-in" as const, login: "octo" };
+  assert.match(
+    setupDeliveryCopy(signedIn, true),
+    /^Delivery: Open PRs on each repository\..*can't merge.*Delivery credential: GitHub CLI · @octo\./,
+  );
+  assert.match(
+    setupDeliveryCopy(undefined, true),
+    /Checking the GitHub CLI login/,
+  );
+  assert.match(
+    setupDeliveryCopy(null, true),
+    /Delivery credential: none\. The GitHub CLI login could not be checked/,
+  );
+  assert.match(
+    setupDeliveryCopy({ state: "not-signed-in" }, true),
+    /Delivery credential: none\. No usable GitHub CLI login was detected/,
+  );
+  // GitLab delivery uses the installation credential, whatever the login says.
+  assert.match(
+    setupDeliveryCopy(signedIn, false),
+    /GitLab delivery uses the installation's GitLab credential/,
+  );
+  assert.doesNotMatch(setupDeliveryCopy(signedIn, false), /@octo/);
+});
+
+test("the ready check reports missing delivery authority and credential with a Delivery link, and never blocks", () => {
+  const id = "p1";
+  const link = {
+    label: "Delivery settings",
+    href: "/app/projects/p1/settings?tab=delivery",
+  };
+  const grant = (repositoryId: string) => ({
+    action: "pr.create" as const,
+    repositoryId,
+    mode: "allow" as const,
+  });
+  const credential = (usable = true) => ({
+    configured: true,
+    source: "gh" as const,
+    usable,
+    reason: usable ? null : ("gh-not-signed-in" as const),
+    gh: { state: "signed-in" as const, login: "octo" },
+  });
+  const github = (repositoryId: string) => ({
+    repositoryId,
+    codeHost: "github",
+  });
+  const gitlab = (repositoryId: string) => ({
+    repositoryId,
+    codeHost: "gitlab",
+  });
+  const policy = (
+    over: Partial<{
+      grants: ReturnType<typeof grant>[];
+      credentialConfigured: boolean;
+      credential: ReturnType<typeof credential> | undefined;
+    }> = {},
+  ) => ({
+    credentialConfigured: true,
+    credential: credential(),
+    grants: [grant("R1")],
+    ...over,
+  });
+  // No grants.
+  assert.deepEqual(
+    deliveryReadyLine(id, policy({ grants: [] }), [github("R1")]),
+    {
+      text: "Delivery: 1 linked repository has no delivery authority, so cab can't push or open pull requests there.",
+      link,
+    },
+  );
+  // No credential, with authority granted.
+  assert.deepEqual(
+    deliveryReadyLine(
+      id,
+      policy({ credentialConfigured: false, credential: undefined }),
+      [github("R1")],
+    ),
+    { text: "Delivery: No GitHub delivery credential is set.", link },
+  );
+  // An unusable credential.
+  assert.deepEqual(
+    deliveryReadyLine(id, policy({ credential: credential(false) }), [
+      github("R1"),
+    ]),
+    { text: "Delivery: The GitHub delivery credential isn't usable.", link },
+  );
+  // Both, for two repositories.
+  assert.equal(
+    deliveryReadyLine(
+      id,
+      policy({ credentialConfigured: false, credential: undefined }),
+      [github("R1"), github("R2")],
+    )?.text,
+    "Delivery: 1 linked repository has no delivery authority, so cab can't push or open pull requests there. No GitHub delivery credential is set.",
+  );
+  // GitLab uses the installation credential, so it has no credential line.
+  assert.deepEqual(
+    deliveryReadyLine(
+      id,
+      policy({ credentialConfigured: false, credential: undefined }),
+      [gitlab("R1")],
+    ),
+    { text: "Delivery: granted" },
+  );
+  // Complete.
+  assert.deepEqual(deliveryReadyLine(id, policy(), [github("R1")]), {
+    text: "Delivery: granted · GitHub CLI · @octo",
+  });
+  // Loading, failed, and a project with no repository.
+  assert.deepEqual(deliveryReadyLine(id, undefined, []), {
+    text: "Delivery: checking…",
+  });
+  assert.deepEqual(deliveryReadyLine(id, null, []), {
+    text: "Delivery: status unavailable.",
+  });
+  assert.equal(deliveryReadyLine(id, policy(), []), null);
+  // The line is informational: the items that block Resume do not include it.
+  const ready = readyCheckItems({
+    leadProfileId: null,
+    workspace: null,
+    readiness: { state: "loading" },
+    capacity: null,
+  });
+  assert.equal(
+    ready.items.some((item) => /^Delivery/.test(item.text)),
+    false,
+  );
 });
 
 test("Create is held or actionable by one function of the project and the lead profile", () => {

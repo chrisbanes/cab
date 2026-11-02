@@ -56,6 +56,7 @@ import {
   rowsFromDraft,
   rowsToDraft,
   type SetupRow,
+  setupDeliveryCopy,
   setupSourceCredentialCopy,
   typeRepository,
   verificationCopy,
@@ -1141,6 +1142,14 @@ export function ProjectSetup(
                   {rowIndex.length > 0 && (
                     <p className="metadata muted">
                       {setupSourceCredentialCopy(sourceGh)}
+                    </p>
+                  )}
+                  {Boolean(
+                    command.type === "project.create" &&
+                      command.repositories?.length,
+                  ) && (
+                    <p className="metadata muted">
+                      {setupDeliveryCopy(sourceGh, rowIndex.length > 0)}
                     </p>
                   )}
                   {rows.length >= 20 && (

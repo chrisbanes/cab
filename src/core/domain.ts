@@ -148,8 +148,20 @@ const commandSchema = z.discriminatedUnion("type", [
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
       // Guided setup's default: the detected GitHub CLI login, stated before creation.
       sourceCredentialRef: z.literal("gh:github.com").optional(),
+      // Guided setup's delivery default: Open PRs on each repository, and the same login for delivery.
+      deliveryDefault: z
+        .object({ credentialRef: z.literal("gh:github.com").optional() })
+        .strict()
+        .optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (command) => !command.deliveryDefault || command.repositories?.length,
+      {
+        path: ["deliveryDefault"],
+        message: "A delivery default needs repositories",
+      },
+    ),
   z
     .object({
       ...commandBase,
@@ -1066,6 +1078,7 @@ export class DomainStore {
     // Not authoritative (apply decides in the transaction); it spares probing repositories.
     this.assertProjectNameAvailable(command.name);
     const release = this.select(command.sourceCredentialRef);
+    const releaseDelivery = this.select(command.deliveryDefault?.credentialRef);
     try {
       const verified: LinkedRepository[] = [];
       // In order, so the first failing row is the one reported; nothing is recorded on failure.
@@ -1114,6 +1127,7 @@ export class DomainStore {
         );
       return outcome.result;
     } finally {
+      releaseDelivery();
       release();
     }
   }
@@ -2839,6 +2853,12 @@ export class DomainStore {
                   : { ...repository, codeHost: "github", host: "github.com" };
               }),
             ),
+          );
+        if (command.deliveryDefault)
+          new DeliveryStore(this.db).recordDefaultWithinTransaction(
+            command.projectId,
+            repositories.map((repository) => repository.repositoryId),
+            command.deliveryDefault.credentialRef ?? null,
           );
         return this.project(command.projectId);
       }

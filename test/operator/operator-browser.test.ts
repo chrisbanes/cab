@@ -466,6 +466,9 @@ test("Chromium verifies the independent login and guarded browser session", asyn
     /Browser-created project/,
   );
   assert.equal(domain.projects().length, 2);
+  // The fallback form never sends a delivery default, so the project is granted nothing.
+  assert.deepEqual(domain.deliveryConfiguration(browserProjectId).grants, []);
+  assert.equal(domain.deliveryCredentialReference(browserProjectId), null);
   await page.goto(`${origin}/profile/${profile.id}`);
   const profileForm = page.locator('form[data-command="profile.configure"]');
   await profileForm

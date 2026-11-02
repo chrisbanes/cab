@@ -1,3 +1,5 @@
+import { resolveGitHubSourceCredential } from "./github-source-credential.js";
+import type { GhOptions } from "./gh-credential.js";
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   absentBranchHead,
@@ -79,6 +81,8 @@ class DeliveryReadUnavailable extends Error {
 
 export interface DeliveryCoordinatorOptions {
   fetcher?: typeof fetch;
+  /** How a `gh:github.com` delivery credential is read; resolved on each use. */
+  gh?: GhOptions | (() => GhOptions);
   providerFactories?: CodeHostProviderFactories;
   issueTrackerFactories?: IssueTrackerWriterFactories;
   /** The issue tracker the project's task source names, or null when the project has no task source. */
@@ -184,11 +188,16 @@ export class DeliveryCoordinator {
     return this.githubProvider(policy, host);
   }
   private githubProvider(policy: DeliveryPolicy, host: string) {
-    const credential = policy.credentialRef
-      ? process.env[policy.credentialRef.slice(4)]
-      : undefined;
+    // Resolved on the provider's first request, so every action reads the credential afresh.
+    const credential = async () => {
+      const resolved = await resolveGitHubSourceCredential(
+        policy.credentialRef,
+        { ...(this.options.gh ? { gh: this.options.gh } : {}) },
+      );
+      return "token" in resolved ? resolved.token : undefined;
+    };
     return new GitHubHttpDeliveryProvider(
-      credential ?? "",
+      credential,
       this.options.fetcher,
       this.options.push,
       this.options.adopt,
@@ -1035,7 +1044,7 @@ export function deliveryRuntimeEnvironment(
   return credentialFreeEnvironment(
     environment,
     policies.flatMap((p) =>
-      p.credentialRef ? [p.credentialRef.slice(4)] : [],
+      p.credentialRef?.startsWith("env:") ? [p.credentialRef.slice(4)] : [],
     ),
   );
 }

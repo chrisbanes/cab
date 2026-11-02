@@ -319,7 +319,10 @@ export class TaskReviewStore {
       const policy = JSON.parse(String(row.policyJson)) as {
         credentialRef?: string;
       };
-      if (policy.credentialRef) {
+      if (policy.credentialRef?.startsWith("gh:"))
+        // No variable to name; the resolved token values come from the child exclusions below.
+        excluded.push(policy.credentialRef);
+      else if (policy.credentialRef) {
         const name = policy.credentialRef.slice(4);
         excluded.push(policy.credentialRef, name);
         if (process.env[name]) excluded.push(process.env[name]!);

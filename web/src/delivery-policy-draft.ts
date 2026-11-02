@@ -43,7 +43,7 @@ export type RepositorySetting = Pick<
 >;
 export type DeliveryPolicyValues = Omit<
   DeliveryConfiguration,
-  "version" | "credentialConfigured" | "repositories"
+  "version" | "credentialConfigured" | "credential" | "repositories"
 > & { repositories?: RepositorySetting[] | undefined };
 const repositorySetting = ({
   repositoryId,
@@ -57,6 +57,7 @@ const repositorySetting = ({
 export type DeliveryPolicySeed = DeliveryPolicyValues & {
   version: number;
   credentialConfigured: boolean;
+  credential?: unknown;
 };
 export type DeliveryPolicyDraft = DeliveryPolicyValues & {
   version: number;
@@ -151,7 +152,12 @@ export function applyRepositoryDeliveryLevel(
 export function deliveryPolicyDraft(
   seed: DeliveryPolicySeed,
 ): DeliveryPolicyDraft {
-  const { credentialConfigured: _configured, repositories, ...values } = seed;
+  const {
+    credentialConfigured: _configured,
+    credential: _credential,
+    repositories,
+    ...values
+  } = seed;
   return {
     ...structuredClone(values),
     ...(repositories
@@ -206,6 +212,8 @@ export function addRequiredCheckRow(
   };
 }
 
+const deliveryCredentialPattern = /^(?:env:[A-Z][A-Z0-9_]*|gh:github\.com)$/;
+
 /** Builds JSON input with opaque keep references; credential input exists only for an explicit Set. */
 export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
   const {
@@ -247,7 +255,7 @@ export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
       : {}),
   };
   if (credentialIntent === "set") {
-    if (!credentialInput || !/^env:[A-Z][A-Z0-9_]*$/.test(credentialInput))
+    if (!credentialInput || !deliveryCredentialPattern.test(credentialInput))
       throw new Error("Enter a valid delivery credential reference.");
     return { ...structuredClone(values), credentialRef: credentialInput };
   }
@@ -371,7 +379,7 @@ export function validateDeliveryPolicyDraft(
   if (
     draft.credentialIntent === "set" &&
     (!draft.credentialInput ||
-      !/^env:[A-Z][A-Z0-9_]*$/.test(draft.credentialInput))
+      !deliveryCredentialPattern.test(draft.credentialInput))
   )
     add("credentialInput", "Enter a valid delivery credential reference.");
   if (draft.grantKeys.length !== draft.grants.length)
@@ -594,14 +602,16 @@ export function deliveryEditorDraft(values: Values): DeliveryPolicyDraft {
         ? { branchPrefix: String(values.branchPrefix ?? "") }
         : {}),
     credentialIntent:
-      values.referenceMode === "set"
+      values.referenceMode === "set" || values.referenceMode === "gh"
         ? "set"
         : values.referenceMode === "clear"
           ? "clear"
           : "preserve",
     ...(values.referenceMode === "set"
       ? { credentialInput: String(values.credentialRef ?? "") }
-      : {}),
+      : values.referenceMode === "gh"
+        ? { credentialInput: "gh:github.com" }
+        : {}),
     grantKeys: grants.map((row) => row.rowKey),
     requiredCheckKeys: checks.map((row) => row.rowKey),
     grants: grants.map(({ rowKey: _key, ...row }) => row),

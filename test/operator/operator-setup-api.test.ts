@@ -999,23 +999,40 @@ test("a gh discovery reference reads with the gh login on every read and never r
   assert.equal(text.includes(fakeGhToken), false);
 });
 
-test("routing and delivery stay env-only while sources accept the exact gh login", () => {
+test("routing stays env-only while sources and delivery accept the exact gh login", () => {
   const routing = operatorCommandSchema.options.find(
     (o) => o.shape.type.value === "routing.configure",
   ) as unknown as { shape: { credentialRef: z.ZodType } } | undefined;
   assert.ok(routing);
+  assert.equal(
+    routing.shape.credentialRef.safeParse("env:FIXTURE_SOURCE").success,
+    true,
+  );
+  assert.equal(
+    routing.shape.credentialRef.safeParse("gh:github.com").success,
+    false,
+  );
   for (const field of [
-    routing.shape.credentialRef,
+    githubConfigurationSchema.shape.credentialRef,
     deliveryPolicySchema.shape.credentialRef,
   ]) {
     assert.equal(field.safeParse("env:FIXTURE_SOURCE").success, true);
-    assert.equal(field.safeParse("gh:github.com").success, false);
+    assert.equal(field.safeParse("gh:github.com").success, true);
+    assert.equal(field.safeParse("gh:other.host").success, false);
+    assert.equal(field.safeParse(null).success, true);
   }
-  const source = githubConfigurationSchema.shape.credentialRef;
-  assert.equal(source.safeParse("env:FIXTURE_SOURCE").success, true);
-  assert.equal(source.safeParse("gh:github.com").success, true);
-  assert.equal(source.safeParse("gh:other.host").success, false);
-  assert.equal(source.safeParse(null).success, true);
+  const delivery = operatorCommandSchema.options.find(
+    (o) => o.shape.type.value === "delivery.configure",
+  ) as unknown as { shape: { credentialRef: z.ZodType } } | undefined;
+  assert.ok(delivery);
+  assert.equal(
+    delivery.shape.credentialRef.safeParse("gh:github.com").success,
+    true,
+  );
+  assert.equal(
+    delivery.shape.credentialRef.safeParse("gh:example.com").success,
+    false,
+  );
 });
 
 test("discovery status reports the login a new project's gh source would use, by status only", async (t) => {

@@ -143,6 +143,42 @@ test("credential intent preserves, clears or submits only newly entered referenc
   );
 });
 
+test("the GitHub CLI login is a valid delivery credential and its status never reaches a submission", () => {
+  const base = deliveryPolicyDraft(
+    seed({
+      credential: {
+        configured: true,
+        source: "gh",
+        usable: true,
+        reason: null,
+        gh: { state: "signed-in", login: "octo" },
+      },
+    }),
+  );
+  assert.equal("credential" in base, false);
+  assert.equal("credential" in deliveryPolicySubmission(base), false);
+  const chosen = { ...base, credentialIntent: "set" as const };
+  assert.deepEqual(
+    deliveryPolicySubmission({ ...chosen, credentialInput: "gh:github.com" }),
+    { ...deliveryPolicySubmission(base), credentialRef: "gh:github.com" },
+  );
+  assert.throws(
+    () =>
+      deliveryPolicySubmission({
+        ...chosen,
+        credentialInput: "gh:example.com",
+      }),
+    /valid delivery credential/,
+  );
+  assert.deepEqual(
+    validateDeliveryPolicyDraft({
+      ...chosen,
+      credentialInput: "gh:github.com",
+    }),
+    [],
+  );
+});
+
 test("stable row keys survive edits and removal while submission contains only policy fields", () => {
   const base = deliveryPolicyDraft(
     seed({
