@@ -977,3 +977,87 @@ test("browse reads are read-only, capability gated and refuse managed assignment
   assert.equal((await h.run(["task", "list", "extra"])).code, 2);
   for (const text of h.outputs) assert.ok(!text.includes(read.token));
 });
+
+test("project get preserves withheld repository JSON nulls and reports the unavailable content it renders", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t),
+    read = await s.issue("read", "nullable-host");
+  assert.equal(
+    (
+      await h.run([
+        "auth",
+        "login",
+        "--url",
+        s.origin,
+        "--token-file",
+        h.tokenFile(read.token),
+      ])
+    ).code,
+    0,
+  );
+  const empty = await h.run([
+    "project",
+    "get",
+    s.projectId,
+    "--output",
+    "json",
+  ]);
+  assert.equal(empty.code, 0, empty.err);
+  assert.equal(
+    empty.json().coverage.complete,
+    true,
+    "optional absent blocks are not unavailable content",
+  );
+  const envKey = "CLI_WITHHELD_HOST",
+    previous = process.env[envKey];
+  process.env[envKey] = "private.example.com";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  s.f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: s.projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: `env:${envKey}`,
+    grants: [],
+    requiredChecks: [],
+  });
+  s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE project_repository_links SET version=2, links=? WHERE projectId=?",
+      )
+      .run(
+        JSON.stringify([
+          {
+            codeHost: "gitlab",
+            host: "private.example.com",
+            repositoryId: "42",
+            projectPath: "group/project",
+            path: "/fixture/checkout",
+            gitCommonDirectory: "/fixture/checkout/.git",
+            ref: "main",
+          },
+        ]),
+        s.projectId,
+      ),
+  );
+  const json = await h.run(["project", "get", s.projectId, "--output", "json"]);
+  assert.equal(json.code, 0, json.err);
+  const body = json.json();
+  assert.equal(body.data.repositories.links[0].host, null);
+  assert.equal(body.data.repositories.links[0].repositoryId, null);
+  assert.equal(body.data.repositories.links[0].ref, null);
+  assert.equal(body.coverage.complete, false);
+  assert.deepEqual(body.coverage.gaps, ["content-unavailable"]);
+  assert.equal(json.out.includes("private.example.com"), false);
+  const human = await h.run(["project", "get", s.projectId]);
+  assert.equal(human.code, 0, human.err);
+  assert.match(human.out, /\(unavailable\)/);
+  assert.match(human.out, /Gap: content-unavailable/);
+  assert.equal(human.out.includes("private.example.com"), false);
+});

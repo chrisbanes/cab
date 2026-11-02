@@ -27,6 +27,9 @@ import {
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
+  jiraRowsFrom,
+  jiraSelections,
+  adoptJiraRows,
   staleRepositoryRows,
   staleSourceRows,
   duplicateRepositoryIds,
@@ -1435,4 +1438,335 @@ test("command network access reads the saved setting, what applies and what it e
     commandNetworkDisclosure,
     "Network-enabled commands can reach whatever credentials and logins the host exposes.",
   );
+});
+
+test("opaque saved source and repository rows are kept by default removed explicitly and restored by discard", () => {
+  const c = config();
+  const sourceReference = {
+    projectId,
+    section: "source" as const,
+    version: 4,
+    index: 0,
+  };
+  const repositoryReference = {
+    projectId,
+    section: "repositories" as const,
+    version: 2,
+    index: 0,
+  };
+  const source = {
+    ...c.source,
+    readiness: { kind: "unavailable" as const },
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: sourceReference,
+      },
+      c.source.selections[0]!,
+    ],
+  };
+  const saved = {
+    ...c.repositories,
+    links: [
+      {
+        codeHost: "gitlab" as const,
+        host: null,
+        repositoryId: null,
+        ref: null,
+        savedRow: repositoryReference,
+      },
+      c.repositories.links[0]!,
+    ],
+  };
+  const loaded = sourceRowsFrom(source),
+    links = repositoryRowsFrom(saved);
+  assert.equal(loaded.incomplete, false);
+  assert.equal(links.incomplete, false);
+  const values = {
+    key: "k",
+    expectedVersion: "4",
+    selections: JSON.stringify(loaded.selections),
+    conditions: "[]",
+    preserveReadiness: true,
+    repositories: JSON.stringify(links.repositories),
+  };
+  assert.deepEqual(sourceCommand(projectId, values).selections[0], {
+    savedRow: sourceReference,
+    keep: true,
+  });
+  assert.equal(
+    Object.hasOwn(sourceCommand(projectId, values), "readiness"),
+    false,
+  );
+  assert.deepEqual(repositoryCommand(projectId, values).repositories[0], {
+    savedRow: repositoryReference,
+    keep: true,
+  });
+  assert.deepEqual(sourceChanges(source, values), []);
+  assert.deepEqual(repositoryChanges(saved, values), []);
+  const removed = {
+    ...values,
+    selections: JSON.stringify(
+      loaded.selections.map((row, index) =>
+        index === 0 ? { ...row, removed: true } : row,
+      ),
+    ),
+    repositories: JSON.stringify(
+      links.repositories.map((row, index) =>
+        index === 0 ? { ...row, removed: true } : row,
+      ),
+    ),
+  };
+  assert.deepEqual(sourceChanges(source, removed), [
+    "− Unavailable saved source",
+  ]);
+  assert.deepEqual(repositoryChanges(saved, removed), [
+    "− Unavailable saved repository link",
+  ]);
+  assert.equal(sourceCommand(projectId, removed).selections.length, 1);
+  assert.equal(repositoryCommand(projectId, removed).repositories.length, 1);
+  assert.deepEqual(sourceCommand(projectId, values).selections[0], {
+    savedRow: sourceReference,
+    keep: true,
+  });
+  assert.deepEqual(repositoryCommand(projectId, values).repositories[0], {
+    savedRow: repositoryReference,
+    keep: true,
+  });
+  assert.equal(JSON.stringify(loaded.selections[0]).includes('"id"'), false);
+  assert.equal(
+    JSON.stringify(links.repositories[0]).includes('"repositoryId"'),
+    false,
+  );
+});
+
+test("opaque adoption never transfers a removal to the same ordinal of a newer snapshot", () => {
+  const c = config();
+  const source = {
+    ...c.source,
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: {
+          projectId,
+          section: "source" as const,
+          version: 4,
+          index: 0,
+        },
+      },
+    ],
+  };
+  const saved = {
+    ...c.repositories,
+    links: [
+      {
+        codeHost: "gitlab" as const,
+        host: null,
+        repositoryId: null,
+        ref: null,
+        savedRow: {
+          projectId,
+          section: "repositories" as const,
+          version: 2,
+          index: 0,
+        },
+      },
+    ],
+  };
+  const values = {
+    selections: JSON.stringify(
+      sourceRowsFrom(source).selections.map((row) => ({
+        ...row,
+        removed: true,
+      })),
+    ),
+    repositories: JSON.stringify(
+      repositoryRowsFrom(saved).repositories.map((row) => ({
+        ...row,
+        removed: true,
+      })),
+    ),
+  };
+  const latestSource = {
+    ...source,
+    version: 5,
+    selections: source.selections.map((row) => ({
+      ...row,
+      savedRow: { ...row.savedRow, version: 5 },
+    })),
+  };
+  const latestLinks = {
+    ...saved,
+    version: 3,
+    links: saved.links.map((row) => ({
+      ...row,
+      savedRow: { ...row.savedRow, version: 3 },
+    })),
+  };
+  const adopted = adoptSourceRows(latestSource, values),
+    repositories = adoptRepositoryRows(latestLinks, values);
+  assert.deepEqual(adopted.dropped, ["Unavailable saved source"]);
+  assert.deepEqual(repositories.dropped, ["Unavailable saved repository link"]);
+  assert.equal(parseRows(adopted.selections)[0]!.removed, undefined);
+  assert.equal(parseRows(repositories.repositories)[0]!.removed, undefined);
+  assert.equal(
+    JSON.parse(String(parseRows(adopted.selections)[0]!.savedRow)).version,
+    5,
+  );
+  assert.equal(
+    JSON.parse(String(parseRows(repositories.repositories)[0]!.savedRow))
+      .version,
+    3,
+  );
+});
+
+test("Jira placeholders coexist with visible query edits without importing withheld identities from private reads", () => {
+  const c = config();
+  const reference = {
+    projectId,
+    section: "source" as const,
+    version: 4,
+    index: 0,
+  };
+  const source = {
+    ...c.source,
+    tracker: "jira" as const,
+    selections: [
+      {
+        id: null,
+        kind: "jql" as const,
+        descriptor: null,
+        active: true,
+        savedRow: reference,
+      },
+      {
+        id: "visible",
+        kind: "jql" as const,
+        descriptor: null,
+        active: true,
+        savedRow: { ...reference, index: 1 },
+      },
+    ],
+  };
+  const known = {
+    jql: [
+      { id: "PRIVATE HIDDEN ID", jql: "PRIVATE HIDDEN QUERY" },
+      { id: "visible", jql: "project = VISIBLE" },
+    ],
+  };
+  const loaded = jiraRowsFrom(source, known);
+  assert.equal(loaded.incomplete, false);
+  assert.equal(
+    jiraRowsFrom({
+      ...source,
+      selections: source.selections.map(
+        ({ savedRow: _reference, ...row }) => row,
+      ),
+    }).incomplete,
+    true,
+  );
+  assert.equal(loaded.jql, "project = VISIBLE");
+  assert.deepEqual(loaded.jqlIds, ["visible"]);
+  assert.equal(JSON.stringify(loaded).includes("PRIVATE"), false);
+  assert.deepEqual(
+    jiraSelections(source, {
+      ...loaded,
+      jql: "project = EDITED\nproject = NEW",
+    }),
+    [
+      { savedRow: reference, keep: true },
+      { id: "visible", kind: "jql", jql: "project = EDITED" },
+      { id: "S-1", kind: "jql", jql: "project = NEW" },
+    ],
+  );
+  assert.equal(parseRows(jiraRowsFrom(source).selections).length, 2);
+  const removed = {
+    ...loaded,
+    selections: JSON.stringify(
+      parseRows(loaded.selections).map((row) => ({ ...row, removed: true })),
+    ),
+  };
+  assert.deepEqual(jiraSelections(source, removed), [
+    { id: "visible", kind: "jql", jql: "project = VISIBLE" },
+  ]);
+  const latest = {
+    ...source,
+    version: 5,
+    selections: source.selections.map((row) => ({
+      ...row,
+      savedRow: { ...row.savedRow, version: 5 },
+    })),
+  };
+  const adopted = adoptJiraRows(
+    latest,
+    { ...removed, jql: "project = EDITED" },
+    known,
+  );
+  assert.equal(adopted.dropped, 1);
+  assert.equal(adopted.jql, "project = EDITED");
+  assert.equal(parseRows(adopted.selections)[0]!.removed, undefined);
+});
+
+test("opaque row identity cannot alias a visible id containing the serialized reference", () => {
+  const c = config();
+  const reference = {
+    projectId,
+    section: "source" as const,
+    version: 4,
+    index: 0,
+  };
+  const id = JSON.stringify(reference);
+  const source = {
+    ...c.source,
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: reference,
+      },
+      { id, kind: "search" as const, descriptor: null, active: false },
+    ],
+  };
+  const loaded = sourceRowsFrom(source);
+  const values = {
+    selections: JSON.stringify(
+      loaded.selections.map((row, index) =>
+        index === 0 ? { ...row, removed: true } : row,
+      ),
+    ),
+  };
+  const adopted = parseRows(adoptSourceRows(source, values).selections);
+  assert.equal(adopted.length, 2);
+  assert.equal(adopted[0]!.unavailable, true);
+  assert.equal(adopted[0]!.removed, true);
+  assert.equal(adopted[1]!.id, id);
+  assert.equal(adopted[1]!.unavailable, undefined);
+  assert.ok(
+    sourceChanges(source, { selections: "[]", conditions: "[]" }).includes(
+      "− Unavailable saved source (saved since this form loaded)",
+    ),
+  );
+  const repositories = {
+    ...c.repositories,
+    links: [
+      {
+        codeHost: "gitlab" as const,
+        host: null,
+        ref: null,
+        repositoryId: null,
+        savedRow: { ...reference, section: "repositories" as const },
+      },
+    ],
+  };
+  assert.deepEqual(repositoryChanges(repositories, { repositories: "[]" }), [
+    "− Unavailable saved repository link (saved since this form loaded)",
+  ]);
 });

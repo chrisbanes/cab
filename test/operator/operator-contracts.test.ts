@@ -4,6 +4,7 @@ import { executionIntentStateSchema } from "../../src/core/execution-runtime.js"
 import {
   assignmentRecoverySchema,
   deliveryReadSchema,
+  deliveryConfigurationSchema,
   commandReceiptSchema,
   interactionSchema,
   localReviewOperationReadSchema,
@@ -863,4 +864,81 @@ test("a delivery binding's link stays on github.com unless it is a GitLab merge 
     { codeHost: "gitlab", url: gitlabUrl.replace("https", "http") },
   ])
     assert.equal(ok(bad), false, JSON.stringify(bad));
+});
+
+test("delivery policy read and keep-row contracts never accept partial unavailable identities", () => {
+  const savedRow = {
+    projectId: key,
+    section: "delivery-grants",
+    version: 2,
+    index: 0,
+  };
+  const hidden = {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow,
+  };
+  const policy = {
+    version: 2,
+    mode: "reviewable-pr",
+    credentialConfigured: true,
+    grants: [hidden],
+    requiredChecks: [],
+  };
+  assert.deepEqual(deliveryConfigurationSchema.parse(policy), policy);
+  assert.equal(
+    deliveryConfigurationSchema.safeParse({
+      ...policy,
+      credentialRef: "env:PRIVATE",
+    }).success,
+    false,
+  );
+  assert.equal(
+    deliveryConfigurationSchema.safeParse({
+      ...policy,
+      grants: [{ ...hidden, repositoryId: "redacted" }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    deliveryConfigurationSchema.safeParse({ ...policy, branchPrefix: null })
+      .success,
+    false,
+  );
+  assert.equal(
+    deliveryConfigurationSchema.safeParse({
+      ...policy,
+      branchPrefixUnavailable: true,
+    }).success,
+    false,
+  );
+  assert.equal(
+    deliveryConfigurationSchema.safeParse({
+      ...policy,
+      branchPrefix: null,
+      branchPrefixUnavailable: true,
+    }).success,
+    true,
+  );
+  const command = {
+    type: "delivery.configure",
+    key,
+    projectId: key,
+    expectedVersion: 2,
+    mode: "reviewable-pr",
+    grants: [{ savedRow, keep: true }],
+    requiredChecks: [],
+    preserveBranchPrefix: true,
+  };
+  assert.deepEqual(operatorCommandSchema.parse(command), command);
+  for (const row of [
+    hidden,
+    { savedRow },
+    { savedRow, keep: false },
+    { savedRow, keep: true, action: "issue.comment" },
+  ])
+    assert.equal(
+      operatorCommandSchema.safeParse({ ...command, grants: [row] }).success,
+      false,
+    );
 });

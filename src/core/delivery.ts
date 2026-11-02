@@ -2593,25 +2593,43 @@ export class DeliveryStore {
   ) {
     const current = this.configuration(projectId);
     if (current.version !== expectedVersion)
-      throw new Error("Version conflict: delivery policy changed");
+      throw new DomainConflictError(
+        "Version conflict: delivery policy changed",
+      );
     const policy = deliveryPolicySchema.parse(input);
-    for (const grant of policy.grants) {
+    for (const [index, grant] of policy.grants.entries()) {
       if (
         grant.action === "project.field" &&
         (!grant.projectNodeId ||
           !grant.fieldNodeId ||
           !grant.optionNodeIds?.length)
       )
-        throw new Error("Project field grant requires exact field and options");
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Project field grant requires exact field and options",
+          [
+            ...(!grant.projectNodeId ? [`grants.${index}.projectNodeId`] : []),
+            ...(!grant.fieldNodeId ? [`grants.${index}.fieldNodeId`] : []),
+            ...(!grant.optionNodeIds?.length
+              ? [`grants.${index}.optionNodeIds`]
+              : []),
+          ],
+        );
       if (grant.action === "project.item.add" && !grant.projectNodeId)
-        throw new Error("Project item grant requires an exact Project");
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Project item grant requires an exact Project",
+          [`grants.${index}.projectNodeId`],
+        );
       if (
         grant.action === "issue.status"
           ? !grant.statusIds?.length
           : grant.statusIds
       )
-        throw new Error(
+        throw new DomainPolicyError(
+          "invalid-input",
           "Only an issue.status grant takes statusIds, and it requires some",
+          [`grants.${index}.statusIds`],
         );
     }
     this.db

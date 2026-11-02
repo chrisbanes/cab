@@ -115,7 +115,7 @@ test("disposed and replaced resources abort delayed reads without updating retai
   assert.equal(next.state.data?.observedAt, 42);
 });
 test("old command and read 401 cannot expire a replacement authentication lifetime; current 401 still expires", async () => {
-  for (const method of ["read", "command"] as const) {
+  for (const method of ["read", "command", "operation"] as const) {
     let release!: (r: Response) => void;
     let expired = 0;
     const client = new OperatorClient(
@@ -137,9 +137,17 @@ test("old command and read 401 cannot expire a replacement authentication lifeti
     const sending =
       method === "command"
         ? client.command(c, "old")
-        : client
-            .read("/api/operator/workspace", workspaceSchema)
-            .catch(() => null);
+        : method === "operation"
+          ? client
+              .operation({
+                scope: `project:${c.projectId}`,
+                type: "delivery.configure",
+                key: c.key,
+              })
+              .catch(() => null)
+          : client
+              .read("/api/operator/workspace", workspaceSchema)
+              .catch(() => null);
     client.invalidateAuthentication();
     release(
       Response.json(
@@ -255,4 +263,71 @@ test("request authentication scope preserves replacement private draft and durab
   assert.equal(session, "expired");
   assert.deepEqual(draft.values, {});
   assert.equal(storage.getItem(storageKey), bytes);
+});
+
+test("typed operation read validates minimal receipts and uses an authenticated encoded GET", async () => {
+  const projectId = crypto.randomUUID(),
+    key = crypto.randomUUID();
+  const controller = new AbortController();
+  const receipt = {
+    kind: "configuration",
+    key,
+    recorded: true,
+    result: {
+      commandType: "delivery.configure",
+      resourceId: projectId,
+      version: 4,
+      credentialConfigured: true,
+    },
+  };
+  const value = { data: { state: "recorded", receipt }, observedAt: 42 };
+  const client = new OperatorClient(async (path, init) => {
+    assert.equal(String(path).split("?")[0], "/api/operator/operations");
+    assert.deepEqual(
+      Object.fromEntries(new URL(String(path), "http://fixture").searchParams),
+      {
+        scope: `project:${projectId}`,
+        type: "delivery.configure",
+        key,
+      },
+    );
+    assert.equal(init?.credentials, "same-origin");
+    assert.equal(init?.method, undefined);
+    assert.equal(init?.body, undefined);
+    assert.equal(init?.signal, controller.signal);
+    return Response.json(value);
+  });
+  const query = {
+    scope: `project:${projectId}`,
+    type: "delivery.configure" as const,
+    key,
+  };
+  assert.deepEqual(await client.operation(query, controller.signal), value);
+  for (const invalid of [
+    { data: { state: "recorded", receipt } },
+    {
+      data: {
+        state: "recorded",
+        receipt: {
+          ...receipt,
+          result: { ...receipt.result, credentialRef: "env:PRIVATE" },
+        },
+      },
+      observedAt: 42,
+    },
+    { data: { state: "not-recorded", receipt }, observedAt: 42 },
+  ]) {
+    const broken = new OperatorClient(async () => Response.json(invalid));
+    await assert.rejects(
+      broken.operation(query),
+      (error: unknown) =>
+        error instanceof ClientError && error.code === "invalid-response",
+    );
+  }
+  const missing = new OperatorClient(async () =>
+    Response.json({ data: { state: "not-recorded" }, observedAt: 42 }),
+  );
+  assert.deepEqual((await missing.operation(query)).data, {
+    state: "not-recorded",
+  });
 });

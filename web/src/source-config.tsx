@@ -104,6 +104,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     conditions: withKeys(loaded.conditions),
     mode: loaded.mode,
     closedIssues: loaded.closedIssues,
+    preserveReadiness: loaded.preserveReadiness,
   };
   // Row keys are regenerated per render, so the load is identified by the saved read.
   useLoadedDraft(d, initial, p.loadedAt, data.source);
@@ -133,9 +134,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       stale.length > 0 ||
       duplicates.length > 0 ||
       lines.length === 0 ||
-      // An unknown saved rule is only replaced by a rule, never cleared to none.
-      (data.source.readiness.kind === "unavailable" &&
-        conditions.length === 0) ||
       (v.referenceMode === "gh" &&
         data.source.credential?.gh.state !== "signed-in");
   const readinessDiscovery = useReadinessDiscovery({
@@ -275,7 +273,25 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 "Check the new source fields.",
               )}
               {selections.map((r, i) =>
-                r.keep ? (
+                r.unavailable ? (
+                  <div className="settings-row" key={String(r.rowKey)}>
+                    <h3 className="small-heading">Unavailable saved source</h3>
+                    <p className="metadata muted">
+                      {r.removed
+                        ? "Will be removed"
+                        : "Kept unless you remove it."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => toggleRemoved("selections", i)}
+                    >
+                      {r.removed
+                        ? `Undo remove unavailable source ${i + 1}`
+                        : `Remove unavailable source ${i + 1}`}
+                    </Button>
+                  </div>
+                ) : r.keep ? (
                   <div className="settings-row" key={String(r.rowKey)}>
                     <div className="settings-row-heading">
                       <div>
@@ -498,7 +514,8 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
               )}
               {data.source.readiness.kind === "unavailable" ? (
                 <p className="metadata muted">
-                  Saved readiness is unavailable; add a condition to replace it.
+                  Saved readiness is unavailable and is kept when saving. Add a
+                  condition to replace it.
                 </p>
               ) : (
                 conditions.length === 0 && (

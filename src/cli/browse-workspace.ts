@@ -147,6 +147,7 @@ const projectGet: BrowseCommand = {
         d.project.name,
         ...d.profiles.flatMap((p) => [p.name, p.summary]),
         ...d.source.selections.flatMap((s) => [s.id, s.descriptor]),
+        ...d.repositories.links.flatMap((r) => [r.repositoryId, r.host, r.ref]),
       )
         ? ["content-unavailable"]
         : [],
@@ -188,7 +189,7 @@ const projectGet: BrowseCommand = {
                 d.repositories.links.map((r) => [
                   unavailable(r.repositoryId),
                   r.codeHost,
-                  r.host,
+                  unavailable(r.host),
                   unavailable(r.ref),
                 ]),
               ),

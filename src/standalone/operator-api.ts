@@ -8,7 +8,16 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
-import { gitLabHostSchema } from "../core/repository-links.js";
+import {
+  gitLabHostSchema,
+  repositoriesConfigurationCommandSchema,
+} from "../core/repository-links.js";
+import {
+  githubConfigurationCommandSchema,
+  githubConfigurationSchema,
+  jiraConfigurationSchema,
+  closedIssuesSchema,
+} from "../core/github-source-contracts.js";
 import {
   CommandResultValidationError,
   type DomainCommandResultMap,
@@ -23,6 +32,7 @@ import type { OperatorCommentReview } from "../core/delivery.js";
 import {
   absentBranchHead,
   externalActionSchema,
+  deliveryPolicySchema,
   isOperatorDeliveryCaller,
   isRecoveryAction,
   materialDigest,
@@ -120,6 +130,7 @@ import {
   operationScopeSchema,
   operationTypeSchema,
   operatorCommandSchema,
+  type savedConfigurationRowSchema,
   profileConfigurationSchema,
   profilePrivateValuesSchema,
   profileInstructionsSchema,
@@ -957,6 +968,59 @@ export class OperatorApi {
   ) {
     const safe = this.safe(value, excluded, limit);
     return safe === String(value) ? safe : null;
+  }
+  private safeDeliveryConfiguration(
+    projectId: string,
+    configuration: ReturnType<
+      ReturnType<StandaloneService["delivery"]>["publicConfiguration"]
+    >,
+    excluded: readonly string[] | undefined,
+  ) {
+    const unavailable = (
+      section: "delivery-grants" | "delivery-checks",
+      index: number,
+    ) => ({
+      kind: "unavailable" as const,
+      label: "Unavailable saved row" as const,
+      savedRow: { projectId, section, version: configuration.version, index },
+    });
+    return {
+      ...configuration,
+      ...(configuration.branchPrefix !== undefined &&
+      !this.disclosable(configuration.branchPrefix, excluded)
+        ? { branchPrefix: null, branchPrefixUnavailable: true as const }
+        : {}),
+      grants: configuration.grants.map((grant, index) =>
+        this.deliveryRowDisclosable(grant, excluded)
+          ? grant
+          : unavailable("delivery-grants", index),
+      ),
+      requiredChecks: configuration.requiredChecks.map((check, index) =>
+        this.deliveryRowDisclosable(check, excluded)
+          ? check
+          : unavailable("delivery-checks", index),
+      ),
+    };
+  }
+  private deliveryRowDisclosable(
+    row: object,
+    excluded: readonly string[] | undefined,
+  ): boolean {
+    return Object.values(row).every((value) =>
+      typeof value === "string"
+        ? this.disclosable(value, excluded)
+        : Array.isArray(value)
+          ? value.every((id) => this.disclosable(id, excluded))
+          : true,
+    );
+  }
+  /** Failure to establish the exclusion fence withholds all policy text on a read. */
+  private configurationVisibility() {
+    try {
+      return this.visibilityToken();
+    } catch {
+      return undefined;
+    }
   }
   async retainedEvidencePolicy(taskId: string) {
     const visibility = this.visibilityToken();
@@ -6292,12 +6356,22 @@ export class OperatorApi {
     });
   }
   async readProjectConfiguration(projectId: string) {
-    return this.readWithSourceFence(
-      () => this.readProjectConfigurationOnce(projectId),
-      projectId,
-    );
+    return this.readWithSourceFence(async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const fence = this.configurationVisibility();
+        const response = await this.readProjectConfigurationOnce(
+          projectId,
+          fence === undefined,
+        );
+        if (fence === this.configurationVisibility()) return response;
+      }
+      throw new OperatorApiError(503, "unavailable");
+    }, projectId);
   }
-  private async readProjectConfigurationOnce(projectId: string) {
+  private async readProjectConfigurationOnce(
+    projectId: string,
+    withhold = false,
+  ) {
     const p = this.requireProject(projectId),
       d = this.domain(),
       g = d.githubConfiguration(projectId),
@@ -6306,7 +6380,7 @@ export class OperatorApi {
       credential = jira
         ? undefined
         : await this.service.gitHubSourceCredentialStatus(projectId),
-      excluded = await this.exclusions(projectId),
+      excluded = withhold ? undefined : await this.exclusions(projectId),
       r = d.routing(projectId),
       active = d.githubActiveSelectionIds(projectId);
     return projectConfigurationSchema.parse({
@@ -6347,6 +6421,11 @@ export class OperatorApi {
           availability:
             this.service.routingAvailability(projectId).reason ?? "available",
         },
+        delivery: this.safeDeliveryConfiguration(
+          projectId,
+          this.service.delivery().publicConfiguration(projectId),
+          excluded,
+        ),
         statusMapping: this.statusMappingView(
           projectId,
           g.selections,
@@ -6355,19 +6434,34 @@ export class OperatorApi {
         ),
         repositories: {
           version: links.version,
-          links: links.links.map((r) => ({
-            repositoryId: this.safe(r.repositoryId, excluded),
-            codeHost: r.codeHost,
-            host: r.host,
-            ref: this.safe(r.ref, excluded),
-          })),
+          links: links.links.map((r, index) => {
+            const available = [r.repositoryId, r.host, r.ref].every((value) =>
+              this.disclosable(value, excluded),
+            );
+            return {
+              repositoryId: available ? r.repositoryId : null,
+              codeHost: r.codeHost,
+              host: available ? r.host : null,
+              ref: available ? r.ref : null,
+              ...(!available
+                ? {
+                    savedRow: {
+                      projectId,
+                      section: "repositories" as const,
+                      version: links.version,
+                      index,
+                    },
+                  }
+                : {}),
+            };
+          }),
         },
         source: {
           version: g.version,
           ...(jira
             ? {
                 tracker: "jira" as const,
-                instance: this.safe(jira.instance, excluded),
+                instance: this.exact(jira.instance, excluded),
               }
             : {}),
           credentialConfigured: jira
@@ -6377,23 +6471,42 @@ export class OperatorApi {
             : g.credentialRef !== null,
           ...(credential ? { credential } : {}),
           selections: [
-            ...(jira?.selections ?? []).map((s) => ({
+            ...(jira?.selections ?? []).map((s, index) => ({
               id: this.exact(s.id, excluded),
               kind: "jql" as const,
               descriptor: null,
               active: active.includes(s.id),
+              savedRow: {
+                projectId,
+                section: "source" as const,
+                version: jira!.version,
+                index,
+              },
             })),
-            ...g.selections.map((s) => ({
+            ...g.selections.map((s, index) => ({
               id: this.exact(s.id, excluded),
+              ...(this.exact(s.id, excluded) === null
+                ? {
+                    savedRow: {
+                      projectId,
+                      section: "source" as const,
+                      version: g.version,
+                      index,
+                    },
+                  }
+                : {}),
               kind: s.kind,
-              descriptor: this.safe(
-                s.kind === "repository"
-                  ? `${s.owner}/${s.name}`
-                  : s.kind === "project"
-                    ? s.projectNodeId
-                    : null,
-                excluded,
-              ),
+              descriptor:
+                this.exact(s.id, excluded) === null
+                  ? null
+                  : this.exact(
+                      s.kind === "repository"
+                        ? `${s.owner}/${s.name}`
+                        : s.kind === "project"
+                          ? s.projectNodeId
+                          : null,
+                      excluded,
+                    ),
               active: active.includes(s.id),
             })),
           ],
@@ -7149,10 +7262,7 @@ export class OperatorApi {
   }
   /** Refuses the whole save when Jira rejects any new or changed JQL. */
   private async verifyJiraSelections(
-    c: Extract<
-      z.infer<typeof operatorCommandSchema>,
-      { type: "jira.configure" }
-    >,
+    c: Extract<DomainCommand, { type: "jira.configure" }>,
   ) {
     const current = this.domain().jiraConfiguration(c.projectId),
       excluded = await this.exclusions(c.projectId);
@@ -8052,9 +8162,460 @@ export class OperatorApi {
     });
   }
 
+  private async normalizeConfigurationRows(
+    c: Extract<
+      z.output<typeof operatorCommandSchema>,
+      { type: "github.configure" | "jira.configure" | "repositories.configure" }
+    >,
+  ) {
+    this.requireProject(c.projectId);
+    const domain = this.domain();
+    const rows =
+      c.type === "repositories.configure" ? c.repositories : c.selections;
+    const hasReferences = rows.some((row) => "savedRow" in row);
+    const jira = domain.jiraConfiguration(c.projectId);
+    const source = domain.githubConfiguration(c.projectId);
+    const repositories = domain.repositoryLinks(c.projectId);
+    const version =
+      c.type === "repositories.configure"
+        ? repositories.version
+        : source.version;
+    // The same project/version/index cannot select a row from the other tracker.
+    if (
+      hasReferences &&
+      c.type !== "repositories.configure" &&
+      (c.type === "jira.configure") !== (jira !== null)
+    )
+      throw new DomainPolicyError(
+        "invalid-input",
+        "Saved source belongs to another tracker",
+        [`selections.${rows.findIndex((row) => "savedRow" in row)}.savedRow`],
+      );
+    const used = new Set<number>();
+    const resolve = (
+      reference: z.output<typeof savedConfigurationRowSchema>,
+      section: "source" | "repositories",
+      length: number,
+      path: string,
+    ) => {
+      if (reference.projectId !== c.projectId || reference.section !== section)
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved row belongs to another configuration",
+          [path],
+        );
+      if (
+        reference.version !== c.expectedVersion ||
+        version !== c.expectedVersion
+      )
+        throw new DomainConflictError("Saved configuration version changed");
+      if (reference.index >= length || used.has(reference.index))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved row is missing or repeated",
+          [path],
+        );
+      used.add(reference.index);
+      return reference.index;
+    };
+    const { key, projectId, expectedVersion } = c;
+    const base = {
+      key,
+      projectId,
+      expectedVersion,
+      actor: "operator" as const,
+    };
+    const normalized = (() => {
+      if (c.type === "repositories.configure") {
+        const expanded = c.repositories.map((row, index) => {
+          if (!("savedRow" in row)) return row;
+          const link =
+            repositories.links[
+              resolve(
+                row.savedRow,
+                "repositories",
+                repositories.links.length,
+                `repositories.${index}.savedRow`,
+              )
+            ]!;
+          // Reuse the domain's path/projectPath retention and verification; never copy storage-only metadata.
+          return {
+            codeHost: link.codeHost,
+            host: link.host,
+            repositoryId: link.repositoryId,
+            ref: link.ref,
+          };
+        });
+        this.uniqueConfigurationIds(
+          expanded.map((row) => row.repositoryId),
+          "repositories",
+          "repositoryId",
+        );
+        return {
+          ...base,
+          type: c.type,
+          ...repositoriesConfigurationCommandSchema.parse({
+            repositories: expanded,
+          }),
+        };
+      }
+      if (c.type === "github.configure") {
+        const {
+          type: _type,
+          key: _key,
+          projectId: _projectId,
+          expectedVersion: _version,
+          ...policy
+        } = c;
+        const expanded = c.selections.map((row, index) =>
+          "savedRow" in row
+            ? {
+                id: source.selections[
+                  resolve(
+                    row.savedRow,
+                    "source",
+                    source.selections.length,
+                    `selections.${index}.savedRow`,
+                  )
+                ]!.id,
+                keep: true as const,
+              }
+            : row,
+        );
+        this.uniqueConfigurationIds(
+          expanded.map((row) => row.id),
+          "selections",
+          "id",
+        );
+        return {
+          ...base,
+          type: c.type,
+          ...githubConfigurationCommandSchema
+            .extend({
+              credentialRef:
+                githubConfigurationSchema.shape.credentialRef.optional(),
+            })
+            .parse({
+              ...policy,
+              selections: expanded,
+              readiness:
+                c.readiness === undefined ? source.readiness : c.readiness,
+            }),
+        };
+      }
+      const {
+        type: _type,
+        key: _key,
+        projectId: _projectId,
+        expectedVersion: _version,
+        ...policy
+      } = c;
+      if (
+        hasReferences &&
+        c.instance !== undefined &&
+        c.instance !== jira?.instance
+      )
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved source belongs to another site",
+          ["instance"],
+        );
+      const expanded = c.selections.map((row, index) =>
+        "savedRow" in row
+          ? jira!.selections[
+              resolve(
+                row.savedRow,
+                "source",
+                jira!.selections.length,
+                `selections.${index}.savedRow`,
+              )
+            ]!
+          : row,
+      );
+      this.uniqueConfigurationIds(
+        expanded.map((row) => row.id),
+        "selections",
+        "id",
+      );
+      return {
+        ...base,
+        type: c.type,
+        ...jiraConfigurationSchema
+          .extend({
+            closedIssues: closedIssuesSchema.optional(),
+            readiness: jiraConfigurationSchema.shape.readiness.optional(),
+          })
+          .parse({
+            ...policy,
+            instance: c.instance === undefined ? jira?.instance : c.instance,
+            selections: expanded,
+          }),
+      };
+    })();
+    // Preserve exact legacy input and replay before current exclusion/version checks.
+    const recorded = !hasReferences
+      ? domain.recordedCommand(normalized)
+      : undefined;
+    if (recorded !== undefined) return normalized;
+    if (version !== c.expectedVersion)
+      throw new DomainConflictError("Configuration version changed");
+    const fence = this.configurationVisibility();
+    const excluded = await this.exclusions(c.projectId);
+    if (!excluded || fence === undefined)
+      throw new OperatorApiError(503, "unavailable");
+    if (fence !== this.configurationVisibility())
+      throw new DomainConflictError("Configuration changed during validation");
+    const hiddenIds =
+      c.type === "repositories.configure"
+        ? repositories.links
+            .filter(
+              (link) =>
+                ![link.repositoryId, link.host, link.ref].every((value) =>
+                  this.disclosable(value, excluded),
+                ),
+            )
+            .map((link) => link.repositoryId)
+        : (jira?.selections ?? source.selections)
+            .filter((row) => !this.disclosable(row.id, excluded))
+            .map((row) => row.id);
+    for (const [index, row] of rows.entries()) {
+      if ("savedRow" in row) continue;
+      const id = "repositoryId" in row ? row.repositoryId : row.id;
+      if (hiddenIds.includes(id))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "A saved unavailable identity cannot be replaced explicitly",
+          [
+            `${c.type === "repositories.configure" ? "repositories" : "selections"}.${index}.${c.type === "repositories.configure" ? "repositoryId" : "id"}`,
+          ],
+        );
+    }
+    return normalized;
+  }
+  private uniqueConfigurationIds(
+    ids: string[],
+    field: string,
+    identity: string,
+  ) {
+    const seen = new Set<string>();
+    for (const [index, id] of ids.entries()) {
+      if (seen.has(id))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Configuration identities must be unique",
+          [`${field}.${index}.${identity}`],
+        );
+      seen.add(id);
+    }
+  }
+
+  private configurationInputError(error: z.ZodError) {
+    const paths = (
+      issues: z.ZodError["issues"],
+      parent: PropertyKey[] = [],
+    ): string[] =>
+      issues.flatMap((issue) =>
+        issue.code === "invalid_union"
+          ? issue.errors.flatMap((branch) =>
+              paths(branch, [...parent, ...issue.path]),
+            )
+          : [
+              [...parent, ...issue.path]
+                .filter((part) =>
+                  typeof part === "number"
+                    ? Number.isSafeInteger(part) && part >= 0
+                    : typeof part === "string" &&
+                      /^[A-Za-z][A-Za-z0-9]*$/.test(part),
+                )
+                .join("."),
+            ],
+      );
+    return new OperatorApiError(400, "invalid-input", [
+      ...new Set(paths(error.issues).filter(Boolean)),
+    ]);
+  }
+  private async executeDeliveryConfiguration(
+    c: Extract<
+      z.output<typeof operatorCommandSchema>,
+      { type: "delivery.configure" }
+    >,
+  ) {
+    const domain = this.domain();
+    const receipt = (raw: unknown) =>
+      commandReceipt(
+        parseDomainCommandOutcome(c.type, raw),
+        c.key,
+        c.projectId,
+      );
+    const command = (policy: z.output<typeof deliveryPolicySchema>) => ({
+      type: c.type,
+      key: c.key,
+      projectId: c.projectId,
+      expectedVersion: c.expectedVersion,
+      ...policy,
+      actor: "operator" as const,
+    });
+    const prefix =
+      c.branchPrefix === undefined && !Object.hasOwn(c, "branchPrefix")
+        ? {}
+        : { branchPrefix: c.branchPrefix };
+    const explicitGrants = c.grants.filter((row) => !("savedRow" in row));
+    const explicitChecks = c.requiredChecks.filter(
+      (row) => !("savedRow" in row),
+    );
+    // Explicit legacy commands replay their original hash before current policy/privacy checks.
+    if (
+      c.credentialRef !== undefined &&
+      !c.preserveBranchPrefix &&
+      explicitGrants.length === c.grants.length &&
+      explicitChecks.length === c.requiredChecks.length
+    ) {
+      const original = command(
+        deliveryPolicySchema.parse({
+          mode: c.mode,
+          credentialRef: c.credentialRef,
+          ...prefix,
+          grants: explicitGrants,
+          requiredChecks: explicitChecks,
+        }),
+      );
+      const recorded = domain.recordedCommand(original);
+      if (recorded !== undefined) return receipt(recorded);
+    }
+    if (domain.deliveryConfiguration(c.projectId).version !== c.expectedVersion)
+      throw new DomainConflictError(
+        "Version conflict: delivery policy changed",
+      );
+    const fence = this.configurationVisibility();
+    const excluded = await this.exclusions(c.projectId);
+    const current = domain.deliveryConfiguration(c.projectId);
+    if (current.version !== c.expectedVersion)
+      throw new DomainConflictError(
+        "Version conflict: delivery policy changed",
+      );
+    if (!excluded || fence === undefined)
+      throw new OperatorApiError(503, "unavailable");
+    if (fence !== this.configurationVisibility())
+      throw new OperatorApiError(409, "conflict");
+    const seen = new Set<string>();
+    type Reference = Extract<
+      (typeof c.grants)[number],
+      { keep: true }
+    >["savedRow"];
+    const indexOf = (
+      reference: Reference,
+      section: Reference["section"],
+      length: number,
+      path: string,
+    ) => {
+      if (reference.projectId !== c.projectId || reference.section !== section)
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved row belongs to another policy section",
+          [path],
+        );
+      if (reference.version !== c.expectedVersion)
+        throw new DomainConflictError("Saved row policy version changed");
+      const identity = `${section}:${reference.index}`;
+      if (reference.index >= length || seen.has(identity))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved row is missing or repeated",
+          [path],
+        );
+      seen.add(identity);
+      return reference.index;
+    };
+    const grants = c.grants.map((row, index) => {
+      if ("savedRow" in row)
+        return current.grants[
+          indexOf(
+            row.savedRow,
+            "delivery-grants",
+            current.grants.length,
+            `grants.${index}.savedRow`,
+          )
+        ]!;
+      if (!this.deliveryRowDisclosable(row, excluded))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Grant text is unavailable",
+          [`grants.${index}`],
+        );
+      return row;
+    });
+    const requiredChecks = c.requiredChecks.map((row, index) => {
+      if ("savedRow" in row)
+        return current.requiredChecks[
+          indexOf(
+            row.savedRow,
+            "delivery-checks",
+            current.requiredChecks.length,
+            `requiredChecks.${index}.savedRow`,
+          )
+        ]!;
+      if (!this.deliveryRowDisclosable(row, excluded))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Check text is unavailable",
+          [`requiredChecks.${index}.name`],
+        );
+      return row;
+    });
+    if (
+      !c.preserveBranchPrefix &&
+      c.branchPrefix !== undefined &&
+      !this.disclosable(c.branchPrefix, excluded)
+    )
+      throw new DomainPolicyError(
+        "invalid-input",
+        "Branch prefix is unavailable",
+        ["branchPrefix"],
+      );
+    const retainedPrefix = c.preserveBranchPrefix
+      ? Object.hasOwn(current, "branchPrefix")
+        ? { branchPrefix: current.branchPrefix }
+        : {}
+      : prefix;
+    // No provider work or await between selecting a reference and dispatch; the domain CAS is final.
+    const policy = deliveryPolicySchema.parse({
+      mode: c.mode,
+      ...retainedPrefix,
+      grants,
+      requiredChecks,
+      credentialRef:
+        c.credentialRef === undefined
+          ? domain.deliveryCredentialReference(c.projectId)
+          : c.credentialRef,
+    });
+    return receipt(await this.executeDomain(command(policy)));
+  }
+
   async execute(input: unknown, reviewSession?: OperatorReviewSessionContext) {
-    const c = operatorCommandSchema.parse(input);
+    const parsed = operatorCommandSchema.safeParse(input);
+    if (!parsed.success) {
+      if (
+        input &&
+        typeof input === "object" &&
+        "type" in input &&
+        [
+          "delivery.configure",
+          "github.configure",
+          "jira.configure",
+          "repositories.configure",
+        ].includes(String(input.type))
+      )
+        throw this.configurationInputError(parsed.error);
+      throw parsed.error;
+    }
+    const inputCommand = parsed.data;
     try {
+      const c =
+        inputCommand.type === "github.configure" ||
+        inputCommand.type === "jira.configure" ||
+        inputCommand.type === "repositories.configure"
+          ? await this.normalizeConfigurationRows(inputCommand)
+          : inputCommand;
       if (
         c.type === "drafting.start" ||
         c.type === "drafting.stop" ||
@@ -8487,6 +9048,8 @@ export class OperatorApi {
       }
       if ("projectId" in c) {
         this.requireProject(c.projectId);
+        if (c.type === "delivery.configure")
+          return await this.executeDeliveryConfiguration(c);
         const raw = await this.executeDomain({ ...c, actor: "operator" });
         return commandReceipt(
           parseDomainCommandOutcome(c.type, raw),
@@ -8615,6 +9178,16 @@ export class OperatorApi {
         ...(saved.resumedLead ? { resumedLead: true } : {}),
       });
     } catch (error) {
+      if (
+        [
+          "delivery.configure",
+          "github.configure",
+          "jira.configure",
+          "repositories.configure",
+        ].includes(inputCommand.type) &&
+        error instanceof z.ZodError
+      )
+        throw this.configurationInputError(error);
       if (error instanceof OperatorApiError || error instanceof z.ZodError)
         throw error;
       if (error instanceof LocalReviewAnchorRequiredError)
