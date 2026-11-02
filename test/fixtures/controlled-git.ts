@@ -54,7 +54,7 @@ export function controlledGit(root?: string) {
   // observable by polling its identity. Never watch the parent: the holdPipe
   // descendant must outlive its fake git.
   const ownerWatch = `setInterval(() => {
-  const result = spawnSync("ps", ["-ww", "-p", ${JSON.stringify(String(process.pid))}, "-o", "lstart="], { encoding: "utf8", timeout: 1000 });
+  const result = spawnSync("ps", ["-ww", "-p", ${JSON.stringify(String(process.pid))}, "-o", "lstart="], { encoding: "utf8", timeout: 1000, env: { ...process.env, TZ: "UTC" } });
   if (result.error) return;
   if (result.status !== 0 || result.stdout.trim().split(/\\s+/).join(" ") !== ${JSON.stringify(ownerStartedAt)}) process.exit(0);
 }, 500).unref();
@@ -250,7 +250,8 @@ function ownerStartTime(): string {
   const result = spawnSync(
     "ps",
     ["-ww", "-p", String(process.pid), "-o", "lstart="],
-    { encoding: "utf8", timeout: 5000 },
+    // UTC: the watch runs in another process whose TZ may differ.
+    { encoding: "utf8", timeout: 5000, env: { ...process.env, TZ: "UTC" } },
   );
   const startedAt = result.stdout?.trim().split(/\s+/).join(" ");
   if (result.error || result.status !== 0 || !startedAt)

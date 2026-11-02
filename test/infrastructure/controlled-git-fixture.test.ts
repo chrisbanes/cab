@@ -152,7 +152,7 @@ test("fixture processes exit when a test times out", async () => {
   await withHarness("timeout", async ({ child, output, started }) => {
     const { identities } = await started();
     assert.equal(identities.length, 2);
-    const [code] = await once(child, "exit");
+    const [code] = await once(child, "close");
     assert.notEqual(code, 0);
     assert.match(output(), /timed out|cancelled/);
     await assertGone(identities);

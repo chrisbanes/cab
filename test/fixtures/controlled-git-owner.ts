@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, rmSync } from "node:fs";
 import { test } from "node:test";
 import {
   type ControlledGitEvent,
@@ -25,10 +25,17 @@ export async function startStalledGit(): Promise<StalledGit> {
     stdio: "pipe",
   });
   const deadline = Date.now() + 10_000;
-  while (!controlled.events().some((event) => event.event === "ready")) {
-    if (Date.now() > deadline)
-      throw new Error("Controlled Git fixture never became ready");
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  try {
+    while (!controlled.events().some((event) => event.event === "ready")) {
+      if (Date.now() > deadline)
+        throw new Error("Controlled Git fixture never became ready");
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  } catch (error) {
+    git.kill("SIGKILL");
+    await controlled.cleanup().catch(() => {});
+    rmSync(controlled.root, { recursive: true, force: true });
+    throw error;
   }
   return { controlled, git, identities: recordedIdentities(controlled) };
 }
@@ -68,7 +75,7 @@ if (mode === "owner-hold") {
 } else if (mode === "timeout") {
   // node:test's timeout does not run `finally` before --test-force-exit ends
   // this process, so only the fixture's owner watch can clear its processes.
-  test("stalled git times out", { timeout: 2000 }, async () => {
+  test("stalled git times out", { timeout: 5000 }, async () => {
     const { controlled, identities } = await startStalledGit();
     report({ root: controlled.root, identities });
     await new Promise<never>(() => {});
