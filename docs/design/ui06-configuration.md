@@ -98,8 +98,8 @@ Every semicolon-separated foundation inventory control appears individually belo
 | source.review | status | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
 | source.review | Project fields | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
 | source.review | native blockers | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| source.review | review | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| source.review | hold resolution | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
+| source.review | review history | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
+| source.review | Resume source hold | /task/:id | /task/:id | Retained at this exact destination: the only source decision; no replacement in Settings or recovery. |
 | /runtime/control/capacity | global capacity | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
 | /runtime/control/capacity | project override | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
 | /runtime/control/capacity | remove override | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |

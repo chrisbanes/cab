@@ -20,11 +20,11 @@ Each semicolon-separated control has an individual disposition. Project controls
 | Project Settings | github.place | conflicting placement | `/app/projects/:id/settings?tab=sync` | yes |
 | Project Settings | delivery.configure | completion mode; branch prefix; scoped grants; required checks; set/clear credential reference | `/app/projects/:id/settings?tab=delivery` | yes |
 | /app/tasks/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Task Changes tab | yes |
-| /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard; issue changed since handback notice | Task Changes tab | yes |
+| /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
 | /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
 | Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
 | /task/:id | task.configure | local title; outcome; readiness | Retained task page | yes |
-| /task/:id | source.review | source identity; body; status; Project fields; native blockers; Resume source hold only | Retained task page | no |
+| /task/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Retained task page | no |
 | /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
 | /runtime/task/:id | /runtime/control/dependency/add | local dependency add | Retained Runtime task page | yes |
 | /runtime/task/:id | /runtime/control/dependency/remove | local dependency remove | Retained Runtime task page | yes |
