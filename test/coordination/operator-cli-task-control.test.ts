@@ -12,6 +12,16 @@ import { refusedTask } from "../fixtures/refused-task.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
+/** The app's own Stop or Resume: a session JSON command with a fresh key. */
+const sessionCommand = (
+  s: Operator["s"],
+  type: "task.stop" | "task.resume",
+) =>
+  s.sessionPost("/api/operator/commands", {
+    type,
+    key: randomUUID(),
+    taskId: s.taskId,
+  });
 const stopped = (o: Operator, taskId: string) =>
   o.s.f.service.isTaskStopped(taskId);
 
@@ -173,14 +183,11 @@ test("repeated and replayed Stop and Resume follow the unresolved-key rule", asy
     assert.equal(stopped(o, s.taskId), expected, verb);
   }
 
-  // A Stop whose reply was lost, a Resume through the retained form, then `task stop`.
+  // A Stop whose reply was lost, a Resume from the app's session, then `task stop`.
   let r = await cli("rw", ["task", "stop", s.taskId], { fetch: lostReply });
   assert.equal(r.code, 6, r.out);
   assert.doesNotMatch(r.json().error.message, /operation get/);
-  const form = await s.sessionForm("/runtime/control/resume", {
-    taskId: s.taskId,
-  });
-  assert.equal(form.status, 303);
+  assert.equal((await sessionCommand(s, "task.resume")).status, 200);
   assert.equal(stopped(o, s.taskId), false);
   r = await o.h.run([
     "task",
@@ -208,12 +215,12 @@ test("repeated and replayed Stop and Resume follow the unresolved-key rule", asy
   assert.equal(r.json().data.stopInEffect, true);
   assert.equal(stopped(o, s.taskId), true);
 
-  // The mirror: a lost Resume, a retained Stop, then `task resume`.
+  // The mirror: a lost Resume, a session Stop, then `task resume`.
   r = await cli("rw", ["task", "resume", s.taskId], { fetch: lostReply });
   assert.equal(r.code, 6);
   assert.equal(
-    (await s.sessionForm("/runtime/control/stop", { taskId: s.taskId })).status,
-    303,
+    (await sessionCommand(s, "task.stop")).status,
+    200,
   );
   r = await cli("rw", ["task", "resume", s.taskId]);
   assert.equal(r.json().data.reusedRequest, true);
@@ -221,12 +228,12 @@ test("repeated and replayed Stop and Resume follow the unresolved-key rule", asy
   assert.equal(stopped(o, s.taskId), true);
 });
 
-test("CLI and retained forms share the Stop hold and the session projection", async (t) => {
+test("CLI and session commands share the Stop hold and the session projection", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s } = o;
   assert.equal(
-    (await s.sessionForm("/runtime/control/stop", { taskId: s.taskId })).status,
-    303,
+    (await sessionCommand(s, "task.stop")).status,
+    200,
   );
   let r = await cli("rw", ["task", "resume", s.taskId]);
   assert.equal(r.json().data.receipt.stopCleared, true);
@@ -239,9 +246,8 @@ test("CLI and retained forms share the Stop hold and the session projection", as
   r = await cli("rw", ["task", "get", s.taskId]);
   assert.deepEqual(r.json().data.execution.holds, session.data.execution.holds);
   assert.equal(
-    (await s.sessionForm("/runtime/control/resume", { taskId: s.taskId }))
-      .status,
-    303,
+    (await sessionCommand(s, "task.resume")).status,
+    200,
   );
   assert.equal(stopped(o, s.taskId), false);
   await cli("rw", ["task", "stop", s.taskId]);

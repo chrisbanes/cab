@@ -187,21 +187,6 @@ test("runtime overview reports effective access limits without exposing configur
     page.body.includes(`/app/tasks/${taskId}?section=execution`),
     "runtime overview links to task-specific history",
   );
-  const taskRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "GET" && candidate.path === "/runtime/task/:taskId",
-  );
-  assert.ok(taskRoute);
-  const taskPage = await taskRoute.handler({
-    params: { taskId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(taskPage.kind, "html");
-  if (taskPage.kind === "html") {
-    assert.match(taskPage.body, /Paused/);
-    assert.match(taskPage.body, /Not ready/);
-  }
 });
 
 test("runtime overview shows the restart notice only after a runtime failure", async (t) => {
@@ -480,65 +465,13 @@ test("runtime details distinguish selected, queued, and running assignments acro
     assert.ok(route, `GET ${path} exists`);
     return route;
   };
-  const page = async (taskId: string) =>
-    get("/runtime/task/:taskId").handler({
-      params: { taskId },
-      fields: {},
-      csrfToken: "test-token",
-    });
-  const runningLead = service
-    .domain()
-    .assignments(runningTask)
-    .find((assignment) => assignment.profileId === leadA);
-  const queuedLead = service
-    .domain()
-    .assignments(queuedTask)
-    .find((assignment) => assignment.profileId === leadA);
-  assert.ok(runningLead && queuedLead);
-  const runningPage = await page(runningTask);
-  assert.equal(runningPage.kind, "html");
-  if (runningPage.kind === "html") {
-    assert.match(runningPage.body, /Execution status: Running\./);
-    assert.match(runningPage.body, /Accountable project lead: Lead A/);
-    assert.match(runningPage.body, /Lead A \(project lead\)/);
-    assert.match(
-      runningPage.body,
-      /Running\. Execution runtime: Codex\. Captured instruction revision/,
-    );
-    assert.doesNotMatch(
-      runningPage.body,
-      /PRIVATE_(?:TASK_OUTCOME|ASSIGNMENT_BRIEF|LEAD_A_INSTRUCTIONS)/,
-    );
-  }
-  const queuedPage = await page(queuedTask);
-  assert.equal(queuedPage.kind, "html");
-  if (queuedPage.kind === "html") {
-    assert.match(
-      queuedPage.body,
-      /Execution status: Queued; waiting for capacity admission\./,
-    );
-    assert.match(
-      queuedPage.body,
-      /Lead A \(project lead\)<\/a>: Queued; waiting for capacity admission\./,
-    );
-  }
-  const selectedPage = await page(selectedTask);
-  assert.equal(selectedPage.kind, "html");
-  if (selectedPage.kind === "html") {
-    assert.match(
-      selectedPage.body,
-      /Execution status: Not ready for admission/,
-    );
-    assert.match(selectedPage.body, /Accountable project lead: Lead B/);
-    assert.match(
-      selectedPage.body,
-      /Worker<\/a>: Selected; blocked from admission/,
-    );
-    assert.doesNotMatch(
-      selectedPage.body,
-      /Project A|Running task|Queued task|PRIVATE_/,
-    );
-  }
+  // Task status is the task read's execution, not a page derivation.
+  const api = new OperatorApi(service, [directory]);
+  const state = async (taskId: string) =>
+    (await api.readTask(taskId)).data.execution.state;
+  assert.equal(await state(runningTask), "running");
+  assert.equal(await state(queuedTask), "queued");
+  assert.equal(await state(selectedTask), "waiting");
   const selectedAssignmentPage = await get(
     "/runtime/assignment/:assignmentId",
   ).handler({
@@ -645,7 +578,7 @@ test("capacity control replays the same keyed change", async (t) => {
   );
 });
 
-test("task runtime detail keeps stop and writer holds visible after Resume", async (t) => {
+test("task execution and the assignment page keep the writer hold visible after Resume", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "cab-runtime-task-"));
   const heldRuntime = new HeldRuntime();
   const service = new StandaloneService(
@@ -694,48 +627,18 @@ test("task runtime detail keeps stop and writer holds visible after Resume", asy
   await until(() => heldRuntime.turns > 0);
 
   const routes = runtimeOperatorRoutes(service);
-  const taskRoute = routes.find(
-    (candidate) =>
-      candidate.method === "GET" && candidate.path === "/runtime/task/:taskId",
-  );
-  assert.ok(taskRoute, "task runtime history route exists");
-  const context = {
-    params: { taskId },
-    fields: {},
-    csrfToken: "test-token",
-  };
-  const runningPage = await taskRoute.handler(context);
-  assert.equal(runningPage.kind, "html");
-  if (runningPage.kind !== "html") return;
-  assert.match(runningPage.body, /Task lead/);
-  assert.match(runningPage.body, /Running/);
-  assert.match(runningPage.body, /&lt;script&gt;/);
-  assert.doesNotMatch(runningPage.body, /<script>/);
-  assert.doesNotMatch(runningPage.body, /PRIVATE_(?:PROFILE|OUTCOME)_SENTINEL/);
+  const api = new OperatorApi(service, [directory]);
+  const read = async () => (await api.readTask(taskId)).data;
+  assert.equal((await read()).execution.state, "running");
 
   await service.stopTask(taskId);
-  const stopRoute = routes.find(
-    (candidate) =>
-      candidate.method === "POST" && candidate.path === "/runtime/control/stop",
-  );
-  assert.ok(stopRoute, "stop route exists");
-  const stopResult = await stopRoute.handler({
-    params: {},
-    fields: { taskId },
-    csrfToken: "test-token",
-  });
-  assert.deepEqual(stopResult, {
-    kind: "redirect",
-    location: `/app/tasks/${taskId}?section=execution`,
-  });
+  assert.equal((await read()).execution.state, "stopping");
 
+  // Resume clears only the Stop: the writer hold stays recorded.
   await service.resumeTask(taskId);
-  const resumedPage = await taskRoute.handler(context);
-  assert.equal(resumedPage.kind, "html");
-  if (resumedPage.kind !== "html") return;
-  assert.match(resumedPage.body, /Writer ownership remains held/);
-  assert.match(resumedPage.body, /may continue/i);
-  assert.doesNotMatch(resumedPage.body, /force unlock|stopped and released/i);
+  const resumed = await read();
+  assert.equal(resumed.execution.holds.stop, false);
+  assert.equal(resumed.executionRecovery?.holds.writer, true);
   const leadAssignment = service
     .domain()
     .assignments(taskId)
@@ -753,14 +656,22 @@ test("task runtime detail keeps stop and writer holds visible after Resume", asy
     csrfToken: "test-token",
   });
   assert.equal(heldAssignmentPage.kind, "html");
-  if (heldAssignmentPage.kind === "html")
+  if (heldAssignmentPage.kind === "html") {
     assert.match(
       heldAssignmentPage.body,
       /Execution status: Held; recovery is required\./,
     );
+    assert.match(heldAssignmentPage.body, /Writer ownership remains held/);
+    assert.match(heldAssignmentPage.body, /&lt;script&gt;/);
+    assert.doesNotMatch(heldAssignmentPage.body, /<script>/);
+    assert.doesNotMatch(
+      heldAssignmentPage.body,
+      /PRIVATE_(?:PROFILE|OUTCOME)_SENTINEL/,
+    );
+  }
 });
 
-test("task and assignment recovery views render every scoped record without implying release", async (t) => {
+test("the assignment recovery view renders every scoped record without implying release", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "cab-runtime-recovery-view-"));
   const runtime = new RecoveryEvidenceRuntime();
   const service = new StandaloneService(
@@ -900,32 +811,21 @@ test("task and assignment recovery views render every scoped record without impl
   assert.ok(pendingRecord?.binding);
   assert.notEqual(receiptRecord.workId, pendingRecord.workId);
 
-  const taskRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "GET" && candidate.path === "/runtime/task/:taskId",
-  );
   const assignmentRoute = runtimeOperatorRoutes(service).find(
     (candidate) =>
       candidate.method === "GET" &&
       candidate.path === "/runtime/assignment/:assignmentId",
   );
-  assert.ok(taskRoute);
   assert.ok(assignmentRoute);
-  const taskPage = await taskRoute.handler({
-    params: { taskId },
-    fields: {},
-    csrfToken: "test-token",
-  });
   const assignmentPage = await assignmentRoute.handler({
     params: { assignmentId: pendingRecord.binding.assignmentId },
     fields: {},
     csrfToken: "test-token",
   });
-  assert.equal(taskPage.kind, "html");
   assert.equal(assignmentPage.kind, "html");
-  if (taskPage.kind !== "html" || assignmentPage.kind !== "html") return;
+  if (assignmentPage.kind !== "html") return;
 
-  for (const page of [taskPage.body, assignmentPage.body]) {
+  for (const page of [assignmentPage.body]) {
     assert.match(page, new RegExp(`Recovery record: ${receiptRecord.workId}`));
     assert.match(page, new RegExp(`Recovery record: ${pendingRecord.workId}`));
     assert.ok(
@@ -986,127 +886,6 @@ test("task and assignment recovery views render every scoped record without impl
       /PRIVATE_RECOVERY_(?:INSTRUCTIONS|WORKER_INSTRUCTIONS|OUTCOME|BRIEF|CREDENTIAL)_SENTINEL/,
     );
   }
-});
-
-test("dependency controls replay add and remove commands across restart", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-dependencies-"));
-  let service = new StandaloneService(join(directory, "data"), () => runtime);
-  t.after(async () => {
-    await service.stop();
-    rmSync(directory, { recursive: true, force: true });
-  });
-  await service.start();
-
-  const profileId = randomUUID();
-  const projectId = randomUUID();
-  const taskId = randomUUID();
-  const blockerId = randomUUID();
-  command(service, {
-    type: "profile.create",
-    profileId,
-    name: "Dependency lead",
-    instructions: "coordinate",
-    capabilities: "coordination",
-  });
-  command(service, {
-    type: "project.create",
-    projectId,
-    name: "Dependency project",
-    leadProfileId: profileId,
-  });
-  for (const [id, title] of [
-    [taskId, "Dependent task"],
-    [blockerId, "Blocking task"],
-  ])
-    command(service, {
-      type: "task.create",
-      projectId,
-      taskId: id,
-      title,
-      outcome: "Deliver work",
-      ready: false,
-    });
-
-  const routes = runtimeOperatorRoutes(service);
-  const add = routes.find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/dependency/add",
-  );
-  const remove = routes.find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/dependency/remove",
-  );
-  assert.ok(add, "dependency add route exists");
-  assert.ok(remove, "dependency remove route exists");
-  const addFields = {
-    key: randomUUID(),
-    projectId,
-    taskId,
-    blockerTaskId: blockerId,
-    expectedVersion: "1",
-  };
-  const addContext = { params: {}, fields: addFields, csrfToken: "token" };
-  assert.deepEqual(await add.handler(addContext), {
-    kind: "redirect",
-    location: `/app/tasks/${taskId}?section=execution`,
-  });
-  assert.deepEqual(await add.handler(addContext), {
-    kind: "redirect",
-    location: `/app/tasks/${taskId}?section=execution`,
-  });
-  assert.deepEqual(service.domain().dependencies(taskId), [blockerId]);
-
-  await service.stop();
-  service = new StandaloneService(join(directory, "data"), () => runtime);
-  await service.start();
-  const restartedAdd = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/dependency/add",
-  );
-  assert.ok(restartedAdd);
-  await restartedAdd.handler(addContext);
-  assert.deepEqual(service.domain().dependencies(taskId), [blockerId]);
-
-  const removeFields = {
-    key: randomUUID(),
-    projectId,
-    taskId,
-    blockerTaskId: blockerId,
-    expectedVersion: "2",
-  };
-  const removeContext = {
-    params: {},
-    fields: removeFields,
-    csrfToken: "token",
-  };
-  const restartedRemove = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/dependency/remove",
-  );
-  assert.ok(restartedRemove);
-  assert.deepEqual(await restartedRemove.handler(removeContext), {
-    kind: "redirect",
-    location: `/app/tasks/${taskId}?section=execution`,
-  });
-  assert.deepEqual(await restartedRemove.handler(removeContext), {
-    kind: "redirect",
-    location: `/app/tasks/${taskId}?section=execution`,
-  });
-  await service.stop();
-  service = new StandaloneService(join(directory, "data"), () => runtime);
-  await service.start();
-  const finalRemove = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/dependency/remove",
-  );
-  assert.ok(finalRemove);
-  await finalRemove.handler(removeContext);
-  assert.deepEqual(service.domain().dependencies(taskId), []);
 });
 
 test("instruction apply refreshes the selected assignment revision once", async (t) => {

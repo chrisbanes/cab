@@ -280,7 +280,7 @@ test("bearer credentials read through the service under server-side route author
     ["GET", "/app"],
     ["GET", "/assets/main.js"],
     ["POST", "/command", {}],
-    ["POST", `/runtime/task/${s.taskId}`, {}],
+    ["POST", "/runtime/control/instruction-apply", {}],
   ];
   for (const token of [read.token, write.token])
     for (const [method, path, body] of denied) {
@@ -672,19 +672,19 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
       "insufficient-scope",
     );
   }
-  for (const token of [read.token, write.token])
-    for (const path of ["/runtime/control/stop", "/runtime/control/resume"]) {
-      const r = await fetch(`${s.origin}${path}`, {
-        method: "POST",
-        redirect: "manual",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({ taskId: s.taskId }).toString(),
-      });
-      assert.equal(r.status, 403, path);
-    }
+  // A bearer credential reaches no retained session form route.
+  for (const token of [read.token, write.token]) {
+    const r = await fetch(`${s.origin}/runtime/control/instruction-apply`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ taskId: s.taskId }).toString(),
+    });
+    assert.equal(r.status, 403);
+  }
   assert.equal(databaseDigest(s.f), before);
   assert.equal(s.f.service.isTaskStopped(s.taskId), false);
 
@@ -708,9 +708,9 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
   assert.equal(resumed.kind, "task-resume");
   assert.equal(resumed.stopCleared, true);
   assert.equal(s.f.service.isTaskStopped(s.taskId), false);
-  // The retained session form still works and shares the hold.
-  r = await s.sessionForm("/runtime/control/stop", { taskId: s.taskId });
-  assert.equal(r.status, 303);
+  // The app's session Stop shares the hold.
+  r = await s.sessionPost("/api/operator/commands", command("task.stop"));
+  assert.equal(r.status, 200);
   assert.equal(s.f.service.isTaskStopped(s.taskId), true);
   r = await s.bearer(write.token, "/api/operator/commands", {
     method: "POST",

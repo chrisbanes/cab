@@ -1663,10 +1663,7 @@ test("pre-turn witness is exposed safely through operator API and both shared ru
       ).data.records.find((r) => r.workId === f.old.workId)?.preTurnRejection,
       witness,
     );
-    for (const path of [
-      "/runtime/task/:taskId",
-      "/runtime/assignment/:assignmentId",
-    ]) {
+    for (const path of ["/runtime/assignment/:assignmentId"]) {
       const route = required(
         runtimeOperatorRoutes(f.service).find((r) => r.path === path),
       );

@@ -13,7 +13,6 @@ import type { RecoveryRecord } from "./recovery-types.js";
 import type { TurnRequest } from "./scheduler.js";
 import type { ExecutionIntent } from "./state.js";
 import type { StandaloneService } from "./service.js";
-import type { StopObservation } from "./supervisor.js";
 import { escapeHtml, hidden } from "./operator-html.js";
 import { unavailableAlert } from "../operator/runtime-restart-copy.js";
 import {
@@ -28,15 +27,6 @@ const positiveIntegerString = z
   .transform(Number)
   .refine(Number.isSafeInteger);
 const uuid = z.string().uuid();
-const dependencyFields = z
-  .object({
-    key: uuid,
-    projectId: uuid,
-    taskId: uuid,
-    blockerTaskId: uuid,
-    expectedVersion: positiveIntegerString,
-  })
-  .strict();
 const instructionFields = z
   .object({
     key: uuid,
@@ -45,7 +35,6 @@ const instructionFields = z
     expectedVersion: positiveIntegerString,
   })
   .strict();
-const taskControlFields = z.object({ taskId: uuid }).strict();
 const capacityFields = z
   .object({
     key: z.string().uuid(),
@@ -95,8 +84,6 @@ export interface RuntimeOperatorApi {
   configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
   ): Promise<CapacityLimits>;
-  stopTask(taskId: string): Promise<StopObservation>;
-  resumeTask(taskId: string): Promise<void>;
   taskHold(taskId: string): string | undefined;
   adoptHistoricalPreTurnRejection?: StandaloneService["adoptHistoricalPreTurnRejection"];
   adoptHistoricalNoTurnSubmission?: StandaloneService["adoptHistoricalNoTurnSubmission"];
@@ -205,7 +192,7 @@ function operationForm(
     .join("")}<button type="submit">${escapeHtml(label)}</button></form>`;
 }
 
-/** The task workspace's Execution tab; the retained task page is no longer linked. */
+/** The task workspace's Execution tab. */
 function taskHref(taskId: string): string {
   return `/app/tasks/${encodeURIComponent(taskId)}?section=execution`;
 }
@@ -364,168 +351,6 @@ function executionHoldSection(taskId: string, api: RuntimeOperatorApi): string {
   if (!held)
     return `<section><h2>Execution ownership and recovery</h2><p>No unresolved execution hold is reported.</p>${evidenceList}</section>`;
   return `<section><h2>Execution ownership and recovery</h2><ul><li>${stop ? "Operator Stop remains active" : "Operator Stop is not active"}</li><li>${writer ? "Writer ownership remains held" : "No unresolved writer hold is recorded"}</li><li>${capacity ? "Capacity remains held" : "No unresolved capacity hold is recorded"}</li><li>${uncertainty ? "Execution state is uncertain" : "No uncertainty hold is recorded"}</li></ul>${evidenceList}<p>Effects may continue while an execution is stopping. Elapsed time, interruption acknowledgement, and Resume do not resolve writer ownership. Use independent recovery evidence before allowing another writer.</p></section>`;
-}
-
-function dependencyForm(
-  task: ReturnType<RuntimeDomain["task"]>,
-  candidates: ReturnType<RuntimeDomain["tasks"]>,
-  existing: string[],
-  csrfToken: string,
-): string {
-  const taskId = String(task.id);
-  const choices = candidates.filter(
-    (candidate) =>
-      String(candidate.id) !== taskId &&
-      !existing.includes(String(candidate.id)),
-  );
-  if (choices.length === 0) return "";
-  return `<form method="post" action="/runtime/control/dependency/add">${hidden("key", randomUUID())}${hidden("csrfToken", csrfToken)}${hidden("projectId", String(task.projectId))}${hidden("taskId", taskId)}${hidden("expectedVersion", String(task.version))}<label>Local blocker <select name="blockerTaskId">${choices
-    .map(
-      (choice) =>
-        `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.title)}</option>`,
-    )
-    .join(
-      "",
-    )}</select></label><button type="submit">Add dependency</button></form>`;
-}
-
-function taskPage(
-  taskId: string,
-  api: RuntimeOperatorApi,
-  csrfToken: string,
-): string {
-  const domain = api.domain();
-  const task = domain.task(uuid.parse(taskId));
-  const project = domain.project(String(task.projectId));
-  const assignments = domain.assignments(taskId);
-  const leadProfileId =
-    typeof project.leadProfileId === "string"
-      ? String(project.leadProfileId)
-      : undefined;
-  const leadProfile = leadProfileId ? domain.profile(leadProfileId) : undefined;
-  const leadAssignment = leadProfileId
-    ? assignments.find((assignment) => assignment.profileId === leadProfileId)
-    : undefined;
-  const dependencyIds = domain.dependencies(taskId);
-  const dependencies = dependencyIds.map((id) => domain.task(id));
-  const candidates = domain.tasks(String(task.projectId));
-  const rows = assignments
-    .map((assignment) => {
-      const assignmentId = String(assignment.id);
-      const profile = domain.profile(String(assignment.profileId));
-      const lead = String(assignment.profileId) === leadProfileId;
-      const status = statusForAssignment(assignment, api);
-      const stale =
-        Number(assignment.instructionsRevision) !==
-          Number(project.instructionsRevision) ||
-        Number(assignment.profileRevision) !== Number(profile.version);
-      const apply = stale
-        ? operationForm(
-            "/runtime/control/instruction-apply",
-            [
-              ["projectId", String(task.projectId)],
-              ["assignmentId", assignmentId],
-              ["expectedVersion", String(assignment.version)],
-            ],
-            csrfToken,
-            "Apply current instructions for the next turn",
-          )
-        : "<p>Current instruction and profile revisions are applied.</p>";
-      return `<li><a href="${assignmentHref(assignmentId)}">${escapeHtml(profile.name)}${lead ? " (project lead)" : ""}</a>: ${escapeHtml(status)}. ${runtimeLine(assignment, api)} Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.${apply}</li>`;
-    })
-    .join("");
-  const dependencyRows = dependencies.length
-    ? dependencies
-        .map(
-          (blocker) =>
-            `<li>${escapeHtml(blocker.title)} — ${escapeHtml(blocker.state)}${operationForm(
-              "/runtime/control/dependency/remove",
-              [
-                ["projectId", String(task.projectId)],
-                ["taskId", taskId],
-                ["blockerTaskId", String(blocker.id)],
-                ["expectedVersion", String(task.version)],
-              ],
-              csrfToken,
-              "Remove dependency",
-            )}</li>`,
-        )
-        .join("")
-    : "<li>No local task blockers.</li>";
-  const isOpen = task.state === "open";
-  const stopForm = isOpen
-    ? operationForm(
-        "/runtime/control/stop",
-        [["taskId", taskId]],
-        csrfToken,
-        "Best-effort Stop",
-        false,
-      )
-    : "";
-  const resumeForm = operationForm(
-    "/runtime/control/resume",
-    [["taskId", taskId]],
-    csrfToken,
-    "Resume task",
-    false,
-  );
-  const lead = leadProfile
-    ? `<p>Accountable project lead: ${escapeHtml(leadProfile.name)}${leadAssignment ? `; <a href="${assignmentHref(String(leadAssignment.id))}">task-scoped lead execution</a>` : ""}.</p>`
-    : "<p>No project lead is configured.</p>";
-  const held = api
-    .recoveryForTask(taskId)
-    .some(
-      (record) =>
-        record.binding?.taskId === taskId &&
-        (record.holds.stop ||
-          record.holds.writer ||
-          record.holds.capacity ||
-          record.holds.uncertainty ||
-          record.holds.task !== null),
-    );
-  const assignmentStatuses = assignments.map((assignment) =>
-    statusForAssignment(assignment, api),
-  );
-  const taskAdmission = domain.admission(taskId);
-  const status = api
-    .recoveryForTask(taskId)
-    .some((record) => record.binding?.taskId === taskId && record.holds.stop)
-    ? "Stopping; effects may continue"
-    : assignmentStatuses.includes("Starting")
-      ? "Starting"
-      : assignmentStatuses.includes("Running")
-        ? "Running"
-        : held || api.taskHold(taskId)
-          ? "Uncertain or held; recovery is required"
-          : task.state !== "open"
-            ? `Task is ${String(task.state)}`
-            : project.paused
-              ? "Paused; no new admission"
-              : !task.ready
-                ? "Not ready for admission"
-                : !taskAdmission.eligible
-                  ? `Blocked from admission: ${taskAdmission.reasons.map(admissionReason).join(", ")}`
-                  : assignmentStatuses.includes(
-                        "Queued; waiting for capacity admission",
-                      )
-                    ? "Queued; waiting for capacity admission"
-                    : assignmentStatuses.includes(
-                          "Admitted; runtime state is not confirmed",
-                        )
-                      ? "Admitted; runtime state is not confirmed"
-                      : assignmentStatuses.some((value) =>
-                            value.startsWith("Selected; waiting"),
-                          )
-                        ? "Selected; waiting for admission"
-                        : assignmentStatuses.some((value) =>
-                              value.startsWith("Selected; blocked"),
-                            )
-                          ? "Selected; blocked from admission"
-                          : "No active execution is reported";
-  const admissionStatus = taskAdmission.eligible
-    ? "Task admission gates are clear"
-    : `Task admission blocked: ${taskAdmission.reasons.map(admissionReason).map(escapeHtml).join(", ")}`;
-  return `<main><h1>${escapeHtml(task.title)}</h1><p>Project: ${escapeHtml(project.name)}. Project state: ${project.paused ? "Paused" : "Active"}. Task state: ${escapeHtml(task.state)}; ${task.ready ? "Ready" : "Not ready"}.</p><p>${admissionStatus}.</p>${lead}<p>Execution status: ${escapeHtml(status)}.</p><p>Local dependencies gate new execution independently of readiness.</p><section><h2>Task-scoped assignments</h2>${assignments.length ? `<ul>${rows}</ul>` : "<p>No assignments have been selected.</p>"}</section><section><h2>Task dependencies</h2><ul>${dependencyRows}</ul>${dependencyForm(task, candidates, dependencyIds, csrfToken)}</section>${executionHoldSection(taskId, api)}<section><h2>Task controls</h2><p>${isOpen ? "Stop holds new work and asks running turns to end; some effects may still finish." : "Only an open task can be stopped."} Resume clears only the Stop, not any other hold on this task.</p>${stopForm}${resumeForm}</section></main>`;
 }
 
 /** The persisted binding harness when bound, else the captured revision's runtime. */
@@ -949,14 +774,6 @@ export class RuntimeOperatorRoutes {
       },
       {
         method: "GET",
-        path: "/runtime/task/:taskId",
-        handler: ({ params, csrfToken }) => ({
-          kind: "html",
-          body: taskPage(params.taskId ?? "", this.api, csrfToken),
-        }),
-      },
-      {
-        method: "GET",
         path: "/runtime/assignment/:assignmentId",
         handler: async ({ params, csrfToken }) => {
           const id = params.assignmentId ?? "";
@@ -990,32 +807,6 @@ export class RuntimeOperatorRoutes {
       },
       {
         method: "POST",
-        path: "/runtime/control/dependency/add",
-        handler: ({ fields }) => {
-          const input = dependencyFields.parse(fields);
-          this.api.domain().execute({
-            ...input,
-            type: "dependency.add",
-            actor: "operator",
-          } as DomainCommand);
-          return { kind: "redirect", location: taskHref(input.taskId) };
-        },
-      },
-      {
-        method: "POST",
-        path: "/runtime/control/dependency/remove",
-        handler: ({ fields }) => {
-          const input = dependencyFields.parse(fields);
-          this.api.domain().execute({
-            ...input,
-            type: "dependency.remove",
-            actor: "operator",
-          } as DomainCommand);
-          return { kind: "redirect", location: taskHref(input.taskId) };
-        },
-      },
-      {
-        method: "POST",
         path: "/runtime/control/instruction-apply",
         handler: ({ fields }) => {
           const input = instructionFields.parse(fields);
@@ -1028,24 +819,6 @@ export class RuntimeOperatorRoutes {
             kind: "redirect",
             location: assignmentHref(input.assignmentId),
           };
-        },
-      },
-      {
-        method: "POST",
-        path: "/runtime/control/stop",
-        handler: async ({ fields }) => {
-          const { taskId } = taskControlFields.parse(fields);
-          await this.api.stopTask(taskId);
-          return { kind: "redirect", location: taskHref(taskId) };
-        },
-      },
-      {
-        method: "POST",
-        path: "/runtime/control/resume",
-        handler: async ({ fields }) => {
-          const { taskId } = taskControlFields.parse(fields);
-          await this.api.resumeTask(taskId);
-          return { kind: "redirect", location: taskHref(taskId) };
         },
       },
     ];

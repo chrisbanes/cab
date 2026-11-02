@@ -114,7 +114,6 @@ test("retained HTML routes share the production foundation and native interactio
     `/task/${taskId}`,
     `/assignment/${assignmentId}`,
     "/runtime",
-    `/runtime/task/${taskId}`,
     `/runtime/assignment/${assignmentId}`,
   ];
   let stylesheetHref = "";

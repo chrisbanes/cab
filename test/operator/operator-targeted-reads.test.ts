@@ -243,14 +243,6 @@ async function readAll(
     await settle(`project:${projectId}`, () => api.readProject(projectId));
   for (const { id } of tasks) {
     await settle(`task:${id}`, () => api.readTask(id));
-    await settle(`page:task:${id}`, async () => {
-      const r = await route("/runtime/task/:taskId").handler({
-        params: { taskId: id },
-        fields: {},
-        csrfToken: "token",
-      });
-      return r.kind === "html" ? page(r.body) : r;
-    });
     for (const a of d.assignments(id)) {
       const assignmentId = String(a.id);
       await settle(`assignment:${assignmentId}`, () =>
