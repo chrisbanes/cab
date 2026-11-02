@@ -9,7 +9,7 @@ import {
   deliveryPolicyChangeText,
   deliveryFieldErrors,
   deliveryRows,
-  deliveryMappingCoverageLoss,
+  deliveryMappingCoverageWarning,
   type GrantRow,
   type CheckRow,
 } from "./delivery-policy-draft.js";
@@ -101,7 +101,7 @@ export function DeliveryTab(p: TabProps) {
       field.startsWith(`${path}.`),
     )?.[1];
   const mapping = p.data.statusMapping;
-  const coverageLoss = deliveryMappingCoverageLoss(saved, draft, mapping);
+  const coverageWarning = deliveryMappingCoverageWarning(saved, draft, mapping);
   const removedUnavailable = saved.grants.some(
     (g) =>
       "savedRow" in g &&
@@ -381,12 +381,7 @@ export function DeliveryTab(p: TabProps) {
         </div>
         <aside className="settings-column">
           <ChangeList lines={lines} />
-          {coverageLoss && (
-            <Alert role="alert">
-              Previously allowed mapped status changes lose authority in a saved
-              tracker scope. The status mapping is unchanged.
-            </Alert>
-          )}
+          {coverageWarning && <Alert role="alert">{coverageWarning}</Alert>}
           {removedUnavailable && (
             <Alert role="alert">
               Removing an unavailable grant may remove status-mapping authority.

@@ -463,3 +463,45 @@ export function deliveryMappingCoverageLoss(
       ).length > 0,
   );
 }
+
+/** Distinguish confirmed mapped-target loss from a conservative warning when that view is withheld. */
+export function deliveryMappingCoverageWarning(
+  saved: DeliveryPolicyValues,
+  proposed: DeliveryPolicyValues,
+  view: z.infer<typeof statusMappingViewSchema> | undefined,
+): string | null {
+  if (deliveryMappingCoverageLoss(saved, proposed, view))
+    return "Previously allowed mapped status changes lose authority in a saved tracker scope. The status mapping is unchanged.";
+  if (view !== undefined) return null;
+  const reduced = saved.grants.some((grant) => {
+    if ("savedRow" in grant || grant.mode !== "allow") return false;
+    let coverage: StatusMappingCoverage;
+    if (grant.action === "issue.status")
+      coverage = {
+        tracker: "jira",
+        repositoryId: grant.repositoryId,
+        granted: grant.statusIds ?? [],
+      };
+    else if (
+      grant.action === "project.field" &&
+      grant.projectNodeId &&
+      grant.fieldNodeId
+    )
+      coverage = {
+        tracker: "github",
+        repositoryId: grant.repositoryId,
+        granted: [
+          {
+            projectNodeId: grant.projectNodeId,
+            fieldNodeId: grant.fieldNodeId,
+            optionNodeIds: grant.optionNodeIds ?? [],
+          },
+        ],
+      };
+    else return false;
+    return statusMappingCoverageLoss(saved, proposed, coverage).length > 0;
+  });
+  return reduced
+    ? "Status-mapping details are unavailable. These changes may remove status-mapping authority. The saved mapping is unchanged."
+    : null;
+}

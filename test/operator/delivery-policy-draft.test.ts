@@ -10,6 +10,7 @@ import {
   removeGrantRow,
   validateDeliveryPolicyDraft,
   statusMappingCoverageLoss,
+  deliveryMappingCoverageWarning,
   type DeliveryPolicySeed,
 } from "../../web/src/delivery-policy-draft.js";
 
@@ -677,4 +678,70 @@ test("reviewing a newer policy cannot rebind an old unavailable ordinal", async 
   const row = deliveryPolicySubmission(deliveryEditorDraft(values)).grants[0];
   assert.ok(row && "savedRow" in row);
   assert.equal(row.savedRow.version, 7);
+});
+
+test("withheld mapping warns conservatively when public status authority is reduced", () => {
+  const grant = {
+    action: "project.field" as const,
+    repositoryId: "r",
+    mode: "allow" as const,
+    projectNodeId: "P",
+    fieldNodeId: "F",
+    optionNodeIds: ["O", "other"],
+  };
+  const saved = seed({ grants: [grant] });
+  const warning = (next: DeliveryPolicySeed) =>
+    deliveryMappingCoverageWarning(saved, next, undefined);
+  for (const next of [
+    seed(),
+    seed({ grants: [{ ...grant, mode: "approval" }] }),
+    seed({ grants: [{ ...grant, optionNodeIds: ["O"] }] }),
+    seed({ grants: [{ ...grant, repositoryId: "other" }] }),
+    seed({ grants: [{ ...grant, fieldNodeId: "other" }] }),
+  ])
+    assert.match(warning(next) ?? "", /may remove status-mapping authority/);
+  assert.equal(warning(saved), null);
+  assert.equal(warning(seed({ grants: [grant, grant] })), null);
+  assert.equal(
+    deliveryMappingCoverageWarning(
+      seed({ grants: [grant, grant] }),
+      saved,
+      undefined,
+    ),
+    null,
+  );
+  const jira = {
+    action: "issue.status" as const,
+    repositoryId: "jira-container",
+    mode: "allow" as const,
+    statusIds: ["open", "done"],
+  };
+  assert.match(
+    deliveryMappingCoverageWarning(
+      seed({ grants: [jira] }),
+      seed({ grants: [{ ...jira, statusIds: ["open"] }] }),
+      undefined,
+    ) ?? "",
+    /may remove status-mapping authority/,
+  );
+  assert.equal(
+    deliveryMappingCoverageWarning(
+      seed({
+        grants: [{ action: "branch.push", repositoryId: "r", mode: "allow" }],
+      }),
+      seed(),
+      undefined,
+    ),
+    null,
+  );
+  assert.equal(
+    deliveryMappingCoverageWarning(saved, seed(), {
+      version: 1,
+      availability: "available",
+      mapping: null,
+      selections: [],
+      granted: [],
+    }),
+    null,
+  );
 });

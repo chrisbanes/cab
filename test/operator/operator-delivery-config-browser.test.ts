@@ -421,3 +421,79 @@ test("Delivery session expiry purges newly entered references and drafts", async
   );
   assert.equal(await page.getByLabel("New environment reference").count(), 0);
 });
+
+test("Delivery warns before reducing a public grant while its mapping view is withheld", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path, phone);
+  const domain = f.service.domain();
+  const hiddenSelection = "HIDDEN_MAPPING_SELECTION";
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: domain.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: hiddenSelection, kind: "project", projectNodeId: "P", filter: "" },
+    ],
+    readiness: null,
+  });
+  domain.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: `env:${hiddenSelection}`,
+    grants: [
+      {
+        action: "project.field",
+        repositoryId: "R",
+        mode: "allow",
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: ["O"],
+      },
+    ],
+    requiredChecks: [],
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: domain.statusMapping(ids.atlas).version,
+    mapping: {
+      selectionId: hiddenSelection,
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      events: { turnStarted: null, handedBack: null, held: null, done: "O" },
+    },
+  });
+  await read(page);
+  await grant(page).getByLabel("Action", { exact: true }).waitFor();
+  assert.doesNotMatch(
+    await page.locator("body").innerText(),
+    new RegExp(hiddenSelection),
+  );
+  let posts = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/commands"))
+      posts++;
+  });
+  await grant(page)
+    .getByLabel("Authority", { exact: true })
+    .selectOption("approval");
+  await page.getByRole("alert").waitFor();
+  assert.equal(posts, 0);
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await page.getByRole("alert").waitFor({ state: "hidden" });
+  await page
+    .getByRole("button", { name: "Remove grant 1", exact: true })
+    .click();
+  await page.getByRole("alert").waitFor();
+  assert.equal(posts, 0);
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await grant(page).waitFor();
+  await page.getByRole("alert").waitFor({ state: "hidden" });
+});

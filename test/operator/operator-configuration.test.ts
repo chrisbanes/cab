@@ -3528,3 +3528,114 @@ test("delivery policies with 257 Project options save and preserve the full conf
       assert.equal(f.runtime.turns, 0);
     });
 });
+
+test("a withheld Project selection leaves public grant reductions warnable without disclosing its id", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const envKey = "PRIVATE_MAPPING_SELECTION";
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: envKey, kind: "project", projectNodeId: "P", filter: "" },
+    ],
+    readiness: null,
+  });
+  const grant = {
+    action: "project.field" as const,
+    repositoryId: "R",
+    mode: "allow" as const,
+    projectNodeId: "P",
+    fieldNodeId: "F",
+    optionNodeIds: ["O"],
+  };
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${envKey}`,
+    grants: [grant],
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mapping: {
+      selectionId: envKey,
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      events: { turnStarted: null, handedBack: null, held: null, done: "O" },
+    },
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.equal(JSON.stringify(read).includes(envKey), false);
+  assert.equal(read.data.statusMapping, undefined);
+  const saved = read.data.delivery!;
+  assert.deepEqual(saved.grants, [grant]);
+  const { deliveryMappingCoverageWarning } = await import(
+    "../../web/src/delivery-policy-draft.js"
+  );
+  for (const grants of [[], [{ ...grant, mode: "approval" as const }]])
+    assert.match(
+      deliveryMappingCoverageWarning(
+        saved,
+        { ...saved, grants },
+        read.data.statusMapping,
+      ) ?? "",
+      /may remove status-mapping authority/,
+    );
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("routing Settings partial edits preserve an existing 129-candidate domain configuration", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const ids = Array.from({ length: 129 }, () => randomUUID()).sort();
+  for (const profileId of ids)
+    domain.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name: "Candidate",
+      instructions: "Routing candidate",
+      capabilities: "Work",
+    });
+  domain.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: true,
+    guidance: "Original",
+    candidateProfileIds: ids,
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(read.data.routing.candidateProfileIds, ids);
+  const { routingCommand } = await import("../../web/src/settings-changes.js");
+  const command = routingCommand(
+    projectId,
+    {
+      key: randomUUID(),
+      expectedVersion: "2",
+      enabled: true,
+      candidateProfileIds: ids,
+      guidance: "Updated",
+      referenceMode: "preserve",
+    },
+    read.data,
+    "Original",
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(command)) < 64 * 1024);
+  await api.execute(command);
+  const after = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(after.data.routing.candidateProfileIds, ids);
+  assert.equal(domain.routing(projectId).guidance, "Updated");
+  assert.equal(domain.routing(projectId).enabled, 1);
+  assert.equal(f.runtime.turns, 0);
+});

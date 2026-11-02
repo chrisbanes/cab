@@ -2583,7 +2583,6 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .optional(),
       candidateProfileIds: z
         .array(uuid)
-        .max(128)
         .refine((ids) => new Set(ids).size === ids.length),
     })
     .strict(),
