@@ -523,44 +523,50 @@ function DeliveryPolicyForm(p: TabProps) {
                 );
               })}
               {!links.length && <p>No linked repositories.</p>}
-              <Field
-                label="Level for all linked repositories"
-                value={bulk}
-                onChange={setBulk}
+              <section
+                className="settings-row"
+                aria-label="All linked repositories"
               >
-                <option value="" disabled>
-                  Choose a level
-                </option>
-                {presets.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {deliveryLevelLabels[preset]}
+                <h3 className="small-heading">All linked repositories</h3>
+                <Field
+                  label="Level for all linked repositories"
+                  value={bulk}
+                  onChange={setBulk}
+                >
+                  <option value="" disabled>
+                    Choose a level
                   </option>
-                ))}
-              </Field>
-              <Button
-                id="shepherd-bulk"
-                type="button"
-                variant="secondary"
-                disabled={
-                  !bulk ||
-                  !links.length ||
-                  links.some(
-                    (link) =>
-                      deliveryLevelView(draft.grants, link.repositoryId) ===
-                      "unavailable",
-                  )
-                }
-                onClick={() =>
-                  choose(
-                    links.map((link) => link.repositoryId),
-                    bulk as Preset,
-                    "shepherd-bulk",
-                  )
-                }
-              >
-                Apply to all linked repositories
-              </Button>
-              {levelError && <Alert role="alert">{levelError}</Alert>}
+                  {presets.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {deliveryLevelLabels[preset]}
+                    </option>
+                  ))}
+                </Field>
+                <Button
+                  id="shepherd-bulk"
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    !bulk ||
+                    !links.length ||
+                    links.some(
+                      (link) =>
+                        deliveryLevelView(draft.grants, link.repositoryId) ===
+                        "unavailable",
+                    )
+                  }
+                  onClick={() =>
+                    choose(
+                      links.map((link) => link.repositoryId),
+                      bulk as Preset,
+                      "shepherd-bulk",
+                    )
+                  }
+                >
+                  Apply to all linked repositories
+                </Button>
+                {levelError && <Alert role="alert">{levelError}</Alert>}
+              </section>
             </fieldset>
           </Panel>
           <Panel
