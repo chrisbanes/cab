@@ -6536,17 +6536,24 @@ export class StandaloneService {
       workspaceBindings,
     } = this.current;
     this.flushRuntimeAnswers();
-    // Every confirmed push wakes the scheduler, and start-up ends with a wake.
-    domain.reconcileRestacks({
-      queue: (taskId, reason, identity) =>
-        coordination.ensureDeliveryEventWithinTransaction(
-          taskId,
-          reason,
-          identity,
-        ),
-      advance: (taskId, repositoryId, commit) =>
-        workspaceBindings.advanceCommit(taskId, repositoryId, commit),
-    });
+    // Every confirmed push wakes the scheduler, and start-up ends with a wake. A failure is
+    // logged and retried on the next wake; it never holds back the rest of the wake.
+    try {
+      domain.reconcileRestacks({
+        queue: (taskId, reason, identity) =>
+          coordination.ensureDeliveryEventWithinTransaction(
+            taskId,
+            reason,
+            identity,
+          ),
+        advance: (taskId, repositoryId, commit) =>
+          workspaceBindings.advanceCommit(taskId, repositoryId, commit),
+      });
+    } catch (error) {
+      process.stderr.write(
+        `${JSON.stringify({ operation: "restack-reconcile", error: sanitizeError(error, this.failureExclusions()) })}\n`,
+      );
+    }
     const deliveryWorkCompleted = (delivery: InboxDelivery): boolean => {
       const intent = state.byWorkId(delivery.deliveryWorkId);
       const binding = state.taskBinding(delivery.deliveryWorkId);
