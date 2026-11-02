@@ -1262,6 +1262,8 @@ export const assignmentSchema = z
     instructionsRevision: revision,
     currentProfileRevision: revision,
     currentInstructionsRevision: revision,
+    /** False before the assignment's first turn starts, which takes the revisions current then; absent from older services. */
+    started: z.boolean().optional(),
     /** The execution runtime of the captured profile revision. */
     runtime: profileRuntimeSchema,
     executionGeneration: generation.nullable(),

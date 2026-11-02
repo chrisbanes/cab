@@ -83,7 +83,11 @@ async function world(f: Fixture) {
 
 async function shownTitle(api: OperatorApi, taskId: string) {
   const { data } = await api.readTask(taskId);
-  if (data.task.title === null) assert.equal(data.contentUnavailable, true);
+  if (data.task.title === null) {
+    assert.equal(data.contentUnavailable, true);
+    // Over the bound, the task-wide recovery read is omitted, never empty.
+    assert.equal(data.executionRecovery, undefined);
+  } else assert.ok(data.executionRecovery);
   return data.task.title;
 }
 

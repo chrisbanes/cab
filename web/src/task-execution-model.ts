@@ -28,6 +28,7 @@ const settled = new Set<Execution["state"]>([
   "queued",
   "waiting",
   "paused",
+  "not-started",
   "completed",
   "cancelled",
 ]);
@@ -44,9 +45,14 @@ export function taskHolds(execution: Execution, recovery?: Recovery): Holds {
   };
 }
 
+/** Said when the task-wide recovery read is withheld: holds only older records keep are unknown. */
+export const holdsUnreadable =
+  "Holds from older records can't be read here; open each assignment's recovery.";
+
 /**
  * The task's execution status in the task read's own order, and whether recovery is required.
- * A hold the status does not show is named, so a held execution never reads as idle or queued.
+ * A hold the status does not show is named, so a held execution never reads as idle or queued;
+ * without the task-wide recovery read the status is never presented as safe either.
  */
 export function executionStatus(execution: Execution, recovery?: Recovery) {
   const holds = taskHolds(execution, recovery);
@@ -64,14 +70,20 @@ export function executionStatus(execution: Execution, recovery?: Recovery) {
   return {
     label,
     held:
+      !recovery ||
       leftover ||
       holds.stop ||
       holds.uncertainty ||
       holds.task ||
       ["stopping", "uncertain"].includes(execution.state),
-    note: leftover
-      ? "Execution holds are still recorded; recovery is required before another writer."
-      : null,
+    note:
+      [
+        leftover &&
+          "Execution holds are still recorded; recovery is required before another writer.",
+        !recovery && holdsUnreadable,
+      ]
+        .filter(Boolean)
+        .join(" ") || null,
   };
 }
 
@@ -97,7 +109,8 @@ export const resumeWarning =
 
 /** What the evidence list says above its records: unavailable, none, or how many are omitted. */
 export function evidenceNotice(recovery: Recovery | undefined): string | null {
-  if (!recovery) return "Recovery evidence is unavailable from this service.";
+  if (!recovery)
+    return "Recovery evidence is withheld for this task (its history can't be shown safely) or the service does not report it.";
   if (!recovery.evidenceAvailable)
     return "No recovery records are recorded for this task. That is not evidence of release.";
   return recovery.omittedCount
@@ -123,6 +136,8 @@ export function recordLine(record: Recovery["records"][number]): string {
 
 /** Which captured revisions are behind the current ones; empty when the row is current. */
 export function staleRevisions(a: Data["assignments"][number]): string[] {
+  // A first turn takes the revisions current when it is admitted: nothing to apply yet.
+  if (a.started === false) return [];
   return [
     a.instructionsRevision !== a.currentInstructionsRevision &&
       `instructions ${a.instructionsRevision} → ${a.currentInstructionsRevision}`,

@@ -3965,6 +3965,7 @@ export class OperatorApi {
             d.profile(String(a.profileId)).version,
           ),
           currentInstructionsRevision: Number(p.instructionsRevision),
+          started: this.service.assignmentHasStartedExecution(String(a.id)),
           runtime: d.profileRuntime(
             String(a.profileId),
             Number(a.profileRevision),

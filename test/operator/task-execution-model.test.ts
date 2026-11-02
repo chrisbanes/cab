@@ -62,7 +62,7 @@ test("every execution state has a status, and stopping and uncertain always need
     "cancelled",
   ];
   for (const state of states) {
-    const status = executionStatus(execution(state));
+    const status = executionStatus(execution(state), recovery());
     assert.ok(status.label, state);
     assert.equal(
       status.held,
@@ -85,7 +85,7 @@ test("every execution state has a status, and stopping and uncertain always need
 });
 
 test("a hold only a record keeps marks an idle or paused status as held", () => {
-  for (const state of ["idle", "queued", "paused"] as const) {
+  for (const state of ["idle", "queued", "paused", "not-started"] as const) {
     const status = executionStatus(
       execution(state),
       recovery({ writer: true }),
@@ -95,11 +95,15 @@ test("a hold only a record keeps marks an idle or paused status as held", () => 
   }
   // A running execution's own writer and capacity are not leftovers.
   assert.deepEqual(
-    executionStatus(execution("running", { writer: true, capacity: true })),
+    executionStatus(
+      execution("running", { writer: true, capacity: true }),
+      recovery(),
+    ),
     { label: "Running", held: false, note: null },
   );
   assert.equal(
-    executionStatus(execution("running", { uncertainty: true })).held,
+    executionStatus(execution("running", { uncertainty: true }), recovery())
+      .held,
     true,
   );
   assert.equal(executionStatus(execution("idle"), recovery()).held, false);
@@ -124,7 +128,7 @@ test("hold lines combine the task read's holds with the records', Stop first", (
 });
 
 test("evidence notices distinguish unavailable, none and omitted records", () => {
-  assert.match(evidenceNotice(undefined) ?? "", /unavailable/);
+  assert.match(evidenceNotice(undefined) ?? "", /withheld/);
   assert.match(evidenceNotice(recovery()) ?? "", /not evidence of release/);
   assert.equal(evidenceNotice(recovery({}, [record])), null);
   assert.equal(
@@ -174,4 +178,32 @@ test("admission and revision staleness wording", () => {
     }).length,
     2,
   );
+});
+
+test("without the task-wide recovery read a quiet status still says older holds are unknown", () => {
+  const status = executionStatus(execution("paused", {}, ["project-paused"]));
+  assert.equal(status.label, "Paused; no new admission");
+  assert.equal(status.held, true);
+  assert.equal(
+    status.note,
+    "Holds from older records can't be read here; open each assignment's recovery.",
+  );
+  assert.match(evidenceNotice(undefined) ?? "", /withheld for this task/);
+  // A leftover hold the task read itself reports keeps both sentences.
+  assert.match(
+    executionStatus(execution("idle", { writer: true })).note ?? "",
+    /still recorded.*can't be read here/,
+  );
+});
+
+test("a never-started assignment has nothing to apply: its first turn takes the current revisions", () => {
+  const row = {
+    instructionsRevision: 1,
+    currentInstructionsRevision: 2,
+    profileRevision: 1,
+    currentProfileRevision: 2,
+  } as TaskRead["data"]["assignments"][number];
+  assert.deepEqual(staleRevisions({ ...row, started: false }), []);
+  assert.equal(staleRevisions({ ...row, started: true }).length, 2);
+  assert.equal(staleRevisions(row).length, 2);
 });

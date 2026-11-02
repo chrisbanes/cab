@@ -6,6 +6,7 @@ import {
   createOperatorFixture,
   seedOperatorRecovery,
 } from "../fixtures/operator-web.js";
+import { seedImportedCommentTask } from "../fixtures/task-review.js";
 
 async function seed() {
   const f = await createOperatorFixture();
@@ -201,4 +202,22 @@ test("dependency candidates are the project's other tasks that are not already b
     ),
     new Set([taskId, candidateId]),
   );
+});
+
+test("an imported task gets no local dependency candidates, and unstarted assignments say so", async (t) => {
+  const { f, api, taskId, candidateId } = await seed();
+  t.after(() => f.close());
+  // Bound execution records mean started; a fresh lead assignment has never run.
+  assert.ok(
+    (await api.readTask(taskId)).data.assignments.every((a) => a.started),
+  );
+  assert.ok(f.service.domain().ensureLeadAssignment(candidateId));
+  assert.deepEqual(
+    (await api.readTask(candidateId)).data.assignments.map((a) => a.started),
+    [false],
+  );
+  const imported = await seedImportedCommentTask(f, null);
+  const read = (await api.readTask(imported.taskId)).data;
+  assert.ok(read.source);
+  assert.deepEqual(read.dependencyCandidates, []);
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   type CommandReceipt,
   type OperatorCommand,
@@ -17,6 +17,7 @@ import {
   evidenceWarning,
   executionHoldLines,
   executionStatus,
+  holdsUnreadable,
   recordLine,
   resumeWarning,
   staleRevisions,
@@ -52,6 +53,7 @@ export function ConfirmCommand({
   destructive?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const cancel = useRef<HTMLButtonElement>(null);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -59,7 +61,15 @@ export function ConfirmCommand({
           {trigger}
         </Button>
       </DialogTrigger>
-      <DialogContent role="alertdialog" className="stop-dialog">
+      <DialogContent
+        role="alertdialog"
+        className="stop-dialog"
+        onOpenAutoFocus={(event) => {
+          // Opens on the choice that sends nothing.
+          event.preventDefault();
+          cancel.current?.focus();
+        }}
+      >
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className="body">{description}</DialogDescription>
         <div className="stop-dialog-actions">
@@ -73,7 +83,7 @@ export function ConfirmCommand({
             {confirm}
           </Button>
           <DialogClose asChild>
-            <Button type="button" variant="secondary">
+            <Button ref={cancel} type="button" variant="secondary">
               Cancel
             </Button>
           </DialogClose>
@@ -284,8 +294,10 @@ export function TaskExecution({
               </li>
             ))}
           </ul>
-        ) : (
+        ) : recovery ? (
           <p>No unresolved execution hold is reported.</p>
+        ) : (
+          <p>{holdsUnreadable}</p>
         )}
         <p className="muted">{resumeWarning}</p>
       </section>
