@@ -888,7 +888,9 @@ test("each repository edits its merge method and additional checks, with suggest
   const settings = page.getByRole("group", {
     name: "Merge settings for acme/atlas",
   });
-  const warning = settings.getByRole("alert");
+  const warning = settings
+    .getByRole("alert")
+    .filter({ hasText: "No required checks" });
   await warning.waitFor();
   assert.match(
     await warning.innerText(),
@@ -904,13 +906,25 @@ test("each repository edits its merge method and additional checks, with suggest
     "Not set",
     "Merge commit",
     "Squash",
+    "Rebase",
   ]);
+  await settings
+    .getByText(
+      "The default branch allows: merge commit, squash. Merges into other branches follow their own rules.",
+      { exact: true },
+    )
+    .waitFor();
   await settings
     .getByText(
       "No merge method is set, so cab holds every merge for this repository.",
     )
     .waitFor();
-  await method.selectOption("squash");
+  // A method the default branch doesn't allow is a warning, not a refusal: a PR may target another branch.
+  await method.selectOption("rebase");
+  await settings
+    .getByRole("alert")
+    .filter({ hasText: "The default branch doesn't allow rebase" })
+    .waitFor();
   await page.getByRole("button", { name: "Add lint", exact: true }).click();
   assert.equal(await check(page).getByLabel("Check name").inputValue(), "lint");
   assert.equal(await warning.count(), 0);
@@ -921,7 +935,7 @@ test("each repository edits its merge method and additional checks, with suggest
   assert.deepEqual(sent.repositories, [
     {
       repositoryId: "acme/atlas",
-      mergeMethod: "squash",
+      mergeMethod: "rebase",
       requiredChecks: [{ name: "lint" }],
     },
   ]);
@@ -931,7 +945,7 @@ test("each repository edits its merge method and additional checks, with suggest
   assert.deepEqual(saved.repositories, [
     {
       repositoryId: "acme/atlas",
-      mergeMethod: "squash",
+      mergeMethod: "rebase",
       requiredChecks: [{ name: "lint" }],
     },
   ]);

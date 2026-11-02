@@ -270,8 +270,6 @@ const branchPrefixValid = (value: string) =>
 /** Indexed field errors for the domain's accepted policy shape and configure-time grant rules. */
 export function validateDeliveryPolicyDraft(
   draft: DeliveryPolicyDraft,
-  /** The read's live code-host requirements, which bound each repository's method. */
-  requirements: readonly RepositoryDeliveryRead[] = [],
 ): DeliveryPolicyFieldError[] {
   const errors: DeliveryPolicyFieldError[] = [];
   const add = (path: string, message: string) => errors.push({ path, message });
@@ -350,15 +348,6 @@ export function validateDeliveryPolicyDraft(
   });
   draft.repositories?.forEach((repository, r) => {
     const at = `repositories.${r}`;
-    const read = requirements.find(
-      (x) => x.repositoryId === repository.repositoryId,
-    );
-    if (
-      repository.mergeMethod !== null &&
-      read?.codeHost.status === "live" &&
-      !read.codeHost.allowedMethods.includes(repository.mergeMethod)
-    )
-      add(`${at}.mergeMethod`, "Choose a merge method the code host allows.");
     if (repository.additionalChecks.length > 100)
       add(`${at}.requiredChecks`, "At most 100 additional checks are allowed.");
     repository.additionalChecks.forEach((check, index) => {
@@ -496,28 +485,25 @@ import type { DeliveryPolicy } from "../../src/core/delivery.js";
 /** Stable UI keys never enter the submitted policy or indexed API paths. */
 export function deliveryFieldErrors(
   draft: DeliveryPolicyDraft,
-  requirements: readonly RepositoryDeliveryRead[] = [],
 ): Record<string, string> {
   return Object.fromEntries(
-    validateDeliveryPolicyDraft(draft, requirements).map(
-      ({ path, message }) => {
-        const parts = path.split(".");
-        if (
-          parts[0] === "grants" &&
-          parts[1] &&
-          draft.grantKeys.includes(parts[1])
-        )
-          parts[1] = String(draft.grantKeys.indexOf(parts[1]));
-        if (
-          parts[0] === "requiredChecks" &&
-          parts[1] &&
-          draft.requiredCheckKeys.includes(parts[1])
-        )
-          parts[1] = String(draft.requiredCheckKeys.indexOf(parts[1]));
-        if (path === "credentialInput") parts[0] = "credentialRef";
-        return [parts.join("."), message];
-      },
-    ),
+    validateDeliveryPolicyDraft(draft).map(({ path, message }) => {
+      const parts = path.split(".");
+      if (
+        parts[0] === "grants" &&
+        parts[1] &&
+        draft.grantKeys.includes(parts[1])
+      )
+        parts[1] = String(draft.grantKeys.indexOf(parts[1]));
+      if (
+        parts[0] === "requiredChecks" &&
+        parts[1] &&
+        draft.requiredCheckKeys.includes(parts[1])
+      )
+        parts[1] = String(draft.requiredCheckKeys.indexOf(parts[1]));
+      if (path === "credentialInput") parts[0] = "credentialRef";
+      return [parts.join("."), message];
+    }),
   );
 }
 export function deliveryEditorValues(seed: DeliveryPolicySeed): Values {

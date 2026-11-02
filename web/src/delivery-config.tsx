@@ -50,6 +50,9 @@ import {
   deliveryMergeWarning,
   mergeMethodLabels,
   mergeMethodUnsetNote,
+  codeHostMergeMethods,
+  defaultBranchMethodsNote,
+  mergeMethodNotAllowedWarning,
   noRequiredChecksWarning,
   unconfirmedChecksNote,
   type CodeHost,
@@ -322,7 +325,7 @@ function DeliveryPolicyForm(p: TabProps) {
     <form
       ref={form}
       onSubmit={(event) => {
-        const errors = deliveryFieldErrors(draft, requirements);
+        const errors = deliveryFieldErrors(draft);
         const ids = upward(saved, draft);
         if (
           !isLocked &&
@@ -385,7 +388,7 @@ function DeliveryPolicyForm(p: TabProps) {
                   p.session,
                   command(pending.draft),
                   p.refreshConfiguration,
-                  deliveryFieldErrors(pending.draft, requirements),
+                  deliveryFieldErrors(pending.draft),
                 );
               else apply(pending.draft);
             }}
@@ -747,16 +750,9 @@ function RepositoryMergeSettings({
   const id = row.repositoryId;
   const at = `repositories.${index}`;
   const live = read.codeHost.status === "live" ? read.codeHost : null;
-  const methods = live
-    ? [
-        ...live.allowedMethods,
-        ...(row.mergeMethod && !live.allowedMethods.includes(row.mergeMethod)
-          ? [row.mergeMethod]
-          : []),
-      ]
-    : row.mergeMethod
-      ? [row.mergeMethod]
-      : [];
+  // Any method the host supports: a PR may target a branch whose rules differ from the default's.
+  const methods: readonly (keyof typeof mergeMethodLabels)[] =
+    codeHostMergeMethods[codeHost];
   const checks = row.additionalChecks;
   const setChecks = (next: CheckRow[]) =>
     onChange((current) => ({ ...current, additionalChecks: next }));
@@ -775,7 +771,6 @@ function RepositoryMergeSettings({
         id={`merge-method-${index}`}
         label={`Merge method for ${id}`}
         value={row.mergeMethod ?? ""}
-        disabled={!live}
         error={error(`${at}.mergeMethod`)}
         onChange={(value) =>
           onChange((current) => ({
@@ -789,13 +784,18 @@ function RepositoryMergeSettings({
         {methods.map((method) => (
           <option key={method} value={method}>
             {mergeMethodLabels[method]}
-            {live && !live.allowedMethods.includes(method)
-              ? " (not allowed)"
-              : ""}
           </option>
         ))}
       </Field>
       {!row.mergeMethod && <p>{mergeMethodUnsetNote}</p>}
+      {live && <p>{defaultBranchMethodsNote(live.allowedMethods)}</p>}
+      {live &&
+        row.mergeMethod &&
+        !live.allowedMethods.includes(row.mergeMethod) && (
+          <Alert role="alert">
+            {mergeMethodNotAllowedWarning(row.mergeMethod)}
+          </Alert>
+        )}
       <p>{codeHostChecksSummary(codeHost, read.codeHost)}</p>
       {live && live.checks.length > 0 && (
         <ul aria-label={`Checks required by the code host for ${id}`}>

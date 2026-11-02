@@ -4,6 +4,9 @@ import {
   checkStatusWord,
   codeHostActionLabel,
   codeHostChecksSummary,
+  codeHostMergeMethods,
+  defaultBranchMethodsNote,
+  mergeMethodNotAllowedWarning,
   noRequiredChecksWarning,
   deliveryActionLine,
   deliveryBlockerSentence,
@@ -332,5 +335,22 @@ test("a repository's code-host checks read live, absent or unavailable, and no c
   assert.equal(
     noRequiredChecksWarning("gitlab"),
     "No required checks: neither GitLab nor cab requires a check, so cab holds every merge for this repository. Add an additional required check or a code-host rule.",
+  );
+});
+
+test("the default branch's merge methods are guidance, and a method it doesn't allow is a warning", () => {
+  assert.deepEqual(codeHostMergeMethods.github, ["merge", "squash", "rebase"]);
+  assert.deepEqual(codeHostMergeMethods.gitlab, ["merge", "squash"]);
+  assert.equal(
+    defaultBranchMethodsNote(["squash"]),
+    "The default branch allows: squash. Merges into other branches follow their own rules.",
+  );
+  assert.equal(
+    defaultBranchMethodsNote([]),
+    "The default branch allows: no method cab can use. Merges into other branches follow their own rules.",
+  );
+  assert.equal(
+    mergeMethodNotAllowedWarning("merge"),
+    "The default branch doesn't allow merge commit, so cab holds merges into it until the method or the branch's rules change.",
   );
 });

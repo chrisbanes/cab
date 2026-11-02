@@ -967,22 +967,18 @@ test("a legacy read becomes per-repository rows, and every save sends the reposi
   assert.deepEqual(deliveryPolicyChangeText(saved, squash).slice(0, 1), [
     "Merge method changed for R1",
   ]);
-  assert.deepEqual(deliveryFieldErrors(squash, [read(null)]), {});
-  // A method the code host does not allow is invalid; unavailable requirements leave the saved one alone.
+  assert.deepEqual(deliveryFieldErrors(squash), {});
+  // The default branch's methods are guidance: a PR may target a branch with other rules.
   const rebase = {
     ...draft,
     repositories: [
       { ...draft.repositories![0]!, mergeMethod: "rebase" as const },
     ],
   };
-  assert.deepEqual(deliveryFieldErrors(rebase, [read(null)]), {
-    "repositories.0.mergeMethod": "Choose a merge method the code host allows.",
-  });
-  assert.deepEqual(
-    deliveryFieldErrors(rebase, [
-      { ...read(null), codeHost: { status: "unavailable", reason: "timeout" } },
-    ]),
-    {},
+  assert.deepEqual(deliveryFieldErrors(rebase), {});
+  assert.equal(
+    deliveryPolicySubmission(rebase).repositories?.[0]?.mergeMethod,
+    "rebase",
   );
   const blank = {
     ...draft,
@@ -993,7 +989,7 @@ test("a legacy read becomes per-repository rows, and every save sends the reposi
       },
     ],
   };
-  assert.deepEqual(Object.keys(deliveryFieldErrors(blank, [read(null)])), [
+  assert.deepEqual(Object.keys(deliveryFieldErrors(blank)), [
     "repositories.0.requiredChecks.0.name",
     "repositories.0.requiredChecks.1.appId",
   ]);

@@ -186,6 +186,26 @@ export const mergeMethodLabels = {
   squash: "Squash",
   rebase: "Rebase",
 } as const;
+/** The methods cab can merge with on each code host; GitLab's rebase is a separate API cab does not call. */
+export const codeHostMergeMethods = {
+  github: ["merge", "squash", "rebase"],
+  gitlab: ["merge", "squash"],
+} as const;
+/** The default branch's methods are guidance: a PR into another branch follows that branch's rules. */
+export const defaultBranchMethodsNote = (
+  allowed: readonly (keyof typeof mergeMethodLabels)[],
+) =>
+  `The default branch allows: ${
+    allowed.length
+      ? allowed
+          .map((method) => mergeMethodLabels[method].toLowerCase())
+          .join(", ")
+      : "no method cab can use"
+  }. Merges into other branches follow their own rules.`;
+export const mergeMethodNotAllowedWarning = (
+  method: keyof typeof mergeMethodLabels,
+) =>
+  `The default branch doesn't allow ${mergeMethodLabels[method].toLowerCase()}, so cab holds merges into it until the method or the branch's rules change.`;
 export const mergeMethodUnsetNote =
   "No merge method is set, so cab holds every merge for this repository.";
 const requirementUnavailable = {
