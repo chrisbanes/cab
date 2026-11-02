@@ -8668,9 +8668,13 @@ export class StandaloneService {
         const coordination = this.current?.coordination;
         const binding = state.taskBinding(request.workId);
         if (coordination) {
-          const delivery = coordination.deliveryForWork(request.workId);
-          if (delivery?.state === "queued")
-            coordination.completeDeliveryBatch(request.workId);
+          // A retry or requeue completes the batch its original request had bound.
+          const delivery = state
+            .workLineage(request.workId)
+            .map((workId) => coordination.deliveryForWork(workId))
+            .find((batch) => batch?.state === "queued");
+          if (delivery)
+            coordination.completeDeliveryBatch(delivery.deliveryWorkId);
           if (binding) {
             for (const completion of coordination.completionRequests(
               binding.taskId,

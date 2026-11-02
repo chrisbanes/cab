@@ -661,6 +661,34 @@ test("a retried lead turn that a planned shutdown requeues completes its inbox b
   assert.match(w.prompts[4] ?? "", /Second message\./);
 });
 
+test("a retried lead turn completes an inbox batch still bound to the failed work", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const retryWorkId = await retryRunning(w);
+  await reportIn(w, "turn-3", "thread-2");
+  // The state a build that left the batch behind produced.
+  const { failedWorkId } = databaseOf(w.service)
+    .prepare(
+      "SELECT failedWorkId FROM execution_retry_resolutions WHERE retryWorkId = ?",
+    )
+    .get(retryWorkId) as { failedWorkId: string };
+  databaseOf(w.service)
+    .prepare(
+      "UPDATE coordination_delivery_batches SET deliveryWorkId = ? WHERE deliveryWorkId = ?",
+    )
+    .run(failedWorkId, retryWorkId);
+  w.end("turn-3");
+  await w.until(() => batches(w)[0]?.state === "completed", "batch completed");
+  assert.equal(batches(w)[0]?.deliveryWorkId, failedWorkId);
+  await w.until(
+    () => !w.service.list().some((work) => work.state === "running"),
+    "retry turn end",
+  );
+  await w.message("Second message.");
+  await w.until(() => w.prompts.length === 4, "next message turn");
+  assert.match(w.prompts[3] ?? "", /Second message\./);
+});
+
 test("a retried reporting repair keeps its repair instruction", async (t) => {
   const w = await liveTextWorld();
   t.after(() => w.close());
