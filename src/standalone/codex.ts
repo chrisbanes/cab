@@ -9,8 +9,6 @@ import { createReadStream } from "node:fs";
 import { isAbsolute } from "node:path";
 import { pluginSkillRoots, skillScopeConfig } from "./codex-skills.js";
 import { resolveOnPath } from "./executable-path.js";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import {
   encodeNativeInputReply,
   nativeEndpointKey,
@@ -1047,11 +1045,40 @@ export class CodexRuntime implements Runtime {
   ): Promise<void> {
     this.nativeExecutable = undefined;
     try {
-      const { stdout } = await promisify(execFile)(executable, ["--version"], {
-        env: environment,
-        timeout: 1000,
-        killSignal: "SIGKILL",
-        maxBuffer: 4096,
+      const stdout = await new Promise<string>((resolve, reject) => {
+        const probe = spawn(executable, ["--version"], {
+          env: environment,
+          detached: true,
+          stdio: "pipe",
+        });
+        let output = "";
+        let bytes = 0;
+        let failed = false;
+        const terminate = () => {
+          failed = true;
+          // Like execFile's timeout, close readers even if a descendant inherited them.
+          probe.stdout.destroy();
+          probe.stderr.destroy();
+          probe.kill("SIGKILL");
+        };
+        const timer = setTimeout(terminate, 1000);
+        probe.on("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        probe.on("close", (code) => {
+          clearTimeout(timer);
+          if (failed || code !== 0)
+            reject(new Error("Codex version probe failed"));
+          else resolve(output);
+        });
+        probe.stdin.end();
+        for (const stream of [probe.stdout, probe.stderr])
+          stream.on("data", (chunk: Buffer) => {
+            bytes += chunk.length;
+            if (bytes > 4096) terminate();
+            else if (stream === probe.stdout) output += chunk.toString("utf8");
+          });
       });
       const hash = createHash("sha256");
       for await (const chunk of createReadStream(executable))
@@ -1877,6 +1904,8 @@ export class CodexRuntime implements Runtime {
           : []),
       ],
       {
+        // Terminal signals must reach cab first; pipes and the child handle retain ownership.
+        detached: true,
         stdio: "pipe",
         env: codex
           ? { ...environment, CODEX_HOME: codex.home, HOME: codex.userHome }
@@ -1953,11 +1982,14 @@ export class CodexRuntime implements Runtime {
     this.nativeReadbacks.clear();
     this.clearConversationCaptures();
     if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) =>
+        child.once("exit", () => resolve()),
+      );
       child.kill("SIGTERM");
       let timeout: NodeJS.Timeout | undefined;
       try {
         await Promise.race([
-          new Promise<void>((resolve) => child.once("exit", () => resolve())),
+          exited,
           new Promise<void>((resolve) => {
             timeout = setTimeout(resolve, 3000);
           }),
@@ -1967,6 +1999,7 @@ export class CodexRuntime implements Runtime {
       }
       if (child.exitCode === null && child.signalCode === null)
         child.kill("SIGKILL");
+      await exited;
     }
   }
 

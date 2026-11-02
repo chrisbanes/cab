@@ -3621,3 +3621,44 @@ test("archive mutations keep their ordering fence beyond the RPC timeout and sto
   await runtime.stop();
   await rejected;
 });
+
+test("stop awaits the owned child after the SIGKILL fallback", {
+  timeout: 10000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-force-exit-"));
+  const executable = join(root, "fake-codex.mjs");
+  writeFileSync(
+    executable,
+    `#!${process.execPath}
+import { createInterface } from "node:readline";
+if (process.argv.includes("--version")) process.exit(0);
+process.on("SIGTERM", () => {});
+for await (const line of createInterface({ input: process.stdin })) {
+  const message = JSON.parse(line);
+  if (message.id === undefined) continue;
+  let result = {};
+  if (message.method === "account/read") result = { account: { type: "chatgpt" } };
+  if (message.method === "config/read") result = { config: { approval_policy: "never", sandbox_mode: "workspace-write" } };
+  process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");
+}
+`,
+    { mode: 0o700 },
+  );
+  const runtime = newTestRuntime(executable);
+  try {
+    await runtime.start();
+    const child = (
+      runtime as unknown as { child: ChildProcessWithoutNullStreams }
+    ).child;
+    let exited = false;
+    child.once("exit", () => {
+      exited = true;
+    });
+    await runtime.stop();
+    assert.equal(exited, true, "stop does not resolve at kill submission");
+    assert.equal(child.signalCode, "SIGKILL");
+  } finally {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -4,6 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import {
+  type DeliveryActionRecord,
+  DeliveryStore,
+} from "../../src/core/delivery.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import {
@@ -401,7 +405,33 @@ async function restartAndComplete(
     0,
     "no shutdown target survives the restart",
   );
-  return service;
+  assert.equal(
+    runtimes[harness].startedTurns.length,
+    1,
+    "one continuation dispatch",
+  );
+  const original = service.list().find((item) => item.workId === oldWorkId);
+  const continued = service.list().find((item) => item.workId === requeue);
+  assert.equal(continued?.workspace, original?.workspace);
+  assert.equal(continued?.threadId, oldThread);
+  const before = one(service, "SELECT * FROM execution_shutdown_resolutions");
+  await service.stop();
+  const nextRuntimes = newRuntimes([]);
+  const next = box.track(serviceFor(box.root, nextRuntimes));
+  await next.start();
+  await startedOf(next).scheduler.wake();
+  assert.equal(readClosedOrLive(next, oldWorkId), requeue);
+  assert.deepEqual(
+    one(next, "SELECT * FROM execution_shutdown_resolutions"),
+    before,
+  );
+  assert.deepEqual(
+    nextRuntimes[harness].startedTurns,
+    [],
+    "second restart dispatches nothing",
+  );
+  assert.equal(stateOf(next, requeue), "completed");
+  return next;
 }
 
 function readClosedOrLive(service: StandaloneService, oldWorkId: string) {
@@ -1078,3 +1108,149 @@ test("an interrupt response that arrives after the terminal status still release
   );
   assert.equal(count(box.root, "execution_shutdown_resolutions"), 1);
 });
+
+for (const harness of ["codex", "claude"] as const) {
+  for (const risk of ["callback", "survivor", "delivery-effect"] as const) {
+    test(`${harness} shutdown retains ownership for pending ${risk}`, async (t) => {
+      const box = sandbox(t);
+      const runtimes = newRuntimes([]);
+      const service = box.track(
+        serviceFor(box.root, runtimes, { supervisor: { shutdownWaitMs: 100 } }),
+      );
+      await service.start();
+      const [task] = await seed(service, [harness]);
+      assert.ok(task);
+      await untilRunning(service, [runtimes[harness]], [task.workId]);
+      const gate = deferred();
+      if (risk === "callback")
+        service.registerExecutionCallback(task.workId, gate.promise);
+      if (risk === "survivor")
+        service.holdKnownSurvivor(task.workId, "owned fixture survivor");
+      if (risk === "delivery-effect")
+        databaseOf(service)
+          .prepare(
+            "INSERT INTO execution_pending_effects (workId, effectKey, state, reason) VALUES (?, 'external-delivery', 'pending', 'pending delivery')",
+          )
+          .run(task.workId);
+      await service.stop();
+      gate.resolve();
+      assert.equal(count(box.root, "execution_shutdown_resolutions"), 0);
+      assert.equal(count(box.root, "task_writer_admissions", task.workId), 1);
+      assert.equal(
+        count(box.root, "execution_capacity_reservations", task.workId),
+        1,
+      );
+      const restartedRuntimes = newRuntimes([]);
+      const restarted = box.track(serviceFor(box.root, restartedRuntimes));
+      await restarted.start();
+      await startedOf(restarted).scheduler.wake();
+      assert.equal(stateOf(restarted, task.workId), "held");
+      assert.deepEqual(restartedRuntimes[harness].startedTurns, []);
+    });
+  }
+  test(`${harness} shutdown and restart preserve pause, approval material and delivery admission hold`, async (t) => {
+    const box = sandbox(t);
+    const runtimes = newRuntimes([]);
+    const service = box.track(serviceFor(box.root, runtimes));
+    await service.start();
+    const [task] = await seed(service, [harness]);
+    assert.ok(task);
+    await untilRunning(service, [runtimes[harness]], [task.workId]);
+    const intent = service.list().find((item) => item.workId === task.workId);
+    assert.ok(intent?.threadId && intent.turnId);
+    const call = {
+      threadId: intent.threadId,
+      turnId: intent.turnId,
+      callId: "shutdown-approval",
+    };
+    const { coordination } = startedOf(service);
+    const response = coordination.requestApproval({
+      ...call,
+      tool: "cab_request_approval",
+      arguments: {
+        action: "publish",
+        target: "owned fixture",
+        material: { digest: "unchanged" },
+      },
+    });
+    assert.equal(response.success, true);
+    const approvals = coordination.interactions(task.taskId);
+    assert.equal(approvals[0]?.status, "open");
+    const binding = coordination.deliveryCaller({
+      ...call,
+      tool: "cab_external_action",
+      arguments: {},
+    });
+    const operationId = randomUUID();
+    const action: DeliveryActionRecord = {
+      operationId,
+      binding,
+      policyVersion: 1,
+      state: "uncertain",
+      attempts: 1,
+      request: {
+        operationId,
+        action: {
+          kind: "issue.status",
+          target: {
+            repositoryId: "fixture-project",
+            nodeId: "fixture-issue",
+            number: 1,
+          },
+          statusId: "done",
+          expected: { statusId: "open" },
+        },
+      },
+      beforeState: null,
+      observation: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    databaseOf(service)
+      .prepare(
+        "INSERT INTO delivery_actions (operationId, taskId, materialHash, recordJson) VALUES (?, ?, ?, ?)",
+      )
+      .run(operationId, task.taskId, "fixture-hash", JSON.stringify(action));
+    assert.deepEqual(
+      new DeliveryStore(databaseOf(service)).actionBlockers(task.taskId),
+      ["external-action-uncertain"],
+    );
+    const projectId = binding.projectId;
+    service.domain().execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(service.domain().project(projectId).version),
+      paused: true,
+    });
+    await service.stop();
+    const nextRuntimes = newRuntimes([]);
+    const next = box.track(serviceFor(box.root, nextRuntimes));
+    await next.start();
+    await startedOf(next).scheduler.wake();
+    assert.deepEqual(
+      startedOf(next).coordination.interactions(task.taskId),
+      approvals,
+    );
+    const retained = new DeliveryStore(databaseOf(next)).action(operationId);
+    assert.equal(retained.state, "uncertain");
+    assert.equal(
+      retained.attempts,
+      1,
+      "shutdown/restart must not repeat the external write",
+    );
+    assert.deepEqual(retained.binding, action.binding);
+    assert.deepEqual(retained.request, action.request);
+    assert.ok(
+      next.domain().admission(task.taskId).reasons.includes("project-paused"),
+    );
+    assert.ok(
+      next
+        .domain()
+        .admission(task.taskId)
+        .reasons.includes("external-action-uncertain"),
+    );
+    assert.deepEqual(nextRuntimes[harness].startedTurns, []);
+  });
+}

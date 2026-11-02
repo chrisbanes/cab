@@ -1,9 +1,31 @@
+import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { record } from "./trace.js";
 const file = process.env.SIGNAL_TRACE;
 if (!file) throw new Error("Missing owned trace");
 let preempted = false;
-record(file, "child-start", { ppid: process.ppid });
+const ownGroup = Number(
+  execFileSync("ps", ["-p", String(process.pid), "-o", "pgid="], {
+    encoding: "utf8",
+    timeout: 3000,
+  }).trim(),
+);
+record(
+  file,
+  process.argv.includes("--version") || process.env.SIGNAL_PROBE
+    ? "probe-start"
+    : "child-start",
+  {
+    ppid: process.ppid,
+    pgid: ownGroup,
+    birth: execFileSync("ps", ["-p", String(process.pid), "-o", "lstart="], {
+      encoding: "utf8",
+    }).trim(),
+    boot: execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], {
+      encoding: "utf8",
+    }).trim(),
+  },
+);
 process.on("SIGINT", () => {
   record(file, "child-SIGINT");
   preempted = true;
@@ -24,6 +46,19 @@ for await (const line of createInterface({ input: process.stdin })) {
     record(file, "child-active");
     continue;
   }
+  if (m.method === undefined) {
+    if (m.id === 700) {
+      record(file, "result-saved", m.result);
+      write({
+        method: "turn/completed",
+        params: {
+          threadId: "signal-thread",
+          turn: { id: "signal-successor", status: "completed" },
+        },
+      });
+    }
+    continue;
+  }
   if (m.id === undefined) continue;
   let result: unknown = {};
   if (m.method === "account/read") result = { account: { type: "chatgpt" } };
@@ -32,14 +67,26 @@ for await (const line of createInterface({ input: process.stdin })) {
       config: { approval_policy: "never", sandbox_mode: "workspace-write" },
     };
   if (m.method === "model/list") result = { data: [] };
-  if (m.method === "thread/start")
+  if (m.method === "thread/start" || m.method === "thread/resume")
+    record(file, "conversation-open", {
+      method: m.method,
+      threadId: m.params.threadId ?? "signal-thread",
+    });
+  if (m.method === "thread/start" || m.method === "thread/resume")
     result = {
       thread: { id: "signal-thread" },
       approvalPolicy: "never",
       sandbox: { type: "workspaceWrite" },
     };
   if (m.method === "turn/start") {
-    result = { turn: { id: "signal-turn" } };
+    result = {
+      turn: {
+        id:
+          process.env.SIGNAL_RESUME === "1"
+            ? "signal-successor"
+            : "signal-turn",
+      },
+    };
     record(file, "child-active");
   }
   if (m.method === "turn/interrupt") {
@@ -58,4 +105,20 @@ for await (const line of createInterface({ input: process.stdin })) {
     continue;
   }
   write({ id: m.id, result });
+  if (m.method === "turn/start" && process.env.SIGNAL_RESUME === "1")
+    setTimeout(
+      () =>
+        write({
+          id: 700,
+          method: "item/tool/call",
+          params: {
+            threadId: "signal-thread",
+            turnId: "signal-successor",
+            callId: "successor-result",
+            tool: "cab_report_result",
+            arguments: { summary: "Offline successor settled" },
+          },
+        }),
+      30,
+    );
 }

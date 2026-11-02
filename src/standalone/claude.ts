@@ -1,4 +1,4 @@
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
@@ -328,14 +328,34 @@ function defaultSandboxSelfTest(input: {
   env: Record<string, string>;
 }): Promise<boolean> {
   if (process.platform !== "darwin") return Promise.resolve(false);
-  return new Promise((done) =>
-    execFile(
+  return new Promise((done) => {
+    const probe = spawn(
       "/usr/bin/sandbox-exec",
       ["-p", "(version 1)(allow default)", "/usr/bin/true"],
-      { cwd: input.workspace, env: input.env, timeout: 5000 },
-      (error) => done(!error),
-    ),
-  );
+      {
+        cwd: input.workspace,
+        env: input.env,
+        detached: true,
+        stdio: "pipe",
+      },
+    );
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      probe.kill("SIGTERM");
+    }, 5000);
+    probe.stdin.end();
+    probe.stdout.resume();
+    probe.stderr.resume();
+    probe.once("error", () => {
+      clearTimeout(timer);
+      done(false);
+    });
+    probe.once("close", (code) => {
+      clearTimeout(timer);
+      done(!timedOut && code === 0);
+    });
+  });
 }
 
 /** Resolves through the nearest existing ancestor, so symlinked parents are followed. */
@@ -790,8 +810,10 @@ export class ClaudeRuntime implements Runtime {
     } finally {
       abort.abort();
       await drained;
-      if (child && !(await this.awaitExit(child, exited)))
+      if (child && !(await this.awaitExit(child, exited))) {
         child.kill("SIGKILL");
+        await exited;
+      }
     }
   }
 
@@ -1129,6 +1151,8 @@ export class ClaudeRuntime implements Runtime {
     const child = spawn(options.command, options.args, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       env: options.env,
+      // Applies to settings probes and turns; cab still owns and awaits each child.
+      detached: true,
       // The SDK's forwarded signal terminates the CLI on abort (C0 F2).
       signal: options.signal,
       stdio: ["pipe", "pipe", "ignore"],

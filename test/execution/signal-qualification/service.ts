@@ -31,6 +31,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     record(trace, "service-signal", { signal }),
   );
 record(trace, "service-start", { ppid: process.ppid });
+// Scripted SDK can become idle without a real listener; retain the fixture driver.
+const keepAlive = setInterval(() => {}, 60000);
 let service!: StandaloneService;
 await runServiceEntry(["serve", data], () => {
   service = new StandaloneService(
@@ -53,6 +55,7 @@ await runServiceEntry(["serve", data], () => {
               spawnEnvironment: () => ({
                 PATH: process.env.PATH,
                 SIGNAL_TRACE: trace,
+                SIGNAL_RESUME: mode === "restart" ? "1" : "0",
                 SIGNAL_SILENT:
                   mode === "silent" || mode === "repeat" ? "1" : "0",
               }),
@@ -66,7 +69,7 @@ await runServiceEntry(["serve", data], () => {
                   token: "offline-fixture",
                 }),
               },
-              sdk: signalSdk(trace, executable),
+              sdk: signalSdk(trace, executable, mode === "restart"),
               resolveExecutable: async () => executable,
               sandboxSelfTest: async () => true,
               exitTimeoutMs: 500,
@@ -107,6 +110,21 @@ await runServiceEntry(["serve", data], () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
     await start();
     if (mode === "startup") return;
+    if (mode === "restart") {
+      await until(
+        () =>
+          service
+            .list()
+            .some(
+              (item) =>
+                item.workId.startsWith("shutdown:") &&
+                item.state === "completed",
+            ),
+        "successor settled",
+      );
+      record(trace, "restart-settled", service.list());
+      return;
+    }
     const tasks = await seed(service, [harness]);
     const task = tasks[0];
     if (!task) throw new Error("Missing seeded task");
@@ -168,7 +186,7 @@ await runServiceEntry(["serve", data], () => {
     const snapshot = {
       intents: db
         .prepare(
-          "SELECT workId, state, threadId, turnId FROM execution_intents",
+          "SELECT workId, state, threadId, turnId, workspace FROM execution_intents",
         )
         .all(),
       resolutions: db
@@ -188,6 +206,7 @@ await runServiceEntry(["serve", data], () => {
   };
   return service;
 });
+clearInterval(keepAlive);
 record(trace, "service-ended");
 
 async function seed(service: StandaloneService, harnesses: ExecutionHarness[]) {
@@ -206,7 +225,10 @@ async function seed(service: StandaloneService, harnesses: ExecutionHarness[]) {
     name: "Lead",
     instructions: "lead",
     capabilities: "code",
-    runtime: { harness: "codex" },
+    runtime:
+      harnesses[0] === "codex"
+        ? { harness: "claude", model: "opus", reasoningEffort: "high" }
+        : { harness: "codex" },
   });
   execute({
     type: "profile.create",
@@ -267,7 +289,7 @@ async function seed(service: StandaloneService, harnesses: ExecutionHarness[]) {
       assignmentId,
       profileId: workers[harness],
       brief: "build",
-      resultDestination: "lead",
+      resultDestination: "operator",
       requesterAssignmentId: null,
     });
     execute({

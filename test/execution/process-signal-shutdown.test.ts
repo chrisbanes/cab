@@ -65,14 +65,135 @@ function calibratedSignal(log: Event[]) {
   );
   const active = log.find((e) => e.event === "child-active");
   assert.ok(active, "Calibration: no active child");
-  assert.ok(
-    log.some((e) => e.event === "child-SIGINT" && e.pid === active.pid),
-    "Calibration: active child received no signal",
-  );
 }
 
-// These tests characterize baseline refusal. Set SIGNAL_EXPECT_REPAIR=1 to expose the
-// expected-red clean-continuation regression without pretending T1 repairs production.
+async function restartTwice(
+  root: string,
+  harness: string,
+  trace: string,
+  owned: ReturnType<typeof identity>[],
+) {
+  let firstInbox: string[] | undefined;
+  for (let generation = 1; generation <= 2; generation++) {
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL("./signal-qualification/service.js", import.meta.url),
+        ),
+        root,
+        harness,
+        "restart",
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { PATH: process.env.PATH },
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    const exit = new Promise<void>((resolve) =>
+      child.once("exit", () => resolve()),
+    );
+    assert.ok(child.pid);
+    const service = identity(child.pid);
+    owned.push(service);
+    assert.equal(service.pgid, service.pid);
+    await until(
+      () =>
+        events(trace).some(
+          (e) => e.pid === child.pid && e.event === "restart-settled",
+        ),
+      `restart ${generation}: ${output}`,
+    );
+    const childStart = events(trace).find(
+      (e) =>
+        e.event === "child-start" &&
+        (e.detail as { ppid: number }).ppid === service.pid,
+    );
+    if (childStart) {
+      const detail = childStart.detail as Omit<
+        ReturnType<typeof identity>,
+        "pid"
+      >;
+      owned.push({ pid: childStart.pid, ...detail });
+      assert.equal(detail.pgid, childStart.pid);
+    }
+    assert.ok(signalOwned(service, "SIGTERM"));
+    await Promise.race([
+      exit,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Restart exit: ${output}`)),
+          8000,
+        ).unref(),
+      ),
+    ]);
+    assert.equal(child.exitCode, 0, output);
+    const log = events(trace);
+    const durable = log.findLast((e) => e.event === "durable-resolution")
+      ?.detail as {
+      resolutions: { threadId: string }[];
+      intents: {
+        workId: string;
+        state: string;
+        workspace: string;
+        threadId: string;
+      }[];
+    };
+    assert.equal(durable.resolutions.length, 1);
+    const original = durable.intents.find(
+      (i) => !i.workId.startsWith("shutdown:"),
+    );
+    const successors = durable.intents.filter((i) =>
+      i.workId.startsWith("shutdown:"),
+    );
+    assert.equal(successors.length, 1);
+    assert.equal(successors[0]?.state, "completed");
+    const conversations = log
+      .filter((e) => e.event === "conversation-open")
+      .map((e) => e.detail as { method: string; threadId: string });
+    assert.deepEqual(
+      conversations.map((c) => c.method),
+      ["thread/start", "thread/resume"],
+    );
+    assert.ok(conversations.every((c) => c.threadId === original?.threadId));
+    const inbox = durable.intents
+      .filter((i) => i.workId.includes(":inbox:"))
+      .map((i) => i.workId)
+      .sort();
+    if (firstInbox)
+      assert.deepEqual(inbox, firstInbox, "pending inbox identities preserved");
+    firstInbox = inbox;
+    assert.equal(
+      log.filter((e) => e.event === "result-saved").length,
+      1,
+      "one result callback across both restarts",
+    );
+    assert.equal(successors[0]?.threadId, original?.threadId);
+    assert.equal(successors[0]?.workspace, original?.workspace);
+    assert.equal(
+      log.filter((e) => e.event === "child-active").length,
+      2,
+      "one original and one successor dispatch across two restarts",
+    );
+    for (const e of log.filter(
+      (e) =>
+        ["child-start", "probe-start"].includes(e.event) &&
+        (e.detail as { ppid: number }).ppid === service.pid,
+    ))
+      assert.ok(absent(e.pid), "restart runtime/probes exited");
+    writeFileSync(join(root, `restart-${generation}.log`), output);
+  }
+}
+
+// Missing terminal evidence stays held; ordinary signals must coordinate cleanly.
 for (const [harness, signal, mode] of [
   ["codex", "SIGINT", "baseline"],
   ["codex", "SIGINT", "fault"],
@@ -87,7 +208,7 @@ for (const [harness, signal, mode] of [
   ["codex", "SIGTERM", "repeat"],
 ] as const) {
   test(`${harness} ${signal} ${mode}: calibrated owned-process shutdown`, {
-    timeout: 20000,
+    timeout: 30000,
     skip: process.platform !== "darwin",
   }, async (t) => {
     const evidence =
@@ -166,11 +287,15 @@ for (const [harness, signal, mode] of [
             binding.requestSequence > 0,
         );
         assert.equal(runtime.ppid, service.pid);
-        assert.equal(
-          runtime.pgid,
-          service.pgid,
-          "baseline production spawn inherits the owned service group",
-        );
+        if (process.env.SIGNAL_INHERITED_FAULT !== "1") {
+          assert.equal(
+            runtime.pgid,
+            runtime.pid,
+            "runtime owns its isolated group",
+          );
+          assert.notEqual(runtime.pgid, service.pgid);
+          assert.notEqual(runtime.pgid, driver.pgid);
+        }
       }
       const members = execFileSync("ps", ["-axo", "pid=,ppid=,pgid="], {
         encoding: "utf8",
@@ -183,10 +308,23 @@ for (const [harness, signal, mode] of [
         .map((row) => row[0]);
       assert.deepEqual(
         members.sort(),
-        owned.map((p) => p.pid).sort(),
+        owned
+          .filter((p) => p.pgid === service.pgid)
+          .map((p) => p.pid)
+          .sort(),
         "signal group contains only owned processes",
       );
       record(trace, "ownership-proof", { driver, owned, members });
+      if (mode === "fault") {
+        const runtime = owned[1];
+        assert.ok(runtime);
+        record(trace, "intentional-runtime-signal", runtime);
+        assert.ok(signalOwned(runtime, "SIGINT"));
+        await until(
+          () => events(trace).some((e) => e.event === "child-SIGINT"),
+          "intentional fault receipt",
+        );
+      }
       record(trace, "driver-signal", {
         signal,
         target: signal === "SIGINT" ? -service.pgid : service.pid,
@@ -232,7 +370,7 @@ for (const [harness, signal, mode] of [
           /Calibration/,
         );
         assert.throws(
-          () => calibratedSignal(log.filter((e) => e.event !== "child-SIGINT")),
+          () => calibratedSignal(log.filter((e) => e.event !== "bound-ready")),
           /Calibration/,
         );
       }
@@ -244,6 +382,19 @@ for (const [harness, signal, mode] of [
         intents: { state: string }[];
       };
       assert.ok(durable);
+      const probes = log.filter((e) => e.event === "probe-start");
+      assert.ok(
+        (mode === "startup" && harness === "claude") || probes.length > 0,
+        "model/version probe ran through the real spawn seam",
+      );
+      for (const probe of probes) {
+        assert.equal(
+          (probe.detail as { pgid: number }).pgid,
+          probe.pid,
+          "probe group isolated",
+        );
+        assert.ok(absent(probe.pid), "probe cleanup awaited");
+      }
       if (mode === "startup") {
         assert.equal(durable.intents.length, 0);
         return;
@@ -251,47 +402,28 @@ for (const [harness, signal, mode] of [
       assert.ok(log.some((e) => e.event === "child-active"));
       const receipt = log.findIndex((e) => e.event === "child-SIGINT");
       const interrupt = log.findIndex((e) => e.event === "adapter-interrupt");
-      if (
-        signal === "SIGINT" &&
-        (harness === "codex" ||
-          mode === "fault" ||
-          durable.resolutions.length === 0)
-      ) {
-        assert.ok(
-          receipt >= 0,
-          "Calibration failure: runtime never received group SIGINT",
-        );
-        assert.ok(
-          log.some((e) => e.event === "delayed-effect"),
-          "quiet interval did not mean exit",
-        );
-        if (harness === "codex")
-          assert.ok(
-            interrupt === -1 || receipt < interrupt,
-            "Codex preemption must precede protocol interrupt",
-          );
+      if (mode === "fault") {
+        assert.ok(receipt >= 0, "intentional fault reached active runtime");
+        assert.ok(log.some((e) => e.event === "delayed-effect"));
+        assert.ok(interrupt === -1 || receipt < interrupt);
         assert.equal(durable.resolutions.length, 0);
         assert.equal(durable.writers.length, 1);
         assert.equal(durable.capacity.length, 1);
         assert.equal(durable.intents[0]?.state, "held");
-        if (process.env.SIGNAL_EXPECT_REPAIR === "1")
-          assert.equal(
-            durable.resolutions.length,
-            1,
-            "regression: clean shutdown must resolve/requeue once",
-          );
       } else if (mode === "silent") {
         assert.equal(durable.resolutions.length, 0);
         assert.equal(durable.writers.length, 1);
       } else {
-        if (signal === "SIGTERM")
-          assert.equal(receipt, -1, "PID SIGTERM must not fan out as SIGINT");
-        else
-          assert.ok(receipt >= 0, "Claude must actually receive group SIGINT");
+        assert.equal(
+          receipt,
+          -1,
+          "isolated runtime must not receive inherited SIGINT",
+        );
         assert.equal(durable.resolutions.length, 1);
         assert.equal(durable.writers.length, 0);
         assert.equal(durable.capacity.length, 0);
         assert.ok(log.some((e) => e.event === "adapter-terminal"));
+        await restartTwice(root, harness, trace, owned);
       }
     } finally {
       // Creation handles plus a fresh exact birth/boot identity guard every cleanup signal.
