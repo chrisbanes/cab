@@ -39,7 +39,9 @@ belong to #1435–#1437.
   workspace is about to be provisioned, `stacked_dependencies` records the blocker, the
   repository and the blocker's last pushed commit as the parent head. A dependent whose blocker
   is not yet published waits without a workspace, so it never starts from the link base.
-  Turning stacking off changes only dependents with no record.
+  While stacking is on, no waiting stack shape gets a workspace from the link base; it is
+  provisioned once the dependent stacks or its blockers are Done. Turning stacking off
+  changes only dependents with no record.
 - **The workspace starts at the parent head.** The worktree is created at that commit, which
   every task worktree of the linked repository can read without a fetch. An unreachable commit
   fails provisioning visibly; it never falls back to the link base. `branch.push`,
