@@ -585,3 +585,17 @@ test("a retried reporting repair keeps its repair instruction", async (t) => {
   await w.until(() => w.prompts.length === 3, "retried repair turn");
   assert.match(w.prompts[2] ?? "", repairInstruction);
 });
+
+test("a reporting repair requeued by a planned shutdown keeps its repair instruction", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await firstLeadTurn(w, false);
+  await w.until(() => w.prompts.length === 2, "repair turn");
+  assert.match(w.prompts[1] ?? "", repairInstruction);
+  await w.restart();
+  await w.until(() => w.prompts.length === 3, "requeued repair turn");
+  assert.ok(
+    w.service.turnRequests().some((r) => r.workId.startsWith("shutdown:")),
+  );
+  assert.match(w.prompts[2] ?? "", repairInstruction);
+});
