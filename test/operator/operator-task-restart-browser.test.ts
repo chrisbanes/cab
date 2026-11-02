@@ -217,6 +217,16 @@ for (const [name, viewport] of Object.entries(viewports)) {
           r.request().method() === "GET" &&
           new RegExp(`/api/operator/tasks/${taskId}(\\?.*)?$`).test(r.url()),
       );
+      // A phone's open Task actions overlay can cover the button: a tap outside closes it first.
+      if (
+        viewport.width < 760 &&
+        (await page
+          .locator("details.task-header-overflow")
+          .evaluate(
+            (d) => (d as HTMLDetailsElement).open && d.checkVisibility(),
+          ))
+      )
+        await page.mouse.click(4, 700);
       await page.getByRole("button", { name: "Refresh task" }).click();
       await read;
       await page.waitForTimeout(300);

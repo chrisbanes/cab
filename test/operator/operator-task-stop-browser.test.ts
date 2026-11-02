@@ -60,14 +60,18 @@ test("the task header offers Stop… only on an open task and Resume… on a sto
 
   assert.deepEqual(await actions(open.taskId, "Open task"), [
     ["A", "Execution", undefined],
+    ["BUTTON", "Edit task…", false],
     ["BUTTON", "Reset task…", true],
     ["BUTTON", "Stop…", false],
   ]);
+  // Editing a local task stays offered once it is finished, as on the retained page.
   assert.deepEqual(await actions(done.taskId, "Done task"), [
     ["A", "Execution", undefined],
+    ["BUTTON", "Edit task…", false],
   ]);
   assert.deepEqual(await actions(cancelled.taskId, "Cancelled task"), [
     ["A", "Execution", undefined],
+    ["BUTTON", "Edit task…", false],
   ]);
 
   // An existing Stop on a finished task offers Resume….
@@ -78,6 +82,7 @@ test("the task header offers Stop… only on an open task and Resume… on a sto
   });
   assert.deepEqual(await actions(done.taskId, "Done task"), [
     ["A", "Execution", undefined],
+    ["BUTTON", "Edit task…", false],
     ["BUTTON", "Resume…", false],
   ]);
 });
