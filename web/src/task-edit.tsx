@@ -77,16 +77,17 @@ export function EditTask({
     )
       setDraft(fresh(edit));
   }, [outcome, version]);
-  // As the retained page and the composer: a task keeps a title and a desired outcome.
   const changed = {
     ...(draft.title !== draft.base.title && { title: draft.title }),
     ...(draft.outcome !== draft.base.outcome && { outcome: draft.outcome }),
     ...(draft.ready !== draft.base.ready && { ready: draft.ready }),
   };
+  // A changed title or outcome must not be blank, as on the retained page and in the composer; an
+  // untouched one is not sent, so a stored empty outcome does not block another change.
   const valid =
-    draft.title.trim() !== "" &&
-    draft.outcome.trim() !== "" &&
-    Object.keys(changed).length > 0;
+    Object.keys(changed).length > 0 &&
+    ("title" in changed ? draft.title.trim() !== "" : true) &&
+    ("outcome" in changed ? draft.outcome.trim() !== "" : true);
   // Opening starts from the latest read, not from an earlier abandoned draft.
   const reset = () => setDraft(fresh(edit));
   return (
