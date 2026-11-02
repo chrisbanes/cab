@@ -90,6 +90,7 @@ import {
   isGitLabProjectPath,
   type TaskReadiness,
 } from "../core/github-source.js";
+import { issueBriefByteLimit } from "../core/issue-brief.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
@@ -3890,12 +3891,15 @@ export class OperatorApi {
       this.domain()
         .leadBindings()
         .find((b) => String(b.taskId) === taskId)?.assignmentId ?? null;
+    const issueBrief = this.service.githubSources().issueBrief(taskId);
     const data = {
       task: {
         id: taskId,
         projectId,
         title: this.safe(t.title, excluded),
         outcome: this.safe(t.outcome, excluded),
+        issueBrief: this.safe(issueBrief?.text, excluded, issueBriefByteLimit),
+        issueBriefTruncated: issueBrief?.truncated ?? false,
         version: Number(t.version),
         state: t.state,
         ready: Boolean(t.ready),
@@ -5745,6 +5749,15 @@ export class OperatorApi {
         ...source,
         title: this.safe(source.title, excluded),
         body: this.safe(source.body, excluded),
+        ...(source.issueBrief === undefined
+          ? {}
+          : {
+              issueBrief: this.safe(
+                source.issueBrief,
+                excluded,
+                issueBriefByteLimit,
+              ),
+            }),
         criteria: source.criteria.map((c) => ({
           ...c,
           text: this.safe(c.text, excluded) ?? "[Content unavailable]",

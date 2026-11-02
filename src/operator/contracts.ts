@@ -1681,6 +1681,10 @@ export const taskSchema = envelope(
           projectId: uuid,
           title: safeText,
           outcome: safeText,
+          /** The issue's brief comment and later trusted notes; null without one or when withheld. */
+          issueBrief: z.string().max(32768).nullable(),
+          /** Notes or brief text were cut to fit the 32 KB cap. */
+          issueBriefTruncated: z.boolean(),
           version: revision,
           state: taskState,
           ready: z.boolean(),

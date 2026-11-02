@@ -20,7 +20,12 @@ type FeedbackReference = z.infer<typeof feedbackReferenceSchema>;
 type WorkspaceDirectory = z.infer<typeof workspaceDirectoryReadSchema>["data"];
 type WorkspacePreview = z.infer<typeof workspacePreviewReadSchema>["data"];
 
-export type OverviewCard = "brief" | "evidence" | "assignments" | "context";
+export type OverviewCard =
+  | "brief"
+  | "issue-brief"
+  | "evidence"
+  | "assignments"
+  | "context";
 
 export type RangePin = "start" | "end" | null;
 

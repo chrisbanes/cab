@@ -1004,3 +1004,98 @@ test("every lead composer shows the same resume line for a completed lead and ke
   assert.equal(f.service.domain().task(a.taskId).state, "open");
   assert.deepEqual(pageErrors, []);
 });
+
+test("an imported task's issue brief shows as its own Overview section beside the shared brief", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain(),
+    projectId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: `Issue brief ${projectId.slice(0, 8)}`,
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:ISSUE_BRIEF_REFERENCE",
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R1",
+        owner: "owner",
+        name: "repo",
+      },
+    ],
+    readiness: null,
+  });
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+  const sources = f.service.githubSources();
+  sources.reconcileSelection(projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I_BRIEF",
+        repositoryId: "R1",
+        repositoryName: "owner/repo",
+        number: 7,
+        title: "Imported with a brief",
+        body: "The issue outcome",
+        state: "open",
+        labels: [],
+        projectFields: [],
+      },
+    ],
+  });
+  sources.reconcileIssueBrief("I_BRIEF", {
+    complete: true,
+    comments: ["## Agent Brief\nThe settled contract", "x".repeat(40_000)],
+    reason: null,
+  });
+  const taskId = String(sources.issue("I_BRIEF")?.taskId);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(`${web.origin}/app/tasks/${taskId}`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await openOverviewCard(page, "issue-brief");
+  const section = page.locator("#issue-brief");
+  await section
+    .getByRole("heading", { name: "Issue brief", exact: true })
+    .waitFor();
+  await section.getByText("The settled contract").waitFor();
+  await section.getByText("Truncated to 32 KB").waitFor();
+  assert.equal(
+    await page.locator("#brief").getByText("The settled contract").count(),
+    0,
+  );
+  await captureBrowserEvidence(page, "1366-issue-brief", { fullPage: false });
+});

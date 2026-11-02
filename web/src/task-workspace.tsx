@@ -2548,6 +2548,27 @@ export function TaskWorkspace({
                   </label>
                 </details>
               </section>
+              {data.task.issueBrief !== null && (
+                <section id="issue-brief">
+                  <details
+                    className="overview-disclosure"
+                    {...overviewCard("issue-brief")}
+                  >
+                    <summary>
+                      <h3 className="section-heading">Issue brief</h3>
+                      <span className="metadata muted">
+                        The issue's brief comment and later notes
+                        {data.task.issueBriefTruncated
+                          ? " · Truncated to 32 KB"
+                          : ""}
+                      </span>
+                    </summary>
+                    <div className="brief-prose">
+                      <MarkdownPreview text={data.task.issueBrief} />
+                    </div>
+                  </details>
+                </section>
+              )}
               <section id="assignments">
                 <details
                   className="overview-disclosure"
