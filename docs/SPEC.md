@@ -769,7 +769,10 @@ settlement, result-destination reconciliation and messages to delegated assignme
 are task-view controls, and the CLI offers the same commands. A local task's title, outcome
 and Ready are edited from Edit task… in the task header, and an imported task's active source hold
 is resumed from the decision card in its Overview, through the receipted `task.configure` and
-`source.review` JSON commands. The retained server-rendered `/task/:id` page offers the same two
+`source.review` JSON commands. Edit task… is offered only for a local task whose title and outcome
+the task read discloses exactly (`task.textExact`); text the service redacts or withholds is never
+offered for editing or written back, and the dialog sends only the fields the operator changed. A
+task with redacted text changes Ready through `cab task configure TASK_ID --ready true|false`. The retained server-rendered `/task/:id` page offers the same two
 controls until its removal; it is reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
