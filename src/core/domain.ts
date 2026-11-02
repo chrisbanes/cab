@@ -2243,54 +2243,60 @@ export class DomainStore {
     advance: (taskId: string, repositoryId: string, commit: string) => void;
   }): void {
     const delivery = new DeliveryStore(this.db);
-    const ids = this.db
-      .prepare("SELECT taskId FROM stacked_dependencies ORDER BY recordedAt")
-      .all() as Row[];
-    for (const { taskId } of ids)
-      transaction(this.db, () => {
-        const row = this.one(
-          "SELECT * FROM stacked_dependencies WHERE taskId = ?",
-          String(taskId),
-        );
-        if (!row) return;
-        const dependent = String(row.taskId),
-          repositoryId = String(row.repositoryId);
-        let parentHead = String(row.parentHead);
-        const own =
-          delivery.taskBranch(dependent, repositoryId)?.lastPushedSha ?? null;
-        if (row.restack === "pending" && own !== row.restackFromSha) {
-          // The push was proved to descend from parentHead, its starting point.
-          this.db
-            .prepare(
-              "UPDATE stacked_dependencies SET restack = 'current', restackFromSha = NULL WHERE taskId = ?",
-            )
-            .run(dependent);
-          effects.advance(dependent, repositoryId, parentHead);
-        }
-        const blocker = String(row.blockerTaskId);
-        if (!this.blocksDependents(blocker)) return;
-        const head = delivery.taskBranch(blocker, repositoryId)?.lastPushedSha;
-        if (
-          !head ||
-          head === parentHead ||
-          !this.one(
-            "SELECT 1 AS present FROM task_lead_bindings WHERE taskId = ?",
-            dependent,
+    /** Whether the dependency needs a change; with `apply`, makes it. */
+    const step = (taskId: string, apply: boolean): boolean => {
+      const row = this.one(
+        "SELECT * FROM stacked_dependencies WHERE taskId = ?",
+        taskId,
+      );
+      if (!row) return false;
+      const repositoryId = String(row.repositoryId);
+      let parentHead = String(row.parentHead);
+      const own =
+        delivery.taskBranch(taskId, repositoryId)?.lastPushedSha ?? null;
+      const landed = row.restack === "pending" && own !== row.restackFromSha;
+      if (landed && apply) {
+        // The push was proved to descend from parentHead, its starting point.
+        this.db
+          .prepare(
+            "UPDATE stacked_dependencies SET restack = 'current', restackFromSha = NULL WHERE taskId = ?",
           )
-        )
-          return;
+          .run(taskId);
+        effects.advance(taskId, repositoryId, parentHead);
+      }
+      const blocker = String(row.blockerTaskId);
+      const head = this.blocksDependents(blocker)
+        ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
+        : null;
+      const moved =
+        !!head &&
+        head !== parentHead &&
+        !!this.one(
+          "SELECT 1 AS present FROM task_lead_bindings WHERE taskId = ?",
+          taskId,
+        );
+      if (moved && head && apply) {
         parentHead = head;
         this.db
           .prepare(
             "UPDATE stacked_dependencies SET parentHead = ?, restack = 'pending', restackFromSha = ? WHERE taskId = ?",
           )
-          .run(parentHead, own, dependent);
+          .run(parentHead, own, taskId);
         effects.queue(
-          dependent,
+          taskId,
           `The blocker's branch moved to ${parentHead}. Rebase this task's branch onto ${parentHead} and publish it with branch.force-push (branch.push if it was never pushed); the push must descend from ${parentHead}.`,
           `restack:${repositoryId}:${parentHead}`,
         );
-      });
+      }
+      return landed || moved;
+    };
+    const ids = this.db
+      .prepare("SELECT taskId FROM stacked_dependencies ORDER BY recordedAt")
+      .all() as Row[];
+    // Reads first, so a wake with nothing to do takes no write lock.
+    for (const { taskId } of ids)
+      if (step(String(taskId), false))
+        transaction(this.db, () => step(String(taskId), true));
   }
 
   private hasWorkspace(taskId: string): boolean {
