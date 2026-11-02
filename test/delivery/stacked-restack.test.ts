@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { BackgroundFailureDiagnostic } from "../../src/standalone/service.js";
 import { git } from "../fixtures/publication.js";
 import {
   repositoryId,
@@ -139,4 +140,45 @@ test("a restack missed before a restart is queued once after it; a Done blocker 
   });
   await f.service.refreshGitHub();
   assert.equal(f.restackNotices().length, 1);
+});
+
+test("a stacked dependency that cannot reconcile is reported once while the others still restack", async (t) => {
+  const diagnostics: BackgroundFailureDiagnostic[] = [];
+  const f = await stackedDeliveryFixture(t, {
+    tasks: 3,
+    backgroundDiagnosticSink: (event) => {
+      diagnostics.push(event);
+    },
+  });
+  const [A, B, C] = f.tasks as [string, string, string];
+  await f.waitTurn(A);
+  await start(f, A, B);
+  await start(f, B, C);
+  const moved = "e".repeat(40);
+  // C's own branch record cannot be read, so its reconcile throws; A moves for B.
+  await f.restart((db) => {
+    db.prepare(
+      "INSERT OR REPLACE INTO delivery_task_branches VALUES (?, ?, 'cab/poison', 'not-a-commit', NULL, 1)",
+    ).run(C, repositoryId);
+    db.prepare(
+      "UPDATE delivery_task_branches SET lastPushedSha = ? WHERE taskId = ?",
+    ).run(moved, A);
+  });
+  await until(() => f.restackNotices().length === 1, "B's restack");
+  assert.deepEqual(f.restackNotices(), [
+    `${B} restack:${repositoryId}:1:${moved}`,
+  ]);
+  await until(
+    () => diagnostics.some((d) => d.operation === "restack-reconcile"),
+    "the restack diagnostic",
+  );
+  await f.service.refreshGitHub();
+  await f.service.refreshGitHub();
+  const reported = diagnostics.filter(
+    (d) => d.operation === "restack-reconcile",
+  );
+  assert.equal(reported.length, 1, "reported once, not on every wake");
+  assert.equal(reported[0]?.errorCode, "restack-reconcile-failed");
+  assert.ok(reported[0]?.error, "the sanitized cause");
+  assert.equal(f.service.list().length > 0, true, "the service keeps running");
 });

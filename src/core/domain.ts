@@ -2264,6 +2264,8 @@ export class DomainStore {
   reconcileRestacks(effects: {
     queue: (taskId: string, reason: string, identity: string) => void;
     advance: (taskId: string, repositoryId: string, commit: string) => void;
+    /** One dependency's failure; the others still reconcile. Without it, the failure throws. */
+    failed?: (taskId: string, error: unknown) => void;
   }): void {
     const delivery = new DeliveryStore(this.db);
     /** Whether the dependency needs a change; with `apply`, makes it. */
@@ -2322,8 +2324,13 @@ export class DomainStore {
       .all() as Row[];
     // Reads first, so a wake with nothing to do takes no write lock.
     for (const { taskId } of ids)
-      if (step(String(taskId), false))
-        transaction(this.db, () => step(String(taskId), true));
+      try {
+        if (step(String(taskId), false))
+          transaction(this.db, () => step(String(taskId), true));
+      } catch (error) {
+        if (!effects.failed) throw error;
+        effects.failed(String(taskId), error);
+      }
   }
 
   /** Set once the standalone service's workspace table exists; a bare domain store has none. */

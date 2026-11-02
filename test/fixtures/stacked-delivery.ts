@@ -15,7 +15,10 @@ import type {
 } from "../../src/standalone/codex.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+import {
+  StandaloneService,
+  type StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
 import { unusedIssueInspection } from "./delivery-fixture.js";
 import { git } from "./publication.js";
 import { tmpdir } from "./temp.js";
@@ -34,6 +37,7 @@ export async function stackedDeliveryFixture(
     tasks?: number;
     forcePush?: "allow" | "approval";
     stacking?: boolean;
+    backgroundDiagnosticSink?: StandaloneServiceOptions["backgroundDiagnosticSink"];
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-stacked-")));
@@ -136,6 +140,9 @@ export async function stackedDeliveryFixture(
         issueTrackerFactories: { github: () => provider },
       },
       power: { enabled: false },
+      ...(options.backgroundDiagnosticSink
+        ? { backgroundDiagnosticSink: options.backgroundDiagnosticSink }
+        : {}),
     });
     await service.start();
     return service;

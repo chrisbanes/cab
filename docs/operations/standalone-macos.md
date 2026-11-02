@@ -377,6 +377,10 @@ per line:
   unexpectedly, and a `safe-shutdown` diagnostic when the service cannot stop
   cleanly. Both carry `error`, the failure's `name`, `code` when it has one, its
   `message`, up to 10 stack frames and its `cause` chain, redacted as described below.
+- A `restack-reconcile` diagnostic (`errorCode` `restack-reconcile-failed`, same `error`)
+  when one stacked dependency cannot be reconciled. It is not fatal: the service keeps
+  running, the other dependencies still restack, and the failing one is retried on every
+  wake but logged again only when its failure changes or it recovers and fails again.
 - `{"event":"service-failure","stage":"service-shutdown"|"listener-shutdown","error"}`
   when the service or the operator listener fails to shut down.
 - `{"event":"service-exit","reason"}`, exactly once at the end. `reason` is `signal`

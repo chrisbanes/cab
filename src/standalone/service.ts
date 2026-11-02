@@ -578,12 +578,15 @@ export type BackgroundFailureOperation =
   | "domain-wake"
   | "post-turn-wake"
   | "scheduler-drain"
+  /** Not fatal: the failing stacked dependency is retried on the next wake. */
+  | "restack-reconcile"
   | "safe-shutdown";
 
 export type BackgroundFailureCode =
   | "unexpected-background-failure"
   | "shutdown-failed"
-  | "diagnostic-writer-failed";
+  | "diagnostic-writer-failed"
+  | "restack-reconcile-failed";
 
 export interface BackgroundFailureDiagnostic {
   serviceId: string;
@@ -830,6 +833,8 @@ export class StandaloneService {
   /** Ends the waits of GitLab requests being retried after a 429 when the service stops. */
   private retryWaits: AbortController | undefined;
   private readonly backgroundRuns = new Set<Promise<void>>();
+  /** The restack failures last reported, by stacked dependent, so a wake repeats none. */
+  private restackFailures = new Map<string, string>();
   private readonly generationsByNotification = new WeakMap<
     Promise<BackgroundFailureDiagnostic>,
     ServiceGeneration
@@ -6536,8 +6541,27 @@ export class StandaloneService {
       workspaceBindings,
     } = this.current;
     this.flushRuntimeAnswers();
-    // Every confirmed push wakes the scheduler, and start-up ends with a wake. A failure is
-    // logged and retried on the next wake; it never holds back the rest of the wake.
+    // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
+    // fails is reported and retried on the next wake; the others and the wake go on.
+    const restackFailures = new Map<string, string>();
+    const reportRestack = (taskId: string, error: unknown) => {
+      const sanitized = sanitizeError(error, this.failureExclusions());
+      // The stack differs by what woke the scheduler; the failure is the same.
+      const key = JSON.stringify([
+        sanitized.name,
+        sanitized.code,
+        sanitized.message,
+      ]);
+      restackFailures.set(taskId, key);
+      if (this.restackFailures.get(taskId) === key) return;
+      void this.writeBackgroundDiagnostic(generation, {
+        serviceId: generation.id,
+        incident: generation.incident,
+        operation: "restack-reconcile",
+        errorCode: "restack-reconcile-failed",
+        error: sanitized,
+      }).catch(() => {});
+    };
     try {
       domain.reconcileRestacks({
         queue: (taskId, reason, identity) =>
@@ -6548,12 +6572,13 @@ export class StandaloneService {
           ),
         advance: (taskId, repositoryId, commit) =>
           workspaceBindings.advanceCommit(taskId, repositoryId, commit),
+        failed: reportRestack,
       });
     } catch (error) {
-      process.stderr.write(
-        `${JSON.stringify({ operation: "restack-reconcile", error: sanitizeError(error, this.failureExclusions()) })}\n`,
-      );
+      reportRestack("", error);
     }
+    // Logged once per distinct failure; a dependency that recovers is logged again if it fails.
+    this.restackFailures = restackFailures;
     const deliveryWorkCompleted = (delivery: InboxDelivery): boolean => {
       const intent = state.byWorkId(delivery.deliveryWorkId);
       const binding = state.taskBinding(delivery.deliveryWorkId);
