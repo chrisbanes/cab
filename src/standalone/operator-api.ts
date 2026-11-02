@@ -6466,6 +6466,10 @@ export class OperatorApi {
       links = d.repositoryLinks(projectId),
       jira = d.jiraConfiguration(projectId),
       scope = new GhLoginScope(),
+      // Started now so the gh probe overlaps the other reads; omitted, never guessed, when it fails.
+      deliveryCredential = this.service
+        .deliveryCredentialStatus(projectId, scope)
+        .catch(() => undefined),
       credential = jira
         ? undefined
         : await this.service.gitHubSourceCredentialStatus(projectId, scope),
@@ -6518,10 +6522,7 @@ export class OperatorApi {
             links.links.map((link) => link.repositoryId),
             excluded,
           )),
-          // Omitted, never guessed, when the status cannot be read, as for withheld rows.
-          credential: await this.service
-            .deliveryCredentialStatus(projectId, scope)
-            .catch(() => undefined),
+          credential: await deliveryCredential,
         },
         statusMapping: this.statusMappingView(
           projectId,

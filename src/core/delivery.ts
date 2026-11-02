@@ -2678,7 +2678,7 @@ export class DeliveryStore {
   /**
    * Once per store: gives each project's linked repositories without code-host grants the Open PRs
    * level. Nothing is removed or downgraded and the mode, credential and prefix stay. A project with
-   * an open pull request, an open approval or an unresolved action is skipped, because the version
+   * an open pull request, an open or approved-but-unused approval or an unresolved action is skipped, because the version
    * bump would invalidate the settlements and approvals bound to its policy version.
    */
   applyOpenPrsDefault(
@@ -2729,6 +2729,8 @@ export class DeliveryStore {
     return [
       "SELECT 1 FROM delivery_pr_bindings b JOIN domain_tasks t ON t.id=b.taskId WHERE t.projectId=? AND json_extract(b.recordJson,'$.observation.state')='OPEN'",
       "SELECT 1 FROM coordination_interactions i JOIN domain_tasks t ON t.id=i.taskId WHERE t.projectId=? AND i.kind='approval' AND i.status='open'",
+      // Approved but not yet used: the lead's retry needs the binding's policy version to be current.
+      "SELECT 1 FROM delivery_approval_bindings b JOIN domain_tasks t ON t.id=b.taskId JOIN coordination_interactions i ON i.interactionId=b.interactionId WHERE t.projectId=? AND b.operationId IS NULL AND i.status IN ('open','approved')",
       "SELECT 1 FROM delivery_actions a JOIN domain_tasks t ON t.id=a.taskId WHERE t.projectId=? AND json_extract(a.recordJson,'$.state') IN ('prepared','attempting','uncertain')",
     ].some((sql) => this.db.prepare(sql).get(projectId) !== undefined);
   }

@@ -276,12 +276,18 @@ function DeliveryPolicyForm(p: TabProps) {
   );
   const links = p.data.repositories.links;
   // Derived from the draft, so a project the migration skipped offers it and a set-up one does not.
-  const notSetUp = links.flatMap((link) =>
+  const unset = links.flatMap((link) =>
     link.repositoryId !== null &&
     deliveryLevelView(draft.grants, link.repositoryId) === "not-set-up"
       ? [link.repositoryId]
       : [],
   );
+  // Withheld when the level could not be applied: a hidden saved grant or the 256-row limit refuses it.
+  const notSetUp =
+    draft.grants.some((row) => "savedRow" in row) ||
+    draft.grants.length + 7 * unset.length > 256
+      ? []
+      : unset;
   const apply = (next: DeliveryPolicyDraft) => {
     d.set(
       "grants",

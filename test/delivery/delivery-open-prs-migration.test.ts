@@ -212,6 +212,23 @@ const inFlight: [string, (w: ReturnType<typeof world>, p: string) => void][] = [
         .run(randomUUID(), w.task(projectId), randomUUID(), randomUUID()),
   ],
   [
+    "an approved approval the lead has not used yet",
+    (w, projectId) => {
+      const interactionId = randomUUID();
+      const taskId = w.task(projectId);
+      w.db
+        .prepare(
+          "INSERT INTO coordination_interactions (interactionId, taskId, requestingAssignmentId, requestingWorkId, requestingWorkRevision, requestingAssignmentVersion, conversationRevision, kind, status, prompt, action, materialHash, revision) VALUES (?, ?, ?, ?, 1, 1, 1, 'approval', 'approved', 'p', 'pr.merge', 'h', 1)",
+        )
+        .run(interactionId, taskId, randomUUID(), randomUUID());
+      w.db
+        .prepare(
+          "INSERT INTO delivery_approval_bindings (interactionId, taskId, assignmentId, taskVersion, assignmentVersion, conversationRevision, workRevision, policyVersion, materialHash, operationId) VALUES (?, ?, ?, 1, 1, 1, 1, 1, 'h', NULL)",
+        )
+        .run(interactionId, taskId, randomUUID());
+    },
+  ],
+  [
     "an uncertain action",
     (w, projectId) =>
       w.db
