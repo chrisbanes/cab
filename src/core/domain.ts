@@ -2159,8 +2159,11 @@ export class DomainStore {
     }
     const gate = this.stackDecision(taskId).gate;
     if (gate) {
-      // A stacked dependency's blocker gate is its open change request at its last push.
-      const blocked = reasons.indexOf("imported-blockers-blocked");
+      // A stacked dependency's blocker gate is its open change request at its last push. It
+      // replaces only the GitHub dependency it stacks on; a local task's flag is the operator's.
+      const blocked = imported
+        ? reasons.indexOf("imported-blockers-blocked")
+        : -1;
       if (blocked >= 0) reasons.splice(blocked, 1);
       if (gate !== "ok") reasons.push(`stacked-blocker-${gate}`);
     } else if (this.blockingDependencies(taskId).length)

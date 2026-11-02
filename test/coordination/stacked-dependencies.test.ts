@@ -628,3 +628,22 @@ test("the parent head waits while the dependent has a push prepared, in flight o
   reconcile();
   assert.equal(f.domain.stackFacts(D)?.restack, "pending");
 });
+
+test("a local dependent's operator-set imported-blocker flag still holds a stacked dependency", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  assert.deepEqual(f.reasons(D), []);
+  f.run({
+    type: "imported-blockers.set",
+    actor: "operator",
+    projectId: p,
+    taskId: D,
+    expectedVersion: f.version(D),
+    state: "blocked",
+  });
+  assert.deepEqual(f.reasons(D), ["imported-blockers-blocked"]);
+  f.domain.recordStackedDependency(D);
+  assert.deepEqual(f.reasons(D), ["imported-blockers-blocked"]);
+});
