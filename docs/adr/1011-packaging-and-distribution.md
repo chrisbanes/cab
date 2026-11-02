@@ -80,9 +80,10 @@ stops the job. The tarball's bundled-Node channel is unchanged.
 
 Shared startup also creates protected local CLI material beside the data directory,
 outside data snapshots. Foreground clients can use it under the same OS account
-without Keychain or a token login. Installed-service record discovery, default
-connection adoption and lifecycle integration of this mode remain outstanding in
-the sibling of #1413; the current install/upgrade token workflow is unchanged.
+without Keychain or a token login. `cab service install` uses this mode by default,
+and with no saved connection the CLI finds the installed service from its protected
+install record; `--access token` or `--token-file` keeps the explicit token setup, and
+upgrade readiness uses the selected connection's mode.
 
 Data, auth and snapshots stay under `~/Library/Application Support/cab/`, logs
 under `~/Library/Logs/cab/`, separate from the npm installation and development

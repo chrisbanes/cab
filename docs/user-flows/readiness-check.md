@@ -1,6 +1,7 @@
 # Readiness check
 
-**Status:** implemented. `cab service install` runs it after it signs the CLI in; the
+**Status:** implemented. `cab service install` runs it through local CLI access (or the
+saved or explicitly provisioned token connection) once the service answers; the
 procedure is in [standalone macOS operations](../operations/standalone-macos.md).
 The Getting started Runtime row and first-task Fix actions that read these checks
 are planned.
@@ -12,9 +13,10 @@ what the service can and cannot use, with one fix line per problem.
 
 ## Entry points
 
-- `cab doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
+- `cab doctor` in the operator CLI (local access, or any read credential; the service must advertise `diagnostics.read`).
 - `cab service install`, which prints this table with its `Fix` lines on
-  stderr after it signs the CLI in, before it opens the app. A failed check does not fail the install.
+  stderr through local CLI access (or the saved or explicitly provisioned token
+  connection), before it opens the app. A failed check does not fail the install.
 - Settings → Readiness (`/app/settings#readiness`), the first section until a task
   starts a turn and the last afterwards.
 - [Getting started](getting-started.md) Runtime row and [first task](first-task.md)

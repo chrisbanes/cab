@@ -5,8 +5,8 @@ import {
   appendFileSync,
   chmodSync,
   closeSync,
-  copyFileSync,
   constants,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -24,25 +24,27 @@ import {
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import { PassThrough } from "node:stream";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { z } from "zod";
+import { CliError } from "../../src/cli/connections.js";
 import {
   compareReleaseVersions,
-  defaultServiceHost,
   daemonVerifyCommand,
-  ghTokenStorage,
+  defaultServiceHost,
   type FirstRun,
   type GhTokenStorage,
+  ghTokenStorage,
   type InstallCli,
   installService,
   LIFECYCLE_OPTIONS,
   lifecycleOptions,
   type OperatorConnection,
+  type SavedSelection,
+  SERVICE_USAGE,
   type ServiceHost,
   type ServiceOptions,
-  SERVICE_USAGE,
   serviceCommand,
   uninstallService,
   upgradeService,
@@ -1040,7 +1042,17 @@ test("upgrade preflight refusals make no launchd change", async (t) => {
   const f = await installed(t);
   const before = tree(f.home);
   const refusals: [() => void, string, RegExp][] = [
-    [() => f.setOrigin(new Error("logged out")), f.releaseB, /auth login/],
+    [
+      () =>
+        f.setOrigin(
+          new CliError(
+            "credential-not-found",
+            "This connection is logged out.",
+          ),
+        ),
+      f.releaseB,
+      /No usable CLI connection: This connection is logged out\. Nothing was stopped/,
+    ],
     [
       () => f.setOrigin("http://127.0.0.1:1"),
       f.releaseB,
@@ -1574,6 +1586,14 @@ class FakeCli implements InstallCli {
     if (this.password === undefined) throw new Error("cancelled");
     return this.password;
   }
+  /** What `selection` returns; an Error is thrown. */
+  saved: SavedSelection | null | Error = null;
+  selections: (string | undefined)[] = [];
+  async selection(requested: string | undefined) {
+    this.selections.push(requested);
+    if (this.saved instanceof Error) throw this.saved;
+    return this.saved;
+  }
   async login(...args: unknown[]) {
     this.calls.push("login");
     this.logins.push(args.slice(0, 4));
@@ -1584,8 +1604,16 @@ class FakeCli implements InstallCli {
   doctorHangs = false;
   releaseDoctor: () => void = () => {};
 
-  async doctor(connection: string) {
-    this.calls.push(`doctor ${connection}`);
+  async doctor(
+    connection: string | undefined,
+    _signal?: AbortSignal,
+    record?: string,
+  ) {
+    this.calls.push(
+      connection === undefined
+        ? `doctor local ${record}`
+        : `doctor ${connection}`,
+    );
     // A referenced timer, so a lone run keeps the event loop alive until the bound fires.
     if (this.doctorHangs)
       await new Promise<void>((resolve) => {
@@ -1645,7 +1673,15 @@ async function tarballSetup(
       f.releaseA,
       f.launchd.host(),
       { ...io, signal },
-      { tarball, cli, connection: "local", open: true, ...overrides },
+      // The sign-in cases below are explicit token installs; local cases override access.
+      {
+        tarball,
+        cli,
+        connection: "local",
+        access: "token",
+        open: true,
+        ...overrides,
+      },
     );
     return { code, ...out, cli };
   };
@@ -1689,6 +1725,112 @@ test("install TARBALL unpacks, asks for the password, signs in, runs doctor and 
   assert.equal(output.connection, "local");
   assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
   assert.doesNotMatch(result.stderr + result.stdout, /test-password|ens_/);
+});
+
+test("a default install uses local access: no sign-in, mint or Keychain, doctor through its own record, app opened", async (t) => {
+  for (const authPresent of [true, false]) {
+    const f = await tarballSetup(t, { auth: authPresent });
+    const cli = new FakeCli();
+    cli.password = "new-password";
+    const result = await f.run(
+      { access: undefined, connection: undefined, discoverable: false },
+      cli,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    // A password is asked for only to create a missing auth file.
+    assert.deepEqual(
+      cli.prompts,
+      authPresent ? [] : ["New operator password: "],
+    );
+    assert.equal(existsSync(f.authFile), true);
+    assert.deepEqual(f.launchd.requests, [], "no session, login or mint");
+    assert.deepEqual(cli.logins, []);
+    assert.deepEqual(cli.calls, [`doctor local ${f.recordPath}`]);
+    assert.deepEqual(cli.selections, [undefined]);
+    assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.accessMode, "local");
+    assert.equal(output.connection, null);
+    assert.equal(output.credentialActive, false);
+    assert.equal(output.sessionOpen, false);
+    assert.match(result.stderr, /local access through this OS account/);
+    assert.match(result.stderr, /cab doctor --local --local-installation /);
+    assert.ok(result.stderr.includes(f.recordPath));
+    assert.doesNotMatch(result.stderr, /auth login/);
+  }
+  // The default label and state need no selector at all.
+  const f = await tarballSetup(t);
+  const result = await f.run(
+    { access: undefined, connection: undefined, discoverable: true },
+    new FakeCli(),
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /Then run: cab doctor\n/);
+});
+
+test("a local install uses a saved selection unchanged and reports one it cannot use without replacing it", async (t) => {
+  const local = { access: undefined, connection: undefined } as const;
+  let f = await tarballSetup(t);
+  let cli = new FakeCli();
+  cli.saved = { name: "work", url: f.origin, accessMode: "token" };
+  let result = await f.run(local, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(cli.calls, ["doctor work"]);
+  assert.equal(JSON.parse(result.stdout).connection, "work");
+  assert.equal(JSON.parse(result.stdout).accessMode, "token");
+  assert.match(result.stderr, /connection work \(token access\), unchanged/);
+  assert.deepEqual(f.launchd.requests, []);
+
+  // A token connection for another service, or a selection that cannot resolve: no doctor,
+  // no substitution, and the remedy names local access to this installation.
+  for (const saved of [
+    { name: "remote", url: "https://cab.example", accessMode: "token" },
+    // A saved local connection for another installation is not this service either.
+    { name: "other", url: "http://127.0.0.1:1", accessMode: "local" },
+    Object.assign(new Error("Choose a connection: a, b"), {
+      code: "connection-ambiguous",
+    }),
+  ] as const) {
+    f = await tarballSetup(t);
+    cli = new FakeCli();
+    cli.saved = saved as SavedSelection | Error;
+    result = await f.run(local, cli);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(cli.calls, []);
+    assert.match(result.stderr, /was not used or changed/);
+    assert.match(result.stderr, /--local-installation /);
+    assert.ok(result.stderr.includes(f.recordPath));
+    assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+  }
+});
+
+test("install refuses an explicit local choice over a selected token, and a token into a saved name, before anything changes", async (t) => {
+  for (const [first, saved, pattern] of [
+    [
+      { access: "local", connection: undefined },
+      { name: "work", url: "http://127.0.0.1:1", accessMode: "token" },
+      /does not convert it.*cab connection local work --local-installation/,
+    ],
+    [
+      { access: "token", connection: "local" },
+      { name: "local", url: "http://127.0.0.1:1", accessMode: "local" },
+      /already saved; install never replaces/,
+    ],
+  ] as const) {
+    const f = await tarballSetup(t);
+    const cli = new FakeCli();
+    cli.saved = saved as SavedSelection;
+    const before = tree(f.home);
+    const result = await f.run(first, cli);
+    assert.equal(result.code, 1);
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "preflight");
+    assert.match(report.error, pattern);
+    assert.deepEqual(cli.prompts, []);
+    assert.deepEqual(f.launchd.requests, []);
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(tree(f.home), before);
+  }
 });
 
 test("install creates the auth file from the password when it is missing", async (t) => {
@@ -2374,7 +2516,10 @@ test("daemon mode re-run verifies the installed plist and job against the record
   assert.deepEqual(f.launchd.fetched, [
     `http://127.0.0.1:${f.options.port}/app`,
   ]);
-  assert.match(verified.stderr, /cab auth login --connection local/);
+  // A verified daemon completes with local access to its own record; it never signs in.
+  assert.match(verified.stderr, /local access through this OS account/);
+  assert.ok(verified.stderr.includes(f.recordPath));
+  assert.doesNotMatch(verified.stderr, /auth login/);
   assert.match(verified.stderr, /Open http:\/\/127\.0\.0\.1:\d+\/app/);
   assert.deepEqual(f.launchd.mutations(), []);
   assert.deepEqual(f.launchd.requests, []);
@@ -3542,7 +3687,8 @@ test("daemon mode verify command carries every install option that matters and d
   assert.ok(real.stderr.includes("--connection work-box --mode daemon"));
   runSudoSteps(f);
   const verified = await f.installDaemon({ connection: "work-box" });
-  assert.match(verified.stderr, /cab auth login --connection work-box --url/);
+  // Verifying uses the selected connection, else local access; it never signs in.
+  assert.match(verified.stderr, /local access through this OS account/);
 });
 
 /** Every path under `root` with its mode and content hash, as a map. */

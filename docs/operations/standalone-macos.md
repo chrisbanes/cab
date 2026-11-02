@@ -50,7 +50,7 @@ and change only the entries above.
 ### Install
 
 Install a release tarball with one command. It unpacks the tarball, installs the
-service, signs the CLI in and opens the app:
+service, checks it with `cab doctor` through local CLI access and opens the app:
 
 ```sh
 tar -xzf cab-0.1.0-darwin-arm64.tar.gz
@@ -77,9 +77,10 @@ artifact for the label exists (an install in the other mode is refused until you
 uninstall it), and the port is free. With `--token-file`, the path must not exist and its
 directory must. A missing auth file also refuses outside an
 interactive terminal; run install in one, or run `cab service init-auth`
-first. It then asks once, on a hidden prompt, for the operator password (a new
-password when the auth file is missing, which it creates as a mode `0600`
-verifier, not the password). It renders the plist with the same validation as
+first. When the auth file is missing, it asks on a hidden prompt for a new browser
+password and creates the auth file as a mode `0600` verifier, not the password. With
+an existing auth file a default install asks for nothing; only an explicit token
+install (below) asks for the existing password. It renders the plist with the same validation as
 before (absolute canonical paths, no symlinks, new log files, the fixed `PATH`,
 `RunAtLoad=true`, `KeepAlive=false`, no secrets), lints it with `plutil -lint`,
 records it, moves it into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and
@@ -95,23 +96,53 @@ version, and the auth file once created, so a rerun asks for the existing passwo
 instead of a new one. Run it again after fixing the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
 keeps the record so that `service uninstall` can finish.
 
-Once `/app` answers, the service stays installed whatever follows. Install signs
-in with the password over the session API the UI uses, issues one `read`
-credential named `install · <hostname>` that expires in 90 days, and stores it as
-the CLI connection `local` (`--connection NAME` renames it). The token goes to the
-login Keychain, or with `--token-file PATH` to a new `0600` file at that path
-(an existing file is refused). Install then runs `cab doctor` for that
-connection, prints its table and `Fix` lines on stderr, and opens
-`http://127.0.0.1:PORT/app` unless you pass `--no-open`. The JSON result stays on
-stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in,
-plus `"credentialActive"` and `"sessionOpen"`. `credentialActive` is true when the
+Once `/app` answers, the service stays installed whatever follows. By default the
+CLI uses **local access**: same-OS-account read/write authority through the
+service's private local state, with no token, login, Keychain or saved connection.
+Install issues no credential and opens no sign-in session. With no saved CLI
+connection, a bare command such as `cab doctor` finds the default installation from
+its record, `~/Library/Application Support/cab/launchd/local.cab.service.json`, and
+checks that the record, the service's published loopback origin and the live
+installation identity agree. A present record that is unsafe, malformed or does not
+match fails; it never falls back to another installation, and nothing scans other
+directories or ports. Select another label or state directory by its exact record:
+
+```sh
+cab auth status --local --local-installation "$STATE/launchd/LABEL.json"
+cab connection local NAME --local-installation "$STATE/launchd/LABEL.json"
+cab connection use NAME
+```
+
+A saved connection is used unchanged: when one is selected (`--connection NAME`,
+`CAB_CONNECTION`, the default or the only one), install runs doctor through it and
+reports `"accessMode"` and `"connection"` for it. A token connection that points at
+another service, or a selection that cannot be resolved, is reported and left alone;
+install neither converts it to local access nor issues a replacement token. Only
+`cab connection local NAME` changes a saved connection's mode. `--access local`
+states the default explicitly and refuses when the selected connection uses a token.
+
+Install then runs `cab doctor`, prints its table and `Fix` lines on stderr, and
+opens `http://127.0.0.1:PORT/app` unless you pass `--no-open`. The JSON result stays
+on stdout with `"accessMode":"local"`, `"connection":null` (or the saved connection
+used), and `"credentialActive":false` and `"sessionOpen":false`.
+
+**Explicit token access.** `--access token`, or `--token-file PATH`, keeps the token
+setup: install asks for the operator password, signs in over the session API the
+UI uses, issues one `read` credential named `install · <hostname>` that expires in
+90 days, and stores it as the CLI connection `local` (`--connection NAME` names it).
+Install refuses before anything changes when that name is already saved; it never
+replaces a saved connection or changes the default. The token goes to the login
+Keychain, or with `--token-file PATH` to a new `0600` file at that path (an existing
+file is refused). Install then runs `cab doctor` for that connection. The JSON
+result reports `"accessMode":"token"` and `"connection":"local"`, or `null` when the
+CLI was not logged in, plus `"credentialActive"` and `"sessionOpen"`. `credentialActive` is true when the
 minted credential could not be confirmed revoked (the revoke is tried twice) or its
 creation was not confirmed; install then prints its name and tells you to revoke it in
 Settings → CLI credentials. `sessionOpen` is true when the sign-in logout was not
 confirmed or the login reply was lost. The exit status stays 0 because the service is installed.
 The password and token are never printed or put on a command line.
 
-If the prompt is cancelled (the Ctrl-C keypress there skips sign-in; it does not
+In a token install, if the prompt is cancelled (the Ctrl-C keypress there skips sign-in; it does not
 stop the install, whereas a SIGINT sent from outside stops it before anything changes)
 or skipped, the password is wrong (one attempt only),
 the credential cannot be stored (it is then revoked), or doctor or the browser
@@ -124,11 +155,18 @@ cab auth login --connection local --url http://127.0.0.1:8787
 cab doctor
 ```
 
-The issued credential widens nothing: whoever runs install as the service user
-already holds the auth file and the data directory. It is listed, rotatable and
+In a local install, a failed doctor or browser open also leaves the service
+running; install prints the doctor command to run.
+
+Neither mode widens anything: whoever runs install as the service user already
+holds the auth file and the data directory. Local access does not isolate other
+processes of the same OS account. An issued credential is listed, rotatable and
 revocable in Settings → CLI credentials like any other. Upgrade never signs in or
-issues a credential; it reads readiness through this connection, so an expired or
-revoked credential stops upgrade with the existing message until you log in again.
+issues a credential. It reads readiness through the selected connection, chosen once
+for the whole upgrade: a saved token connection that has expired or been revoked
+stops upgrade before the job is stopped, until you log in again; with no saved
+connection it uses local access to the installation being upgraded, reloading the
+service's rotated local material after the restart without a login.
 
 ### Install and upgrade from npm
 
@@ -168,8 +206,12 @@ To update, install the new version, then upgrade:
 
 ```sh
 npm install -g @chrisbanes/cab@0.2.0
-cab service upgrade --connection local
+cab service upgrade
 ```
+
+Upgrade reads readiness through the selected CLI connection, or with none saved,
+through local access to this installation. Pass `--connection NAME` to choose a
+saved one.
 
 `service upgrade` with no `VERSION_DIR` must run from a global npm installation. After
 the usual checks and the readiness read, and before it stops the job, it stages the
@@ -197,7 +239,7 @@ Unpack the new release beside the old one and run its `upgrade`:
 ```sh
 mkdir "$STATE/versions/0.2.0"
 tar -xzf cab-0.2.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/0.2.0"
-"$STATE/versions/0.2.0/bin/cab" service upgrade "$STATE/versions/0.2.0" --connection local
+"$STATE/versions/0.2.0/bin/cab" service upgrade "$STATE/versions/0.2.0"
 ```
 
 The first release that gives Codex its own home refuses to resume Codex
@@ -208,12 +250,16 @@ readable.
 
 Before it changes anything, upgrade reads the install record, checks the target
 release as install does, checks that the running job is the one the record
-describes, and loads the connection's token (`--connection`,
-`CAB_CONNECTION` or the default connection), which must be for the
-installed origin. It also makes one readiness read with that token while the old
-job still runs, and refuses if the read fails (an expired or revoked token, or one
-without `diagnostics.read`), and it refuses a target older than the installed
-release. It then runs these stages:
+describes, and selects the CLI connection once for the whole upgrade
+(`--connection`, `CAB_CONNECTION`, the default or the only saved connection; with
+none saved, local access to this installation by its record). The connection must
+be for the installed origin. It also makes one readiness read through it while the
+old job still runs, and refuses if the read fails (an expired or revoked token, one
+without `diagnostics.read`, or missing or stale local state), and it refuses a
+target older than the installed release. Later readiness reads use the same
+connection, mode and installation; local access reloads the restarted service's
+rotated material for each read and never selects another installation. It then
+runs these stages:
 
 1. `stop`: boots out the job and confirms that its process exited, within 30
    seconds.
@@ -343,9 +389,9 @@ process, that process's identity can be read, and the process listening on the p
 process, an unreadable identity, another or an unknown listener on the port, or a
 process that never serves, exits 1 with a message that keeps the record and gives the
 read-only checks. It never trusts a 200 from whatever else holds the port. After it reports
-started it prints the
-manual `cab auth login` line, `cab doctor` and the app URL (it never opens
-the browser), as the LaunchAgent install does when it could not sign in. When the job is not loaded it
+started it runs `cab doctor` through the selected connection, or local access to
+the daemon's record, and prints the app URL (it never opens the browser). A daemon
+install never issues a token: `--access token` and `--token-file` are refused. When the job is not loaded it
 prints the steps again with `"started":false`. When the plist or job differs from
 the record it refuses and changes nothing; so does a different release, a tarball
 or a different port. The re-run never writes under `/Library`, never changes launchd
@@ -419,7 +465,7 @@ upgrading stops the job and cab cannot do that without sudo. To upgrade, switch 
 ```sh
 cab service uninstall            # prints the sudo steps; run them, then run it again
 cab service install              # the LaunchAgent
-cab service upgrade "$STATE/versions/0.2.0" --connection local
+cab service upgrade "$STATE/versions/0.2.0"
 cab service uninstall
 cab service install --mode daemon  # then the sudo steps and the verify re-run
 ```
@@ -1328,9 +1374,8 @@ checks its installation and preserves prior config/token/file on failure.
 The browser still requires its password; local CLI access retains all route,
 revision, receipt, approval and hold checks. It trusts the OS account, without
 process isolation; managed assignments are refused before local reads or HTTP.
-Installed-service record discovery and lifecycle integration remain outstanding
-in the sibling of #1413. The installation and upgrade instructions above retain
-their existing token workflow until that integration ships.
+An installed service uses the same local material under `STATE/data`; see
+[Install](#install) for how the CLI finds it from the install record.
 
 ### Start, inspect, restart and stop by hand
 

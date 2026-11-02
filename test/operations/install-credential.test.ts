@@ -207,7 +207,7 @@ test("installCli doctor writes the readiness table to stderr only", async (t) =>
   } as unknown as CliDeps;
   const cli = installCli(deps);
   await cli.login("local", f.origin, issued.token, undefined, never);
-  await cli.doctor("local", never);
+  await cli.doctor("local", never, "/unused");
   assert.equal(out, "");
   assert.match(err, /Check\s+Status\s+Reason/);
 });
@@ -647,7 +647,7 @@ test("installCli doctor stops reading when its signal aborts", async (t) => {
   const cli = installCli(deps);
   await cli.login("local", f.origin, issued.token, undefined, never);
   const started = Date.now();
-  await cli.doctor("local", stop.signal);
+  await cli.doctor("local", stop.signal, "/unused");
   assert.equal(requests.length, 1, "the readiness read was in flight");
   assert.ok(Date.now() - started < 5000, "doctor returned on the abort");
 });
@@ -712,4 +712,33 @@ test("every state-changing request reports what it may have left behind when its
     assert.equal(result.credentialActive, active, name);
     assert.equal(result.sessionOpen, open, name);
   }
+});
+
+test("installCli doctor refuses a managed assignment before reading the install record or local material", async (t) => {
+  const h = harness(t);
+  let reads = 0;
+  const deps = {
+    env: { CAB_CLI_CONFIG_DIR: h.configDir, CAB_MANAGED_ASSIGNMENT: "1" },
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    fetch: () => {
+      throw Error("no request");
+    },
+    platform: "darwin",
+    keychain: () => {
+      throw Error("no Keychain");
+    },
+    // The record lookup reads the uid first; a managed refusal comes before it.
+    get uid() {
+      reads += 1;
+      return process.getuid?.();
+    },
+    now: Date.now,
+  } as unknown as CliDeps;
+  await assert.rejects(
+    installCli(deps).doctor(undefined, never, join(h.dir, "record.json")),
+    (error: { code?: string }) => error.code === "managed-assignment",
+  );
+  assert.equal(reads, 0);
 });

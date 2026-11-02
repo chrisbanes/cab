@@ -201,9 +201,20 @@ only, redirects, managed refusal before reads/HTTP, and diagnostic redaction.
 Shared route/session/CSRF, revision, receipt, approval and hold tests remain the
 authority evidence. This is same-OS-account trust, not process isolation.
 
-Installed-service discovery and lifecycle integration remain outstanding in the
-sibling of #1413. Foreground evidence does not qualify that integration, npm
-publication, a production deployment or cutover. The required final-head `check`
+Installed-service discovery and lifecycle integration are covered offline by
+`test/operations/installation-discovery.test.ts` (protected record discovery,
+explicit record selection, adoption and token precedence against real services),
+`test/operations/service-lifecycle.test.ts` (local default install, saved-selection
+preservation, token-install refusals) and `test/operations/npm-service-lifecycle.test.ts`
+(a spawned installed service: local install doctor, restart and upgrade through
+the same local selection, and a revoked selected token refusing before the job
+stops). One bounded live run of the guarded smoke
+(`live-service-lifecycle.mjs --local-access --live`) passed on a disposable label: an
+installed service with local access through install, doctor, saved local selection,
+read and write, equal-version reload, upgrade and uninstall, then a foreground server
+through read and write, doctor and restart, with real folders and launchd labels
+unchanged ([evidence](evidence/2026-11-02-installed-local-access.md)). None of this
+qualifies npm publication, a production deployment or cutover. The required final-head `check`
 CI context remains a merge gate even when local checks pass.
 
 Bound-turn recovery requires offline coverage of both runtime identities, exact

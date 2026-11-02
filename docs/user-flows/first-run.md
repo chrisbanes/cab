@@ -24,8 +24,9 @@ each screen leading to the next and nothing to look up.
 
 ## Steps
 
-1. One install command unpacks the release, asks for the operator password when no
-   auth file exists, installs the LaunchAgent, waits for the service and opens the
+1. One install command unpacks the release, asks for a new browser password when no
+   auth file exists, installs the LaunchAgent, waits for the service, checks it with
+   `cab doctor` through local CLI access (no token or login) and opens the
    sign-in page. The `tar -xzf` line before the command only makes the tarball's own
    `cab` runnable ([operations](../operations/standalone-macos.md#install)).
 2. Sign in. Home shows the getting-started card and nothing else until the first

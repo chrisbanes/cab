@@ -11,6 +11,14 @@
 // them with `npm install -g --prefix` into the private root, and drives the same lifecycle
 // through that prefix's `cab` (install, package update and removal, upgrade, uninstall,
 // reinstall). Local tarballs only; nothing is published.
+//
+// `--local-access --live` proves #1414: automatic local CLI access, with no token, login or
+// Keychain, through an installed LaunchAgent (install, doctor, saved local selection, read and
+// write, equal-version reload, upgrade, uninstall) and then a foreground server (start, read and
+// write, doctor, graceful stop, restart). It uses only a `local.cab.validation-1414-<hex>` label,
+// loopback ports other than 8787 and a disposable HOME, STATE and CLI config; it never selects
+// a saved connection or token. `--local-access --dry-run [--label L] [--port P]` validates
+// those guards and prints the plan without touching launchd, the network or the disk.
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -26,6 +34,7 @@ import {
   statSync,
 } from "node:fs";
 import { createServer } from "node:net";
+import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -783,13 +792,430 @@ async function npmMain() {
   evidence.rootRemoved = true;
 }
 
+const LOCAL_LABEL = /^local\.cab\.validation-1414-[0-9a-f]{8}$/;
+const REAL_PORT = 8787;
+
+/** The #1414 guards: only the disposable label scheme and never the real service's port. */
+function localAccessGuard({ label, ports }) {
+  if (!LOCAL_LABEL.test(label))
+    throw new Error(
+      `refusing label ${label}: only local.cab.validation-1414-<8 hex> is allowed`,
+    );
+  for (const port of ports)
+    if (
+      !Number.isInteger(port) ||
+      port < 1024 ||
+      port > 65_535 ||
+      port === REAL_PORT
+    )
+      throw new Error(
+        `refusing port ${port}: use a free high loopback port other than ${REAL_PORT}`,
+      );
+}
+
+/** The value after `--name`, when given. */
+const argValue = (name) => {
+  const at = process.argv.indexOf(name);
+  return at < 0 ? undefined : process.argv[at + 1];
+};
+
+/** Disposable environments: never the operator's HOME, CLI config, connection or token. */
+const disposableEnv = (home, config) => ({
+  PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+  HOME: home,
+  CAB_CLI_CONFIG_DIR: config,
+});
+
+let foreground;
+
+async function localAccessMain() {
+  assert.equal(process.platform, "darwin", "requires macOS");
+  const deadline = started + 600_000;
+  const bounded = (name, value) => {
+    assert.ok(Date.now() < deadline, "the 10-minute journey deadline passed");
+    step(name, value);
+  };
+  const { packCab, installGlobal } = await import(
+    pathToFileURL(join(repo, "dist/test/fixtures/npm-package.js")).href
+  );
+  const { OperatorAuth } = await import(
+    pathToFileURL(join(repo, "dist/src/standalone/operator-auth.js")).href
+  );
+  root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "cab-1414-")));
+  chmodSync(root, 0o700);
+  const label = `local.cab.validation-1414-${randomBytes(4).toString("hex")}`;
+  const port = await freePort();
+  const foregroundPort = await freePort();
+  localAccessGuard({ label, ports: [port, foregroundPort] });
+  assert.notEqual(port, foregroundPort);
+  target = `gui/${process.getuid()}/${label}`;
+  const state = join(root, "state");
+  const logs = join(root, "logs");
+  const agents = join(root, "agents");
+  const cli = join(root, "cli");
+  const home = join(root, "home");
+  const prefix = join(root, "prefix");
+  for (const dir of [state, logs, agents, cli, home])
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  activation = join(agents, `${label}.plist`);
+  const record = join(state, "launchd", `${label}.json`);
+  const origin = `http://127.0.0.1:${port}`;
+  evidence.mode = "local-access";
+  evidence.label = label;
+  evidence.headCommit = git("rev-parse", "HEAD");
+  evidence.node = process.version;
+  evidence.npm = run("npm", ["--version"]).out.trim();
+  assert.equal(print(), null, "throwaway label must start unloaded");
+  before = baseline();
+  bounded("1-preflight", {
+    labelAbsent: true,
+    portsAvoidRealService: true,
+    disposableHomeAndConfig: true,
+  });
+
+  const packages = join(root, "packages");
+  mkdirSync(packages);
+  const a = await packCab(packages, "0.1.0");
+  const b = await packCab(packages, "0.1.1-live.1414");
+  evidence.packages = {
+    a: { version: a.version, integrity: a.integrity },
+    b: { version: b.version, integrity: b.integrity },
+  };
+  await installGlobal(prefix, a.tarball, home);
+  const bin = join(prefix, "bin", "cab");
+  const env = disposableEnv(home, join(cli, "config"));
+  const cab = (args) => run(bin, args, { env });
+  const json = (args, what) => {
+    const result = cab([...args, "--output", "json"]);
+    assert.equal(result.code, 0, `${what} failed: ${result.out}${result.err}`);
+    return JSON.parse(result.out);
+  };
+  const localStatus = (selection, what) => {
+    const { data, connection } = json(["auth", "status", ...selection], what);
+    assert.equal(data.accessMode, "local", `${what}: local access`);
+    assert.equal(data.credential.scope, "read-write", `${what}: read-write`);
+    assert.equal(data.credential.expiresAt, null, `${what}: no expiry`);
+    return { id: data.service.installationId, connection };
+  };
+  /** One digest-bound project create (no lead, repository or runtime) and its readback. */
+  const createProject = (selection, name) => {
+    const id = randomUUID();
+    const file = join(cli, `${id}.json`);
+    json(
+      [
+        "project",
+        "prepare-create",
+        "--name",
+        name,
+        "--lead-profile",
+        "none",
+        "--id",
+        id,
+        "--out",
+        file,
+        ...selection,
+      ],
+      "project prepare-create",
+    );
+    json(["project", "apply", "--file", file, ...selection], "project apply");
+    const read = json(["project", "get", id, ...selection], "project get");
+    assert.equal(read.data.project?.id ?? read.data.id, id);
+    return id;
+  };
+  bounded("2-packages", {
+    a: a.version,
+    b: b.version,
+    startedNothing: print() === null,
+  });
+
+  const options = [
+    "--label",
+    label,
+    "--state-dir",
+    state,
+    "--log-dir",
+    logs,
+    "--launch-agents-dir",
+    agents,
+  ];
+  const password = randomBytes(24).toString("hex");
+  const installed = await runOnPty(
+    bin,
+    ["service", "install", "--no-open", ...options, "--port", String(port)],
+    { env, prompt: "New operator password: ", password },
+  );
+  assert.ok(installed.typed, "the new browser password prompt appeared");
+  assert.equal(installed.code, 0, "install failed (output withheld)");
+  assert.ok(
+    !installed.output.includes(password) && !installed.output.includes("ens_"),
+    "no password or token on the terminal",
+  );
+  const report = JSON.parse(
+    installed.output
+      .split(/\r?\n/)
+      .find((line) => line.startsWith('{"ok":true,"operation":"install"')),
+  );
+  assert.equal(report.accessMode, "local");
+  assert.equal(report.connection, null);
+  assert.equal(report.credentialActive, false);
+  assert.equal(report.sessionOpen, false);
+  assert.match(
+    installed.output,
+    /Check\s+Status\s+Reason/,
+    "install ran doctor",
+  );
+  assert.ok(
+    !existsSync(join(cli, "config", "connections.json")),
+    "nothing saved",
+  );
+  const jobA = await until(() => print()?.pid && print(), 60_000, "job A pid");
+  assert.equal(jobA.path, activation);
+  pids.add(jobA.pid);
+  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  bounded("3-install-local", {
+    output: report,
+    doctorRan: true,
+    savedConnection: false,
+    passwordTyped: "hidden prompt, not recorded",
+  });
+
+  const selector = ["--local", "--local-installation", record];
+  const { id: installationId } = localStatus(selector, "record status");
+  json(
+    ["connection", "local", "smoke", "--local-installation", record],
+    "adoption",
+  );
+  json(["connection", "use", "smoke"], "connection use");
+  const saved = localStatus([], "saved status");
+  assert.equal(saved.connection, "smoke");
+  assert.equal(saved.id, installationId);
+  const projects = json(["project", "list"], "project list");
+  const projectId = createProject([], "Live 1414 installed");
+  json(["doctor"], "doctor");
+  bounded("4-local-read-write", {
+    recordSelector: true,
+    savedLocalConnection: "smoke",
+    readProjectsBefore: Array.isArray(projects.data?.projects ?? projects.data),
+    createdProject: "repository-free, no lead profile",
+    doctor: "exit 0",
+  });
+
+  const reload = cab([
+    "service",
+    "upgrade",
+    join(state, "versions", a.version),
+    ...options,
+  ]);
+  assert.equal(reload.code, 0, `reload failed: ${reload.err}`);
+  const reloadReport = JSON.parse(reload.out);
+  assert.ok(processGone(jobA.pid), "the reloaded process exited");
+  const jobReload = await until(
+    () => print()?.pid && print(),
+    60_000,
+    "reload pid",
+  );
+  pids.add(jobReload.pid);
+  assert.equal(localStatus([], "after reload").id, installationId);
+  json(["project", "get", projectId], "readback after reload");
+  json(["doctor"], "doctor after reload");
+  bounded("5-equal-version-reload", {
+    output: reloadReport,
+    sameInstallation: true,
+    noLogin: true,
+  });
+
+  await installGlobal(prefix, b.tarball, home);
+  const upgrade = cab(["service", "upgrade", ...options]);
+  assert.equal(upgrade.code, 0, `upgrade failed: ${upgrade.err}`);
+  const upgradeReport = JSON.parse(upgrade.out);
+  assert.equal(upgradeReport.version, b.version);
+  assert.equal(
+    upgradeReport.snapshot,
+    null,
+    "no migration pending, no snapshot",
+  );
+  assert.ok(upgradeReport.readiness.every((check) => check.status !== "fail"));
+  assert.ok(processGone(jobReload.pid), "the old process exited");
+  const jobB = await until(() => print()?.pid && print(), 60_000, "job B pid");
+  pids.add(jobB.pid);
+  assert.equal(localStatus([], "after upgrade").id, installationId);
+  json(["project", "get", projectId], "readback after upgrade");
+  bounded("6-upgrade", {
+    output: upgradeReport,
+    sameInstallation: true,
+    savedLocalConnectionKept: true,
+  });
+
+  const uninstall = cab(["service", "uninstall", ...options]);
+  assert.equal(uninstall.code, 0, `uninstall failed: ${uninstall.err}`);
+  assert.equal(print(), null);
+  await until(() => [...pids].every(processGone), 30_000, "process exit");
+  for (const kept of [
+    join(state, "data"),
+    join(state, "auth"),
+    join(state, "versions"),
+  ])
+    assert.ok(existsSync(kept), `${kept} kept`);
+  assert.equal(existsSync(activation), false);
+  bounded("7-uninstall", {
+    output: JSON.parse(uninstall.out),
+    kept: ["data", "auth", "versions"],
+  });
+
+  // Foreground: its own data, auth, HOME and CLI config; the process is our own child.
+  const fg = join(root, "foreground");
+  const fgHome = join(fg, "home");
+  mkdirSync(join(fgHome, ".codex"), { recursive: true, mode: 0o700 });
+  const fgAuth = join(fg, "auth", "operator-auth.json");
+  mkdirSync(dirname(fgAuth), { recursive: true, mode: 0o700 });
+  await OperatorAuth.initialize(fgAuth, password);
+  const fgData = join(fg, "data");
+  const fgOrigin = `http://127.0.0.1:${foregroundPort}`;
+  const fgEnv = disposableEnv(join(fg, "cli-home"), join(fg, "cli-config"));
+  mkdirSync(fgEnv.HOME, { mode: 0o700 });
+  const fgCab = (args) => run(bin, args, { env: fgEnv });
+  const fgSelector = ["--local", "--local-state", fgData];
+  const fgJson = (args, what) => {
+    const result = fgCab([...args, "--output", "json"]);
+    assert.equal(result.code, 0, `${what} failed: ${result.out}${result.err}`);
+    return JSON.parse(result.out);
+  };
+  const startForeground = async () => {
+    foreground = spawn(
+      bin,
+      ["service", "operator", fgData, String(foregroundPort)],
+      {
+        env: {
+          PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+          HOME: fgHome,
+          CAB_OPERATOR_AUTH_FILE: fgAuth,
+          CAB_OPERATOR_ORIGIN: fgOrigin,
+        },
+        stdio: "ignore",
+      },
+    );
+    pids.add(foreground.pid);
+    await until(
+      () => fgCab(["auth", "status", ...fgSelector]).code === 0,
+      120_000,
+      "foreground local access",
+    );
+    const { data } = fgJson(
+      ["auth", "status", ...fgSelector],
+      "foreground status",
+    );
+    assert.equal(data.accessMode, "local");
+    assert.equal(data.credential.expiresAt, null);
+    return data.service.installationId;
+  };
+  const stopForeground = async () => {
+    const child = foreground;
+    const exited = new Promise((done) => child.once("exit", done));
+    if (child.exitCode === null) child.kill("SIGTERM");
+    await Promise.race([
+      exited,
+      new Promise((_, fail) =>
+        setTimeout(() => fail(new Error("foreground stop timed out")), 30_000),
+      ),
+    ]);
+    assert.ok(processGone(child.pid), "the foreground process exited");
+    foreground = undefined;
+  };
+  const fgId = await startForeground();
+  fgJson(["project", "list", ...fgSelector], "foreground read");
+  const fgProject = (() => {
+    const id = randomUUID();
+    const file = join(fg, `${id}.json`);
+    fgJson(
+      [
+        "project",
+        "prepare-create",
+        "--name",
+        "Live 1414 foreground",
+        "--lead-profile",
+        "none",
+        "--id",
+        id,
+        "--out",
+        file,
+        ...fgSelector,
+      ],
+      "foreground prepare-create",
+    );
+    fgJson(
+      ["project", "apply", "--file", file, ...fgSelector],
+      "foreground apply",
+    );
+    fgJson(["project", "get", id, ...fgSelector], "foreground readback");
+    return id;
+  })();
+  fgJson(["doctor", ...fgSelector], "foreground doctor");
+  await stopForeground();
+  assert.equal(await startForeground(), fgId, "restart keeps the installation");
+  fgJson(
+    ["project", "get", fgProject, ...fgSelector],
+    "foreground readback after restart",
+  );
+  fgJson(["doctor", ...fgSelector], "foreground doctor after restart");
+  await stopForeground();
+  bounded("8-foreground", {
+    localStatus: "read-write, no expiry",
+    readWriteReadback: true,
+    doctor: "exit 0 before and after restart",
+    restartSameInstallation: true,
+    gracefulStop: "SIGTERM to the owned child, exit confirmed",
+    upgrade: "not applicable to a foreground server",
+  });
+
+  const changes = diff(before, baseline());
+  evidence.baseline = { changes };
+  assert.ok(
+    Object.values(changes).every((c) => !c.added.length && !c.removed.length),
+    "real folders and launchd labels unchanged",
+  );
+  assert.equal(print(), null, "label gone");
+  assert.ok([...pids].every(processGone), "no owned process remains");
+  rmSync(root, { recursive: true });
+  evidence.rootRemoved = true;
+  bounded("9-postflight", {
+    unchanged: true,
+    labelGone: true,
+    processesGone: true,
+  });
+}
+
 const npmMode = process.argv.includes("--npm");
+const localMode = process.argv.includes("--local-access");
+if (localMode && process.argv.includes("--dry-run")) {
+  // Validates the guards only: no launchd, network, process or disk access.
+  const label = argValue("--label") ?? "local.cab.validation-1414-00000000";
+  const port = Number(argValue("--port") ?? "18787");
+  try {
+    localAccessGuard({ label, ports: [port] });
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exit(2);
+  }
+  process.stdout.write(
+    `${JSON.stringify({ mode: "local-access", dryRun: true, label, port, home: "disposable", cliConfig: "disposable", savedConnections: "none", tokens: "never read" })}\n`,
+  );
+  process.exit(0);
+}
+if (
+  localMode &&
+  (argValue("--label") !== undefined || argValue("--port") !== undefined)
+) {
+  process.stderr.write(
+    "A live run chooses its own disposable label and ports.\n",
+  );
+  process.exit(2);
+}
 if (!npmMode && !process.argv.includes("--live")) {
   process.stderr.write("Refusing the live launchctl proof without --live.\n");
   process.exit(2);
 }
 try {
-  await (npmMode ? npmMain() : main());
+  await (localMode ? localAccessMain() : npmMode ? npmMain() : main());
   evidence.result = "pass";
 } catch (error) {
   evidence.result = "fail";
@@ -812,8 +1238,35 @@ try {
   } catch (cleanupError) {
     evidence.cleanup = `cleanup failed: ${cleanupError.message}`;
   }
+  // Our own foreground child only, by the exact process object this run spawned.
+  if (foreground && foreground.exitCode === null) {
+    foreground.kill("SIGTERM");
+    try {
+      await until(() => processGone(foreground.pid), 30_000, "foreground exit");
+      evidence.foregroundCleanup =
+        "owned foreground child stopped and exit confirmed";
+    } catch {
+      evidence.foregroundCleanup = `owned foreground child ${foreground.pid} did not exit`;
+    }
+  }
   if (before) evidence.baselineChangesAfterFailure = diff(before, baseline());
-  evidence.retainedRoot = root;
+  if (
+    localMode &&
+    root &&
+    (!target || print() === null) &&
+    [...pids].every(processGone)
+  ) {
+    rmSync(root, { recursive: true, force: true });
+    evidence.rootRemoved =
+      "after failure, once the label was gone and every owned process exited";
+  } else evidence.retainedRoot = root;
 } finally {
-  process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
+  // No absolute home or temporary paths in the evidence.
+  let text = JSON.stringify(evidence, null, 2);
+  for (const [path, name] of [
+    [root, "<root>"],
+    [homedir(), "<home>"],
+  ])
+    if (path) text = text.split(path).join(name);
+  process.stdout.write(`${text}\n`);
 }
