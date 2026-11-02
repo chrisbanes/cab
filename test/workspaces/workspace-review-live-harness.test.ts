@@ -13,6 +13,13 @@ const module = await import(
     resolve("test/workspaces/review-qualification/runtime-contract.mjs"),
   ).href
 );
+function barrier() {
+  let release: () => void = () => {};
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, resolve: () => release() };
+}
 browserTest(
   "timed-out browser creation settles and closes its late resource within reserved cleanup without another turn",
   async () => {
@@ -28,13 +35,6 @@ browserTest(
 );
 
 test("timed-out service startup keeps its late service-stop owner without racing runtime shutdown", async () => {
-  const barrier = () => {
-    let release: () => void = () => {};
-    const promise = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    return { promise, resolve: () => release() };
-  };
   const entered = barrier();
   const gate = barrier();
   const cleaned = barrier();
@@ -116,6 +116,97 @@ test("absolute deadline rejects promise settlement before a delayed timer callba
     ),
     "timely",
   );
+});
+
+test("rejected resource handoff retains its cleanup owner until exact close settles", async () => {
+  let now = 0;
+  let closes = 0;
+  let handedToCaller = false;
+  const closeStarted = barrier();
+  const allowClose = barrier();
+  const resource = {
+    close() {
+      closes++;
+    },
+  };
+  const lateRecord = { state: "pending", settledWithinCleanupDeadline: false };
+  const cleanup = {
+    verification: { kind: "verified" },
+    operations: {},
+    lateResources: [lateRecord],
+  };
+  const owned = module.ownedStep(
+    () => {
+      now = 101;
+      return resource;
+    },
+    100,
+    "browser-start",
+    async (created: typeof resource) => {
+      assert.equal(created, resource);
+      closeStarted.resolve();
+      await allowClose.promise;
+      created.close();
+      lateRecord.state = "settled";
+    },
+    () => now,
+  );
+  let ownerSettled = false;
+  void owned.settled.then(() => {
+    ownerSettled = true;
+  });
+  try {
+    await assert.rejects(
+      owned.result.then(() => {
+        handedToCaller = true;
+      }),
+      /browser-start-deadline/,
+    );
+    await Promise.race([
+      closeStarted.promise,
+      owned.settled.then(() =>
+        assert.fail("cleanup owner settled without closing resource"),
+      ),
+    ]);
+    assert.equal(handedToCaller, false);
+    assert.equal(ownerSettled, false);
+    assert.equal(closes, 0);
+    assert.equal(module.cleanupIsVerified(cleanup, 100, now), false);
+  } finally {
+    allowClose.resolve();
+    await owned.settled;
+  }
+  assert.equal(ownerSettled, true);
+  assert.equal(closes, 1);
+  assert.equal(lateRecord.state, "settled");
+  assert.equal(module.cleanupIsVerified(cleanup, 100, now), false);
+  // Even a later exact exit proof must not retroactively credit late cleanup.
+  assert.equal(module.cleanupIsVerified(cleanup, 200, now), false);
+});
+
+test("timely resource handoff leaves close ownership with the caller exactly once", async () => {
+  let closes = 0;
+  const resource = {
+    close() {
+      closes++;
+    },
+  };
+  const owned = module.ownedStep(
+    () => resource,
+    100,
+    "browser-start",
+    (created: typeof resource) => {
+      created.close();
+    },
+    () => 0,
+  );
+  const received = await owned.result;
+  await owned.settled;
+  assert.equal(received, resource);
+  assert.equal(closes, 0);
+  received.close();
+  await owned.settled;
+  assert.equal(closes, 1);
 });
 
 test("cleanup credit requires timely final proof and timely settled late resources", () => {

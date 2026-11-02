@@ -57,6 +57,28 @@ export async function bounded(action, deadline, label, now = Date.now) {
     clearTimeout(timer);
   }
 }
+// Creation settlement and caller handoff are distinct ownership events.
+export function ownedStep(action, deadline, label, dispose, now = Date.now) {
+  let handoff;
+  const handedOff = new Promise((resolve) => {
+    handoff = resolve;
+  });
+  const created = Promise.resolve().then(action);
+  const settled = created.then(async (value) => {
+    if (!(await handedOff) && dispose) await dispose(value);
+  });
+  const result = bounded(() => created, deadline, label, now).then(
+    (value) => {
+      handoff(true);
+      return value;
+    },
+    (error) => {
+      handoff(false);
+      throw error;
+    },
+  );
+  return { result, settled };
+}
 export function cleanupIsVerified(cleanup, deadline, now = Date.now()) {
   return (
     now <= deadline &&
@@ -234,71 +256,82 @@ export async function runQualification(options = {}) {
     reportCall,
     callbackPending = false,
     callbackFailure;
-  let finishing = false,
-    probe,
-    cleanupDeadline;
+  let probe, cleanupDeadline, beginCleanup;
+  const cleanupStarted = new Promise((resolve) => {
+    beginCleanup = resolve;
+  });
   const pendingSteps = new Map();
   const step = (action, label, lateCleanup) => {
-    const promise = Promise.resolve()
-      .then(action)
-      .then(async (value) => {
-        if (finishing && lateCleanup) {
-          const record = {
-            identity: `${label}:${evidence.cleanup.lateResources.length + 1}`,
-            kind: value?.constructor?.name ?? label,
-            state: "pending",
-            createdAt: new Date().toISOString(),
-            createdMs: Date.now() - start,
-            closeStartedAt: new Date().toISOString(),
-            closeStartedMs: Date.now() - start,
-            cleanupRemainingMsAtStart: Math.max(
-              0,
-              cleanupDeadline - Date.now(),
-            ),
-          };
-          evidence.cleanup.lateResources.push(record);
-          try {
-            await lateCleanup(value);
-            record.state = "settled";
-            record.closeEndedAt = new Date().toISOString();
-            record.closeEndedMs = Date.now() - start;
-            record.cleanupRemainingMsAtEnd = Math.max(
-              0,
-              cleanupDeadline - Date.now(),
-            );
-            record.settledWithinCleanupDeadline = Date.now() <= cleanupDeadline;
-            if (label === "service-start")
-              evidence.cleanup.lateVerification = fixtureChild?.verify() ?? {
-                kind: "unknown",
-                reason: "no-owned-fixture-child",
-                method: "fixture-owned-child-exit",
-              };
-            save();
-          } catch (error) {
-            record.state = "failed";
-            record.reason = String(error.message).slice(0, 512);
-            record.closeEndedAt = new Date().toISOString();
-            record.closeEndedMs = Date.now() - start;
-            record.cleanupRemainingMsAtEnd = Math.max(
-              0,
-              cleanupDeadline - Date.now(),
-            );
-            record.settledWithinCleanupDeadline = Date.now() <= cleanupDeadline;
-            save();
-            throw error;
-          } finally {
-            if (label === "service-start") fixture?.onLateServiceCleanup?.();
+    const { result, settled } = ownedStep(
+      action,
+      deadline,
+      label,
+      lateCleanup
+        ? async (value) => {
+            const createdAt = new Date().toISOString();
+            const createdMs = Date.now() - start;
+            await cleanupStarted;
+            const record = {
+              identity: `${label}:${evidence.cleanup.lateResources.length + 1}`,
+              kind: value?.constructor?.name ?? label,
+              state: "pending",
+              createdAt,
+              createdMs,
+              closeStartedAt: new Date().toISOString(),
+              closeStartedMs: Date.now() - start,
+              cleanupRemainingMsAtStart: Math.max(
+                0,
+                cleanupDeadline - Date.now(),
+              ),
+            };
+            evidence.cleanup.lateResources.push(record);
+            try {
+              await lateCleanup(value);
+              record.state = "settled";
+              record.closeEndedAt = new Date().toISOString();
+              record.closeEndedMs = Date.now() - start;
+              record.cleanupRemainingMsAtEnd = Math.max(
+                0,
+                cleanupDeadline - Date.now(),
+              );
+              record.settledWithinCleanupDeadline =
+                Date.now() <= cleanupDeadline;
+              if (label === "service-start")
+                evidence.cleanup.lateVerification = fixtureChild?.verify() ?? {
+                  kind: "unknown",
+                  reason: "no-owned-fixture-child",
+                  method: "fixture-owned-child-exit",
+                };
+              save();
+            } catch (error) {
+              record.state = "failed";
+              record.reason = String(error.message).slice(0, 512);
+              record.closeEndedAt = new Date().toISOString();
+              record.closeEndedMs = Date.now() - start;
+              record.cleanupRemainingMsAtEnd = Math.max(
+                0,
+                cleanupDeadline - Date.now(),
+              );
+              record.settledWithinCleanupDeadline =
+                Date.now() <= cleanupDeadline;
+              save();
+              throw error;
+            } finally {
+              if (label === "service-start") fixture?.onLateServiceCleanup?.();
+            }
+            throw Error(`${label}-late-creation-cleaned`);
           }
-          throw Error(`${label}-late-creation-cleaned`);
-        }
-        return value;
-      });
-    pendingSteps.set(promise, label);
-    promise.then(
-      () => pendingSteps.delete(promise),
-      () => pendingSteps.delete(promise),
+        : undefined,
     );
-    return bounded(() => promise, deadline, label);
+    pendingSteps.set(settled, label);
+    settled.then(
+      () => pendingSteps.delete(settled),
+      () => pendingSteps.delete(settled),
+    );
+    return result.then((value) => {
+      pendingSteps.delete(settled);
+      return value;
+    });
   };
   const taskId = randomUUID(),
     projectId = randomUUID(),
@@ -686,9 +719,9 @@ export async function runQualification(options = {}) {
         .map((i) => ({ workId: i.workId, state: i.state, reason: i.reason }));
     } catch {}
   } finally {
-    finishing = true;
     evidence.process ??= runtime?.processIdentity();
     cleanupDeadline = Math.min(start + totalMs, Date.now() + cleanupMs);
+    beginCleanup();
     async function clean(name, action) {
       const stage = {
         operation: name,
