@@ -955,9 +955,16 @@ export class RuntimeOperatorRoutes {
         path: "/runtime/assignment/:assignmentId",
         handler: async ({ params, csrfToken }) => {
           const id = params.assignmentId ?? "";
-          let controls = `<p><a href="/app/assignments/${escapeHtml(id)}/recovery">Review bound-turn recovery</a></p>`;
-          if (this.recovery && this.api.recoverBoundTurnExecution) {
-            const options = await this.recovery.readRecoveryOptions(id);
+          const link = `<p><a href="/app/assignments/${encodeURIComponent(id)}/recovery">Review bound-turn recovery</a></p>`;
+          let controls = link;
+          // A failed advisory read must not blank Stop, holds and instructions on this page.
+          const options =
+            this.recovery && this.api.recoverBoundTurnExecution
+              ? await this.recovery.readRecoveryOptions(id).catch(() => null)
+              : undefined;
+          if (options === null)
+            controls = `<p>Recovery evidence could not be read.</p>${link}`;
+          if (options) {
             controls = `<section><h2>Bound-turn recovery</h2><p>Eligibility is advisory. Submission verifies the exact identity again. Reconciliation is permanent and does not resume work.</p>${options.data.records
               .map((r) => {
                 const path = r.paths.find(

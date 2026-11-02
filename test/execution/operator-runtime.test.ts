@@ -1214,6 +1214,42 @@ test("instruction apply refreshes the selected assignment revision once", async 
     );
 });
 
+test("retained assignment page keeps its controls and the recovery link when the recovery read fails", async (t) => {
+  const w = await boundWorld(t),
+    service = w.s.f.service;
+  const api = new OperatorApi(service, [w.s.f.directory]);
+  const params = { assignmentId: w.g.assignmentId };
+  const render = async (
+    recovery: Parameters<typeof runtimeOperatorRoutes>[1],
+  ) => {
+    const route = runtimeOperatorRoutes(service, recovery).find(
+      (r) => r.path === "/runtime/assignment/:assignmentId",
+    );
+    assert.ok(route);
+    const result = await route.handler({ fields: {}, params, csrfToken: "c" });
+    assert.equal(result.kind, "html");
+    return result.kind === "html" ? result.body : "";
+  };
+  const failed = await render({
+    readRecoveryOptions: async () => {
+      throw new Error("lookup unavailable");
+    },
+    readOperation: api.readOperation.bind(api),
+  });
+  assert.match(failed, /assignment<\/h1>/);
+  assert.match(failed, /<h2>Instruction revisions/);
+  assert.match(failed, /Recovery evidence could not be read/);
+  assert.ok(
+    failed.includes(
+      `href="/app/assignments/${encodeURIComponent(w.g.assignmentId)}/recovery"`,
+    ),
+  );
+  assert.doesNotMatch(failed, /lookup unavailable/);
+  const working = await render(api);
+  assert.match(working, /Eligible for review/);
+  assert.doesNotMatch(working, /could not be read/);
+});
+
 test("retained bound-turn controls review without writes, retain refusal and read original receipt before exact retry", async (t) => {
   const w = await boundWorld(t),
     service = w.s.f.service;
