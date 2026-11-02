@@ -2557,7 +2557,7 @@ export function TaskWorkspace({
                     <summary>
                       <h3 className="section-heading">Issue brief</h3>
                       <span className="metadata muted">
-                        The issue's brief comment and later notes
+                        Current · The issue's brief comment and later notes
                         {data.task.issueBriefTruncated
                           ? " · Truncated to 32 KB"
                           : ""}

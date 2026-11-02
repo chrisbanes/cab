@@ -1092,7 +1092,8 @@ test("an imported task's issue brief shows as its own Overview section beside th
     .getByRole("heading", { name: "Issue brief", exact: true })
     .waitFor();
   await section.getByText("The settled contract").waitFor();
-  await section.getByText("Truncated to 32 KB").waitFor();
+  // The current brief, whatever source revision the shared brief shows.
+  await section.getByText(/^Current · .*Truncated to 32 KB$/).waitFor();
   assert.equal(
     await page.locator("#brief").getByText("The settled contract").count(),
     0,
