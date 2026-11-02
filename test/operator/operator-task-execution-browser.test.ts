@@ -1,0 +1,254 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { type Browser, chromium, type Page } from "playwright";
+import {
+  browserSuite,
+  captureBrowserEvidence,
+} from "../fixtures/browser-diagnostics.js";
+import {
+  createOperatorFixture,
+  seedOperatorRecovery,
+} from "../fixtures/operator-web.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
+
+const test = browserSuite("ui-task-execution");
+
+async function signIn(
+  page: Page,
+  origin: string,
+  password: string,
+  path: string,
+) {
+  await page.goto(origin + path);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.locator("main.page h1").waitFor();
+}
+const noHorizontalScroll = (page: Page) =>
+  page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+
+test("the Execution tab adds and removes a dependency and Apply updates a stale assignment", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(f, "Execution project", "Execution task");
+  const d = f.service.domain(),
+    blockerId = randomUUID();
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: a.projectId,
+    taskId: blockerId,
+    title: "Blocker task",
+    outcome: "Done",
+    ready: false,
+  });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      commands.push(r.postDataJSON());
+  });
+
+  // The header's Execution opens the tab in place.
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page
+    .locator(".task-header-actions")
+    .getByRole("link", { name: "Execution", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "Execution", selected: true }).waitFor();
+  assert.match(page.url(), /\?section=execution$/);
+  const execution = page.locator("section#execution");
+  await execution.getByText("Task admission blocked:").waitFor();
+  assert.ok(
+    await execution
+      .getByRole("link", { name: "Task-scoped lead execution" })
+      .getAttribute("href")
+      .then((h) => h === `/app/tasks/${a.taskId}?assignment=${a.assignmentId}`),
+  );
+  await execution
+    .getByText("No recovery records are recorded for this task.", {
+      exact: false,
+    })
+    .waitFor();
+
+  // Add: choose, review, Cancel sends nothing; confirm records one fenced command.
+  const add = execution.getByRole("button", { name: "Add dependency…" });
+  assert.equal(await add.isDisabled(), true);
+  await execution.getByLabel("Local blocker").selectOption(blockerId);
+  await add.click();
+  const dialog = page.getByRole("alertdialog", {
+    name: "Wait for Blocker task?",
+  });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "detached" });
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === "Add dependency…",
+  );
+  assert.equal(commands.length, 0);
+  await add.click();
+  await dialog.getByRole("button", { name: "Add dependency" }).click();
+  await execution.getByText("Dependency added.").waitFor();
+  assert.deepEqual(d.dependencies(a.taskId), [blockerId]);
+  assert.equal(commands[0]?.type, "dependency.add");
+  assert.equal(commands[0]?.expectedVersion, 1);
+  await execution
+    .getByRole("link", { name: "Blocker task", exact: true })
+    .waitFor();
+  await execution
+    .getByText("No other task in this project can be added.")
+    .waitFor();
+
+  // Remove is the counterpart; a lost reply is checked with the same key, never resent anew.
+  let armed = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    if (armed && route.request().postData()?.includes('"dependency.remove"')) {
+      armed = false;
+      await route.fetch();
+      await route.abort();
+    } else await route.fallback();
+  });
+  await execution.getByRole("button", { name: "Remove" }).click();
+  await page
+    .getByRole("alertdialog", { name: "Remove Blocker task as a blocker?" })
+    .getByRole("button", { name: "Remove dependency" })
+    .click();
+  const check = execution.getByRole("button", {
+    name: "Check whether it saved",
+  });
+  await check.waitFor();
+  assert.deepEqual(d.dependencies(a.taskId), []);
+  await check.click();
+  await execution.getByText("Dependency removed.").waitFor();
+  const removes = commands.filter((c) => c.type === "dependency.remove");
+  assert.equal(removes.length, 2);
+  assert.equal(removes[0]?.key, removes[1]?.key);
+  await page.unroute("**/api/operator/commands");
+  await execution.getByText("No local task blockers.").waitFor();
+  await execution.getByLabel("Local blocker").selectOption(blockerId);
+  await execution.getByRole("button", { name: "Add dependency…" }).click();
+  await dialog.getByRole("button", { name: "Add dependency" }).click();
+  await execution
+    .getByRole("link", { name: "Blocker task", exact: true })
+    .waitFor();
+  assert.deepEqual(d.dependencies(a.taskId), [blockerId]);
+  await captureBrowserEvidence(page, "task-execution-desktop");
+
+  // Apply: a stale row offers it in its expanded facts; a current row does not.
+  const project = d.project(a.projectId);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: a.projectId,
+    expectedVersion: Number(project.version),
+    instructions: "Updated instructions",
+  });
+  await page.getByRole("button", { name: "Refresh task" }).click();
+  await page.getByRole("tab", { name: "Overview" }).click();
+  const fold = page.locator("details.inspector-fold");
+  if ((await fold.getAttribute("open")) === null)
+    await fold.locator("> summary").click();
+  const card = page.locator("#assignments > details.overview-disclosure");
+  if ((await card.getAttribute("open")) === null)
+    await card.locator("> summary").click();
+  const facts = page.locator("details.assignment-facts").first();
+  await facts.locator("> summary").click();
+  await facts.getByText(/Captured revisions are behind/).waitFor();
+  await facts
+    .getByRole("button", {
+      name: "Apply current instructions for the next turn…",
+    })
+    .click();
+  await page
+    .getByRole("alertdialog", {
+      name: "Apply current instructions for the next turn?",
+    })
+    .getByRole("button", { name: "Apply", exact: true })
+    .click();
+  await facts.getByText(/^Applied\./).waitFor();
+  const applied = commands.find((c) => c.type === "assignment.apply");
+  assert.equal(applied?.assignmentId, a.assignmentId);
+  assert.equal(
+    Number(d.assignment(a.assignmentId).instructionsRevision),
+    Number(d.project(a.projectId).instructionsRevision),
+  );
+  await facts.getByText(/Captured revisions are behind/).waitFor({
+    state: "detached",
+  });
+
+  // Narrow: the tab fits the phone without sideways scrolling.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("tab", { name: "Execution" }).click();
+  await execution.getByText("Local dependencies", { exact: true }).waitFor();
+  assert.ok(await noHorizontalScroll(page));
+  await captureBrowserEvidence(page, "task-execution-phone");
+});
+
+test("the Execution tab keeps an older record's holds in view after Resume", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(f, "Held project", "Held task");
+  seedOperatorRecovery(f, {
+    projectId: a.projectId,
+    taskId: a.taskId,
+    assignmentId: a.assignmentId,
+  });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${a.taskId}?section=execution`,
+  );
+  const execution = page.locator("section#execution");
+  await execution.getByText("Stopping; effects may continue").waitFor();
+  await execution
+    .getByText(
+      "Showing the newest 20 of 21 recorded recovery records; 1 older record is omitted.",
+    )
+    .waitFor();
+  await captureBrowserEvidence(page, "task-execution-stopping");
+
+  // Resume from the header clears only the Stop.
+  await page.getByRole("button", { name: "Resume…", exact: true }).click();
+  await page.getByRole("button", { name: "Resume task" }).click();
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Stop…", exact: true }).waitFor();
+  for (const hold of ["Writer ownership", "Capacity", "Uncertainty"])
+    await execution.getByText(hold, { exact: true }).waitFor();
+  await execution
+    .getByText(/holds are still recorded; recovery is required/)
+    .waitFor();
+  assert.equal(
+    await execution.getByText("Operator Stop", { exact: true }).count(),
+    0,
+  );
+  await captureBrowserEvidence(page, "task-execution-held-after-resume");
+});

@@ -1,9 +1,10 @@
-/** The task page's four tabs; the active one is page state, never a route. */
+/** The task page's tabs; the active one is page state, never a route. */
 export const taskTabs = [
   ["overview", "Overview"],
   ["files", "Files"],
   ["changes", "Changes"],
   ["review", "Review"],
+  ["execution", "Execution"],
 ] as const;
 export type TaskTab = (typeof taskTabs)[number][0];
 export const tabIds: readonly TaskTab[] = taskTabs.map(([id]) => id);
@@ -12,6 +13,7 @@ const sectionTabs: Record<string, TaskTab> = {
   files: "files",
   changes: "changes",
   "local-review": "review",
+  execution: "execution",
 };
 
 /** The tab whose panel holds a section; Overview holds the rest. */

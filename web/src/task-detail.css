@@ -308,6 +308,13 @@ a.task-source-chip:hover {
   outline-offset: -2px;
 }
 
+/* Five tabs fit a 390px phone without scrolling. */
+@media (max-width: 759px) {
+  .task-tabs [role="tab"] {
+    padding-inline: var(--space-8);
+  }
+}
+
 /* Only the open panel takes a layout; `hidden` keeps the others out (the browser default). */
 .task-panel:not([hidden]) {
   display: flex;
@@ -1130,5 +1137,70 @@ a.task-source-chip:hover {
   .conv-tools [data-slot="button"],
   .conv-gap [data-slot="button"] {
     min-height: 44px;
+  }
+}
+
+/* The Execution tab: facts as label/value rows, then holds, evidence and dependencies. */
+.task-execution {
+  display: grid;
+  gap: var(--space-16);
+  max-width: 72ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-execution section {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.execution-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4) var(--space-12);
+  margin: 0;
+}
+
+.execution-facts dt {
+  font-weight: var(--weight-medium);
+}
+
+.execution-facts dd {
+  margin: 0;
+}
+
+.execution-list {
+  display: grid;
+  gap: var(--space-8);
+  margin: 0;
+  padding-left: var(--space-20);
+}
+
+.execution-list li > [data-slot="button"] {
+  margin-left: var(--space-8);
+}
+
+.execution-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.execution-add [data-slot="native-select"] {
+  min-width: 16rem;
+}
+
+@media (max-width: 759px) {
+  .execution-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .execution-facts dd {
+    margin-bottom: var(--space-4);
+  }
+
+  .execution-add [data-slot="native-select"] {
+    min-width: 0;
   }
 }

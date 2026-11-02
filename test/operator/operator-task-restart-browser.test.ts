@@ -98,7 +98,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
         .locator("[data-start-again]")
         .getByRole("link", { name: "Open recovery" })
         .getAttribute("href"),
-      `/runtime/task/${held.taskId}`,
+      `/app/tasks/${held.taskId}?section=execution`,
     );
     // Reset is disabled, with its reason as the tooltip.
     if (viewport.width < 760)

@@ -381,7 +381,9 @@ async function run() {
   await page.getByRole("button", { name: "Best-effort Stop" }).click();
   const stop = await stopResponse;
   assert.equal(stop.status(), 303);
-  await page.waitForURL(`${origin}/runtime/task/${taskId}`);
+  // The retained form answers with the task's Execution tab; its retained page still reads the holds.
+  await page.waitForURL(`${origin}/app/tasks/${taskId}?section=execution`);
+  await page.goto(`${origin}/runtime/task/${taskId}`);
   const afterStop = await page.locator("body").innerText();
   assert.match(afterStop, /Operator Stop remains active/);
   assert.match(afterStop, /Writer ownership remains held/);

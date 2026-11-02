@@ -1,6 +1,11 @@
 import type { Page } from "playwright";
 
-export type TaskTabName = "Overview" | "Files" | "Changes" | "Review";
+export type TaskTabName =
+  | "Overview"
+  | "Files"
+  | "Changes"
+  | "Review"
+  | "Execution";
 
 /**
  * Opens one of the task page's tabs and waits until its panel shows. An open tab is left

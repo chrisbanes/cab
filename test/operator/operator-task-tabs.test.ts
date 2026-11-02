@@ -8,7 +8,13 @@ import {
 } from "../../web/src/task-tabs.js";
 
 test("tabForSection maps every task section to the panel that holds it", () => {
-  assert.deepEqual(tabIds, ["overview", "files", "changes", "review"]);
+  assert.deepEqual(tabIds, [
+    "overview",
+    "files",
+    "changes",
+    "review",
+    "execution",
+  ]);
   for (const [section, tab] of [
     ["decisions", "overview"],
     ["brief", "overview"],
@@ -18,6 +24,7 @@ test("tabForSection maps every task section to the panel that holds it", () => {
     ["files", "files"],
     ["changes", "changes"],
     ["local-review", "review"],
+    ["execution", "execution"],
     ["context", "overview"],
     ["history", "overview"],
     ["unknown", "overview"],
@@ -31,6 +38,8 @@ test("tabForLocation chooses the initial tab from the query and fragment", () =>
     ["/app/tasks/x?section=context", "overview"],
     ["/app/tasks/x#history", "overview"],
     ["/app/tasks/x?section=local-review", "review"],
+    ["/app/tasks/x?section=execution", "execution"],
+    ["/app/tasks/x#execution", "execution"],
     ["/app/tasks/x?assignment=a#history", "overview"],
     ["/app/tasks/x?assignment=a", "overview"],
     ["/app/tasks/x?path=docs/a.md&repository=r", "files"],

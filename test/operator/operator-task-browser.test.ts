@@ -1529,7 +1529,7 @@ for (const viewport of [
     assert.ok(page.url().endsWith(`/app/tasks/${ids.importedId}`));
     // Below 760px Execution sits in the closed Task actions disclosure, which role queries skip.
     const execution = page.locator(
-      `.task-header-actions a[href="/runtime/task/${ids.importedId}"]`,
+      `.task-header-actions a[href="/app/tasks/${ids.importedId}?section=execution"]`,
     );
     await execution.waitFor({ state: "attached" });
     assert.equal(

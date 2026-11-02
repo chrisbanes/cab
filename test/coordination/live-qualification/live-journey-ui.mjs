@@ -2950,7 +2950,7 @@ async function runLocalDependencyJourney(
   );
   required(
     firstPost.status() === 303 &&
-      firstLocation === `/runtime/task/${dependentTaskId}` &&
+      firstLocation === `/app/tasks/${dependentTaskId}` &&
       new URL(page.url()).pathname === firstLocation &&
       firstVersion === Number(dependentBeforeEdge.version) + 1 &&
       firstEdges.length === 1 &&

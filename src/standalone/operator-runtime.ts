@@ -205,8 +205,9 @@ function operationForm(
     .join("")}<button type="submit">${escapeHtml(label)}</button></form>`;
 }
 
+/** The task workspace's Execution tab; the retained task page is no longer linked. */
 function taskHref(taskId: string): string {
-  return `/runtime/task/${encodeURIComponent(taskId)}`;
+  return `/app/tasks/${encodeURIComponent(taskId)}?section=execution`;
 }
 
 function assignmentHref(assignmentId: string): string {

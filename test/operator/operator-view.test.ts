@@ -83,7 +83,7 @@ test("operator project, profile, routing, and task views render scoped editable 
       taskPage,
       /Readiness and configuration eligibility do not confirm runtime admission or execution\./,
     );
-    assert.ok(taskPage.includes(`/runtime/task/${task.id}`));
+    assert.ok(taskPage.includes(`/app/tasks/${task.id}?section=execution`));
     assert.ok(!taskPage.includes("/coordination/"));
     const assignmentPage = ui.assignment(assignment.id);
     assert.match(assignmentPage, /Assignment lifecycle state: pending/);

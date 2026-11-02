@@ -43,7 +43,7 @@ export function RestartDestinationLink({
       variant="secondary"
       href={
         destination === "recovery"
-          ? `/runtime/task/${taskId}`
+          ? `/app/tasks/${taskId}?section=execution`
           : `/app/tasks/${taskId}?section=decisions`
       }
     >

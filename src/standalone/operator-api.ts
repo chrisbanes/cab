@@ -3995,7 +3995,12 @@ export class OperatorApi {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };
       }),
-      executionRecovery: this.taskRecovery(taskId, assignments, excluded),
+      // Withheld content means the task's history is over its bound: no full read, unavailable.
+      ...(excluded === undefined
+        ? {}
+        : {
+            executionRecovery: this.taskRecovery(taskId, assignments, excluded),
+          }),
       dependencyCandidates: await this.dependencyCandidates(taskId, projectId),
       source: identity
         ? this.source(identity, issue, projectId, excluded)

@@ -184,7 +184,7 @@ test("runtime overview reports effective access limits without exposing configur
   assert.match(page.body, /Stricter isolation.*not proved/i);
   assert.doesNotMatch(page.body, /PRIVATE_(?:PROFILE|OUTCOME)_SENTINEL/);
   assert.ok(
-    page.body.includes(`/runtime/task/${taskId}`),
+    page.body.includes(`/app/tasks/${taskId}?section=execution`),
     "runtime overview links to task-specific history",
   );
   const taskRoute = runtimeOperatorRoutes(service).find(
@@ -562,7 +562,7 @@ test("runtime details distinguish selected, queued, and running assignments acro
     );
     assert.match(
       selectedAssignmentPage.body,
-      new RegExp(`/runtime/task/${selectedTask}`),
+      new RegExp(`/app/tasks/${selectedTask}\\?section=execution`),
     );
     assert.doesNotMatch(selectedAssignmentPage.body, /PRIVATE_/);
   }
@@ -574,7 +574,9 @@ test("runtime details distinguish selected, queued, and running assignments acro
   assert.equal(overview.kind, "html");
   if (overview.kind === "html") {
     for (const taskId of [runningTask, queuedTask, selectedTask])
-      assert.ok(overview.body.includes(`/runtime/task/${taskId}`));
+      assert.ok(
+        overview.body.includes(`/app/tasks/${taskId}?section=execution`),
+      );
     assert.match(overview.body, /Project A/);
     assert.match(overview.body, /Project B/);
     assert.doesNotMatch(overview.body, /PRIVATE_/);
@@ -724,7 +726,7 @@ test("task runtime detail keeps stop and writer holds visible after Resume", asy
   });
   assert.deepEqual(stopResult, {
     kind: "redirect",
-    location: `/runtime/task/${taskId}`,
+    location: `/app/tasks/${taskId}?section=execution`,
   });
 
   await service.resumeTask(taskId);
@@ -1048,11 +1050,11 @@ test("dependency controls replay add and remove commands across restart", async 
   const addContext = { params: {}, fields: addFields, csrfToken: "token" };
   assert.deepEqual(await add.handler(addContext), {
     kind: "redirect",
-    location: `/runtime/task/${taskId}`,
+    location: `/app/tasks/${taskId}?section=execution`,
   });
   assert.deepEqual(await add.handler(addContext), {
     kind: "redirect",
-    location: `/runtime/task/${taskId}`,
+    location: `/app/tasks/${taskId}?section=execution`,
   });
   assert.deepEqual(service.domain().dependencies(taskId), [blockerId]);
 
@@ -1088,11 +1090,11 @@ test("dependency controls replay add and remove commands across restart", async 
   assert.ok(restartedRemove);
   assert.deepEqual(await restartedRemove.handler(removeContext), {
     kind: "redirect",
-    location: `/runtime/task/${taskId}`,
+    location: `/app/tasks/${taskId}?section=execution`,
   });
   assert.deepEqual(await restartedRemove.handler(removeContext), {
     kind: "redirect",
-    location: `/runtime/task/${taskId}`,
+    location: `/app/tasks/${taskId}?section=execution`,
   });
   await service.stop();
   service = new StandaloneService(join(directory, "data"), () => runtime);
