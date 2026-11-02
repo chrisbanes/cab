@@ -98,7 +98,11 @@ export function aggregateFailureReport({
   until,
   runs,
   complete = true,
+  asOf = new Date().toISOString(),
 }) {
+  if (!validTimestamp(asOf)) throw Error("Invalid report snapshot time");
+  const windowElapsed = until < asOf.slice(0, 10);
+  const completeWindow = complete && windowElapsed;
   const inWindow = (r) =>
     typeof r.createdAt === "string" &&
     r.createdAt.slice(0, 10) >= since &&
@@ -145,7 +149,7 @@ export function aggregateFailureReport({
   const upper = denominator ? Math.min(1, potentialIds.size / denominator) : 1;
   const lower = denominator ? unrelated / denominator : 0;
   const fullWindow =
-    complete &&
+    completeWindow &&
     denominator > 0 &&
     dateDays(since, until) === 14 &&
     incomplete === 0;
@@ -157,14 +161,19 @@ export function aggregateFailureReport({
     until,
     windowDays: dateDays(since, until),
     comparisonHorizonUntil: until,
+    asOf,
+    windowElapsed,
+    windowCoverage: windowElapsed
+      ? null
+      : { reason: "window-not-ended", until, asOf },
     targetRate: 1 / 20,
     denominator,
     observedFailures: failedEligible.length,
     confirmedUnrelated: unrelated,
     unclassified,
-    incomplete: incomplete + (complete ? 0 : 1),
+    incomplete: incomplete + (completeWindow ? 0 : 1),
     lowerBound: lower,
-    upperBound: Math.max(upper, complete ? 0 : 1),
+    upperBound: Math.max(upper, completeWindow ? 0 : 1),
     verdict:
       fullWindow && upper <= 1 / 20
         ? "met"
@@ -582,6 +591,7 @@ export async function renderReport({
   owner = "chrisbanes",
   repo = "cab",
 }) {
+  const asOf = new Date().toISOString();
   validateReportOptions({ since, until, top });
   top = Number(top);
   const base = `${API}/repos/${owner}/${repo}`;
@@ -882,6 +892,7 @@ export async function renderReport({
     until,
     runs,
     complete: !query.capped,
+    asOf,
   });
   report.capped = query.capped;
   report.excludedEvidence = runs.flatMap((run) => run.excludedEvidence);

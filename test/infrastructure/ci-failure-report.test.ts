@@ -131,6 +131,31 @@ test("failed attempts count once even without parsed test names, and incomplete 
   assert.equal(report.otherBranchFailures.length, 1);
 });
 
+test("a current or future UTC window cannot establish the fourteen-day target", () => {
+  for (const until of ["2026-11-02", "2026-11-14"]) {
+    const since = until === "2026-11-02" ? "2026-10-20" : "2026-11-01";
+    const report = api.aggregateFailureReport({
+      since,
+      until,
+      asOf: "2026-11-02T12:00:00Z",
+      runs: [
+        {
+          id: 1,
+          branch: "main",
+          event: "push",
+          createdAt: `${since}T12:00:00Z`,
+          conclusion: "success",
+        },
+      ],
+    });
+    assert.equal(report.windowElapsed, false);
+    assert.equal(report.windowCoverage.reason, "window-not-ended");
+    assert.equal(report.verdict, "insufficient-evidence");
+    assert.equal(report.incomplete, 1);
+    assert.equal(report.upperBound, 1);
+  }
+});
+
 test("a clean complete fourteen-day denominator can meet, but excluded evidence is not unrelated", () => {
   const runs = Array.from({ length: 20 }, (_, i) => ({
     id: i + 1,
@@ -222,7 +247,9 @@ test("follows Link next despite a short page and exact URLs use the injected rea
   );
   assert.equal(result.items.length, 2);
   assert.equal(urls.length, 2);
-  assert.equal(new URL(urls[0]).searchParams.get("per_page"), "100");
+  const firstUrl = urls[0];
+  assert.ok(firstUrl);
+  assert.equal(new URL(firstUrl).searchParams.get("per_page"), "100");
 });
 
 test("full jobs pages have no workflow-query ceiling, malformed payloads and API errors fail", async () => {
@@ -395,7 +422,7 @@ function runRecord(overrides: Record<string, unknown> = {}) {
 test("collection retains failed attempt before latest success and captures attempt timing and links", async () => {
   const calls: Array<{ url: string; options?: { rawLogs?: boolean } }> = [];
   const transport = async (url: string, options?: { rawLogs?: boolean }) => {
-    calls.push({ url, options });
+    calls.push({ url, ...(options === undefined ? {} : { options }) });
     if (url.includes("/workflows/ci.yml/runs"))
       return apiResponse({ workflow_runs: [runRecord(), runRecord()] });
     if (url.includes("head_sha=")) return apiResponse({ workflow_runs: [] });
