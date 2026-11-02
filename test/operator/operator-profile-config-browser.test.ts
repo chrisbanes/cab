@@ -490,20 +490,18 @@ test("Profile configuration switches Codex to Claude and back as new revisions",
     .waitFor();
 });
 
-test("New profile starts on the first enabled runtime: Claude when Codex is disabled", async (_t, journey) => {
-  const { f, page } = await startSettings(
-    journey,
-    "/app/settings/profiles/new",
-    undefined,
-    undefined,
-    {
-      runtimeFactory: (_context, harness) =>
-        harness === "claude"
-          ? new ClaudeShapedFixtureRuntime()
-          : new OperatorFixtureRuntime(),
-      serviceOptions: { runtimeHarnesses: ["codex", "claude"] },
-    },
-  );
+async function claudeDefaultProfile(
+  journey: Parameters<typeof startSettings>[0],
+  path = "/app/settings/profiles/new",
+) {
+  const fixture = await startSettings(journey, path, undefined, undefined, {
+    runtimeFactory: (_context, harness) =>
+      harness === "claude"
+        ? new ClaudeShapedFixtureRuntime()
+        : new OperatorFixtureRuntime(),
+    serviceOptions: { runtimeHarnesses: ["codex", "claude"] },
+  });
+  const { f } = fixture;
   await f.service.configureRuntime({
     key: randomUUID(),
     harness: "codex",
@@ -512,11 +510,142 @@ test("New profile starts on the first enabled runtime: Claude when Codex is disa
       .runtimeSettings()
       .find((r) => r.harness === "codex")?.boundTasks,
   });
+  return fixture;
+}
+
+const waitForProfileRuntime = (page: Page, expected: string) =>
+  page.waitForFunction(
+    (value) =>
+      document.querySelector<HTMLSelectElement>('select[aria-label="Runtime"]')
+        ?.value === value,
+    expected,
+  );
+
+test("New profile starts on the first enabled runtime: Claude when Codex is disabled", async (_t, journey) => {
+  const { page } = await claudeDefaultProfile(journey);
   await page.reload();
   const runtime = page.getByLabel("Runtime", { exact: true });
   await runtime.waitFor();
+  // Visibility precedes the workspace read and the effect that applies its default.
+  await waitForProfileRuntime(page, "claude");
   assert.equal(await runtime.inputValue(), "claude");
 });
+
+for (const schedule of [
+  "late-clean",
+  "late-dirty",
+  "late-choice",
+  "workspace-first",
+] as const)
+  test(`New profile runtime follows workspace without replacing edits: ${schedule}`, async (_t, journey) => {
+    const { page } = await claudeDefaultProfile(
+      journey,
+      schedule === "workspace-first" ? "/app/settings" : undefined,
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    let held!: () => void;
+    const reading = new Promise<void>((done) => {
+      held = done;
+    });
+    journey.cleanup(async () => release(), "release-workspace-read");
+    const chronology: Array<Record<string, unknown>> = [];
+    await page.route("**/api/operator/workspace", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      chronology.push({
+        event: "workspace-held",
+        observedAt: body.observedAt,
+        harnesses: body.data.harnesses.map(
+          (h: { harness: string; enabled: boolean }) => ({
+            harness: h.harness,
+            enabled: h.enabled,
+          }),
+        ),
+      });
+      held();
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      await page.reload();
+      await reading;
+      if (schedule === "workspace-first") {
+        release();
+        await page.getByText("Connected", { exact: true }).waitFor();
+        await page
+          .getByRole("link", { name: "Create profile", exact: true })
+          .click();
+      }
+      const runtime = page.getByLabel("Runtime", { exact: true });
+      await runtime.waitFor();
+      // These fields only render once draft initialization has selected a harness.
+      await page.getByLabel("Model", { exact: true }).waitFor();
+      const node = await runtime.elementHandle();
+      assert.ok(node);
+      chronology.push({
+        event: "initialized",
+        value: await runtime.inputValue(),
+        modelRendered: true,
+      });
+      assert.equal(
+        await runtime.inputValue(),
+        schedule === "workspace-first" ? "claude" : "codex",
+      );
+      if (schedule === "late-dirty")
+        await page
+          .getByLabel("Profile name", { exact: true })
+          .fill("Kept name");
+      if (schedule === "late-choice") {
+        await runtime.selectOption("claude");
+        await page.getByLabel("Model", { exact: true }).fill("sonnet");
+      }
+      chronology.push({
+        event: "before-release",
+        value: await runtime.inputValue(),
+        focused: await runtime.evaluate((el) => el === document.activeElement),
+      });
+      release();
+      await page.getByText("Connected", { exact: true }).waitFor();
+      const expected = schedule === "late-dirty" ? "codex" : "claude";
+      await waitForProfileRuntime(page, expected);
+      // The selected-runtime note/settings establish application of the real payload too.
+      if (schedule === "late-dirty")
+        await page
+          .getByText("The Codex runtime is not enabled on this service.", {
+            exact: false,
+          })
+          .waitFor();
+      else
+        await page
+          .getByRole("complementary", { name: "Execution policy" })
+          .getByRole("list", { name: "Disclosed limits" })
+          .waitFor();
+      chronology.push({
+        event: "workspace-applied",
+        value: await runtime.inputValue(),
+        sameNode: await node.evaluate((el) => el.isConnected),
+      });
+      assert.equal(await runtime.inputValue(), expected);
+      assert.equal(await node.evaluate((el) => el.isConnected), true);
+      if (schedule === "late-dirty")
+        assert.equal(
+          await page.getByLabel("Profile name", { exact: true }).inputValue(),
+          "Kept name",
+        );
+      if (schedule === "late-choice")
+        assert.equal(
+          await page.getByLabel("Model", { exact: true }).inputValue(),
+          "sonnet",
+        );
+    } finally {
+      release();
+      _t.diagnostic(JSON.stringify({ schedule, chronology }));
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
 
 const codexSettingsOptions = {
   runtimeFactory: (

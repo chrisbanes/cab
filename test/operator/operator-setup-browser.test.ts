@@ -1680,6 +1680,7 @@ async function linkedReadyCheck(
   journey: Parameters<typeof setupJourney>[0],
   options: {
     viewport?: { width: number; height: number };
+    prepare?: (page: Page) => Promise<void>;
     /** Readiness checks that fail, which also offers Check again. */
     failing?: Parameters<typeof stubReadiness>[1];
   } = {},
@@ -1691,6 +1692,7 @@ async function linkedReadyCheck(
     readerFactory: atlasIssueReader,
     ...(options.viewport ? { viewport: options.viewport } : {}),
   });
+  await options.prepare?.(s.page);
   await stubReadiness(s.page, options.failing);
   const sent = sentCommands(s.page);
   const steps: string[] = [];
@@ -1860,17 +1862,195 @@ test("Setup's ready check offers Refresh again for an unconfirmed refresh withou
   assert.deepEqual(t.steps, ["preview", "refresh", "refresh"]);
 });
 
-test("Setup's ready check reviews a source saved elsewhere before importing again", async (_t, journey) => {
-  const t = await linkedReadyCheck(journey);
-  await t.importButton.waitFor();
-  // Save elsewhere only after the panel's own read, so only Review changes re-reads.
-  await until(
+function responseGate() {
+  let release!: () => void;
+  const promise = new Promise<void>((done) => {
+    release = done;
+  });
+  return { promise, resolve: release };
+}
+
+/** #1388's ordering guard: a completed server snapshot must precede the external save. */
+const waitForImportPrivateRead = (
+  t: Awaited<ReturnType<typeof linkedReadyCheck>>,
+) =>
+  until(
     () =>
       t.privateReads.includes(
         `/api/operator/projects/${t.projectId}/private-values`,
       ),
     "the Import issues private read",
   );
+
+for (const guarded of [false, true])
+  test(`Setup's ready check reviews a source saved elsewhere before importing again: ${guarded ? "private-read guard" : "historical no-wait ordering"}`, async (_t, journey) => {
+    const release = responseGate();
+    const requested = responseGate();
+    journey.cleanup(async () => release.resolve(), "release-private-read");
+    const chronology: Array<Record<string, unknown>> = [];
+    let snapshot: unknown;
+    let equivalent = false;
+    const t = await linkedReadyCheck(journey, {
+      failing: { "codex-login": "fail" },
+      prepare: async (page) => {
+        await page.route(
+          "**/api/operator/projects/*/private-values",
+          async (route) => {
+            chronology.push({ event: "private-start" });
+            requested.resolve();
+            await release.promise;
+            const response = await route.fetch();
+            const body = await response.json();
+            chronology.push({
+              event: "private-response",
+              version: body.data.source.version,
+              observedAt: body.observedAt,
+            });
+            await route.fulfill({ response });
+          },
+        );
+        await page.route(
+          "**/api/operator/projects/*/configuration",
+          async (route) => {
+            const response = await route.fetch();
+            const current = await response.json();
+            snapshot ??= current;
+            const body = equivalent ? (snapshot as typeof current) : current;
+            chronology.push({
+              event: "configuration-response",
+              version: body.data.source.version,
+              observedAt: body.observedAt,
+            });
+            await route.fulfill({ response, json: body });
+          },
+        );
+      },
+    });
+    try {
+      await t.importButton.waitFor();
+      await requested.promise;
+      const saveElsewhere = async () => {
+        chronology.push({ event: "external-save-start" });
+        await new OperatorApi(t.f.service, [t.f.directory]).execute({
+          type: "github.configure",
+          key: randomUUID(),
+          projectId: t.projectId,
+          expectedVersion: 1,
+          selections: [{ id: "S-1", keep: true }],
+          readiness: {
+            mode: "all",
+            conditions: [{ kind: "label", operator: "has", name: "ready" }],
+          },
+        } as never);
+        chronology.push({ event: "external-save", version: 2 });
+      };
+      if (guarded) {
+        const save = waitForImportPrivateRead(t).then(saveElsewhere);
+        // Give the waiting journey a render opportunity while its private response is held.
+        await t.page.evaluate(
+          () =>
+            new Promise<void>((done) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => done())),
+            ),
+        );
+        assert.equal(
+          chronology.some((e) => e.event === "external-save-start"),
+          false,
+        );
+        release.resolve();
+        await save;
+        assert.equal(
+          chronology.find((e) => e.event === "private-response")?.version,
+          1,
+        );
+      } else await saveElsewhere();
+      await t.importButton.click();
+      const warning = outcomeMessages(t.ready).filter({
+        hasText: "Nothing was refreshed.",
+      });
+      await warning.waitFor();
+      const panel = await t.panel.elementHandle();
+      const outcome = await warning.elementHandle();
+      const button = await warning
+        .getByRole("button", { name: "Review changes" })
+        .elementHandle();
+      assert.ok(panel && outcome && button);
+      chronology.push({
+        event: "conflict",
+        previews: t
+          .previews()
+          .map(({ key, expectedVersion }) => ({ key, expectedVersion })),
+        connected: await button.evaluate((el) => el.isConnected),
+      });
+      if (guarded) {
+        equivalent = true;
+        for (let i = 0; i < 2; i++) {
+          const reread = t.page.waitForResponse((r) =>
+            r
+              .url()
+              .endsWith(`/api/operator/projects/${t.projectId}/configuration`),
+          );
+          await t.ready.getByRole("button", { name: "Check again" }).click();
+          await reread;
+          await t.page.evaluate(
+            () =>
+              new Promise<void>((done) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => done()),
+                ),
+              ),
+          );
+          chronology.push({
+            event: "equivalent-read",
+            version: 1,
+            connected: await button.evaluate((el) => el.isConnected),
+          });
+          assert.equal(await outcome.evaluate((el) => el.isConnected), true);
+          assert.equal(await button.evaluate((el) => el.isConnected), true);
+        }
+        equivalent = false;
+        const reread = t.page.waitForResponse((r) =>
+          r
+            .url()
+            .endsWith(`/api/operator/projects/${t.projectId}/configuration`),
+        );
+        await warning.getByRole("button", { name: "Review changes" }).click();
+        await reread;
+        await warning.waitFor({ state: "detached" });
+      } else {
+        release.resolve();
+        await warning.waitFor({ state: "detached" });
+        chronology.push({
+          event: "version-transition",
+          connected: await button.evaluate((el) => el.isConnected),
+          panelConnected: await panel.evaluate((el) => el.isConnected),
+        });
+        assert.equal(
+          chronology.find((e) => e.event === "private-response")?.version,
+          2,
+        );
+        assert.equal(await button.evaluate((el) => el.isConnected), false);
+        assert.equal(await panel.evaluate((el) => el.isConnected), true);
+      }
+      assert.deepEqual(t.steps, ["preview"]);
+      assert.equal(t.f.service.domain().project(t.projectId).paused, 1);
+      assert.equal(t.f.service.domain().tasks(t.projectId).length, 0);
+      assert.deepEqual(
+        t.f.service.domain().githubActiveSelectionIds(t.projectId),
+        [],
+      );
+      await t.page.unrouteAll({ behavior: "wait" });
+    } finally {
+      release.resolve();
+      _t.diagnostic(JSON.stringify({ guarded, chronology }));
+    }
+  });
+
+test("Setup's ready check reviews a source saved elsewhere before importing again", async (_t, journey) => {
+  const t = await linkedReadyCheck(journey);
+  await t.importButton.waitFor();
+  // Save elsewhere only after the panel's own read, so only Review changes re-reads.
+  await waitForImportPrivateRead(t);
   await new OperatorApi(t.f.service, [t.f.directory]).execute({
     type: "github.configure",
     key: randomUUID(),
