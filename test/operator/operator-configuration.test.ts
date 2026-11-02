@@ -830,18 +830,31 @@ test("delivery and source credential reference, key and value are excluded from 
       kind: "unavailable",
     });
     assert.equal(publicData.profile.data.capabilities, "[redacted]");
-    await assert.rejects(
-      api.execute({
-        type: "delivery.configure",
-        key: randomUUID(),
-        projectId,
-        expectedVersion: 2,
-        mode: "reviewable-pr",
-        credentialRef: reference,
-        grants: [],
-        requiredChecks: [],
-      }),
-    );
+    const configured = await api.execute({
+      type: "delivery.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      mode: "reviewable-pr",
+      credentialRef: reference,
+      grants: [],
+      requiredChecks: [],
+    });
+    assert.deepEqual(configured, {
+      kind: "configuration",
+      key: configured.key,
+      recorded: true,
+      result: {
+        commandType: "delivery.configure",
+        resourceId: projectId,
+        version: 3,
+        credentialConfigured: true,
+      },
+    });
+    const afterSet = await api.readProjectConfiguration(projectId);
+    assert.equal(JSON.stringify(afterSet).includes(reference), false);
+    assert.equal(JSON.stringify(afterSet).includes(envKey), false);
+    assert.equal(JSON.stringify(afterSet).includes(envValue), false);
   }
   assert.equal(f.runtime.turns, 0);
 });
@@ -1629,6 +1642,995 @@ setTimeout(() => {
   assert.ok(allEvents.every((e) => e.peak <= 4));
   t.diagnostic(
     `Observed child peak ${Math.max(...allEvents.map((e) => e.peak))}; first request detection 1, fresh token commands 9; four independent request/attempt scopes.`,
+  );
+  assert.equal(f.runtime.turns, 0);
+});
+
+const deliveryInput = (projectId: string, extra: object = {}) => ({
+  type: "delivery.configure" as const,
+  key: randomUUID(),
+  projectId,
+  expectedVersion: 1,
+  mode: "reviewable-pr" as const,
+  grants: [],
+  requiredChecks: [],
+  ...extra,
+});
+
+async function deliveryFixture(t: TestContext) {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const projectId = randomUUID();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Delivery",
+    leadProfileId: null,
+  });
+  return { f, api, projectId };
+}
+
+const historicalDeliveryHash = (value: unknown): string => {
+  const canonical = (item: unknown): string =>
+    Array.isArray(item)
+      ? `[${item.map(canonical).join(",")}]`
+      : item && typeof item === "object"
+        ? `{${Object.entries(item)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+            .join(",")}}`
+        : JSON.stringify(item);
+  return createHash("sha256").update(canonical(value)).digest("hex");
+};
+
+test("delivery JSON preserves every accepted action, supplemental scope and optional shape", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const { actionKinds } = await import("../../src/core/delivery.js");
+  const grants = actionKinds.flatMap((action) => {
+    const grant = {
+      action,
+      repositoryId: "container",
+      mode:
+        action === "branch.adopt" ? ("approval" as const) : ("allow" as const),
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: action === "project.field" ? ["O", "O"] : [],
+      ...(action === "issue.status" ? { statusIds: ["S", "S"] } : {}),
+    };
+    return [grant, grant];
+  });
+  const requiredChecks = [
+    { name: "build" },
+    { name: "build", appId: 42 },
+    { name: "build", appId: 42 },
+  ];
+  const first = await api.execute(
+    deliveryInput(projectId, { mode: "through-merge", grants, requiredChecks }),
+  );
+  assert.deepEqual(first.kind === "configuration" && first.result, {
+    commandType: "delivery.configure",
+    resourceId: projectId,
+    version: 2,
+    credentialConfigured: false,
+  });
+  const visible = (await api.readProjectConfiguration(projectId)).data
+    .delivery!;
+  assert.deepEqual(visible, {
+    version: 2,
+    mode: "through-merge",
+    credentialConfigured: false,
+    grants,
+    requiredChecks,
+  });
+  assert.equal(Object.hasOwn(visible, "branchPrefix"), false);
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 2,
+      grants,
+      requiredChecks,
+      branchPrefix: "",
+    }),
+  );
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.delivery!.branchPrefix,
+    "",
+  );
+  assert.equal(f.service.delivery().configuration(projectId).branchPrefix, "");
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery credentials normalize Preserve Set Clear and expose only original minimal receipts after restart", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const set = deliveryInput(projectId, { credentialRef: "env:DELIVERY_FIRST" });
+  const setReceipt = await api.execute(set);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_FIRST",
+  );
+  const preserve = deliveryInput(projectId, { expectedVersion: 2 });
+  const original = await api.execute(preserve);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_FIRST",
+  );
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      credentialRef: "env:DELIVERY_SECOND",
+    }),
+  );
+  await assert.rejects(
+    api.execute(preserve),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.deepEqual(await api.execute(set), setReceipt);
+  await api.execute(
+    deliveryInput(projectId, { expectedVersion: 4, credentialRef: null }),
+  );
+  assert.equal(f.service.domain().deliveryCredentialReference(projectId), null);
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  const lookup = await reopened.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key: preserve.key,
+    }),
+  );
+  assert.deepEqual(lookup.data, { state: "recorded", receipt: original });
+  assert.deepEqual(await reopened.execute(set), setReceipt);
+  for (const value of [
+    original,
+    lookup,
+    await reopened.readProjectConfiguration(projectId),
+  ])
+    assert.doesNotMatch(
+      JSON.stringify(value),
+      /DELIVERY_FIRST|DELIVERY_SECOND|credentialRef"|grants".*operation/,
+    );
+  assert.equal(f.service.delivery().configuration(projectId).version, 5);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery excluded rows and prefix expose only version-bound references and keep exact values or remove", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const envKey = "DELIVERY_OPAQUE_COLLISION",
+    previous = process.env[envKey];
+  process.env[envKey] = "private-prefix/";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  const hiddenGrant = {
+    action: "issue.comment" as const,
+    mode: "allow" as const,
+    repositoryId: "ordinary",
+    projectNodeId: envKey,
+    fieldNodeId: "F",
+    optionNodeIds: ["O", "O"],
+  };
+  const visibleGrant = {
+    action: "branch.push" as const,
+    mode: "approval" as const,
+    repositoryId: "ordinary",
+    optionNodeIds: [],
+  };
+  const hiddenCheck = { name: `env:${envKey}`, appId: 7 };
+  const visibleCheck = { name: "build" };
+  f.service.domain().execute({
+    ...deliveryInput(projectId),
+    credentialRef: `env:${envKey}`,
+    grants: [hiddenGrant, visibleGrant, hiddenGrant],
+    requiredChecks: [hiddenCheck, visibleCheck],
+    branchPrefix: "private-prefix/",
+    actor: "operator",
+  });
+  const read = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.deepEqual(read.grants[1], visibleGrant);
+  assert.deepEqual(read.requiredChecks[1], visibleCheck);
+  assert.deepEqual(read.grants[0], {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: { projectId, section: "delivery-grants", version: 2, index: 0 },
+  });
+  assert.deepEqual(read.requiredChecks[0], {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: { projectId, section: "delivery-checks", version: 2, index: 0 },
+  });
+  assert.equal(read.branchPrefix, null);
+  assert.equal(read.branchPrefixUnavailable, true);
+  for (const secret of [envKey, `env:${envKey}`, "private-prefix/"])
+    assert.equal(JSON.stringify(read).includes(secret), false);
+  const grant = read.grants[0]!,
+    check = read.requiredChecks[0]!;
+  assert.ok("savedRow" in grant && "savedRow" in check);
+  const keep = deliveryInput(projectId, {
+    expectedVersion: 2,
+    preserveBranchPrefix: true,
+    grants: [{ savedRow: grant.savedRow, keep: true }, visibleGrant],
+    requiredChecks: [visibleCheck, { savedRow: check.savedRow, keep: true }],
+  });
+  const receipt = await api.execute(keep);
+  assert.deepEqual(f.service.delivery().configuration(projectId), {
+    version: 3,
+    mode: "reviewable-pr",
+    credentialRef: `env:${envKey}`,
+    branchPrefix: "private-prefix/",
+    grants: [hiddenGrant, visibleGrant],
+    requiredChecks: [visibleCheck, hiddenCheck],
+  });
+  assert.equal(JSON.stringify(receipt).includes(envKey), false);
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare(
+        "SELECT payloadHash FROM command_receipts WHERE scope=? AND key=?",
+      )
+      .get(projectId, keep.key) as { payloadHash: string };
+    assert.equal(
+      row.payloadHash,
+      historicalDeliveryHash({
+        ...deliveryInput(projectId, {
+          key: keep.key,
+          expectedVersion: 2,
+          credentialRef: `env:${envKey}`,
+          branchPrefix: "private-prefix/",
+          grants: [hiddenGrant, visibleGrant],
+          requiredChecks: [visibleCheck, hiddenCheck],
+        }),
+        actor: "operator",
+      }),
+    );
+  });
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      branchPrefix: "",
+      grants: [visibleGrant],
+      requiredChecks: [visibleCheck],
+    }),
+  );
+  const after = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.deepEqual(after.grants, [visibleGrant]);
+  assert.deepEqual(after.requiredChecks, [visibleCheck]);
+  assert.equal(after.branchPrefix, "");
+});
+
+test("delivery saved row references reject duplicates foreign sections indexes and revisions without recording", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const grant = { action: "issue.comment", repositoryId: "R", mode: "allow" };
+  await api.execute(
+    deliveryInput(projectId, {
+      grants: [grant],
+      requiredChecks: [{ name: "build" }],
+    }),
+  );
+  const savedRow = {
+    projectId,
+    section: "delivery-grants",
+    version: 2,
+    index: 0,
+  };
+  for (const [extra, status, paths] of [
+    [
+      {
+        grants: [
+          { savedRow, keep: true },
+          { savedRow, keep: true },
+        ],
+      },
+      400,
+      ["grants.1.savedRow"],
+    ],
+    [
+      {
+        grants: [
+          { savedRow: { ...savedRow, projectId: randomUUID() }, keep: true },
+        ],
+      },
+      400,
+      ["grants.0.savedRow"],
+    ],
+    [
+      {
+        grants: [
+          { savedRow: { ...savedRow, section: "delivery-checks" }, keep: true },
+        ],
+      },
+      400,
+      ["grants.0.savedRow"],
+    ],
+    [
+      { grants: [{ savedRow: { ...savedRow, index: 1 }, keep: true }] },
+      400,
+      ["grants.0.savedRow"],
+    ],
+    [
+      { grants: [{ savedRow: { ...savedRow, version: 1 }, keep: true }] },
+      409,
+      undefined,
+    ],
+    [
+      { requiredChecks: [{ savedRow, keep: true }] },
+      400,
+      ["requiredChecks.0.savedRow"],
+    ],
+  ] as const) {
+    const input = deliveryInput(projectId, { expectedVersion: 2, ...extra });
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, status);
+      assert.deepEqual(error.fieldPaths, paths);
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("delivery missing exclusion evidence withholds policy text and refuses normalization", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(
+    deliveryInput(projectId, {
+      branchPrefix: "private/",
+      grants: [
+        {
+          action: "issue.comment",
+          repositoryId: "private-repo",
+          mode: "allow",
+        },
+      ],
+      requiredChecks: [{ name: "private-check", appId: 42 }],
+    }),
+  );
+  const original = DomainStore.prototype.deliveryCredentialReference;
+  DomainStore.prototype.deliveryCredentialReference = () => {
+    throw new Error("unavailable private lookup");
+  };
+  try {
+    const policy = (await api.readProjectConfiguration(projectId)).data
+      .delivery!;
+    assert.equal(policy.branchPrefix, null);
+    assert.equal(policy.branchPrefixUnavailable, true);
+    assert.ok(policy.grants.every((row) => "savedRow" in row));
+    assert.ok(policy.requiredChecks.every((row) => "savedRow" in row));
+    assert.doesNotMatch(
+      JSON.stringify(policy),
+      /private-repo|private-check|private\/|unavailable private lookup/,
+    );
+    const input = deliveryInput(projectId, { expectedVersion: 2 });
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError && error.status === 503,
+    );
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  } finally {
+    DomainStore.prototype.deliveryCredentialReference = original;
+  }
+});
+
+test("delivery semantic refusals report indexed fields and do not write or leave receipts", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const base = { repositoryId: "R", mode: "allow" };
+  for (const [grant, paths] of [
+    [
+      { ...base, action: "project.field" },
+      [
+        "grants.0.projectNodeId",
+        "grants.0.fieldNodeId",
+        "grants.0.optionNodeIds",
+      ],
+    ],
+    [{ ...base, action: "project.item.add" }, ["grants.0.projectNodeId"]],
+    [
+      { ...base, action: "issue.status", statusIds: [] },
+      ["grants.0.statusIds"],
+    ],
+    [
+      { ...base, action: "issue.comment", statusIds: [] },
+      ["grants.0.statusIds"],
+    ],
+  ] as const) {
+    const input = deliveryInput(projectId, { grants: [grant] });
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, 400);
+      assert.deepEqual(error.fieldPaths, paths);
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 1);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("delivery exclusion collisions reject explicit policy text but permit opaque preservation", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:DELIVERY_POLICY_COLLISION",
+    }),
+  );
+  for (const [extra, path] of [
+    [
+      {
+        grants: [
+          {
+            action: "issue.comment",
+            repositoryId: "DELIVERY_POLICY_COLLISION",
+            mode: "allow",
+          },
+        ],
+      },
+      "grants.0",
+    ],
+    [
+      { requiredChecks: [{ name: "env:DELIVERY_POLICY_COLLISION" }] },
+      "requiredChecks.0.name",
+    ],
+    [{ branchPrefix: "DELIVERY_POLICY_COLLISION" }, "branchPrefix"],
+  ] as const) {
+    const input = deliveryInput(projectId, { expectedVersion: 2, ...extra });
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError && error.status === 400);
+      assert.deepEqual(error.fieldPaths, [path]);
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("delivery explicit legacy hash and receipt replay survive later credentials restart and explicit undefined", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const original = {
+    ...deliveryInput(projectId),
+    credentialRef: "env:DELIVERY_LEGACY",
+    branchPrefix: undefined,
+    actor: "operator" as const,
+  };
+  const legacyResult = {
+    mode: "reviewable-pr",
+    version: 2,
+    credentialConfigured: true,
+    grants: [],
+    requiredChecks: [],
+  };
+  const { branchPrefix: _absent, ...omitted } = original;
+  assert.notEqual(
+    historicalDeliveryHash(original),
+    historicalDeliveryHash(omitted),
+  );
+  const expectedHash = historicalDeliveryHash(original);
+  // An original pre-API receipt stores the legacy canonical digest, including explicit undefined.
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO command_receipts (scope,key,payloadHash,result) VALUES (?,?,?,?)",
+    ).run(projectId, original.key, expectedHash, JSON.stringify(legacyResult));
+  });
+  const { actor: _actor, ...input } = original;
+  const receipt = await api.execute(input);
+  assert.deepEqual(receipt.kind === "configuration" && receipt.result, {
+    commandType: "delivery.configure",
+    resourceId: projectId,
+    version: 2,
+    credentialConfigured: true,
+  });
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:DELIVERY_LATER",
+      branchPrefix: "current/",
+    }),
+  );
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(await reopened.execute(input), receipt);
+  assert.deepEqual(
+    (
+      await reopened.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "delivery.configure",
+          key: input.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt },
+  );
+  await assert.rejects(
+    reopened.execute({ ...input, credentialRef: null }),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare(
+        "SELECT payloadHash,result FROM command_receipts WHERE scope=? AND key=?",
+      )
+      .get(projectId, original.key) as { payloadHash: string; result: string };
+    assert.equal(row.payloadHash, expectedHash);
+    assert.equal(row.result, JSON.stringify(legacyResult));
+  });
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_LATER",
+  );
+  assert.equal(f.service.delivery().configuration(projectId).version, 2);
+});
+
+test("delivery final domain CAS rejects a policy changed between normalization and the store call", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const input = deliveryInput(projectId);
+  const original = domain.execute.bind(domain);
+  domain.execute = (command) => {
+    if (command.type === "delivery.configure" && command.key === input.key)
+      original({
+        ...deliveryInput(projectId),
+        actor: "operator",
+        credentialRef: null,
+        mode: "through-merge",
+      });
+    return original(command);
+  };
+  try {
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError && error.status === 409,
+    );
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.equal(
+      f.service.delivery().configuration(projectId).mode,
+      "through-merge",
+    );
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  } finally {
+    domain.execute = original;
+  }
+});
+
+test("delivery accepts policy row limits and rejects malformed shapes without writes or receipts", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const grant = { action: "issue.comment", repositoryId: "R", mode: "allow" };
+  const failures: [object, string][] = [
+    [{ grants: Array.from({ length: 257 }, () => grant) }, "grants"],
+    [
+      {
+        requiredChecks: Array.from({ length: 101 }, () => ({ name: "build" })),
+      },
+      "requiredChecks",
+    ],
+    [{ credentialRef: "gh:github.com" }, "credentialRef"],
+    [{ credentialRef: "env:not_valid" }, "credentialRef"],
+    [{ branchPrefix: "../unsafe" }, "branchPrefix"],
+    [{ branchPrefix: "x".repeat(65) }, "branchPrefix"],
+    [{ preserveBranchPrefix: true, branchPrefix: "" }, "branchPrefix"],
+    [{ grants: [{ ...grant, action: "branch.adopt" }] }, "grants.0.mode"],
+    [{ grants: [{ ...grant, repositoryId: "" }] }, "grants.0.repositoryId"],
+    [
+      {
+        grants: [
+          { ...grant, statusIds: Array.from({ length: 257 }, () => "S") },
+        ],
+      },
+      "grants.0.statusIds",
+    ],
+    [
+      { requiredChecks: [{ name: "build", appId: 0 }] },
+      "requiredChecks.0.appId",
+    ],
+    [
+      { requiredChecks: [{ name: "build", appId: 1.5 }] },
+      "requiredChecks.0.appId",
+    ],
+    [{ requiredChecks: [{ name: "" }] }, "requiredChecks.0.name"],
+    [
+      {
+        grants: [
+          {
+            savedRow: {
+              projectId,
+              section: "delivery-grants",
+              version: 1,
+              index: -1,
+            },
+            keep: true,
+          },
+        ],
+      },
+      "grants.0.savedRow.index",
+    ],
+    [
+      {
+        grants: [
+          {
+            ...grant,
+            savedRow: {
+              projectId,
+              section: "delivery-grants",
+              version: 1,
+              index: 0,
+            },
+            keep: true,
+          },
+        ],
+      },
+      "grants.0",
+    ],
+  ];
+  for (const [extra, path] of failures) {
+    const input = deliveryInput(projectId, extra);
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError && error.status === 400);
+      const paths = error.fieldPaths ?? [];
+      assert.ok(
+        paths.some(
+          (candidate) => candidate === path || candidate.startsWith(`${path}.`),
+        ),
+        `${path}: ${paths.join(",")}`,
+      );
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 1);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+  const grants = Array.from({ length: 256 }, () => grant);
+  const requiredChecks = Array.from({ length: 100 }, () => ({
+    name: "build",
+    appId: 1,
+  }));
+  await api.execute(deliveryInput(projectId, { grants, requiredChecks }));
+  const read = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.deepEqual(read.grants, grants);
+  assert.deepEqual(read.requiredChecks, requiredChecks);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery preserved prefix keeps absence and empty as distinct policy shapes", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(deliveryInput(projectId, { preserveBranchPrefix: true }));
+  assert.equal(
+    Object.hasOwn(
+      f.service.delivery().configuration(projectId),
+      "branchPrefix",
+    ),
+    false,
+  );
+  await api.execute(
+    deliveryInput(projectId, { expectedVersion: 2, branchPrefix: "" }),
+  );
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      preserveBranchPrefix: true,
+    }),
+  );
+  assert.equal(f.service.delivery().configuration(projectId).branchPrefix, "");
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.delivery!.branchPrefix,
+    "",
+  );
+});
+
+test("delivery configuration read rebuilds when a credential exclusion changes after collection", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const envKey = "DELIVERY_READ_FENCE",
+    previous = process.env[envKey];
+  process.env[envKey] = "old-private-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: `env:${envKey}`,
+      branchPrefix: "new-private/",
+    }),
+  );
+  const delivery = f.service.delivery();
+  const original = delivery.publicConfiguration.bind(delivery);
+  let reads = 0;
+  delivery.publicConfiguration = (id) => {
+    const value = original(id);
+    if (++reads === 1) process.env[envKey] = "new-private/";
+    return value;
+  };
+  try {
+    const policy = (await api.readProjectConfiguration(projectId)).data
+      .delivery!;
+    assert.equal(policy.branchPrefix, null);
+    assert.equal(policy.branchPrefixUnavailable, true);
+    assert.equal(JSON.stringify(policy).includes("new-private/"), false);
+    assert.equal(reads, 2);
+  } finally {
+    delivery.publicConfiguration = original;
+  }
+});
+
+test("delivery HTTP writes retain session Origin CSRF and bearer scopes with indexed 400 and stale 409", async (t) => {
+  const { f, projectId } = await deliveryFixture(t);
+  const { serveCli } = await import("../fixtures/operator-cli.js");
+  const s = await serveCli(t, f);
+  const endpoint = "/api/operator/commands";
+  const command = deliveryInput(projectId, {
+    credentialRef: "env:HTTP_DELIVERY",
+  });
+  assert.equal(
+    (
+      await fetch(`${s.origin}${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await s.sessionPost(endpoint, command, {
+        origin: "https://foreign.example",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await s.sessionPost(endpoint, command, { "x-csrf-token": "wrong" }))
+      .status,
+    403,
+  );
+  const read = await s.issue("read");
+  const write = await s.issue("read-write");
+  assert.equal(
+    (await s.bearer(read.token, endpoint, { method: "POST", body: command }))
+      .status,
+    403,
+  );
+  for (const [extra, path] of [
+    [
+      {
+        grants: [{ action: "project.field", repositoryId: "R", mode: "allow" }],
+      },
+      "grants.0.projectNodeId",
+    ],
+    [
+      {
+        grants: [{ action: "branch.adopt", repositoryId: "R", mode: "allow" }],
+      },
+      "grants.0.mode",
+    ],
+    [
+      { requiredChecks: [{ name: "build", appId: 0 }] },
+      "requiredChecks.0.appId",
+    ],
+    [{ branchPrefix: "../bad" }, "branchPrefix"],
+    [{ credentialRef: "env:invalid" }, "credentialRef"],
+  ] as const) {
+    const invalid = deliveryInput(projectId, extra);
+    const response = await s.sessionPost(endpoint, invalid);
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as {
+      error: { code: string; fieldPaths: string[] };
+    };
+    assert.equal(body.error.code, "invalid-input");
+    assert.ok(body.error.fieldPaths.includes(path), JSON.stringify(body));
+    assert.equal(f.service.delivery().configuration(projectId).version, 1);
+    const lookup = await s.sessionGet(
+      `/api/operator/operations?scope=project:${projectId}&type=delivery.configure&key=${invalid.key}`,
+    );
+    assert.deepEqual(((await lookup.json()) as { data: unknown }).data, {
+      state: "not-recorded",
+    });
+  }
+  const set = await s.bearer(write.token, endpoint, {
+    method: "POST",
+    body: command,
+  });
+  assert.equal(set.status, 200);
+  const receipt = await set.json();
+  assert.deepEqual(receipt, {
+    kind: "configuration",
+    key: command.key,
+    recorded: true,
+    result: {
+      commandType: "delivery.configure",
+      resourceId: projectId,
+      version: 2,
+      credentialConfigured: true,
+    },
+  });
+  const stale = await s.sessionPost(endpoint, deliveryInput(projectId));
+  assert.equal(stale.status, 409);
+  const collision = await s.sessionPost(
+    endpoint,
+    deliveryInput(projectId, {
+      expectedVersion: 2,
+      requiredChecks: [{ name: "HTTP_DELIVERY" }],
+    }),
+  );
+  assert.equal(collision.status, 400);
+  assert.equal((await collision.text()).includes("HTTP_DELIVERY"), false);
+  const config = await s.bearer(
+    read.token,
+    `/api/operator/projects/${projectId}/configuration`,
+  );
+  assert.equal(config.status, 200);
+  const publicText = await config.text();
+  assert.equal(publicText.includes("HTTP_DELIVERY"), false);
+  assert.equal(publicText.includes('"credentialRef"'), false);
+  assert.equal((await s.sessionPost(endpoint, command)).status, 200);
+  const lookup = await s.bearer(
+    read.token,
+    `/api/operator/operations?scope=project:${projectId}&type=delivery.configure&key=${command.key}`,
+  );
+  assert.equal(lookup.status, 200);
+  assert.deepEqual(((await lookup.json()) as { data: unknown }).data, {
+    state: "recorded",
+    receipt,
+  });
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery unknown normalized save is recovered by original operation after credential change and restart", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:DELIVERY_UNKNOWN_ORIGINAL",
+    }),
+  );
+  const input = deliveryInput(projectId, { expectedVersion: 2 });
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  const injected = new DomainStore(db, () => {
+    throw new DomainPolicyError("invalid-input", "private postcommit failure");
+  });
+  const domain = f.service.domain(),
+    original = domain.execute.bind(domain);
+  domain.execute = (command) =>
+    command.key === input.key ? injected.execute(command) : original(command);
+  try {
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError &&
+        error.status === 503 &&
+        error.code === "command-outcome-unknown",
+    );
+  } finally {
+    domain.execute = original;
+  }
+  assert.equal(f.service.delivery().configuration(projectId).version, 3);
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      credentialRef: "env:DELIVERY_UNKNOWN_LATER",
+    }),
+  );
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  const query = new URLSearchParams({
+    scope: `project:${projectId}`,
+    type: "delivery.configure",
+    key: input.key,
+  });
+  const readback = await reopened.readOperation(query);
+  assert.deepEqual(readback.data, {
+    state: "recorded",
+    receipt: {
+      kind: "configuration",
+      key: input.key,
+      recorded: true,
+      result: {
+        commandType: "delivery.configure",
+        resourceId: projectId,
+        version: 3,
+        credentialConfigured: true,
+      },
+    },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(readback),
+    /DELIVERY_UNKNOWN|private postcommit failure/,
+  );
+  await assert.rejects(
+    reopened.execute(input),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.equal(f.service.delivery().configuration(projectId).version, 4);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_UNKNOWN_LATER",
+  );
+  await assert.rejects(
+    reopened.readOperation(
+      new URLSearchParams({
+        ...Object.fromEntries(query),
+        type: "project.configure",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  f.seedPersistedState((store) =>
+    store
+      .prepare("UPDATE command_receipts SET result=? WHERE scope=? AND key=?")
+      .run('{"version":"invalid"}', projectId, input.key),
+  );
+  await assert.rejects(
+    reopened.readOperation(query),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
   );
   assert.equal(f.runtime.turns, 0);
 });

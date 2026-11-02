@@ -2060,6 +2060,91 @@ export const taskToolOutputSchema = envelope(
 );
 const base = { key: uuid };
 const domainBase = { ...base, projectId: uuid };
+const deliveryIdentity = z.string().trim().min(1).max(512);
+const deliveryGrantSchema = z
+  .object({
+    action: z.enum([
+      "issue.comment",
+      "issue.labels",
+      "issue.edit",
+      "issue.create",
+      "project.item.add",
+      "project.field",
+      "issue.status",
+      "pr.create",
+      "pr.edit",
+      "pr.ready",
+      "pr.merge",
+      "issue.close",
+      "pr.thread.reply",
+      "pr.thread.resolve",
+      "branch.push",
+      "branch.force-push",
+      "branch.adopt",
+    ]),
+    repositoryId: deliveryIdentity,
+    mode: z.enum(["allow", "approval"]),
+    projectNodeId: deliveryIdentity.optional(),
+    fieldNodeId: deliveryIdentity.optional(),
+    optionNodeIds: z.array(deliveryIdentity).optional(),
+    statusIds: z.array(deliveryIdentity).max(256).optional(),
+  })
+  .strict()
+  .refine(
+    (grant) => grant.action !== "branch.adopt" || grant.mode === "approval",
+    { path: ["mode"], message: "Branch adoption requires approval." },
+  );
+const deliveryCheckSchema = z
+  .object({
+    name: deliveryIdentity,
+    appId: z.number().int().positive().optional(),
+  })
+  .strict();
+const deliverySavedRowSchema = z
+  .object({
+    projectId: uuid,
+    section: z.enum(["delivery-grants", "delivery-checks"]),
+    version: revision,
+    index: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+const keptDeliveryRowSchema = z
+  .object({ savedRow: deliverySavedRowSchema, keep: z.literal(true) })
+  .strict();
+const unavailableDeliveryRowSchema = z
+  .object({
+    kind: z.literal("unavailable"),
+    label: z.literal("Unavailable saved row"),
+    savedRow: deliverySavedRowSchema,
+  })
+  .strict();
+/** Exact visible policy rows or opaque references to rows withheld by the exclusion boundary. */
+export const deliveryConfigurationSchema = z
+  .object({
+    version: revision,
+    mode: z.enum(["reviewable-pr", "through-merge"]),
+    credentialConfigured: z.boolean(),
+    branchPrefix: z.string().max(64).nullable().optional(),
+    branchPrefixUnavailable: z.literal(true).optional(),
+    grants: z
+      .array(z.union([deliveryGrantSchema, unavailableDeliveryRowSchema]))
+      .max(256),
+    requiredChecks: z
+      .array(z.union([deliveryCheckSchema, unavailableDeliveryRowSchema]))
+      .max(100),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      (value.branchPrefix === null) !==
+      (value.branchPrefixUnavailable === true)
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["branchPrefix"],
+        message: "An unavailable prefix must be withheld.",
+      });
+  });
 const localReviewCommentSchema = z
   .object({
     commentId: uuid,
@@ -2479,6 +2564,31 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .refine((ids) => new Set(ids).size === ids.length),
     })
     .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("delivery.configure"),
+      expectedVersion: revision,
+      mode: z.enum(["reviewable-pr", "through-merge"]),
+      credentialRef: envCredentialReference.nullable().optional(),
+      branchPrefix: z.string().max(64).optional(),
+      preserveBranchPrefix: z.literal(true).optional(),
+      grants: z
+        .array(z.union([deliveryGrantSchema, keptDeliveryRowSchema]))
+        .max(256),
+      requiredChecks: z
+        .array(z.union([deliveryCheckSchema, keptDeliveryRowSchema]))
+        .max(100),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (value.preserveBranchPrefix && value.branchPrefix !== undefined)
+        context.addIssue({
+          code: "custom",
+          path: ["branchPrefix"],
+          message: "Choose an explicit prefix or preserve the saved prefix.",
+        });
+    }),
   z
     .object({
       ...domainBase,
@@ -2904,6 +3014,14 @@ export const configurationReceiptSchema = z
           resourceId: uuid,
           version: revision,
           enabled: z.boolean(),
+          credentialConfigured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("delivery.configure"),
+          resourceId: uuid,
+          version: revision,
           credentialConfigured: z.boolean(),
         })
         .strict(),
@@ -3392,6 +3510,7 @@ export const projectConfigurationSchema = envelope(
           ]),
         })
         .strict(),
+      delivery: deliveryConfigurationSchema.optional(),
       placements: z.array(
         z
           .object({
@@ -4508,6 +4627,7 @@ export const operationTypeSchema = z.enum([
   "project.create",
   "project.configure",
   "routing.configure",
+  "delivery.configure",
   "capacity.configure",
   "runtime.configure",
   "assignment.apply",
