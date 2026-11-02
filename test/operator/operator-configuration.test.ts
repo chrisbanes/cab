@@ -3971,3 +3971,70 @@ test("a retried command without per-repository settings replays on a project tha
     after.version,
   );
 });
+
+test("a retried per-repository save replays its receipt, and the same key with other settings is refused", async (t) => {
+  const { f, api, projectId, hidden, policy, visible } =
+    await hiddenRepositoryFixture(t);
+  const key = randomUUID();
+  const expectedVersion = f.service.delivery().configuration(projectId).version;
+  const send = (repositories: unknown[]) =>
+    api.execute(
+      deliveryInput(projectId, { key, expectedVersion, repositories }),
+    );
+  const first = await send([visible]);
+  const after = f.service.delivery().configuration(projectId);
+  assert.equal(after.version, expectedVersion + 1);
+  // A lost response is retried with the version the first run started from: it replays, not conflicts.
+  assert.deepEqual(await send([visible]), first);
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  for (const changed of [
+    [{ ...visible, mergeMethod: "merge" }],
+    [{ ...visible, requiredChecks: [{ name: "lint" }] }],
+    [],
+  ])
+    await assert.rejects(send(changed), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual([error.status, error.code], [409, "conflict"]);
+      return true;
+    });
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  // A kept row resolves against the policy the first run changed, so its retry replays by the recorded save.
+  policy([], [{ repositoryId: "visible", requiredChecks: [{ name: hidden }] }]);
+  const keptVersion = f.service.delivery().configuration(projectId).version;
+  const keptKey = randomUUID();
+  const kept = () =>
+    api.execute(
+      deliveryInput(projectId, {
+        key: keptKey,
+        expectedVersion: keptVersion,
+        repositories: [
+          {
+            repositoryId: "visible",
+            mergeMethod: "squash",
+            requiredChecks: [
+              {
+                savedRow: {
+                  projectId,
+                  section: "delivery-checks",
+                  version: keptVersion,
+                  index: 0,
+                  repositoryId: "visible",
+                },
+                keep: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  const keptFirst = await kept();
+  assert.deepEqual(
+    f.service.delivery().configuration(projectId).repositories?.[0],
+    {
+      repositoryId: "visible",
+      mergeMethod: "squash",
+      requiredChecks: [{ name: hidden }],
+    },
+  );
+  assert.deepEqual(await kept(), keptFirst);
+});

@@ -22,6 +22,7 @@ import {
   CommandResultValidationError,
   type DomainCommandResultMap,
   LinkedRepositoryValidationError,
+  type deliveryCommandResultSchema,
   parseDomainCommandOutcome,
 } from "../core/command-results.js";
 import type {
@@ -31,6 +32,7 @@ import type {
 import type { OperatorCommentReview } from "../core/delivery.js";
 import {
   absentBranchHead,
+  canonicalMaterial,
   externalActionSchema,
   deliveryPolicySchema,
   isOperatorDeliveryCaller,
@@ -614,6 +616,58 @@ export function githubPullUrl(
  * must be one verified for the repository, and neither path segment may be a dot segment. A deleted
  * branch has no head to show.
  */
+/**
+ * Whether a delivery.configure retry agrees with the policy its key recorded: the version it led to,
+ * the mode, every explicit row in place, a kept row only where a saved row stands, and each named
+ * visible repository's method and checks, with no visible entry left out. A hidden repository's entry is
+ * cab's to derive, so it is not compared.
+ */
+function deliveryRetryMatches(
+  c: Extract<
+    z.output<typeof operatorCommandSchema>,
+    { type: "delivery.configure" }
+  >,
+  saved: z.output<typeof deliveryCommandResultSchema>,
+  /** Whether the operator can see a repository; only those are the command's to name. */
+  visible: (repositoryId: string) => boolean,
+): boolean {
+  const rows = (input: readonly object[], recorded: readonly object[]) =>
+    input.length === recorded.length &&
+    input.every(
+      (row, i) =>
+        "savedRow" in row ||
+        canonicalMaterial(row) === canonicalMaterial(recorded[i]),
+    );
+  return (
+    saved.version === c.expectedVersion + 1 &&
+    saved.mode === c.mode &&
+    rows(c.grants, saved.grants) &&
+    (c.credentialRef === undefined ||
+      saved.credentialConfigured === (c.credentialRef !== null)) &&
+    (c.preserveBranchPrefix ||
+      c.branchPrefix === undefined ||
+      saved.branchPrefix === c.branchPrefix) &&
+    (c.repositories
+      ? saved.requiredChecks.length === 0 &&
+        (saved.repositories ?? []).every(
+          (r) =>
+            !visible(r.repositoryId) ||
+            c.repositories?.some((e) => e.repositoryId === r.repositoryId),
+        ) &&
+        c.repositories.every((entry) => {
+          const recorded = saved.repositories?.find(
+            (r) => r.repositoryId === entry.repositoryId,
+          );
+          return (
+            recorded !== undefined &&
+            recorded.mergeMethod === entry.mergeMethod &&
+            rows(entry.requiredChecks, recorded.requiredChecks)
+          );
+        })
+      : rows(c.requiredChecks, saved.requiredChecks))
+  );
+}
+
 export function githubCompareUrl(
   repositoryName: string | null,
   lastPushedSha: string | null,
@@ -8580,6 +8634,26 @@ export class OperatorApi {
       );
       const recorded = domain.recordedCommand(original);
       if (recorded !== undefined) return receipt(recorded);
+    }
+    // A retried per-repository save replays before the version check. It cannot be recomputed: its
+    // kept rows and hidden repositories resolve against the policy the first run changed. So the
+    // retry must agree with what that run saved, or the key is refused like any changed payload.
+    // Other normalized commands keep their contract: a stale retry conflicts and readOperation recovers it.
+    const prior = c.repositories
+      ? domain.recordedResult(c.projectId, c.key, c.type)
+      : undefined;
+    if (prior !== undefined) {
+      const excluded = await this.exclusions(c.projectId);
+      if (!excluded) throw new OperatorApiError(503, "unavailable");
+      if (
+        !deliveryRetryMatches(c, prior.result, (id) =>
+          this.disclosable(id, excluded),
+        )
+      )
+        throw new DomainConflictError(
+          "Command key already used with different payload",
+        );
+      return commandReceipt(prior, c.key, c.projectId);
     }
     if (domain.deliveryConfiguration(c.projectId).version !== c.expectedVersion)
       throw new DomainConflictError(
