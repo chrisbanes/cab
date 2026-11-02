@@ -103,11 +103,11 @@ Every semicolon-separated foundation inventory control appears individually belo
 | /runtime/control/capacity | global capacity | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
 | /runtime/control/capacity | project override | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
 | /runtime/control/capacity | remove override | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
-| /runtime/control/dependency/add | local dependency add | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/dependency/remove | local dependency remove | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/instruction-apply | apply project instructions and profile revisions | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/stop | stop request and observation | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/resume | explicit resume | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
+| /runtime/control/dependency/add | local dependency add | /runtime/task/:id | /app/tasks/:id?section=execution | Implemented replacement in the task Execution tab through `dependency.add`; original control retained pending parity approval. |
+| /runtime/control/dependency/remove | local dependency remove | /runtime/task/:id | /app/tasks/:id?section=execution | Implemented replacement in the task Execution tab through `dependency.remove`; original control retained pending parity approval. |
+| /runtime/control/instruction-apply | apply project instructions and profile revisions | /runtime/task/:id | /app/tasks/:id | Implemented replacement in the task inspector's expanded stale assignment row through `assignment.apply`; the original control stays on `/runtime/assignment/:id`. |
+| /runtime/control/stop | stop request and observation | /runtime/task/:id | /app/tasks/:id | Implemented replacement as the task header's Stop… through `task.stop`; original control retained pending parity approval. |
+| /runtime/control/resume | explicit resume | /runtime/task/:id | /app/tasks/:id | Implemented replacement as the task header's Resume… through `task.resume`; original control retained pending parity approval. |
 | read | generation | /runtime/assignment/:id | /app/assignments/:id/recovery | Read-only curated evidence; exact advanced evidence and existing Apply remain retained. No ownership release or proof controls. |
 | read | holds | /runtime/assignment/:id | /app/assignments/:id/recovery | Read-only curated evidence; exact advanced evidence and existing Apply remain retained. No ownership release or proof controls. |
 | read | advanced recovery evidence | /runtime/assignment/:id | /app/assignments/:id/recovery | Read-only curated evidence; exact advanced evidence and existing Apply remain retained. No ownership release or proof controls. |

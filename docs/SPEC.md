@@ -765,9 +765,14 @@ The operator UI is a React application at `/app`, served with same-origin
 `/api/operator` JSON by the production `operator` command. Approval decisions, handback
 settlement, result-destination reconciliation and messages to delegated assignments
 are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
-server-rendered routes: local task edits and Resume source hold on `/task/:id`;
-Stop/Resume and recovery on
-`/runtime/task/:id`. They are reached from a task's inspector and Execution link. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
+server-rendered routes: local task edits and Resume source hold on `/task/:id`,
+reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
+shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
+local dependencies, with Add and Remove; the task header offers Stop… and, while the task
+is stopped, Resume…, and a stale assignment row applies current instructions for its next
+turn. These use the same receipted JSON commands as the CLI. The retained
+`/runtime/task/:id` page and its forms are no longer linked and remain only until the
+parity review approves their removal. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
