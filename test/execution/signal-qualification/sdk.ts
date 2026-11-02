@@ -1,12 +1,19 @@
 import type { ChildProcess } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { ClaudeSdk } from "../../../src/standalone/claude.js";
 import { record } from "./trace.js";
 
-/** Model-free SDK transport; spawning still goes through ClaudeRuntime.spawnTurnProcess. */
+/**
+ * Model-free SDK transport; spawning still goes through ClaudeRuntime.spawnTurnProcess.
+ * With `sessions`, the CLI saves the prompt to its session file only after `saveDelayMs`
+ * (an abort first prevents it) and `resume` of an unsaved session fails, as the real CLI does.
+ */
 export function signalSdk(
   file: string,
   executable: string,
   completing = false,
+  sessions?: { saveDelayMs: number },
 ): ClaudeSdk {
   return {
     createSdkMcpServer: ((options: { tools: unknown[] }) => ({
@@ -74,6 +81,39 @@ export function signalSdk(
           });
           const first = await prompt[Symbol.asyncIterator]().next();
           if (first.done) throw new Error("No admitted prompt");
+          if (sessions) {
+            const config = options.env?.CLAUDE_CONFIG_DIR;
+            const id = options.resume ?? options.sessionId;
+            if (!config || !id) throw new Error("Session fixture needs config");
+            const projects = join(config, "projects");
+            if (
+              options.resume &&
+              !(
+                existsSync(projects) &&
+                readdirSync(projects).some((d) =>
+                  existsSync(join(projects, d, `${id}.jsonl`)),
+                )
+              )
+            ) {
+              record(file, "resume-missing", { session: id });
+              child.kill("SIGTERM");
+              throw new Error("No conversation found");
+            }
+            const save = setTimeout(() => {
+              mkdirSync(join(projects, "fixture"), { recursive: true });
+              appendFileSync(
+                join(projects, "fixture", `${id}.jsonl`),
+                `${JSON.stringify({ type: "user", sessionId: id })}\n`,
+              );
+              record(file, "session-saved", { session: id });
+            }, sessions.saveDelayMs);
+            options.abortController?.signal.addEventListener(
+              "abort",
+              () => clearTimeout(save),
+              { once: true },
+            );
+            child.once("exit", () => clearTimeout(save));
+          }
           child.stdin?.write(`${JSON.stringify({ method: "sdk-active" })}\n`);
           yield {
             type: "system",
