@@ -290,6 +290,20 @@ export function selectionLine(
   return `${s.id ?? "ID unavailable"} ${kind}${s.active ? "" : " · inactive"}`;
 }
 
+export const diagnosticCaptureLabels = {
+  enhanced: "Enhanced",
+  baseline: "Baseline",
+} as const;
+/** The mode a project reports; `undefined` is an older service that does not report it. */
+export const diagnosticCaptureLine = (
+  mode: keyof typeof diagnosticCaptureLabels | undefined,
+) =>
+  mode
+    ? `Diagnostic capture is ${mode} for this project.`
+    : "The service does not report this project's mode, so it cannot be changed here.";
+export const diagnosticCaptureAppliesNote =
+  "A change applies to executions started afterwards and erases no stored diagnostics.";
+
 export const readinessNextStep =
   "Check the readiness conditions in GitHub source settings.";
 

@@ -19,7 +19,7 @@ import {
 } from "../../src/operator/contracts.js";
 import { parseSkills, skillsSummary } from "./skill-plugins.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
-import { plural } from "./settings-view.js";
+import { diagnosticCaptureLabels, plural } from "./settings-view.js";
 
 export type Values = Record<string, string | boolean | string[]>;
 export type ProjectConfigurationData = z.infer<
@@ -92,6 +92,15 @@ export function projectChanges(
   )
     lines.push(
       `Command network access ${v.commandNetworkAccess ? "enabled" : "disabled"}`,
+    );
+  const mode = diagnosticCaptureLabels;
+  if (
+    data.diagnosticCapture !== undefined &&
+    v.diagnosticCapture !== undefined &&
+    v.diagnosticCapture !== data.diagnosticCapture
+  )
+    lines.push(
+      `Diagnostic capture: ${mode[data.diagnosticCapture]} → ${mode[v.diagnosticCapture as keyof typeof mode]}`,
     );
   const instructions = privateEdit(v.instructions, revealed);
   if (instructions) lines.push(`Instructions ${instructions}`);
