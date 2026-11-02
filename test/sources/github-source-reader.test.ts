@@ -868,3 +868,114 @@ test("a blocker's status follows a repository rename by node id, not by the stor
     reason: "invalid-issue-identity",
   });
 });
+
+const commentReference = {
+  nodeId: "I_7",
+  repositoryId: "R_1",
+  repositoryName: "org/repo",
+  number: 7,
+};
+const comment = (id: number, association: string, body: string | null) => ({
+  id,
+  body,
+  author_association: association,
+  issue_url: "https://api.github.com/repos/org/repo/issues/7",
+});
+
+test("issue comments count only trusted authors' comments without cab's marker, oldest first", async () => {
+  const requests: string[] = [];
+  const reader = new GitHubHttpSourceReader("fixture-token", async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url === "https://api.github.com/repos/org/repo")
+      return new Response(
+        JSON.stringify({ node_id: "R_1", full_name: "org/repo" }),
+      );
+    if (url.includes("page=2"))
+      return new Response(
+        JSON.stringify([
+          comment(4, "MEMBER", "Member note"),
+          comment(5, "MEMBER", "Done <!-- cab-operation:x -->"),
+        ]),
+      );
+    return new Response(
+      JSON.stringify([
+        comment(1, "OWNER", "## Agent Brief\nWork"),
+        comment(2, "COLLABORATOR", "Collaborator note"),
+        comment(3, "NONE", "Drive-by note"),
+      ]),
+      {
+        headers: {
+          link: '<https://api.github.com/repos/org/repo/issues/7/comments?per_page=100&page=2>; rel="next"',
+        },
+      },
+    );
+  });
+  assert.deepEqual(await reader.readIssueComments(commentReference), {
+    complete: true,
+    comments: ["## Agent Brief\nWork", "Collaborator note", "Member note"],
+    reason: null,
+  });
+  assert.equal(
+    requests[1],
+    "https://api.github.com/repos/org/repo/issues/7/comments?per_page=100",
+  );
+});
+
+test("an issue comment read past the page bound, of another issue, or rate-limited is incomplete", async () => {
+  let page = 0;
+  const endless = new GitHubHttpSourceReader("fixture-token", async (input) => {
+    const url = String(input);
+    if (url === "https://api.github.com/repos/org/repo")
+      return new Response(
+        JSON.stringify({ node_id: "R_1", full_name: "org/repo" }),
+      );
+    page++;
+    return new Response(JSON.stringify([comment(page, "OWNER", "x")]), {
+      headers: {
+        link: `<https://api.github.com/repos/org/repo/issues/7/comments?per_page=100&page=${page + 1}>; rel="next"`,
+      },
+    });
+  });
+  const limited = await endless.readIssueComments(commentReference);
+  assert.deepEqual(
+    [limited.complete, limited.reason, limited.comments],
+    [false, "page-limit", []],
+  );
+  const other = new GitHubHttpSourceReader("fixture-token", async (input) =>
+    String(input) === "https://api.github.com/repos/org/repo"
+      ? new Response(JSON.stringify({ node_id: "R_1", full_name: "org/repo" }))
+      : new Response(
+          JSON.stringify([
+            {
+              ...comment(1, "OWNER", "x"),
+              issue_url: "https://api.github.com/repos/org/repo/issues/8",
+            },
+          ]),
+        ),
+  );
+  assert.equal(
+    (await other.readIssueComments(commentReference)).reason,
+    "invalid-issue-identity",
+  );
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  const rateLimited = new GitHubHttpSourceReader(
+    "fixture-token",
+    async (input) =>
+      String(input) === "https://api.github.com/repos/org/repo"
+        ? new Response(
+            JSON.stringify({ node_id: "R_1", full_name: "org/repo" }),
+          )
+        : new Response("limited", {
+            status: 403,
+            headers: {
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(reset),
+            },
+          }),
+  );
+  const paused = await rateLimited.readIssueComments(commentReference);
+  assert.equal(paused.complete, false);
+  assert.equal(paused.reason, "rate-limited");
+  assert.equal(paused.complete ? undefined : paused.resumeAt, reset * 1000);
+});

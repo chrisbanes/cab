@@ -1,6 +1,9 @@
 import { sourceCredentialReference } from "../core/credential-reference.js";
 import type { GitHubSelection } from "../core/github-source-contracts.js";
-import type { IssueReference } from "../core/github-source.js";
+import type {
+  IssueCommentsRead,
+  IssueReference,
+} from "../core/github-source.js";
 import { createHash } from "node:crypto";
 import {
   detectGh,
@@ -198,6 +201,19 @@ export class CredentialGitHubSourceReader implements GitHubSourceReader {
     if ("reason" in resolved)
       return { complete: false, blockers: [], reason: resolved.reason };
     const result = await resolved.reader.readBlockers(reference);
+    this.pauses?.note(resolved.token, result);
+    return result;
+  }
+
+  async readIssueComments(
+    reference: IssueReference,
+  ): Promise<IssueCommentsRead> {
+    const resolved = await this.delegate();
+    if ("reason" in resolved)
+      return { complete: false, comments: [], reason: resolved.reason };
+    if (!resolved.reader.readIssueComments)
+      return { complete: false, comments: [], reason: "comments-unavailable" };
+    const result = await resolved.reader.readIssueComments(reference);
     this.pauses?.note(resolved.token, result);
     return result;
   }

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { adfToMarkdown } from "../core/adf-markdown.js";
 import type {
+  IssueCommentsRead,
+  IssueReference,
   IssueSnapshot,
   SelectionSnapshot,
 } from "../core/github-source.js";
@@ -87,6 +89,32 @@ const parseSchema = z
   })
   .passthrough();
 
+const commentId = z.string().regex(/^\d{1,20}$/);
+const commentsPageSchema = z
+  .object({
+    comments: z.array(
+      z.object({ id: commentId, body: z.unknown() }).passthrough(),
+    ),
+    total: z.number().int().nonnegative(),
+  })
+  .passthrough();
+const commentListSchema = z
+  .object({
+    values: z.array(
+      z
+        .object({
+          id: commentId,
+          properties: z
+            .array(z.object({ key: z.string() }).passthrough())
+            .default([]),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+/** The comment property cab's own Jira comments carry; such a comment never counts. */
+const cabCommentProperty = "cab-operation";
+
 /** A Jira Cloud site's JQL reads; the credential is resolved on every call. */
 export class JiraSourceReader {
   constructor(
@@ -161,6 +189,70 @@ export class JiraSourceReader {
       return {
         complete: false,
         issues,
+        reason: error instanceof JiraFailure ? error.reason : "reader-error",
+        ...(error instanceof JiraFailure && error.resumeAt !== undefined
+          ? { resumeAt: error.resumeAt }
+          : {}),
+      };
+    }
+  }
+
+  /**
+   * The issue's comments, oldest first, as Markdown, without cab's own (marked by its comment
+   * property). Comments are listed by page, then their properties are read in batches.
+   */
+  async readIssueComments(
+    reference: IssueReference,
+  ): Promise<IssueCommentsRead> {
+    try {
+      const access = this.resolved();
+      if (!/^\d{1,20}$/.test(reference.nodeId))
+        throw new JiraFailure("malformed");
+      const listed: { id: string; body: unknown }[] = [];
+      for (let page = 0; ; page++) {
+        if (page >= maxPages) throw new JiraFailure("page-limit");
+        const result = commentsPageSchema.safeParse(
+          await jiraRequest(
+            this.fetcher,
+            access,
+            `/issue/${reference.nodeId}/comment?startAt=${listed.length}&maxResults=${pageSize}&orderBy=created`,
+          ),
+        );
+        if (!result.success) throw new JiraFailure("malformed");
+        listed.push(...result.data.comments);
+        if (listed.length >= result.data.total) break;
+        if (!result.data.comments.length) throw new JiraFailure("malformed");
+      }
+      const marked = new Set<string>();
+      for (let i = 0; i < listed.length; i += pageSize) {
+        const ids = listed.slice(i, i + pageSize).map((c) => Number(c.id));
+        const result = commentListSchema.safeParse(
+          await jiraRequest(
+            this.fetcher,
+            access,
+            "/comment/list?expand=properties",
+            { method: "POST", body: { ids } },
+          ),
+        );
+        if (!result.success || result.data.values.length !== ids.length)
+          throw new JiraFailure("malformed");
+        for (const comment of result.data.values)
+          if (comment.properties.some((p) => p.key === cabCommentProperty))
+            marked.add(comment.id);
+      }
+      return {
+        complete: true,
+        comments: listed
+          .filter((comment) => !marked.has(comment.id))
+          .map((comment) =>
+            comment.body == null ? "" : adfToMarkdown(comment.body),
+          ),
+        reason: null,
+      };
+    } catch (error) {
+      return {
+        complete: false,
+        comments: [],
         reason: error instanceof JiraFailure ? error.reason : "reader-error",
         ...(error instanceof JiraFailure && error.resumeAt !== undefined
           ? { resumeAt: error.resumeAt }

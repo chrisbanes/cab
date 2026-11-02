@@ -2,6 +2,7 @@ import type { DomainStore } from "../core/domain.js";
 import type {
   BlockerSnapshot,
   GitHubSourceStore,
+  IssueCommentsRead,
   SelectionSnapshot,
 } from "../core/github-source.js";
 import type { JiraReaderFactory } from "./issue-tracker.js";
@@ -35,6 +36,7 @@ export class JiraSynchronizer {
   }
 
   private async perform(): Promise<void> {
+    const briefsRead = new Set<string>();
     // An issue matched by projects on one site is stored once, so every read of that site
     // requests the select fields any of its projects' rules need, not just its own.
     const fieldsBySite = new Map<string, string[]>();
@@ -84,19 +86,45 @@ export class JiraSynchronizer {
         // read leaves them, and reconcileSelection has already marked them unknown.
         if (!committed || !snapshot.complete) continue;
         for (const issue of snapshot.issues) {
-          if (!store.issue(issue.nodeId)) continue;
+          const imported = store.issue(issue.nodeId);
+          if (!imported) continue;
+          const reference = {
+            nodeId: issue.nodeId,
+            repositoryId: issue.repositoryId,
+            repositoryName: issue.repositoryName,
+            number: issue.number,
+          };
           const blockers: BlockerSnapshot = issue.blockedBy
             ? { complete: true, blockers: issue.blockedBy, reason: null }
             : { complete: false, blockers: [], reason: "links-unread" };
           store.reconcileBlockers(issue.nodeId, blockers, {
             ...binding,
             selectionId: selection.id,
-            reference: {
-              nodeId: issue.nodeId,
-              repositoryId: issue.repositoryId,
-              repositoryName: issue.repositoryName,
-              number: issue.number,
-            },
+            reference,
+          });
+          // Only an open task reads its issue brief, once per pass; Done tasks keep their last one.
+          const key = `${config.instance}\n${issue.nodeId}`;
+          if (
+            briefsRead.has(key) ||
+            this.domain.task(String(imported.taskId)).state !== "open"
+          )
+            continue;
+          briefsRead.add(key);
+          const comments: IssueCommentsRead =
+            (this.pausedUntil.get(config.instance) ?? 0) > Date.now()
+              ? { complete: false, comments: [], reason: "rate-limited" }
+              : await reader.readIssueComments(reference).catch(() => ({
+                  complete: false as const,
+                  comments: [],
+                  reason: "reader-error",
+                }));
+          if (this.stopped) return;
+          if (!comments.complete && comments.resumeAt !== undefined)
+            this.pausedUntil.set(config.instance, comments.resumeAt);
+          store.reconcileIssueBrief(issue.nodeId, comments, {
+            ...binding,
+            selectionId: selection.id,
+            reference,
           });
         }
       }

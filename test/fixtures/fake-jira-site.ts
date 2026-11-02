@@ -264,6 +264,7 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
         comments: issue.comments.map((c) => ({
           id: c.id,
           author: { accountId: c.accountId },
+          body: c.body,
         })),
       });
     if (request.method === "POST" && part === "comment") {

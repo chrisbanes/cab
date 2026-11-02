@@ -5,6 +5,7 @@ import type {
   SelectionSnapshot,
   IssueStatus,
   BlockerSnapshot,
+  IssueCommentsRead,
   IssueReference,
 } from "../core/github-source.js";
 export type {
@@ -12,6 +13,7 @@ export type {
   SelectionSnapshot,
   IssueStatus,
   BlockerSnapshot,
+  IssueCommentsRead,
   IssueReference,
 } from "../core/github-source.js";
 import {
@@ -125,7 +127,20 @@ export interface GitHubSourceReader {
   readSelection(selection: GitHubSelection): Promise<SelectionSnapshot>;
   readIssueStatus(reference: IssueReference): Promise<IssueStatus>;
   readBlockers(reference: IssueReference): Promise<BlockerSnapshot>;
+  /** The issue's counted comments for its issue brief; a reader without it leaves the brief alone. */
+  readIssueComments?(reference: IssueReference): Promise<IssueCommentsRead>;
 }
+
+const commentSchema = z.object({
+  id: z.number().int().positive(),
+  body: z.string().nullable(),
+  author_association: z.string(),
+  issue_url: z.string(),
+});
+/** Comment authors whose comments count toward an issue brief. */
+const trustedAssociations = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/** cab's own comments carry its operation marker and never count. */
+const cabMarker = "<!-- cab-operation:";
 
 const MAX_PAGES = 100;
 
@@ -423,6 +438,44 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
       };
     } catch (error) {
       return { complete: false, blockers, ...incomplete(error) };
+    }
+  }
+
+  async readIssueComments(
+    reference: IssueReference,
+  ): Promise<IssueCommentsRead> {
+    try {
+      const [owner, name, extra] = reference.repositoryName.split("/");
+      if (!owner || !name || extra)
+        throw new Error("invalid-repository-reference");
+      const repository = await this.repository(owner, name);
+      if (repository.node_id !== reference.repositoryId)
+        throw new Error("repository-mismatch");
+      const issueUrl = `${api}/repos/${repository.full_name}/issues/${reference.number}`;
+      const values = await this.pages(
+        `${api}/repos/${repository.full_name.split("/").map(encodeURIComponent).join("/")}/issues/${reference.number}/comments?per_page=100`,
+        commentSchema,
+      );
+      if (
+        values.some(
+          (comment) =>
+            comment.issue_url.toLowerCase() !== issueUrl.toLowerCase(),
+        )
+      )
+        throw new Error("invalid-issue-identity");
+      return {
+        complete: true,
+        comments: values
+          .filter(
+            (comment) =>
+              trustedAssociations.has(comment.author_association) &&
+              !comment.body?.includes(cabMarker),
+          )
+          .map((comment) => comment.body ?? ""),
+        reason: null,
+      };
+    } catch (error) {
+      return { complete: false, comments: [], ...incomplete(error) };
     }
   }
 
