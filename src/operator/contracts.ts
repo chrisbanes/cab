@@ -1767,6 +1767,11 @@ export const taskSchema = envelope(
           projectId: uuid,
           title: safeText,
           outcome: safeText,
+          /**
+           * Whether `title` and `outcome` are the stored text, not a redacted or withheld projection;
+           * only then may a client send them back.
+           */
+          textExact: z.boolean(),
           /** The issue's brief comment and later trusted notes; null without one or when withheld. */
           issueBrief: z.string().max(32768).nullable(),
           /** Notes or brief text were cut to fit the 32 KB cap. */

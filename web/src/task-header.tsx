@@ -91,6 +91,7 @@ export function taskHeaderReport(
       : null,
     edit:
       data.source === null &&
+      data.task.textExact &&
       data.task.title !== null &&
       data.task.outcome !== null
         ? {

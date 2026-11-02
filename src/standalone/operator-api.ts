@@ -3900,6 +3900,9 @@ export class OperatorApi {
         projectId,
         title: this.safe(t.title, excluded),
         outcome: this.safe(t.outcome, excluded),
+        textExact:
+          this.disclosable(t.title, excluded) &&
+          this.disclosable(t.outcome, excluded),
         issueBrief: this.safe(issueBrief?.text, excluded, issueBriefByteLimit),
         issueBriefTruncated: issueBrief?.truncated ?? false,
         version: Number(t.version),

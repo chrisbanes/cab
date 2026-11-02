@@ -1565,6 +1565,56 @@ test("imported projections validate provider fields and distinguish attempted sy
   );
   assert.doesNotMatch(JSON.stringify(read), /PRIVATE PROVIDER ERROR/);
 });
+test("the task read says whether title and outcome are the stored text, so a redacted one is never sent back", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const taskId = randomUUID();
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    title: "Plain title",
+    outcome: "Plain outcome",
+    ready: false,
+  });
+  const read = async () => (await api.readTask(taskId)).data.task;
+  assert.equal((await read()).textExact, true);
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: taskId,
+    expectedVersion: Number(d.task(taskId).version),
+    title: "Rotate the Canary value",
+  });
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: Number(d.project(ids.projectId).version),
+    instructions: "Canary value",
+  });
+  const redacted = await read();
+  assert.match(String(redacted.title), /\[redacted\]/);
+  assert.equal(redacted.textExact, false);
+  // A Ready-only command leaves the stored title as it was.
+  await api.execute({
+    type: "task.configure",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: taskId,
+    expectedVersion: redacted.version,
+    ready: true,
+  });
+  assert.equal(d.task(taskId).title, "Rotate the Canary value");
+});
 test("source.review resumes a source hold through the command flow and refuses definitely", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

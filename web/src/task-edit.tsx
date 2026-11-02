@@ -29,6 +29,9 @@ export interface TaskEditOffer {
   version: number;
 }
 
+/** A draft filled from a read, remembering the values it started from. */
+const fresh = (edit: TaskEditOffer) => ({ ...edit, base: edit });
+
 /**
  * Edit task… for a local task: title, desired outcome and Ready, sent as `task.configure` at the
  * version read. After a conflict the fields adopt the newest read, so the next save is deliberate.
@@ -48,7 +51,7 @@ export function EditTask({
   onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false),
-    [draft, setDraft] = useState(edit),
+    [draft, setDraft] = useState(fresh(edit)),
     id = useId();
   const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
@@ -64,7 +67,7 @@ export function EditTask({
         window.dispatchEvent(new Event(taskChangedEvent));
     },
   );
-  const { title, outcome: text, ready, version } = edit;
+  const { version } = edit;
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a new read after a conflict replaces the draft.
   useEffect(() => {
     if (
@@ -72,19 +75,20 @@ export function EditTask({
       outcome.command.type === "task.configure" &&
       outcome.command.expectedVersion !== version
     )
-      setDraft({ ...edit, version });
+      setDraft(fresh(edit));
   }, [outcome, version]);
   // As the retained page and the composer: a task keeps a title and a desired outcome.
-  const valid = draft.title.trim() !== "" && draft.outcome.trim() !== "";
+  const changed = {
+    ...(draft.title !== draft.base.title && { title: draft.title }),
+    ...(draft.outcome !== draft.base.outcome && { outcome: draft.outcome }),
+    ...(draft.ready !== draft.base.ready && { ready: draft.ready }),
+  };
+  const valid =
+    draft.title.trim() !== "" &&
+    draft.outcome.trim() !== "" &&
+    Object.keys(changed).length > 0;
   // Opening starts from the latest read, not from an earlier abandoned draft.
-  const reset = () =>
-    setDraft({
-      projectId: edit.projectId,
-      title,
-      outcome: text,
-      ready,
-      version,
-    });
+  const reset = () => setDraft(fresh(edit));
   return (
     <Dialog
       open={open}
@@ -118,9 +122,8 @@ export function EditTask({
                 taskId,
                 // The version the draft was filled from, not a later read that arrived while editing.
                 expectedVersion: draft.version,
-                title: draft.title,
-                outcome: draft.outcome,
-                ready: draft.ready,
+                // Only what the operator changed: an untouched field is never sent back.
+                ...changed,
               }),
             );
           }}

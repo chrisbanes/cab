@@ -220,3 +220,57 @@ test("an imported task has no Edit task… and a phone keeps it in Task actions"
   await page.keyboard.press("Escape");
   assert.equal(await trigger(page).isVisible(), false);
 });
+
+test("a title or outcome the read redacts is never offered for editing, and Ready alone sends only Ready", async (_t, j) => {
+  const { f, open } = await start(j, { width: 1366, height: 900 });
+  const redacted = await seedReviewTask(
+    f,
+    "Redacted project",
+    "Rotate the Canary value",
+    "Outcome",
+  );
+  const plain = await seedReviewTask(
+    f,
+    "Plain project",
+    "Plain title",
+    "Plain outcome",
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: redacted.projectId,
+    expectedVersion: Number(d.project(redacted.projectId).version),
+    instructions: "Canary value",
+  });
+  const { web, page } = await open();
+  await signIn(page, web, redacted.taskId);
+  await page.getByRole("link", { name: "Execution" }).waitFor();
+  assert.equal(await trigger(page).count(), 0);
+
+  const configures: Array<Record<string, unknown>> = [];
+  page.on("request", (request) => {
+    const body = request.postData() ?? "";
+    if (request.method() === "POST" && body.includes('"task.configure"'))
+      configures.push(JSON.parse(body));
+  });
+  await page.goto(`${web.origin}/app/tasks/${plain.taskId}`);
+  await trigger(page).click();
+  const dialog = page.getByRole("dialog", { name: "Edit task" });
+  // Nothing changed yet: there is nothing to save.
+  assert.equal(
+    await dialog
+      .getByRole("button", { name: "Save", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await dialog.getByLabel("Ready").check();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await dialog.getByText("Saved.").waitFor();
+  assert.equal(configures.length, 1);
+  assert.equal(configures[0]?.ready, true);
+  assert.equal("title" in (configures[0] ?? {}), false);
+  assert.equal("outcome" in (configures[0] ?? {}), false);
+  assert.equal(d.task(plain.taskId).title, "Plain title");
+});
