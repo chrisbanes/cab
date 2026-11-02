@@ -6518,10 +6518,10 @@ export class OperatorApi {
             links.links.map((link) => link.repositoryId),
             excluded,
           )),
-          credential: await this.service.deliveryCredentialStatus(
-            projectId,
-            scope,
-          ),
+          // Omitted, never guessed, when the status cannot be read, as for withheld rows.
+          credential: await this.service
+            .deliveryCredentialStatus(projectId, scope)
+            .catch(() => undefined),
         },
         statusMapping: this.statusMappingView(
           projectId,

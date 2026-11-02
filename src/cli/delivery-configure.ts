@@ -185,7 +185,7 @@ export const deliveryConfigureCommands = new Map<string, WriteCommand>([
             changes.push({ field: "mode", from: delivery.mode, to: mode });
           if (level === "merge-when-ready")
             notes.push(
-              "Merge when ready lets the lead merge without asking once the merge gate reports no blockers; cab cannot unmerge.",
+              "Merge when ready lets the lead merge without asking once the merge gate reports no blockers; a merge cannot be undone from here.",
             );
         }
 

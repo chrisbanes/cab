@@ -1715,8 +1715,11 @@ test("delivery JSON preserves every accepted action, supplemental scope and opti
     version: 2,
     credentialConfigured: false,
   });
-  const visible = (await api.readProjectConfiguration(projectId)).data
-    .delivery!;
+  // The credential status is asserted on its own; it depends on the host's gh.
+  const { credential, ...visible } = (
+    await api.readProjectConfiguration(projectId)
+  ).data.delivery!;
+  assert.equal(credential?.configured, false);
   assert.deepEqual(visible, {
     version: 2,
     mode: "through-merge",
@@ -2262,7 +2265,7 @@ test("delivery accepts policy row limits and rejects malformed shapes without wr
       },
       "requiredChecks",
     ],
-    [{ credentialRef: "gh:github.com" }, "credentialRef"],
+    [{ credentialRef: "gh:example.com" }, "credentialRef"],
     [{ credentialRef: "env:not_valid" }, "credentialRef"],
     [{ branchPrefix: "../unsafe" }, "branchPrefix"],
     [{ branchPrefix: "x".repeat(65) }, "branchPrefix"],
