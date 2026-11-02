@@ -216,9 +216,16 @@ Reconciliation is irreversible, releases only the verified execution, and dispat
 nothing. Planned shutdown instead trusts its exact acknowledged failed terminal
 plus ended callbacks/effects; neither proof substitutes for the other. Browser and
 fake-process evidence do not qualify real-runtime interruption or host restart.
-Finite disposable real-runtime signal and CLI recovery evidence for both adapters
-remains required before claiming that scenario qualified; no production incident or
-installed prototype may be used as a fixture.
+Real-runtime qualification uses the finite disposable six-case driver
+(`test/execution/signal-qualification/live-signals.mjs --live`). The case
+matrix is group SIGINT and service-PID SIGTERM, each with two restarts, plus one
+uncertain bound-turn CLI recovery, for each runtime. It needs a root grant and
+at most 20 model turns. No production incident or installed prototype may be used
+as a fixture. The [dated record](evidence/issue-1416-signal-recovery-2026-11-02.md)
+qualifies both adapters' foreground signal restart and CLI bound-turn recovery for
+non-imported tasks. It does not qualify the installed LaunchAgent restart, repeated
+signals, descendant containment, or the restart of imported tasks, which still hold
+(#1454).
 
 ### Operator CLI acceptance
 

@@ -131,13 +131,23 @@ directories with a live, missing or unreadable owner are kept. Test evidence
 outlives the run only when `CAB_TEST_EVIDENCE_DIR` is set, as in CI. Harnesses run
 directly (the `*:live` commands) and `node --test` invocations bypass the runner and
 manage their own temp directories. The per-run override applies to POSIX `TMPDIR`
-only.
+only. A direct `node --test` of a suite that starts a service, such as
+`dist/test/execution/process-signal-shutdown.test.js`, needs a symlink-free
+`TMPDIR`. On macOS the default `/var/folders/...` resolves through `/var`, and
+the service refuses that data directory, so pass the resolved `/private/var/...`
+path as the runner does.
 
 Real App Server
 qualification is separate and runs only when requested explicitly, for example
 `npm run recovery:live`, `npm run planned-restart:live` and `npm run routing:live`,
 which require their `--live` opt-in
-(see the other `*:live` scripts in `package.json`). These checks do not prove
+(see the other `*:live` scripts in `package.json`). Signal restart and bound-turn
+recovery use `node test/execution/signal-qualification/live-signals.mjs --live
+--max-turns 20 --max-attempts 1 --deadline-ms 1800000 --grant GRANT_FILE`. It
+refuses without a root grant naming the clean head and tree, and it rebuilds
+`dist/` first. Its offline contract test runs without opt-in. Set
+`CAB_SIGNAL_OFFLINE_MATRIX=1` on macOS to also run the full six-case journey over
+model-free fake runtimes before a live attempt. These checks do not prove
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.
 
