@@ -330,6 +330,17 @@ every current admission check, without using the transient-retry allowance. A tu
 that completes within the interval completes normally. Everything else, including
 drafting and direct turns, keeps today's restart hold.
 
+Startup re-observes every imported task's provider state, which revises the task.
+A shutdown requeue of an imported task whose revision was current when the service
+stopped takes the re-observed revision once complete reconciliation shows the task
+still admissible, then runs under every admission check. A readiness, blocker,
+membership or source-hold change while the service was down holds the requeue with
+that reason, not as stale. A paused project or an incomplete provider read keeps it
+waiting with that allowance, and revisions or re-observation during the wait are
+absorbed when admission is then clean; a structural change during the wait holds it.
+Only a revision after the requeue has taken the re-observed revision holds it as
+stale, as for local tasks.
+
 Owned Codex and Claude runtime/probe children start in separate process groups,
 with piped stdio and retained lifecycle ownership. Terminal group SIGINT therefore
 reaches cab's handler without pre-empting its protocol interrupt. cab still awaits

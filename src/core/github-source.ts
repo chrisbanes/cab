@@ -710,6 +710,16 @@ export class GitHubSourceStore {
     });
   }
 
+  /** Each imported task's current version, for every provider; read before startup invalidation. */
+  importedTaskVersions(): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        "SELECT id, version FROM domain_tasks WHERE id IN (SELECT taskId FROM external_items)",
+      )
+      .all() as { id: string; version: number }[];
+    return new Map(rows.map((row) => [row.id, Number(row.version)]));
+  }
+
   invalidateProviderObservations(): void {
     transaction(this.db, () => {
       this.db
