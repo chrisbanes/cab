@@ -28,6 +28,11 @@ interface RunnerResult {
   stdout: { lines: string[]; omitted: number; truncated: number };
   stderr: { lines: string[]; omitted: number; truncated: number };
 }
+interface Guard {
+  result: RunnerResult;
+  links: string[];
+  incomplete: string | null;
+}
 const runner = (await import(
   pathToFileURL(resolve("scripts/run-tests.mjs")).href
 )) as {
@@ -67,11 +72,39 @@ const runner = (await import(
     operatorCodexHome: string,
     maxDepth?: number,
   ): Promise<string[]>;
-  guardRunLinks<T>(
+  guardRunLinks(
     root: string,
     operatorCodexHome: string,
-    run: () => Promise<T>,
-  ): Promise<{ result: T; links: string[] }>;
+    run: () => Promise<RunnerResult>,
+    scanLinks?: (
+      root: string,
+      home: string,
+      maxDepth?: number,
+    ) => Promise<string[]>,
+  ): Promise<Guard>;
+  finishRun(
+    result: RunnerResult,
+    guard: Guard,
+    name: string,
+    options?: { evidenceRoot?: string; stderr?: { write(text: string): void } },
+  ): Promise<number>;
+  runGuarded(
+    root: string,
+    operatorCodexHome: string,
+    args: string[],
+    env: NodeJS.ProcessEnv,
+    name: string,
+    options?: {
+      evidenceRoot?: string;
+      stderr?: { write(text: string): void };
+      process?: { forwardOutput?: boolean; forwardSignals?: boolean };
+    },
+  ): Promise<number>;
+  main(
+    base: string,
+    environment: NodeJS.ProcessEnv,
+    run: (root: string, operatorCodexHome: string) => Promise<void>,
+  ): Promise<void>;
   sweepStaleRunTempRoots(base: string, alive?: (pid: number) => boolean): void;
   runnerStatus(
     result: Pick<RunnerResult, "timedOut" | "exitObserved" | "code"> & {
@@ -629,4 +662,137 @@ test("the runner points CODEX_HOME at an absent directory inside the run root", 
       runner.isolateOperatorCodex(root, fallback),
       "/home/operator/.codex",
     );
+  }));
+
+const captured = () => {
+  const chunks: string[] = [];
+  return {
+    write: (text: string) => void chunks.push(text),
+    text: () => chunks.join(""),
+  };
+};
+
+/** Runs a short child under the whole runner path (guard, status, evidence) and reads back what it recorded. */
+const runGuardedChild = async (
+  base: string,
+  root: string,
+  operator: string,
+  script: string,
+) => {
+  const evidenceRoot = join(base, "evidence");
+  await mkdir(evidenceRoot, { mode: 0o700 });
+  const stderr = captured();
+  const status = await runner.runGuarded(
+    root,
+    operator,
+    ["-e", script],
+    childEnv(root),
+    "wiring",
+    {
+      evidenceRoot,
+      stderr,
+      process: { forwardOutput: false, forwardSignals: false },
+    },
+  );
+  const manifest = (await readdir(evidenceRoot, { recursive: true })).find(
+    (entry) => entry.endsWith("manifest.json"),
+  );
+  assert.ok(manifest);
+  const recorded = JSON.parse(
+    await readFile(join(evidenceRoot, manifest), "utf8"),
+  ) as { wrapperStatus: number; operatorLoginLinks: string[] };
+  return { status, stderr: stderr.text(), recorded };
+};
+
+test("a guard hit fails the run and its evidence manifest", () =>
+  withBase(async (base) => {
+    const root = runner.createRunTempRoot(base);
+    const operator = join(base, "operator", ".codex");
+    await mkdir(operator, { recursive: true });
+    const { status, stderr, recorded } = await runGuardedChild(
+      base,
+      root,
+      operator,
+      transientLink(root, operator),
+    );
+    assert.equal(status, 1);
+    assert.match(stderr, /linked the operator Codex login/);
+    assert.match(stderr, /^ {2}x\/data\/codex\/home\/auth\.json$/m);
+    assert.equal(stderr.includes(operator), false);
+    assert.equal(recorded.wrapperStatus, 1);
+    assert.deepEqual(recorded.operatorLoginLinks, [
+      "x/data/codex/home/auth.json",
+    ]);
+  }));
+
+test(
+  "an unreadable directory in the run root neither crashes the guard nor changes the run status",
+  { skip: process.getuid?.() === 0 },
+  () =>
+    withBase(async (base) => {
+      const root = runner.createRunTempRoot(base);
+      const operator = join(base, "operator", ".codex");
+      const locked = join(root, "locked");
+      await mkdir(join(locked, "inner"), { recursive: true });
+      await chmod(locked, 0o000);
+      try {
+        const { status, stderr, recorded } = await runGuardedChild(
+          base,
+          root,
+          operator,
+          "process.exitCode=3",
+        );
+        assert.equal(status, 3);
+        assert.equal(stderr, "");
+        assert.equal(recorded.wrapperStatus, 3);
+      } finally {
+        await chmod(locked, 0o700);
+      }
+    }),
+);
+
+test("a failed final scan reports an incomplete guard and keeps the run status", () =>
+  withBase(async (base) => {
+    const root = runner.createRunTempRoot(base);
+    const guard = await runner.guardRunLinks(
+      root,
+      join(base, "operator"),
+      () => runner.runTestProcess(["-e", "process.exitCode=3"]),
+      () =>
+        Promise.reject(
+          Object.assign(new Error(`${root} broke`), { code: "EIO" }),
+        ),
+    );
+    assert.equal(guard.incomplete, "EIO");
+    assert.equal(guard.result.code, 3);
+    const stderr = captured();
+    const status = await runner.finishRun(guard.result, guard, "incomplete", {
+      evidenceRoot: join(base, "evidence"),
+      stderr,
+    });
+    assert.equal(status, 3);
+    assert.equal(
+      stderr.text().startsWith("Codex login guard scan incomplete (EIO)"),
+      true,
+    );
+    assert.equal(stderr.text().includes(root), false);
+  }));
+
+test("main gives the test tree a disposable CODEX_HOME and TMPDIR inside the run root", () =>
+  withBase(async (base) => {
+    const environment: NodeJS.ProcessEnv = { CODEX_HOME: join(base, "real") };
+    let seen:
+      | { root: string; home: string; environment: NodeJS.ProcessEnv }
+      | undefined;
+    await runner.main(base, environment, async (root, home) => {
+      seen = { root, home, environment: { ...environment } };
+    });
+    assert.ok(seen);
+    assert.equal(seen.environment.TMPDIR, seen.root);
+    assert.equal(
+      seen.environment.CODEX_HOME,
+      join(seen.root, "operator-codex"),
+    );
+    assert.equal(seen.home, join(base, "real"));
+    assert.deepEqual(await readdir(base), []);
   }));

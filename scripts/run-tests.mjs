@@ -235,7 +235,12 @@ export function runnerStatus(result) {
     : 125;
 }
 
-export async function recordRunnerEvidence(result, name, evidenceRoot) {
+export async function recordRunnerEvidence(
+  result,
+  name,
+  evidenceRoot,
+  guard = { links: [], incomplete: null },
+) {
   let timer;
   try {
     return await Promise.race([
@@ -252,7 +257,9 @@ export async function recordRunnerEvidence(result, name, evidenceRoot) {
           JSON.stringify(
             {
               ...manifest,
-              wrapperStatus: runnerStatus(result),
+              wrapperStatus: guardedStatus(result, guard),
+              operatorLoginLinks: guard.links,
+              guardScanIncomplete: guard.incomplete,
               nodeVersion: process.version,
               exitProof: "owned root child only",
             },
@@ -479,6 +486,10 @@ const within = (path, directory) =>
  * operator Codex home, or a `codex/home/auth.json` link leaving the root. Reads link targets
  * only, never follows links or opens the login file.
  */
+// Entries that vanish, or that this user cannot read, are skipped rather than failing the run.
+const skippable = (error) =>
+  ["ENOENT", "ENOTDIR", "EACCES", "EPERM", "EINVAL"].includes(error?.code);
+
 export async function findOperatorLoginLinks(
   root,
   operatorCodexHome,
@@ -499,7 +510,7 @@ export async function findOperatorLoginLinks(
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (error) {
-      if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return;
+      if (skippable(error)) return;
       throw error;
     }
     for (const entry of entries) {
@@ -509,7 +520,7 @@ export async function findOperatorLoginLinks(
         try {
           target = resolve(directory, await readlink(path));
         } catch (error) {
-          if (error?.code === "ENOENT" || error?.code === "ENOTDIR") continue;
+          if (skippable(error)) continue;
           throw error;
         }
         const name = relative(root, path);
@@ -531,7 +542,12 @@ export async function findOperatorLoginLinks(
  * Runs `run()` while scanning the root once a second for operator-login links, then once more
  * after it ends, because tests remove their own roots and an end-only scan would miss most links.
  */
-export async function guardRunLinks(root, operatorCodexHome, run) {
+export async function guardRunLinks(
+  root,
+  operatorCodexHome,
+  run,
+  scanLinks = findOperatorLoginLinks,
+) {
   const links = new Set();
   let scan = Promise.resolve();
   let scanning = false;
@@ -539,7 +555,7 @@ export async function guardRunLinks(root, operatorCodexHome, run) {
     if (scanning) return;
     scanning = true;
     // Depth 6 reaches <test-root>/<dir>/data/codex/home/auth.json; the final scan is unbounded.
-    scan = findOperatorLoginLinks(root, operatorCodexHome, 6)
+    scan = scanLinks(root, operatorCodexHome, 6)
       .then((found) => {
         for (const link of found) links.add(link);
       })
@@ -553,16 +569,73 @@ export async function guardRunLinks(root, operatorCodexHome, run) {
     clearInterval(timer);
     await scan;
   }
-  for (const link of await findOperatorLoginLinks(root, operatorCodexHome))
-    links.add(link);
-  return { result, links: [...links].sort() };
+  // A failed final scan must not replace the run's own status; report it as incomplete.
+  let incomplete = null;
+  try {
+    for (const link of await scanLinks(root, operatorCodexHome))
+      links.add(link);
+  } catch (error) {
+    incomplete = String(error?.code ?? error?.name ?? "Error");
+  }
+  return { result, links: [...links].sort(), incomplete };
 }
 
-async function main() {
+/** The runner's exit status: the run's own, else 1 when the guard found an operator-login link. */
+export const guardedStatus = (result, guard) =>
+  runnerStatus(result) || (guard.links.length ? 1 : 0);
+
+/** Reports the guard outcome, records evidence and returns the exit status for the run. */
+export async function finishRun(
+  result,
+  guard,
+  name,
+  { evidenceRoot, stderr = process.stderr } = {},
+) {
+  if (guard.links.length)
+    stderr.write(
+      `Test run linked the operator Codex login inside its temp root:\n${guard.links.map((link) => `  ${link}\n`).join("")}`,
+    );
+  if (guard.incomplete)
+    stderr.write(`Codex login guard scan incomplete (${guard.incomplete})\n`);
+  const status = guardedStatus(result, guard);
+  try {
+    await recordRunnerEvidence(result, name, evidenceRoot, guard);
+  } catch {
+    stderr.write("Runner evidence incomplete\n");
+    return status || 1;
+  }
+  return status;
+}
+
+/** Runs the test process under the link guard and returns the exit status. */
+export async function runGuarded(
+  root,
+  operatorCodexHome,
+  args,
+  env,
+  name,
+  options = {},
+) {
+  const guard = await guardRunLinks(root, operatorCodexHome, () =>
+    runTestProcess(args, {
+      env,
+      forwardOutput: true,
+      forwardSignals: true,
+      ...options.process,
+    }),
+  );
+  return finishRun(guard.result, guard, name, options);
+}
+
+export async function main(
+  base = realpathSync(tmpdir()),
+  environment = process.env,
+  run = runSelected,
+) {
   // shortcut: TMPDIR is the POSIX temp root; Windows is not a supported test platform.
-  await withRunTempRoot(realpathSync(tmpdir()), (root) => {
-    process.env.TMPDIR = root;
-    return runSelected(root, isolateOperatorCodex(root, process.env));
+  await withRunTempRoot(base, (root) => {
+    environment.TMPDIR = root;
+    return run(root, isolateOperatorCodex(root, environment));
   });
 }
 
@@ -618,39 +691,23 @@ async function runSelected(root, operatorCodexHome) {
     );
     process.stdout.write(`Test timings: ${destination}\n`);
   }
-  const { result, links } = await guardRunLinks(root, operatorCodexHome, () =>
-    runTestProcess(args, {
-      env: {
-        ...process.env,
-        CAB_TEST_PROFILE: options.profile,
-        CAB_TEST_BROWSER_ENGINE: {
-          all: "all",
-          chromium: "chromium",
-          service: "none",
-        }[options.profile],
-      },
-      forwardOutput: true,
-      forwardSignals: true,
-    }),
+  process.exitCode = await runGuarded(
+    root,
+    operatorCodexHome,
+    args,
+    {
+      ...process.env,
+      CAB_TEST_PROFILE: options.profile,
+      CAB_TEST_BROWSER_ENGINE: {
+        all: "all",
+        chromium: "chromium",
+        service: "none",
+      }[options.profile],
+    },
+    preflight
+      ? "fixture preflight"
+      : `${options.suite} ${options.profile} shard ${options.shard}/${options.shards}`,
   );
-  if (links.length)
-    process.stderr.write(
-      `Test run linked the operator Codex login inside its temp root:\n${links.map((link) => `  ${link}\n`).join("")}`,
-    );
-  const status = runnerStatus(result) || (links.length ? 1 : 0);
-  try {
-    await recordRunnerEvidence(
-      result,
-      preflight
-        ? "fixture preflight"
-        : `${options.suite} ${options.profile} shard ${options.shard}/${options.shards}`,
-    );
-  } catch {
-    process.stderr.write("Runner evidence incomplete\n");
-    process.exitCode = status || 1;
-    return;
-  }
-  process.exitCode = status;
 }
 if (
   process.argv[1] &&
