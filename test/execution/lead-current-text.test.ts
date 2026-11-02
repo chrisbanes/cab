@@ -45,51 +45,90 @@ async function liveTextWorld(labels = ["ready"]) {
     },
   };
   const prompts: string[] = [];
-  const ends = new Map<string, () => void>();
+  /** Each turn's terminal status, settled by the test or by an interrupt. */
+  const turns = new Map<
+    string,
+    {
+      promise: Promise<"completed" | "failed">;
+      resolve: (status: "completed" | "failed") => void;
+    }
+  >();
+  const turn = (turnId: string) => {
+    let entry = turns.get(turnId);
+    if (!entry) {
+      let resolve!: (status: "completed" | "failed") => void;
+      const promise = new Promise<"completed" | "failed">((done) => {
+        resolve = done;
+      });
+      entry = { promise, resolve };
+      turns.set(turnId, entry);
+    }
+    return entry;
+  };
+  /** Turns that failed with transient, retryable evidence. */
+  const transient = new Set<string>();
+  let threads = 0;
   let toolCall:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
     | undefined;
   /** When set, the next `startTurn` fails as if its response were lost. */
   let loseNextResponse = false;
-  const runtime = (): Runtime => ({
+  const runtime = () => ({
     async start() {},
     async stop() {},
     onUnexpectedRequest() {},
-    onToolCall(listener) {
+    onToolCall(
+      listener: (call: RuntimeToolCall) => Promise<RuntimeToolResult>,
+    ) {
       toolCall = listener;
     },
     async startThread() {
-      return "thread";
+      return `thread-${++threads}`;
     },
     async resumeThread() {},
-    async startTurn(_thread, _workspace, prompt) {
+    async startTurn(_thread: string, _workspace: string, prompt: string) {
       prompts.push(prompt);
       if (loseNextResponse) {
         loseNextResponse = false;
         throw new Error("turn start response lost");
       }
-      const turnId = `turn-${prompts.length}`;
-      ends.set(turnId, () => {});
-      return turnId;
+      return `turn-${prompts.length}`;
     },
-    async interruptTurn() {},
-    async waitForTurn(_thread, turnId) {
-      await new Promise<void>((resolve) => ends.set(turnId, resolve));
-      return "completed";
+    async interruptTurn(_thread: string, turnId: string) {
+      turn(turnId).resolve("failed");
+    },
+    waitForTurn(_thread: string, turnId: string) {
+      return turn(turnId).promise;
+    },
+    failureEvidence(threadId: string, turnId: string) {
+      return transient.has(turnId)
+        ? {
+            threadId,
+            turnId,
+            status: "failed" as const,
+            classification: "transient" as const,
+            reasonCode: "serverOverloaded" as const,
+            source: "harness" as const,
+            harnessRetries: 0,
+          }
+        : undefined;
     },
   });
-  const service = new StandaloneService(
-    join(root, "data"),
-    runtime,
-    undefined,
-    {
-      issueTrackers: {
-        readerFactories: { github: () => reader },
-        intervalMs: 60_000,
+  const make = () =>
+    new StandaloneService(
+      join(root, "data"),
+      () => runtime() as Runtime,
+      undefined,
+      {
+        issueTrackers: {
+          readerFactories: { github: () => reader },
+          intervalMs: 60_000,
+        },
+        power: { enabled: false },
+        retry: { fallbackBackoffMs: 0 },
       },
-      power: { enabled: false },
-    },
-  );
+    );
+  let service = make();
   await service.start();
   const domain = service.domain();
   const projectId = randomUUID(),
@@ -142,9 +181,8 @@ async function liveTextWorld(labels = ["ready"]) {
   });
   await service.refreshGitHub();
   const taskId = String(service.githubSources().issue("I_1")?.taskId);
-  const db = databaseOf(service);
   const count = (sql: string) =>
-    Number((db.prepare(sql).get(taskId) as { n: number }).n);
+    Number((databaseOf(service).prepare(sql).get(taskId) as { n: number }).n);
   const settle = async () => {
     for (let i = 0; i < 200; i++)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -156,8 +194,12 @@ async function liveTextWorld(labels = ["ready"]) {
   };
   return {
     root,
-    service,
-    domain,
+    get service() {
+      return service;
+    },
+    get domain() {
+      return service.domain();
+    },
     projectId,
     taskId,
     prompts,
@@ -181,28 +223,39 @@ async function liveTextWorld(labels = ["ready"]) {
       await service.refreshGitHub();
     },
     pause() {
-      domain.execute({
+      service.domain().execute({
         type: "project.configure",
         actor: "operator",
         key: randomUUID(),
         projectId,
-        expectedVersion: Number(domain.project(projectId).version),
+        expectedVersion: Number(service.domain().project(projectId).version),
         paused: true,
       });
     },
     unpause() {
-      domain.execute({
+      service.domain().execute({
         type: "project.configure",
         actor: "operator",
         key: randomUUID(),
         projectId,
-        expectedVersion: Number(domain.project(projectId).version),
+        expectedVersion: Number(service.domain().project(projectId).version),
         paused: false,
       });
     },
-    lead: () => String(domain.ensureLeadAssignment(taskId)?.id),
+    lead: () => String(service.domain().ensureLeadAssignment(taskId)?.id),
     end(turnId: string) {
-      ends.get(turnId)?.();
+      turn(turnId).resolve("completed");
+    },
+    /** Ends the turn as a confirmed transient failure, which queues a retry. */
+    failTransiently(turnId: string) {
+      transient.add(turnId);
+      turn(turnId).resolve("failed");
+    },
+    /** A planned shutdown, then a fresh service over the same data. */
+    async restart() {
+      await service.stop();
+      service = make();
+      await service.start();
     },
     tool: (call: RuntimeToolCall) => {
       assert.ok(toolCall);
@@ -212,12 +265,16 @@ async function liveTextWorld(labels = ["ready"]) {
       loseNextResponse = true;
     },
     async message(text: string) {
-      const recipient = String(domain.ensureLeadAssignment(taskId)?.id);
+      const recipient = String(
+        service.domain().ensureLeadAssignment(taskId)?.id,
+      );
       await service.coordinationView().postOperatorMessage({
         key: randomUUID(),
         taskId,
         recipientAssignmentId: recipient,
-        expectedAssignmentVersion: Number(domain.assignment(recipient).version),
+        expectedAssignmentVersion: Number(
+          service.domain().assignment(recipient).version,
+        ),
         message: text,
       });
     },
@@ -234,7 +291,7 @@ async function liveTextWorld(labels = ["ready"]) {
     settle,
     until,
     async close() {
-      for (const end of ends.values()) end();
+      for (const entry of turns.values()) entry.resolve("completed");
       await service.stop();
       rmSync(root, { recursive: true, force: true });
     },
@@ -268,7 +325,7 @@ test("a lead's turns carry the current issue text, a capped diff only after a ch
   await w.settle();
   assert.deepEqual(w.activity(), running);
   const report = await w.tool({
-    threadId: "thread",
+    threadId: "thread-1",
     turnId: "turn-1",
     callId: "report-after-edit",
     tool: "cab_report_result",
@@ -327,7 +384,10 @@ test("a lead turn whose start response is lost does not count as seen", async (t
     "first turn end",
   );
   const lead = w.lead();
-  assert.equal(w.service.leadText().confirmed(lead, "thread")?.title, "Original title");
+  assert.equal(
+    w.service.leadText().confirmed(lead, "thread-1")?.title,
+    "Original title",
+  );
   await w.edit("Changed title", "Original body");
   w.loseNextResponse();
   await w.message("Continue.");
@@ -335,7 +395,10 @@ test("a lead turn whose start response is lost does not count as seen", async (t
   await w.settle();
   assert.match(w.prompts[1] ?? "", /\+ Changed title/);
   // The submission is uncertain, so the lead's last seen text is still the original.
-  assert.equal(w.service.leadText().confirmed(lead, "thread")?.title, "Original title");
+  assert.equal(
+    w.service.leadText().confirmed(lead, "thread-1")?.title,
+    "Original title",
+  );
 });
 
 test("a queued lead follow-up survives a text edit and is refused after a readiness change", async (t) => {
@@ -346,7 +409,7 @@ test("a queued lead follow-up survives a text edit and is refused after a readin
     await w.service.provisionTask(w.taskId);
     await w.until(() => w.prompts.length === 1, "first turn");
     await w.tool({
-      threadId: "thread",
+      threadId: "thread-1",
       turnId: "turn-1",
       callId: "report",
       tool: "cab_report_result",
@@ -454,4 +517,71 @@ test("an Improve draft turn queued before a text edit is refused although the ta
       assert.match(w.prompts[0] ?? "", /^Task: Original title\n/);
     }
   }
+});
+
+/** Starts the lead's first turn and ends it, reporting a result unless `report` is false. */
+async function firstLeadTurn(
+  w: Awaited<ReturnType<typeof liveTextWorld>>,
+  report = true,
+) {
+  w.unpause();
+  await w.service.provisionTask(w.taskId);
+  await w.until(() => w.prompts.length === 1, "first turn");
+  if (report)
+    await w.tool({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "report",
+      tool: "cab_report_result",
+      arguments: { summary: "First pass" },
+    });
+  w.end("turn-1");
+  await w.until(
+    () => !w.service.list().some((work) => work.state === "running"),
+    "first turn end",
+  );
+}
+
+const repairInstruction = /Reporting repair: the previous successful turn/;
+
+/** Reports a result in the turn, so its failure leaves no unresolved effect to recover. */
+const reportIn = (
+  w: Awaited<ReturnType<typeof liveTextWorld>>,
+  turnId: string,
+) =>
+  w.tool({
+    threadId: "thread-1",
+    turnId,
+    callId: `report-${turnId}`,
+    tool: "cab_report_result",
+    arguments: { summary: `Reported in ${turnId}` },
+  });
+
+test("a retried lead turn keeps the inbox material its original request had bound", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await firstLeadTurn(w);
+  await w.message("Bound operator message.");
+  await w.until(() => w.prompts.length === 2, "message turn");
+  assert.match(w.prompts[1] ?? "", /Bound operator message\./);
+  await reportIn(w, "turn-2");
+  w.failTransiently("turn-2");
+  await w.until(() => w.prompts.length === 3, "retried turn");
+  assert.ok(
+    w.service.turnRequests().some((r) => r.workId.startsWith("retry:")),
+  );
+  assert.match(w.prompts[2] ?? "", /^Task: Original title\n/);
+  assert.equal(w.prompts[2]?.match(/Bound operator message\./g)?.length, 1);
+});
+
+test("a retried reporting repair keeps its repair instruction", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await firstLeadTurn(w, false);
+  await w.until(() => w.prompts.length === 2, "repair turn");
+  assert.match(w.prompts[1] ?? "", repairInstruction);
+  await reportIn(w, "turn-2");
+  w.failTransiently("turn-2");
+  await w.until(() => w.prompts.length === 3, "retried repair turn");
+  assert.match(w.prompts[2] ?? "", repairInstruction);
 });

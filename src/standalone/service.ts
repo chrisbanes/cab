@@ -503,7 +503,12 @@ const inboxSection = (delivery: InboxDelivery) =>
     .join("\n")}`;
 
 /** A lead turn's current task text and the text its last confirmed turn carried. */
-type LeadTurnText = { current: TaskText; confirmed: TaskText | undefined };
+type LeadTurnText = {
+  current: TaskText;
+  confirmed: TaskText | undefined;
+  /** The submitted work and the works it retried or requeued, newest first. */
+  lineage: string[];
+};
 
 /** The exact submitted prompt; captured segments cannot drift from it. */
 const joinPromptParts = (parts: readonly PromptPart[]) =>
@@ -7262,11 +7267,14 @@ export class StandaloneService {
     threadId: string,
   ): LeadTurnText | undefined {
     const { taskId, assignmentId } = request;
+    if (request.kind !== "assignment" || !taskId || !assignmentId)
+      return undefined;
+    const lineage = this.started().state.workLineage(request.workId);
+    const origin = this.started().schedulerStore.find(
+      lineage.at(-1) as string,
+    );
     if (
-      request.kind !== "assignment" ||
-      !taskId ||
-      !assignmentId ||
-      request.requestKey.startsWith("task:") ||
+      (origin ?? request).requestKey.startsWith("task:") ||
       !this.domain()
         .leadBindings()
         .some(
@@ -7286,7 +7294,7 @@ export class StandaloneService {
       threadId,
       text: current,
     });
-    return { current, confirmed };
+    return { current, confirmed, lineage };
   }
 
   /**
@@ -7297,12 +7305,15 @@ export class StandaloneService {
   private leadRequestText(request: TurnRequest, text: LeadTurnText): string {
     const coordination = this.started().coordination;
     const parts = [leadTaskSection(text.current, text.confirmed)];
-    const delivery = coordination.deliveryForWork(request.workId);
+    // A retry or shutdown requeue carries what its original request had bound.
+    const delivery = text.lineage
+      .map((workId) => coordination.deliveryForWork(workId))
+      .find((batch) => batch !== undefined);
     if (delivery) parts.push(inboxSection(delivery));
     if (
       coordination
         .reportingRepairs(String(request.taskId))
-        .some((repair) => repair.repairWorkId === request.workId)
+        .some((repair) => text.lineage.includes(repair.repairWorkId))
     )
       parts.push(reportingRepairInstruction);
     return parts.join("\n\n");
@@ -7379,14 +7390,17 @@ export class StandaloneService {
     )
       throw new Error("Assignment prompt binding no longer matches its task");
 
-    const leadBinding = domain
-      .leadBindings()
-      .find(
-        (item) =>
-          item.taskId === binding.taskId &&
-          item.projectId === projectId &&
-          item.assignmentId === binding.assignmentId,
-      );
+    // Prepared lead text already established the lead binding for this submission.
+    const leadBinding =
+      leadText ??
+      domain
+        .leadBindings()
+        .find(
+          (item) =>
+            item.taskId === binding.taskId &&
+            item.projectId === projectId &&
+            item.assignmentId === binding.assignmentId,
+        );
     const profileInstructions = String(
       domain.profileRevision(
         String(assignment.profileId),
