@@ -3466,6 +3466,16 @@ export class CoordinationStore {
             WHERE r.interruptedWorkId=? AND i.state='resolved-failed'`,
             workId,
           )) ||
+        // A confirmed transient failure was resolved and its retry queued.
+        (this.one(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_retry_resolutions'",
+        ) &&
+          this.one(
+            `SELECT 1 FROM execution_retry_resolutions r
+            JOIN execution_intents i ON i.workId=r.failedWorkId
+            WHERE r.failedWorkId=? AND i.state='resolved-failed'`,
+            workId,
+          )) ||
         (this.one(
           "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inbox_request_supersessions'",
         ) &&

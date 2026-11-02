@@ -1237,6 +1237,25 @@ export class ExecutionState {
     );
   }
 
+  private hasTable(name: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(name) !== undefined
+    );
+  }
+
+  /** The batch's work ID is unique, so a queued batch follows its successor work. */
+  private moveQueuedDeliveryBatch(fromWorkId: string, toWorkId: string): void {
+    if (this.hasTable("coordination_delivery_batches"))
+      this.db
+        .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
+          WHERE deliveryWorkId = ? AND state = 'queued'`)
+        .run(toWorkId, fromWorkId);
+  }
+
   /**
    * This work, then the works it replaced as a transient-failure retry or a planned-shutdown
    * requeue, back to the request that was first queued. Material bound to that request (its
@@ -5864,6 +5883,8 @@ export class ExecutionState {
           value.nextEligibleAt,
           Date.now(),
         );
+      // The retry carries the failed work's queued inbox batch, as a requeue does.
+      this.moveQueuedDeliveryBatch(value.workId, retryWorkId);
       this.db
         .prepare(`INSERT INTO execution_recovery_observations
         (id, workId, kind, reason, recordedAt)
@@ -6017,12 +6038,6 @@ export class ExecutionState {
         );
 
       const target = this.stopTarget(value.workId);
-      const hasTable = (name: string) =>
-        this.db
-          .prepare(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-          )
-          .get(name) !== undefined;
       const held = this.db
         .prepare(`SELECT
         EXISTS (SELECT 1 FROM execution_request_refusals WHERE workId = ?) AS refused,
@@ -6063,7 +6078,7 @@ export class ExecutionState {
           value.workId,
         ) as Record<string, number>;
       const completionPending =
-        hasTable("coordination_completion_requests") &&
+        this.hasTable("coordination_completion_requests") &&
         this.db
           .prepare(`SELECT 1 FROM coordination_completion_requests
           WHERE leadWorkId = ? AND status = 'pending'`)
@@ -6161,12 +6176,7 @@ export class ExecutionState {
         this.db
           .prepare(`DELETE FROM ${table} WHERE workId = ?`)
           .run(value.workId);
-      // The delivery batch's work ID is unique, so it follows the requeue.
-      if (hasTable("coordination_delivery_batches"))
-        this.db
-          .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
-          WHERE deliveryWorkId = ? AND state = 'queued'`)
-          .run(requeueWorkId, value.workId);
+      this.moveQueuedDeliveryBatch(value.workId, requeueWorkId);
       this.db
         .prepare(`INSERT INTO execution_shutdown_resolutions
         (interruptedWorkId, requeueWorkId, workRevision, requestSequence,
