@@ -110,6 +110,7 @@ const commentListSchema = z
         })
         .passthrough(),
     ),
+    isLast: z.boolean().optional(),
   })
   .passthrough();
 /** The comment property cab's own Jira comments carry; such a comment never counts. */
@@ -223,22 +224,37 @@ export class JiraSourceReader {
         if (listed.length >= result.data.total) break;
         if (!result.data.comments.length) throw new JiraFailure("malformed");
       }
+      // Properties come back by ID. Jira pages this answer without a documented size, so
+      // the IDs still missing are asked again until every listed comment is seen once.
+      const missing = new Set(listed.map((c) => c.id));
+      if (missing.size !== listed.length) throw new JiraFailure("malformed");
       const marked = new Set<string>();
-      for (let i = 0; i < listed.length; i += pageSize) {
-        const ids = listed.slice(i, i + pageSize).map((c) => Number(c.id));
+      for (let round = 0; missing.size; round++) {
+        if (round >= maxPages) throw new JiraFailure("page-limit");
+        const requested = [...missing].slice(0, pageSize);
         const result = commentListSchema.safeParse(
           await jiraRequest(
             this.fetcher,
             access,
             "/comment/list?expand=properties",
-            { method: "POST", body: { ids } },
+            { method: "POST", body: { ids: requested.map(Number) } },
           ),
         );
-        if (!result.success || result.data.values.length !== ids.length)
+        if (!result.success) throw new JiraFailure("malformed");
+        const returned = new Set(result.data.values.map((c) => c.id));
+        // Only requested IDs, each once; fewer than requested only on a page Jira says is not its last.
+        if (
+          returned.size !== result.data.values.length ||
+          returned.size === 0 ||
+          [...returned].some((id) => !requested.includes(id)) ||
+          (returned.size < requested.length && result.data.isLast !== false)
+        )
           throw new JiraFailure("malformed");
-        for (const comment of result.data.values)
+        for (const comment of result.data.values) {
+          missing.delete(comment.id);
           if (comment.properties.some((p) => p.key === cabCommentProperty))
             marked.add(comment.id);
+        }
       }
       return {
         complete: true,

@@ -421,9 +421,58 @@ test("a malformed, short or rate-limited comment read is incomplete", async () =
       : json({ values: [] }),
   ).reader.readIssueComments(commentReference);
   assert.equal(short.reason, "malformed");
+  // Same count, different comment: the IDs must match, not just their number.
+  const swapped = await reader((req) =>
+    req.method === "GET"
+      ? json({ total: 1, comments: [{ id: "1", body: adfParagraph("x") }] })
+      : json({ values: [{ id: "2", properties: [] }] }),
+  ).reader.readIssueComments(commentReference);
+  assert.equal(swapped.reason, "malformed");
+  // A short property page Jira marks as its last is incomplete too.
+  const two = [
+    { id: "1", body: adfParagraph("a") },
+    { id: "2", body: adfParagraph("b") },
+  ];
+  const cut = await reader((req) =>
+    req.method === "GET"
+      ? json({ total: 2, comments: two })
+      : json({ values: [{ id: "1", properties: [] }], isLast: true }),
+  ).reader.readIssueComments(commentReference);
+  assert.equal(cut.reason, "malformed");
   const limited = await reader(
     () => new Response("{}", { status: 429, headers: { "retry-after": "30" } }),
   ).reader.readIssueComments(commentReference);
   assert.equal(limited.reason, "rate-limited");
   assert.ok(!limited.complete && (limited.resumeAt ?? 0) > Date.now());
+});
+
+test("a property listing Jira pages below the requested IDs is completed by asking again for the rest", async () => {
+  const comments = Array.from({ length: 5 }, (_, i) => ({
+    id: String(i + 1),
+    body: adfParagraph(`Comment ${i + 1}`),
+    properties:
+      i === 3 ? [{ key: "cab-operation", value: { operationId: "x" } }] : [],
+  }));
+  const asked: number[][] = [];
+  const { reader: r } = reader((req) => {
+    if (req.method === "GET")
+      return json({
+        total: comments.length,
+        comments: comments.map(({ id, body }) => ({ id, body })),
+      });
+    const ids = (req.body as { ids: number[] }).ids;
+    asked.push(ids);
+    // Two per page, as a site with a smaller page size would answer.
+    const page = comments.filter((c) => ids.includes(Number(c.id)));
+    return json({ values: page.slice(0, 2), isLast: page.length <= 2 });
+  });
+  const read = await r.readIssueComments(commentReference);
+  assert.equal(read.complete, true);
+  assert.deepEqual(read.comments, [
+    "Comment 1",
+    "Comment 2",
+    "Comment 3",
+    "Comment 5",
+  ]);
+  assert.deepEqual(asked, [[1, 2, 3, 4, 5], [3, 4, 5], [5]]);
 });
