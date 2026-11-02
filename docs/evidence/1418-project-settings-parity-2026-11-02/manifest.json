@@ -1,9 +1,9 @@
 {
   "record": "../1418-project-settings-parity-2026-11-02.md",
   "status": "additive parity checkpoint; local integrated check passed; removal and whole-issue acceptance remain pending",
-  "auditedImplementationCommit": "187f0db77eee9736713c3c807a1462b2e5171158",
-  "auditedImplementationTree": "9393b315321865c8ffec2c0951ecdad34b3d3916",
-  "integratedMain": "d7d6e091190c4621bad3f106e78bdb18d9d761ed",
+  "auditedImplementationCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
+  "auditedImplementationTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
+  "integratedMain": "a4cc5f7de6a78a184ddd70fabcfeb6ae0965c269",
   "planComment": "6565226423",
   "planSemanticDigest": "5651549f1d4fe1a6f0049b42a49a6e35fae8b5261aab2c3f76f633f0f5daf30f",
   "capturePrivacy": "Only synthetic visible repository/Project/check labels; no reference names, credentials, query text, withheld identity or private fixture paths. Copies are byte-identical.",
@@ -117,16 +117,16 @@
     "web/src/project-config.tsx": "da27212fe5116afc6c5b0ac8e4db05e4feece0e2",
     "web/src/routing-config.tsx": "121471e6f0ef0a674f639716ef01d7387df35b45",
     "web/src/source-config.tsx": "a65a4bb5d0b945f33ca1dfeaede81e9f19fc610e",
-    "web/src/jira-source.tsx": "b6af0ef5f673ca75288333099de3a663cab92e8a",
+    "web/src/jira-source.tsx": "87f97e1cf605bab51b9014bd1ff7d5e96c241e78",
     "web/src/repository-config.tsx": "da5fe9513b9b89ca96ca4f2e9e0e224e2657f87e",
-    "web/src/settings-changes.ts": "268aee0b4064d3521c0b4089ebda82409ac936a4",
+    "web/src/settings-changes.ts": "a6cb33783a82500f0cf6924885227cdef16a6d48",
     "web/src/settings-view.ts": "c99074ba15703da513945646712d54c868a65eb4",
     "test/operator/operator-delivery-config-browser.test.ts": "6e8abf92473c9473d315e611227ef1b62a697245",
     "test/operator/operator-project-config-browser.test.ts": "c7b94333e9cb7722b083d18b3c4339e666574fe7",
     "scripts/run-tests.mjs": "455b6f228f2a73dade764885bdf9ba9d16ec25ed",
     "test/fixtures/browser-engines.ts": "13668e5937c13c9bb26e31ec35b9ff3224eae45e",
-    "test/operator/operator-jira-source-browser.test.ts": "b5279acc3aded7bb8fc96ad20c7bd125a096711b",
-    "test/operator/operator-configuration.test.ts": "c49d7a0ee07a2464b3f5cb4d4f415fb050f9ea7b",
+    "test/operator/operator-jira-source-browser.test.ts": "5345529aaf345c6b4800c5d9b125469a0f34b0f1",
+    "test/operator/operator-configuration.test.ts": "8c5751744f1d1128b09553eb53e7fe637a47c788",
     "test/operator/delivery-policy-draft.test.ts": "5183db520a6b909cec79e4656c1db812318e5ac5",
     "package.json": "42d6e2e1d91277f065773cee10a149c7065c9025",
     "package-lock.json": "330a2d4b5f5ffc58f620d5116a17e4273dc122a4",
@@ -1146,69 +1146,117 @@
       "finalCaptureRenewal": 1,
       "fail": 0,
       "skip": 0
+    },
+    "successful187f0db7Check": {
+      "state": "passed; no removal approval",
+      "command": "node /tmp/cab-pinned-npm/node_modules/npm/bin/npm-cli.js run check",
+      "nodeVersion": "v26.13.0",
+      "npmVersion": "12.2.1",
+      "sourceCommit": "187f0db77eee9736713c3c807a1462b2e5171158",
+      "logArtifact": "/tmp/cab-1418-t5-final-check-187f0db7.log",
+      "runCount": 1,
+      "expectedSelection": "suite=all profile=all shard=1/1 files=392",
+      "scope": "Synthetic fixtures only; no live scripts/provider/model runtime qualification, installed service or Haze access.",
+      "startedAt": "2026-11-02T02:19:45.539012+00:00",
+      "exitCode": 0,
+      "completedAt": "2026-11-02T02:30:18.279176+00:00",
+      "summary": {
+        "tests": 4400,
+        "pass": 4399,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0,
+        "durationMs": 477164.282125
+      },
+      "skips": [
+        "\ufe63 the macOS Keychain stores, reads and deletes a token without exposing it in argv (0.397208ms) # set CAB_KEYCHAIN_LIVE=1 on macOS"
+      ],
+      "logSha256": "d0b0e26b4083fb5cb765110b6e9e2b948cd5550df9ac609c4745b5a6f05aafa1",
+      "logBytes": 482318,
+      "actualSelection": "suite=all profile=all shard=1/1 files=392",
+      "frozenInputSha256": {
+        "docs/design/ui02-foundation.md": "29736af6c580431032ed555d1404eac8e14dbd8ba0a45a81631a39e276e95bd8",
+        "docs/design/ui06-configuration.md": "0350468c06a4fc6c60ae78c04a5717ab631af9f2efc1e1bf2f1c4c38344ffeba",
+        "docs/evidence/1418-project-settings-parity-2026-11-02.md": "fc391ef63015bc287815de6d1be941020c90ffdb67da849c68735bd020795a66",
+        "docs/evidence/1418-project-settings-parity-2026-11-02/manifest.json": "77bf8098c6deb387c3af11a9be9920ce600e54059bbeedcb24dbb5d8ccbb3703",
+        ".scratch/1418/t5-retained-counts.mjs": "10a660d897d2360711a0728e6a1fc5001a13b2bc24934ffb45c76206d986990b",
+        ".scratch/1418/retained-controls.json": "f6d5b4eab02dfe630e3bede110a261bec2ac25cb9f0d173523c01f00f887037d",
+        ".scratch/1418/planned-suite-inclusion.json": "98a536cc0649c4961457275ff5f9743491a2511b1457f833578e8090adcec463"
+      },
+      "finalProductionBundle": [
+        {
+          "buildOutputPath": "dist/operator/assets/index-Bv2Thfmf.js",
+          "sha256": "a49dd2bb41cc0210f7e5759013d4e83b41e18927fb13c134aa870b6ce683e3b5",
+          "bytes": 1328908,
+          "matchesRootFollowUpBuild": true
+        },
+        {
+          "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css",
+          "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
+          "bytes": 122023,
+          "matchesRootFollowUpBuild": true
+        }
+      ],
+      "inventoryResults": {
+        "logicalControls": 86,
+        "reachableDestinations": 18,
+        "broaderRenderedForms": 30,
+        "broaderDiscriminants": 14,
+        "broaderFormActions": 8,
+        "extensionRoutes": 14
+      },
+      "postRunChanges": "Only qualification metadata, the source-backed submit-only branch note and the owner ledger were completed after the run. Inventory dispositions, production and test files were unchanged."
     }
   },
   "verification": {
-    "state": "passed; no removal approval",
+    "state": "failed; no retry; no qualification credit",
     "command": "node /tmp/cab-pinned-npm/node_modules/npm/bin/npm-cli.js run check",
     "nodeVersion": "v26.13.0",
     "npmVersion": "12.2.1",
-    "sourceCommit": "187f0db77eee9736713c3c807a1462b2e5171158",
-    "logArtifact": "/tmp/cab-1418-t5-final-check-187f0db7.log",
+    "sourceCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
+    "sourceTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
     "runCount": 1,
-    "expectedSelection": "suite=all profile=all shard=1/1 files=392",
-    "scope": "Synthetic fixtures only; no live scripts/provider/model runtime qualification, installed service or Haze access.",
-    "startedAt": "2026-11-02T02:19:45.539012+00:00",
-    "exitCode": 0,
-    "completedAt": "2026-11-02T02:30:18.279176+00:00",
+    "logArtifact": "/tmp/cab-1418-t5-final-check-a5484c0.log",
+    "logBytes": 2421935,
+    "logSha256": "137577236d6ddea1ea2ccdd7ac92919278ef1d77497c261243e26e7a9beeb241",
+    "exitCode": 1,
     "summary": {
-      "tests": 4400,
-      "pass": 4399,
-      "fail": 0,
+      "tests": 4411,
+      "pass": 3101,
+      "fail": 1309,
       "cancelled": 0,
       "skipped": 1,
       "todo": 0,
-      "durationMs": 477164.282125
+      "durationMs": 249720.676042
     },
-    "skips": [
-      "\ufe63 the macOS Keychain stores, reads and deletes a token without exposing it in argv (0.397208ms) # set CAB_KEYCHAIN_LIVE=1 on macOS"
+    "observedErrors": [
+      "listen EPERM: operation not permitted 127.0.0.1",
+      "spawnSync ps EPERM"
     ],
-    "logSha256": "d0b0e26b4083fb5cb765110b6e9e2b948cd5550df9ac609c4745b5a6f05aafa1",
-    "logBytes": 482318,
-    "actualSelection": "suite=all profile=all shard=1/1 files=392",
-    "frozenInputSha256": {
-      "docs/design/ui02-foundation.md": "29736af6c580431032ed555d1404eac8e14dbd8ba0a45a81631a39e276e95bd8",
-      "docs/design/ui06-configuration.md": "0350468c06a4fc6c60ae78c04a5717ab631af9f2efc1e1bf2f1c4c38344ffeba",
-      "docs/evidence/1418-project-settings-parity-2026-11-02.md": "fc391ef63015bc287815de6d1be941020c90ffdb67da849c68735bd020795a66",
-      "docs/evidence/1418-project-settings-parity-2026-11-02/manifest.json": "77bf8098c6deb387c3af11a9be9920ce600e54059bbeedcb24dbb5d8ccbb3703",
-      ".scratch/1418/t5-retained-counts.mjs": "10a660d897d2360711a0728e6a1fc5001a13b2bc24934ffb45c76206d986990b",
-      ".scratch/1418/retained-controls.json": "f6d5b4eab02dfe630e3bede110a261bec2ac25cb9f0d173523c01f00f887037d",
-      ".scratch/1418/planned-suite-inclusion.json": "98a536cc0649c4961457275ff5f9743491a2511b1457f833578e8090adcec463"
-    },
-    "finalProductionBundle": [
-      {
-        "buildOutputPath": "dist/operator/assets/index-Bv2Thfmf.js",
-        "sha256": "a49dd2bb41cc0210f7e5759013d4e83b41e18927fb13c134aa870b6ce683e3b5",
-        "bytes": 1328908,
-        "matchesRootFollowUpBuild": true
-      },
-      {
-        "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css",
-        "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
-        "bytes": 122023,
-        "matchesRootFollowUpBuild": true
-      }
+    "setupFailures": [
+      "Setup replaces the form with the ready check, focuses it and keeps the first-project heading",
+      "Setup after Create shows a blank second-project form on reload, without the ready check or a leave prompt",
+      "Setup keeps the form and every value when Create is refused, and sends one create for a double submit",
+      "Setup keeps Create focusable with its reason while the lead profile is being created"
     ],
-    "inventoryResults": {
-      "logicalControls": 86,
-      "reachableDestinations": 18,
-      "broaderRenderedForms": 30,
-      "broaderDiscriminants": 14,
-      "broaderFormActions": 8,
-      "extensionRoutes": 14
-    },
-    "postRunChanges": "Only qualification metadata, the source-backed submit-only branch note and the owner ledger were completed after the run. Inventory dispositions, production and test files were unchanged."
+    "disposition": "Preserve complete failed run; no retry and no source/test changes."
   },
   "captureCopiesInspectedAt": "2026-11-02T02:19:45.539012+00:00",
-  "captureCopiesInspected": true
+  "captureCopiesInspected": true,
+  "rootIntegration": {
+    "commit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
+    "tree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
+    "main": "a4cc5f7de6a78a184ddd70fabcfeb6ae0965c269",
+    "scope": "Only already-qualified #1405 Setup/profile tests and dated evidence follow the audited Jira repair; no legacy renderer or Delivery visual change."
+  },
+  "jiraRepeatRepair": {
+    "sourceCommit": "7bfa4e64",
+    "integratedSource": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
+    "focusedEvidence": "120 passed, 0 failed, 0 skipped on source 7bfa4e64; relevant source bytes are identical in a5484c0.",
+    "repair": "Still-public deletion intent is tracked separately from positional JQL row IDs across repeated conflicts; Discard resets it; adoption updates query text, identities and deletion intent together; identities that become hidden restore with the existing notice; history is never sent on the wire.",
+    "independentAudit": "Fresh boundary audit 9148101b shipped the full Jira identity/adoption/private-read/lifecycle/wire contract against exact main a4cc5f7; previous findings resolved, no new blockers.",
+    "evidenceManifest": ".scratch/1418/root-jira-repeat-repair/manifest.json"
+  },
+  "captureScopeNote": "Existing four Delivery captures are preserved byte-for-byte with original capture checkout heads and source scopes. No new visual capture was made; Jira repair and main integration do not change the Delivery renderer."
 }
