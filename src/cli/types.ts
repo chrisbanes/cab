@@ -93,6 +93,13 @@ export type Values = {
   enabled?: string | undefined;
   "guidance-file"?: string | undefined;
   "credential-ref"?: string | undefined;
+  repository?: string[] | undefined;
+  level?: string | undefined;
+  "merge-method"?: string | undefined;
+  "required-check"?: string[] | undefined;
+  "required-checks"?: string | undefined;
+  "branch-prefix"?: string | undefined;
+  "branch-prefix-default"?: boolean | undefined;
   candidates?: string | undefined;
   "global-limit"?: string | undefined;
   "project-limit"?: string[] | undefined;

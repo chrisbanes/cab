@@ -536,6 +536,9 @@ previewed again, and marks observations incomplete; removing a selection discard
 definition. `project prepare-repositories` writes a `repositories.configure` change
 document the same way: kept links are sent as `{codeHost, host, repositoryId, ref}`
 without their path, and a link change leaves the source version and selections alone.
+`delivery configure` writes a `delivery.configure` change document the same way,
+from the Delivery tab's own level and merge-mode rules, keeping every saved row it is
+not asked to change; `project apply` sends it.
 `project preview-source` records `github.preview` after a complete provider read;
 its receipt is the original activation, so the CLI also reports the live state.
 `project place-task` records `github.place`; its receipt is not readable through

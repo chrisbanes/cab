@@ -52,6 +52,7 @@ const AREA: Record<ChangeKind, string> = {
   "project.create": "project",
   "project.configure": "project",
   "routing.configure": "project",
+  "delivery.configure": "project",
   "capacity.configure": "capacity",
   "github.configure": "project",
   "jira.configure": "project",
@@ -83,6 +84,10 @@ export const CHANGE_COMMANDS: Record<
   },
   "routing.configure": {
     prepare: "cab project prepare-routing",
+    read: (id) => `cab project get ${id}`,
+  },
+  "delivery.configure": {
+    prepare: "cab delivery configure",
     read: (id) => `cab project get ${id}`,
   },
   "capacity.configure": {
@@ -464,6 +469,10 @@ function effectNote(document: ChangeDocument): string[] {
     return [
       "Jira source saved; every selection is active, and nothing was dispatched or started.",
       "The next sync refresh imports the matching issues; they stay unadmitted until their blockers are read.",
+    ];
+  if (c.type === "delivery.configure")
+    return [
+      "Delivery policy saved; its grants authorize external actions from now on, and nothing was dispatched, started or cancelled.",
     ];
   if (c.type === "repositories.configure")
     return [
