@@ -52,7 +52,12 @@ export function SourceHoldCard({
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
-  const resolve = outcome?.kind === "recorded" || !hold?.active;
+  // A recorded resume answers only the hold it cleared: a later hold bumps the version past it.
+  const resolve =
+    !hold?.active ||
+    (outcome?.kind === "recorded" &&
+      outcome.command.type === "source.review" &&
+      task.task.version <= outcome.command.expectedVersion + 1);
   // Nothing left to decide and nothing to report.
   if (resolve && !outcome) return null;
   return (

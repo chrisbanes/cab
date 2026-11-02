@@ -95,6 +95,17 @@ test("a local task is edited from its header with version fencing and a conflict
     title: "Changed elsewhere",
     outcome: "Elsewhere outcome",
   });
+  // A reread that lands while the dialog is open must not move the version the draft is saved at.
+  const reread = page.waitForResponse(
+    (r) =>
+      r.request().method() === "GET" &&
+      new RegExp(`/api/operator/tasks/${task.taskId}(\\?.*)?$`).test(r.url()),
+  );
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
+  await reread;
+  await page.waitForTimeout(300);
   await dialog.getByLabel("Title").fill("My title");
   await dialog.getByRole("button", { name: "Save", exact: true }).click();
   await dialog.getByText(/Not saved: the task changed/).waitFor();

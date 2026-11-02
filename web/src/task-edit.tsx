@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import {
   operatorCommandSchema,
   type Session,
+  textMaxLength,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { useCommandSend } from "./command-send.js";
@@ -115,7 +116,8 @@ export function EditTask({
                 key: crypto.randomUUID(),
                 projectId: edit.projectId,
                 taskId,
-                expectedVersion: version,
+                // The version the draft was filled from, not a later read that arrived while editing.
+                expectedVersion: draft.version,
                 title: draft.title,
                 outcome: draft.outcome,
                 ready: draft.ready,
@@ -137,6 +139,7 @@ export function EditTask({
             <Textarea
               id={`${id}-outcome`}
               autoGrow
+              maxLength={textMaxLength}
               value={draft.outcome}
               disabled={Boolean(sending) || uncertain}
               onChange={(e) => setDraft({ ...draft, outcome: e.target.value })}
@@ -158,7 +161,7 @@ export function EditTask({
             entry={entry}
             outcome={outcome}
             recorded="Saved."
-            conflict="Not saved: the task changed since it was read. The latest values are shown."
+            conflict="Not saved: the task changed, or cannot be edited right now. The latest values are shown."
             check={() => void send()}
             review={{ label: "Dismiss", onClick: clear }}
           />
