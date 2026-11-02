@@ -620,7 +620,7 @@ test("a lead's turns carry the issue brief after the outcome and diff its change
   await w.until(() => w.prompts.length === 1, "first turn");
   assert.ok(
     (w.prompts[0] ?? "").startsWith(
-      `Task: Original title\nOutcome: Original body\n\nIssue brief (the issue's trusted brief comment and the notes after it):\n${brief}\n\n--- Later note ---\n\nNote one`,
+      `Task: Original title\nOutcome: Original body\n\nIssue brief (the issue's brief comment and the notes after it):\n${brief}\n\n--- Later note ---\n\nNote one`,
     ),
   );
   assert.doesNotMatch(w.prompts[0] ?? "", /Changes \(/);

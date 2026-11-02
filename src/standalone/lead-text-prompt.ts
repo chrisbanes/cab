@@ -114,7 +114,7 @@ export function leadTaskSection(
     `Task: ${current.title}\nOutcome: ${current.outcome}` +
     (current.issueBrief === null
       ? ""
-      : `\n\nIssue brief (the issue's trusted brief comment and the notes after it):\n${current.issueBrief}`);
+      : `\n\nIssue brief (the issue's brief comment and the notes after it):\n${current.issueBrief}`);
   if (
     !confirmed ||
     (confirmed.title === current.title &&

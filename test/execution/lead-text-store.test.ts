@@ -360,7 +360,7 @@ test("the lead task section carries the issue brief after the outcome, and a bri
   const a = { title: "T", outcome: "O", issueBrief: "## Agent Brief\nB" };
   assert.equal(
     leadTaskSection(a, { ...a }),
-    "Task: T\nOutcome: O\n\nIssue brief (the issue's trusted brief comment and the notes after it):\n## Agent Brief\nB",
+    "Task: T\nOutcome: O\n\nIssue brief (the issue's brief comment and the notes after it):\n## Agent Brief\nB",
   );
   const b = { ...a, issueBrief: `${a.issueBrief}\n\n--- Later note ---\n\nN` };
   assert.deepEqual(issueTextDiff(a, b), [
