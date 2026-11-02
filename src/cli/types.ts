@@ -85,6 +85,7 @@ export type Values = {
   "lead-profile"?: string | undefined;
   "diagnostic-capture"?: string | undefined;
   "command-network-access"?: string | undefined;
+  stacking?: string | undefined;
   id?: string | undefined;
   enabled?: string | undefined;
   "guidance-file"?: string | undefined;

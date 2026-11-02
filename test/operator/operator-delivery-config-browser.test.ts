@@ -770,3 +770,52 @@ test("bulk refuses overflow atomically and withheld links cannot be silently ski
     true,
   );
 });
+
+test("the stacking switch states what it risks and saves without resetting the policy draft", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  const stacking = page.getByRole("switch", {
+    name: "Start dependents on their blocker's change request",
+  });
+  await stacking.waitFor();
+  assert.equal(await stacking.isChecked(), false);
+  const text = await page.locator("body").innerText();
+  assert.match(
+    text,
+    /Stacking is off: dependents wait until their blockers are Done\./,
+  );
+  assert.match(
+    text,
+    /Dependents start on their blocker's unmerged work, and a merge cannot be undone\./,
+  );
+  assert.match(text, /Applies to dependents that have not started/);
+  const saveStacking = page.getByRole("button", {
+    name: "Save stacking",
+    exact: true,
+  });
+  assert.equal(await saveStacking.isDisabled(), true);
+
+  // An unsaved policy edit stays while the switch saves on its own.
+  await page.getByLabel("Completion mode").selectOption("through-merge");
+  await stacking.check();
+  await captureBrowserEvidence(page, "delivery-stacking");
+  const command = body(page);
+  await saveStacking.click();
+  const sent = await command;
+  assert.deepEqual(Object.keys(sent).sort(), [
+    "expectedVersion",
+    "key",
+    "projectId",
+    "stacking",
+    "type",
+  ]);
+  assert.equal(sent.type, "project.configure");
+  assert.equal(sent.stacking, true);
+  await savedOutcome(page);
+  assert.equal(f.service.domain().stacking(ids.atlas), true);
+  await page.getByText("Stacking is on:").waitFor();
+  assert.equal(
+    await page.getByLabel("Completion mode").inputValue(),
+    "through-merge",
+  );
+  assert.equal(await save(page).isDisabled(), false);
+});

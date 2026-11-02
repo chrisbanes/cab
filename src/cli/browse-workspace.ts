@@ -172,6 +172,14 @@ const projectGet: BrowseCommand = {
                 : "disabled",
           ],
           [
+            "Stacking",
+            d.stacking === undefined
+              ? "not reported"
+              : d.stacking
+                ? "on"
+                : "off",
+          ],
+          [
             "Routing",
             `${d.routing.availability} (${d.routing.enabled ? "enabled" : "disabled"}, ${d.routing.candidateProfileIds.length} candidates)`,
           ],

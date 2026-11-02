@@ -21,6 +21,8 @@ export const waitCodes = [
   "assignment-held",
   "assignment-recovery-unresolved",
   "local-dependency",
+  "stacked-blocker-unpublished",
+  "stacked-blocker-unknown",
   "imported-blockers-blocked",
   "imported-blockers-unknown",
   "source-held",
@@ -94,6 +96,8 @@ export const waitLabels: Record<WaitCode, string> = {
   "assignment-held": "Assignment held",
   "assignment-recovery-unresolved": "Assignment recovery unresolved",
   "local-dependency": "Blocked by a task dependency",
+  "stacked-blocker-unpublished": "Waiting for the blocker's change request",
+  "stacked-blocker-unknown": "Blocker's change request unconfirmed",
   "imported-blockers-blocked": "Blocked by a GitHub dependency",
   "imported-blockers-unknown": "GitHub dependencies unconfirmed",
   "source-held": "Held by the source",
@@ -206,7 +210,11 @@ export function deriveWaits(f: WaitFacts): Wait[] {
       reason === "project-lead-revoked"
     )
       add(reason, { kind: "choose-lead", projectId: f.projectId });
-    else if (reason === "local-dependency")
+    else if (
+      reason === "local-dependency" ||
+      reason === "stacked-blocker-unpublished" ||
+      reason === "stacked-blocker-unknown"
+    )
       add(
         reason,
         null,

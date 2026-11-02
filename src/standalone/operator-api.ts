@@ -3917,6 +3917,7 @@ export class OperatorApi {
         };
       }),
       admission,
+      stack: d.stackFacts(taskId),
       waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
       execution,
       taskHold: this.nonStopTaskHold(taskId, excluded),
@@ -6394,6 +6395,7 @@ export class OperatorApi {
         instructionPresent: Boolean(p.instructions),
         diagnosticCapture: d.diagnosticCaptureMode(projectId),
         commandNetworkAccess: d.commandNetworkAccess(projectId),
+        stacking: d.stacking(projectId),
         placements: [
           this.service.githubSources(),
           ...this.service.githubSources().jiraStores(),
