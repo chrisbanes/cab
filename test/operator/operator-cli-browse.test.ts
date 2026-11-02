@@ -672,6 +672,26 @@ test("task get names the lead assignment, execution and who acts next", async (t
     line(changed.out, "Issue"),
     "Issue:   changed since handback; nothing reopened",
   );
+  // An issue brief prints as its own block after the outcome.
+  const briefed = await h.run(["task", "get", id], {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (!String(input).endsWith(`/api/operator/tasks/${id}`)) return response;
+      const body = (await response.json()) as Json;
+      body.data.task.issueBrief = "## Agent Brief\nBuild it";
+      body.data.task.issueBriefTruncated = true;
+      return new Response(JSON.stringify(body), {
+        status: response.status,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  assert.ok(
+    briefed.out.endsWith(
+      "\n\nIssue brief: (truncated to 32 KB)\n## Agent Brief\nBuild it\n",
+    ),
+  );
+  assert.doesNotMatch(human, /Issue brief/);
   // A project with no lead has no Lead line; its Waiting line says so.
   const bare = (await h.run(["task", "get", s.taskId])).out;
   assert.equal(line(bare, "Lead"), undefined);

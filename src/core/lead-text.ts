@@ -5,6 +5,8 @@ import { type Database, transaction } from "./store.js";
 export interface LeadText {
   title: string;
   outcome: string;
+  /** The task's issue brief (untrusted source text); null when it has none. */
+  issueBrief: string | null;
   /** The task's latest source capture revision; null when it has none. */
   sourceRevision: number | null;
 }
@@ -12,6 +14,7 @@ export interface LeadText {
 const textRow = z.object({
   title: z.string(),
   outcome: z.string(),
+  issueBrief: z.string().nullable(),
   sourceRevision: z.number().int().positive().nullable(),
 });
 
@@ -41,6 +44,11 @@ export class LeadTextStore {
         sourceRevision INTEGER NOT NULL,
         basis TEXT NOT NULL CHECK(basis IN ('handback','done','upgrade'))
       );`);
+    // Fresh and upgraded stores add the column the same way, so their schemas match.
+    if (!this.columnExists("lead_text_submissions", "issueBrief"))
+      this.db.exec(
+        "ALTER TABLE lead_text_submissions ADD COLUMN issueBrief TEXT",
+      );
     if (anchorsExisted) return;
     // Work handed back before anchors existed: what it saw is unknown, so the text observed
     // now is the baseline. Later revisions flag; earlier edits are not claimed.
@@ -64,6 +72,9 @@ export class LeadTextStore {
       this.db
         .prepare(
           `SELECT b.title, t.outcome,
+            (SELECT ib.brief FROM source_issue_briefs ib JOIN external_items e
+              ON e.provider = ib.provider AND e.instance = ib.instance AND e.externalId = ib.externalId
+              WHERE e.taskId = t.id) AS issueBrief,
             (SELECT MAX(revision) FROM task_review_sources s WHERE s.taskId = t.id) AS sourceRevision
           FROM domain_tasks t JOIN tasks b ON b.id = t.id WHERE t.id = ?`,
         )
@@ -85,10 +96,10 @@ export class LeadTextStore {
   }): void {
     this.db
       .prepare(
-        `INSERT INTO lead_text_submissions (workId, taskId, assignmentId, requestSequence, threadId, sourceRevision, title, outcome)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO lead_text_submissions (workId, taskId, assignmentId, requestSequence, threadId, sourceRevision, title, outcome, issueBrief)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(workId) DO UPDATE SET threadId = excluded.threadId, sourceRevision = excluded.sourceRevision,
-          title = excluded.title, outcome = excluded.outcome
+          title = excluded.title, outcome = excluded.outcome, issueBrief = excluded.issueBrief
         WHERE lead_text_submissions.turnId IS NULL AND lead_text_submissions.assignmentId = excluded.assignmentId`,
       )
       .run(
@@ -100,6 +111,7 @@ export class LeadTextStore {
         input.text.sourceRevision,
         input.text.title,
         input.text.outcome,
+        input.text.issueBrief,
       );
   }
 
@@ -161,7 +173,7 @@ export class LeadTextStore {
   confirmed(assignmentId: string, threadId: string): LeadText | undefined {
     const row = this.db
       .prepare(
-        `SELECT s.title, s.outcome, s.sourceRevision FROM lead_text_confirmed c
+        `SELECT s.title, s.outcome, s.issueBrief, s.sourceRevision FROM lead_text_confirmed c
         JOIN lead_text_submissions s ON s.workId = c.workId
         WHERE c.assignmentId = ? AND s.threadId = ?`,
       )
@@ -213,6 +225,12 @@ export class LeadTextStore {
         )
         .get(taskId) !== undefined
     );
+  }
+
+  private columnExists(table: string, column: string): boolean {
+    return (
+      this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    ).some((row) => row.name === column);
   }
 
   private tableExists(name: string): boolean {

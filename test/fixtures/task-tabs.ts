@@ -14,7 +14,12 @@ export async function openTaskTab(page: Page, name: TaskTabName) {
   await page.locator(`#${await tab.getAttribute("aria-controls")}`).waitFor();
 }
 
-export type OverviewCardName = "brief" | "evidence" | "assignments" | "context";
+export type OverviewCardName =
+  | "brief"
+  | "issue-brief"
+  | "evidence"
+  | "assignments"
+  | "context";
 
 /** The collapsed Overview card's `details` element. */
 export const overviewCard = (page: Page, name: OverviewCardName) =>

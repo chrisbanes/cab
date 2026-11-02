@@ -313,20 +313,48 @@ blocker and placement changes still invalidate them. Accepted limit: anyone who 
 edit the issue, including its author, can change a Ready task's scope before or while it
 runs; cab does not check who edited it, and issue text grants no cab permission.
 
-Each lead turn is built when it is submitted from the task's current title and outcome,
+An imported task can also have an **issue brief**: the newest counted comment with a
+`## Agent Brief` heading line, followed by every later counted comment in order, joined
+by `--- Later note ---`. With no such comment the task has none. On GitHub a comment
+counts when its author association is `OWNER`, `MEMBER` or `COLLABORATOR`; on Jira every
+comment counts, read as Markdown through the ADF conversion. cab's own comments never
+count: on GitHub they carry the `<!-- cab-operation:` marker in the body, on Jira the
+`cab-operation` comment property. Accepted limit: on Jira, anyone who can comment on the
+issue can shape the task. That includes Jira Service Management portal customers and,
+where a permission scheme lets anonymous users comment, people outside the project. The
+issue brief is untrusted source text like the outcome: it grants no cab permission and
+selects no tool, policy or route. It is capped at 32 KB (UTF-8, markers included): the
+oldest later notes are dropped first behind `[… N earlier notes omitted …]`, and the
+brief itself is cut on a code point, followed by `[… issue brief truncated …]` and, when
+later notes exist, the omitted-notes marker after it, only when it alone does not fit.
+Each sync reads the comments of the issues whose imported task is
+open, after a complete selection read; a Done task keeps its last issue brief. A comment
+read that fails, is rate-limited or reaches its page bound keeps the stored issue brief
+and never empties it. An issue brief change is a live text change, as above: a new source
+revision, no hold, no admission reason and no version change. A task without an issue
+brief keeps the source revisions it had before issue briefs existed. On upgrade, the
+first sync imports an issue's existing brief as a source change: an open task that was
+already handed back gets the informational changed-since-handback flag, and its lead's
+next turn shows the brief as added. Done tasks are not read, so they are unaffected. The task read
+carries it as `issueBrief` with `issueBriefTruncated`, beside the outcome; the task view
+shows it in its own Issue brief section and `cab task get` prints it after the outcome.
+
+Each lead turn is built when it is submitted from the task's current title, outcome and
+issue brief (in its own section after the outcome),
 followed by the material already bound to that work (its inbox batch, a draft turn's
 operator message, a reporting repair), including when the turn is a retry or a
 planned-shutdown requeue of that request; the lead's frozen assignment brief is not used.
 When the text differs from what the lead's last confirmed turn in the same conversation
 carried (a replaced or new conversation has none), the turn adds a
-line diff (`- ` before, `+ ` now, by field) capped at 200 lines and 8,000 UTF-8 bytes,
-ending with `[… issue diff truncated …]` when cut; the full current text is never cut. A
+line diff (`- ` before, `+ ` now, by field, the issue brief included) capped at 200 lines and 8,000 UTF-8 bytes,
+ending with `[… issue diff truncated …]` when cut; the full current text is never cut
+beyond the issue brief's own cap. A
 turn is confirmed once `startTurn` returned and its exact execution identity bound the
 turn. A submission left uncertain by a crash or a lost response does not count, so the
 next turn repeats the diff; a turn after no change carries none. A text change creates no
 inbox event, wakes no assignment and does not block `cab_report_result`: the lead sees it
 on its next turn, whatever starts that turn. A routed or delegated assignment keeps the
-brief its lead wrote and is not told. An Improve draft turn queued before an edit is
+brief its lead wrote and is not told, and does not receive the issue brief. An Improve draft turn queued before an edit is
 refused, and `issue.edit` keeps its expected-text guard. An assignment that has never
 started a turn shows no instructions or profile staleness wait, since its first turn takes
 both as they are then.

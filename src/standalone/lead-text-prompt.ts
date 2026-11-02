@@ -2,6 +2,8 @@
 export interface TaskText {
   title: string;
   outcome: string;
+  /** The issue brief, untrusted source text like the outcome; null when the task has none. */
+  issueBrief: string | null;
 }
 
 export const issueDiffLineLimit = 200;
@@ -73,9 +75,13 @@ export function issueTextDiff(before: TaskText, after: TaskText): string[] {
   for (const [heading, a, b] of [
     ["Title:", before.title, after.title],
     ["Outcome:", before.outcome, after.outcome],
+    ["Issue brief:", before.issueBrief, after.issueBrief],
   ] as const) {
     if (a === b) continue;
-    lines.push(heading, ...lineDiff(a.split("\n"), b.split("\n")));
+    // No issue brief has no lines, so adding or removing one diffs only its own lines.
+    const split = (text: string | null) =>
+      text === null ? [] : text.split("\n");
+    lines.push(heading, ...lineDiff(split(a), split(b)));
   }
   const bytes = (line: string) => Buffer.byteLength(line, "utf8") + 1;
   let total = 0;
@@ -97,17 +103,23 @@ export function issueTextDiff(before: TaskText, after: TaskText): string[] {
 }
 
 /**
- * A lead turn's task section: the full current title and outcome, then, when the text changed
+ * A lead turn's task section: the full current title, outcome and issue brief, then, when the text changed
  * since the lead's last confirmed turn, the capped diff against what that turn carried.
  */
 export function leadTaskSection(
   current: TaskText,
   confirmed: TaskText | undefined,
 ): string {
-  const task = `Task: ${current.title}\nOutcome: ${current.outcome}`;
+  const task =
+    `Task: ${current.title}\nOutcome: ${current.outcome}` +
+    (current.issueBrief === null
+      ? ""
+      : `\n\nIssue brief (the issue's brief comment and the notes after it):\n${current.issueBrief}`);
   if (
     !confirmed ||
-    (confirmed.title === current.title && confirmed.outcome === current.outcome)
+    (confirmed.title === current.title &&
+      confirmed.outcome === current.outcome &&
+      confirmed.issueBrief === current.issueBrief)
   )
     return task;
   return `${task}\n\nThe task's issue text changed since your last turn. Changes (- before, + now):\n${issueTextDiff(confirmed, current).join("\n")}`;

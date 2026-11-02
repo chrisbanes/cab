@@ -1561,6 +1561,104 @@ test("imported projections validate provider fields and distinguish attempted sy
   );
   assert.doesNotMatch(JSON.stringify(read), /PRIVATE PROVIDER ERROR/);
 });
+test("the task read carries an imported task's issue brief apart from its outcome, with its truncation", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const d = f.service.domain();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    credentialRef: "env:UI02_SYNTHETIC_REFERENCE",
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R1",
+        owner: "owner",
+        name: "repo",
+      },
+    ],
+    readiness: null,
+  });
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+  const source = f.service.githubSources();
+  source.reconcileSelection(ids.projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I1",
+        repositoryId: "R1",
+        repositoryName: "owner/repo",
+        number: 42,
+        title: "Imported",
+        body: "The outcome",
+        state: "open",
+        labels: [],
+        projectFields: [],
+      },
+    ],
+  });
+  const taskId = String(source.issue("I1")?.taskId);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const read = async () => (await api.readTask(taskId)).data.task;
+  assert.deepEqual(
+    [(await read()).issueBrief, (await read()).issueBriefTruncated],
+    [null, false],
+  );
+  const local = (await api.readTask(ids.taskId)).data.task;
+  assert.deepEqual(
+    [local.issueBrief, local.issueBriefTruncated],
+    [null, false],
+  );
+  source.reconcileIssueBrief("I1", {
+    complete: true,
+    comments: ["## Agent Brief\nBuild it", "x".repeat(40_000)],
+    reason: null,
+  });
+  const task = await read();
+  assert.equal(task.outcome, "The outcome");
+  assert.equal(
+    task.issueBrief,
+    "## Agent Brief\nBuild it\n\n[… 1 earlier note omitted …]",
+  );
+  assert.equal(task.issueBriefTruncated, true);
+  // The brief rides in the source revision history too, under the same exclusions.
+  const review = await api.readReview(taskId);
+  assert.equal(review.data.sources.at(-1)?.issueBrief, task.issueBrief);
+
+  // The project's source credential value inside a brief is withheld from both reads.
+  const canary = "issue-brief-canary-7731";
+  const previous = process.env.UI02_SYNTHETIC_REFERENCE;
+  process.env.UI02_SYNTHETIC_REFERENCE = canary;
+  t.after(() => {
+    if (previous === undefined) delete process.env.UI02_SYNTHETIC_REFERENCE;
+    else process.env.UI02_SYNTHETIC_REFERENCE = previous;
+  });
+  source.reconcileIssueBrief("I1", {
+    complete: true,
+    comments: [`## Agent Brief\nUse ${canary} to deploy`],
+    reason: null,
+  });
+  const withheld = await read();
+  assert.doesNotMatch(String(withheld.issueBrief), new RegExp(canary));
+  assert.equal(withheld.outcome, "The outcome");
+  const history = await api.readReview(taskId);
+  assert.equal(history.data.sources.at(-1)?.issueBrief, null);
+  assert.doesNotMatch(JSON.stringify(history), new RegExp(canary));
+});
 test("omitted-material denial replay remains exact after privacy-context change and service reopen", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

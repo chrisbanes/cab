@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2407,5 +2407,180 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
     old.db.close();
   } finally {
     db.close();
+  }
+});
+
+const briefComments = (...notes: string[]) => ({
+  complete: true as const,
+  comments: ["## Agent Brief\nDo the work", ...notes],
+  reason: null,
+});
+
+test("a changed issue brief is a live text change: one source revision, no hold, version or blocker change", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const reviews = new TaskReviewStore(w.db);
+    const before = {
+      version: Number(w.domain.task(taskId).version),
+      blockers: w.domain.task(taskId).importedBlockers,
+      revisions: reviews.sources(taskId).length,
+      reasons: w.domain.admission(taskId).reasons,
+    };
+    assert.equal(
+      w.sources.reconcileIssueBrief("I_1", briefComments("A")),
+      true,
+    );
+    const latest = reviews.sources(taskId).at(-1);
+    assert.equal(reviews.sources(taskId).length, before.revisions + 1);
+    assert.equal(
+      latest?.issueBrief,
+      "## Agent Brief\nDo the work\n\n--- Later note ---\n\nA",
+    );
+    assert.deepEqual(w.sources.issueBrief(taskId), {
+      text: latest?.issueBrief,
+      truncated: false,
+    });
+    assert.equal(w.hold(), undefined);
+    assert.equal(Number(w.domain.task(taskId).version), before.version);
+    assert.equal(w.domain.task(taskId).importedBlockers, before.blockers);
+    assert.deepEqual(w.domain.admission(taskId).reasons, before.reasons);
+    // The same read again changes nothing; an edited note is a new revision.
+    w.sources.reconcileIssueBrief("I_1", briefComments("A"));
+    assert.equal(reviews.sources(taskId).length, before.revisions + 1);
+    w.sources.reconcileIssueBrief("I_1", briefComments("A, edited"));
+    assert.equal(reviews.sources(taskId).length, before.revisions + 2);
+    // A selection re-read of unchanged text keeps the brief in its digest: no flip-flop.
+    w.observe({});
+    assert.equal(reviews.sources(taskId).length, before.revisions + 2);
+    // An incomplete read keeps the stored brief and its revision.
+    assert.equal(
+      w.sources.reconcileIssueBrief("I_1", {
+        complete: false,
+        comments: [],
+        reason: "page-limit",
+      }),
+      true,
+    );
+    assert.match(String(w.sources.issueBrief(taskId)?.text), /A, edited$/);
+    assert.equal(reviews.sources(taskId).length, before.revisions + 2);
+    // A complete read with no brief comment deletes it, as a new revision.
+    w.sources.reconcileIssueBrief("I_1", {
+      complete: true,
+      comments: ["just a note"],
+      reason: null,
+    });
+    assert.equal(w.sources.issueBrief(taskId), null);
+    assert.equal(reviews.sources(taskId).length, before.revisions + 3);
+    assert.equal(reviews.sources(taskId).at(-1)?.issueBrief, null);
+    assert.equal(w.hold(), undefined);
+    assert.equal(Number(w.domain.task(taskId).version), before.version);
+  } finally {
+    w.close();
+  }
+});
+
+test("an issue brief read under a stale binding writes nothing", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const { version } = w.domain.githubConfiguration(w.projectId);
+    const binding = {
+      projectId: w.projectId,
+      configVersion: version,
+      credentialRef: "env:TEST_GITHUB",
+      selectionId: "repo",
+      reference: {
+        nodeId: "I_1",
+        repositoryId: "R_1",
+        repositoryName: "org/repo",
+        number: 1,
+      },
+    };
+    assert.equal(
+      w.sources.reconcileIssueBrief("I_1", briefComments(), {
+        ...binding,
+        configVersion: version + 1,
+      }),
+      false,
+    );
+    assert.equal(w.sources.issueBrief(taskId), null);
+    assert.equal(
+      w.sources.reconcileIssueBrief("I_1", briefComments(), binding),
+      true,
+    );
+    assert.notEqual(w.sources.issueBrief(taskId), null);
+  } finally {
+    w.close();
+  }
+});
+
+test("a task without an issue brief keeps the source digest and revision it had before issue briefs", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const reviews = new TaskReviewStore(w.db);
+    const legacyDigest = (title: string, body: string) =>
+      createHash("sha256")
+        .update(JSON.stringify({ kind: "github", title, body }))
+        .digest("hex");
+    assert.equal(
+      reviews.sources(taskId).at(-1)?.digest,
+      legacyDigest("Imported issue", "Ship this"),
+    );
+    w.observe({ body: "Edited" });
+    assert.equal(
+      reviews.sources(taskId).at(-1)?.digest,
+      legacyDigest("Imported issue", "Edited"),
+    );
+    // A complete read that finds no brief writes nothing for such a task.
+    const revisions = reviews.sources(taskId).length;
+    w.sources.reconcileIssueBrief("I_1", {
+      complete: true,
+      comments: ["no brief here"],
+      reason: null,
+    });
+    assert.equal(reviews.sources(taskId).length, revisions);
+  } finally {
+    w.close();
+  }
+});
+
+test("upgrading a store from before issue briefs adds no source revision, handback flag or lead text change", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const leadText = new LeadTextStore(w.db);
+    leadText.prepare({
+      workId: "w1",
+      taskId,
+      assignmentId: "lead",
+      requestSequence: 1,
+      threadId: "thread",
+      text: leadText.current(taskId),
+    });
+    leadText.confirm("w1", "thread", "turn-1");
+    leadText.recordHandback(taskId, "handback", "w1");
+    // Back to the level-5 shape: no brief table, no submission column, records without the field.
+    w.db.exec(
+      "DROP TABLE source_issue_briefs; ALTER TABLE lead_text_submissions DROP COLUMN issueBrief",
+    );
+    w.db.exec(
+      "UPDATE task_review_sources SET recordJson = json_remove(recordJson, '$.issueBrief')",
+    );
+    const before = new TaskReviewStore(w.db).sources(taskId);
+    assert.equal(before.at(-1)?.issueBrief, undefined);
+    w.domain.migrate();
+    w.observe({});
+    const after = new TaskReviewStore(w.db).sources(taskId);
+    assert.deepEqual(
+      after.map((s) => [s.revision, s.digest]),
+      before.map((s) => [s.revision, s.digest]),
+    );
+    assert.equal(leadText.changedSinceHandback(taskId), false);
+    assert.equal(leadText.confirmed("lead", "thread")?.issueBrief, null);
+    assert.equal(leadText.current(taskId).issueBrief, null);
+  } finally {
+    w.close();
   }
 });

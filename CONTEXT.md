@@ -123,6 +123,10 @@ _Avoid_: Project-wide checks; that list only survives in policies saved before p
 The stable identity of a task's corresponding item in an external system, independent of which sources discover it.
 _Avoid_: Source configuration when referring to external task identity
 
+**Issue brief**:
+The comment on an external item that states the work's contract, with the trusted notes that follow it.
+_Avoid_: agent brief, brief (alone), when not meaning an assignment brief
+
 **Task publication**:
 The operator creating an external item from a local task, so that the same task
 takes the item's external reference and becomes imported.

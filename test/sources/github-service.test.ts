@@ -2440,3 +2440,138 @@ test("the service builds preview and sync readers from the injected issue-tracke
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a sync imports an open task's issue brief from its counted comments, keeps it on a failed read, and never reads a Done task's", async () => {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  try {
+    const projectId = addGitHubProject(domain);
+    let comments: string[] | "fail" = [
+      "Discussion before the brief",
+      "## Agent Brief\nBuild it",
+      "Collaborator note",
+      "Member note",
+    ];
+    const commentReads: string[] = [];
+    const reader: GitHubSourceReader = {
+      async readSelection() {
+        return { complete: true, issues: [issue], reason: null };
+      },
+      async readBlockers() {
+        return { complete: true, blockers: [], reason: null };
+      },
+      async readIssueStatus() {
+        return { status: "open" };
+      },
+      async readIssueComments(reference) {
+        commentReads.push(reference.nodeId);
+        return comments === "fail"
+          ? { complete: false, comments: [], reason: "page-limit" }
+          : { complete: true, comments, reason: null };
+      },
+    };
+    const synchronizer = new GitHubSynchronizer(domain, sources, () => reader);
+    await synchronizer.refresh();
+    const taskId = String(sources.issue("I_1")?.taskId);
+    const brief = () => sources.issueBrief(taskId)?.text ?? null;
+    const revisions = () =>
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM task_review_sources WHERE taskId = ?",
+        )
+        .get(taskId)?.n;
+    const version = Number(domain.task(taskId).version);
+    assert.equal(
+      brief(),
+      "## Agent Brief\nBuild it\n\n--- Later note ---\n\nCollaborator note\n\n--- Later note ---\n\nMember note",
+    );
+    assert.deepEqual(commentReads, ["I_1"]);
+    // A newer brief replaces the older one and the notes before it.
+    comments = ["## Agent Brief\nOld", "Old note", "## Agent Brief\nNew", "N"];
+    await synchronizer.refresh();
+    assert.equal(brief(), "## Agent Brief\nNew\n\n--- Later note ---\n\nN");
+    const counted = revisions();
+    // Unchanged counted comments make no new revision.
+    await synchronizer.refresh();
+    assert.equal(revisions(), counted);
+    // A failed read keeps the brief.
+    comments = "fail";
+    await synchronizer.refresh();
+    assert.equal(brief(), "## Agent Brief\nNew\n\n--- Later note ---\n\nN");
+    assert.equal(revisions(), counted);
+    // No brief comment: no issue brief.
+    comments = ["Just discussion"];
+    await synchronizer.refresh();
+    assert.equal(brief(), null);
+    // No hold and no structural version change along the way.
+    assert.equal(sources.hold("I_1"), undefined);
+    assert.equal(Number(domain.task(taskId).version), version);
+    domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      expectedVersion: version,
+      state: "done",
+    });
+    commentReads.length = 0;
+    comments = ["## Agent Brief\nAfter Done"];
+    await synchronizer.refresh();
+    assert.deepEqual(commentReads, []);
+    assert.equal(brief(), null);
+  } finally {
+    db.close();
+  }
+});
+
+test("a rate limit hit by issue brief reads never costs a selection its blocker reads", async () => {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  try {
+    addGitHubProject(domain);
+    const issues = [issue, { ...issue, nodeId: "I_2", number: 2 }];
+    const blockerReads: string[] = [];
+    const commentReads: string[] = [];
+    const reader: GitHubSourceReader = {
+      async readSelection() {
+        return { complete: true, issues, reason: null };
+      },
+      async readBlockers(reference) {
+        blockerReads.push(reference.nodeId);
+        return { complete: true, blockers: [], reason: null };
+      },
+      async readIssueStatus() {
+        return { status: "open" };
+      },
+      async readIssueComments(reference) {
+        commentReads.push(reference.nodeId);
+        return {
+          complete: false,
+          comments: [],
+          reason: "rate-limited",
+          resumeAt: Date.now() + 60_000,
+        };
+      },
+    };
+    await new GitHubSynchronizer(domain, sources, () => reader).refresh();
+    assert.deepEqual(blockerReads, ["I_1", "I_2"]);
+    // The first brief read paused the credential; the second is not attempted.
+    assert.deepEqual(commentReads, ["I_1"]);
+    for (const nodeId of ["I_1", "I_2"])
+      assert.equal(
+        domain.task(String(sources.issue(nodeId)?.taskId)).importedBlockers,
+        "clear",
+      );
+  } finally {
+    db.close();
+  }
+});

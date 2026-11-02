@@ -57,6 +57,11 @@ interface JiraState {
   fail: Record<string, number>;
   /** JQL whose response is cut off mid-body. */
   truncated: Set<string>;
+  /** Each issue's comments by issue id, oldest first. */
+  comments: Record<
+    string,
+    { id: string; body: unknown; properties: { key: string }[] }[]
+  >;
 }
 
 async function fixture(
@@ -71,10 +76,31 @@ async function fixture(
     });
     process.env[names[key]] = values[key];
   }
-  const state: JiraState = { issues: {}, fail: {}, truncated: new Set() };
+  const state: JiraState = {
+    issues: {},
+    fail: {},
+    truncated: new Set(),
+    comments: {},
+  };
   const jira = fakeJira((request) => {
     if (request.url.pathname.endsWith("/myself"))
       return json({ accountId: "acct-1", displayName: "Chris" });
+    const listed = /\/issue\/(\d+)\/comment$/.exec(request.url.pathname);
+    if (listed) {
+      const comments = state.comments[listed[1] ?? ""] ?? [];
+      return json({
+        total: comments.length,
+        comments: comments.map(({ id, body }) => ({ id, body })),
+      });
+    }
+    if (request.url.pathname.endsWith("/comment/list")) {
+      const ids = (request.body as { ids: number[] }).ids.map(String);
+      return json({
+        values: Object.values(state.comments)
+          .flat()
+          .filter((c) => ids.includes(c.id)),
+      });
+    }
     const jql =
       (request.body as { jql?: string; queries?: string[] }).jql ??
       (request.body as { queries: string[] }).queries[0] ??
@@ -801,4 +827,48 @@ test("Jira policy reads default Skip, explicit Done and omitted edits under the 
       .closedIssues,
     "skip",
   );
+});
+
+test("a Jira issue's brief and later note import as Markdown into the task read, without cab's own comment", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  f.state.issues["project = ABC"] = [jiraIssue(3)];
+  f.state.comments["10003"] = [
+    { id: "1", body: adfParagraph("Before the brief"), properties: [] },
+    {
+      id: "2",
+      body: {
+        type: "doc",
+        version: 1,
+        content: [
+          {
+            type: "heading",
+            attrs: { level: 2 },
+            content: [{ type: "text", text: "Agent Brief" }],
+          },
+          { type: "paragraph", content: [{ type: "text", text: "Build it" }] },
+        ],
+      },
+      properties: [],
+    },
+    { id: "3", body: adfParagraph("Later note"), properties: [] },
+    {
+      id: "4",
+      body: adfParagraph("cab delivered this"),
+      properties: [{ key: "cab-operation" }],
+    },
+  ];
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }]);
+  await f.api.refreshSources();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10003")?.taskId);
+  const task = (await f.api.readTask(taskId)).data.task;
+  assert.equal(
+    task.issueBrief,
+    "## Agent Brief\n\nBuild it\n\n--- Later note ---\n\nLater note",
+  );
+  assert.equal(task.issueBriefTruncated, false);
+  assert.equal(task.outcome, "Body 3");
 });

@@ -111,7 +111,7 @@ export type StartupSnapshotOptions = {
  * the guard test; a database at a lower level is snapshotted before it is migrated, and one at a
  * higher level is refused.
  */
-export const MIGRATION_LEVEL = 5;
+export const MIGRATION_LEVEL = 6;
 
 /** The package version, resolved from dist/src/standalone in a checkout, an npm install and a release. */
 export function releaseVersion(): string {

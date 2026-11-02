@@ -12,6 +12,7 @@ import type { IssueTrackerReaderFactory } from "./issue-tracker.js";
 import type {
   BlockerSnapshot,
   GitHubSourceReader,
+  IssueCommentsRead,
   IssueReference,
   IssueSnapshot,
   IssueStatus,
@@ -91,7 +92,15 @@ export class GitHubSynchronizer {
     );
   }
 
+  private openTask(issue: IssueSnapshot): boolean {
+    const taskId = this.sources.issue(issue.nodeId)?.taskId;
+    return (
+      taskId !== undefined && this.domain.task(String(taskId)).state === "open"
+    );
+  }
+
   private async perform(): Promise<void> {
+    const briefsRead = new Set<string>();
     // One reader per credential for this pass, so its repository lookups are shared.
     const readers = new Map<string, GitHubSourceReader>();
     const readerFor = (reference: string) => {
@@ -135,14 +144,14 @@ export class GitHubSynchronizer {
         if (!committed) continue;
         if (!snapshot.complete) continue;
         for (const issue of snapshot.issues) {
-          const reads = this.readsBlockers(issue);
-          if (!reads) continue;
           const reference: IssueReference = {
             nodeId: issue.nodeId,
             repositoryId: issue.repositoryId,
             repositoryName: issue.repositoryName,
             number: issue.number,
           };
+          const reads = this.readsBlockers(issue);
+          if (!reads) continue;
           // Paused and unread issues are recorded as unknown, never left with an
           // earlier "clear" that a later readiness could admit before its read.
           const blockers: BlockerSnapshot =
@@ -166,6 +175,43 @@ export class GitHubSynchronizer {
             selectionId: selection.id,
             reference,
           });
+        }
+        // Issue briefs are read after every blocker read, so a rate limit they hit never
+        // leaves this selection's blockers unknown and stalls admission.
+        for (const issue of snapshot.issues) {
+          const reference: IssueReference = {
+            nodeId: issue.nodeId,
+            repositoryId: issue.repositoryId,
+            repositoryName: issue.repositoryName,
+            number: issue.number,
+          };
+          // Only an open task reads its issue brief, once per pass; Done tasks keep their last one.
+          if (
+            reader.readIssueComments &&
+            !briefsRead.has(issue.nodeId) &&
+            this.openTask(issue)
+          ) {
+            briefsRead.add(issue.nodeId);
+            const comments: IssueCommentsRead =
+              !(reader instanceof CredentialGitHubSourceReader) &&
+              this.paused(credentialRef)
+                ? { complete: false, comments: [], reason: "rate-limited" }
+                : await reader.readIssueComments(reference).catch(() => ({
+                    complete: false as const,
+                    comments: [],
+                    reason: "reader-error",
+                  }));
+            if (this.stopped) return;
+            if (!(reader instanceof CredentialGitHubSourceReader))
+              this.notePause(credentialRef, comments);
+            this.sources.reconcileIssueBrief(issue.nodeId, comments, {
+              projectId,
+              configVersion: config.version,
+              credentialRef: config.credentialRef,
+              selectionId: selection.id,
+              reference,
+            });
+          }
         }
       }
     }

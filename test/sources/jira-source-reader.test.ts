@@ -350,3 +350,129 @@ test("every issue is stamped with when the read began, so a read overlapping a w
   const stamp = snapshot.issues[0]?.projectReadAt;
   assert.ok(stamp !== undefined && stamp >= before && stamp < resolvedAt);
 });
+
+const commentReference = {
+  nodeId: "10001",
+  repositoryId: "10000",
+  repositoryName: "ABC",
+  number: 1,
+};
+
+test("issue comments read as Markdown, oldest first, without cab's own", async () => {
+  const comments = [
+    { id: "1", body: adfParagraph("## Agent Brief"), properties: [] },
+    { id: "2", body: adfParagraph("Later note"), properties: [] },
+    {
+      id: "3",
+      body: adfParagraph("Delivered"),
+      properties: [{ key: "cab-operation", value: { operationId: "x" } }],
+    },
+  ];
+  const { reader: r, requests } = reader((req) =>
+    req.method === "GET"
+      ? json({
+          total: comments.length,
+          comments: comments
+            .slice(Number(req.url.searchParams.get("startAt")))
+            .slice(0, 2)
+            .map(({ id, body }) => ({ id, body })),
+        })
+      : json({
+          values: comments.filter((c) =>
+            (req.body as { ids: number[] }).ids.includes(Number(c.id)),
+          ),
+        }),
+  );
+  const read = await r.readIssueComments(commentReference);
+  assert.equal(read.complete, true);
+  assert.equal(read.comments.length, 2);
+  assert.match(String(read.comments[0]), /Agent Brief/);
+  assert.equal(read.comments[1], "Later note");
+  assert.deepEqual(
+    requests.map((q) => [q.method, q.url.pathname, q.url.search]),
+    [
+      [
+        "GET",
+        "/rest/api/3/issue/10001/comment",
+        "?startAt=0&maxResults=100&orderBy=created",
+      ],
+      [
+        "GET",
+        "/rest/api/3/issue/10001/comment",
+        "?startAt=2&maxResults=100&orderBy=created",
+      ],
+      ["POST", "/rest/api/3/comment/list", "?expand=properties"],
+    ],
+  );
+});
+
+test("a malformed, short or rate-limited comment read is incomplete", async () => {
+  const malformed = await reader(() =>
+    json({ total: 1, comments: [{ id: "x" }] }),
+  ).reader.readIssueComments(commentReference);
+  assert.deepEqual(
+    [malformed.complete, malformed.reason, malformed.comments],
+    [false, "malformed", []],
+  );
+  // A property listing missing a comment proves nothing about it.
+  const short = await reader((req) =>
+    req.method === "GET"
+      ? json({ total: 1, comments: [{ id: "1", body: adfParagraph("x") }] })
+      : json({ values: [] }),
+  ).reader.readIssueComments(commentReference);
+  assert.equal(short.reason, "malformed");
+  // Same count, different comment: the IDs must match, not just their number.
+  const swapped = await reader((req) =>
+    req.method === "GET"
+      ? json({ total: 1, comments: [{ id: "1", body: adfParagraph("x") }] })
+      : json({ values: [{ id: "2", properties: [] }] }),
+  ).reader.readIssueComments(commentReference);
+  assert.equal(swapped.reason, "malformed");
+  // A short property page Jira marks as its last is incomplete too.
+  const two = [
+    { id: "1", body: adfParagraph("a") },
+    { id: "2", body: adfParagraph("b") },
+  ];
+  const cut = await reader((req) =>
+    req.method === "GET"
+      ? json({ total: 2, comments: two })
+      : json({ values: [{ id: "1", properties: [] }], isLast: true }),
+  ).reader.readIssueComments(commentReference);
+  assert.equal(cut.reason, "malformed");
+  const limited = await reader(
+    () => new Response("{}", { status: 429, headers: { "retry-after": "30" } }),
+  ).reader.readIssueComments(commentReference);
+  assert.equal(limited.reason, "rate-limited");
+  assert.ok(!limited.complete && (limited.resumeAt ?? 0) > Date.now());
+});
+
+test("a property listing Jira pages below the requested IDs is completed by asking again for the rest", async () => {
+  const comments = Array.from({ length: 5 }, (_, i) => ({
+    id: String(i + 1),
+    body: adfParagraph(`Comment ${i + 1}`),
+    properties:
+      i === 3 ? [{ key: "cab-operation", value: { operationId: "x" } }] : [],
+  }));
+  const asked: number[][] = [];
+  const { reader: r } = reader((req) => {
+    if (req.method === "GET")
+      return json({
+        total: comments.length,
+        comments: comments.map(({ id, body }) => ({ id, body })),
+      });
+    const ids = (req.body as { ids: number[] }).ids;
+    asked.push(ids);
+    // Two per page, as a site with a smaller page size would answer.
+    const page = comments.filter((c) => ids.includes(Number(c.id)));
+    return json({ values: page.slice(0, 2), isLast: page.length <= 2 });
+  });
+  const read = await r.readIssueComments(commentReference);
+  assert.equal(read.complete, true);
+  assert.deepEqual(read.comments, [
+    "Comment 1",
+    "Comment 2",
+    "Comment 3",
+    "Comment 5",
+  ]);
+  assert.deepEqual(asked, [[1, 2, 3, 4, 5], [3, 4, 5], [5]]);
+});

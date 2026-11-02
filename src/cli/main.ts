@@ -890,6 +890,13 @@ async function run(
             : `Undelivered result ${r.resultId}: no lead or requester can receive it now`,
         ),
         ...(task.outcome ? ["", task.outcome] : []),
+        ...(task.issueBrief
+          ? [
+              "",
+              `Issue brief:${task.issueBriefTruncated ? " (truncated to 32 KB)" : ""}`,
+              task.issueBrief,
+            ]
+          : []),
       ].join("\n"),
     };
   }

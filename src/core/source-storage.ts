@@ -135,6 +135,12 @@ export function migrateSourceStorage(db: Database): void {
       provider TEXT NOT NULL, instance TEXT NOT NULL, scopeId TEXT NOT NULL,
       fieldId TEXT NOT NULL, name TEXT NOT NULL, options TEXT NOT NULL,
       PRIMARY KEY(provider, instance, scopeId, fieldId)
+    );
+    CREATE TABLE IF NOT EXISTS source_issue_briefs (
+      provider TEXT NOT NULL, instance TEXT NOT NULL, externalId TEXT NOT NULL,
+      brief TEXT NOT NULL, truncated INTEGER NOT NULL CHECK(truncated IN (0,1)),
+      PRIMARY KEY(provider, instance, externalId),
+      FOREIGN KEY(provider, instance, externalId) REFERENCES external_items(provider, instance, externalId)
     );`);
   // The tracker's own status as JSON `{id,name,categoryKey}`, and its single-select values as
   // JSON `[{fieldId,optionId,name}]`; NULL for GitHub.
