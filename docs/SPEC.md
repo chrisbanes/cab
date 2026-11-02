@@ -636,9 +636,8 @@ The operator UI is a React application at `/app`, served with same-origin
 settlement, result-destination reconciliation and messages to delegated assignments
 are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
 server-rendered routes: local task edits and source review decisions on `/task/:id`;
-delivery policy on `/project/:id`; and Stop/Resume and recovery on
-`/runtime/task/:id`. They are reached from a task's inspector, Project settings'
-Open advanced editor and a task's Execution link. The technical
+Stop/Resume and recovery on
+`/runtime/task/:id`. They are reached from a task's inspector and Execution link. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
@@ -1040,7 +1039,8 @@ owner; the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
 are rechecked when self-hosting by others is considered.
 
 Configuration forms edit current values in place rather than requiring a complete
-replacement. The signed-in operator may reveal and edit instructions, routing guidance
+replacement. Routing edits retain the full saved candidate set within the existing
+request-size limit. The signed-in operator may reveal and edit instructions, routing guidance
 and saved search queries in place, and local paths display plainly: the web session is
 the operator's own private origin. Reveal is a dedicated read that requires that
 session; no CLI credential can make it, whatever its scope. Reveals are not recorded.
@@ -2026,6 +2026,8 @@ separate approval. Issue closure is a separate project permission after completi
 conditions; observed PR auto-closure is reconciled, not assumed to complete all work.
 Writes record confirmed success, confirmed failure or uncertainty; local edits
 cannot masquerade as confirmed remote updates.
+
+The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 17 scoped action kinds and required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. When that view is unavailable, reducing public status-related allow coverage shows a conservative warning that mapped status writes may lose authority; the warning grants no write permission. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
 
 The service implements operator-owned, versioned project delivery policy. Absent
 action grants deny writes; imported identity and repository access supply no write

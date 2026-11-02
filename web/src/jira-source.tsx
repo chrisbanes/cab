@@ -15,6 +15,7 @@ import {
   DraftOutcome,
   key,
   locked,
+  reloadDraft,
   Panel,
   submitDraft,
   useDraft,
@@ -24,7 +25,13 @@ import {
 } from "./settings.js";
 import { clockLabel } from "./presentation.js";
 import { parseRule, ruleLines, savedRule } from "./jira-readiness.js";
-import { closedIssueLabels } from "./settings-changes.js";
+import {
+  closedIssueLabels,
+  jiraRowsFrom,
+  jiraSelections,
+  adoptJiraRows,
+  parseRows,
+} from "./settings-changes.js";
 import { ruleText } from "../../src/operator/readiness-text.js";
 import type { ObservationResource } from "./sync-placement.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -256,26 +263,26 @@ export function JiraSourceTab(
       [p.client],
     ),
   );
-  // One query per line: a saved query that spans lines reads as one with its breaks as spaces.
-  const loadedJql = (known?.jql ?? [])
-    .map((s) => s.jql.replace(/\s*\n\s*/g, " "))
-    .join("\n");
-  useLoadedDraft(
-    d,
-    saved && !known
-      ? null
-      : {
-          expectedVersion: String(data.source.version),
-          instance: saved ? String(data.source.instance ?? "") : "",
-          closedIssues: saved ? data.source.closedIssues : "skip",
-          jql: loadedJql,
-          readinessMode: rule?.mode ?? "all",
-          readiness: savedRuleLines,
-          key: key(),
-        },
-    p.loadedAt,
-    [data.source.version, loadedJql, savedRuleLines],
-  );
+  const loadedQueries = saved
+    ? jiraRowsFrom(data.source, known)
+    : { selections: "[]", jql: "", jqlIds: [], incomplete: false };
+  const loadedJql = loadedQueries.jql;
+  const initial = {
+    expectedVersion: String(data.source.version),
+    instance: saved ? String(data.source.instance ?? "") : "",
+    closedIssues: saved ? data.source.closedIssues : "skip",
+    ...loadedQueries,
+    removedJqlIds: [] as string[],
+    readinessMode: rule?.mode ?? "all",
+    readiness: savedRuleLines,
+    key: key(),
+  };
+  useLoadedDraft(d, initial, p.loadedAt, [
+    data.source.version,
+    loadedQueries.selections,
+    loadedJql,
+    savedRuleLines,
+  ]);
   const lines = String(d.values.jql ?? "")
     .split("\n")
     .map((l) => l.trim())
@@ -325,13 +332,18 @@ export function JiraSourceTab(
   const usable = (sites.state.data?.data.credentials ?? []).filter(
     (c) => c.usable,
   );
-  const blocked = !instance || lines.length === 0 || lines.length > 30;
+  const retainedRows = parseRows(d.values.selections);
+  const count =
+    retainedRows.filter((row) => !row.removed).length + lines.length;
+  const blocked =
+    loadedQueries.incomplete ||
+    (!saved && !instance) ||
+    (!saved && count === 0) ||
+    count > 30;
   const readiness = parseRule(
     String(d.values.readinessMode ?? "all"),
     String(d.values.readiness ?? ""),
   );
-  // The saved queries are private text: the editor opens only once they are read.
-  const editorReady = !saved || known !== undefined;
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
@@ -347,179 +359,218 @@ export function JiraSourceTab(
           title="Jira source"
           description="Each line is one JQL query. cab imports the issues each query matches; titles and descriptions stay read-only here."
         >
-          {editorReady ? (
-            <form
-              onSubmit={(e) =>
-                void submitDraft(
-                  e,
-                  d,
-                  p.client,
-                  p.session,
-                  {
-                    type: "jira.configure",
-                    key: String(d.values.key),
-                    projectId,
-                    expectedVersion: data.source.version,
-                    instance,
-                    closedIssues:
-                      d.values.closedIssues === "done" ? "done" : "skip",
-                    selections: lines.map((jql, i) => ({
-                      id: `S-${i + 1}`,
-                      kind: "jql",
-                      jql,
-                    })),
-                    ...(withheld || "error" in readiness
-                      ? {}
-                      : { readiness: readiness.rule }),
-                  },
-                  p.refreshConfiguration,
-                  {
-                    ...(blocked
-                      ? { jql: "Enter a site and at least one query." }
-                      : {}),
-                    ...("error" in readiness && !withheld
-                      ? { readiness: readiness.error }
-                      : {}),
-                  },
-                )
-              }
-            >
-              <label className="field body" htmlFor={siteId}>
-                Jira site
-                <NativeSelect
-                  id={siteId}
-                  aria-label="Jira site"
-                  className="control"
-                  disabled={locked(d) || saved}
-                  value={instance}
-                  onChange={(e) => d.set("instance", e.target.value)}
-                >
-                  <option value="">Choose a site</option>
-                  {(saved && !usable.some((c) => c.instance === instance)
-                    ? [...usable.map((c) => c.instance), instance]
-                    : usable.map((c) => c.instance)
-                  ).map((site) => (
-                    <option key={site} value={site}>
-                      {site}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </label>
-              {usable.length === 0 && !saved && (
-                <p className="metadata muted">
-                  Add a Jira site credential below first.
-                </p>
-              )}
-              <DraftField
-                draft={d}
-                field="jql"
-                errorField={errorKey ?? "jql"}
-                label="JQL queries, one per line"
-                multiline
-              />
-              {withheld ? (
-                <p className="metadata muted">
-                  The saved readiness rule is not shown here, and saving leaves
-                  it as it is.
-                </p>
-              ) : (
-                <>
-                  <DraftField
-                    draft={d}
-                    field="readinessMode"
-                    label="Readiness mode"
-                  >
-                    <option value="all">All conditions must hold</option>
-                    <option value="any">Any condition may hold</option>
-                  </DraftField>
-                  <DraftField
-                    draft={d}
-                    field="readiness"
-                    label="Readiness conditions, one per line"
-                    multiline
-                  />
-                  <p className="metadata muted">
-                    {rule
-                      ? `Saved rule: ${ruleText(data.source.readiness)}. `
-                      : "No readiness rule: every matched open issue is Ready. "}
-                    Write label has|lacks NAME, status in|not-in ID, or
-                    customfield_N in|not-in ID, with IDs separated by commas.
-                    Leave empty for no rule.
-                  </p>
-                </>
-              )}
-              <DraftField
-                draft={d}
-                field="closedIssues"
-                label="Closed Jira issues"
+          <form
+            onSubmit={(e) =>
+              void submitDraft(
+                e,
+                d,
+                p.client,
+                p.session,
+                {
+                  type: "jira.configure",
+                  key: String(d.values.key),
+                  projectId,
+                  expectedVersion: Number(d.values.expectedVersion),
+                  ...(instance ? { instance } : {}),
+                  closedIssues:
+                    d.values.closedIssues === "done" ? "done" : "skip",
+                  selections: jiraSelections(data.source, d.values),
+                  ...(withheld || "error" in readiness
+                    ? {}
+                    : { readiness: readiness.rule }),
+                },
+                p.refreshConfiguration,
+                {
+                  ...(blocked
+                    ? { jql: "Enter a site and at least one query." }
+                    : {}),
+                  ...("error" in readiness && !withheld
+                    ? { readiness: readiness.error }
+                    : {}),
+                },
+              )
+            }
+          >
+            <label className="field body" htmlFor={siteId}>
+              Jira site
+              <NativeSelect
+                id={siteId}
+                aria-label="Jira site"
+                className="control"
+                disabled={locked(d) || saved}
+                value={instance}
+                onChange={(e) => d.set("instance", e.target.value)}
               >
-                {Object.entries(closedIssueLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
+                <option value="">
+                  {saved && !instance
+                    ? "Saved site unavailable"
+                    : "Choose a site"}
+                </option>
+                {(saved &&
+                instance &&
+                !usable.some((c) => c.instance === instance)
+                  ? [...usable.map((c) => c.instance), instance]
+                  : usable.map((c) => c.instance)
+                ).map((site) => (
+                  <option key={site} value={site}>
+                    {site}
                   </option>
                 ))}
-              </DraftField>
+              </NativeSelect>
+            </label>
+            {usable.length === 0 && !saved && (
               <p className="metadata muted">
-                When an issue closes in Jira, Treat closure as Done completes
-                its cab task once execution settles and source checks allow
-                completion. Task history is kept. Switching to Skip reopens
-                tasks completed by Jira closure.
+                Add a Jira site credential below first.
               </p>
-              <div className="settings-actions">
+            )}
+            {saved && !known && (
+              <p className="metadata" role="status">
+                {priv.state.error
+                  ? "Saved queries unavailable; kept as unavailable rows."
+                  : "Loading saved queries; kept as unavailable rows."}
+                {priv.state.error && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={priv.refresh}
+                  >
+                    Retry saved queries
+                  </Button>
+                )}
+              </p>
+            )}
+            {retainedRows.map((row, index) => (
+              <div className="settings-row" key={String(row.savedRow)}>
+                <p className="body">
+                  Unavailable saved source ·{" "}
+                  {row.removed
+                    ? "Will be removed"
+                    : "Kept unless you remove it."}
+                </p>
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={previewing || blocked || locked(d)}
-                  onClick={() => void preview()}
+                  disabled={locked(d)}
+                  onClick={() => {
+                    const rows = parseRows(d.values.selections);
+                    const { removed, ...rest } = rows[index]!;
+                    rows[index] = removed ? rest : { ...rest, removed: true };
+                    d.set("selections", JSON.stringify(rows));
+                  }}
                 >
-                  {previewing ? "Previewing…" : "Preview matches"}
+                  {row.removed
+                    ? `Undo remove unavailable source ${index + 1}`
+                    : `Remove unavailable source ${index + 1}`}
                 </Button>
               </div>
-              {previews?.map((r) => (
-                <div key={r.jql} className="metadata">
-                  <p data-private>{r.jql}</p>
-                  {"error" in r ? (
-                    <p role="alert">{r.error}</p>
-                  ) : (
-                    <ul>
-                      {r.matches.map((m) => (
-                        <li key={m}>{m}</li>
-                      ))}
-                      {r.more && <li>More matches not shown</li>}
-                      {r.matches.length === 0 && <li>No matches</li>}
-                    </ul>
-                  )}
-                </div>
-              ))}
-              <DraftOutcome
-                draft={d}
-                client={p.client}
-                session={p.session}
-                label="Save Jira source"
-                saveDisabled={blocked}
-                refresh={p.refreshConfiguration}
-                success={null}
-                caveat="Saving replaces the selections and activates them all. Jira checks each new or changed query first; a rejected query saves nothing."
-              />
-            </form>
-          ) : (
-            <div role="status">
-              <p className="metadata">
-                {priv.state.error
-                  ? "Saved queries unavailable."
-                  : "Loading saved queries…"}
+            ))}
+            <DraftField
+              draft={d}
+              field="jql"
+              errorField={errorKey ?? "jql"}
+              label="JQL queries, one per line"
+              multiline
+            />
+            {withheld ? (
+              <p className="metadata muted">
+                The saved readiness rule is not shown here, and saving leaves it
+                as it is.
               </p>
-              {priv.state.error && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => priv.refresh()}
+            ) : (
+              <>
+                <DraftField
+                  draft={d}
+                  field="readinessMode"
+                  label="Readiness mode"
                 >
-                  Retry
-                </Button>
-              )}
+                  <option value="all">All conditions must hold</option>
+                  <option value="any">Any condition may hold</option>
+                </DraftField>
+                <DraftField
+                  draft={d}
+                  field="readiness"
+                  label="Readiness conditions, one per line"
+                  multiline
+                />
+                <p className="metadata muted">
+                  {rule
+                    ? `Saved rule: ${ruleText(data.source.readiness)}. `
+                    : "No readiness rule: every matched open issue is Ready. "}
+                  Write label has|lacks NAME, status in|not-in ID, or
+                  customfield_N in|not-in ID, with IDs separated by commas.
+                  Leave empty for no rule.
+                </p>
+              </>
+            )}
+            <DraftField
+              draft={d}
+              field="closedIssues"
+              label="Closed Jira issues"
+            >
+              {Object.entries(closedIssueLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </DraftField>
+            <p className="metadata muted">
+              When an issue closes in Jira, Treat closure as Done completes its
+              cab task once execution settles and source checks allow
+              completion. Task history is kept. Switching to Skip reopens tasks
+              completed by Jira closure.
+            </p>
+            <div className="settings-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={previewing || blocked || locked(d)}
+                onClick={() => void preview()}
+              >
+                {previewing ? "Previewing…" : "Preview matches"}
+              </Button>
             </div>
-          )}
+            {previews?.map((r) => (
+              <div key={r.jql} className="metadata">
+                <p data-private>{r.jql}</p>
+                {"error" in r ? (
+                  <p role="alert">{r.error}</p>
+                ) : (
+                  <ul>
+                    {r.matches.map((m) => (
+                      <li key={m}>{m}</li>
+                    ))}
+                    {r.more && <li>More matches not shown</li>}
+                    {r.matches.length === 0 && <li>No matches</li>}
+                  </ul>
+                )}
+              </div>
+            ))}
+            <DraftOutcome
+              draft={d}
+              client={p.client}
+              session={p.session}
+              label="Save Jira source"
+              saveDisabled={blocked}
+              discard={() => reloadDraft(d, initial)}
+              review={() => {
+                if (locked(d)) return;
+                d.adoptLatest(data.source.version, initial, [
+                  ["jql", "jqlIds", "removedJqlIds"],
+                ]);
+                const adopted = adoptJiraRows(data.source, d.values, known);
+                d.set("selections", adopted.selections);
+                d.set("jql", adopted.jql);
+                d.set("jqlIds", adopted.jqlIds);
+                d.set("removedJqlIds", adopted.removedJqlIds);
+                if (adopted.dropped)
+                  d.notice =
+                    "Loaded the latest version. Edits or removals of unavailable sources were discarded.";
+              }}
+              refresh={p.refreshConfiguration}
+              success={null}
+              caveat="Saving replaces the selections and activates them all. Jira checks each new or changed query first; a rejected query saves nothing."
+            />
+          </form>
         </Panel>
         {saved && (
           <Panel

@@ -90,11 +90,6 @@ test("service and advanced HTML source status use only the configured fake gh ex
   assert.equal(source.credential.usable, true);
   assert.equal(source.credential.gh.state, "signed-in");
   assert.equal(source.credential.gh.login, "octo");
-  const html = await explicitWorld.s.sessionGet(
-    `/project/${explicitWorld.ids.atlas}`,
-  );
-  assert.equal(html.status, 200);
-  assert.match(await html.text(), /Detected GitHub CLI account @octo/);
   assert.ok(
     gh.environments().length > 0,
     "explicit fake gh must serve the source status",
@@ -559,7 +554,7 @@ test("place-task chooses a matching project once, with the domain's placement ru
   assert.equal(version(third), applied, "placed once");
 });
 
-test("a setup-recorded GitHub CLI source credential reads back the same in JSON, HTML and the CLI, and after Clear", async (t) => {
+test("a setup-recorded GitHub CLI source credential reads back the same in JSON and the CLI, and after Clear", async (t) => {
   const gh = createFakeGh();
   t.after(() => gh.close());
   const w = await world(t, gh.executable);
@@ -575,7 +570,7 @@ test("a setup-recorded GitHub CLI source credential reads back the same in JSON,
   assert.equal(created.status, 200);
   const readBack = async () => {
     const source = (await w.config(projectId)).source;
-    const html = await (await w.s.sessionGet(`/project/${projectId}`)).text();
+    const html = JSON.stringify(await w.config(projectId));
     const human = await w.h.run([
       "project",
       "sources",
@@ -591,8 +586,6 @@ test("a setup-recorded GitHub CLI source credential reads back the same in JSON,
   assert.equal(defaulted.source.version, 1);
   assert.equal(defaulted.source.credential.source, "gh");
   assert.equal(defaulted.source.credential.usable, true);
-  assert.match(defaulted.html, /Credential: GitHub CLI\. Usable\./);
-  assert.match(defaulted.html, /Detected GitHub CLI account @octo\./);
   assert.match(defaulted.cli, /Credential:\s+GitHub CLI\n/);
   assert.match(defaulted.cli, /Detected GitHub CLI account:\s+@octo/);
   const cleared = await w.s.sessionPost("/api/operator/commands", {
@@ -609,6 +602,6 @@ test("a setup-recorded GitHub CLI source credential reads back the same in JSON,
   assert.equal(after.source.version, 2);
   assert.equal(after.source.credentialConfigured, false);
   assert.equal(after.source.credential.configured, false);
-  assert.match(after.html, /Credential: not configured\./);
+  assert.equal(after.source.credential.usable, false);
   assert.match(after.cli, /Credential:\s+not configured\n/);
 });

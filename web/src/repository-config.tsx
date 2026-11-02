@@ -188,7 +188,9 @@ export function RepositoryTab(p: TabProps) {
             >
               <legend className="sr-only">Repository access</legend>
               {repositories.map((r, i) => {
-                const name = String(r.repositoryId || `row ${i + 1}`);
+                const name = r.unavailable
+                  ? `Unavailable saved repository link ${i + 1}`
+                  : String(r.repositoryId || `row ${i + 1}`);
                 return (
                   <div className="settings-row" key={String(r.rowKey)}>
                     {r.keep ? (
@@ -196,7 +198,14 @@ export function RepositoryTab(p: TabProps) {
                         <div>
                           <h3 className="small-heading">{name}</h3>
                           <p className="metadata muted">
-                            {codeHostName(r.codeHost as CodeHost)} · {r.host}
+                            {r.unavailable ? (
+                              "Kept unless you remove it."
+                            ) : (
+                              <>
+                                {codeHostName(r.codeHost as CodeHost)} ·{" "}
+                                {r.host}
+                              </>
+                            )}
                           </p>
                         </div>
                         {r.removed && (
@@ -226,7 +235,7 @@ export function RepositoryTab(p: TabProps) {
                         </Button>
                       </div>
                     )}
-                    {!r.removed && (
+                    {!r.removed && !r.unavailable && (
                       <div className="settings-fields">
                         {!r.keep && (
                           <>

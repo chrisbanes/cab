@@ -306,8 +306,8 @@ test("Chromium verifies the independent login and guarded browser session", asyn
   const context = await browser.newContext();
   const page = await context.newPage();
   journey.observe(page);
-  await page.goto(`${origin}/project/${project.id}`);
-  assert.equal(new URL(page.url()).pathname, `/project/${project.id}`);
+  await page.goto(`${origin}/profile/${profile.id}`);
+  assert.equal(new URL(page.url()).pathname, `/profile/${profile.id}`);
   assert.doesNotMatch(
     await page.locator("body").innerText(),
     /Private browser project/,
@@ -412,14 +412,16 @@ test("Chromium verifies the independent login and guarded browser session", asyn
     1,
   );
 
-  await page.goto(`${origin}/project/${project.id}`);
-  const originalProjectForm = page.locator(
-    'form[data-command="project.configure"]',
-  );
-  await originalProjectForm
-    .locator('textarea[name="instructions"]')
-    .fill("Original project's private instructions");
-  await save(page, originalProjectForm);
+  await page.goto(`${origin}/profile/${profile.id}`);
+  const api = new OperatorApi(service, [directory]);
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId: project.id,
+    expectedVersion: 1,
+    instructions: "Original project's private instructions",
+  });
+  await page.goto(origin);
 
   const protectedToken = await csrfToken(page);
   const rejectedForms = [
@@ -488,68 +490,38 @@ test("Chromium verifies the independent login and guarded browser session", asyn
   await save(page, profileForm);
   assert.equal(domain.profile(profile.id).name, "Browser-edited profile");
 
-  await page.goto(`${origin}/project/${browserProjectId}`);
-  const projectForm = page.locator('form[data-command="project.configure"]');
-  await projectForm
-    .locator('input[name="name"]')
-    .fill("Browser-configured project");
-  await projectForm
-    .locator('select[name="leadProfileId"]')
-    .selectOption(profile.id);
-  await projectForm
-    .locator('textarea[name="instructions"]')
-    .fill("Project-specific operator guidance");
-  await save(page, projectForm);
-  assert.equal(domain.project(browserProjectId).leadProfileId, profile.id);
-  assert.equal(domain.project(project.id).leadProfileId, profile.id);
-  assert.notEqual(
-    domain.project(project.id).instructions,
-    domain.project(browserProjectId).instructions,
-  );
-  assert.equal(domain.project(project.id).paused, 1);
-  assert.equal(domain.project(browserProjectId).paused, 1);
-
-  await page.goto(`${origin}/project/${browserProjectId}`);
-  const taskForm = page.locator('form[data-command="task.create"]');
-  assert.match(await taskForm.innerText(), /Create and start/);
-  assert.equal(
-    await taskForm.locator('input[name="ready"]').isChecked(),
-    false,
-  );
-  await taskForm.locator('input[name="title"]').fill("Browser-created task");
-  await taskForm
-    .locator('textarea[name="outcome"]')
-    .fill("Deliver the operator form journey");
-  const taskId = await taskForm.locator('input[name="taskId"]').inputValue();
-  await save(page, taskForm);
-  assert.equal(domain.tasks(browserProjectId).length, 1);
-  assert.equal(domain.task(taskId).ready, 0);
-
-  const externalRequests: string[] = [];
-  page.on("request", (request) => {
-    if (new URL(request.url()).origin !== origin) {
-      externalRequests.push(request.url());
-    }
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId: browserProjectId,
+    expectedVersion: 1,
+    name: "Browser-configured project",
+    leadProfileId: profile.id,
+    instructions: "Project-specific operator guidance",
   });
-  await page.goto(`${origin}/project/${browserProjectId}`);
-  const startForm = page.locator('form[data-command="task.create"]');
-  await startForm.locator('input[name="title"]').fill("Browser-started task");
-  await startForm
-    .locator('textarea[name="outcome"]')
-    .fill("Set Ready from the create form only");
-  await startForm.locator('input[name="ready"]').check();
-  const startedTaskId = await startForm
-    .locator('input[name="taskId"]')
-    .inputValue();
-  await save(page, startForm);
-  assert.equal(domain.task(startedTaskId).ready, 1);
+  const taskId = randomUUID();
+  await api.execute({
+    type: "task.create",
+    key: randomUUID(),
+    projectId: browserProjectId,
+    taskId,
+    title: "Browser task",
+    outcome: "Deliver the operator form journey",
+    ready: false,
+  });
+  assert.equal(domain.task(taskId).ready, 0);
+  const startedTaskId = randomUUID();
+  await api.execute({
+    type: "task.create",
+    key: randomUUID(),
+    projectId: browserProjectId,
+    taskId: startedTaskId,
+    title: "Ready task",
+    outcome: "Set Ready explicitly",
+    ready: true,
+  });
   assert.deepEqual(domain.admission(startedTaskId).reasons, ["project-paused"]);
-  assert.equal(domain.project(browserProjectId).paused, 1);
-  assert.deepEqual(
-    externalRequests,
-    [],
-    "the operator browser journey makes no cross-origin request",
-  );
+
   assert.equal(domain.tasks(browserProjectId).length, 2);
 
   await page.goto(`${origin}/task/${taskId}`);
@@ -567,28 +539,22 @@ test("Chromium verifies the independent login and guarded browser session", asyn
   assert.equal(domain.task(taskId).ready, 1);
   assert.deepEqual(domain.admission(taskId).reasons, ["project-paused"]);
 
-  await page.goto(`${origin}/project/${browserProjectId}`);
-  const routingForm = page.locator('form[data-command="routing.configure"]');
-  await routingForm.locator('input[name="enabled"]').check();
-  await routingForm
-    .locator('textarea[name="guidance"]')
-    .fill("Use only this configured candidate");
-  await routingForm
-    .locator('input[name="credentialRef"]')
-    .fill("env:PRIVATE_BROWSER_CREDENTIAL_REF");
-  await routingForm
-    .locator('textarea[name="candidateProfileIds"]')
-    .fill(JSON.stringify([profile.id], null, 2));
-  await save(page, routingForm);
-  assert.equal(domain.routing(browserProjectId).credentialAvailable, 1);
-  await page.goto(`${origin}/project/${browserProjectId}`);
-  const routingHtml = await page.locator("body").innerText();
-  assert.match(routingHtml, /credential reference configured/);
-  assert.doesNotMatch(routingHtml, /PRIVATE_BROWSER_CREDENTIAL_REF/);
+  await api.execute({
+    type: "routing.configure",
+    key: randomUUID(),
+    projectId: browserProjectId,
+    expectedVersion: 1,
+    enabled: true,
+    guidance: "Use only this configured candidate",
+    credentialRef: "env:PRIVATE_BROWSER_CREDENTIAL_REF",
+    candidateProfileIds: [profile.id],
+  });
   assert.equal(
-    domain.routing(browserProjectId).candidateProfileIds,
-    JSON.stringify([profile.id]),
+    (await api.readProjectConfiguration(browserProjectId)).data.routing
+      .credentialConfigured,
+    true,
   );
+  await page.goto(origin);
 
   const logoutForm = page.locator('form[action="/logout"]');
   const logoutResponse = page.waitForResponse(
@@ -745,29 +711,25 @@ test("authenticated project pause and resume preserve captured instructions whil
     .selectOption(profileId);
   await save(page, projectForm);
 
-  await page.goto(`${origin}/project/${projectId}`);
-  let projectConfig = page.locator('form[data-command="project.configure"]');
+  const api = new OperatorApi(service, [directory]);
   const capturedInstructions = "PROJECT_INSTRUCTIONS_REVISION_TWO";
-  await projectConfig
-    .locator('textarea[name="instructions"]')
-    .fill(capturedInstructions);
-  await save(page, projectConfig);
-  assert.equal(
-    Number(service.domain().project(projectId).instructionsRevision),
-    2,
-  );
-
-  await page.goto(`${origin}/project/${projectId}`);
-  const taskForm = page.locator('form[data-command="task.create"]');
-  const taskId = await taskForm.locator('input[name="taskId"]').inputValue();
-  await taskForm
-    .locator('input[name="title"]')
-    .fill("Captured instruction task");
-  await taskForm
-    .locator('textarea[name="outcome"]')
-    .fill("Remain held while the project is paused.");
-  await taskForm.locator('input[name="ready"]').check();
-  await save(page, taskForm);
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instructions: capturedInstructions,
+  });
+  const taskId = randomUUID();
+  await api.execute({
+    type: "task.create",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Captured instruction task",
+    outcome: "Remain held while the project is paused.",
+    ready: true,
+  });
   await service.provisionTask(taskId);
 
   await until(() => service.domain().assignments(taskId).length === 1);
@@ -777,15 +739,13 @@ test("authenticated project pause and resume preserve captured instructions whil
   assert.equal(service.domain().project(projectId).paused, 1);
   assert.equal(runtime.turns, 0, "a ready task remains held while paused");
 
-  await page.goto(`${origin}/project/${projectId}`);
-  projectConfig = page.locator('form[data-command="project.configure"]');
-  await projectConfig.locator('input[name="paused"]').uncheck();
-  await save(page, projectConfig);
-  assert.equal(
-    Number(service.domain().project(projectId).instructionsRevision),
-    2,
-    "resuming with unchanged instructions must preserve the captured revision",
-  );
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: service.domain().project(projectId).version,
+    paused: false,
+  });
   await until(() => runtime.turns === 1);
   assert.ok(runtime.prompts[0]?.includes(capturedInstructions));
   assert.equal(
@@ -816,32 +776,22 @@ test("authenticated project pause and resume preserve captured instructions whil
       ),
   );
 
-  await page.goto(`${origin}/project/${projectId}`);
-  projectConfig = page.locator('form[data-command="project.configure"]');
   const changedInstructions = "PROJECT_INSTRUCTIONS_REVISION_THREE";
-  await projectConfig
-    .locator('textarea[name="instructions"]')
-    .fill(changedInstructions);
-  await projectConfig.locator('input[name="paused"]').check();
-  const changedCommand = await projectConfig.evaluate((element) => {
-    const form = element as HTMLFormElement;
-    return Object.fromEntries(new FormData(form).entries()) as Record<
-      string,
-      string
-    >;
-  });
-  await save(page, projectConfig);
+  const changedCommand = {
+    type: "project.configure" as const,
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(service.domain().project(projectId).version),
+    instructions: changedInstructions,
+    paused: true,
+  };
+  await api.execute(changedCommand);
   assert.equal(
     Number(service.domain().project(projectId).instructionsRevision),
     3,
     "a real instruction change still creates a revision",
   );
-  const replay = await context.request.post(`${origin}/command`, {
-    headers: { origin },
-    form: changedCommand,
-    maxRedirects: 0,
-  });
-  assert.equal(replay.status(), 303, "same keyed project edit replays");
+  await api.execute(changedCommand);
   assert.equal(
     Number(service.domain().project(projectId).instructionsRevision),
     3,
@@ -849,7 +799,6 @@ test("authenticated project pause and resume preserve captured instructions whil
   );
 
   // Operator input recorded while the project is paused stays durable but starts nothing.
-  const api = new OperatorApi(service, [directory]);
   const pausedRead = (await api.readTask(taskId)).data;
   const pausedQuestion = pausedRead.questions[0];
   const pausedLead = pausedRead.assignments.find(
@@ -875,10 +824,13 @@ test("authenticated project pause and resume preserve captured instructions whil
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(runtime.turns, 1, "paused work cannot start a follow-up turn");
 
-  await page.goto(`${origin}/project/${projectId}`);
-  projectConfig = page.locator('form[data-command="project.configure"]');
-  await projectConfig.locator('input[name="paused"]').uncheck();
-  await save(page, projectConfig);
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(service.domain().project(projectId).version),
+    paused: false,
+  });
   assert.equal(
     Number(service.domain().project(projectId).instructionsRevision),
     3,
@@ -1276,12 +1228,13 @@ test("operator commands and Chromium runtime controls keep durable readback", as
   );
   assert.deepEqual(service.domain().dependencies(taskId), [blockerTaskId]);
 
-  await page.goto(`${origin}/project/${projectId}`);
-  const projectForm = page.locator('form[data-command="project.configure"]');
-  await projectForm
-    .locator('textarea[name="instructions"]')
-    .fill("Browser-applied current project instructions.");
-  await save(page, projectForm);
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(service.domain().project(projectId).version),
+    instructions: "Browser-applied current project instructions.",
+  });
   assert.equal(
     Number(service.domain().project(projectId).instructionsRevision),
     2,

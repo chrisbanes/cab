@@ -830,18 +830,31 @@ test("delivery and source credential reference, key and value are excluded from 
       kind: "unavailable",
     });
     assert.equal(publicData.profile.data.capabilities, "[redacted]");
-    await assert.rejects(
-      api.execute({
-        type: "delivery.configure",
-        key: randomUUID(),
-        projectId,
-        expectedVersion: 2,
-        mode: "reviewable-pr",
-        credentialRef: reference,
-        grants: [],
-        requiredChecks: [],
-      }),
-    );
+    const configured = await api.execute({
+      type: "delivery.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      mode: "reviewable-pr",
+      credentialRef: reference,
+      grants: [],
+      requiredChecks: [],
+    });
+    assert.deepEqual(configured, {
+      kind: "configuration",
+      key: configured.key,
+      recorded: true,
+      result: {
+        commandType: "delivery.configure",
+        resourceId: projectId,
+        version: 3,
+        credentialConfigured: true,
+      },
+    });
+    const afterSet = await api.readProjectConfiguration(projectId);
+    assert.equal(JSON.stringify(afterSet).includes(reference), false);
+    assert.equal(JSON.stringify(afterSet).includes(envKey), false);
+    assert.equal(JSON.stringify(afterSet).includes(envValue), false);
   }
   assert.equal(f.runtime.turns, 0);
 });
@@ -1630,5 +1643,2061 @@ setTimeout(() => {
   t.diagnostic(
     `Observed child peak ${Math.max(...allEvents.map((e) => e.peak))}; first request detection 1, fresh token commands 9; four independent request/attempt scopes.`,
   );
+  assert.equal(f.runtime.turns, 0);
+});
+
+const deliveryInput = (projectId: string, extra: object = {}) => ({
+  type: "delivery.configure" as const,
+  key: randomUUID(),
+  projectId,
+  expectedVersion: 1,
+  mode: "reviewable-pr" as const,
+  grants: [],
+  requiredChecks: [],
+  ...extra,
+});
+
+async function deliveryFixture(t: TestContext) {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const projectId = randomUUID();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Delivery",
+    leadProfileId: null,
+  });
+  return { f, api, projectId };
+}
+
+const historicalDeliveryHash = (value: unknown): string => {
+  const canonical = (item: unknown): string =>
+    Array.isArray(item)
+      ? `[${item.map(canonical).join(",")}]`
+      : item && typeof item === "object"
+        ? `{${Object.entries(item)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+            .join(",")}}`
+        : JSON.stringify(item);
+  return createHash("sha256").update(canonical(value)).digest("hex");
+};
+
+test("delivery JSON preserves every accepted action, supplemental scope and optional shape", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const { actionKinds } = await import("../../src/core/delivery.js");
+  const grants = actionKinds.flatMap((action) => {
+    const grant = {
+      action,
+      repositoryId: "container",
+      mode:
+        action === "branch.adopt" ? ("approval" as const) : ("allow" as const),
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: action === "project.field" ? ["O", "O"] : [],
+      ...(action === "issue.status" ? { statusIds: ["S", "S"] } : {}),
+    };
+    return [grant, grant];
+  });
+  const requiredChecks = [
+    { name: "build" },
+    { name: "build", appId: 42 },
+    { name: "build", appId: 42 },
+  ];
+  const first = await api.execute(
+    deliveryInput(projectId, { mode: "through-merge", grants, requiredChecks }),
+  );
+  assert.deepEqual(first.kind === "configuration" && first.result, {
+    commandType: "delivery.configure",
+    resourceId: projectId,
+    version: 2,
+    credentialConfigured: false,
+  });
+  const visible = (await api.readProjectConfiguration(projectId)).data
+    .delivery!;
+  assert.deepEqual(visible, {
+    version: 2,
+    mode: "through-merge",
+    credentialConfigured: false,
+    grants,
+    requiredChecks,
+  });
+  assert.equal(Object.hasOwn(visible, "branchPrefix"), false);
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 2,
+      grants,
+      requiredChecks,
+      branchPrefix: "",
+    }),
+  );
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.delivery!.branchPrefix,
+    "",
+  );
+  assert.equal(f.service.delivery().configuration(projectId).branchPrefix, "");
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery credentials normalize Preserve Set Clear and expose only original minimal receipts after restart", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const set = deliveryInput(projectId, { credentialRef: "env:DELIVERY_FIRST" });
+  const setReceipt = await api.execute(set);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_FIRST",
+  );
+  const preserve = deliveryInput(projectId, { expectedVersion: 2 });
+  const original = await api.execute(preserve);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_FIRST",
+  );
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      credentialRef: "env:DELIVERY_SECOND",
+    }),
+  );
+  await assert.rejects(
+    api.execute(preserve),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.deepEqual(await api.execute(set), setReceipt);
+  await api.execute(
+    deliveryInput(projectId, { expectedVersion: 4, credentialRef: null }),
+  );
+  assert.equal(f.service.domain().deliveryCredentialReference(projectId), null);
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  const lookup = await reopened.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key: preserve.key,
+    }),
+  );
+  assert.deepEqual(lookup.data, { state: "recorded", receipt: original });
+  assert.deepEqual(await reopened.execute(set), setReceipt);
+  for (const value of [
+    original,
+    lookup,
+    await reopened.readProjectConfiguration(projectId),
+  ])
+    assert.doesNotMatch(
+      JSON.stringify(value),
+      /DELIVERY_FIRST|DELIVERY_SECOND|credentialRef"|grants".*operation/,
+    );
+  assert.equal(f.service.delivery().configuration(projectId).version, 5);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery excluded rows and prefix expose only version-bound references and keep exact values or remove", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const envKey = "DELIVERY_OPAQUE_COLLISION",
+    previous = process.env[envKey];
+  process.env[envKey] = "private-prefix/";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  const hiddenGrant = {
+    action: "issue.comment" as const,
+    mode: "allow" as const,
+    repositoryId: "ordinary",
+    projectNodeId: envKey,
+    fieldNodeId: "F",
+    optionNodeIds: ["O", "O"],
+  };
+  const visibleGrant = {
+    action: "branch.push" as const,
+    mode: "approval" as const,
+    repositoryId: "ordinary",
+    optionNodeIds: [],
+  };
+  const hiddenCheck = { name: `env:${envKey}`, appId: 7 };
+  const visibleCheck = { name: "build" };
+  f.service.domain().execute({
+    ...deliveryInput(projectId),
+    credentialRef: `env:${envKey}`,
+    grants: [hiddenGrant, visibleGrant, hiddenGrant],
+    requiredChecks: [hiddenCheck, visibleCheck],
+    branchPrefix: "private-prefix/",
+    actor: "operator",
+  });
+  const read = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.deepEqual(read.grants[1], visibleGrant);
+  assert.deepEqual(read.requiredChecks[1], visibleCheck);
+  assert.deepEqual(read.grants[0], {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: { projectId, section: "delivery-grants", version: 2, index: 0 },
+  });
+  assert.deepEqual(read.requiredChecks[0], {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: { projectId, section: "delivery-checks", version: 2, index: 0 },
+  });
+  assert.equal(read.branchPrefix, null);
+  assert.equal(read.branchPrefixUnavailable, true);
+  for (const secret of [envKey, `env:${envKey}`, "private-prefix/"])
+    assert.equal(JSON.stringify(read).includes(secret), false);
+  const grant = read.grants[0]!,
+    check = read.requiredChecks[0]!;
+  assert.ok("savedRow" in grant && "savedRow" in check);
+  const keep = deliveryInput(projectId, {
+    expectedVersion: 2,
+    preserveBranchPrefix: true,
+    grants: [{ savedRow: grant.savedRow, keep: true }, visibleGrant],
+    requiredChecks: [visibleCheck, { savedRow: check.savedRow, keep: true }],
+  });
+  const receipt = await api.execute(keep);
+  assert.deepEqual(f.service.delivery().configuration(projectId), {
+    version: 3,
+    mode: "reviewable-pr",
+    credentialRef: `env:${envKey}`,
+    branchPrefix: "private-prefix/",
+    grants: [hiddenGrant, visibleGrant],
+    requiredChecks: [visibleCheck, hiddenCheck],
+  });
+  assert.equal(JSON.stringify(receipt).includes(envKey), false);
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare(
+        "SELECT payloadHash FROM command_receipts WHERE scope=? AND key=?",
+      )
+      .get(projectId, keep.key) as { payloadHash: string };
+    assert.equal(
+      row.payloadHash,
+      historicalDeliveryHash({
+        ...deliveryInput(projectId, {
+          key: keep.key,
+          expectedVersion: 2,
+          credentialRef: `env:${envKey}`,
+          branchPrefix: "private-prefix/",
+          grants: [hiddenGrant, visibleGrant],
+          requiredChecks: [visibleCheck, hiddenCheck],
+        }),
+        actor: "operator",
+      }),
+    );
+  });
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      branchPrefix: "",
+      grants: [visibleGrant],
+      requiredChecks: [visibleCheck],
+    }),
+  );
+  const after = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.deepEqual(after.grants, [visibleGrant]);
+  assert.deepEqual(after.requiredChecks, [visibleCheck]);
+  assert.equal(after.branchPrefix, "");
+});
+
+test("delivery saved row references reject duplicates foreign sections indexes and revisions without recording", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const grant = { action: "issue.comment", repositoryId: "R", mode: "allow" };
+  await api.execute(
+    deliveryInput(projectId, {
+      grants: [grant],
+      requiredChecks: [{ name: "build" }],
+    }),
+  );
+  const savedRow = {
+    projectId,
+    section: "delivery-grants",
+    version: 2,
+    index: 0,
+  };
+  for (const [extra, status, paths] of [
+    [
+      {
+        grants: [
+          { savedRow, keep: true },
+          { savedRow, keep: true },
+        ],
+      },
+      400,
+      ["grants.1.savedRow"],
+    ],
+    [
+      {
+        grants: [
+          { savedRow: { ...savedRow, projectId: randomUUID() }, keep: true },
+        ],
+      },
+      400,
+      ["grants.0.savedRow"],
+    ],
+    [
+      {
+        grants: [
+          { savedRow: { ...savedRow, section: "delivery-checks" }, keep: true },
+        ],
+      },
+      400,
+      ["grants.0.savedRow"],
+    ],
+    [
+      { grants: [{ savedRow: { ...savedRow, index: 1 }, keep: true }] },
+      400,
+      ["grants.0.savedRow"],
+    ],
+    [
+      { grants: [{ savedRow: { ...savedRow, version: 1 }, keep: true }] },
+      409,
+      undefined,
+    ],
+    [
+      { requiredChecks: [{ savedRow, keep: true }] },
+      400,
+      ["requiredChecks.0.savedRow"],
+    ],
+  ] as const) {
+    const input = deliveryInput(projectId, { expectedVersion: 2, ...extra });
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, status);
+      assert.deepEqual(error.fieldPaths, paths);
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("delivery missing exclusion evidence withholds policy text and refuses normalization", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(
+    deliveryInput(projectId, {
+      branchPrefix: "private/",
+      grants: [
+        {
+          action: "issue.comment",
+          repositoryId: "private-repo",
+          mode: "allow",
+        },
+      ],
+      requiredChecks: [{ name: "private-check", appId: 42 }],
+    }),
+  );
+  const original = DomainStore.prototype.deliveryCredentialReference;
+  DomainStore.prototype.deliveryCredentialReference = () => {
+    throw new Error("unavailable private lookup");
+  };
+  try {
+    const policy = (await api.readProjectConfiguration(projectId)).data
+      .delivery!;
+    assert.equal(policy.branchPrefix, null);
+    assert.equal(policy.branchPrefixUnavailable, true);
+    assert.ok(policy.grants.every((row) => "savedRow" in row));
+    assert.ok(policy.requiredChecks.every((row) => "savedRow" in row));
+    assert.doesNotMatch(
+      JSON.stringify(policy),
+      /private-repo|private-check|private\/|unavailable private lookup/,
+    );
+    const input = deliveryInput(projectId, { expectedVersion: 2 });
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError && error.status === 503,
+    );
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  } finally {
+    DomainStore.prototype.deliveryCredentialReference = original;
+  }
+});
+
+test("delivery semantic refusals report indexed fields and do not write or leave receipts", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const base = { repositoryId: "R", mode: "allow" };
+  for (const [grant, paths] of [
+    [
+      { ...base, action: "project.field" },
+      [
+        "grants.0.projectNodeId",
+        "grants.0.fieldNodeId",
+        "grants.0.optionNodeIds",
+      ],
+    ],
+    [{ ...base, action: "project.item.add" }, ["grants.0.projectNodeId"]],
+    [
+      { ...base, action: "issue.status", statusIds: [] },
+      ["grants.0.statusIds"],
+    ],
+    [
+      { ...base, action: "issue.comment", statusIds: [] },
+      ["grants.0.statusIds"],
+    ],
+  ] as const) {
+    const input = deliveryInput(projectId, { grants: [grant] });
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, 400);
+      assert.deepEqual(error.fieldPaths, paths);
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 1);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("delivery exclusion collisions reject explicit policy text but permit opaque preservation", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:DELIVERY_POLICY_COLLISION",
+    }),
+  );
+  for (const [extra, path] of [
+    [
+      {
+        grants: [
+          {
+            action: "issue.comment",
+            repositoryId: "DELIVERY_POLICY_COLLISION",
+            mode: "allow",
+          },
+        ],
+      },
+      "grants.0",
+    ],
+    [
+      { requiredChecks: [{ name: "env:DELIVERY_POLICY_COLLISION" }] },
+      "requiredChecks.0.name",
+    ],
+    [{ branchPrefix: "DELIVERY_POLICY_COLLISION" }, "branchPrefix"],
+  ] as const) {
+    const input = deliveryInput(projectId, { expectedVersion: 2, ...extra });
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError && error.status === 400);
+      assert.deepEqual(error.fieldPaths, [path]);
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("delivery explicit legacy hash and receipt replay survive later credentials restart and explicit undefined", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const original = {
+    ...deliveryInput(projectId),
+    credentialRef: "env:DELIVERY_LEGACY",
+    branchPrefix: undefined,
+    actor: "operator" as const,
+  };
+  const legacyResult = {
+    mode: "reviewable-pr",
+    version: 2,
+    credentialConfigured: true,
+    grants: [],
+    requiredChecks: [],
+  };
+  const { branchPrefix: _absent, ...omitted } = original;
+  assert.notEqual(
+    historicalDeliveryHash(original),
+    historicalDeliveryHash(omitted),
+  );
+  const expectedHash = historicalDeliveryHash(original);
+  // An original pre-API receipt stores the legacy canonical digest, including explicit undefined.
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO command_receipts (scope,key,payloadHash,result) VALUES (?,?,?,?)",
+    ).run(projectId, original.key, expectedHash, JSON.stringify(legacyResult));
+  });
+  const { actor: _actor, ...input } = original;
+  const receipt = await api.execute(input);
+  assert.deepEqual(receipt.kind === "configuration" && receipt.result, {
+    commandType: "delivery.configure",
+    resourceId: projectId,
+    version: 2,
+    credentialConfigured: true,
+  });
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:DELIVERY_LATER",
+      branchPrefix: "current/",
+    }),
+  );
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(await reopened.execute(input), receipt);
+  assert.deepEqual(
+    (
+      await reopened.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "delivery.configure",
+          key: input.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt },
+  );
+  await assert.rejects(
+    reopened.execute({ ...input, credentialRef: null }),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare(
+        "SELECT payloadHash,result FROM command_receipts WHERE scope=? AND key=?",
+      )
+      .get(projectId, original.key) as { payloadHash: string; result: string };
+    assert.equal(row.payloadHash, expectedHash);
+    assert.equal(row.result, JSON.stringify(legacyResult));
+  });
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_LATER",
+  );
+  assert.equal(f.service.delivery().configuration(projectId).version, 2);
+});
+
+test("delivery final domain CAS rejects a policy changed between normalization and the store call", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const input = deliveryInput(projectId);
+  const original = domain.execute.bind(domain);
+  domain.execute = (command) => {
+    if (command.type === "delivery.configure" && command.key === input.key)
+      original({
+        ...deliveryInput(projectId),
+        actor: "operator",
+        credentialRef: null,
+        mode: "through-merge",
+      });
+    return original(command);
+  };
+  try {
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError && error.status === 409,
+    );
+    assert.equal(f.service.delivery().configuration(projectId).version, 2);
+    assert.equal(
+      f.service.delivery().configuration(projectId).mode,
+      "through-merge",
+    );
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  } finally {
+    domain.execute = original;
+  }
+});
+
+test("delivery accepts policy row limits and rejects malformed shapes without writes or receipts", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const grant = { action: "issue.comment", repositoryId: "R", mode: "allow" };
+  const failures: [object, string][] = [
+    [{ grants: Array.from({ length: 257 }, () => grant) }, "grants"],
+    [
+      {
+        requiredChecks: Array.from({ length: 101 }, () => ({ name: "build" })),
+      },
+      "requiredChecks",
+    ],
+    [{ credentialRef: "gh:github.com" }, "credentialRef"],
+    [{ credentialRef: "env:not_valid" }, "credentialRef"],
+    [{ branchPrefix: "../unsafe" }, "branchPrefix"],
+    [{ branchPrefix: "x".repeat(65) }, "branchPrefix"],
+    [{ preserveBranchPrefix: true, branchPrefix: "" }, "branchPrefix"],
+    [{ grants: [{ ...grant, action: "branch.adopt" }] }, "grants.0.mode"],
+    [{ grants: [{ ...grant, repositoryId: "" }] }, "grants.0.repositoryId"],
+    [
+      {
+        grants: [
+          { ...grant, statusIds: Array.from({ length: 257 }, () => "S") },
+        ],
+      },
+      "grants.0.statusIds",
+    ],
+    [
+      { requiredChecks: [{ name: "build", appId: 0 }] },
+      "requiredChecks.0.appId",
+    ],
+    [
+      { requiredChecks: [{ name: "build", appId: 1.5 }] },
+      "requiredChecks.0.appId",
+    ],
+    [{ requiredChecks: [{ name: "" }] }, "requiredChecks.0.name"],
+    [
+      {
+        grants: [
+          {
+            savedRow: {
+              projectId,
+              section: "delivery-grants",
+              version: 1,
+              index: -1,
+            },
+            keep: true,
+          },
+        ],
+      },
+      "grants.0.savedRow.index",
+    ],
+    [
+      {
+        grants: [
+          {
+            ...grant,
+            savedRow: {
+              projectId,
+              section: "delivery-grants",
+              version: 1,
+              index: 0,
+            },
+            keep: true,
+          },
+        ],
+      },
+      "grants.0",
+    ],
+  ];
+  for (const [extra, path] of failures) {
+    const input = deliveryInput(projectId, extra);
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError && error.status === 400);
+      const paths = error.fieldPaths ?? [];
+      assert.ok(
+        paths.some(
+          (candidate) => candidate === path || candidate.startsWith(`${path}.`),
+        ),
+        `${path}: ${paths.join(",")}`,
+      );
+      return true;
+    });
+    assert.equal(f.service.delivery().configuration(projectId).version, 1);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "delivery.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+  const grants = Array.from({ length: 256 }, () => grant);
+  const requiredChecks = Array.from({ length: 100 }, () => ({
+    name: "build",
+    appId: 1,
+  }));
+  await api.execute(deliveryInput(projectId, { grants, requiredChecks }));
+  const read = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.deepEqual(read.grants, grants);
+  assert.deepEqual(read.requiredChecks, requiredChecks);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery preserved prefix keeps absence and empty as distinct policy shapes", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(deliveryInput(projectId, { preserveBranchPrefix: true }));
+  assert.equal(
+    Object.hasOwn(
+      f.service.delivery().configuration(projectId),
+      "branchPrefix",
+    ),
+    false,
+  );
+  await api.execute(
+    deliveryInput(projectId, { expectedVersion: 2, branchPrefix: "" }),
+  );
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      preserveBranchPrefix: true,
+    }),
+  );
+  assert.equal(f.service.delivery().configuration(projectId).branchPrefix, "");
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.delivery!.branchPrefix,
+    "",
+  );
+});
+
+test("delivery configuration read rebuilds when a credential exclusion changes after collection", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const envKey = "DELIVERY_READ_FENCE",
+    previous = process.env[envKey];
+  process.env[envKey] = "old-private-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: `env:${envKey}`,
+      branchPrefix: "new-private/",
+    }),
+  );
+  const delivery = f.service.delivery();
+  const original = delivery.publicConfiguration.bind(delivery);
+  let reads = 0;
+  delivery.publicConfiguration = (id) => {
+    const value = original(id);
+    if (++reads === 1) process.env[envKey] = "new-private/";
+    return value;
+  };
+  try {
+    const policy = (await api.readProjectConfiguration(projectId)).data
+      .delivery!;
+    assert.equal(policy.branchPrefix, null);
+    assert.equal(policy.branchPrefixUnavailable, true);
+    assert.equal(JSON.stringify(policy).includes("new-private/"), false);
+    assert.equal(reads, 2);
+  } finally {
+    delivery.publicConfiguration = original;
+  }
+});
+
+test("delivery HTTP writes retain session Origin CSRF and bearer scopes with indexed 400 and stale 409", async (t) => {
+  const { f, projectId } = await deliveryFixture(t);
+  const { serveCli } = await import("../fixtures/operator-cli.js");
+  const s = await serveCli(t, f);
+  const endpoint = "/api/operator/commands";
+  const command = deliveryInput(projectId, {
+    credentialRef: "env:HTTP_DELIVERY",
+  });
+  assert.equal(
+    (
+      await fetch(`${s.origin}${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await s.sessionPost(endpoint, command, {
+        origin: "https://foreign.example",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await s.sessionPost(endpoint, command, { "x-csrf-token": "wrong" }))
+      .status,
+    403,
+  );
+  const read = await s.issue("read");
+  const write = await s.issue("read-write");
+  assert.equal(
+    (await s.bearer(read.token, endpoint, { method: "POST", body: command }))
+      .status,
+    403,
+  );
+  for (const [extra, path] of [
+    [
+      {
+        grants: [{ action: "project.field", repositoryId: "R", mode: "allow" }],
+      },
+      "grants.0.projectNodeId",
+    ],
+    [
+      {
+        grants: [{ action: "branch.adopt", repositoryId: "R", mode: "allow" }],
+      },
+      "grants.0.mode",
+    ],
+    [
+      { requiredChecks: [{ name: "build", appId: 0 }] },
+      "requiredChecks.0.appId",
+    ],
+    [{ branchPrefix: "../bad" }, "branchPrefix"],
+    [{ credentialRef: "env:invalid" }, "credentialRef"],
+  ] as const) {
+    const invalid = deliveryInput(projectId, extra);
+    const response = await s.sessionPost(endpoint, invalid);
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as {
+      error: { code: string; fieldPaths: string[] };
+    };
+    assert.equal(body.error.code, "invalid-input");
+    assert.ok(body.error.fieldPaths.includes(path), JSON.stringify(body));
+    assert.equal(f.service.delivery().configuration(projectId).version, 1);
+    const lookup = await s.sessionGet(
+      `/api/operator/operations?scope=project:${projectId}&type=delivery.configure&key=${invalid.key}`,
+    );
+    assert.deepEqual(((await lookup.json()) as { data: unknown }).data, {
+      state: "not-recorded",
+    });
+  }
+  const set = await s.bearer(write.token, endpoint, {
+    method: "POST",
+    body: command,
+  });
+  assert.equal(set.status, 200);
+  const receipt = await set.json();
+  assert.deepEqual(receipt, {
+    kind: "configuration",
+    key: command.key,
+    recorded: true,
+    result: {
+      commandType: "delivery.configure",
+      resourceId: projectId,
+      version: 2,
+      credentialConfigured: true,
+    },
+  });
+  const stale = await s.sessionPost(endpoint, deliveryInput(projectId));
+  assert.equal(stale.status, 409);
+  const collision = await s.sessionPost(
+    endpoint,
+    deliveryInput(projectId, {
+      expectedVersion: 2,
+      requiredChecks: [{ name: "HTTP_DELIVERY" }],
+    }),
+  );
+  assert.equal(collision.status, 400);
+  assert.equal((await collision.text()).includes("HTTP_DELIVERY"), false);
+  const config = await s.bearer(
+    read.token,
+    `/api/operator/projects/${projectId}/configuration`,
+  );
+  assert.equal(config.status, 200);
+  const publicText = await config.text();
+  assert.equal(publicText.includes("HTTP_DELIVERY"), false);
+  assert.equal(publicText.includes('"credentialRef"'), false);
+  assert.equal((await s.sessionPost(endpoint, command)).status, 200);
+  const lookup = await s.bearer(
+    read.token,
+    `/api/operator/operations?scope=project:${projectId}&type=delivery.configure&key=${command.key}`,
+  );
+  assert.equal(lookup.status, 200);
+  assert.deepEqual(((await lookup.json()) as { data: unknown }).data, {
+    state: "recorded",
+    receipt,
+  });
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("delivery unknown normalized save is recovered by original operation after credential change and restart", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:DELIVERY_UNKNOWN_ORIGINAL",
+    }),
+  );
+  const input = deliveryInput(projectId, { expectedVersion: 2 });
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  const injected = new DomainStore(db, () => {
+    throw new DomainPolicyError("invalid-input", "private postcommit failure");
+  });
+  const domain = f.service.domain(),
+    original = domain.execute.bind(domain);
+  domain.execute = (command) =>
+    command.key === input.key ? injected.execute(command) : original(command);
+  try {
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError &&
+        error.status === 503 &&
+        error.code === "command-outcome-unknown",
+    );
+  } finally {
+    domain.execute = original;
+  }
+  assert.equal(f.service.delivery().configuration(projectId).version, 3);
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 3,
+      credentialRef: "env:DELIVERY_UNKNOWN_LATER",
+    }),
+  );
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  const query = new URLSearchParams({
+    scope: `project:${projectId}`,
+    type: "delivery.configure",
+    key: input.key,
+  });
+  const readback = await reopened.readOperation(query);
+  assert.deepEqual(readback.data, {
+    state: "recorded",
+    receipt: {
+      kind: "configuration",
+      key: input.key,
+      recorded: true,
+      result: {
+        commandType: "delivery.configure",
+        resourceId: projectId,
+        version: 3,
+        credentialConfigured: true,
+      },
+    },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(readback),
+    /DELIVERY_UNKNOWN|private postcommit failure/,
+  );
+  await assert.rejects(
+    reopened.execute(input),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.equal(f.service.delivery().configuration(projectId).version, 4);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_UNKNOWN_LATER",
+  );
+  await assert.rejects(
+    reopened.readOperation(
+      new URLSearchParams({
+        ...Object.fromEntries(query),
+        type: "project.configure",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  f.seedPersistedState((store) =>
+    store
+      .prepare("UPDATE command_receipts SET result=? WHERE scope=? AND key=?")
+      .run('{"version":"invalid"}', projectId, input.key),
+  );
+  await assert.rejects(
+    reopened.readOperation(query),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque GitHub selections retain definitions readiness and closed mode with visible edits without activating", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:HIDDEN_SELECTION",
+  });
+  const hidden = {
+    id: "HIDDEN_SELECTION",
+    kind: "search" as const,
+    query: "is:open private query",
+  };
+  const visible = {
+    id: "visible",
+    kind: "repository" as const,
+    repositoryId: "R",
+    owner: "acme",
+    name: "app",
+  };
+  const readiness = {
+    mode: "all" as const,
+    conditions: [
+      {
+        kind: "label" as const,
+        operator: "has" as const,
+        name: "HIDDEN_SELECTION",
+      },
+    ],
+  };
+  domain.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    selections: [hidden, visible],
+    readiness,
+    closedIssues: "done",
+  });
+  const read = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(read.selections[0]!.id, null);
+  assert.deepEqual(read.selections[0]!.savedRow, {
+    projectId,
+    section: "source",
+    version: 2,
+    index: 0,
+  });
+  assert.equal(read.readiness.kind, "unavailable");
+  assert.equal(JSON.stringify(read).includes(hidden.id), false);
+  const kept = { savedRow: read.selections[0]!.savedRow, keep: true };
+  const added = { id: "new", kind: "search", query: "new private query" };
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    selections: [kept, { id: visible.id, keep: true }, added],
+  });
+  assert.deepEqual(domain.githubConfiguration(projectId).selections, [
+    hidden,
+    visible,
+    added,
+  ]);
+  assert.deepEqual(domain.githubConfiguration(projectId).readiness, readiness);
+  assert.equal(domain.githubConfiguration(projectId).closedIssues, "done");
+  assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    selections: [{ id: visible.id, keep: true }],
+  });
+  assert.deepEqual(domain.githubConfiguration(projectId).selections, [visible]);
+  assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque source references reject foreign tracker section ordinal duplicates collisions and limits without writes", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:HIDDEN_SELECTION",
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [{ id: "HIDDEN_SELECTION", kind: "search", query: "query" }],
+    readiness: null,
+  });
+  const savedRow = { projectId, section: "source", version: 2, index: 0 };
+  const keep = { savedRow, keep: true };
+  const base = {
+    type: "github.configure",
+    projectId,
+    expectedVersion: 2,
+    selections: [keep],
+  };
+  const matrix: [object, number, string?][] = [
+    [{ selections: [keep, keep] }, 400, "selections.1.savedRow"],
+    [
+      {
+        selections: [
+          { savedRow: { ...savedRow, projectId: randomUUID() }, keep: true },
+        ],
+      },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      {
+        selections: [
+          { savedRow: { ...savedRow, section: "repositories" }, keep: true },
+        ],
+      },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      { selections: [{ savedRow: { ...savedRow, index: 1 }, keep: true }] },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      { selections: [{ savedRow: { ...savedRow, version: 1 }, keep: true }] },
+      409,
+    ],
+    [
+      { type: "jira.configure", instance: "example.atlassian.net" },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      {
+        selections: [
+          keep,
+          { id: "HIDDEN_SELECTION", kind: "search", query: "replacement" },
+        ],
+      },
+      400,
+      "selections.1.id",
+    ],
+    [
+      {
+        selections: [
+          { id: "HIDDEN_SELECTION", kind: "search", query: "replacement" },
+        ],
+      },
+      400,
+      "selections.0.id",
+    ],
+    [
+      {
+        selections: [
+          ...Array.from({ length: 30 }, (_, i) => ({
+            id: `new-${i}`,
+            kind: "search",
+            query: "query",
+          })),
+          keep,
+        ],
+      },
+      400,
+      "selections",
+    ],
+  ];
+  for (const [extra, status, path] of matrix) {
+    const input = { ...base, key: randomUUID(), ...extra };
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, status);
+      if (path)
+        assert.ok(
+          error.fieldPaths?.includes(path),
+          JSON.stringify(error.fieldPaths),
+        );
+      assert.equal(JSON.stringify(error).includes("HIDDEN_SELECTION"), false);
+      return true;
+    });
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type:
+              input.type === "jira.configure"
+                ? "jira.configure"
+                : "github.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+  // A selection that became withheld since the read must be reviewed, not substituted by its old visible id.
+  const visible = { id: "BECOMES_HIDDEN", kind: "search", query: "query" };
+  await api.execute({
+    ...base,
+    key: randomUUID(),
+    selections: [keep, visible],
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    expectedVersion: 2,
+    credentialRef: "env:BECOMES_HIDDEN",
+  });
+  await assert.rejects(
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 3,
+      selections: [{ id: visible.id, keep: true }],
+    }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "selections.0.id",
+  );
+  assert.equal(domain.githubConfiguration(projectId).version, 3);
+});
+
+test("a Jira query added beside a hidden sequential identity round trips through the editor command", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const previous = process.env.JIRA_HIDDEN_SELECTION;
+  process.env.JIRA_HIDDEN_SELECTION = "S-1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.JIRA_HIDDEN_SELECTION;
+    else process.env.JIRA_HIDDEN_SELECTION = previous;
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:JIRA_HIDDEN_SELECTION",
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:JIRA_SITE",
+      emailRef: "env:JIRA_EMAIL",
+      tokenRef: "env:JIRA_TOKEN",
+    },
+  });
+  const hidden = { id: "S-1", kind: "jql" as const, jql: "project = PRIVATE" };
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [hidden],
+  });
+  f.service.jiraJqlErrors = async () => [];
+  const { jiraRowsFrom, jiraSelections } = await import(
+    "../../web/src/settings-changes.js"
+  );
+  const source = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(source.selections[0]!.id, null);
+  const selections = jiraSelections(source, {
+    ...jiraRowsFrom(source),
+    jql: "project = NEW",
+  });
+  await api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: source.version,
+    selections,
+  });
+  const saved = domain.jiraConfiguration(projectId)!;
+  assert.deepEqual(saved.selections[0], hidden);
+  assert.equal(saved.selections[1]!.jql, "project = NEW");
+  assert.notEqual(saved.selections[1]!.id, hidden.id);
+  const read = await api.readProjectConfiguration(projectId);
+  assert.equal(read.data.source.selections.length, 2);
+  assert.equal(JSON.stringify(read).includes("S-1"), false);
+});
+
+test("opaque Jira selections preserve hidden IDs JQL readiness closed mode and instance beside visible edits", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const previousSite = process.env.HIDDEN_JIRA_ID;
+  process.env.HIDDEN_JIRA_ID = "example.atlassian.net";
+  t.after(() => {
+    if (previousSite === undefined) delete process.env.HIDDEN_JIRA_ID;
+    else process.env.HIDDEN_JIRA_ID = previousSite;
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:JIRA_SITE",
+      emailRef: "env:JIRA_EMAIL",
+      tokenRef: "env:JIRA_TOKEN",
+    },
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:HIDDEN_JIRA_ID",
+  });
+  const hidden = {
+    id: "HIDDEN_JIRA_ID",
+    kind: "jql" as const,
+    jql: "project = PRIVATE",
+  };
+  const readiness = {
+    mode: "all" as const,
+    conditions: [
+      {
+        kind: "status" as const,
+        operator: "in" as const,
+        statusIds: ["ready"],
+      },
+    ],
+  };
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [
+      hidden,
+      { id: "visible", kind: "jql", jql: "project = VISIBLE" },
+    ],
+    readiness,
+    closedIssues: "done",
+  });
+  let queries = 0;
+  f.service.jiraJqlErrors = async () => {
+    queries++;
+    return [];
+  };
+  const source = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(source.selections[0]!.id, null);
+  assert.equal(source.instance, null);
+  const input = {
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    selections: [
+      { savedRow: source.selections[0]!.savedRow, keep: true },
+      { id: "visible", kind: "jql", jql: "project = CHANGED" },
+    ],
+  };
+  const receipt = await api.execute(input);
+  const saved = domain.jiraConfiguration(projectId)!;
+  assert.equal(queries, 1);
+  assert.deepEqual(saved.selections, [
+    hidden,
+    { id: "visible", kind: "jql", jql: "project = CHANGED" },
+  ]);
+  assert.deepEqual(saved.readiness, readiness);
+  assert.equal(saved.closedIssues, "done");
+  assert.equal(saved.instance, "example.atlassian.net");
+  assert.equal(JSON.stringify(receipt).includes(hidden.id), false);
+  const wrongKind = {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    selections: [
+      {
+        savedRow: { projectId, section: "source", version: 3, index: 0 },
+        keep: true,
+      },
+    ],
+  };
+  await assert.rejects(
+    api.execute(wrongKind),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 400,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "jira.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 3,
+      instance: "other.atlassian.net",
+      selections: [
+        {
+          savedRow: { projectId, section: "source", version: 3, index: 0 },
+          keep: true,
+        },
+      ],
+    }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "instance",
+  );
+  assert.equal(queries, 1);
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(
+    (
+      await reopened.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "jira.configure",
+          key: input.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt },
+  );
+  await assert.rejects(
+    reopened.execute(input),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.equal(f.service.domain().jiraConfiguration(projectId)!.version, 3);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque GitHub and GitLab links preserve exact path ref host project path and still verify every checkout", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const github = join(f.directory, "opaque-gh"),
+    gitlab = join(f.directory, "opaque-gl"),
+    visible = join(f.directory, "visible-link");
+  await checkout(github, "https://github.com/acme/app.git");
+  await checkout(gitlab, "https://secret.example.com/group/app.git");
+  await checkout(visible, "https://github.com/acme/visible.git");
+  const envKey = "OPAQUE_LINK_ID",
+    previous = process.env[envKey];
+  process.env[envKey] = "secret.example.com";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  f.service.domain().execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${envKey}`,
+  });
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: envKey,
+        path: github,
+        ref: "main",
+      },
+      {
+        codeHost: "gitlab",
+        host: "secret.example.com",
+        repositoryId: "42",
+        projectPath: "group/app",
+        path: gitlab,
+        ref: "main",
+      },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "visible",
+        path: visible,
+        ref: "main",
+      },
+    ],
+  });
+  const saved = f.service.domain().repositoryLinks(projectId);
+  const read = (await api.readProjectConfiguration(projectId)).data
+    .repositories;
+  assert.ok(
+    read.links
+      .slice(0, 2)
+      .every(
+        (row) =>
+          row.repositoryId === null &&
+          row.host === null &&
+          row.ref === null &&
+          row.savedRow,
+      ),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(read),
+    /OPAQUE_LINK_ID|secret.example.com|group\/app|opaque-gh|opaque-gl/,
+  );
+  // The whole link is opaque when its host is withheld, even if its numeric ID alone is public.
+  const collision = {
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    repositories: [
+      {
+        codeHost: "gitlab",
+        host: "secret.example.com",
+        repositoryId: "42",
+        projectPath: "group/app",
+        path: gitlab,
+        ref: "main",
+      },
+    ],
+  };
+  await assert.rejects(
+    api.execute(collision),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "repositories.0.repositoryId",
+  );
+  assert.equal(f.service.domain().repositoryLinks(projectId).version, 2);
+  const originalKeep = {
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    repositories: [
+      ...read.links
+        .slice(0, 2)
+        .map((row) => ({ savedRow: row.savedRow, keep: true })),
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "visible",
+        ref: "HEAD",
+      },
+    ],
+  };
+  const originalReceipt = await api.execute(originalKeep);
+  assert.deepEqual(
+    f.service.domain().repositoryLinks(projectId).links,
+    saved.links.map((row, index) =>
+      index === 2 ? { ...row, ref: "HEAD" } : row,
+    ),
+  );
+  const current = (await api.readProjectConfiguration(projectId)).data
+    .repositories;
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    repositories: [{ savedRow: current.links[1]!.savedRow, keep: true }],
+  });
+  assert.deepEqual(f.service.domain().repositoryLinks(projectId).links, [
+    saved.links[1],
+  ]);
+  // A retained link is not a verification bypass: changing its actual origin refuses the next save.
+  await promisify(execFile)("git", [
+    "-C",
+    gitlab,
+    "remote",
+    "set-url",
+    "origin",
+    "https://secret.example.com/group/other.git",
+  ]);
+  const last = (await api.readProjectConfiguration(projectId)).data
+    .repositories;
+  const bad = {
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 4,
+    repositories: [{ savedRow: last.links[0]!.savedRow, keep: true }],
+  };
+  await assert.rejects(
+    api.execute(bad),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "repositories.0.path",
+  );
+  assert.equal(f.service.domain().repositoryLinks(projectId).version, 4);
+  assert.deepEqual(
+    (
+      await api.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "repositories.configure",
+          key: bad.key,
+        }),
+      )
+    ).data,
+    { state: "not-recorded" },
+  );
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  await assert.rejects(
+    reopened.execute(originalKeep),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.deepEqual(
+    (
+      await reopened.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "repositories.configure",
+          key: originalKeep.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt: originalReceipt },
+  );
+  assert.deepEqual(f.service.domain().repositoryLinks(projectId).links, [
+    saved.links[1],
+  ]);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque repository handles reject section project ordinal duplicates stale versions and expanded limits", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const path = join(f.directory, "kept-link");
+  await checkout(path, "https://github.com/acme/app.git");
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R",
+        path,
+        ref: "main",
+      },
+    ],
+  });
+  const savedRow = { projectId, section: "repositories", version: 2, index: 0 };
+  const keep = { savedRow, keep: true };
+  for (const [rows, status, field] of [
+    [[keep, keep], 400, "repositories.1.savedRow"],
+    [
+      [{ savedRow: { ...savedRow, section: "source" }, keep: true }],
+      400,
+      "repositories.0.savedRow",
+    ],
+    [
+      [{ savedRow: { ...savedRow, projectId: randomUUID() }, keep: true }],
+      400,
+      "repositories.0.savedRow",
+    ],
+    [
+      [{ savedRow: { ...savedRow, index: 1 }, keep: true }],
+      400,
+      "repositories.0.savedRow",
+    ],
+    [[{ savedRow: { ...savedRow, version: 1 }, keep: true }], 409, undefined],
+    [
+      [
+        keep,
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "R",
+          path,
+          ref: "main",
+        },
+      ],
+      400,
+      "repositories.1.repositoryId",
+    ],
+    [
+      [
+        keep,
+        ...Array.from({ length: 20 }, (_, index) => ({
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: `R-${index}`,
+          path,
+          ref: "main",
+        })),
+      ],
+      400,
+      "repositories",
+    ],
+  ] as const) {
+    const input = {
+      type: "repositories.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      repositories: rows,
+    };
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, status);
+      if (field)
+        assert.ok(
+          error.fieldPaths?.includes(field),
+          JSON.stringify(error.fieldPaths),
+        );
+      return true;
+    });
+    assert.equal(f.service.domain().repositoryLinks(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "repositories.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("opaque source reads fail closed without exclusion evidence and refuse keep normalization without mutations", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: "saved-private", kind: "search", query: "private query" },
+    ],
+    readiness: null,
+  });
+  const original = DomainStore.prototype.deliveryCredentialReference;
+  DomainStore.prototype.deliveryCredentialReference = () => {
+    throw new Error("private exclusion lookup unavailable");
+  };
+  try {
+    const read = (await api.readProjectConfiguration(projectId)).data.source;
+    assert.equal(read.selections[0]!.id, null);
+    assert.equal(JSON.stringify(read).includes("saved-private"), false);
+    const input = {
+      type: "github.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      selections: [{ savedRow: read.selections[0]!.savedRow, keep: true }],
+    };
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError && error.status === 503,
+    );
+    assert.equal(f.service.domain().githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "github.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  } finally {
+    DomainStore.prototype.deliveryCredentialReference = original;
+  }
+});
+
+test("credential exclusions protect the entire configuration including status mapping scopes", async (t) => {
+  for (const tracker of ["github", "jira"] as const)
+    await t.test(tracker, async (t) => {
+      const { f, api, projectId } = await deliveryFixture(t);
+      const domain = f.service.domain();
+      const envKey = "STATUS_MAPPING_PRIVATE_REFERENCE";
+      const privateValue = "STATUS_MAPPING_PRIVATE_VALUE";
+      const previous = process.env[envKey];
+      process.env[envKey] = privateValue;
+      t.after(() => {
+        if (previous === undefined) delete process.env[envKey];
+        else process.env[envKey] = previous;
+      });
+      if (tracker === "github")
+        domain.execute({
+          type: "github.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: 1,
+          selections: [
+            {
+              id: envKey,
+              kind: "project",
+              projectNodeId: privateValue,
+              filter: "",
+            },
+          ],
+          readiness: null,
+        });
+      else {
+        domain.execute({
+          type: "issue-tracker-credential.configure",
+          actor: "operator",
+          key: randomUUID(),
+          issueTracker: "jira",
+          instance: "example.atlassian.net",
+          credential: {
+            siteRef: "env:JIRA_SITE",
+            emailRef: "env:JIRA_EMAIL",
+            tokenRef: "env:JIRA_TOKEN",
+          },
+        });
+        domain.execute({
+          type: "jira.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: 1,
+          instance: "example.atlassian.net",
+          selections: [
+            { id: "visible", kind: "jql", jql: "project = VISIBLE" },
+          ],
+          readiness: null,
+        });
+      }
+      const grant =
+        tracker === "github"
+          ? {
+              action: "project.field" as const,
+              repositoryId: "R",
+              mode: "allow" as const,
+              projectNodeId: privateValue,
+              fieldNodeId: envKey,
+              optionNodeIds: [envKey, privateValue],
+            }
+          : {
+              action: "issue.status" as const,
+              repositoryId: "R",
+              mode: "allow" as const,
+              statusIds: [envKey, privateValue],
+            };
+      domain.execute({
+        ...deliveryInput(projectId),
+        actor: "operator",
+        credentialRef: `env:${envKey}`,
+        grants: [grant],
+      });
+      const withoutMapping = await api.readProjectConfiguration(projectId);
+      for (const secret of [envKey, `env:${envKey}`, privateValue])
+        assert.equal(JSON.stringify(withoutMapping).includes(secret), false);
+      assert.equal(withoutMapping.data.statusMapping, undefined);
+      const mapping =
+        tracker === "github"
+          ? {
+              selectionId: envKey,
+              projectNodeId: privateValue,
+              fieldNodeId: envKey,
+              events: {
+                turnStarted: null,
+                handedBack: null,
+                held: null,
+                done: privateValue,
+              },
+            }
+          : {
+              tracker: "jira" as const,
+              events: {
+                turnStarted: null,
+                handedBack: null,
+                held: null,
+                done: privateValue,
+              },
+            };
+      domain.execute({
+        type: "status-mapping.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: 1,
+        mapping,
+      });
+      for (const removeGrant of [false, true]) {
+        if (removeGrant)
+          domain.execute({
+            ...deliveryInput(projectId),
+            expectedVersion: 2,
+            actor: "operator",
+            credentialRef: `env:${envKey}`,
+            grants: [],
+          });
+        const read = await api.readProjectConfiguration(projectId);
+        for (const secret of [envKey, `env:${envKey}`, privateValue])
+          assert.equal(JSON.stringify(read).includes(secret), false);
+        assert.equal(
+          read.data.statusMapping,
+          undefined,
+          "a withheld mapping must not become an editable empty mapping",
+        );
+        if (!removeGrant)
+          assert.equal("savedRow" in read.data.delivery!.grants[0]!, true);
+        assert.deepEqual(
+          domain.statusMapping(projectId).mapping,
+          mapping,
+          "read projection never changes persisted mapping",
+        );
+      }
+      assert.equal(f.runtime.turns, 0);
+    });
+});
+
+test("delivery policies with 257 Project options save and preserve the full configuration read", async (t) => {
+  for (const duplicates of [false, true])
+    await t.test(duplicates ? "duplicates" : "distinct", async (t) => {
+      const { f, api, projectId } = await deliveryFixture(t);
+      const grant = {
+        action: "project.field" as const,
+        repositoryId: "R",
+        mode: "allow" as const,
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: Array.from({ length: 257 }, (_, index) =>
+          duplicates ? "option" : `option-${index}`,
+        ),
+      };
+      const input = deliveryInput(projectId, { grants: [grant] });
+      assert.ok(Buffer.byteLength(JSON.stringify(input)) < 64 * 1024);
+      await api.execute(input);
+      const read = await api.readProjectConfiguration(projectId);
+      assert.deepEqual(read.data.delivery!.grants, [grant]);
+      const mapping = read.data.statusMapping;
+      assert.ok(mapping && !("tracker" in mapping));
+      assert.deepEqual(mapping.granted, [
+        {
+          projectNodeId: "P",
+          fieldNodeId: "F",
+          optionNodeIds: grant.optionNodeIds,
+        },
+      ]);
+      assert.deepEqual(f.service.delivery().configuration(projectId).grants, [
+        grant,
+      ]);
+      assert.equal(f.runtime.turns, 0);
+    });
+});
+
+test("a withheld Project selection leaves public grant reductions warnable without disclosing its id", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const envKey = "PRIVATE_MAPPING_SELECTION";
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: envKey, kind: "project", projectNodeId: "P", filter: "" },
+    ],
+    readiness: null,
+  });
+  const grant = {
+    action: "project.field" as const,
+    repositoryId: "R",
+    mode: "allow" as const,
+    projectNodeId: "P",
+    fieldNodeId: "F",
+    optionNodeIds: ["O"],
+  };
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${envKey}`,
+    grants: [grant],
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mapping: {
+      selectionId: envKey,
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      events: { turnStarted: null, handedBack: null, held: null, done: "O" },
+    },
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.equal(JSON.stringify(read).includes(envKey), false);
+  assert.equal(read.data.statusMapping, undefined);
+  const saved = read.data.delivery!;
+  assert.deepEqual(saved.grants, [grant]);
+  const { deliveryMappingCoverageWarning } = await import(
+    "../../web/src/delivery-policy-draft.js"
+  );
+  for (const grants of [[], [{ ...grant, mode: "approval" as const }]])
+    assert.match(
+      deliveryMappingCoverageWarning(
+        saved,
+        { ...saved, grants },
+        read.data.statusMapping,
+      ) ?? "",
+      /may remove status-mapping authority/,
+    );
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("routing Settings partial edits preserve an existing 129-candidate domain configuration", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const ids = Array.from({ length: 129 }, () => randomUUID()).sort();
+  for (const profileId of ids)
+    domain.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name: "Candidate",
+      instructions: "Routing candidate",
+      capabilities: "Work",
+    });
+  domain.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: true,
+    guidance: "Original",
+    candidateProfileIds: ids,
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(read.data.routing.candidateProfileIds, ids);
+  const { routingCommand } = await import("../../web/src/settings-changes.js");
+  const command = routingCommand(
+    projectId,
+    {
+      key: randomUUID(),
+      expectedVersion: "2",
+      enabled: true,
+      candidateProfileIds: ids,
+      guidance: "Updated",
+      referenceMode: "preserve",
+    },
+    read.data,
+    "Original",
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(command)) < 64 * 1024);
+  await api.execute(command);
+  const after = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(after.data.routing.candidateProfileIds, ids);
+  assert.equal(domain.routing(projectId).guidance, "Updated");
+  assert.equal(domain.routing(projectId).enabled, 1);
   assert.equal(f.runtime.turns, 0);
 });

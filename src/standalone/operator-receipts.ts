@@ -78,6 +78,18 @@ export function commandReceipt(
             credentialConfigured: outcome.result.credentialAvailable === 1,
           },
         };
+      case "delivery.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId,
+            version: outcome.result.version,
+            credentialConfigured: outcome.result.credentialConfigured,
+          },
+        };
       case "status-mapping.configure":
         return {
           kind: "configuration" as const,
@@ -253,7 +265,6 @@ export function commandReceipt(
             ready: outcome.result.ready === 1,
           },
         };
-      case "delivery.configure":
       case "assignment.create":
         throw new ReceiptShapeError();
       default: {

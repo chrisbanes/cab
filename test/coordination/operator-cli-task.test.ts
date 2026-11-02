@@ -896,7 +896,6 @@ test("a pending own-delivery closure proof is not shown as GitHub closure on any
   const ui = new LocalOperatorUi(d, undefined, sources);
   for (const [page, marker] of [
     [ui.task(taskId), "Source hold: closure-read-unavailable"],
-    [ui.project(s.projectId), "Imported task"],
   ] as const) {
     assert.ok(page.includes(marker), marker);
     assert.ok(
@@ -957,7 +956,6 @@ test("an unproved own-delivery closure attribution is explained on every task vi
     "Source hold: closure-attribution-unproved",
   ])
     assert.ok(page.includes(marker), marker);
-  assert.ok(ui.project(s.projectId).includes("closure not attributed to cab"));
 });
 
 test("task get names an imported Draft task's unmet readiness condition", async (t) => {

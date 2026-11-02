@@ -71,17 +71,16 @@ if (args.length !== 1 || args[0] !== "--live") {
       page.setDefaultNavigationTimeout(15_000);
 
       phase = "unauthenticated private read";
-      const privatePath = `/project/${encodeURIComponent(config.projectId)}`;
+      const privatePath = `/app/projects/${encodeURIComponent(config.projectId)}/settings`;
       const preLogin = await page.goto(`${config.origin}${privatePath}`);
       assert.equal(new URL(page.url()).origin, config.origin);
       assert.equal(preLogin?.status(), 200);
+      await page
+        .getByRole("button", { name: "Sign in", exact: true })
+        .waitFor();
       const preLoginBody = await page.locator("body").innerText();
       assert.match(preLoginBody, /Sign in/);
       assert.equal(preLoginBody.includes(config.privateMarker), false);
-      assert.equal(
-        await page.locator('form[method="post"]').getAttribute("action"),
-        "/login",
-      );
       const anonymousCookie = (await context.cookies()).find(
         (cookie) => cookie.name === "cab_operator_session",
       );
@@ -93,6 +92,10 @@ if (args.length !== 1 || args[0] !== "--live") {
       const runtimeReadBody = await page.locator("body").innerText();
       assert.match(runtimeReadBody, /Sign in/);
       assert.equal(runtimeReadBody.includes(config.privateMarker), false);
+      assert.equal(
+        await page.locator('form[method="post"]').getAttribute("action"),
+        "/login",
+      );
       const anonymousWorkspaceContext = await browser.newContext();
       try {
         const anonymousWorkspace = await anonymousWorkspaceContext.request.get(
@@ -170,7 +173,19 @@ if (args.length !== 1 || args[0] !== "--live") {
       phase = "authenticated private read";
       await page.goto(`${config.origin}${privatePath}`);
       assert.equal(new URL(page.url()).origin, config.origin);
-      const privateBody = await page.locator("body").innerText();
+      await page
+        .getByRole("navigation", { name: "Project configuration sections" })
+        .waitFor();
+      const configuration = await context.request.get(
+        `${config.origin}/api/operator/projects/${encodeURIComponent(config.projectId)}/configuration`,
+      );
+      assert.equal(configuration.status(), 200);
+      const privateValues = await context.request.get(
+        `${config.origin}/api/operator/projects/${encodeURIComponent(config.projectId)}/private-values`,
+      );
+      assert.equal(privateValues.status(), 200);
+      const privateBody =
+        (await configuration.text()) + (await privateValues.text());
       assert.equal(privateBody.includes(config.privateMarker), true);
       await page.goto(`${config.origin}/runtime`);
       assert.equal(new URL(page.url()).origin, config.origin);

@@ -360,20 +360,16 @@ test("source-only production factory previews, imports, fails closed and recover
       error.credentialReason === "missing-credential",
   );
   await assert.rejects(
-    f.ui.submit({
+    f.api.execute({
       type: "github.preview",
       projectId: f.projectId,
-      expectedVersion: "2",
+      expectedVersion: 2,
       selectionId: "S-1",
       key: missingKey,
     }),
-    { message: sourceCredentialExplanation("missing-credential") },
+    { status: 409, credentialReason: "missing-credential" },
   );
   assert.equal(requests.length, 0);
-  assert.match(
-    await f.ui.projectWithCredentialStatus(f.projectId),
-    /href="#github-source-credential"/,
-  );
   f.configure("gh:github.com");
   const key = randomUUID(),
     expectedVersion = 3;
@@ -436,24 +432,23 @@ test("source-only production factory previews, imports, fails closed and recover
     .githubSources()
     .syncState(f.projectId, "S-1")?.refreshedAt;
   assert.deepEqual(await f.api.execute(preview), receipt);
-  await f.ui.submit({ ...preview, expectedVersion: String(expectedVersion) });
   assert.equal(
     f.service.domain().task(taskId).importedBlockers,
     "clear",
     "recorded replay does not probe or invalidate",
   );
   await assert.rejects(
-    f.ui.submit({
+    f.api.execute({
       ...preview,
       key: randomUUID(),
-      expectedVersion: String(expectedVersion),
+      expectedVersion,
     }),
-    { message: sourceCredentialExplanation("gh-not-signed-in") },
+    { status: 409, credentialReason: "gh-not-signed-in" },
   );
   assert.equal(
     f.service.domain().task(taskId).importedBlockers,
     "unknown",
-    "failed active HTML preview invalidates stale admission",
+    "failed active JSON preview invalidates stale admission",
   );
   assert.equal(
     f.service.githubSources().syncState(f.projectId, "S-1")?.refreshedAt,
@@ -532,15 +527,6 @@ test("source-only production factory previews, imports, fails closed and recover
     receipt,
     "recorded preview replay skips provider despite Clear",
   );
-  assert.deepEqual(
-    await f.ui.submit({ ...preview, expectedVersion: String(expectedVersion) }),
-    f.service.domain().recordedCommand({
-      ...preview,
-      type: "github.activate",
-      actor: "operator",
-    }),
-    "HTML same-key replay skips provider despite Clear",
-  );
   assert.equal(f.service.domain().tasks(f.projectId).length, 2);
   assert.equal(
     f.service.domain().githubConfiguration(f.projectId).selections.length,
@@ -584,7 +570,7 @@ test("a late source reference filters helpers immediately while the existing Cod
   assert.equal(f.spawns.at(-1)?.FIXTURE_SX_ALIAS, undefined);
 });
 
-test("JSON and advanced HTML expose the same actionable source credential refusal", async (t) => {
+test("JSON exposes actionable source credential refusals", async (t) => {
   const gh = createFakeGh();
   t.after(() => gh.close());
   const s = await startCliService(t, {
@@ -640,19 +626,6 @@ test("JSON and advanced HTML expose the same actionable source credential refusa
     assert.equal(body.error.credentialReason, reason);
     assert.equal(body.error.message, sourceCredentialExplanation(reason));
     assert.equal(JSON.stringify(body).includes(fakeGhToken), false);
-    const html = await s.sessionForm("/command", {
-      ...command,
-      expectedVersion: String(version),
-    });
-    assert.equal(html.status, 409);
-    const text = await html.text();
-    assert.ok(
-      text
-        .replaceAll("&#39;", "'")
-        .includes(sourceCredentialExplanation(reason)),
-    );
-    assert.ok(text.includes(`#github-source-credential`));
-    assert.equal(text.includes(fakeGhToken), false);
   }
 });
 
@@ -945,7 +918,7 @@ clearInterval(timer); process.stdout.write(JSON.stringify({hosts:{"github.com":[
   );
 });
 
-for (const consumer of ["configuration", "observations", "html"] as const)
+for (const consumer of ["configuration", "observations"] as const)
   test(`${consumer} readback cannot mix a pending old credential with a new source configuration`, async (t) => {
     environment(t, {
       GH_TOKEN: undefined,
@@ -969,7 +942,7 @@ for (const consumer of ["configuration", "observations", "html"] as const)
         ? f.api.readProjectConfiguration(f.projectId)
         : consumer === "observations"
           ? f.api.readSourceObservations()
-          : f.ui.projectWithCredentialStatus(f.projectId);
+          : f.api.readProjectConfiguration(f.projectId);
     const deadline = Date.now() + 2000;
     while (!existsSync(started) && Date.now() < deadline)
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -983,10 +956,7 @@ for (const consumer of ["configuration", "observations", "html"] as const)
     });
     writeFileSync(release, "release");
     const response = await pending;
-    if (typeof response === "string") {
-      assert.ok(response.includes("Usable."));
-      assert.ok(!response.includes("GitHub CLI sign-in could not be read"));
-    } else if ("source" in response.data) {
+    if ("source" in response.data) {
       assert.equal(response.data.source.version, 3);
       assert.equal(response.data.source.selections[0]?.active, true);
       assert.equal(response.data.source.credential?.usable, true);
@@ -999,7 +969,7 @@ for (const consumer of ["configuration", "observations", "html"] as const)
     }
   });
 
-for (const surface of ["api", "html"] as const)
+for (const surface of ["api"] as const)
   test(`${surface} delayed preview credential failure preserves newer source evidence`, async (t) => {
     environment(t, { FIXTURE_SX_PREVIEW_NEW: "preview-new-value" });
     const f = await fixture(t);
@@ -1030,11 +1000,6 @@ for (const surface of ["api", "html"] as const)
       () => f.service.coordinationView(),
       () => reader,
     );
-    const ui = new LocalOperatorUi(
-      f.service.domain(),
-      () => reader,
-      f.service.githubSources(),
-    );
     const command = {
       type: "github.preview" as const,
       projectId: f.projectId,
@@ -1043,9 +1008,7 @@ for (const surface of ["api", "html"] as const)
       key: randomUUID(),
     };
     const pending =
-      surface === "api"
-        ? api.execute(command)
-        : ui.submit({ ...command, expectedVersion: "2" });
+      surface === "api" ? api.execute(command) : api.execute(command);
     const rejection = assert.rejects(pending);
     await entered;
     f.configure("env:FIXTURE_SX_PREVIEW_NEW");
@@ -1094,7 +1057,7 @@ for (const surface of ["api", "html"] as const)
 
 import { ghToken } from "../../src/standalone/gh-credential.js";
 
-test("candidate gh offers match selected identity across service/JSON/HTML with precedence and private exclusions", async (t) => {
+test("candidate gh offers match selected identity across service/JSON with precedence and private exclusions", async (t) => {
   const f = await fixture(t);
   environment(t, {
     PATH: `${f.gh.executable.slice(0, f.gh.executable.lastIndexOf("/"))}:${process.env.PATH}`,
@@ -1135,11 +1098,6 @@ test("candidate gh offers match selected identity across service/JSON/HTML with 
     grants: [],
     requiredChecks: [],
   });
-  const direct = new LocalOperatorUi(
-    f.service.domain(),
-    undefined,
-    f.service.githubSources(),
-  );
   const provider = globalThis.fetch;
   let providerReads = 0;
   globalThis.fetch = async () => {
@@ -1162,6 +1120,7 @@ test("candidate gh offers match selected identity across service/JSON/HTML with 
       f.configure(actual);
       const config = f.service.domain().githubConfiguration(f.projectId);
       const start = f.gh.commands().length;
+      const environmentStart = f.gh.environments().length;
       const status = await f.service.gitHubSourceCredentialStatus(f.projectId);
       assert.deepEqual(status.gh, {
         state: "signed-in",
@@ -1175,14 +1134,6 @@ test("candidate gh offers match selected identity across service/JSON/HTML with 
         observations.data.projects.find((p) => p.projectId === f.projectId)
           ?.credential?.gh,
         status.gh,
-      );
-      assert.match(
-        await f.ui.projectWithCredentialStatus(f.projectId),
-        /Detected GitHub CLI account @first-account/,
-      );
-      assert.match(
-        await direct.projectWithCredentialStatus(f.projectId),
-        /Detected GitHub CLI account @first-account/,
       );
       assert.ok(
         f.gh
@@ -1199,7 +1150,7 @@ test("candidate gh offers match selected identity across service/JSON/HTML with 
         f.service.domain().githubActiveSelectionIds(f.projectId),
         [],
       );
-      for (const env of f.gh.environments().slice(-5)) {
+      for (const env of f.gh.environments().slice(environmentStart)) {
         assert.equal(env.GH_TOKEN, "candidate-gh-first");
         assert.equal(env.GITHUB_TOKEN, "candidate-github-second");
         for (const key of [
@@ -1249,10 +1200,6 @@ test("candidate gh offers match selected identity across service/JSON/HTML with 
       .commands()
       .slice(start)
       .every((command) => command === "status"),
-  );
-  assert.doesNotMatch(
-    await direct.projectWithCredentialStatus(f.projectId),
-    /@stored-account/,
   );
   f.configure("gh:github.com");
   assert.equal(

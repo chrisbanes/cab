@@ -52,6 +52,7 @@ import {
   usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
+import { DeliveryTab } from "./delivery-config.js";
 import { RepositoryTab } from "./repository-config.js";
 import { SourceTab } from "./source-config.js";
 import { readinessAnchor } from "./observation-counts.js";
@@ -190,6 +191,13 @@ export function ProjectConfiguration(
                 observations={observations}
               />
             </>
+          ) : tab === "delivery" ? (
+            <DeliveryTab
+              {...p}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
           ) : tab === "sync" ? (
             <SyncTab
               {...p}
@@ -244,6 +252,13 @@ function statusLine(
     return withSaved(
       "Repository links are the checkouts workspaces and delivery use.",
       saved("repositories.configure", data.repositories.version),
+    );
+  if (tab === "delivery")
+    return withSaved(
+      data.delivery?.credentialConfigured
+        ? "Delivery credential configured."
+        : "No delivery credential configured.",
+      data.delivery ? saved("delivery.configure", data.delivery.version) : null,
     );
   if (tab === "github")
     return [
@@ -457,9 +472,6 @@ function GeneralTab(p: TabProps) {
             <a key="tasks" href={`/app/projects/${projectId}`}>
               Project tasks
             </a>,
-            <a key="advanced" href={`/project/${projectId}`}>
-              Open advanced project editor
-            </a>,
           ]}
         />
       </div>
@@ -524,10 +536,10 @@ function CredentialReferences({
       )}
       {row(
         "Delivery policy, authority grants and required checks",
-        "Not edited here",
+        "Edit policy and scoped authority in Delivery",
         null,
-        `/project/${projectId}`,
-        "Open advanced editor",
+        `${page}?tab=delivery`,
+        "Change in Delivery",
       )}
     </Panel>
   );

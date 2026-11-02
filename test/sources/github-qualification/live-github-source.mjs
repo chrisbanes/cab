@@ -178,9 +178,13 @@ try {
     });
   await service.refreshGitHub();
   const ui = new LocalOperatorUi(domain, undefined, service.githubSources());
-  const projectHtml = ui.project(projectId);
   for (const selection of selections)
-    assert.match(projectHtml, new RegExp(`${selection.id}.*complete`));
+    assert.equal(
+      Boolean(
+        service.githubSources().syncState(projectId, selection.id)?.complete,
+      ),
+      true,
+    );
   for (const expected of manifest.issues) {
     const imported = service.githubSources().issue(expected.nodeId);
     assert.ok(imported, `Expected issue ${expected.nodeId} was not imported`);

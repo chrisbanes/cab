@@ -9,6 +9,7 @@ import type {
   profileConfigurationSchema,
   projectConfigurationSchema,
   runtimeSettingsSchema,
+  projectPrivateValuesSchema,
 } from "../../src/operator/contracts.js";
 
 import {
@@ -194,6 +195,20 @@ export function reference(v: Values) {
  * until the operator edits it: `query` (search) and `path` (repository link) then hold the edit.
  */
 export type SourceRow = Record<string, string | boolean | string[]>;
+/** Drafts keep opaque references as JSON inside the existing scalar row model. */
+const opaqueRow = (savedRow: object): SourceRow => ({
+  keep: true,
+  unavailable: true,
+  savedRow: JSON.stringify(savedRow),
+});
+const keepOpaque = (row: SourceRow) => ({
+  savedRow: JSON.parse(String(row.savedRow)),
+  keep: true,
+});
+const rowIdentity = (row: SourceRow, field: string) =>
+  row.unavailable ? `opaque:${row.savedRow}` : `identity:${row[field]}`;
+const sourceIdentity = (row: SourceRow) => rowIdentity(row, "id");
+const repositoryIdentity = (row: SourceRow) => rowIdentity(row, "repositoryId");
 type Source = ProjectConfigurationData["source"];
 type Repositories = ProjectConfigurationData["repositories"];
 /** What the session-only read returned for this source version: the baseline of any edit. */
@@ -230,20 +245,25 @@ export function parseRows(value: Values[string] | undefined): SourceRow[] {
  */
 export function sourceRowsFrom(source: Source) {
   return {
-    selections: source.selections.map((s) => ({
-      id: s.id ?? "",
-      kind: s.kind,
-      descriptor: s.descriptor ?? "",
-      active: s.active,
-      keep: true,
-    })),
+    selections: source.selections.map((s) =>
+      s.id === null && s.savedRow
+        ? { ...opaqueRow(s.savedRow), kind: s.kind, active: s.active }
+        : {
+            id: s.id ?? "",
+            kind: s.kind,
+            descriptor: s.descriptor ?? "",
+            active: s.active,
+            keep: true,
+          },
+    ),
     // No rule and an unavailable rule both load no condition; nothing is prefilled.
     conditions: (readinessCommandValue(source.readiness)?.conditions ?? []).map(
       (c) => ({ ...c }),
     ),
     mode: source.readiness.kind === "rule" ? source.readiness.mode : "all",
     closedIssues: source.closedIssues,
-    incomplete: source.selections.some((s) => s.id === null),
+    incomplete: source.selections.some((s) => s.id === null && !s.savedRow),
+    preserveReadiness: source.readiness.kind === "unavailable",
   };
 }
 
@@ -254,26 +274,33 @@ export function sourceRowsFrom(source: Source) {
 export function repositoryRowsFrom(saved: Repositories) {
   return {
     // `savedRef` remembers the loaded ref, so adoption can tell an edited ref from a stale one.
-    repositories: saved.links.map((r) => ({
-      codeHost: r.codeHost,
-      host: r.host,
-      repositoryId: r.repositoryId ?? "",
-      ref: r.ref ?? "",
-      savedRef: r.ref ?? "",
-      keep: true,
-    })),
+    repositories: saved.links.map((r) =>
+      r.savedRow
+        ? opaqueRow(r.savedRow)
+        : {
+            codeHost: r.codeHost,
+            host: r.host ?? "",
+            repositoryId: r.repositoryId ?? "",
+            ref: r.ref ?? "",
+            savedRef: r.ref ?? "",
+            keep: true,
+          },
+    ),
     incomplete: saved.links.some(
-      (r) => r.repositoryId === null || r.ref === null,
+      (r) =>
+        !r.savedRow &&
+        (r.repositoryId === null || r.ref === null || r.host === null),
     ),
   };
 }
 
-/** The next free `S-<n>` above every saved or drafted id, so no removed id is reused. */
-export function nextSelectionId(saved: string[], drafted: string[]) {
+/** Hidden saved IDs require independent allocation; otherwise keep sequential IDs above removed rows. */
+export function nextSelectionId(saved: (string | null)[], drafted: string[]) {
+  if (saved.includes(null)) return crypto.randomUUID();
   const highest = Math.max(
     0,
     ...[...saved, ...drafted].map((id) =>
-      Number(/^S-(\d+)$/.exec(id)?.[1] ?? 0),
+      Number(/^S-(\d+)$/.exec(id ?? "")?.[1] ?? 0),
     ),
   );
   return `S-${highest + 1}`;
@@ -312,7 +339,9 @@ export function sourceChanges(
   const selections = parseRows(v.selections),
     conditions = parseRows(v.conditions);
   for (const r of selections)
-    if (r.keep && r.removed)
+    if (r.unavailable) {
+      if (r.removed) lines.push("− Unavailable saved source");
+    } else if (r.keep && r.removed)
       lines.push(
         `− ${r.id} · ${kindLabel(r.kind)}${r.descriptor ? ` ${r.descriptor}` : ""}`,
       );
@@ -325,12 +354,22 @@ export function sourceChanges(
       lines.push(
         `− ${s.id} · ${kindLabel(s.kind)} (saved since this form loaded)`,
       );
+  for (const row of source.selections)
+    if (
+      row.id === null &&
+      row.savedRow &&
+      !selections.some(
+        (draft) => draft.savedRow === JSON.stringify(row.savedRow),
+      )
+    )
+      lines.push("− Unavailable saved source (saved since this form loaded)");
   const saved = source.readiness;
   const unavailable = saved.kind === "unavailable";
   if (
-    unavailable ||
-    JSON.stringify(draftedRule(v)) !==
-      JSON.stringify(readinessCommandValue(saved))
+    unavailable
+      ? conditions.length > 0
+      : JSON.stringify(draftedRule(v)) !==
+        JSON.stringify(readinessCommandValue(saved))
   )
     lines.push(
       `Readiness: ${conditions.length ? `${v.mode === "any" ? "any" : "all"} of ${plural(conditions.length, "condition")}` : "no readiness rule"}${unavailable ? " (replaces unavailable readiness)" : ""}`,
@@ -354,7 +393,9 @@ export function repositoryChanges(
   const lines: string[] = [];
   const repositories = parseRows(v.repositories);
   for (const r of repositories) {
-    if (r.keep && r.removed)
+    if (r.unavailable) {
+      if (r.removed) lines.push("− Unavailable saved repository link");
+    } else if (r.keep && r.removed)
       lines.push(`− Repository access: ${r.repositoryId}`);
     else if (!r.keep && !r.removed)
       lines.push(
@@ -378,6 +419,16 @@ export function repositoryChanges(
       lines.push(
         `− Repository access: ${s.repositoryId} (saved since this form loaded)`,
       );
+  for (const row of saved.links)
+    if (
+      row.savedRow &&
+      !repositories.some(
+        (draft) => draft.savedRow === JSON.stringify(row.savedRow),
+      )
+    )
+      lines.push(
+        "− Unavailable saved repository link (saved since this form loaded)",
+      );
   return lines;
 }
 
@@ -389,9 +440,13 @@ export function staleSourceRows(source: Source, v: Values) {
   return [
     ...parseRows(v.selections).filter(
       (r) =>
-        r.keep && !r.removed && !source.selections.some((s) => s.id === r.id),
+        r.keep &&
+        !r.removed &&
+        !sourceRowsFrom(source).selections.some(
+          (s) => sourceIdentity(s) === sourceIdentity(r),
+        ),
     ),
-  ].map((r) => String(r.id));
+  ].map((r) => (r.unavailable ? "Unavailable saved source" : String(r.id)));
 }
 
 /** Kept links that are no longer saved (removed elsewhere); Save is blocked until reviewed. */
@@ -401,9 +456,15 @@ export function staleRepositoryRows(saved: Repositories, v: Values) {
       (r) =>
         r.keep &&
         !r.removed &&
-        !saved.links.some((s) => s.repositoryId === r.repositoryId),
+        !repositoryRowsFrom(saved).repositories.some(
+          (s) => repositoryIdentity(s) === repositoryIdentity(r),
+        ),
     )
-    .map((r) => String(r.repositoryId));
+    .map((r) =>
+      r.unavailable
+        ? "Unavailable saved repository link"
+        : String(r.repositoryId),
+    );
 }
 
 /**
@@ -429,14 +490,15 @@ const mergeRows = (
 /**
  * Rows for a newly adopted revision. Kept rows take the latest saved definition; rows saved
  * elsewhere join as kept rows; kept rows removed elsewhere are dropped; a new selection whose
- * id was saved elsewhere takes the next free id.
+ * id was saved elsewhere or cannot be checked against withheld identities gets a fresh id.
  */
 export function adoptSourceRows(source: Source, v: Values) {
   const loaded = sourceRowsFrom(source);
-  const saved = source.selections.flatMap((x) => (x.id ? [x.id] : []));
+  const saved = source.selections.map((x) => x.id);
   const taken = parseRows(v.selections).map((x) => String(x.id));
   const selections = parseRows(v.selections).map((r) => {
-    if (r.keep || !saved.includes(String(r.id))) return r;
+    if (r.keep || (!saved.includes(null) && !saved.includes(String(r.id))))
+      return r;
     const id = nextSelectionId(saved, taken);
     taken.push(id);
     return { ...r, id };
@@ -447,32 +509,31 @@ export function adoptSourceRows(source: Source, v: Values) {
   const droppedSelections = parseRows(v.selections)
     .filter((r) => {
       if (!r.keep) return false;
-      const latest = loaded.selections.find((s) => s.id === r.id);
+      const latest = loaded.selections.find(
+        (s) => sourceIdentity(s) === sourceIdentity(r),
+      );
+      if (r.unavailable) return Boolean(r.removed) && !latest;
       return latest
         ? (latest.kind !== r.kind || latest.descriptor !== r.descriptor) &&
             (Boolean(r.removed) || typeof r.query === "string")
         : !r.removed && typeof r.query === "string";
     })
-    .map((r) => String(r.id));
+    .map((r) => (r.unavailable ? "Unavailable saved source" : String(r.id)));
   return {
     dropped: droppedSelections,
     selections: JSON.stringify(
-      mergeRows(
-        selections,
-        loaded.selections,
-        (r) => r.id,
-        (r, latest) =>
-          latest.kind !== r.kind || latest.descriptor !== r.descriptor
-            ? { ...latest, rowKey: r.rowKey ?? crypto.randomUUID() }
-            : {
-                ...latest,
-                rowKey: r.rowKey ?? crypto.randomUUID(),
-                ...(r.removed ? { removed: true } : {}),
-                // An edited query stays until the operator saves or discards it, with its baseline.
-                ...(typeof r.query === "string"
-                  ? { query: r.query, queryBase: String(r.queryBase ?? "") }
-                  : {}),
-              },
+      mergeRows(selections, loaded.selections, sourceIdentity, (r, latest) =>
+        latest.kind !== r.kind || latest.descriptor !== r.descriptor
+          ? { ...latest, rowKey: r.rowKey ?? crypto.randomUUID() }
+          : {
+              ...latest,
+              rowKey: r.rowKey ?? crypto.randomUUID(),
+              ...(r.removed ? { removed: true } : {}),
+              // An edited query stays until the operator saves or discards it, with its baseline.
+              ...(typeof r.query === "string"
+                ? { query: r.query, queryBase: String(r.queryBase ?? "") }
+                : {}),
+            },
       ),
     ),
   };
@@ -489,25 +550,40 @@ export function adoptRepositoryRows(saved: Repositories, v: Values) {
     .filter(
       (r) =>
         r.keep &&
-        !r.removed &&
-        (r.ref !== r.savedRef || typeof r.path === "string") &&
-        !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
+        (r.unavailable || !r.removed) &&
+        (r.unavailable
+          ? Boolean(r.removed)
+          : r.ref !== r.savedRef || typeof r.path === "string") &&
+        !loaded.repositories.some(
+          (s) => repositoryIdentity(s) === repositoryIdentity(r),
+        ),
     )
-    .map((r) => String(r.repositoryId));
+    .map((r) =>
+      r.unavailable
+        ? "Unavailable saved repository link"
+        : String(r.repositoryId),
+    );
   return {
     dropped,
     repositories: JSON.stringify(
       mergeRows(
         parseRows(v.repositories),
         loaded.repositories,
-        (r) => r.repositoryId,
-        (r, latest) => ({
-          ...r,
-          codeHost: String(latest.codeHost),
-          host: String(latest.host),
-          ref: String(r.ref === r.savedRef ? latest.ref : r.ref),
-          savedRef: String(latest.ref),
-        }),
+        repositoryIdentity,
+        (r, latest) =>
+          latest.unavailable
+            ? {
+                ...latest,
+                rowKey: r.rowKey ?? crypto.randomUUID(),
+                ...(r.removed ? { removed: true } : {}),
+              }
+            : {
+                ...r,
+                codeHost: String(latest.codeHost),
+                host: String(latest.host),
+                ref: String(r.ref === r.savedRef ? latest.ref : r.ref),
+                savedRef: String(latest.ref),
+              },
       ),
     ),
   };
@@ -526,7 +602,7 @@ export function duplicateRepositoryIds(v: Values) {
 const duplicateIds = (rows: SourceRow[], id: (r: SourceRow) => unknown) => [
   ...new Set(
     rows
-      .filter((r) => !r.removed)
+      .filter((r) => !r.removed && !r.unavailable)
       .map((r) => String(id(r)))
       .filter((x, i, all) => x !== "" && all.indexOf(x) !== i),
   ),
@@ -555,6 +631,7 @@ export function sourceCommand(
     projectId,
     expectedVersion: Number(v.expectedVersion),
     selections: live(parseRows(v.selections)).map((r) => {
+      if (r.unavailable) return keepOpaque(r);
       if (r.keep)
         return queryEdited(r, known)
           ? { id: r.id, kind: "search", query: r.query }
@@ -562,7 +639,9 @@ export function sourceCommand(
       const { rowKey: _k, ...row } = r;
       return row;
     }),
-    readiness: draftedRule(v),
+    ...(v.preserveReadiness && parseRows(v.conditions).length === 0
+      ? {}
+      : { readiness: draftedRule(v) }),
     closedIssues: v.closedIssues,
     ...(v.referenceMode === "gh"
       ? { credentialRef: "gh:github.com" }
@@ -582,20 +661,26 @@ export function repositoryCommand(
     expectedVersion: Number(v.expectedVersion),
     // A saved row keeps its code host and host; a row added in the form is GitHub or GitLab,
     // and only a new GitLab row names its project path.
-    repositories: live(parseRows(v.repositories)).map((r) => ({
-      codeHost: r.codeHost ?? "github",
-      host: r.host ?? "github.com",
-      repositoryId: r.repositoryId,
-      ref: r.ref,
-      ...(r.keep
-        ? pathEdited(r, known)
-          ? { path: r.path }
-          : {}
+    repositories: live(parseRows(v.repositories)).map((r) =>
+      r.unavailable
+        ? keepOpaque(r)
         : {
-            ...(r.codeHost === "gitlab" ? { projectPath: r.projectPath } : {}),
-            path: r.path,
-          }),
-    })),
+            codeHost: r.codeHost ?? "github",
+            host: r.host ?? "github.com",
+            repositoryId: r.repositoryId,
+            ref: r.ref,
+            ...(r.keep
+              ? pathEdited(r, known)
+                ? { path: r.path }
+                : {}
+              : {
+                  ...(r.codeHost === "gitlab"
+                    ? { projectPath: r.projectPath }
+                    : {}),
+                  path: r.path,
+                }),
+          },
+    ),
   };
 }
 
@@ -623,4 +708,131 @@ export function capacityChanges(
       lines.push(`${name} override: ${r.override} → ${limit}`);
   }
   return lines;
+}
+
+/** Public rows stay preservable while a session-only Jira query read is unavailable. */
+export function jiraRowsFrom(
+  source: Source,
+  known?: Pick<
+    z.infer<typeof projectPrivateValuesSchema>["data"]["source"],
+    "jql"
+  >,
+) {
+  const visible: { id: string; jql: string }[] = [];
+  const kept: SourceRow[] = [];
+  let incomplete = false;
+  for (const row of source.selections) {
+    const query =
+      row.id === null
+        ? undefined
+        : known?.jql?.find((entry) => entry.id === row.id);
+    if (query) visible.push(query);
+    else if (row.savedRow) kept.push(opaqueRow(row.savedRow));
+    else incomplete = true;
+  }
+  return {
+    incomplete,
+    selections: JSON.stringify(kept),
+    jql: visible.map((row) => row.jql.replace(/\s*\n\s*/g, " ")).join("\n"),
+    jqlIds: visible.map((row) => row.id),
+  };
+}
+
+/** Retained rows carry no JQL or hidden id; visible query edits keep their original visible id. */
+export function jiraSelections(source: Source, values: Values) {
+  const kept = live(parseRows(values.selections)).map(keepOpaque);
+  const ids = Array.isArray(values.jqlIds) ? [...values.jqlIds] : [];
+  const taken = source.selections.map((row) => row.id);
+  const queries = String(values.jql ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return [
+    ...kept,
+    ...queries.map((jql, index) => {
+      const id = ids[index] || nextSelectionId(taken, ids);
+      ids[index] = id;
+      return { id, kind: "jql", jql };
+    }),
+  ];
+}
+
+/** A newer snapshot cannot identify an old opaque row: restore current placeholders, never transfer its removal by ordinal. */
+export function adoptJiraRows(
+  source: Source,
+  values: Values,
+  known?: Pick<
+    z.infer<typeof projectPrivateValuesSchema>["data"]["source"],
+    "jql"
+  >,
+) {
+  const loaded = jiraRowsFrom(source, known);
+  const ids = Array.isArray(values.jqlIds) ? values.jqlIds : [];
+  const visible = source.selections.flatMap((row) =>
+    row.id === null ? [] : [row.id],
+  );
+  let dropped = 0;
+  const queries = String(values.jql ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  // Positional ids shrink on review; deletion intent must survive the next conflict.
+  const removedIds = new Set(
+    Array.isArray(values.removedJqlIds) ? values.removedJqlIds : [],
+  );
+  for (const id of ids.slice(queries.length)) if (id) removedIds.add(id);
+  for (const id of removedIds) {
+    if (!visible.includes(id)) {
+      removedIds.delete(id);
+      dropped++;
+    }
+  }
+  const drafted = queries.flatMap((jql, index) => {
+    const id = ids[index] ?? "";
+    if (id && !visible.includes(id)) {
+      dropped++;
+      return [];
+    }
+    return [{ id, jql }];
+  });
+  for (const row of drafted) removedIds.delete(row.id);
+  const latest = loaded.jql
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((jql, index) => {
+      const id = loaded.jqlIds[index]!;
+      // An original id without a draft query was deliberately removed.
+      return removedIds.has(id) || drafted.some((row) => row.id === id)
+        ? []
+        : [{ id, jql }];
+    });
+  const previous = parseRows(values.selections);
+  const placeholders = parseRows(loaded.selections)
+    .filter((row) => {
+      const reference = JSON.parse(String(row.savedRow)) as { index: number };
+      const id = source.selections[reference.index]?.id;
+      // A still-public identity is already edited or removed in the query field.
+      return (
+        id === null ||
+        id === undefined ||
+        (!removedIds.has(id) && !drafted.some((entry) => entry.id === id))
+      );
+    })
+    .map((row) =>
+      previous.some((old) => old.savedRow === row.savedRow && old.removed)
+        ? { ...row, removed: true }
+        : row,
+    );
+  dropped += previous.filter(
+    (row) =>
+      row.removed &&
+      !placeholders.some((current) => current.savedRow === row.savedRow),
+  ).length;
+  return {
+    dropped,
+    selections: JSON.stringify(placeholders),
+    jql: [...drafted, ...latest].map((row) => row.jql).join("\n"),
+    jqlIds: [...drafted, ...latest].map((row) => row.id),
+    removedJqlIds: [...removedIds],
+  };
 }

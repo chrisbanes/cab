@@ -351,7 +351,6 @@ async function seedPublicState(session) {
 async function readRestoredPublicState(session, records) {
   for (const [kind, id, expected] of [
     ["profile", records.profileId, "S08a disposable profile"],
-    ["project", records.projectId, "S08a disposable project"],
     ["task", records.taskId, "S08a unready fixture task"],
   ]) {
     const response = await fetch(`${origin}/${kind}/${id}`, {
@@ -367,12 +366,17 @@ async function readRestoredPublicState(session, records) {
   });
   const taskHtml = await task.text();
   assert.match(taskHtml, /Not ready/);
-  const project = await fetch(`${origin}/project/${records.projectId}`, {
-    headers: { cookie: session.cookie },
-    signal: AbortSignal.timeout(5_000),
-  });
+  const project = await fetch(
+    `${origin}/api/operator/projects/${records.projectId}/configuration`,
+    {
+      headers: { cookie: session.cookie },
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
   assert.equal(project.status, 200);
-  assert.match(await project.text(), /Paused/);
+  const configuration = (await project.json()).data;
+  assert.equal(configuration.project.name, "S08a disposable project");
+  assert.equal(configuration.project.paused, true);
   return { profiles: 1, projects: 1, pausedProjects: 1, unreadyTasks: 1 };
 }
 

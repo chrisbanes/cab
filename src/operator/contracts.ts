@@ -2060,6 +2060,114 @@ export const taskToolOutputSchema = envelope(
 );
 const base = { key: uuid };
 const domainBase = { ...base, projectId: uuid };
+const deliveryIdentity = z.string().trim().min(1).max(512);
+const deliveryGrantSchema = z
+  .object({
+    action: z.enum([
+      "issue.comment",
+      "issue.labels",
+      "issue.edit",
+      "issue.create",
+      "project.item.add",
+      "project.field",
+      "issue.status",
+      "pr.create",
+      "pr.edit",
+      "pr.ready",
+      "pr.merge",
+      "issue.close",
+      "pr.thread.reply",
+      "pr.thread.resolve",
+      "branch.push",
+      "branch.force-push",
+      "branch.adopt",
+    ]),
+    repositoryId: deliveryIdentity,
+    mode: z.enum(["allow", "approval"]),
+    projectNodeId: deliveryIdentity.optional(),
+    fieldNodeId: deliveryIdentity.optional(),
+    optionNodeIds: z.array(deliveryIdentity).optional(),
+    statusIds: z.array(deliveryIdentity).max(256).optional(),
+  })
+  .strict()
+  .refine(
+    (grant) => grant.action !== "branch.adopt" || grant.mode === "approval",
+    { path: ["mode"], message: "Branch adoption requires approval." },
+  );
+const deliveryCheckSchema = z
+  .object({
+    name: deliveryIdentity,
+    appId: z.number().int().positive().optional(),
+  })
+  .strict();
+const deliverySavedRowSchema = z
+  .object({
+    projectId: uuid,
+    section: z.enum(["delivery-grants", "delivery-checks"]),
+    version: revision,
+    index: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+export const savedConfigurationRowSchema = deliverySavedRowSchema
+  .extend({
+    section: z.enum(["source", "repositories"]),
+  })
+  .strict();
+const keptConfigurationRowSchema = z
+  .object({ savedRow: savedConfigurationRowSchema, keep: z.literal(true) })
+  .strict();
+const keptDeliveryRowSchema = z
+  .object({ savedRow: deliverySavedRowSchema, keep: z.literal(true) })
+  .strict();
+const repositoryConfigurationRowSchema = z
+  .unknown()
+  .transform((input, context) => {
+    const parsed = repositoriesConfigurationCommandSchema.safeParse({
+      repositories: [input],
+    });
+    if (parsed.success) return parsed.data.repositories[0]!;
+    for (const issue of parsed.error.issues)
+      context.addIssue({
+        code: "custom",
+        path: issue.path.slice(2),
+        message: issue.message,
+      });
+    return z.NEVER;
+  });
+const unavailableDeliveryRowSchema = z
+  .object({
+    kind: z.literal("unavailable"),
+    label: z.literal("Unavailable saved row"),
+    savedRow: deliverySavedRowSchema,
+  })
+  .strict();
+/** Exact visible policy rows or opaque references to rows withheld by the exclusion boundary. */
+export const deliveryConfigurationSchema = z
+  .object({
+    version: revision,
+    mode: z.enum(["reviewable-pr", "through-merge"]),
+    credentialConfigured: z.boolean(),
+    branchPrefix: z.string().max(64).nullable().optional(),
+    branchPrefixUnavailable: z.literal(true).optional(),
+    grants: z
+      .array(z.union([deliveryGrantSchema, unavailableDeliveryRowSchema]))
+      .max(256),
+    requiredChecks: z
+      .array(z.union([deliveryCheckSchema, unavailableDeliveryRowSchema]))
+      .max(100),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      (value.branchPrefix === null) !==
+      (value.branchPrefixUnavailable === true)
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["branchPrefix"],
+        message: "An unavailable prefix must be withheld.",
+      });
+  });
 const localReviewCommentSchema = z
   .object({
     commentId: uuid,
@@ -2475,10 +2583,34 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .optional(),
       candidateProfileIds: z
         .array(uuid)
-        .max(128)
         .refine((ids) => new Set(ids).size === ids.length),
     })
     .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("delivery.configure"),
+      expectedVersion: revision,
+      mode: z.enum(["reviewable-pr", "through-merge"]),
+      credentialRef: envCredentialReference.nullable().optional(),
+      branchPrefix: z.string().max(64).optional(),
+      preserveBranchPrefix: z.literal(true).optional(),
+      grants: z
+        .array(z.union([deliveryGrantSchema, keptDeliveryRowSchema]))
+        .max(256),
+      requiredChecks: z
+        .array(z.union([deliveryCheckSchema, keptDeliveryRowSchema]))
+        .max(100),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (value.preserveBranchPrefix && value.branchPrefix !== undefined)
+        context.addIssue({
+          code: "custom",
+          path: ["branchPrefix"],
+          message: "Choose an explicit prefix or preserve the saved prefix.",
+        });
+    }),
   z
     .object({
       ...domainBase,
@@ -2492,7 +2624,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...domainBase,
       type: z.literal("repositories.configure"),
       expectedVersion: revision,
-      ...repositoriesConfigurationCommandSchema.shape,
+      repositories: z
+        .array(
+          z.union([
+            repositoryConfigurationRowSchema,
+            keptConfigurationRowSchema,
+          ]),
+        )
+        .max(20),
     })
     .strict(),
   z
@@ -2501,6 +2640,21 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("jira.configure"),
       expectedVersion: revision,
       ...jiraConfigurationSchema.shape,
+      instance: jiraConfigurationSchema.shape.instance.optional(),
+      selections: z
+        .array(
+          z.union([
+            jiraConfigurationSchema.shape.selections.element,
+            keptConfigurationRowSchema,
+          ]),
+        )
+        .max(30)
+        .refine((rows) => {
+          const ids = rows.flatMap((row) =>
+            "savedRow" in row ? [] : [row.id],
+          );
+          return new Set(ids).size === ids.length;
+        }, "Selection IDs must be unique"),
       closedIssues: closedIssuesSchema.optional(),
       /** Omitted keeps the saved rule; `null` removes it. */
       readiness: jiraConfigurationSchema.shape.readiness.optional(),
@@ -2512,6 +2666,21 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("github.configure"),
       expectedVersion: revision,
       ...githubConfigurationCommandSchema.shape,
+      selections: z
+        .array(
+          z.union([
+            githubConfigurationCommandSchema.shape.selections.element,
+            keptConfigurationRowSchema,
+          ]),
+        )
+        .max(30)
+        .refine((rows) => {
+          const ids = rows.flatMap((row) =>
+            "savedRow" in row ? [] : [row.id],
+          );
+          return new Set(ids).size === ids.length;
+        }, "Selection IDs must be unique"),
+      readiness: githubConfigurationCommandSchema.shape.readiness.optional(),
       credentialRef: githubConfigurationSchema.shape.credentialRef.optional(),
     })
     .strict(),
@@ -2904,6 +3073,14 @@ export const configurationReceiptSchema = z
           resourceId: uuid,
           version: revision,
           enabled: z.boolean(),
+          credentialConfigured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("delivery.configure"),
+          resourceId: uuid,
+          version: revision,
           credentialConfigured: z.boolean(),
         })
         .strict(),
@@ -3347,7 +3524,7 @@ const githubStatusMappingViewSchema = z
           .object({
             projectNodeId: text,
             fieldNodeId: text,
-            optionNodeIds: z.array(text).max(256),
+            optionNodeIds: z.array(text),
           })
           .strict(),
       )
@@ -3392,6 +3569,7 @@ export const projectConfigurationSchema = envelope(
           ]),
         })
         .strict(),
+      delivery: deliveryConfigurationSchema.optional(),
       placements: z.array(
         z
           .object({
@@ -3414,16 +3592,18 @@ export const projectConfigurationSchema = envelope(
                 .object({
                   repositoryId: safeText,
                   codeHost: z.literal("github"),
-                  host: z.literal("github.com"),
+                  host: z.literal("github.com").nullable(),
                   ref: safeText,
+                  savedRow: savedConfigurationRowSchema.optional(),
                 })
                 .strict(),
               z
                 .object({
                   repositoryId: safeText,
                   codeHost: z.literal("gitlab"),
-                  host: z.string().min(1).max(253),
+                  host: z.string().min(1).max(253).nullable(),
                   ref: safeText,
+                  savedRow: savedConfigurationRowSchema.optional(),
                 })
                 .strict(),
             ]),
@@ -3445,6 +3625,7 @@ export const projectConfigurationSchema = envelope(
                 kind: z.enum(["repository", "search", "project", "jql"]),
                 descriptor: safeText,
                 active: z.boolean(),
+                savedRow: savedConfigurationRowSchema.optional(),
               })
               .strict(),
           ),
@@ -4508,6 +4689,7 @@ export const operationTypeSchema = z.enum([
   "project.create",
   "project.configure",
   "routing.configure",
+  "delivery.configure",
   "capacity.configure",
   "runtime.configure",
   "assignment.apply",
