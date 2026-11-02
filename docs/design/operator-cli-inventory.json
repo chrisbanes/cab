@@ -859,9 +859,9 @@
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Persists the operator Stop hold and requests best-effort cancellation (effect cancellation-requested for a running task, saved for an idle one).",
-      "denial": "A read-only credential exits 3 (and a direct bearer post is 403) with the digest unchanged; bearer posts to the retained /runtime/control/stop route are 403 for both scopes.",
+      "denial": "A read-only credential exits 3 (and a direct bearer post is 403) with the digest unchanged; bearer posts to retained session form routes are 403 for both scopes.",
       "revision": "--expected-version is optional so an unrelated edit cannot block Stop; a mismatch exits 4; an unknown task exits 2.",
-      "retry": "A lost Stop then rerun replays the receipt; the keyless retained form and the receipted command share one hold; the output reports whether Stop is in effect.",
+      "retry": "A lost Stop then rerun replays the receipt; the app's session command and the CLI share one hold; the output reports whether Stop is in effect.",
       "observation": "real",
       "state": "passed",
       "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
@@ -882,7 +882,7 @@
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Clears only the operator Stop and lists independent holds that remain; with no Stop it reports effect none; it never clears recovery holds.",
-      "denial": "A read-only credential exits 3 (and a direct bearer post is 403); bearer posts to /runtime/control/resume are 403 for both scopes.",
+      "denial": "A read-only credential exits 3 (and a direct bearer post is 403); bearer posts to retained session form routes are 403 for both scopes.",
       "revision": "--expected-version mismatch exits 4 with no change; an independent hold survives Resume.",
       "retry": "A lost Resume then rerun replays the old receipt and reports Stop not in effect with new --request-id advice.",
       "observation": "real",

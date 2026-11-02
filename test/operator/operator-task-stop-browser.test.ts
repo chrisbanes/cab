@@ -6,7 +6,7 @@ import { seedReviewTask } from "../fixtures/task-review.js";
 
 const test = browserSuite("ui-task-stop");
 
-test("the task header offers Stop… only on an open task and keeps a Stop requested hold", async (_t, j) => {
+test("the task header offers Stop… only on an open task and Resume… on a stopped one", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -70,7 +70,7 @@ test("the task header offers Stop… only on an open task and keeps a Stop reque
     ["A", "Execution", undefined],
   ]);
 
-  // An existing Stop on a finished task stays visible.
+  // An existing Stop on a finished task offers Resume….
   f.seedPersistedState((db) => {
     db.prepare(
       "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
@@ -78,6 +78,6 @@ test("the task header offers Stop… only on an open task and keeps a Stop reque
   });
   assert.deepEqual(await actions(done.taskId, "Done task"), [
     ["A", "Execution", undefined],
-    ["BUTTON", "Stop requested", true],
+    ["BUTTON", "Resume…", false],
   ]);
 });

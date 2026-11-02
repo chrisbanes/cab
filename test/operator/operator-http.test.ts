@@ -1085,6 +1085,91 @@ test("real runtime routes inherit HTTP guards and persist capacity", async () =>
       service.capacityLimits([projectId]).projectOverrides[projectId],
       1,
     );
+
+    // The removed task page and its four forms answer as any unknown route does, with no
+    // redirect, even to a signed-in, same-origin request with a valid CSRF token.
+    const signedIn = (method: string, path: string) =>
+      fetch(`${origin}${path}`, {
+        method,
+        headers: {
+          origin,
+          cookie: sessionCookie,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        ...(method === "POST"
+          ? {
+              body: new URLSearchParams({
+                csrfToken: protectedCsrf,
+                key: randomUUID(),
+                projectId,
+                taskId,
+                blockerTaskId: randomUUID(),
+                expectedVersion: "1",
+              }),
+            }
+          : {}),
+        redirect: "manual",
+      });
+    const unknown = {
+      GET: await signedIn("GET", `/runtime/unknown/${taskId}`),
+      POST: await signedIn("POST", "/runtime/control/unknown"),
+    };
+    assert.equal(unknown.GET.status, 404);
+    assert.equal(unknown.POST.status, 404);
+    const unknownBody = {
+      GET: await unknown.GET.text(),
+      POST: await unknown.POST.text(),
+    };
+    for (const [method, path] of [
+      ["GET", `/runtime/task/${taskId}`],
+      ["POST", "/runtime/control/dependency/add"],
+      ["POST", "/runtime/control/dependency/remove"],
+      ["POST", "/runtime/control/stop"],
+      ["POST", "/runtime/control/resume"],
+    ] as const) {
+      const response = await signedIn(method, path);
+      assert.equal(response.status, 404, `${method} ${path}`);
+      assert.equal(response.headers.get("location"), null, path);
+      assert.equal(await response.text(), unknownBody[method], path);
+    }
+    assert.equal(domain.dependencies(taskId).length, 0);
+    assert.equal(service.isTaskStopped(taskId), false);
+    // The retained Runtime overview, assignment page and its Apply still work.
+    for (const path of ["/runtime", `/runtime/assignment/${assignmentId}`])
+      assert.equal((await signedIn("GET", path)).status, 200, path);
+    domain.execute({
+      key: randomUUID(),
+      actor: "operator",
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+      instructions: "Changed instructions",
+    });
+    const apply = await fetch(`${origin}/runtime/control/instruction-apply`, {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: sessionCookie,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        csrfToken: protectedCsrf,
+        key: randomUUID(),
+        projectId,
+        assignmentId,
+        expectedVersion: String(domain.assignment(assignmentId).version),
+      }),
+      redirect: "manual",
+    });
+    assert.equal(apply.status, 303);
+    assert.equal(
+      apply.headers.get("location"),
+      `/runtime/assignment/${encodeURIComponent(assignmentId)}`,
+    );
+    assert.equal(
+      Number(domain.assignment(assignmentId).instructionsRevision),
+      Number(domain.project(projectId).instructionsRevision),
+    );
   } finally {
     await http?.stop();
     auth?.close();

@@ -321,7 +321,7 @@ for (const [label, viewport] of [
         .getByRole("tablist", { name: "Task sections" })
         .getByRole("tab")
         .allTextContents(),
-      ["Overview", "Files", "Changes", "Review"],
+      ["Overview", "Files", "Changes", "Review", "Execution"],
       "the conversation replaced the History tab",
     );
 

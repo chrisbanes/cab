@@ -103,11 +103,11 @@ Every semicolon-separated foundation inventory control appears individually belo
 | /runtime/control/capacity | global capacity | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
 | /runtime/control/capacity | project override | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
 | /runtime/control/capacity | remove override | /runtime | /app/settings/runtime | Implemented replacement; original control retained. |
-| /runtime/control/dependency/add | local dependency add | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/dependency/remove | local dependency remove | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/instruction-apply | apply project instructions and profile revisions | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/stop | stop request and observation | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
-| /runtime/control/resume | explicit resume | /runtime/task/:id | /runtime/task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
+| dependency.add | local dependency add | /app/tasks/:id?section=execution | /app/tasks/:id?section=execution | Task Execution tab through `dependency.add`. |
+| dependency.remove | local dependency remove | /app/tasks/:id?section=execution | /app/tasks/:id?section=execution | Task Execution tab through `dependency.remove`. |
+| /runtime/control/instruction-apply | apply project instructions and profile revisions | /runtime/assignment/:id | /runtime/assignment/:id | Retained on the assignment page; the task inspector's expanded stale row of a started assignment also applies through `assignment.apply`. |
+| task.stop | stop request and observation | /app/tasks/:id | /app/tasks/:id | The task header's Stop… through `task.stop`. |
+| task.resume | explicit resume | /app/tasks/:id | /app/tasks/:id | The task header's Resume…, while the task is stopped, through `task.resume`. |
 | read | generation | /runtime/assignment/:id | /app/assignments/:id/recovery | Read-only curated evidence; exact advanced evidence and existing Apply remain retained. No ownership release or proof controls. |
 | read | holds | /runtime/assignment/:id | /app/assignments/:id/recovery | Read-only curated evidence; exact advanced evidence and existing Apply remain retained. No ownership release or proof controls. |
 | read | advanced recovery evidence | /runtime/assignment/:id | /app/assignments/:id/recovery | Read-only curated evidence; exact advanced evidence and existing Apply remain retained. No ownership release or proof controls. |

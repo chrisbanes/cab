@@ -183,7 +183,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   );
   assert.equal(
     await header.getByRole("link", { name: "Execution" }).getAttribute("href"),
-    `/runtime/task/${a.taskId}`,
+    `/app/tasks/${a.taskId}?section=execution`,
   );
   const back = header.getByRole("link", { name: "Back to Atlas", exact: true });
   assert.equal(await back.getAttribute("href"), `/app/projects/${a.projectId}`);
@@ -194,7 +194,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       .count(),
     0,
   );
-  // Four tabs without counts; Overview is selected.
+  // Five tabs without counts; Overview is selected.
   const tabs = page
     .getByRole("tablist", { name: "Task sections" })
     .getByRole("tab");
@@ -203,6 +203,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     "Files",
     "Changes",
     "Review",
+    "Execution",
   ]);
   assert.equal(await tabs.first().getAttribute("aria-selected"), "true");
   // Stop… uses the tinted destructive button.
@@ -787,7 +788,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
     await card
       .getByRole("link", { name: "Inspect uncertain execution" })
       .getAttribute("href"),
-    `/runtime/task/${a.taskId}`,
+    `/app/tasks/${a.taskId}?section=execution`,
   );
   // cab records a routing fallback itself: plain text, never an operator button.
   codes = ["lead-review"];
@@ -815,7 +816,7 @@ for (const engine of [
   { name: "webkit", type: webkit },
 ] as const)
   testForEngine(
-    `Stop confirms first, Keep running sends nothing, Stop task posts the retained form (${engine.name})`,
+    `Stop confirms first, Keep running sends nothing, Stop task sends task.stop and Resume… clears it (${engine.name})`,
     engine.name,
     async (_t, j) => {
       const f = await j.start("fixture.create", () =>
@@ -837,13 +838,14 @@ for (const engine of [
       });
       j.observe(page);
       page.setDefaultTimeout(5000);
-      const stops: { body: string | null; origin: string | undefined }[] = [];
+      const stops: { body: string | null }[] = [];
       page.on("request", (r) => {
         if (
           r.method() === "POST" &&
-          new URL(r.url()).pathname === "/runtime/control/stop"
+          new URL(r.url()).pathname === "/api/operator/commands" &&
+          r.postData()?.includes('"task.stop"')
         )
-          stops.push({ body: r.postData(), origin: r.headers().origin });
+          stops.push({ body: r.postData() });
       });
       await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
       const stop = page.getByRole("button", { name: "Stop…", exact: true });
@@ -905,42 +907,43 @@ for (const engine of [
         fullPage: false,
       });
 
-      const session = await page.evaluate(() =>
-        fetch("/api/operator/session").then((r) => r.json()),
-      );
       await dialog.getByRole("button", { name: "Stop task" }).dblclick();
-      await page.waitForURL((u) => u.pathname === `/runtime/task/${a.taskId}`);
+      await dialog.getByText(/^Stop requested\. New turns are held/).waitFor();
+      // One keyed `task.stop`, without a version fence.
       assert.equal(stops.length, 1);
-      assert.equal(stops[0]?.origin, web.origin);
-      assert.equal(
-        stops[0]?.body,
-        new URLSearchParams({
-          csrfToken: session.csrfToken,
-          taskId: a.taskId,
-        }).toString(),
-      );
-      await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
-      await page.locator("main.page h1").waitFor();
-      const read = await page.evaluate(
-        (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
-        a.taskId,
-      );
-      assert.equal(read.data.execution.holds.stop, true);
-      const requested = page.getByRole("button", {
-        name: "Stop requested",
-        exact: true,
-      });
-      await requested.waitFor();
-      assert.ok(await requested.isDisabled());
-      assert.ok(
-        await page
-          .getByRole("link", { name: "Execution", exact: true })
-          .isVisible(),
+      const sent = JSON.parse(stops[0]?.body ?? "{}");
+      assert.equal(sent.type, "task.stop");
+      assert.equal(sent.taskId, a.taskId);
+      assert.equal("expectedVersion" in sent, false);
+      assert.equal(f.service.isTaskStopped(a.taskId), true);
+      await dialog.getByRole("button", { name: "Close" }).click();
+      await dialog.waitFor({ state: "detached" });
+      // The reread offers Resume… in Stop…'s place, and focus moves to it.
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Resume…",
       );
       assert.match(
         (await page.locator("[data-task-readiness]").textContent()) ?? "",
         /^Stopping; effects may continue/,
       );
+
+      // Resume confirms on its safe choice, clears only the Stop and offers Stop… again.
+      await page.getByRole("button", { name: "Resume…", exact: true }).click();
+      const resume = page.getByRole("alertdialog", {
+        name: "Resume Ship an accessible command menu?",
+      });
+      await resume.getByText(/Clears only the operator Stop/).waitFor();
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Cancel",
+      );
+      await resume.getByRole("button", { name: "Resume task" }).click();
+      await resume.getByText(/^Resumed\. Only the Stop was cleared/).waitFor();
+      assert.equal(f.service.isTaskStopped(a.taskId), false);
+      await resume.getByRole("button", { name: "Close" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Stop…",
+      );
+      assert.equal(stops.length, 1);
     },
   );
 
@@ -1314,7 +1317,7 @@ test("Holds stay listed beneath Fix: Resume project with what clears them and Ex
   for (const href of await links.evaluateAll((a) =>
     a.map((x) => x.getAttribute("href")),
   ))
-    assert.equal(href, `/runtime/task/${taskId}`);
+    assert.equal(href, `/app/tasks/${taskId}?section=execution`);
   // Holds are never a Fix: no buttons and no Fix text inside the list.
   assert.equal(await held.getByRole("button").count(), 0);
   assert.equal(await held.getByText(/^Fix:/).count(), 0);
@@ -1738,8 +1741,9 @@ for (const engine of ["chromium", "webkit"] as const)
         ["ArrowRight", "Files"],
         ["ArrowRight", "Changes"],
         ["ArrowLeft", "Files"],
-        ["End", "Review"],
+        ["End", "Execution"],
         ["ArrowRight", "Overview"],
+        ["ArrowLeft", "Execution"],
         ["ArrowLeft", "Review"],
         ["Home", "Overview"],
       ] as const) {
@@ -1803,6 +1807,7 @@ test("Task deep links open their tab on the first paint", async (_t, j) => {
     ["?target=branch", "Changes"],
     [`?result=${a.result.resultId}`, "Overview"],
     ["#changes", "Changes"],
+    ["?section=execution", "Execution"],
   ];
   for (const [query, name] of cases) {
     await page.goto(`${web.origin}/app/tasks/${a.taskId}${query}`);
@@ -4562,7 +4567,8 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   page.on("request", (r) => {
     if (
       r.method() === "POST" &&
-      new URL(r.url()).pathname === "/runtime/control/stop"
+      new URL(r.url()).pathname === "/api/operator/commands" &&
+      r.postData()?.includes('"task.stop"')
     )
       stops.push(r.url());
   });
@@ -4718,15 +4724,13 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     [["A", "Execution"]],
   );
 
-  // A recorded Stop stays a disabled "Stop requested".
+  // A recorded Stop offers Resume… in place of Stop….
   await page.goto(`${web.origin}/app/tasks/${stopped.taskId}`);
   await toggle.click();
-  const requested = header.getByRole("button", {
-    name: "Stop requested",
-    exact: true,
-  });
-  await requested.waitFor();
-  assert.ok(await requested.isDisabled());
+  const resume = header.getByRole("button", { name: "Resume…", exact: true });
+  await resume.waitFor();
+  assert.ok(await resume.isEnabled());
+  assert.equal(await header.getByRole("button", { name: "Stop…" }).count(), 0);
   assert.ok(
     await header
       .getByRole("link", { name: "Execution", exact: true })
@@ -4918,11 +4922,13 @@ for (const engine of ["chromium", "webkit"] as const)
       await toggle.click();
       await overflow.and(page.locator("[open]")).waitFor();
       await page
-        .locator(`.task-header-actions a[href="/runtime/task/${a.taskId}"]`)
+        .locator(
+          `.task-header-actions a[href="/app/tasks/${a.taskId}?section=execution"]`,
+        )
         .click();
-      await page.waitForURL(
-        (url) => url.pathname === `/runtime/task/${a.taskId}`,
-      );
+      await taskTab(page, "Execution")
+        .and(page.locator('[aria-selected="true"]'))
+        .waitFor();
       await page.goBack();
       await taskTab(page, "Overview").waitFor();
       assert.equal(await overflow.getAttribute("open"), null);

@@ -74,7 +74,7 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
     await card
       .getByRole("link", { name: "Task controls" })
       .getAttribute("href"),
-    `/runtime/task/${ids.taskId}`,
+    `/app/tasks/${ids.taskId}?section=execution`,
   );
   assert.equal(
     await card
@@ -83,6 +83,12 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
     `/app/assignments/${ids.assignmentId}/recovery`,
   );
   await captureBrowserEvidence(page, "1366-runtime");
+  // Task controls opens the task's Execution tab, which keeps the recorded holds in view.
+  await card.getByRole("link", { name: "Task controls" }).click();
+  await page.getByRole("tab", { name: "Execution", selected: true }).waitFor();
+  const execution = page.locator("section#execution");
+  await execution.getByText("Writer ownership", { exact: true }).waitFor();
+  await captureBrowserEvidence(page, "1366-task-execution-held");
 });
 
 test("Assignment recovery shows the uncertainty alert and five independent holds", async (_t, journey) => {
@@ -187,7 +193,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
   assert.deepEqual(hrefs, [
     `/runtime/assignment/${ids.assignmentId}`,
-    `/runtime/task/${ids.taskId}`,
+    `/app/tasks/${ids.taskId}?section=execution`,
     `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
     `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
     `/assignment/${ids.assignmentId}`,
@@ -313,7 +319,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
   assert.deepEqual(siblingHrefs, [
     `/runtime/assignment/${siblingId}`,
-    `/runtime/task/${ids.taskId}`,
+    `/app/tasks/${ids.taskId}?section=execution`,
     `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
     `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
     `/assignment/${siblingId}`,

@@ -1144,9 +1144,10 @@ async function journey() {
 
   stage("remote authority and logout");
   for (const [method, path, body, type] of [
+    // A retained session form route: bearer credentials never reach it.
     [
       "POST",
-      "/runtime/control/stop",
+      "/runtime/control/instruction-apply",
       `taskId=${taskId}`,
       "application/x-www-form-urlencoded",
     ],

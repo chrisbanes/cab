@@ -796,10 +796,7 @@ test("authenticated no-turn routes acknowledge bounded witnesses on task, assign
       f.service.recoveryView().find((r) => r.workId === f.old.workId)
         ?.noTurnSubmission,
     );
-    for (const path of [
-      "/runtime/task/:taskId",
-      "/runtime/assignment/:assignmentId",
-    ]) {
+    for (const path of ["/runtime/assignment/:assignmentId"]) {
       const page = required(routes.find((r) => r.path === path));
       const response = await page.handler({
         params: { taskId: f.taskId, assignmentId: f.assignmentId },

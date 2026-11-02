@@ -193,19 +193,6 @@ async function save(page: Page, form: Locator): Promise<void> {
 }
 
 /** The runtime page's Task controls copy: two plain sentences, no service vocabulary. */
-async function assertTaskControlsCopy(page: Page) {
-  const copy = await page
-    .locator("section", {
-      has: page.getByRole("heading", { name: "Task controls" }),
-    })
-    .locator("p")
-    .innerText();
-  assert.equal(copy.match(/[^.]+\./g)?.length, 2, copy);
-  assert.doesNotMatch(copy, /observ|admission|bounded|never releases/i);
-  assert.match(copy, /some effects may still finish/);
-  assert.match(copy, /Resume clears only the Stop/);
-}
-
 async function submitControl(
   page: Page,
   form: Locator,
@@ -1212,20 +1199,14 @@ test("operator commands and Chromium runtime controls keep durable readback", as
   assert.equal(taskView.results[0]?.recipientAssignmentId, leadAssignment.id);
 
   await until(() => runtime.turns === 3);
-  await page.goto(`${origin}/runtime/task/${taskId}`);
-
-  const dependencyForm = page.locator(
-    'form[action="/runtime/control/dependency/add"]',
-  );
-  await dependencyForm
-    .locator('select[name="blockerTaskId"]')
-    .selectOption(blockerTaskId);
-  await submitControl(
-    page,
-    dependencyForm,
-    "/runtime/control/dependency/add",
-    "Add dependency",
-  );
+  await api.execute({
+    type: "dependency.add",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    blockerTaskId,
+    expectedVersion: Number(service.domain().task(taskId).version),
+  });
   assert.deepEqual(service.domain().dependencies(taskId), [blockerTaskId]);
 
   await api.execute({
@@ -1239,12 +1220,12 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     Number(service.domain().project(projectId).instructionsRevision),
     2,
   );
-  await page.goto(`${origin}/runtime/task/${instructionTaskId}`);
   const instructionAssignment = service
     .domain()
     .assignments(instructionTaskId)
     .find((assignment) => assignment.profileId === leadProfileId);
   assert.ok(instructionAssignment);
+  await page.goto(`${origin}/runtime/assignment/${instructionAssignment.id}`);
   const instructionForm = page
     .locator('form[action="/runtime/control/instruction-apply"]')
     .filter({
@@ -1266,19 +1247,14 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     2,
   );
 
-  await page.goto(`${origin}/runtime/task/${taskId}`);
-  const stopForm = page.locator('form[action="/runtime/control/stop"]');
-  await submitControl(
-    page,
-    stopForm,
-    "/runtime/control/stop",
-    "Best-effort Stop",
-  );
+  // Stop and Resume are JSON commands; the retained assignment page reads the task's holds.
+  const holdsPage = `${origin}/runtime/assignment/${leadAssignment.id}`;
+  await api.execute({ type: "task.stop", key: randomUUID(), taskId });
+  await page.goto(holdsPage);
   let runtimeText = await page.locator("body").innerText();
   assert.match(runtimeText, /Operator Stop remains active/);
   assert.match(runtimeText, /Writer ownership remains held/);
   assert.match(runtimeText, /Effects may continue/);
-  await assertTaskControlsCopy(page);
   const stoppedRecoveryRecord = service
     .recoveryView()
     .find((record) => record.binding?.taskId === taskId);
@@ -1305,17 +1281,12 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     ),
   );
   assert.match(runtimeText, /not proof of termination or release/);
-  await submitControl(
-    page,
-    page.locator('form[action="/runtime/control/resume"]'),
-    "/runtime/control/resume",
-    "Resume task",
-  );
+  await api.execute({ type: "task.resume", key: randomUUID(), taskId });
+  await page.goto(holdsPage);
   runtimeText = await page.locator("body").innerText();
   assert.match(runtimeText, /Operator Stop is not active/);
   assert.match(runtimeText, /Writer ownership remains held/);
   assert.match(runtimeText, /Effects may continue/);
-  await assertTaskControlsCopy(page);
 
   await journey.closeStep("http.stop", http.stop.bind(http));
   http = undefined;
@@ -1398,15 +1369,14 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     persistedAssignmentText,
     /Recorded identities, observations, receipts, and dispositions are evidence only/,
   );
-  await page.goto(`${origin}/runtime/task/${taskId}`);
-  const persistedDependency = page.locator(
-    'form[action="/runtime/control/dependency/remove"]',
-  );
-  await submitControl(
-    page,
-    persistedDependency,
-    "/runtime/control/dependency/remove",
-    "Remove dependency",
-  );
+  // The restarted service has its own API.
+  await new OperatorApi(service, [directory]).execute({
+    type: "dependency.remove",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    blockerTaskId,
+    expectedVersion: Number(service.domain().task(taskId).version),
+  });
   assert.deepEqual(service.domain().dependencies(taskId), []);
 });

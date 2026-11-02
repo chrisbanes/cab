@@ -413,10 +413,12 @@ test("uncertain effect and independent Stop remain visible after restart; expire
     .waitFor();
   assert.equal(f.scripted.state.writes, 1);
   await captureBrowserEvidence(page, "phone-uncertain-effect");
-  await page.goto(`${web.origin}/runtime/task/${f.taskId}`);
-  await page
-    .getByRole("button", { name: "Best-effort Stop", exact: true })
-    .click();
+  await page.goto(`${web.origin}/app/tasks/${f.taskId}`);
+  // At this phone width Stop… sits in the Task actions disclosure; clicking its toggle waits
+  // for the header to render.
+  await page.locator(".task-header-overflow-toggle").click();
+  await page.getByRole("button", { name: "Stop…", exact: true }).click();
+  await page.getByRole("button", { name: "Stop task", exact: true }).click();
   await until(
     () => !f.service.list().some((i) => i.state === "running"),
     "Stop observed",

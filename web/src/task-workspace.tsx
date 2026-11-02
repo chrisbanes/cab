@@ -133,6 +133,7 @@ import {
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
+import { ApplyInstructions, TaskExecution } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
@@ -147,6 +148,7 @@ const sectionIds = [
   "changes",
   "local-review",
   "reply",
+  "execution",
 ];
 /** The section a tab opens at when a link names no section. */
 const tabSections: Record<TaskTab, string> = {
@@ -154,6 +156,7 @@ const tabSections: Record<TaskTab, string> = {
   files: "files",
   changes: "changes",
   review: "local-review",
+  execution: "execution",
 };
 const sourceGap =
   "Retained source body and checklist coverage are unavailable. Source fields are retained only up to 16,000 characters; private or missing material may also be unavailable. Consult the external source or ask the lead.";
@@ -1423,6 +1426,14 @@ export function TaskWorkspace({
           )}
           <PolicyDisclosure harness={execution.harness} workspace={workspace} />
         </details>
+        <ApplyInstructions
+          assignment={a}
+          projectId={data.task.projectId}
+          taskId={taskId}
+          client={client}
+          session={session}
+          onChanged={refreshAll}
+        />
         {data.results
           .filter((r) => r.assignmentId === a.assignmentId)
           .map((r) => (
@@ -2197,7 +2208,7 @@ export function TaskWorkspace({
                   !data.execution.holds.uncertainty && (
                     <ActionLink
                       variant="secondary"
-                      href={`/runtime/task/${taskId}`}
+                      href={`/app/tasks/${taskId}?section=execution`}
                     >
                       Inspect uncertain execution
                     </ActionLink>
@@ -2239,7 +2250,7 @@ export function TaskWorkspace({
                   workspace={workspace ?? null}
                   onChanged={refreshAll}
                   holds={holdLines(data.execution.holds, data.taskHold)}
-                  executionHref={`/runtime/task/${taskId}`}
+                  executionHref={`/app/tasks/${taskId}?section=execution`}
                   assignments={data.assignments}
                 />
                 {stackSummary(data.stack) && (
@@ -2705,6 +2716,17 @@ export function TaskWorkspace({
         </TabPanel>
         <TabPanel tab="review" active={state.tab}>
           <LocalReviewPanel />
+        </TabPanel>
+        <TabPanel tab="execution" active={state.tab}>
+          <TaskExecution
+            data={data}
+            project={workspace?.data.projects.find(
+              (p) => p.id === data.task.projectId,
+            )}
+            client={client}
+            session={session}
+            onChanged={refreshAll}
+          />
         </TabPanel>
       </article>
     </LocalReviewProvider>

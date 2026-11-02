@@ -681,6 +681,48 @@ async function saveForm(page, form) {
   required((await response).status() === 303, "operator-command-redirect");
 }
 
+/** Opens a task's Execution tab in the signed-in app and returns its section. */
+async function openExecutionTab(page, origin, taskId) {
+  await page.goto(`${origin}/app/tasks/${taskId}?section=execution`);
+  const section = page.locator("section#execution");
+  await section.locator("[data-execution-status]").waitFor();
+  return section;
+}
+
+/** Confirms the task header's Stop… or Resume…, which sends one `task.stop` or `task.resume`. */
+async function headerHoldCommand(page, kind) {
+  const response = page.waitForResponse(
+    (candidate) =>
+      new URL(candidate.url()).pathname === "/api/operator/commands" &&
+      candidate.request().method() === "POST" &&
+      (candidate.request().postData() ?? "").includes(`"task.${kind}"`),
+    { timeout: 10_000 },
+  );
+  // Decide on the phone disclosure only once the header has rendered.
+  await page.locator(".task-header-actions").waitFor({ state: "attached" });
+  const toggle = page.locator(".task-header-overflow-toggle");
+  if (await toggle.isVisible()) await toggle.click();
+  await page
+    .getByRole("button", {
+      name: kind === "stop" ? "Stop…" : "Resume…",
+      exact: true,
+    })
+    .click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog
+    .getByRole("button", {
+      name: kind === "stop" ? "Stop task" : "Resume task",
+    })
+    .click();
+  const result = await response;
+  required(
+    result.status() === 200 && (await result.json()).kind === `task-${kind}`,
+    `operator-header-task-${kind}-recorded`,
+  );
+  await dialog.getByRole("button", { name: "Close" }).click();
+  return result;
+}
+
 async function submitForm(page, form, path, buttonName) {
   const response = page.waitForResponse(
     (candidate) =>
@@ -2600,7 +2642,6 @@ async function completeRepoFree(current, page, repositoryFree, evidence) {
   const staleCount = taskIntents(current.service, alpha.taskId).filter(
     (intent) => intent.state !== "completed",
   ).length;
-  await page.goto(`${current.origin}/runtime/task/${alpha.taskId}`);
   const assignments = current.service.domain().assignments(alpha.taskId);
   for (const assignment of assignments) {
     if (
@@ -2901,44 +2942,41 @@ async function runLocalDependencyJourney(
   );
 
   progress("local-dependency-ui-add-and-exact-replay");
-  await page.goto(`${current.origin}/runtime/task/${dependentTaskId}`);
-  const dependencyForm = page.locator(
-    'form[action="/runtime/control/dependency/add"]',
+  // The Execution tab's Add dependency… sends one keyed `dependency.add` JSON command.
+  const dependentExecution = await openExecutionTab(
+    page,
+    current.origin,
+    dependentTaskId,
   );
-  required((await dependencyForm.count()) === 1, "dependency-add-form-present");
-  await dependencyForm
-    .locator('select[name="blockerTaskId"]')
+  await dependentExecution
+    .getByLabel("Local blocker")
     .selectOption(blockerTaskId);
-  const capturedFields = await dependencyForm.evaluate((form) =>
-    Object.fromEntries(
-      Array.from(new FormData(form).entries(), ([name, value]) => [
-        name,
-        String(value),
-      ]),
-    ),
-  );
-  required(
-    capturedFields.projectId === projectId &&
-      capturedFields.taskId === dependentTaskId &&
-      capturedFields.blockerTaskId === blockerTaskId &&
-      capturedFields.expectedVersion === String(dependentBeforeEdge.version) &&
-      typeof capturedFields.key === "string" &&
-      typeof capturedFields.csrfToken === "string",
-    "exact-authenticated-dependency-post-captured",
-  );
-  const dependencyPath = "/runtime/control/dependency/add";
   const firstPostPromise = page.waitForResponse(
     (response) =>
-      new URL(response.url()).pathname === dependencyPath &&
-      response.request().method() === "POST",
+      new URL(response.url()).pathname === "/api/operator/commands" &&
+      response.request().method() === "POST" &&
+      (response.request().postData() ?? "").includes('"dependency.add"'),
     { timeout: 10_000 },
   );
-  await dependencyForm.getByRole("button", { name: "Add dependency" }).click();
+  await dependentExecution
+    .getByRole("button", { name: "Add dependency…" })
+    .click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Add dependency", exact: true })
+    .click();
   const firstPost = await firstPostPromise;
-  const firstLocation = new URL(
-    firstPost.headers().location ?? "",
-    current.origin,
-  ).pathname;
+  const capturedCommand = firstPost.request().postDataJSON();
+  required(
+    capturedCommand.type === "dependency.add" &&
+      capturedCommand.projectId === projectId &&
+      capturedCommand.taskId === dependentTaskId &&
+      capturedCommand.blockerTaskId === blockerTaskId &&
+      capturedCommand.expectedVersion === Number(dependentBeforeEdge.version) &&
+      typeof capturedCommand.key === "string",
+    "exact-authenticated-dependency-command-captured",
+  );
+  const firstReceipt = await firstPost.json();
   const firstVersion = Number(
     current.service.domain().task(dependentTaskId).version,
   );
@@ -2946,31 +2984,22 @@ async function runLocalDependencyJourney(
   const receiptAfterFirst = readCommandReceipt(
     root,
     projectId,
-    capturedFields.key,
+    capturedCommand.key,
   );
   required(
-    firstPost.status() === 303 &&
-      firstLocation === `/runtime/task/${dependentTaskId}` &&
-      new URL(page.url()).pathname === firstLocation &&
+    firstPost.status() === 200 &&
+      firstReceipt.kind === "domain" &&
+      firstReceipt.key === capturedCommand.key &&
       firstVersion === Number(dependentBeforeEdge.version) + 1 &&
       firstEdges.length === 1 &&
       firstEdges[0] === blockerTaskId &&
       receiptAfterFirst.count === 1,
-    "dependency-ui-post-created-one-edge-and-receipt",
+    "dependency-ui-command-created-one-edge-and-receipt",
   );
+  await dependentExecution.getByText("Dependency added.").waitFor();
 
-  const replayPost = await current.browserContext.request.post(
-    `${current.origin}${dependencyPath}`,
-    {
-      form: capturedFields,
-      headers: { origin: current.origin },
-      maxRedirects: 0,
-    },
-  );
-  const replayLocation = new URL(
-    replayPost.headers().location ?? "",
-    current.origin,
-  ).pathname;
+  // The exact captured command, sent again, replays its receipt and changes nothing.
+  const replay = await postOperatorCommand(current, capturedCommand);
   const replayVersion = Number(
     current.service.domain().task(dependentTaskId).version,
   );
@@ -2978,7 +3007,7 @@ async function runLocalDependencyJourney(
   const receiptAfterReplay = readCommandReceipt(
     root,
     projectId,
-    capturedFields.key,
+    capturedCommand.key,
   );
   const receiptPayloadHashStable =
     receiptAfterFirst.payloadHash !== null &&
@@ -2986,17 +3015,17 @@ async function runLocalDependencyJourney(
   const receiptResultStable =
     receiptAfterFirst.result !== null &&
     receiptAfterFirst.result === receiptAfterReplay.result;
+  const sameReceipt = isDeepStrictEqual(replay.receipt, firstReceipt);
   const dependencyReplayVerified =
-    replayPost.status() === 303 &&
-    replayLocation === firstLocation &&
+    replay.status === 200 &&
+    sameReceipt &&
     replayVersion === firstVersion &&
     replayEdges.length === 1 &&
     replayEdges[0] === blockerTaskId &&
     receiptAfterReplay.count === receiptAfterFirst.count &&
     receiptPayloadHashStable &&
     receiptResultStable;
-  await replayPost.dispose();
-  required(dependencyReplayVerified, "dependency-exact-post-replayed-once");
+  required(dependencyReplayVerified, "dependency-exact-command-replayed-once");
 
   const journey = {
     projectId,
@@ -3008,8 +3037,8 @@ async function runLocalDependencyJourney(
     candidateProfileCount: routing.candidateProfileIds.length,
     dependencyPostReplay: {
       postedThroughUi: true,
-      exactCapturedFieldsReplayed: true,
-      sameRedirectLocation: true,
+      exactCapturedCommandReplayed: true,
+      sameReceipt,
       edgeCountAfterPost: firstEdges.length,
       edgeCountAfterReplay: replayEdges.length,
       dependentVersionBeforePost: Number(dependentBeforeEdge.version),
@@ -3047,13 +3076,12 @@ async function runLocalDependencyJourney(
       openAdmission.reasons.includes("local-dependency"),
     "open-unready-blocker-holds-ready-dependent",
   );
-  await page.goto(`${current.origin}/runtime/task/${dependentTaskId}`);
-  const openTaskText = await page.locator("body").innerText();
+  const openTaskText = await (
+    await openExecutionTab(page, current.origin, dependentTaskId)
+  ).innerText();
   required(
-    openTaskText.includes("Task state: open; Ready") &&
-      openTaskText.includes(
-        "Task admission blocked: A local dependency is incomplete",
-      ),
+    openTaskText.includes("open · Ready") &&
+      openTaskText.includes("Waiting on a task dependency"),
     "ready-dependent-visible-with-local-blocker-reason",
   );
   const openBlockerNoTurn = await assertNoTaskTurn(
@@ -3111,10 +3139,8 @@ async function runLocalDependencyJourney(
   };
 
   progress("local-dependency-stop-dependent-before-blocker-completion");
-  await page.goto(`${current.origin}/runtime/task/${dependentTaskId}`);
-  const stopForm = page.locator('form[action="/runtime/control/stop"]');
-  required((await stopForm.count()) === 1, "dependent-stop-control-present");
-  await submitForm(page, stopForm, "/runtime/control/stop", "Best-effort Stop");
+  await openExecutionTab(page, current.origin, dependentTaskId);
+  await headerHoldCommand(page, "stop");
   required(
     current.service.taskHold(dependentTaskId) !== undefined,
     "dependent-stop-hold-set-through-ui",
@@ -3204,11 +3230,12 @@ async function runLocalDependencyJourney(
         stopStillHeld,
       "done-blocker-clears-dependency-gate-but-not-stop",
     );
-    await page.goto(`${current.origin}/runtime/task/${dependentTaskId}`);
-    const releasedTaskText = await page.locator("body").innerText();
+    const releasedTaskText = await (
+      await openExecutionTab(page, current.origin, dependentTaskId)
+    ).innerText();
     required(
       releasedTaskText.includes("Task admission gates are clear") &&
-        releasedTaskText.includes("Stop") &&
+        releasedTaskText.includes("Operator Stop") &&
         current.service.taskHold(dependentTaskId) !== undefined,
       "released-dependency-remains-held-by-stop-in-operator-view",
     );
@@ -3225,18 +3252,8 @@ async function runLocalDependencyJourney(
     };
 
     progress("local-dependency-resume-dependent-and-complete");
-    await page.goto(`${current.origin}/runtime/task/${dependentTaskId}`);
-    const resumeForm = page.locator('form[action="/runtime/control/resume"]');
-    required(
-      (await resumeForm.count()) === 1,
-      "dependent-resume-control-present",
-    );
-    await submitForm(
-      page,
-      resumeForm,
-      "/runtime/control/resume",
-      "Resume task",
-    );
+    await openExecutionTab(page, current.origin, dependentTaskId);
+    await headerHoldCommand(page, "resume");
     required(
       current.service.taskHold(dependentTaskId) === undefined,
       "dependent-stop-cleared-through-ui-resume",

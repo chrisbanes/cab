@@ -155,17 +155,6 @@ test("operator status follows a newer queued continuation over completed history
   const history = service.coordinationView().readTask(taskId).history;
   assert.ok(history.some((entry) => entry.state === "completed"));
 
-  const runtimeTaskRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "GET" && candidate.path === "/runtime/task/:taskId",
-  );
-  assert.ok(runtimeTaskRoute);
-  const runtimePage = await runtimeTaskRoute.handler({
-    params: { taskId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(runtimePage.kind, "html");
   const runtimeAssignmentRoute = runtimeOperatorRoutes(service).find(
     (candidate) =>
       candidate.method === "GET" &&
@@ -187,20 +176,12 @@ test("operator status follows a newer queued continuation over completed history
   const taskRead = (
     await new OperatorApi(service, [directory]).readTask(taskId)
   ).data;
-  assert.deepEqual(
-    {
-      runtimeShowsCurrentQueue:
-        runtimePage.kind === "html" &&
-        /Current-status lead \(project lead\)<\/a>: Queued; waiting for capacity admission\./.test(
-          runtimePage.body,
-        ),
-      taskReadShowsCurrentQueue:
-        taskRead.execution.state === "queued" &&
-        taskRead.assignments.find(
-          (candidate) => candidate.assignmentId === String(assignment.id),
-        )?.executionGeneration?.workId === requests[1]?.workId,
-    },
-    { runtimeShowsCurrentQueue: true, taskReadShowsCurrentQueue: true },
+  assert.equal(taskRead.execution.state, "queued");
+  assert.equal(
+    taskRead.assignments.find(
+      (candidate) => candidate.assignmentId === String(assignment.id),
+    )?.executionGeneration?.workId,
+    requests[1]?.workId,
   );
 });
 
@@ -349,11 +330,6 @@ test("operator reads retain an active worker turn after applying next-turn revis
   );
 
   const runtimeRoutes = runtimeOperatorRoutes(service);
-  const runtimeTaskPage = await route(
-    runtimeRoutes,
-    "GET",
-    "/runtime/task/:taskId",
-  ).handler({ params: { taskId }, fields: {}, csrfToken: "test-token" });
   const runtimeAssignmentPage = await route(
     runtimeRoutes,
     "GET",
@@ -363,12 +339,7 @@ test("operator reads retain an active worker turn after applying next-turn revis
     fields: {},
     csrfToken: "test-token",
   });
-  assert.equal(runtimeTaskPage.kind, "html");
   assert.equal(runtimeAssignmentPage.kind, "html");
-  if (runtimeTaskPage.kind === "html") {
-    assert.match(runtimeTaskPage.body, /Execution status: Running\./);
-    assert.match(runtimeTaskPage.body, /Active-turn worker<\/a>: Running\./);
-  }
   if (runtimeAssignmentPage.kind === "html") {
     assert.match(runtimeAssignmentPage.body, /Execution status: Running\./);
     assert.ok(
@@ -401,17 +372,6 @@ test("operator reads retain an active worker turn after applying next-turn revis
         .find((request) => request.workId === activeRequest.workId)?.state ===
       "completed",
   );
-  const completedRuntimeTaskPage = await route(
-    runtimeOperatorRoutes(service),
-    "GET",
-    "/runtime/task/:taskId",
-  ).handler({ params: { taskId }, fields: {}, csrfToken: "test-token" });
-  assert.equal(completedRuntimeTaskPage.kind, "html");
-  if (completedRuntimeTaskPage.kind === "html")
-    assert.doesNotMatch(
-      completedRuntimeTaskPage.body,
-      /Execution status: Running\./,
-    );
   assert.notEqual((await api.readTask(taskId)).data.execution.state, "running");
 });
 

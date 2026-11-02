@@ -1262,6 +1262,8 @@ export const assignmentSchema = z
     instructionsRevision: revision,
     currentProfileRevision: revision,
     currentInstructionsRevision: revision,
+    /** False before the assignment's first turn starts, which takes the revisions current then; absent from older services. */
+    started: z.boolean().optional(),
     /** The execution runtime of the captured profile revision. */
     runtime: profileRuntimeSchema,
     executionGeneration: generation.nullable(),
@@ -1672,6 +1674,78 @@ export const searchReadSchema = envelope(
     })
     .strict(),
 );
+export const recoveryObservationSchema = z.enum([
+  "exact-live",
+  "exact-terminal-completed",
+  "exact-terminal-failed",
+  "historical-only",
+  "conflicting",
+  "no-proof",
+  "unknown",
+  "known-survivor",
+  "termination-verified",
+  "termination-conflict",
+  "termination-unknown",
+  "receipt-accepted",
+  "retry-enqueued",
+]);
+const recoveryHolds = z
+  .object({
+    stop: z.boolean(),
+    writer: z.boolean(),
+    capacity: z.boolean(),
+    uncertainty: z.boolean(),
+    task: z.boolean(),
+  })
+  .strict();
+const assignmentRecoveryRecordSchema = z
+  .object({
+    workId: safeText,
+    generation: z
+      .object({
+        workRevision: revision.nullable(),
+        requestSequence: revision,
+      })
+      .strict(),
+    binding: z
+      .object({
+        assignmentId: uuid,
+        assignmentVersion: revision,
+        instructionsRevision: revision,
+        profileRevision: revision,
+      })
+      .strict()
+      .nullable(),
+    // "unknown" is operator-only: the API reports it for an unrecognised stored state.
+    intentState: z.enum([...executionIntentStateSchema.options, "unknown"]),
+    requestState: z
+      .enum(["queued", "active", "completed", "held", "unknown"])
+      .nullable(),
+    holds: recoveryHolds,
+    observations: z
+      .array(recoveryObservationSchema)
+      .max(recoveryObservationSchema.options.length),
+    pendingEffectCount: time,
+    noTurnSubmission: z
+      .object({
+        id: uuid,
+        source: z.literal("operator-adopted"),
+        idleThreadMayExist: z.literal(true),
+      })
+      .strict()
+      .optional(),
+    preTurnRejection: z
+      .object({
+        id: uuid,
+        source: z.enum(["runtime", "operator-adopted"]),
+        predecessorThreadId: safeText,
+      })
+      .strict()
+      .optional(),
+    receiptRecorded: z.boolean(),
+    workspace: z.enum(["preserved", "reconciled", "unknown"]),
+  })
+  .strict();
 export const taskSchema = envelope(
   z
     .object({
@@ -1775,6 +1849,27 @@ export const taskSchema = envelope(
       localDependencies: z.array(
         z.object({ id: uuid, title: safeText, state: taskState }).strict(),
       ),
+      /**
+       * Recovery evidence across all of the task's assignments: the newest 20 verified records,
+       * newest last, and the holds any of its records keep (an omitted one included), as the
+       * task-wide assignment recovery read reports them. Absent from older services: unavailable,
+       * never empty.
+       */
+      executionRecovery: z
+        .object({
+          holds: recoveryHolds,
+          evidenceAvailable: z.boolean(),
+          omittedCount: time,
+          records: z.array(assignmentRecoveryRecordSchema).max(20),
+        })
+        .strict()
+        .optional(),
+      /** The project's tasks that could become a local blocker (not this task or a current one); empty for an imported task. */
+      dependencyCandidates: z
+        .array(
+          z.object({ id: uuid, title: safeText, state: taskState }).strict(),
+        )
+        .optional(),
       source,
       messages: z.array(message),
       results: z.array(result),
@@ -3367,78 +3462,6 @@ export const runtimeSettingsSchema = envelope(
     })
     .strict(),
 );
-export const recoveryObservationSchema = z.enum([
-  "exact-live",
-  "exact-terminal-completed",
-  "exact-terminal-failed",
-  "historical-only",
-  "conflicting",
-  "no-proof",
-  "unknown",
-  "known-survivor",
-  "termination-verified",
-  "termination-conflict",
-  "termination-unknown",
-  "receipt-accepted",
-  "retry-enqueued",
-]);
-const recoveryHolds = z
-  .object({
-    stop: z.boolean(),
-    writer: z.boolean(),
-    capacity: z.boolean(),
-    uncertainty: z.boolean(),
-    task: z.boolean(),
-  })
-  .strict();
-const assignmentRecoveryRecordSchema = z
-  .object({
-    workId: safeText,
-    generation: z
-      .object({
-        workRevision: revision.nullable(),
-        requestSequence: revision,
-      })
-      .strict(),
-    binding: z
-      .object({
-        assignmentId: uuid,
-        assignmentVersion: revision,
-        instructionsRevision: revision,
-        profileRevision: revision,
-      })
-      .strict()
-      .nullable(),
-    // "unknown" is operator-only: the API reports it for an unrecognised stored state.
-    intentState: z.enum([...executionIntentStateSchema.options, "unknown"]),
-    requestState: z
-      .enum(["queued", "active", "completed", "held", "unknown"])
-      .nullable(),
-    holds: recoveryHolds,
-    observations: z
-      .array(recoveryObservationSchema)
-      .max(recoveryObservationSchema.options.length),
-    pendingEffectCount: time,
-    noTurnSubmission: z
-      .object({
-        id: uuid,
-        source: z.literal("operator-adopted"),
-        idleThreadMayExist: z.literal(true),
-      })
-      .strict()
-      .optional(),
-    preTurnRejection: z
-      .object({
-        id: uuid,
-        source: z.enum(["runtime", "operator-adopted"]),
-        predecessorThreadId: safeText,
-      })
-      .strict()
-      .optional(),
-    receiptRecorded: z.boolean(),
-    workspace: z.enum(["preserved", "reconciled", "unknown"]),
-  })
-  .strict();
 export const assignmentRecoverySchema = envelope(
   z
     .object({

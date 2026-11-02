@@ -458,7 +458,7 @@ export function RuntimeSettings(p: SettingsProps) {
                       </ActionLink>
                       <ActionLink
                         variant="secondary"
-                        href={`/runtime/task/${task.taskId}`}
+                        href={`/app/tasks/${task.taskId}?section=execution`}
                       >
                         Task controls
                       </ActionLink>
@@ -1123,7 +1123,10 @@ export function AssignmentRecovery(
                   <a key="a" href={`/runtime/assignment/${p.assignmentId}`}>
                     Advanced recovery evidence and exact Apply
                   </a>,
-                  <a key="b" href={`/runtime/task/${data.taskId}`}>
+                  <a
+                    key="b"
+                    href={`/app/tasks/${data.taskId}?section=execution`}
+                  >
                     Task Stop, Resume and dependencies
                   </a>,
                   <a

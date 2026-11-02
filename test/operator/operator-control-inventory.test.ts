@@ -270,7 +270,6 @@ test("retained rendered form actions, fields and mounted route controls match do
     `/profile/${profileId}`,
     `/assignment/${assignmentId}`,
     "/runtime",
-    `/runtime/task/${taskId}`,
     `/runtime/assignment/${assignmentId}`,
   ];
   const actions = new Set<string>(),
@@ -324,7 +323,6 @@ test("retained rendered form actions, fields and mounted route controls match do
     "ready",
     "globalLimit",
     "projectLimit",
-    "blockerTaskId",
     "decision",
   ])
     assert.ok(fields.has(name), `${name} remains rendered`);
@@ -341,7 +339,14 @@ test("retained rendered form actions, fields and mounted route controls match do
     "/app",
   ])
     assert.ok(destinations.has(path), `${path} cross-navigation retained`);
-  assert.equal(forms, 20);
+  assert.equal(forms, 14);
+  for (const removed of [
+    "/runtime/control/dependency/add",
+    "/runtime/control/dependency/remove",
+    "/runtime/control/stop",
+    "/runtime/control/resume",
+  ])
+    assert.equal(actions.has(removed), false, `${removed} is not rendered`);
   assert.equal(
     f.service.delivery().delivery(taskId)?.registeredWorkId,
     deliveryCaller.workId,

@@ -1,0 +1,88 @@
+{
+  "record": "../1415-task-execution-parity-2026-11-02.md",
+  "status": "Additive candidate; maintainer parity approval and removal pending",
+  "productionSourceCommit": "2e057327",
+  "capturePrivacy": "Synthetic disposable real-SQLite fixtures and the production bundle with a fake runtime; no credentials, prompts, paths or process identities are visible.",
+  "captures": [
+    {
+      "file": "task-execution-desktop-chromium.png",
+      "sha256": "8a464ae339fc4167adc49c0e8690e344eb831ca1f9d78fc423efd50469f5a30d",
+      "viewport": "1366x900",
+      "raster": "1366x1432",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: dependency added through the Execution tab"
+    },
+    {
+      "file": "task-execution-phone-chromium.png",
+      "sha256": "fd62077be8e760ef98889721f3f19100447253f8b8061b173a1fc18aa2bd0c5d",
+      "viewport": "390x844",
+      "raster": "390x1700",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: Execution tab after Apply and a checked Stop"
+    },
+    {
+      "file": "dependency-confirm-chromium.png",
+      "sha256": "2dfba03bec78de9c9c75def95e8d1707e6751322e3a5e69943be9016fa70036c",
+      "viewport": "1366x900",
+      "raster": "1366x900",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: Add dependency confirmation opened on Cancel"
+    },
+    {
+      "file": "dependency-confirm-webkit.png",
+      "sha256": "88012fb7e87383a6f2e83c5848af87775af72cf491a7ff99ebe793038e5727ee",
+      "viewport": "1366x900",
+      "raster": "1366x900",
+      "engine": "webkit",
+      "origin": "operator-task-execution-browser: Add dependency confirmation opened on Cancel"
+    },
+    {
+      "file": "task-execution-stopping-chromium.png",
+      "sha256": "bd0e80ccfdccfcf3d4a0238c47d6c5a9214c0d7f0ea3d784780dbb62c2216793",
+      "viewport": "1366x900",
+      "raster": "1366x2254",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: stopped task, 21 records, newest-20 notice"
+    },
+    {
+      "file": "task-execution-held-after-resume-chromium.png",
+      "sha256": "fc5bcce4f4ea18449964ab6b237335215000022f5a95c6e617de5b36828d6c82",
+      "viewport": "1366x900",
+      "raster": "1366x2254",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: after Resume, an older record's writer/capacity/uncertainty holds remain"
+    },
+    {
+      "file": "task-execution-held-after-resume-webkit.png",
+      "sha256": "e1172f70bf2eefc8725eb59a35769198b60b7f03cc5bb99384161453dbf44729",
+      "viewport": "1366x900",
+      "raster": "1366x2254",
+      "engine": "webkit",
+      "origin": "operator-task-execution-browser: after Resume, an older record's writer/capacity/uncertainty holds remain"
+    },
+    {
+      "file": "1366-task-execution-held.png",
+      "sha256": "28ae8170c1e2947617ffb019abebb39bb1c3211c7797145c7d806ce606b1c392",
+      "viewport": "1366x900",
+      "raster": "1366x2168",
+      "engine": "chromium",
+      "origin": "operator-runtime-recovery-browser: Runtime settings Task controls lands on the Execution tab"
+    },
+    {
+      "file": "stop-dialog-phone-chromium.png",
+      "sha256": "e4b8877a3c3a9c4c5bab12f77748c7edda329cb85c4d48647c39ac52f1bb7d74",
+      "viewport": "390x844",
+      "raster": "390x844",
+      "engine": "chromium",
+      "origin": "operator-task-detail-browser: Stop confirmation opened on Keep running, phone (focus ring faint: existing dialog style)"
+    },
+    {
+      "file": "stop-dialog-webkit.png",
+      "sha256": "46297e17f05d41fd8d6ce0db648fbfa331e53429af2d6c9f8869ea2b53b82986",
+      "viewport": "1366x900",
+      "raster": "1366x900",
+      "engine": "webkit",
+      "origin": "operator-task-detail-browser: Stop confirmation opened on Keep running, desktop (focus ring faint: existing dialog style)"
+    }
+  ]
+}
