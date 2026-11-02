@@ -109,7 +109,12 @@ export function aggregateFailureReport({
   const denominator = denominatorRuns.length;
   const failed = all.filter(
     (r) =>
-      r.conclusion === "failure" || r.attempts?.some((a) => a.failures?.length),
+      r.conclusion === "failure" ||
+      r.hasFailedJob ||
+      r.attempts?.some(
+        (a) =>
+          a.jobs?.some((j) => j.conclusion === "failure") || a.failures?.length,
+      ),
   );
   const failedEligible = eligible.filter(
     (r) =>
@@ -161,6 +166,7 @@ export function aggregateFailureReport({
           : "insufficient-evidence",
     runs: failed,
     otherBranchFailures,
+    coverageRuns: all.filter((r) => r.incomplete || r.coverage?.length),
   };
 }
 
@@ -170,9 +176,41 @@ function dateDays(a, b) {
   );
 }
 function validDate(s) {
-  return (
-    /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`))
-  );
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const date = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === s;
+}
+
+export function validateReportOptions({ since, until, top = 20 }) {
+  if (
+    !validDate(since) ||
+    !validDate(until) ||
+    since >= until ||
+    dateDays(since, until) > 31
+  )
+    throw Error("Use increasing real UTC dates spanning at most 31 days");
+  if (
+    !(typeof top === "number"
+      ? Number.isSafeInteger(top)
+      : /^\d+$/.test(top)) ||
+    Number(top) < 1 ||
+    Number(top) > 100
+  )
+    throw Error("--top must be a positive integer no greater than 100");
+}
+
+function safeGithubUrl(value, owner, repo) {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      url.pathname.startsWith(`/${owner}/${repo}/`)
+    );
+  } catch {
+    return false;
+  }
 }
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -269,18 +307,23 @@ export async function paginateActions(
 ) {
   const items = [];
   let next = url;
-  let pages = 0;
+  const visited = new Set();
   const original = new URL(url);
   const repoMatch = original.pathname.match(/^(\/repos\/[^/]+\/[^/]+)\//);
   if (original.origin !== API || !repoMatch)
     throw Error("Refusing Actions query outside repository API");
-  const repoPath = repoMatch[1];
   while (true) {
     const parsed = new URL(next);
-    if (parsed.origin !== API || !parsed.pathname.startsWith(`${repoPath}/`))
+    if (parsed.origin !== API || parsed.pathname !== original.pathname)
       throw Error("GitHub pagination link escaped repository API");
+    if (visited.has(parsed.href))
+      throw Error("GitHub pagination link repeated a page");
+    visited.add(parsed.href);
     for (const [key, value] of original.searchParams)
       if (key !== "page" && parsed.searchParams.get(key) !== value)
+        throw Error("GitHub pagination link changed query scope");
+    for (const [key, value] of parsed.searchParams)
+      if (key !== "page" && original.searchParams.get(key) !== value)
         throw Error("GitHub pagination link changed query scope");
     const response = await transport(next);
     if (!response.ok) throw Error(`GitHub API returned ${response.status}`);
@@ -289,7 +332,6 @@ export async function paginateActions(
       throw Error("Malformed Actions response");
     const batch = body.workflow_runs ?? body.jobs;
     items.push(...batch);
-    pages++;
     const link = nextLink(
       response.headers?.get?.("link") ??
         response.headers?.get?.("Link") ??
@@ -302,7 +344,7 @@ export async function paginateActions(
         capped: queryKind === "workflow-runs" && items.length >= 1000,
       };
     next = new URL(link, next).href;
-    if (queryKind === "workflow-runs" && pages >= 10)
+    if (queryKind === "workflow-runs" && items.length >= 1000)
       return { items, capped: true };
   }
 }
@@ -315,44 +357,37 @@ export async function renderReport({
   owner = "chrisbanes",
   repo = "cab",
 }) {
-  if (
-    !validDate(since) ||
-    !validDate(until) ||
-    since >= until ||
-    dateDays(since, until) > 31
-  )
-    throw Error(
-      "Use --since and --until as an increasing UTC date range of at most 31 days",
-    );
+  validateReportOptions({ since, until, top });
+  top = Number(top);
   const base = `${API}/repos/${owner}/${repo}`;
   const query = await paginateActions(
     `${base}/actions/workflows/ci.yml/runs?created=${since}..${until}`,
     transport,
     { queryKind: "workflow-runs" },
   );
-  const rawRuns = query.items;
+  const rawRuns = [
+    ...new Map(query.items.map((run) => [run.id, run])).values(),
+  ];
   const runs = [];
   for (const raw of rawRuns) {
     if (
       !Number.isSafeInteger(raw.id) ||
-      typeof raw.head_branch !== "string" ||
+      (raw.head_branch !== null && typeof raw.head_branch !== "string") ||
       typeof raw.event !== "string" ||
       typeof raw.head_sha !== "string" ||
       typeof raw.created_at !== "string" ||
       typeof raw.status !== "string" ||
       !Number.isSafeInteger(raw.run_attempt) ||
       raw.run_attempt < 1 ||
-      typeof raw.html_url !== "string"
+      !safeGithubUrl(raw.html_url, owner, repo) ||
+      (raw.conclusion !== null && typeof raw.conclusion !== "string")
     )
       throw Error("Malformed workflow run record");
-    if (
-      raw.created_at < `${since}T00:00:00Z` ||
-      raw.created_at >= `${until}T23:59:59.999Z`
-    )
-      continue;
+    const createdDay = raw.created_at.slice(0, 10);
+    if (createdDay < since || createdDay > until) continue;
     const run = {
       id: raw.id,
-      branch: raw.head_branch,
+      branch: raw.head_branch ?? "unknown",
       event: raw.event,
       sha: raw.head_sha,
       createdAt: raw.created_at,
@@ -360,54 +395,140 @@ export async function renderReport({
       url: raw.html_url,
       attempts: [],
       incomplete: false,
+      coverage: [],
     };
-    if (raw.conclusion === "failure" || raw.run_attempt > 1) {
-      for (let attempt = 1; attempt <= raw.run_attempt; attempt++) {
+    for (let attempt = 1; attempt <= raw.run_attempt; attempt++) {
+      const attemptInfo = {
+        number: attempt,
+        url: `${raw.html_url}/attempts/${attempt}`,
+        jobs: [],
+        failures: [],
+        status: "unknown",
+        startedAt: null,
+        completedAt: null,
+      };
+      run.attempts.push(attemptInfo);
+      try {
         const jobsResult = await paginateActions(
           `${base}/actions/runs/${raw.id}/attempts/${attempt}/jobs`,
           transport,
         );
-        const attemptInfo = { number: attempt, failures: [] };
-        run.attempts.push(attemptInfo);
-        for (const job of jobsResult.items.filter(
-          (j) => j.conclusion === "failure",
-        )) {
+        for (const job of jobsResult.items) {
+          if (
+            !Number.isSafeInteger(job.id) ||
+            typeof job.name !== "string" ||
+            (job.conclusion !== null && typeof job.conclusion !== "string") ||
+            typeof job.status !== "string" ||
+            !safeGithubUrl(job.html_url, owner, repo)
+          ) {
+            run.coverage.push({
+              reason: "malformed-job",
+              attempt,
+              jobId: Number.isSafeInteger(job.id) ? job.id : null,
+            });
+            continue;
+          }
+          const jobRecord = {
+            id: job.id,
+            name: job.name,
+            url: job.html_url,
+            attempt,
+            status: job.status,
+            conclusion: job.conclusion,
+            startedAt: job.started_at ?? null,
+            completedAt: job.completed_at ?? null,
+            failures: [],
+            coverage: [],
+          };
+          attemptInfo.jobs.push(jobRecord);
+          if (
+            job.started_at &&
+            (!attemptInfo.startedAt || job.started_at < attemptInfo.startedAt)
+          )
+            attemptInfo.startedAt = job.started_at;
+          if (
+            job.completed_at &&
+            (!attemptInfo.completedAt ||
+              job.completed_at > attemptInfo.completedAt)
+          )
+            attemptInfo.completedAt = job.completed_at;
+          if (job.status !== "completed" || job.conclusion === null)
+            attemptInfo.status = job.status;
+          else if (attemptInfo.status === "unknown")
+            attemptInfo.status = "completed";
+          if (job.conclusion !== "failure") continue;
           try {
-            if (
-              !Number.isSafeInteger(job.id) ||
-              typeof job.name !== "string" ||
-              typeof job.html_url !== "string"
-            )
-              throw Error("Malformed failed job record");
             const response = await transport(
               `${base}/actions/jobs/${job.id}/logs`,
               { rawLogs: true },
             );
             if (!response.ok) throw Error(`log ${response.status}`);
-            const text = response.body;
-            for (const failure of parseFailureLog(text))
+            const parsedFailures = parseFailureLog(response.body);
+            jobRecord.failures = parsedFailures;
+            if (parsedFailures.length === 0) {
+              jobRecord.coverage.push({
+                reason: "failed-job-log-without-test-marker",
+              });
+              run.coverage.push({
+                reason: "failed-job-log-without-test-marker",
+                attempt,
+                jobId: job.id,
+                jobUrl: job.html_url,
+              });
+            }
+            for (const failure of parsedFailures)
               attemptInfo.failures.push({
                 runId: raw.id,
                 attempt,
                 jobId: job.id,
                 jobName: job.name,
                 url: job.html_url,
+                attemptUrl: attemptInfo.url,
                 failure,
               });
           } catch {
-            run.incomplete = true;
+            jobRecord.coverage.push({ reason: "failed-job-log-unavailable" });
+            run.coverage.push({
+              reason: "failed-job-log-unavailable",
+              attempt,
+              jobId: job.id,
+              jobUrl: job.html_url,
+            });
           }
         }
+      } catch {
+        run.coverage.push({
+          reason: "attempt-jobs-unavailable",
+          attempt,
+          attemptUrl: attemptInfo.url,
+        });
       }
     }
+    const conclusions = run.attempts.flatMap((a) =>
+      a.jobs.map((j) => j.conclusion),
+    );
+    if (!["success", "failure"].includes(raw.conclusion))
+      run.coverage.push({
+        reason:
+          raw.status === "in_progress"
+            ? "run-in-progress"
+            : raw.conclusion === "cancelled"
+              ? "run-cancelled"
+              : "run-conclusion-unknown",
+        status: raw.status,
+        conclusion: raw.conclusion,
+        runUrl: raw.html_url,
+      });
+    run.hasFailedJob = conclusions.includes("failure");
+    run.incomplete = run.coverage.length > 0;
     run.attempts = run.attempts.map((a) => ({
       ...a,
       failures: dedupeAttemptFailures(a.failures),
     }));
-    run.classification = run.incomplete
-      ? "incomplete"
-      : run.attempts.some((a) => a.failures.length)
-        ? "unclassified"
+    run.classification = run.hasFailedJob
+      ? "unclassified"
+      : run.incomplete
+        ? "incomplete"
         : "clean";
     runs.push(run);
   }

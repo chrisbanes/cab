@@ -284,6 +284,56 @@ test("workflow run pagination marks the API 1000-result ceiling, but not other q
   assert.equal(result.capped, true);
 });
 
+test("workflow pagination does not mistake ten short pages for the result ceiling", async () => {
+  let page = 0;
+  const endpoint =
+    "https://api.github.com/repos/chrisbanes/cab/actions/workflows/ci.yml/runs";
+  const result = await api.paginateActions(
+    endpoint,
+    async () => {
+      page++;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map([
+          [
+            "link",
+            page < 11 ? `<${endpoint}?page=${page + 1}>; rel="next"` : "",
+          ],
+        ]),
+        body: JSON.stringify({ workflow_runs: [{ id: page }] }),
+      };
+    },
+    { queryKind: "workflow-runs" },
+  );
+  assert.equal(page, 11);
+  assert.equal(result.capped, false);
+});
+
+test("pagination refuses endpoint changes, added filters and repeated pages", async () => {
+  const endpoint =
+    "https://api.github.com/repos/chrisbanes/cab/actions/workflows/ci.yml/runs";
+  for (const next of [
+    endpoint.replace("ci.yml", "release.yml"),
+    `${endpoint}?branch=topic&page=2`,
+    endpoint,
+  ]) {
+    await assert.rejects(
+      api.paginateActions(
+        endpoint,
+        async () => ({
+          ok: true,
+          status: 200,
+          headers: new Map([["link", `<${next}>; rel="next"`]]),
+          body: JSON.stringify({ workflow_runs: [] }),
+        }),
+        { queryKind: "workflow-runs" },
+      ),
+      /pagination link/,
+    );
+  }
+});
+
 test("Renovate exclusion requires exact guard evidence", () => {
   const line = { raw: "the pinned SDK is the qualified version" };
   assert.equal(
@@ -317,4 +367,225 @@ test("a confirmed failure with incomplete coverage counts once in the upper boun
   assert.equal(report.lowerBound, 1 / 20);
   assert.equal(report.upperBound, 1 / 20);
   assert.equal(report.verdict, "insufficient-evidence");
+});
+
+function apiResponse(payload: unknown, headers = new Map()) {
+  return {
+    ok: true,
+    status: 200,
+    headers,
+    body: typeof payload === "string" ? payload : JSON.stringify(payload),
+  };
+}
+function runRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 10,
+    head_branch: "main",
+    event: "push",
+    head_sha: "abc",
+    created_at: "2026-11-01T23:59:59.999999Z",
+    status: "completed",
+    conclusion: "success",
+    run_attempt: 2,
+    html_url: "https://github.com/chrisbanes/cab/actions/runs/10",
+    ...overrides,
+  };
+}
+
+test("collection retains failed attempt before latest success and captures attempt timing and links", async () => {
+  const calls: Array<{ url: string; options?: { rawLogs?: boolean } }> = [];
+  const transport = async (url: string, options?: { rawLogs?: boolean }) => {
+    calls.push({ url, options });
+    if (url.includes("/workflows/ci.yml/runs"))
+      return apiResponse({ workflow_runs: [runRecord(), runRecord()] });
+    if (url.includes("attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 101,
+            name: "service shard 1",
+            status: "completed",
+            conclusion: "failure",
+            started_at: "2026-11-01T10:00:00Z",
+            completed_at: "2026-11-01T10:01:00Z",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/10/job/101",
+          },
+        ],
+      });
+    if (url.includes("attempts/2/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 102,
+            name: "service shard 1",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-11-01T10:02:00Z",
+            completed_at: "2026-11-01T10:03:00Z",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/10/job/102",
+          },
+        ],
+      });
+    if (url.endsWith("/jobs/101/logs"))
+      return apiResponse(
+        "\u001b[31m2026-11-01T10:00:10Z ✖ spec failed (10ms)\u001b[0m",
+      );
+    throw Error(`unexpected endpoint ${url}`);
+  };
+  const report = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport,
+  });
+  assert.equal(report.denominator, 1);
+  assert.equal(report.observedFailures, 1);
+  assert.equal(report.runs[0].attempts.length, 2);
+  assert.equal(
+    report.runs[0].attempts[0].failures[0].failure.name,
+    "spec failed",
+  );
+  assert.equal(report.runs[0].attempts[1].startedAt, "2026-11-01T10:02:00Z");
+  assert.match(report.runs[0].attempts[0].url, /attempts\/1$/);
+  assert.equal(
+    calls.filter((c) => c.url.includes("/workflows/ci.yml/runs")).length,
+    1,
+  );
+  assert.ok(
+    calls.find((c) => c.url.endsWith("/jobs/101/logs"))?.options?.rawLogs,
+  );
+  assert.ok(calls.every((c) => !/POST|PATCH|DELETE/.test(c.url)));
+});
+
+test("failed jobs with unavailable or markerless logs remain known failures and incomplete", async () => {
+  const transport = async (url: string) => {
+    if (url.includes("/workflows/ci.yml/runs"))
+      return apiResponse({
+        workflow_runs: [runRecord({ run_attempt: 1, conclusion: "failure" })],
+      });
+    if (url.includes("/attempts/1/jobs"))
+      return apiResponse({
+        jobs: [
+          {
+            id: 201,
+            name: "expired log",
+            status: "completed",
+            conclusion: "failure",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/10/job/201",
+          },
+          {
+            id: 202,
+            name: "no marker",
+            status: "completed",
+            conclusion: "failure",
+            html_url:
+              "https://github.com/chrisbanes/cab/actions/runs/10/job/202",
+          },
+        ],
+      });
+    if (url.endsWith("/jobs/201/logs"))
+      return { ok: false, status: 410, headers: new Map(), body: "" };
+    if (url.endsWith("/jobs/202/logs"))
+      return apiResponse("Build failed; no test marker");
+    throw Error("unexpected request");
+  };
+  const report = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport,
+  });
+  const run = report.runs[0];
+  assert.equal(report.observedFailures, 1);
+  assert.equal(run.hasFailedJob, true);
+  assert.equal(run.incomplete, true);
+  assert.deepEqual(
+    run.coverage.map((x: { reason: string }) => x.reason).sort(),
+    ["failed-job-log-unavailable", "failed-job-log-without-test-marker"],
+  );
+});
+
+test("cancelled, in-progress and unknown conclusions retain explicit linked coverage", async () => {
+  const records = [
+    runRecord({ id: 11, run_attempt: 1, conclusion: "cancelled" }),
+    runRecord({
+      id: 12,
+      run_attempt: 1,
+      status: "in_progress",
+      conclusion: null,
+    }),
+    runRecord({
+      id: 13,
+      head_branch: null,
+      run_attempt: 1,
+      conclusion: "neutral",
+    }),
+  ];
+  const transport = async (url: string) =>
+    url.includes("/workflows/ci.yml/runs")
+      ? apiResponse({ workflow_runs: records })
+      : apiResponse({ jobs: [] });
+  const report = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport,
+  });
+  assert.equal(report.denominator, 0);
+  assert.equal(report.runs.length, 0);
+  assert.deepEqual(
+    report.otherBranchFailures.map((r: { id: number }) => r.id),
+    [],
+  );
+  assert.equal(report.incomplete, 2);
+  assert.equal(report.coverageRuns.length, 3);
+  assert.ok(
+    report.coverageRuns.every(
+      (r: { coverage: unknown[] }) => r.coverage.length > 0,
+    ),
+  );
+});
+
+test("report options reject impossible dates, invalid ranges and unsafe top limits", () => {
+  for (const options of [
+    { since: "2026-02-30", until: "2026-03-01" },
+    { since: "2026-11-01", until: "2026-10-31" },
+    { since: "2026-09-01", until: "2026-10-10" },
+    { since: "2026-10-19", until: "2026-11-01", top: 0 },
+    { since: "2026-10-19", until: "2026-11-01", top: 1.5 },
+    { since: "2026-10-19", until: "2026-11-01", top: "1.0" },
+    { since: "2026-10-19", until: "2026-11-01", top: 101 },
+  ])
+    assert.throws(() => api.validateReportOptions(options));
+  assert.doesNotThrow(() =>
+    api.validateReportOptions({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      top: 20,
+    }),
+  );
+});
+
+test("malformed run records fail closed and workflow API failures are visible", async () => {
+  await assert.rejects(
+    api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: async () => apiResponse({ workflow_runs: [{ id: "bad" }] }),
+    }),
+    /Malformed workflow run/,
+  );
+  await assert.rejects(
+    api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: async () => ({
+        ok: false,
+        status: 503,
+        headers: new Map(),
+        body: "",
+      }),
+    }),
+    /503/,
+  );
 });
