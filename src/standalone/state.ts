@@ -1237,6 +1237,107 @@ export class ExecutionState {
     );
   }
 
+  private hasTable(name: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(name) !== undefined
+    );
+  }
+
+  /** The batch's work ID is unique, so a queued batch follows its successor work. */
+  private moveQueuedDeliveryBatch(fromWorkId: string, toWorkId: string): void {
+    if (this.hasTable("coordination_delivery_batches"))
+      this.db
+        .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
+          WHERE deliveryWorkId = ? AND state = 'queued'`)
+        .run(toWorkId, fromWorkId);
+  }
+
+  /**
+   * Once per store: a queued inbox batch left under a work that a retry replaced follows that
+   * work's newest generation (completing if it already completed), as a retry now carries it.
+   * A batch whose newest generation is missing, ambiguous or in another state is left alone.
+   */
+  repairRetriedDeliveryBatches(): void {
+    const marker = "retried-delivery-batches-v1";
+    if (!this.hasTable("coordination_delivery_batches")) return;
+    const done = () =>
+      this.db
+        .prepare(
+          "SELECT 1 FROM runtime_retention_migrations WHERE migrationId = ?",
+        )
+        .get(marker) !== undefined;
+    if (done()) return;
+    transaction(this.db, () => {
+      if (done()) return;
+      const stuck = this.db
+        .prepare(`SELECT batchId, deliveryWorkId, taskId, recipientAssignmentId
+          FROM coordination_delivery_batches
+          WHERE state = 'queued' AND deliveryWorkId IN
+            (SELECT failedWorkId FROM execution_retry_resolutions)`)
+        .all() as {
+        batchId: string;
+        deliveryWorkId: string;
+        taskId: string;
+        recipientAssignmentId: string;
+      }[];
+      // Works that replaced another and were never replaced themselves.
+      const leaves = this.db
+        .prepare(`SELECT successor.workId, intent.state, binding.taskId, binding.assignmentId
+          FROM (SELECT retryWorkId AS workId FROM execution_retry_resolutions
+            UNION SELECT requeueWorkId FROM execution_shutdown_resolutions) successor
+          JOIN execution_intents intent ON intent.workId = successor.workId
+          JOIN task_execution_bindings binding ON binding.workId = successor.workId
+          WHERE successor.workId NOT IN (SELECT failedWorkId FROM execution_retry_resolutions)
+            AND successor.workId NOT IN (SELECT interruptedWorkId FROM execution_shutdown_resolutions)`)
+        .all() as {
+        workId: string;
+        state: string;
+        taskId: string;
+        assignmentId: string;
+      }[];
+      for (const batch of stuck) {
+        const newest = leaves.filter(
+          (leaf) =>
+            leaf.taskId === batch.taskId &&
+            leaf.assignmentId === batch.recipientAssignmentId &&
+            this.workLineage(leaf.workId).includes(batch.deliveryWorkId),
+        );
+        const leaf = newest.length === 1 ? newest[0] : undefined;
+        if (leaf?.state === "completed")
+          this.db
+            .prepare(`UPDATE coordination_delivery_batches
+              SET state = 'completed', completedAt = unixepoch()
+              WHERE batchId = ? AND state = 'queued'`)
+            .run(batch.batchId);
+        else if (
+          leaf &&
+          [
+            "ready",
+            "capacity-waiting",
+            "held",
+            "submitting",
+            "running",
+          ].includes(leaf.state)
+        )
+          this.db
+            .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
+              WHERE batchId = ? AND state = 'queued'
+                AND NOT EXISTS (SELECT 1 FROM coordination_delivery_batches
+                  WHERE deliveryWorkId = ?)`)
+            .run(leaf.workId, batch.batchId, leaf.workId);
+      }
+      this.db
+        .prepare(
+          "INSERT INTO runtime_retention_migrations (migrationId) VALUES (?)",
+        )
+        .run(marker);
+    });
+  }
+
   /**
    * This work, then the works it replaced as a transient-failure retry or a planned-shutdown
    * requeue, back to the request that was first queued. Material bound to that request (its
@@ -5864,6 +5965,8 @@ export class ExecutionState {
           value.nextEligibleAt,
           Date.now(),
         );
+      // The retry carries the failed work's queued inbox batch, as a requeue does.
+      this.moveQueuedDeliveryBatch(value.workId, retryWorkId);
       this.db
         .prepare(`INSERT INTO execution_recovery_observations
         (id, workId, kind, reason, recordedAt)
@@ -6017,12 +6120,6 @@ export class ExecutionState {
         );
 
       const target = this.stopTarget(value.workId);
-      const hasTable = (name: string) =>
-        this.db
-          .prepare(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-          )
-          .get(name) !== undefined;
       const held = this.db
         .prepare(`SELECT
         EXISTS (SELECT 1 FROM execution_request_refusals WHERE workId = ?) AS refused,
@@ -6063,7 +6160,7 @@ export class ExecutionState {
           value.workId,
         ) as Record<string, number>;
       const completionPending =
-        hasTable("coordination_completion_requests") &&
+        this.hasTable("coordination_completion_requests") &&
         this.db
           .prepare(`SELECT 1 FROM coordination_completion_requests
           WHERE leadWorkId = ? AND status = 'pending'`)
@@ -6161,12 +6258,7 @@ export class ExecutionState {
         this.db
           .prepare(`DELETE FROM ${table} WHERE workId = ?`)
           .run(value.workId);
-      // The delivery batch's work ID is unique, so it follows the requeue.
-      if (hasTable("coordination_delivery_batches"))
-        this.db
-          .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
-          WHERE deliveryWorkId = ? AND state = 'queued'`)
-          .run(requeueWorkId, value.workId);
+      this.moveQueuedDeliveryBatch(value.workId, requeueWorkId);
       this.db
         .prepare(`INSERT INTO execution_shutdown_resolutions
         (interruptedWorkId, requeueWorkId, workRevision, requestSequence,

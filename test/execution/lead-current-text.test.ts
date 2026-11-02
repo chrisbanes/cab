@@ -558,9 +558,10 @@ const repairInstruction = /Reporting repair: the previous successful turn/;
 const reportIn = (
   w: Awaited<ReturnType<typeof liveTextWorld>>,
   turnId: string,
+  threadId = "thread-1",
 ) =>
   w.tool({
-    threadId: "thread-1",
+    threadId,
     turnId,
     callId: `report-${turnId}`,
     tool: "cab_report_result",
@@ -582,6 +583,232 @@ test("a retried lead turn keeps the inbox material its original request had boun
   );
   assert.match(w.prompts[2] ?? "", /^Task: Original title\n/);
   assert.equal(w.prompts[2]?.match(/Bound operator message\./g)?.length, 1);
+});
+
+type World = Awaited<ReturnType<typeof liveTextWorld>>;
+
+/** The task's inbox batches, oldest first. */
+const batches = (w: World) =>
+  databaseOf(w.service)
+    .prepare(
+      `SELECT deliveryWorkId, state, completedAt FROM coordination_delivery_batches
+      WHERE taskId = ? ORDER BY createdAt, rowid`,
+    )
+    .all(w.taskId) as {
+    deliveryWorkId: string;
+    state: string;
+    completedAt: number | null;
+  }[];
+
+const workWith = (w: World, prefix: string) =>
+  String(
+    w.service.turnRequests().find((r) => r.workId.startsWith(prefix))?.workId,
+  );
+
+/** Delivers a message, fails its turn transiently, and leaves the retry turn running. */
+async function retryRunning(w: World) {
+  await firstLeadTurn(w);
+  await w.message("Bound operator message.");
+  await w.until(() => w.prompts.length === 2, "message turn");
+  await reportIn(w, "turn-2");
+  w.failTransiently("turn-2");
+  await w.until(() => w.prompts.length === 3, "retried turn");
+  return workWith(w, "retry:");
+}
+
+test("a retried lead turn completes its inbox batch, and the next message starts a turn", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const retryWorkId = await retryRunning(w);
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[retryWorkId, "queued"]],
+  );
+  await reportIn(w, "turn-3", "thread-2");
+  w.end("turn-3");
+  await w.until(() => batches(w)[0]?.state === "completed", "batch completed");
+  await w.until(
+    () => !w.service.list().some((work) => work.state === "running"),
+    "retry turn end",
+  );
+  assert.equal(batches(w).length, 1);
+  assert.notEqual(batches(w)[0]?.completedAt, null);
+  await w.message("Second message.");
+  await w.until(() => w.prompts.length === 4, "next message turn");
+  assert.match(w.prompts[3] ?? "", /Second message\./);
+});
+
+test("a retried lead turn that a planned shutdown requeues completes its inbox batch", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await retryRunning(w);
+  await w.restart();
+  await w.until(() => w.prompts.length === 4, "requeued retry turn");
+  const requeueWorkId = workWith(w, "shutdown:");
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[requeueWorkId, "queued"]],
+  );
+  await reportIn(w, "turn-4", "thread-2");
+  w.end("turn-4");
+  await w.until(() => batches(w)[0]?.state === "completed", "batch completed");
+  await w.until(
+    () => !w.service.list().some((work) => work.state === "running"),
+    "retry turn end",
+  );
+  await w.message("Second message.");
+  await w.until(() => w.prompts.length === 5, "next message turn");
+  assert.match(w.prompts[4] ?? "", /Second message\./);
+});
+
+test("a retried lead turn completes an inbox batch still bound to the failed work", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const retryWorkId = await retryRunning(w);
+  await reportIn(w, "turn-3", "thread-2");
+  // The state a build that left the batch behind produced.
+  const { failedWorkId } = databaseOf(w.service)
+    .prepare(
+      "SELECT failedWorkId FROM execution_retry_resolutions WHERE retryWorkId = ?",
+    )
+    .get(retryWorkId) as { failedWorkId: string };
+  databaseOf(w.service)
+    .prepare(
+      "UPDATE coordination_delivery_batches SET deliveryWorkId = ? WHERE deliveryWorkId = ?",
+    )
+    .run(failedWorkId, retryWorkId);
+  w.end("turn-3");
+  await w.until(() => batches(w)[0]?.state === "completed", "batch completed");
+  assert.equal(batches(w)[0]?.deliveryWorkId, failedWorkId);
+  await w.until(
+    () => !w.service.list().some((work) => work.state === "running"),
+    "retry turn end",
+  );
+  await w.message("Second message.");
+  await w.until(() => w.prompts.length === 4, "next message turn");
+  assert.match(w.prompts[3] ?? "", /Second message\./);
+});
+
+const retryMarker = "retried-delivery-batches-v1";
+
+/** A store a build without the retry move left behind: the batch queued under the failed work. */
+function strand(w: World, retryWorkId: string) {
+  const db = databaseOf(w.service);
+  const { failedWorkId } = db
+    .prepare(
+      "SELECT failedWorkId FROM execution_retry_resolutions WHERE retryWorkId = ?",
+    )
+    .get(retryWorkId) as { failedWorkId: string };
+  db.prepare(
+    `UPDATE coordination_delivery_batches
+    SET deliveryWorkId = ?, state = 'queued', completedAt = NULL`,
+  ).run(failedWorkId);
+  db.prepare(
+    "DELETE FROM runtime_retention_migrations WHERE migrationId = ?",
+  ).run(retryMarker);
+  return failedWorkId;
+}
+
+const idle = (w: World) =>
+  w.until(
+    () => !w.service.list().some((work) => work.state === "running"),
+    "turn end",
+  );
+
+test("a restart completes an inbox batch stranded under a failed work whose retry completed", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const retryWorkId = await retryRunning(w);
+  await reportIn(w, "turn-3", "thread-2");
+  w.end("turn-3");
+  await idle(w);
+  const failedWorkId = strand(w, retryWorkId);
+  await w.restart();
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[failedWorkId, "completed"]],
+  );
+  assert.notEqual(batches(w)[0]?.completedAt, null);
+  await w.message("Second message.");
+  await w.until(() => w.prompts.length === 4, "next message turn");
+  assert.match(w.prompts[3] ?? "", /Second message\./);
+});
+
+test("a restart moves an inbox batch stranded under a failed work to its live retry, once", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const retryWorkId = await retryRunning(w);
+  strand(w, retryWorkId);
+  await w.restart();
+  await w.until(() => w.prompts.length === 4, "requeued retry turn");
+  const requeueWorkId = workWith(w, "shutdown:");
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[requeueWorkId, "queued"]],
+  );
+  await reportIn(w, "turn-4", "thread-2");
+  w.end("turn-4");
+  await w.until(() => batches(w)[0]?.state === "completed", "batch completed");
+  await idle(w);
+  const before = batches(w);
+  await w.restart();
+  assert.deepEqual(batches(w), before);
+  databaseOf(w.service)
+    .prepare("DELETE FROM runtime_retention_migrations WHERE migrationId = ?")
+    .run(retryMarker);
+  await w.restart();
+  assert.deepEqual(batches(w), before);
+});
+
+/** A retry that completed and went idle, with its batch stranded and its intent rewritten. */
+async function strandedBehind(w: World, retryState: string, rebind = false) {
+  const retryWorkId = await retryRunning(w);
+  await reportIn(w, "turn-3", "thread-2");
+  w.end("turn-3");
+  await idle(w);
+  const failedWorkId = strand(w, retryWorkId);
+  const db = databaseOf(w.service);
+  db.prepare("UPDATE execution_intents SET state = ? WHERE workId = ?").run(
+    retryState,
+    retryWorkId,
+  );
+  if (rebind)
+    db.prepare(
+      "UPDATE task_execution_bindings SET assignmentId = ? WHERE workId = ?",
+    ).run(randomUUID(), retryWorkId);
+  return { retryWorkId, failedWorkId };
+}
+
+test("a restart moves a stranded batch onto a retry that is held", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const { retryWorkId } = await strandedBehind(w, "held");
+  await w.restart();
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[retryWorkId, "queued"]],
+  );
+});
+
+test("a restart leaves a stranded batch whose newest work is bound to another assignment", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const { failedWorkId } = await strandedBehind(w, "held", true);
+  await w.restart();
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[failedWorkId, "queued"]],
+  );
+});
+
+test("a task whose lead turn was retried and completed can be reset", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await retryRunning(w);
+  await reportIn(w, "turn-3", "thread-2");
+  w.end("turn-3");
+  await idle(w);
+  assert.deepEqual(w.service.resetAvailability(w.taskId), { available: true });
 });
 
 test("a retried reporting repair keeps its repair instruction", async (t) => {
