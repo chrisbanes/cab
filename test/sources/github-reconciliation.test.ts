@@ -14,6 +14,7 @@ import {
 } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
+import { TaskReviewStore } from "../../src/core/task-review.js";
 import {
   previousSchemaDatabase,
   seedPreviousIssue,
@@ -595,16 +596,50 @@ for (const mode of ["skip", "done"] as const)
     }
   });
 
-test("a closure hold never replaces a changed-text hold", () => {
-  const w = closedIssueWorld("skip");
-  try {
-    w.observe({});
-    w.observe({ body: "Changed scope" });
-    assert.equal(w.hold()?.reason, "changed-text");
-    w.observe({ body: "Changed scope", state: "closed" });
-    assert.equal(w.hold()?.reason, "changed-text");
-  } finally {
-    w.close();
+test("a text edit adopts the text and leaves every other hold reason and generation unchanged", () => {
+  for (const reason of [
+    "closed",
+    "closure-attribution-unproved",
+    "closure-read-unavailable",
+    "readiness-lost",
+    "withdrawn",
+  ]) {
+    const w = closedIssueWorld("skip");
+    try {
+      // Unready, so no complete read releases a recoverable hold for its own reasons.
+      const taskId = String(w.observe({ labels: [] })?.id);
+      w.db
+        .prepare(
+          "INSERT INTO source_holds (provider, instance, externalId, active, reason, generation) VALUES ('github', 'github.com', 'I_1', 1, ?, 3)",
+        )
+        .run(reason);
+      const version = Number(w.domain.task(taskId).version);
+      const reasons = w.domain.admission(taskId).reasons;
+      const edited = w.observe({
+        labels: [],
+        title: "Edited title",
+        body: "Edited scope",
+      });
+      assert.deepEqual(
+        [edited?.title, edited?.outcome, Number(edited?.version)],
+        ["Edited title", "Edited scope", version],
+        reason,
+      );
+      assert.deepEqual(
+        { ...w.hold() },
+        { active: 1, reason, generation: 3 },
+        reason,
+      );
+      assert.deepEqual(w.domain.admission(taskId).reasons, reasons, reason);
+      // Every revision is still captured in source history.
+      assert.equal(
+        new TaskReviewStore(w.db).sources(taskId).at(-1)?.body,
+        "Edited scope",
+        reason,
+      );
+    } finally {
+      w.close();
+    }
   }
 });
 
@@ -1242,10 +1277,12 @@ test("without a readiness rule, Ready tasks still wait on incomplete reads, bloc
       reason: null,
     });
     assert.ok(reasons().includes("imported-blockers-blocked"));
-    // Changed text still needs operator review.
+    // Changed text is live: it is adopted and adds no reason.
+    const before = reasons();
     f.read("repo", [f.at("I_1", { labels: [], body: "Changed" })]);
     assert.equal(Number(f.domain.task(taskId).ready), 1);
-    assert.ok(reasons().includes("source-review-required"));
+    assert.equal(f.domain.task(taskId).outcome, "Changed");
+    assert.deepEqual(reasons(), before);
   } finally {
     f.db.close();
   }
@@ -1387,21 +1424,21 @@ for (const [name, lose] of [
     }
   });
 
-test("re-listing releases no changed-text hold, and leaves a project pause alone", () => {
+test("re-listing with changed text releases the withdrawn hold and adopts the text, and leaves a project pause alone", () => {
   const f = readinessFixture(readyLabel);
   const reason = () => f.sources.hold("I_1")?.reason;
   try {
     f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
     const taskId = f.task("I_1");
     f.read("repo", []);
+    assert.equal(reason(), "withdrawn");
     f.read("repo", [f.at("I_1", { labels: ["ready"], body: "Changed" })]);
     assert.deepEqual(
       [f.sources.hold("I_1")?.active, reason()],
-      [1, "changed-text"],
+      [0, "withdrawn"],
     );
-    assert.ok(
-      f.domain.admission(taskId).reasons.includes("source-review-required"),
-    );
+    assert.equal(f.domain.task(taskId).outcome, "Changed");
+    assert.ok(!f.domain.admission(taskId).reasons.includes("source-hold"));
   } finally {
     f.db.close();
   }
@@ -2268,13 +2305,15 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
       issues: [issue],
       reason: null,
     });
-    const withoutItem = String(sources.review("I_1")?.observedDigest);
+    const withoutItem = Number(
+      domain.task(String(sources.issue("I_1")?.taskId)).version,
+    );
     sources.reconcileSelection(projectId, "project", {
       complete: true,
       issues: [{ ...issue, projectItemNodeId: "ITEM_1" }],
       reason: null,
     });
-    // Only a Project selection knows the item; neither the source digest nor readiness changes.
+    // Only a Project selection knows the item; neither the task nor readiness changes.
     assert.equal(sources.membershipItem(projectId, "repo", "I_1"), null);
     const item = sources.membershipItem(projectId, "project", "I_1");
     assert.ok(item?.readAt && item.readAt <= Date.now());
@@ -2286,8 +2325,8 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
         readAt: null,
       },
     );
-    assert.equal(sources.review("I_1")?.observedDigest, withoutItem);
     const taskId = String(sources.issue("I_1")?.taskId);
+    assert.equal(Number(domain.task(taskId).version), withoutItem);
     assert.equal(domain.task(taskId).ready, 1);
     // The item moves: the next read replaces it.
     sources.reconcileSelection(projectId, "project", {

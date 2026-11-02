@@ -198,7 +198,10 @@ import {
   CredentialGitHubSourceReader,
   gitHubSourceCredentialStatus,
 } from "./github-source-credential.js";
-import { projectIssueTracker } from "../core/source-storage.js";
+import {
+  projectIssueTracker,
+  sourceTextDigest,
+} from "../core/source-storage.js";
 import { GitHubSynchronizer } from "./github-sync.js";
 import {
   jiraCredentialExclusions,
@@ -3683,10 +3686,10 @@ export class StandaloneService {
       task = d.task(taskId),
       imported = d.importedTask(taskId),
       source = this.taskReview().sources(taskId).at(-1),
-      review = imported
-        ? this.importedSources(imported).review(String(imported.nodeId))
+      item = imported
+        ? this.importedSources(imported).issue(String(imported.nodeId))
         : undefined;
-    if (!imported || !source || !review)
+    if (!imported || !source || !item)
       throw new DomainConflictError("Imported task source unavailable");
     return {
       actor: "operator",
@@ -3696,7 +3699,10 @@ export class StandaloneService {
       taskVersion: Number(task.version),
       sourceId: source.sourceId,
       sourceRevision: source.revision,
-      sourceDigest: String(review.observedDigest),
+      sourceDigest: sourceTextDigest(
+        String(item.observedTitle),
+        String(item.observedBody),
+      ),
       sourceNodeId: String(imported.nodeId),
       sourceRepositoryId: String(imported.repositoryId),
       policyVersion: this.delivery().configuration(String(task.projectId))

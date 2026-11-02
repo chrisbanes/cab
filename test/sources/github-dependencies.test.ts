@@ -163,70 +163,44 @@ test("initial and later incomplete native blocker reads hold imported admission"
       reason: null,
     });
     assert.equal(domain.admission(taskId).eligible, true);
+    // Text is live: an edit updates the task and holds nothing.
+    const beforeEdit = Number(domain.task(taskId).version);
     sources.reconcileSelection(projectId, "repo", {
       complete: true,
       issues: [{ ...selected, body: "Ship revised scope" }],
       reason: null,
     });
-    assert.ok(
-      domain.admission(taskId).reasons.includes("source-review-required"),
-    );
-    const digest = String(
-      (
-        db
-          .prepare(
-            "SELECT observedDigest FROM source_reviews WHERE externalId = 'I_1'",
-          )
-          .get() as { observedDigest: string }
-      ).observedDigest,
-    );
+    assert.equal(domain.task(taskId).outcome, "Ship revised scope");
+    assert.equal(Number(domain.task(taskId).version), beforeEdit);
+    assert.equal(domain.admission(taskId).eligible, true);
+    assert.equal(sources.hold("I_1"), undefined);
     const review = {
       type: "source.review" as const,
       projectId,
       taskId,
-      expectedVersion: Number(domain.task(taskId).version),
-      observedDigest: digest,
-      decision: "accept-revised-scope" as const,
+      expectedVersion: beforeEdit,
+      decision: "resume-source-hold" as const,
     };
     assert.throws(
-      () =>
-        domain.execute({
-          ...review,
-          actor: "operator",
-          key: randomUUID(),
-          decision: "resume-source-hold",
-        }),
-      /text review/i,
-    );
-    assert.throws(
-      () => domain.execute({ ...review, actor: "agent", key: randomUUID() }),
-      /operator/i,
-    );
-    assert.throws(
-      () =>
-        domain.execute({
-          ...review,
-          actor: "operator",
-          key: randomUUID(),
-          observedDigest: "0".repeat(64),
-        }),
-      /stale/i,
-    );
-    const reviewKey = randomUUID();
-    const accepted = domain.execute({
-      ...review,
-      actor: "operator",
-      key: reviewKey,
-    });
-    assert.deepEqual(
-      domain.execute({ ...review, actor: "operator", key: reviewKey }),
-      accepted,
-    );
-    assert.equal(domain.task(taskId).outcome, "Ship revised scope");
-    assert.equal(domain.admission(taskId).eligible, true);
-    assert.throws(
       () => domain.execute({ ...review, actor: "operator", key: randomUUID() }),
-      /version/i,
+      /no source hold/i,
+    );
+    for (const decision of ["clarification", "accept-revised-scope"])
+      assert.throws(() =>
+        domain.execute({
+          ...review,
+          decision,
+          actor: "operator",
+          key: randomUUID(),
+        } as never),
+      );
+    assert.throws(() =>
+      domain.execute({
+        ...review,
+        observedDigest: "0".repeat(64),
+        actor: "operator",
+        key: randomUUID(),
+      } as never),
     );
     sources.reconcileSelection(projectId, "repo", {
       complete: true,
@@ -263,22 +237,32 @@ test("initial and later incomplete native blocker reads hold imported admission"
           projectId,
           taskId,
           expectedVersion: resumedVersion,
-          observedDigest: digest,
           decision: "resume-source-hold",
         }),
       /operator/i,
     );
-    domain.execute({
-      type: "source.review",
-      actor: "operator",
+    const resume = {
+      type: "source.review" as const,
+      actor: "operator" as const,
       key: randomUUID(),
       projectId,
       taskId,
       expectedVersion: resumedVersion,
-      observedDigest: digest,
-      decision: "resume-source-hold",
-    });
+      decision: "resume-source-hold" as const,
+    };
+    assert.throws(
+      () =>
+        domain.execute({
+          ...resume,
+          key: randomUUID(),
+          expectedVersion: resumedVersion - 1,
+        }),
+      /version/i,
+    );
+    const resumed = domain.execute(resume);
+    assert.deepEqual(domain.execute(resume), resumed);
     assert.equal(domain.admission(taskId).eligible, true);
+    assert.equal(sources.reviewDecision("I_1")?.decision, "resume-source-hold");
     const beforePartialVersion = Number(domain.task(taskId).version);
     sources.reconcileSelection(projectId, "repo", {
       complete: false,

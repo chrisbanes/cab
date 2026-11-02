@@ -197,7 +197,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
   const workerId = randomUUID();
   const assignmentId = randomUUID();
   let failed = false;
-  let changed = false;
+  let unready = false;
   let turns = 0;
   let toolCall:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -212,7 +212,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
         ? { complete: false, issues: [], reason: "http-403" }
         : {
             complete: true,
-            issues: [changed ? { ...issue, title: "Imported revised" } : issue],
+            issues: [unready ? { ...issue, labels: [] } : issue],
             reason: null,
           };
     },
@@ -346,7 +346,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
     for (let i = 0; i < 100 && turns === 0; i++)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     assert.equal(turns, 1);
-    changed = true;
+    unready = true;
     await service.refreshGitHub();
     assert.ok(domain.admission(taskId).reasons.includes("source-hold"));
     assert.ok(toolCall);
@@ -470,10 +470,10 @@ test("a held canonical lead receives one source-hold notice without changing ass
   );
   const projectId = randomUUID();
   const profileId = randomUUID();
-  let title = "Original";
+  let labels = issue.labels;
   const reader: GitHubSourceReader = {
     async readSelection() {
-      return { complete: true, issues: [{ ...issue, title }], reason: null };
+      return { complete: true, issues: [{ ...issue, labels }], reason: null };
     },
     async readBlockers() {
       return { complete: true, blockers: [], reason: null };
@@ -567,7 +567,7 @@ test("a held canonical lead receives one source-hold notice without changing ass
       db.prepare(
         "UPDATE domain_assignments SET state = 'held' WHERE id = ?",
       ).run(leadId);
-      title = "Revised";
+      labels = [];
       await service.refreshGitHub();
       assert.ok(domain.admission(taskId).reasons.includes("source-hold"));
       const count = () =>
@@ -593,42 +593,24 @@ test("a held canonical lead receives one source-hold notice without changing ass
   }
 });
 
-test("an unassigned routing-enabled source hold does not invent a lead assignment", async () => {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "cab-github-routing-hold-")),
-  );
-  const projectId = randomUUID();
-  const leadId = randomUUID();
-  const workerId = randomUUID();
-  let body = issue.body;
-  let routingCalls = 0;
-  let releaseFirst!: (value: {
-    choice: string;
-    model: string;
-    confidence: number;
-    probabilities: Record<string, number>;
-    usage: { inputTokens: number; outputTokens: number };
-  }) => void;
-  const firstRoute = new Promise<{
-    choice: string;
-    model: string;
-    confidence: number;
-    probabilities: Record<string, number>;
-    usage: { inputTokens: number; outputTokens: number };
-  }>((resolve) => {
-    releaseFirst = resolve;
+/** A promise the test resolves, as `Promise.withResolvers` gives. */
+function gate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
   });
-  const reader: GitHubSourceReader = {
-    async readSelection() {
-      return { complete: true, issues: [{ ...issue, body }], reason: null };
-    },
-    async readBlockers() {
-      return { complete: true, blockers: [], reason: null };
-    },
-    async readIssueStatus() {
-      return { status: "open" };
-    },
-  };
+  return { promise, resolve };
+}
+
+function routingService(
+  root: string,
+  reader: GitHubSourceReader,
+  routingClient: NonNullable<
+    NonNullable<
+      ConstructorParameters<typeof StandaloneService>[3]
+    >["routingClient"]
+  >,
+) {
   const runtime = (): Runtime => ({
     async start() {},
     async stop() {},
@@ -645,104 +627,139 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
       return "completed";
     },
   });
-  const service = new StandaloneService(
-    join(root, "data"),
-    runtime,
-    undefined,
-    {
-      issueTrackers: {
-        readerFactories: { github: () => reader },
-        intervalMs: 60_000,
-      },
-      power: { enabled: false },
-      routingClient: {
-        async choose(request) {
-          routingCalls++;
-          const choice = workerId;
-          const response = {
-            choice,
-            model: request.requestedModel,
-            confidence: 1,
-            probabilities: Object.fromEntries(
-              request.choices.map((candidate) => [
-                candidate,
-                candidate === choice ? 1 : 0,
-              ]),
-            ),
-            usage: { inputTokens: 0, outputTokens: 0 },
-          };
-          return routingCalls === 1 ? firstRoute : response;
-        },
-      },
+  return new StandaloneService(join(root, "data"), runtime, undefined, {
+    issueTrackers: {
+      readerFactories: { github: () => reader },
+      intervalMs: 60_000,
     },
+    power: { enabled: false },
+    routingClient,
+  });
+}
+
+function configureRoutingProject(
+  domain: ReturnType<StandaloneService["domain"]>,
+  projectId: string,
+  leadId: string,
+  workerId: string,
+) {
+  for (const [profileId, name] of [
+    [leadId, "Lead"],
+    [workerId, "Worker"],
+  ] as const)
+    domain.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name,
+      instructions: name,
+      capabilities: "work",
+    });
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Alpha",
+    leadProfileId: leadId,
+  });
+  domain.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: true,
+    guidance: "Choose the worker",
+    credentialRef: "env:TEST_ROUTER",
+    candidateProfileIds: [workerId],
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:TEST_GITHUB",
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "org",
+        name: "repo",
+      },
+    ],
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
+  });
+  domain.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+}
+
+test("an unassigned routing-enabled source hold does not invent a lead assignment", async () => {
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "cab-github-routing-hold-")),
   );
+  const projectId = randomUUID();
+  const leadId = randomUUID();
+  const workerId = randomUUID();
+  let body = issue.body;
+  let labels = issue.labels;
+  let routingCalls = 0;
+  // Each routing choice waits until the test releases it.
+  const route = gate();
+  const reader: GitHubSourceReader = {
+    async readSelection() {
+      return {
+        complete: true,
+        issues: [{ ...issue, body, labels }],
+        reason: null,
+      };
+    },
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "open" };
+    },
+  };
+  const service = routingService(root, reader, {
+    async choose(request) {
+      routingCalls++;
+      const choice = workerId;
+      const response = {
+        choice,
+        model: request.requestedModel,
+        confidence: 1,
+        probabilities: Object.fromEntries(
+          request.choices.map((candidate) => [
+            candidate,
+            candidate === choice ? 1 : 0,
+          ]),
+        ),
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+      await route.promise;
+      return response;
+    },
+  });
   try {
     await service.start();
     const domain = service.domain();
-    for (const [profileId, name] of [
-      [leadId, "Lead"],
-      [workerId, "Worker"],
-    ] as const)
-      domain.execute({
-        type: "profile.create",
-        actor: "operator",
-        key: randomUUID(),
-        profileId,
-        name,
-        instructions: name,
-        capabilities: "work",
-      });
-    domain.execute({
-      type: "project.create",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      name: "Alpha",
-      leadProfileId: leadId,
-    });
-    domain.execute({
-      type: "routing.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      expectedVersion: 1,
-      enabled: true,
-      guidance: "Choose the worker",
-      credentialRef: "env:TEST_ROUTER",
-      candidateProfileIds: [workerId],
-    });
-    domain.execute({
-      type: "github.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      expectedVersion: 1,
-      credentialRef: "env:TEST_GITHUB",
-      selections: [
-        {
-          id: "repo",
-          kind: "repository",
-          repositoryId: "R_1",
-          owner: "org",
-          name: "repo",
-        },
-      ],
-      readiness: {
-        mode: "any",
-        conditions: [{ kind: "label", operator: "has", name: "ready" }],
-      },
-    });
-    domain.execute({
-      type: "github.activate",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      selectionId: "repo",
-      expectedVersion: 2,
-    });
+    configureRoutingProject(domain, projectId, leadId, workerId);
     await service.refreshGitHub();
     const taskId = String(service.githubSources().issue("I_1")?.taskId);
-    body = "Revised work";
+    labels = [];
     await service.refreshGitHub();
     assert.ok(domain.admission(taskId).reasons.includes("source-hold"));
     assert.equal(domain.assignments(taskId).length, 0);
@@ -756,84 +773,128 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
     });
     await service.provisionTask(taskId);
     assert.equal(domain.assignments(taskId).length, 0);
-    const reviewDb = new DatabaseSync(join(root, "data", "standalone.sqlite"));
-    const digest = String(
-      (
-        reviewDb
-          .prepare(
-            "SELECT observedDigest FROM source_reviews WHERE externalId = 'I_1'",
-          )
-          .get() as { observedDigest: string }
-      ).observedDigest,
-    );
-    reviewDb.close();
-    domain.execute({
-      type: "source.review",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      taskId,
-      expectedVersion: Number(domain.task(taskId).version),
-      observedDigest: digest,
-      decision: "accept-revised-scope",
-    });
-    for (let i = 0; i < 100 && routingCalls === 0; i++)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    assert.equal(routingCalls, 1);
+    // Ready again on a complete read: the readiness-lost hold releases and routing starts.
+    labels = issue.labels;
+    const refreshing = service.refreshGitHub();
+    const settle = async () => {
+      for (let i = 0; i < 100; i++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    };
+    await settle();
+    const calls = routingCalls;
+    assert.ok(calls > 0);
+    const brief = domain.task(taskId).outcome;
+    // A text-only edit leaves the pending choice valid; the worker keeps its routed brief.
     body = "Revised again";
     service.githubSources().reconcileSelection(projectId, "repo", {
       complete: true,
       issues: [{ ...issue, body }],
       reason: null,
     });
-    releaseFirst({
-      choice: workerId,
-      model: "jev-1.13.0",
-      confidence: 1,
-      probabilities: { [workerId]: 1, lead_review: 0 },
-      usage: { inputTokens: 0, outputTokens: 0 },
-    });
+    assert.equal(domain.task(taskId).outcome, "Revised again");
+    await settle();
+    assert.equal(routingCalls, calls);
+    route.resolve();
+    await refreshing;
+    await settle();
+    assert.deepEqual(
+      domain
+        .assignments(taskId)
+        .map((assignment) => [assignment.profileId, assignment.brief]),
+      [[workerId, brief]],
+    );
+  } finally {
+    route.resolve();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a pending routing choice is invalidated by a readiness change", async () => {
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "cab-github-routing-readiness-")),
+  );
+  const projectId = randomUUID();
+  const leadId = randomUUID();
+  const workerId = randomUUID();
+  let routingCalls = 0;
+  let route = gate();
+  const reader: GitHubSourceReader = {
+    async readSelection() {
+      return { complete: true, issues: [issue], reason: null };
+    },
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "open" };
+    },
+  };
+  const service = routingService(root, reader, {
+    async choose(request) {
+      routingCalls++;
+      await route.promise;
+      return {
+        choice: workerId,
+        model: request.requestedModel,
+        confidence: 1,
+        probabilities: Object.fromEntries(
+          request.choices.map((candidate) => [
+            candidate,
+            candidate === workerId ? 1 : 0,
+          ]),
+        ),
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    },
+  });
+  const settle = async () => {
     for (let i = 0; i < 100; i++)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    assert.equal(domain.assignments(taskId).length, 0);
-    assert.ok(
-      domain.admission(taskId).reasons.includes("source-review-required"),
-    );
-    const secondDb = new DatabaseSync(join(root, "data", "standalone.sqlite"));
-    const secondDigest = String(
-      (
-        secondDb
-          .prepare(
-            "SELECT observedDigest FROM source_reviews WHERE externalId = 'I_1'",
-          )
-          .get() as { observedDigest: string }
-      ).observedDigest,
-    );
-    secondDb.close();
+  };
+  try {
+    await service.start();
+    const domain = service.domain();
+    configureRoutingProject(domain, projectId, leadId, workerId);
+    await service.refreshGitHub();
+    const taskId = String(service.githubSources().issue("I_1")?.taskId);
     domain.execute({
-      type: "source.review",
+      type: "project.configure",
       actor: "operator",
       key: randomUUID(),
       projectId,
-      taskId,
-      expectedVersion: Number(domain.task(taskId).version),
-      observedDigest: secondDigest,
-      decision: "accept-revised-scope",
+      expectedVersion: 1,
+      paused: false,
     });
-    await service.refreshGitHub();
-    assert.equal(routingCalls, 2);
+    const provisioning = service.provisionTask(taskId);
+    await settle();
+    const calls = routingCalls;
+    assert.ok(calls > 0);
+    for (const read of [[], issue.labels])
+      service.githubSources().reconcileSelection(projectId, "repo", {
+        complete: true,
+        issues: [{ ...issue, labels: read }],
+        reason: null,
+      });
+    const first = route;
+    route = gate();
+    first.resolve();
+    await settle();
+    // The choice made before the readiness change is refused; the next wake chooses afresh.
+    await provisioning;
+    assert.equal(domain.assignments(taskId).length, 0);
+    const refreshing = service.refreshGitHub();
+    await settle();
+    assert.ok(routingCalls > calls);
+    route.resolve();
+    await refreshing;
+    await settle();
     assert.deepEqual(
       domain.assignments(taskId).map((assignment) => assignment.profileId),
       [workerId],
     );
   } finally {
-    releaseFirst({
-      choice: workerId,
-      model: "jev-1.13.0",
-      confidence: 1,
-      probabilities: { [workerId]: 1, lead_review: 0 },
-      usage: { inputTokens: 0, outputTokens: 0 },
-    });
+    route.resolve();
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }

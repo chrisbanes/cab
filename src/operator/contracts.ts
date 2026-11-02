@@ -1425,12 +1425,11 @@ const source = z
         })
         .strict(),
     ),
+    /** The latest operator decision on a source hold; history, not a gate. */
     review: z
       .object({
-        observedDigest: hash,
-        acceptedDigest: hash,
         decision: safeText,
-        decidedAt: z.string().nullable(),
+        decidedAt: z.string(),
       })
       .strict()
       .nullable(),

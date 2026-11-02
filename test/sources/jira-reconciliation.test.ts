@@ -117,7 +117,7 @@ test("a complete Jira read imports a task keyed by provider and instance, with i
   );
 });
 
-test("a later read updates the item, and changed text sets the ordinary hold", () => {
+test("a later read updates the item, and changed text is adopted without a hold", () => {
   const { sources, projectId, config } = setup();
   sources.reconcileSelection(projectId, "S-1", complete(issue()), config());
   sources.reconcileSelection(
@@ -138,7 +138,7 @@ test("a later read updates the item, and changed text sets the ordinary hold", (
     config(),
   );
   assert.equal(sources.issue("10001")?.observedTitle, "Renamed");
-  assert.equal(sources.hold("10001")?.reason, "changed-text");
+  assert.equal(sources.hold("10001"), undefined);
 });
 
 test("one issue in two selections is one task with two memberships", () => {

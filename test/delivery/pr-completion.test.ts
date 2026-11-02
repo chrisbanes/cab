@@ -1159,26 +1159,33 @@ test("a settlement survives cab's own confirmed issue close and completes withou
   }
 });
 
-for (const change of [
-  "a readiness label lost in the closure read",
-  "a title edit in the closure read",
-] as const)
-  test(`a settlement does not survive ${change}`, async () => {
-    const f = await deliveryFixture("reviewable-pr", true);
-    try {
-      await settleThenClose(f, closedOk, () =>
-        change.includes("label")
-          ? f.setSourceLabels([])
-          : f.setSourceTitle("Edited after settlement"),
-      );
-      await f.service.refreshGitHub();
-      assert.ok(blockers(f).includes(awaitingSettlement));
-    } finally {
-      await f.close();
-    }
-  });
+test("a settlement does not survive a readiness label lost in the closure read", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f, closedOk, () => f.setSourceLabels([]));
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
 
-test("a title edit after a carried closure brings the settlement hold back", async () => {
+// Imported text is live: an edit is not structure, so it neither ends nor restores a settlement.
+test("a settlement survives a title edit in the closure read", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f, closedOk, () =>
+      f.setSourceTitle("Edited after settlement"),
+    );
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).title, "Edited after settlement");
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a title edit after a carried closure leaves the settlement standing", async () => {
   const f = await deliveryFixture("reviewable-pr", true);
   try {
     await settleThenClose(f);
@@ -1186,7 +1193,9 @@ test("a title edit after a carried closure brings the settlement hold back", asy
     assert.ok(!blockers(f).includes(awaitingSettlement));
     f.setSourceTitle("Edited after the close");
     await f.service.refreshGitHub();
-    assert.ok(blockers(f).includes(awaitingSettlement));
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    await settleInto(f, "done");
   } finally {
     await f.close();
   }
@@ -1305,7 +1314,12 @@ test("a replacement settlement after another change survives a later lagging clo
   try {
     await settleThenClose(f);
     await f.service.refreshGitHub();
-    f.setSourceTitle("Edited after the close");
+    // A structural change: the issue's blockers become unknown, then clear on the next sync.
+    f.service.githubSources().reconcileBlockers("I1", {
+      complete: false,
+      blockers: [],
+      reason: "http-403",
+    });
     await f.service.refreshGitHub();
     assert.ok(blockers(f).includes(awaitingSettlement));
     const delivery = f.service.delivery();

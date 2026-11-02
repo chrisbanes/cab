@@ -437,7 +437,7 @@ test("approved operator material cannot authorize changed body/source or another
     "denied",
   );
 });
-test("actual source snapshot change during delayed preflight retains its hold and rejects the prior source material before effect", async (t) => {
+test("actual source snapshot change during delayed preflight rejects the prior source material before effect, without a hold", async (t) => {
   const f = await deliveryFixture("reviewable-pr", true);
   t.after(() => f.close());
   const api = new OperatorApi(f.service, [f.root]),
@@ -472,7 +472,8 @@ test("actual source snapshot change during delayed preflight retains its hold an
   if (result.kind === "delivery")
     assert.equal(result.state, "confirmed-failure");
   assert.equal(f.effects.length, 0);
-  assert.ok(f.service.githubSources().hold("I1")?.active);
+  // Text is live: the edit holds nothing, yet the source fence still refuses the old material.
+  assert.equal(f.service.githubSources().hold("I1"), undefined);
   assert.equal(f.service.taskReview().sources(f.taskId).length, 2);
 });
 

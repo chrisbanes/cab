@@ -12,6 +12,7 @@ import {
   itemIs,
   itemKey,
   sameItem,
+  sourceTextDigest,
   type SourceTracker,
 } from "./source-storage.js";
 import { transaction, type Database } from "./store.js";
@@ -1325,7 +1326,7 @@ export class DeliveryStore {
       source = new TaskReviewStore(this.db).sources(caller.taskId).at(-1),
       row = this.db
         .prepare(
-          `SELECT task.projectId,task.version,imported.externalId AS nodeId,imported.containerId AS repositoryId,review.observedDigest FROM domain_tasks task JOIN imported_tasks imported ON imported.taskId=task.id JOIN source_reviews review ON ${sameItem("review", "imported")} WHERE task.id=?`,
+          `SELECT task.projectId,task.version,imported.externalId AS nodeId,imported.containerId AS repositoryId,item.observedTitle,item.observedBody FROM domain_tasks task JOIN imported_tasks imported ON imported.taskId=task.id JOIN external_items item ON ${sameItem("item", "imported")} WHERE task.id=?`,
         )
         .get(caller.taskId) as
         | {
@@ -1333,7 +1334,8 @@ export class DeliveryStore {
             version: number;
             nodeId: string;
             repositoryId: string;
-            observedDigest: string;
+            observedTitle: string;
+            observedBody: string;
           }
         | undefined;
     if (
@@ -1342,7 +1344,8 @@ export class DeliveryStore {
       row.version !== caller.taskVersion ||
       row.nodeId !== caller.sourceNodeId ||
       row.repositoryId !== caller.sourceRepositoryId ||
-      row.observedDigest !== caller.sourceDigest ||
+      sourceTextDigest(row.observedTitle, row.observedBody) !==
+        caller.sourceDigest ||
       source?.sourceId !== caller.sourceId ||
       source.revision !== caller.sourceRevision ||
       policy.version !== caller.policyVersion

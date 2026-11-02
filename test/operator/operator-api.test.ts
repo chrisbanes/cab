@@ -2479,7 +2479,7 @@ test("a routing fallback on a task with no project lead clears without operator 
   assert.equal(Number(d.task(never.taskId).version), version);
   assert.deepEqual(await listedAttention(api, never.taskId), []);
 });
-test("a task read reports source review, hold and unknown source as source-held", async (t) => {
+test("a task read reports a source hold and unknown source as source-held", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const d = f.service.domain(),
@@ -2532,14 +2532,10 @@ test("a task read reports source review, hold and unknown source as source-held"
       externalId: "I1",
     });
     db.prepare(
-      "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
-    ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
-    db.prepare(
       "INSERT INTO source_holds VALUES ('github','github.com','I1',1,'source hold',1)",
     ).run();
   });
   assert.ok(d.admission(taskId).reasons.includes("source-hold"));
-  assert.ok(d.admission(taskId).reasons.includes("source-review-required"));
   const read = await reasons();
   assert.ok(read.includes("source-held"), read.join());
   assert.ok(!read.includes("admission-blocked"), read.join());
