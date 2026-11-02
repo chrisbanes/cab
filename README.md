@@ -121,6 +121,12 @@ owns delivery scope and status.
   `issue.create`, and for a Project target `project.item.add` and `project.field`, grants
   ([ADR-1018](docs/adr/1018-task-publication-in-place.md),
   [ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
+- **Stacked dependencies.** A project can turn on stacking (Delivery tab, CLI or API).
+  A dependent with one blocker in the same repository then starts on the blocker's last
+  pushed commit once the blocker has an open change request at that commit, and its lead is
+  asked to restack with `branch.force-push` when that head moves. Other shapes wait until
+  Done, with the reason shown. Code-host stack links, merge ordering and Unstack are not
+  implemented ([ADR-1023](docs/adr/1023-stacked-dependencies.md)).
 - **Inbox and questions.** The action Inbox lists cross-project questions, approvals
   and recorded interventions by urgency and age. Exact own-tool forms support grouped
   text, single-choice and multiple-choice answers, with preserved drafts and durable
