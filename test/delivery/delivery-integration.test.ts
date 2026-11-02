@@ -2011,3 +2011,46 @@ test("a failed answer with only a message is a confirmed failure that records it
     await f.close();
   }
 });
+
+test("a pull request that moved off the merge target never confirms it, but its recorded merge request can still fail", async () => {
+  const failing = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "pending" },
+    { status: "failed", message: "Head branch was modified" },
+  ]);
+  try {
+    await failing.merge();
+    assert.equal(failing.action().state, "uncertain");
+    failing.f.scripted.state.head = "3".repeat(40);
+    await refreshDelivery(failing.f);
+    assert.deepEqual(failing.action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { uuid: "u-1", status: "failed" },
+      hostReason: "Head branch was modified",
+    });
+    assert.equal(failing.f.scripted.state.writes, 1);
+  } finally {
+    await failing.f.close();
+  }
+  for (const poll of [
+    { status: "pending" },
+    { status: "merged" },
+    "expired",
+  ] as const) {
+    const waiting = await asyncMerge({ http: 202, status: "pending" }, [
+      { status: "pending" },
+      poll,
+    ]);
+    try {
+      await waiting.merge();
+      waiting.f.scripted.state.head = "3".repeat(40);
+      await refreshDelivery(waiting.f);
+      // Merged by the poll, but at a head this action never named: not a confirmation.
+      assert.equal(waiting.action().state, "uncertain", JSON.stringify(poll));
+      assert.equal(waiting.action().mergeRequest?.uuid, "u-1");
+      assert.equal(waiting.f.scripted.state.writes, 1);
+    } finally {
+      await waiting.f.close();
+    }
+  }
+});

@@ -1575,7 +1575,9 @@ export class GitHubHttpDeliveryProvider
                 ...(sent.uuid ? { uuid: sent.uuid } : {}),
                 status: sent.status,
               },
-              ...(sent.message ? { hostReason: sent.message } : {}),
+              ...(sent.status === "failed" && sent.message
+                ? { hostReason: sent.message }
+                : {}),
             },
           };
           break;
@@ -1685,6 +1687,7 @@ export class GitHubHttpDeliveryProvider
     a: Extract<ExternalAction, { kind: "pr.merge" }>,
     record: DeliveryActionRecord,
     prState: string,
+    moved = false,
   ): Promise<ProviderActionObservation> {
     const known = record.observation?.mergeRequest;
     const uncertain = (
@@ -1710,7 +1713,7 @@ export class GitHubHttpDeliveryProvider
     if (known.status === "failed")
       return failed(known, record.observation?.hostReason);
     if (known.status === "enqueued")
-      return prState === "closed"
+      return prState === "closed" && !moved
         ? {
             state: "confirmed-failure",
             reason: "provider-merge-dequeued",
@@ -1929,13 +1932,18 @@ export class GitHubHttpDeliveryProvider
         if (
           p.node_id !== a.target.nodeId ||
           p.number !== a.target.number ||
-          p.head.sha !== a.target.expectedHeadSha ||
-          p.head.ref !== a.target.headRef ||
-          p.base.ref !== (record.acceptedBaseRef ?? a.target.baseRef) ||
           p.head.repo.node_id !== a.target.repositoryId ||
           p.base.repo.node_id !== a.target.repositoryId
         )
           throw new Error("provider-pr-mismatch");
+        const moved =
+          p.head.sha !== a.target.expectedHeadSha ||
+          p.head.ref !== a.target.headRef ||
+          p.base.ref !== (record.acceptedBaseRef ?? a.target.baseRef);
+        // A pull request that moved off the merge target never confirms it, but its recorded merge request can still fail.
+        if (moved && a.kind === "pr.merge")
+          return await this.mergeOutcome(repo.path, a, record, p.state, true);
+        if (moved) throw new Error("provider-pr-mismatch");
         const matches =
           a.kind === "pr.ready"
             ? !p.draft
