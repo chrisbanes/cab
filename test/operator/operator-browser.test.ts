@@ -1274,6 +1274,8 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     "/runtime/control/stop",
     "Best-effort Stop",
   );
+  // The retained form answers with the task's Execution tab; read the retained page itself.
+  await page.goto(`${origin}/runtime/task/${taskId}`);
   let runtimeText = await page.locator("body").innerText();
   assert.match(runtimeText, /Operator Stop remains active/);
   assert.match(runtimeText, /Writer ownership remains held/);
@@ -1311,6 +1313,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     "/runtime/control/resume",
     "Resume task",
   );
+  await page.goto(`${origin}/runtime/task/${taskId}`);
   runtimeText = await page.locator("body").innerText();
   assert.match(runtimeText, /Operator Stop is not active/);
   assert.match(runtimeText, /Writer ownership remains held/);

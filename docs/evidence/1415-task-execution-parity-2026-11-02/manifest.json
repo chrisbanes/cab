@@ -1,0 +1,64 @@
+{
+  "record": "../1415-task-execution-parity-2026-11-02.md",
+  "status": "Additive candidate; maintainer parity approval and removal (T7) pending",
+  "productionSourceCommit": "892ac9db",
+  "capturePrivacy": "Synthetic disposable real-SQLite fixtures and the production bundle with a fake runtime; no credentials, prompts, paths or process identities are visible.",
+  "captures": [
+    {
+      "file": "task-execution-desktop.png",
+      "sha256": "8a464ae339fc4167adc49c0e8690e344eb831ca1f9d78fc423efd50469f5a30d",
+      "viewport": "1366x900",
+      "raster": "1366x1432",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: dependency added through the Execution tab"
+    },
+    {
+      "file": "task-execution-phone.png",
+      "sha256": "cbe33cdf94a3305c5269198a72fd6d95cb6e19c1fe91fe7118ee5c506b805165",
+      "viewport": "390x844",
+      "raster": "390x1652",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: Execution tab after Apply"
+    },
+    {
+      "file": "task-execution-stopping.png",
+      "sha256": "bd0e80ccfdccfcf3d4a0238c47d6c5a9214c0d7f0ea3d784780dbb62c2216793",
+      "viewport": "1366x900",
+      "raster": "1366x2254",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: stopped task, 21 records, newest-20 notice"
+    },
+    {
+      "file": "task-execution-held-after-resume.png",
+      "sha256": "fc5bcce4f4ea18449964ab6b237335215000022f5a95c6e617de5b36828d6c82",
+      "viewport": "1366x900",
+      "raster": "1366x2254",
+      "engine": "chromium",
+      "origin": "operator-task-execution-browser: after Resume, older record's writer/capacity/uncertainty holds remain"
+    },
+    {
+      "file": "1366-task-execution-held.png",
+      "sha256": "28ae8170c1e2947617ffb019abebb39bb1c3211c7797145c7d806ce606b1c392",
+      "viewport": "1366x900",
+      "raster": "1366x2168",
+      "engine": "chromium",
+      "origin": "operator-runtime-recovery-browser: Runtime settings Task controls lands on the Execution tab"
+    },
+    {
+      "file": "stop-dialog-phone-chromium.png",
+      "sha256": "e4b8877a3c3a9c4c5bab12f77748c7edda329cb85c4d48647c39ac52f1bb7d74",
+      "viewport": "390x844",
+      "raster": "390x844",
+      "engine": "chromium",
+      "origin": "operator-task-detail-browser: Stop confirmation, phone"
+    },
+    {
+      "file": "stop-dialog-webkit.png",
+      "sha256": "d1ccb72190ceecff1c502fa32182e54ba1cd1904990826c742c5781eefda8766",
+      "viewport": "1366x900",
+      "raster": "1366x900",
+      "engine": "webkit",
+      "origin": "operator-task-detail-browser: Stop confirmation, desktop"
+    }
+  ]
+}
