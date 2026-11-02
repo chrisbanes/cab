@@ -549,6 +549,10 @@ test("fake-boundary journeys enforce the complete six-case signal/restart/refusa
     },
     async completed(host: Host) {
       calls.push(`${host.id}:completed`);
+      return { list: [] };
+    },
+    async continuations() {
+      return 1;
     },
     async held(host: Host) {
       calls.push(`${host.id}:held`);
@@ -1524,46 +1528,6 @@ test(
     }
   },
 );
-test(
-  "offline Claude observation loss holds at the durable binding with its process still live",
-  darwin,
-  async () => {
-    const s = offlineSession();
-    process.env.CAB_SIGNAL_OFFLINE_TOKEN = "offline-fixture-token";
-    const backend = driver.realBackend(
-      s.root,
-      s.marker,
-      s.journalFile,
-      s.grant,
-      s.options,
-    );
-    const host = await backend.start(
-      { ...caseOf("claude-uncertain"), kind: "uncertain" },
-      0,
-      Date.now() + LIMITS.readyMs,
-    );
-    try {
-      await backend.call(host, "seed");
-      // Arms the injected loss before the first turn's wait; that turn never yields text.
-      await backend.call(host, "followup");
-      // The follow-up is the long first-time request, not the short continuation.
-      assert.equal(
-        readFileSync(join(host.root, "followup.txt"), "utf8"),
-        hostModule.SIGNAL_BRIEF,
-      );
-      await backend.held(host, Date.now() + LIMITS.readyMs);
-      const get = await backend.call(host, "get");
-      assert.equal(get.code, 0);
-      assert.match(JSON.stringify(get.data), /termination-live/);
-      assert.equal((await backend.call(host, "prepare")).code, 4);
-      await backend.endRuntime(host);
-      assert.equal(await backend.close(host), true);
-    } finally {
-      delete process.env.CAB_SIGNAL_OFFLINE_TOKEN;
-      await backend.closeAll();
-    }
-  },
-);
 test("grant source checks run in the repository; build/version children get no Claude token; failures are durable", async () => {
   const calls: { args: string[]; cwd?: string }[] = [];
   const grant = { sourceHead: "head", sourceTree: "tree" };
@@ -1784,10 +1748,10 @@ test("the brief keeps a long first delivery, a one-sentence continuation, and th
   );
   // Clean-case assignments and the uncertain follow-up both carry the same long brief.
   assert.match(source, /const prompt = SIGNAL_BRIEF;/);
-  assert.match(source, /feedLead\(ids, prompt, "followup\.txt"\)/);
+  assert.match(source, /feedLead\(ids, prompt, "followup\.txt", "follow-up"\)/);
   assert.match(
     source,
-    /feedLead\(ids, CONTINUATION_MESSAGE, "continue\.txt"\)/,
+    /feedLead\(ids, CONTINUATION_MESSAGE, "continue\.txt", "message"\)/,
   );
 });
 for (const harness of ["codex", "claude"] as const)
@@ -1846,7 +1810,11 @@ for (const harness of ["codex", "claude"] as const)
           readFileSync(join(caseRoot, "ids.json"), "utf8"),
         );
         assert.match(ids.workId, new RegExp(ids.assignmentId));
-        assert.ok(existsSync(join(caseRoot, "followup.txt")));
+        // The follow-up is the long first-time request, not the short continuation.
+        assert.equal(
+          readFileSync(join(caseRoot, "followup.txt"), "utf8"),
+          hostModule.SIGNAL_BRIEF,
+        );
         assert.ok(existsSync(join(caseRoot, "continue.txt")));
       } finally {
         delete process.env.CAB_SIGNAL_OFFLINE_TOKEN;
@@ -1905,3 +1873,186 @@ test("offline six-case matrix runs the exact live journey: expected 14 turns, 6 
     await backend.closeAll();
   }
 });
+
+/** A scripted uncertain backend: per-step overrides, fixed-identity work items. */
+function uncertainBackend(
+  f: ReturnType<typeof fixture>,
+  overrides: {
+    seedTurns?: number;
+    extraWork?: boolean;
+    continuations?: number;
+  },
+) {
+  const calls: string[] = [];
+  const reserve = () => {
+    const binding = { caseId: "codex-uncertain", generation: 0 };
+    f.journal.consume(f.journal.reserve(binding), binding);
+  };
+  const ids = {
+    workId: "assignment:lead:initial",
+    assignmentId: "lead",
+    inboxAssignmentId: "inbox",
+  };
+  return {
+    calls,
+    backend: {
+      now: f.now,
+      async start() {
+        return {};
+      },
+      async call(_: unknown, op: string) {
+        calls.push(op);
+        if (op === "seed") {
+          for (let i = 0; i < (overrides.seedTurns ?? 1); i++) reserve();
+          return ids;
+        }
+        if (op === "followup" || op === "continue") reserve();
+        if (op === "get") return { code: 0, data: "termination-live" };
+        if (op === "prepare")
+          return { code: calls.includes("endRuntime") ? 0 : 4 };
+        if (op === "submit")
+          return { code: 0, data: { data: { receipt: { id: "r" } } } };
+        if (op === "inspect") return { stopped: true, paused: true };
+        return undefined;
+      },
+      async completed() {
+        return {
+          list: [
+            { workId: "assignment:lead:initial", state: "completed" },
+            ...(overrides.extraWork
+              ? [{ workId: "assignment:delegate:initial", state: "ready" }]
+              : []),
+          ],
+        };
+      },
+      async held() {},
+      async snapshot() {
+        return {
+          intents: [
+            { ...ids, threadId: "t", state: "completed" },
+            ...(calls.includes("continue")
+              ? [
+                  {
+                    workId: "assignment:lead:v3",
+                    threadId: "t",
+                    state: "completed",
+                  },
+                ]
+              : []),
+          ],
+          inbox: [{ eventId: "e" }],
+          receipts: calls.includes("submit") ? [{ id: "r" }] : [],
+        };
+      },
+      async endRuntime() {
+        calls.push("endRuntime");
+      },
+      async continuations() {
+        return overrides.continuations ?? 1;
+      },
+      async close() {
+        return true;
+      },
+    },
+  };
+}
+const uncertainCase = () =>
+  driver.CASES.filter((c: { id: string }) => c.id === "codex-uncertain");
+test("a delegating seed fails at seed-completed with its reservations, before the follow-up spends a turn", async () => {
+  for (const [overrides, text] of [
+    [{ seedTurns: 2 }, "seed must be exactly one lead turn: reservations=2"],
+    [{ extraWork: true }, "seed delegated work: other work items=1"],
+  ] as const) {
+    const f = fixture();
+    const { backend, calls } = uncertainBackend(f, overrides);
+    const error = await driver
+      .runCases(backend, f.journal, uncertainCase())
+      .catch((e: unknown) => e);
+    assert.deepEqual(
+      {
+        stage: error.results[0].failure.stage,
+        message: error.results[0].failure.message,
+      },
+      { stage: "seed-completed", message: text },
+    );
+    assert.ok(!calls.includes("followup"), "no follow-up after a bad seed");
+    assert.deepEqual(
+      f.journal
+        .entries()
+        .filter((r: Row) => r.kind === "failed")
+        .map((r: Row & { stage?: string }) => r.stage),
+      ["seed-completed"],
+    );
+  }
+});
+test("a continuation that records no recovery continuation fails at continuation-recorded", async () => {
+  const f = fixture();
+  const { backend } = uncertainBackend(f, { continuations: 0 });
+  const error = await driver
+    .runCases(backend, f.journal, uncertainCase())
+    .catch((e: unknown) => e);
+  assert.deepEqual(
+    {
+      stage: error.results[0].failure.stage,
+      message: error.results[0].failure.message,
+    },
+    { stage: "continuation-recorded", message: "recovery continuations=0" },
+  );
+  const f2 = fixture();
+  const ok = uncertainBackend(f2, {});
+  const results = await driver.runCases(
+    ok.backend,
+    f2.journal,
+    uncertainCase(),
+  );
+  assert.equal(results[0].failure, undefined, "the scripted journey passes");
+});
+test(
+  "a lead feedback on the wrong route is refused and traced before any CLI send",
+  darwin,
+  async () => {
+    const s = offlineSession();
+    const backend = driver.realBackend(
+      s.root,
+      s.marker,
+      s.journalFile,
+      s.grant,
+      {
+        ...s.options,
+        offline: {
+          ...s.options.offline,
+          // The lead's seed turn stays running: a follow-up would be the wrong route.
+          script: () => ["hold"],
+        },
+      },
+    );
+    const host = await backend.start(
+      { ...caseOf("codex-uncertain"), kind: "uncertain" },
+      0,
+      Date.now() + LIMITS.readyMs,
+    );
+    try {
+      await backend.call(host, "seed");
+      await assert.rejects(
+        backend.call(host, "followup"),
+        /host operation refused/,
+      );
+      assert.deepEqual(host.failures.at(-1), {
+        stage: "followup",
+        name: "AssertionError",
+        code: "ERR_ASSERTION",
+        message:
+          "followup.txt: lead feedback route message, expected follow-up",
+      });
+      const route = driver
+        .jsonlRows(readFileSync(join(host.root, "trace.jsonl"), "utf8"))
+        .find((r: { event: string }) => r.event === "lead-feedback-route");
+      assert.equal(route?.detail.route, "message");
+      assert.equal(route?.detail.expected, "follow-up");
+      assert.equal(existsSync(join(host.root, "followup.txt")), false);
+      assert.equal(await backend.close(host), true);
+    } finally {
+      await backend.closeAll();
+    }
+  },
+);

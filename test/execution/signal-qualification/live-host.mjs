@@ -530,9 +530,23 @@ export async function host(config, offline = false) {
   };
   // Feedback to the task lead: an ordinary message while it is pending or running, a
   // follow-up that resumes its existing conversation once it has completed.
-  const feedLead = async (ids, body, name) => {
+  // The route is traced and checked before anything is sent, so a wrong one spends no turn.
+  const feedLead = async (ids, body, name, expected) => {
     const lead = service.domain().assignment(ids.assignmentId);
-    if (lead.state !== "completed")
+    const route = lead.state === "completed" ? "follow-up" : "message";
+    log("lead-feedback-route", {
+      name,
+      route,
+      expected,
+      leadState: lead.state,
+      leadVersion: lead.version,
+    });
+    assert.equal(
+      route,
+      expected,
+      `${name}: lead feedback route ${route}, expected ${expected}`,
+    );
+    if (route === "message")
       return message(ids.taskId, ids.assignmentId, body, name);
     const file = join(root, name);
     writeFileSync(file, body, { mode: 0o600 });
@@ -573,7 +587,8 @@ export async function host(config, offline = false) {
     followup: async () => {
       loseObservation = true;
       const ids = JSON.parse(readFileSync(idsFile));
-      await feedLead(ids, prompt, "followup.txt");
+      // Resumes the completed seed conversation.
+      await feedLead(ids, prompt, "followup.txt", "follow-up");
     },
     holds: async () => {
       const ids = JSON.parse(readFileSync(idsFile));
@@ -635,7 +650,8 @@ export async function host(config, offline = false) {
         paused: false,
       });
       loseObservation = false;
-      await feedLead(ids, CONTINUATION_MESSAGE, "continue.txt");
+      // A message after recovery records the recovery continuation; a follow-up never does.
+      await feedLead(ids, CONTINUATION_MESSAGE, "continue.txt", "message");
     },
     stop: async () => {
       await service.stop();

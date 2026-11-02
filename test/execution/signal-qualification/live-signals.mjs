@@ -292,7 +292,26 @@ export async function runCases(backend, journal, cases = CASES) {
         cleanProof(before, after, final, ids.workId);
       } else {
         stage = "seed-completed";
-        await backend.completed(host, deadline(), 1);
+        const seeded = await backend.completed(host, deadline(), 1);
+        // Exactly one lead turn and nothing delegated, before the follow-up spends another.
+        const seedTurns =
+          journal.entries().filter((r) => r.kind === "reserve").length -
+          startCount;
+        assert.equal(
+          seedTurns,
+          1,
+          `seed must be exactly one lead turn: reservations=${seedTurns}`,
+        );
+        const delegated = seeded.list.filter(
+          (r) =>
+            !r.workId.includes(ids.assignmentId) &&
+            !r.workId.includes(ids.inboxAssignmentId),
+        ).length;
+        assert.equal(
+          delegated,
+          0,
+          `seed delegated work: other work items=${delegated}`,
+        );
         stage = "followup";
         await backend.call(host, "followup");
         stage = "bound-held";
@@ -339,6 +358,14 @@ export async function runCases(backend, journal, cases = CASES) {
         );
         stage = "continue";
         await backend.call(host, "continue");
+        stage = "continuation-recorded";
+        const continuations = await backend.continuations(host);
+        assert.equal(
+          continuations,
+          1,
+          `recovery continuations=${continuations}`,
+        );
+        stage = "continued";
         await backend.completed(host, deadline(), 3);
         stage = "uncertain-proof";
         const final = await backend.snapshot(host);
@@ -819,6 +846,15 @@ export function realBackend(root, marker, journalFile, grant, options = {}) {
       return host.closing;
     },
     /** Exact-identity cleanup of every host still open, for driver signal/crash paths. */
+    /** Read-only count of recorded recovery continuations, retried like snapshots. */
+    async continuations(host) {
+      const value = await readDurable(
+        host.root,
+        Math.min(journal.deadline, Date.now() + LIMITS.readyMs),
+        recoveryContinuations,
+      );
+      return value.count;
+    },
     /** Last private, capped store reasons seen for a case. */
     diagnostics(caseId) {
       return storeReasons.get(caseId);
@@ -942,6 +978,20 @@ export function pollRead(read, state, limit = 20) {
     state.failures = (state.failures ?? 0) + 1;
     if (!transientRead(error) || state.failures > limit) throw error;
     return undefined;
+  }
+}
+export function recoveryContinuations(root) {
+  const db = new DatabaseSync(join(root, "data", "standalone.sqlite"), {
+    readOnly: true,
+  });
+  try {
+    return db
+      .prepare(
+        "SELECT count(*) AS count FROM coordination_recovery_continuations",
+      )
+      .get();
+  } finally {
+    db.close();
   }
 }
 /** A read-only snapshot through pollRead, retried until it succeeds or `deadline` passes. */
