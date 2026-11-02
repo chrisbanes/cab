@@ -7270,9 +7270,7 @@ export class StandaloneService {
     if (request.kind !== "assignment" || !taskId || !assignmentId)
       return undefined;
     const lineage = this.started().state.workLineage(request.workId);
-    const origin = this.started().schedulerStore.find(
-      lineage.at(-1) as string,
-    );
+    const origin = this.started().schedulerStore.find(lineage.at(-1) as string);
     if (
       (origin ?? request).requestKey.startsWith("task:") ||
       !this.domain()
