@@ -43,7 +43,12 @@ async function liveTextWorld(labels = ["ready"]) {
     async readIssueStatus() {
       return { status: "open" };
     },
+    async readIssueComments() {
+      return { complete: true, comments, reason: null };
+    },
   };
+  /** The issue's counted comments; none makes no issue brief. */
+  let comments: string[] = [];
   const prompts: string[] = [];
   /** Each turn's terminal status, settled by the test or by an interrupt. */
   const turns = new Map<
@@ -216,6 +221,11 @@ async function liveTextWorld(labels = ["ready"]) {
         issues: [{ ...issue, ...text }],
         reason: null,
       });
+    },
+    /** Syncs a change of the issue's counted comments. */
+    async comment(next: string[]) {
+      comments = next;
+      await service.refreshGitHub();
     },
     /** Syncs the loss of the readiness label: a structural change. */
     async unready() {
@@ -598,4 +608,100 @@ test("a reporting repair requeued by a planned shutdown keeps its repair instruc
     w.service.turnRequests().some((r) => r.workId.startsWith("shutdown:")),
   );
   assert.match(w.prompts[2] ?? "", repairInstruction);
+});
+
+test("a lead's turns carry the issue brief after the outcome and diff its changes without a hold or wake", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const brief = "## Agent Brief\nBuild it";
+  await w.comment([brief, "Note one"]);
+  w.unpause();
+  await w.service.provisionTask(w.taskId);
+  await w.until(() => w.prompts.length === 1, "first turn");
+  assert.ok(
+    (w.prompts[0] ?? "").startsWith(
+      `Task: Original title\nOutcome: Original body\n\nIssue brief (the issue's trusted brief comment and the notes after it):\n${brief}\n\n--- Later note ---\n\nNote one`,
+    ),
+  );
+  assert.doesNotMatch(w.prompts[0] ?? "", /Changes \(/);
+  const turnDone = async (n: number) => {
+    await reportIn(w, `turn-${n}`);
+    w.end(`turn-${n}`);
+    await w.until(
+      () => !w.service.list().some((work) => work.state === "running"),
+      `turn ${n} end`,
+    );
+  };
+  await turnDone(1);
+  // A new note: a live text change, with no hold, admission reason, version change or wake.
+  const version = Number(w.domain.task(w.taskId).version);
+  const reasons = w.domain.admission(w.taskId).reasons;
+  const quiet = w.activity();
+  await w.comment([brief, "Note one", "Note two"]);
+  await w.settle();
+  assert.deepEqual(w.activity(), quiet);
+  assert.equal(Number(w.domain.task(w.taskId).version), version);
+  assert.deepEqual(w.domain.admission(w.taskId).reasons, reasons);
+  assert.equal(w.service.githubSources().hold("I_1"), undefined);
+  const api = new OperatorApi(w.service, [w.root]);
+  assert.equal(
+    (await api.readTask(w.taskId)).data.task.issueChangedSinceHandback,
+    true,
+  );
+  await w.message("Continue.");
+  await w.until(() => w.prompts.length === 2, "second turn");
+  assert.match(
+    w.prompts[1] ?? "",
+    /Changes \(- before, \+ now\):\nIssue brief:\n\+ \n\+ --- Later note ---\n\+ \n\+ Note two\n/,
+  );
+  await turnDone(2);
+  // Editing and then deleting a counted note each diff.
+  await w.comment([brief, "Note one, edited", "Note two"]);
+  await w.message("Again.");
+  await w.until(() => w.prompts.length === 3, "third turn");
+  assert.match(
+    w.prompts[2] ?? "",
+    /Issue brief:\n- Note one\n\+ Note one, edited\n/,
+  );
+  await turnDone(3);
+  await w.comment([brief, "Note two"]);
+  await w.message("Once more.");
+  await w.until(() => w.prompts.length === 4, "fourth turn");
+  assert.match(
+    w.prompts[3] ?? "",
+    /Issue brief:\n- Note one, edited\n- \n- --- Later note ---\n- \n/,
+  );
+  await turnDone(4);
+  // No change since: no diff.
+  await w.message("Last.");
+  await w.until(() => w.prompts.length === 5, "fifth turn");
+  assert.doesNotMatch(w.prompts[4] ?? "", /Changes \(/);
+});
+
+test("a specialist's prompt never carries the issue brief", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await w.comment(["## Agent Brief\nSecret plan for the lead"]);
+  w.unpause();
+  await w.service.provisionTask(w.taskId);
+  await w.until(() => w.prompts.length === 1, "lead turn");
+  assert.match(w.prompts[0] ?? "", /Secret plan for the lead/);
+  const lead = w.domain.assignment(w.lead());
+  w.domain.execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: w.projectId,
+    taskId: w.taskId,
+    assignmentId: randomUUID(),
+    profileId: String(lead.profileId),
+    brief: "Specialist brief",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  await w.settle();
+  w.end("turn-1");
+  await w.until(() => w.prompts.length === 2, "specialist turn");
+  assert.match(w.prompts[1] ?? "", /^Specialist brief/);
+  assert.doesNotMatch(w.prompts[1] ?? "", /Secret plan|Issue brief/);
 });
