@@ -3906,6 +3906,53 @@ async function hiddenRepositoryFixture(t: TestContext) {
   return { f, api, projectId, hidden, policy, save, visible };
 }
 
+test("a per-repository save carries the project-wide list to repositories the operator cannot see", async (t) => {
+  const { f, projectId, hidden, policy, save, visible } =
+    await hiddenRepositoryFixture(t);
+  const saved = () => f.service.delivery().configuration(projectId);
+  // A hidden linked repository without an entry gets one carrying the list the save empties.
+  policy([{ name: "legacy" }]);
+  await save([visible]);
+  assert.deepEqual(saved().requiredChecks, []);
+  assert.deepEqual(saved().repositories, [
+    visible,
+    { repositoryId: hidden, requiredChecks: [{ name: "legacy" }] },
+  ]);
+  // A hidden repository's saved entry is kept, with a project-wide list re-added since appended to it.
+  policy(
+    [{ name: "late" }],
+    [
+      visible,
+      {
+        repositoryId: hidden,
+        mergeMethod: "merge",
+        requiredChecks: [{ name: "own" }],
+      },
+    ],
+  );
+  await save([visible]);
+  assert.deepEqual(saved().repositories, [
+    visible,
+    {
+      repositoryId: hidden,
+      mergeMethod: "merge",
+      requiredChecks: [{ name: "own" }, { name: "late" }],
+    },
+  ]);
+  // A command cannot name a repository the operator cannot see.
+  const version = saved().version;
+  await assert.rejects(
+    save([{ repositoryId: hidden, requiredChecks: [] }]),
+    (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, 400);
+      assert.deepEqual(error.fieldPaths, ["repositories.0.repositoryId"]);
+      return true;
+    },
+  );
+  assert.equal(saved().version, version);
+});
+
 test("a retried command without per-repository settings replays on a project that has them", async (t) => {
   const { f, api, projectId, save, visible } = await hiddenRepositoryFixture(t);
   await save([visible]);

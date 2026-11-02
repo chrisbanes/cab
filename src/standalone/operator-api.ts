@@ -8704,14 +8704,37 @@ export class OperatorApi {
               }),
             };
           }),
-          // A repository the operator cannot see keeps its saved entry.
-          ...(current.repositories ?? []).filter(
-            (entry) =>
-              !this.disclosable(entry.repositoryId, excluded) &&
-              !c.repositories?.some(
-                (r) => r.repositoryId === entry.repositoryId,
-              ),
-          ),
+          // A repository the operator cannot see keeps its saved entry, and the project-wide list the
+          // save empties moves into it, so its gate is never weakened by a save it could not show.
+          ...[
+            ...new Set([
+              ...(current.repositories ?? []).map((e) => e.repositoryId),
+              ...domain
+                .repositoryLinks(c.projectId)
+                .links.map((link) => link.repositoryId),
+            ]),
+          ]
+            .filter(
+              (id) =>
+                !this.disclosable(id, excluded) &&
+                !c.repositories?.some((r) => r.repositoryId === id),
+            )
+            .flatMap((repositoryId) => {
+              const entry = current.repositories?.find(
+                (e) => e.repositoryId === repositoryId,
+              );
+              return entry || current.requiredChecks.length
+                ? [
+                    {
+                      ...(entry ?? { repositoryId }),
+                      requiredChecks: [
+                        ...(entry?.requiredChecks ?? []),
+                        ...current.requiredChecks,
+                      ],
+                    },
+                  ]
+                : [];
+            }),
         ]
       : [];
     if (
