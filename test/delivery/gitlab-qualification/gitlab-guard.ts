@@ -1,5 +1,13 @@
 import { isAbsolute } from "node:path";
 import { glabTokenVariables } from "../../../src/standalone/glab-credential.js";
+import {
+  GuardDenied,
+  GuardMechanics,
+  rateHeaders,
+  type RateLimitEvidence,
+} from "../qualification-guard-mechanics.js";
+
+export { GuardDenied };
 
 /** The only GitLab project a qualification run may write to, and the only host it may reach. */
 export const qualificationProject = {
@@ -22,12 +30,6 @@ const readyDocument =
   /^mutation\(\$projectPath: ID!, \$iid: String!\) \{ mergeRequestSetDraft\(input: \{ projectPath: \$projectPath, iid: \$iid, draft: false \}\) \{ errors \} \}$/;
 const sha = /^[0-9a-f]{40}$/;
 
-export class GuardDenied extends Error {
-  constructor(readonly reason: string) {
-    super(`guard-denied:${reason}`);
-  }
-}
-
 interface Created {
   id: number;
   iid: number;
@@ -43,28 +45,16 @@ interface Created {
 export class GitLabGuard {
   readonly branches = new Set<string>();
   readonly requests = new Map<number, Created>();
-  readonly log: Array<{ route: string; status: number | null }> = [];
+  readonly log: GuardMechanics["log"];
   /** Every request, push or fetch the guard refused; a clean run has none. */
-  readonly denied: string[] = [];
+  readonly denied: string[];
   /** Requests sent, by method and route shape, so a rate limit can be traced to what caused it. */
-  readonly counts: Record<string, number> = {};
-  /** Each 429 GitLab answered: the rate-limit headers it carried (names, and the wait it named) and its text. */
-  readonly rateLimited: Array<{
-    route: string;
-    /** Which request of the run this was, and when: seconds since the first, and requests in the minute before. */
-    request: number;
-    atSeconds: number;
-    lastMinute: number;
-    /** The rate-limit headers GitLab sent, name and value: the limit's name, its quota, what was observed and when it resets. */
-    headers: Record<string, string>;
-    retryAfter: string | null;
-    body: string;
-  }> = [];
-  private readonly sentAt: number[] = [];
-  private nextSlot = 0;
+  readonly counts: Record<string, number>;
+  /** Each 429 GitLab answered: the rate-limit headers it carried (name and value: the limit's name, its quota, what was observed and when it resets, and the wait it named) and its text. */
+  readonly rateLimited: RateLimitEvidence[];
+  private readonly mechanics: GuardMechanics;
   /** The one-shot write the request being checked would spend, released if GitLab answers 429. */
   private oneShot: "merge" | "discussion" | "commit" | null = null;
-  private writes = 0;
   private merges = 0;
   private setupDiscussions = 0;
   private setupCommits = 0;
@@ -72,14 +62,20 @@ export class GitLabGuard {
   private readonly mergeable = new Set<number>();
   /** `paceMs` is the least time between two requests, so the run's own rate stays well below GitLab's limits. */
   constructor(
-    private readonly limit = maxWrites,
-    private readonly paceMs = 0,
+    limit = maxWrites,
+    paceMs = 0,
     /** Writes kept for cleanup: a journey write that would leave fewer is refused, so retries cannot starve it. */
-    private readonly cleanupReserve = cleanupWrites,
-  ) {}
+    cleanupReserve = cleanupWrites,
+  ) {
+    this.mechanics = new GuardMechanics(limit, paceMs, cleanupReserve);
+    this.log = this.mechanics.log;
+    this.denied = this.mechanics.denied;
+    this.counts = this.mechanics.counts;
+    this.rateLimited = this.mechanics.rateLimited;
+  }
 
   get writeCount() {
-    return this.writes;
+    return this.mechanics.writeCount;
   }
   get mergeCount() {
     return this.merges;
@@ -95,8 +91,7 @@ export class GitLabGuard {
   }
 
   private deny(reason: string): never {
-    this.denied.push(reason);
-    throw new GuardDenied(reason);
+    return this.mechanics.deny(reason);
   }
   /** Whether a merge was sent and no definitive refusal proved it had no effect. */
   mergeMayBePending() {
@@ -113,14 +108,7 @@ export class GitLabGuard {
   private spend(route: string) {
     const cleanup =
       route === "PUT close merge_request" || route === "DELETE branch";
-    if (this.writes >= this.limit - (cleanup ? 0 : this.cleanupReserve))
-      this.deny("write-cap");
-    this.writes++;
-    this.log.push({ route, status: null });
-  }
-  private done(status: number) {
-    const last = this.log.at(-1);
-    if (last && last.status === null) last.status = status;
+    this.mechanics.spend(route, cleanup);
   }
 
   /** A fetch that reaches GitLab only as far as the run's scope allows. */
@@ -142,23 +130,21 @@ export class GitLabGuard {
       if (method === "GET") this.readAllowed(url);
       else this.writeAllowed(method, url, body);
       const oneShot = this.oneShot;
-      this.count(method, url);
-      this.sentAt.push(Date.now());
-      // Reserve the next slot before waiting, so concurrent requests are spaced too.
-      const slot = Math.max(Date.now(), this.nextSlot);
-      this.nextSlot = slot + this.paceMs;
-      if (slot > Date.now())
-        await new Promise((r) => setTimeout(r, slot - Date.now()));
+      await this.mechanics.admit(this.shape(method, url));
       const response = await next(input, init);
       if (response.status === 429) {
-        await this.noteRateLimit(method, url, response);
+        await this.mechanics.noteRateLimit(
+          this.shape(method, url),
+          response,
+          rateHeaders(response, /^(ratelimit|retry-after)/),
+        );
         // A request answered 429 was not processed: it may be sent again, though the write stays counted.
         if (oneShot === "merge") this.merges--;
         if (oneShot === "discussion") this.setupDiscussions--;
         if (oneShot === "commit") this.setupCommits--;
       }
       if (method !== "GET") {
-        this.done(response.status);
+        this.mechanics.settle(response.status);
         await this.record(method, url, response);
       }
       return response;
@@ -171,31 +157,6 @@ export class GitLabGuard {
       .replace(/\/[0-9]+(?=\/|$)/g, "/:n")
       .replace(/(?<=\/branches\/).+$/, ":branch")
       .replace(/(?<=\/discussions\/)[0-9a-f]+/, ":id")}`;
-  }
-  private count(method: string, url: URL) {
-    const key = this.shape(method, url);
-    this.counts[key] = (this.counts[key] ?? 0) + 1;
-  }
-  private async noteRateLimit(method: string, url: URL, response: Response) {
-    const now = Date.now();
-    this.rateLimited.push({
-      route: this.shape(method, url),
-      request: this.sentAt.length,
-      atSeconds: Math.round((now - (this.sentAt[0] ?? now)) / 1000),
-      lastMinute: this.sentAt.filter((t) => now - t <= 60_000).length,
-      headers: Object.fromEntries(
-        [...response.headers.entries()].filter(([name]) =>
-          /^(ratelimit|retry-after)/.test(name),
-        ),
-      ),
-      retryAfter: response.headers.get("retry-after"),
-      body: (
-        await response
-          .clone()
-          .text()
-          .catch(() => "")
-      ).slice(0, 4096),
-    });
   }
 
   private readAllowed(url: URL) {

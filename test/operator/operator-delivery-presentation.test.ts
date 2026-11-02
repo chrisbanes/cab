@@ -216,3 +216,76 @@ test("code-host actions are named for their host, and an absent host is GitHub",
   );
   assert.equal(codeHostActionLabel("issue.comment", "gitlab"), null);
 });
+
+import {
+  repositoryDeliveryLevel,
+  repositoryLevelGrants,
+} from "../../src/core/delivery-levels.js";
+import {
+  deliveryLevelLabels,
+  deliveryMergeWarning,
+} from "../../web/src/delivery-presentation.js";
+
+test("repository levels describe exact authority without crossing repository or tracker scopes", () => {
+  for (const level of [
+    "open-prs",
+    "merge-with-approval",
+    "merge-when-ready",
+  ] as const) {
+    const rows = repositoryLevelGrants("R", level);
+    assert.equal(repositoryDeliveryLevel(rows, "R"), level);
+    assert.equal(repositoryDeliveryLevel(rows, "42"), "not-set-up");
+    assert.equal(
+      repositoryDeliveryLevel(
+        [
+          ...rows,
+          { action: "branch.adopt", repositoryId: "R", mode: "approval" },
+        ],
+        "R",
+      ),
+      level,
+    );
+    assert.equal(repositoryDeliveryLevel(rows.slice(1), "R"), "custom");
+    for (const extra of [
+      { ...rows[0]!, mode: "approval" as const },
+      { ...rows[0]!, projectNodeId: "P" },
+    ]) {
+      assert.equal(
+        repositoryDeliveryLevel([extra, ...rows.slice(1)], "R"),
+        "custom",
+      );
+    }
+    for (const duplicate of [
+      [...rows, rows[0]!],
+      [rows[0]!, ...rows],
+    ])
+      assert.equal(repositoryDeliveryLevel(duplicate, "R"), "custom");
+    assert.equal(
+      repositoryDeliveryLevel(
+        [...rows, ...repositoryLevelGrants("42", "merge-when-ready")],
+        "42",
+      ),
+      "merge-when-ready",
+    );
+  }
+  assert.equal(repositoryDeliveryLevel([], "R"), "not-set-up");
+  assert.equal(
+    repositoryDeliveryLevel(
+      [{ action: "issue.comment", repositoryId: "R", mode: "allow" }],
+      "R",
+    ),
+    "not-set-up",
+  );
+  assert.equal(
+    repositoryDeliveryLevel(
+      [{ action: "branch.adopt", repositoryId: "R", mode: "approval" }],
+      "R",
+    ),
+    "custom",
+  );
+  assert.equal(deliveryLevelLabels["open-prs"], "Open PRs");
+  assert.equal(
+    deliveryMergeWarning,
+    "The lead will merge without asking once the merge gate reports no blockers. cab can't unmerge or revert a merge.",
+  );
+});

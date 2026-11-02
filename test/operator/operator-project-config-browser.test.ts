@@ -4658,6 +4658,105 @@ test("command network access is a switch with its disclosure that saves as a ver
   assert.equal(d.commandNetworkAccess(ids.atlas), false);
 });
 
+test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=general",
+  );
+  const d = f.service.domain();
+  const capture = page.getByRole("combobox", { name: "Diagnostic capture" });
+  const network = page.getByRole("switch", { name: "Command network access" });
+  await capture.waitFor();
+  // Shown after Command network access, in the same form.
+  assert.equal(
+    await network.evaluate(
+      (n, c) =>
+        Boolean(
+          n.compareDocumentPosition(c as Node) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      await capture.elementHandle(),
+    ),
+    true,
+  );
+  assert.equal(await capture.inputValue(), "enhanced");
+  await captureBrowserEvidence(page, "1366-project-diagnostic-capture");
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  assert.equal(await save.isDisabled(), true);
+
+  await capture.selectOption("baseline");
+  await changes(page)
+    .getByText("Diagnostic capture: Enhanced → Baseline")
+    .waitFor();
+  const version = Number(d.project(ids.atlas).version);
+  const sent = commandBody(page);
+  await save.click();
+  const body = await sent;
+  assert.equal(body.type, "project.configure");
+  assert.equal(body.diagnosticCapture, "baseline");
+  assert.equal(body.expectedVersion, version);
+  assert.equal("paused" in body, false);
+  assert.equal("commandNetworkAccess" in body, false);
+  await savedOutcome(page);
+  assert.equal(d.diagnosticCaptureMode(ids.atlas), "baseline");
+  assert.equal(await capture.inputValue(), "baseline");
+
+  await capture.selectOption("enhanced");
+  const back = commandBody(page);
+  await save.click();
+  assert.equal((await back).diagnosticCapture, "enhanced");
+  await savedOutcome(page);
+  assert.equal(d.diagnosticCaptureMode(ids.atlas), "enhanced");
+
+  // One Save carries both settings and nothing else; the Settings route reaches the same form.
+  await page.goto(
+    new URL(`/app/projects/${ids.atlas}/settings`, page.url()).href,
+  );
+  await capture.waitFor();
+  await capture.selectOption("baseline");
+  await network.click();
+  await changes(page)
+    .getByText("Diagnostic capture: Enhanced → Baseline")
+    .waitFor();
+  await changes(page).getByText("Command network access enabled").waitFor();
+  const both = commandBody(page);
+  await save.click();
+  const combined = await both;
+  assert.equal(combined.diagnosticCapture, "baseline");
+  assert.equal(combined.commandNetworkAccess, true);
+  assert.equal("paused" in combined, false);
+  await savedOutcome(page);
+  assert.equal(d.diagnosticCaptureMode(ids.atlas), "baseline");
+  assert.equal(d.commandNetworkAccess(ids.atlas), true);
+});
+
+test("an unreported diagnostic capture is shown as not reported, selects no mode and stays out of other saves", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  await page.route("**/configuration", async (route) => {
+    const response = await route.fetch();
+    const json = (await response.json()) as { data: Record<string, unknown> };
+    delete json.data.diagnosticCapture;
+    await route.fulfill({ response, json });
+  });
+  await page.reload();
+  await page.getByText("Not reported", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("combobox", { name: "Diagnostic capture" }).count(),
+    0,
+  );
+  await page.getByRole("switch", { name: "Pause project" }).click();
+  const sent = commandBody(page);
+  await page.getByRole("button", { name: "Save project", exact: true }).click();
+  const body = await sent;
+  assert.equal(body.paused, true);
+  assert.equal("diagnosticCapture" in body, false);
+  await savedOutcome(page);
+  assert.equal(f.service.domain().diagnosticCaptureMode(ids.atlas), "enhanced");
+});
+
 type SettingsFixture = Awaited<ReturnType<typeof startDiscovery>>["f"];
 const statusField = "PVTSSF_status";
 /** An `allow` project field grant for Atlas's Project Status, covering the named options. */

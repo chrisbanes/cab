@@ -42,6 +42,43 @@ startup and imports; new files use the selected profile's median fallback. The r
 `check` context aggregates static checks and all applicable test jobs, including
 their failure evidence uploads. Superseded PR runs are cancelled.
 
+To report CI failure history locally, authenticate `gh` and run:
+
+```sh
+node scripts/report-ci-failures.mjs --since 2026-11-02 --until 2026-11-03 --top 5
+```
+
+The report is JSON on stdout. Dates are inclusive UTC calendar dates: `--since`
+must be before `--until`, and the window may span at most 31 days. `--top` is
+between 1 and 100. The example spans two days and cannot qualify the 14-day
+target. The command uses authenticated read-only GitHub API requests; it does not
+print raw logs, schedule work or write to GitHub.
+
+The denominator counts distinct completed `main` push CI run IDs with a success
+or failure conclusion. All attempts are inspected, so a failed attempt remains
+visible after a later pass. Failures on other branches and events are reported
+separately. A later successful run on the same SHA, or a chronologically verified
+later attempt, is corroboration rather than a cause; the comparison stops at the
+`--until` horizon.
+
+The exact `the pinned SDK is the qualified version` failure is excluded only
+when PR metadata positively verifies an applicable Renovate Claude SDK version
+bump and the owning job's step evidence supports excluding that failure. Missing
+metadata, including an unverifiable old PR head, leaves the failure unclassified.
+An aggregate `check` failure is accounted for only when its steps and log match
+complete evidence for the known workflow dependencies. Missing or expired logs,
+cancelled, timed-out or unsupported outcomes, and capped or incomplete history
+remain explicit coverage gaps.
+
+The lower rate bound is confirmed unrelated failures divided by the denominator;
+confirmed unrelated defaults to zero without positive causal evidence. The upper
+bound counts the union of potentially failing and incomplete eligible run IDs
+once. Only a complete, elapsed 14-calendar-day UTC window with an upper bound at
+or below 1 in 20 establishes that the target is met. A lower bound above 1 in 20
+establishes that it is not met; otherwise the evidence is insufficient. A current
+or future window is incomplete at the report's `asOf` time and cannot establish
+that the target is met.
+
 Pull requests that change only Markdown at the repository root or under `docs/`
 skip the build and tests, and `check` passes on the skipped jobs. Changes to
 `docs/design/`, `docs/evidence/` and `docs/operations/`, which tests read, run all

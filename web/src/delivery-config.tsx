@@ -1,7 +1,11 @@
-import { useId, type ReactNode } from "react";
+import { useId, useState, useRef, useEffect, type ReactNode } from "react";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
+  applyRepositoryDeliveryLevel,
+  deliveryLevelView,
+  type DeliveryPolicyDraft,
+  type RepositoryDeliveryLevel,
   deliveryActionKinds,
   deliveryEditorValues,
   deliveryEditorDraft,
@@ -22,6 +26,7 @@ import {
   locked,
   reloadDraft,
   submitDraft,
+  sendDraft,
   useDraft,
   useLoadedDraft,
   key,
@@ -31,10 +36,67 @@ import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import { Alert } from "./ui/alert.js";
 
+import {
+  deliveryLevelLabels,
+  deliveryMergeWarning,
+} from "./delivery-presentation.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "./ui/dialog.js";
+type Preset = Exclude<RepositoryDeliveryLevel, "not-set-up" | "custom">;
+const presets: Preset[] = [
+  "open-prs",
+  "merge-with-approval",
+  "merge-when-ready",
+];
+
 /** Structured policy editing uses the same receipt, draft and authentication lifecycle as Settings. */
 export function DeliveryTab(p: TabProps) {
   const d = useDraft(p.drafts, `delivery.configure:${p.projectId}`);
+  const form = useRef<HTMLFormElement>(null);
+  const origin = useRef<HTMLElement | null>(null);
+  const [bulk, setBulk] = useState("");
+  const [levelError, setLevelError] = useState("");
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [pending, setPending] = useState<{
+    base: string;
+    draft: DeliveryPolicyDraft;
+    ids: string[];
+    save: boolean;
+  } | null>(null);
   const saved = p.data.delivery;
+  const context = JSON.stringify([
+    p.projectId,
+    saved?.version,
+    p.data.repositories,
+  ]);
+  const fingerprint = (value: DeliveryPolicyDraft) =>
+    JSON.stringify([
+      context,
+      d.values.key,
+      value.version,
+      value.mode,
+      value.grants,
+    ]);
+  const currentFingerprint = saved
+    ? fingerprint(deliveryEditorDraft(d.values))
+    : "";
+  useEffect(() => {
+    if (confirmed !== currentFingerprint) setConfirmed(null);
+    if (pending && pending.base !== currentFingerprint) setPending(null);
+  }, [currentFingerprint, confirmed, pending]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a refused level choice is stale once the draft changes.
+  useEffect(() => setLevelError(""), [currentFingerprint]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: confirmation never survives a session or project change.
+  useEffect(() => {
+    setConfirmed(null);
+    setPending(null);
+    setBulk("");
+    setLevelError("");
+  }, [p.session, p.projectId]);
   const initial = saved ? deliveryEditorValues(saved) : null;
   useLoadedDraft(d, initial, p.loadedAt, saved);
   if (!saved || !initial)
@@ -111,29 +173,133 @@ export function DeliveryTab(p: TabProps) {
           JSON.stringify(row.savedRow) === JSON.stringify(g.savedRow),
       ),
   );
+  const links = p.data.repositories.links;
+  const apply = (next: DeliveryPolicyDraft) => {
+    d.set(
+      "grants",
+      JSON.stringify(
+        next.grants.map((row, i) => ({ ...row, rowKey: next.grantKeys[i] })),
+      ),
+    );
+    d.set("mode", next.mode);
+  };
+  const command = (value: DeliveryPolicyDraft) => ({
+    type: "delivery.configure",
+    key: v.key,
+    projectId: p.projectId,
+    expectedVersion: value.version,
+    ...deliveryPolicySubmission(value),
+  });
+  const upward = (
+    before: DeliveryPolicyDraft | typeof saved,
+    next: DeliveryPolicyDraft,
+  ) =>
+    [
+      ...new Set(
+        next.grants.flatMap((row) =>
+          "savedRow" in row ? [] : [row.repositoryId],
+        ),
+      ),
+    ].filter(
+      (id) =>
+        deliveryLevelView(next.grants, id) === "merge-when-ready" &&
+        deliveryLevelView(before.grants, id) !== "merge-when-ready",
+    );
+  const choose = (ids: (string | null)[], level: Preset, returnId: string) => {
+    if (isLocked) return;
+    const result = applyRepositoryDeliveryLevel(draft, ids, level);
+    if (result.kind !== "applied") {
+      setLevelError(result.message);
+      return;
+    }
+    setLevelError("");
+    const raised = upward(draft, result.draft);
+    if (raised.length) {
+      origin.current = document.getElementById(returnId);
+      setPending({
+        base: currentFingerprint,
+        draft: result.draft,
+        ids: raised,
+        save: false,
+      });
+    } else apply(result.draft);
+  };
   return (
     <form
+      ref={form}
       onSubmit={(event) => {
         const errors = deliveryFieldErrors(draft);
+        const ids = upward(saved, draft);
+        if (
+          !isLocked &&
+          !Object.keys(errors).length &&
+          ids.length &&
+          confirmed !== currentFingerprint
+        ) {
+          event.preventDefault();
+          origin.current = document.activeElement as HTMLElement;
+          setPending({ base: currentFingerprint, draft, ids, save: true });
+          return;
+        }
         void submitDraft(
           event,
           d,
           p.client,
           p.session,
-          Object.keys(errors).length
-            ? {}
-            : {
-                type: "delivery.configure",
-                key: v.key,
-                projectId: p.projectId,
-                expectedVersion: Number(v.expectedVersion),
-                ...deliveryPolicySubmission(draft),
-              },
+          Object.keys(errors).length ? {} : command(draft),
           p.refreshConfiguration,
           errors,
         );
       }}
     >
+      <Dialog
+        open={Boolean(
+          pending && pending.base === currentFingerprint && !isLocked,
+        )}
+        onOpenChange={(open) => {
+          if (!open) setPending(null);
+        }}
+      >
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            origin.current?.focus();
+          }}
+        >
+          <DialogTitle>Allow merging without asking?</DialogTitle>
+          <DialogDescription>{deliveryMergeWarning}</DialogDescription>
+          <p>{pending?.ids.join(", ")}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setPending(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              if (!pending || pending.base !== currentFingerprint || isLocked)
+                return;
+              setConfirmed(fingerprint(pending.draft));
+              setPending(null);
+              if (pending.save && form.current)
+                void sendDraft(
+                  form.current,
+                  d,
+                  p.client,
+                  p.session,
+                  command(pending.draft),
+                  p.refreshConfiguration,
+                  deliveryFieldErrors(pending.draft),
+                );
+              else apply(pending.draft);
+            }}
+          >
+            Allow Merge when ready
+          </Button>
+        </DialogContent>
+      </Dialog>
       <div className="settings-split">
         <div className="settings-column">
           <Panel
@@ -175,6 +341,113 @@ export function DeliveryTab(p: TabProps) {
               Saved references and values are never shown.
             </p>
             <ReferenceInput draft={d} />
+          </Panel>
+          <Panel
+            title="Repository shepherd levels"
+            description="Levels describe the current grants. Linking a repository grants nothing. Advanced completion mode still applies."
+          >
+            <fieldset disabled={isLocked} className="settings-rows">
+              <legend className="sr-only">Repository shepherd levels</legend>
+              {links.map((link, i) => {
+                const level = deliveryLevelView(
+                  draft.grants,
+                  link.repositoryId,
+                );
+                return (
+                  <section
+                    key={link.repositoryId ?? i}
+                    className="settings-row"
+                    aria-label={`Repository ${link.repositoryId ?? "unavailable"}`}
+                  >
+                    <h3 className="small-heading">
+                      {link.repositoryId ?? "Unavailable repository"}
+                    </h3>
+                    <p>{deliveryLevelLabels[level]}</p>
+                    {level === "merge-when-ready" &&
+                      draft.mode !== "through-merge" && (
+                        <p>
+                          Completion mode is Reviewable PR, so the lead stops at
+                          a reviewable pull request.
+                        </p>
+                      )}
+                    {level === "not-set-up" && (
+                      <p>This linked repository has no code-host grants.</p>
+                    )}
+                    {level === "unavailable" && (
+                      <p>
+                        Complete repository and grant details are required to
+                        choose a level.
+                      </p>
+                    )}
+                    <Field
+                      id={`shepherd-level-${i}`}
+                      disabled={level === "unavailable"}
+                      label={`Shepherd level for ${link.repositoryId ?? "unavailable"}`}
+                      value={presets.includes(level as Preset) ? level : ""}
+                      onChange={(value) =>
+                        choose(
+                          [link.repositoryId],
+                          value as Preset,
+                          `shepherd-level-${i}`,
+                        )
+                      }
+                    >
+                      <option value="" disabled>
+                        Choose a level
+                      </option>
+                      {presets.map((preset) => (
+                        <option
+                          key={preset}
+                          value={preset}
+                          disabled={level === "unavailable"}
+                        >
+                          {deliveryLevelLabels[preset]}
+                        </option>
+                      ))}
+                    </Field>
+                  </section>
+                );
+              })}
+              {!links.length && <p>No linked repositories.</p>}
+              <Field
+                label="Level for all linked repositories"
+                value={bulk}
+                onChange={setBulk}
+              >
+                <option value="" disabled>
+                  Choose a level
+                </option>
+                {presets.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {deliveryLevelLabels[preset]}
+                  </option>
+                ))}
+              </Field>
+              <Button
+                id="shepherd-bulk"
+                type="button"
+                variant="secondary"
+                disabled={
+                  !bulk ||
+                  !links.length ||
+                  links.some(
+                    (link) =>
+                      deliveryLevelView(draft.grants, link.repositoryId) ===
+                      "unavailable",
+                  )
+                }
+                onClick={() =>
+                  choose(
+                    links.map((link) => link.repositoryId),
+                    bulk as Preset,
+                    "shepherd-bulk",
+                  )
+                }
+              >
+                Apply to all linked repositories
+              </Button>
+              {levelError && <Alert role="alert">{levelError}</Alert>}
+            </fieldset>
           </Panel>
           <Panel
             title="Authority grants"
@@ -416,6 +689,7 @@ function Field({
   error,
   children,
   multiline = false,
+  disabled = false,
 }: {
   id?: string | undefined;
   label: string;
@@ -424,6 +698,7 @@ function Field({
   error?: string | undefined;
   children?: ReactNode;
   multiline?: boolean;
+  disabled?: boolean;
 }) {
   const generated = useId(),
     id = suppliedId ?? generated;
@@ -431,6 +706,7 @@ function Field({
     id,
     "aria-label": label,
     value,
+    disabled,
     "aria-invalid": Boolean(error),
     "aria-describedby": error ? `${id}-error` : undefined,
     onChange: (event: { target: { value: string } }) =>

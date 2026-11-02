@@ -943,6 +943,12 @@ filesystem. Pruning deletes payload items only and keeps per-execution gap
 counts. There is no manual purge, and older snapshots keep any payloads they
 held until those snapshots are deleted.
 
+A project's diagnostic capture (`enhanced` or `baseline`) is edited in the web
+operator UI under the project's Settings, General tab, next to Command network
+access, or with `project prepare --diagnostic-capture`. A change applies to
+executions started afterwards and erases no stored diagnostics. A service that
+does not report the mode shows it as not reported, and the control is absent.
+
 ## Startup snapshot
 
 Whenever the service starts against an existing database with migrations pending, it
@@ -1191,6 +1197,14 @@ log paths separate, absolute and lexically canonical, with every existing path
 component a real directory (not a symlink), and private to the operator.
 `npm run operations` and `npm run operator-auth` remain available and behave as
 before.
+
+### Delivery configuration
+
+Open project Settings → Delivery to set a linked repository's shepherd level. Open PRs lets the lead push, open and ready PRs, fix CI, and reply to and resolve review threads; the operator merges. Force-push requires approval. Merge with my approval additionally permits requesting an operator-approved merge. Merge when ready permits merging once the existing merge gate reports no blockers. cab asks before granting that level and cannot unmerge or revert a merge. Lowering a level needs no escalation confirmation.
+
+Levels are derived from the advanced grant draft. Not set up means no code-host grants; Custom means the grants do not match a preset. Unavailable facts are labelled explicitly. Linking a repository grants nothing. Choose a target before Apply to all linked repositories; the action edits one draft and Save delivery persists it. Presets preserve tracker grants, branch adoption, other repositories, required checks, credential intent and prefix. They set project completion mode to through-merge when any recognized repository grant set is at a merge level, including unlinked scopes; otherwise reviewable-pr. Advanced completion mode remains editable. Presets require public grant identities and bulk changes require a complete saved repository snapshot. An oversized proposal leaves the draft intact.
+
+Cancel leaves the proposal unchanged; Discard restores the loaded draft. Confirmation expires when its authority or context changes, including advanced grant edits and policy or repository revisions. Advanced edits newly reaching Merge when ready also require the warning before Save. For an unknown save, use Check whether it saved: cab retains the original bytes and request identity, checks its receipt first and does not ask for a second confirmation during reconciliation.
 
 ### Build and authenticate from a checkout
 

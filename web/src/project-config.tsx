@@ -25,6 +25,9 @@ import {
   type Values,
 } from "./settings-changes.js";
 import {
+  diagnosticCaptureAppliesNote,
+  diagnosticCaptureLabels,
+  diagnosticCaptureLine,
   plural,
   projectStateSummary,
   projectTab,
@@ -326,6 +329,9 @@ function GeneralTab(p: TabProps) {
     ...(data.commandNetworkAccess === undefined
       ? {}
       : { commandNetworkAccess: data.commandNetworkAccess }),
+    ...(data.diagnosticCapture === undefined
+      ? {}
+      : { diagnosticCapture: data.diagnosticCapture }),
     expectedVersion: String(data.project.version),
   };
   useLoadedDraft(d, initial, p.loadedAt);
@@ -369,6 +375,10 @@ function GeneralTab(p: TabProps) {
     ...(data.commandNetworkAccess !== undefined &&
     Boolean(v.commandNetworkAccess) !== data.commandNetworkAccess
       ? { commandNetworkAccess: Boolean(v.commandNetworkAccess) }
+      : {}),
+    ...(data.diagnosticCapture !== undefined &&
+    v.diagnosticCapture !== data.diagnosticCapture
+      ? { diagnosticCapture: v.diagnosticCapture }
       : {}),
     ...privateField("instructions", v.instructions, revealed),
   });
@@ -426,6 +436,28 @@ function GeneralTab(p: TabProps) {
                 </p>
               </>
             )}
+            {data.diagnosticCapture === undefined ? (
+              // No control: nothing may look selected when the service does not report a mode.
+              <p className="body">
+                Diagnostic capture: <strong>Not reported</strong>
+              </p>
+            ) : (
+              <DraftField
+                draft={d}
+                field="diagnosticCapture"
+                label="Diagnostic capture"
+              >
+                {Object.entries(diagnosticCaptureLabels).map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </DraftField>
+            )}
+            <p className="metadata muted">
+              {diagnosticCaptureLine(data.diagnosticCapture)}
+              {data.diagnosticCapture && ` ${diagnosticCaptureAppliesNote}`}
+            </p>
             <PrivateTextField
               draft={d}
               field="instructions"

@@ -157,3 +157,14 @@ export const deliveryActionLine = (a: {
   operationId: string;
 }) =>
   `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${a.kind}: ${a.state} · ${(a.caller === "service" ? statusMappingActionNote(a.reason) : null) ?? (a.reason && mergeTrainNotes.get(a.reason)) ?? a.reason ?? "receipt recorded"} · operation ${a.operationId}`;
+
+export const deliveryLevelLabels = {
+  "not-set-up": "Not set up",
+  custom: "Custom",
+  "open-prs": "Open PRs",
+  "merge-with-approval": "Merge with my approval",
+  "merge-when-ready": "Merge when ready",
+  unavailable: "Delivery level unavailable",
+};
+export const deliveryMergeWarning =
+  "The lead will merge without asking once the merge gate reports no blockers. cab can't unmerge or revert a merge.";

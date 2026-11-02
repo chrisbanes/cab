@@ -52,6 +52,7 @@ import {
   type OperatorDeliveryCaller,
   type RuntimeDeliveryCaller,
 } from "../core/delivery.js";
+import { leadDeliveryGuidance } from "../core/delivery-guidance.js";
 import {
   type CapacityConfigureCommand,
   type CapacityLimits,
@@ -7220,6 +7221,7 @@ export class StandaloneService {
       projectId,
       binding.instructionsRevision,
     );
+    const deliveryPolicy = this.delivery().publicConfiguration(projectId);
     const roleContext = leadBinding
       ? "Assignment role: project lead. You are accountable for coordinating this task, reviewing its results, and deciding whether to request completion."
       : "Assignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through cab.";
@@ -7237,7 +7239,7 @@ export class StandaloneService {
         .map((id) => domain.profile(id))
         .filter((p) => !p.revoked)
         .map((p) => ({ id: p.id, name: p.name, summary: p.summary })),
-      deliveryPolicy: this.delivery().publicConfiguration(projectId),
+      deliveryPolicy,
     });
     const capture = (() => {
       try {
@@ -7269,7 +7271,16 @@ export class StandaloneService {
         : []),
       {
         name: "role",
-        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools.`,
+        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools.${
+          leadBinding
+            ? `\n${leadDeliveryGuidance(
+                deliveryPolicy,
+                domain
+                  .repositoryLinks(projectId)
+                  .links.map((link) => link.repositoryId),
+              )}`
+            : ""
+        }`,
       },
       {
         name: "review-references",

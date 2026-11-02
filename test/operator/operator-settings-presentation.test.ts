@@ -4,7 +4,11 @@ import {
   commandNetworkDisclosure,
   projectCommandNetworkLine,
 } from "../../src/operator/command-network-copy.js";
-import { sourceCredentialCopy } from "../../web/src/settings-view.js";
+import {
+  diagnosticCaptureAppliesNote,
+  diagnosticCaptureLine,
+  sourceCredentialCopy,
+} from "../../web/src/settings-view.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -162,6 +166,20 @@ test("project and profile change lists name each change without private values",
   assert.deepEqual(network(false, true), ["Command network access enabled"]);
   assert.deepEqual(network(true, false), ["Command network access disabled"]);
   assert.deepEqual(network(true, true), []);
+  // Diagnostic capture lists the change in both directions, and nothing for a mode the service did not report.
+  const capture = (saved: "enhanced" | "baseline" | undefined, next: string) =>
+    projectChanges(
+      { ...c, ...(saved ? { diagnosticCapture: saved } : {}) },
+      { name: "Atlas", leadProfileId: mira, diagnosticCapture: next },
+    );
+  assert.deepEqual(capture("enhanced", "baseline"), [
+    "Diagnostic capture: Enhanced → Baseline",
+  ]);
+  assert.deepEqual(capture("baseline", "enhanced"), [
+    "Diagnostic capture: Baseline → Enhanced",
+  ]);
+  assert.deepEqual(capture("baseline", "baseline"), []);
+  assert.deepEqual(capture(undefined, "baseline"), []);
   // An unedited reveal adds no line and no command field, and the text is never a line.
   const base = { name: "Atlas", leadProfileId: mira, paused: false };
   assert.deepEqual(projectChanges(c, base, "PRIVATE"), []);
@@ -1437,6 +1455,25 @@ test("command network access reads the saved setting, what applies and what it e
   assert.equal(
     commandNetworkDisclosure,
     "Network-enabled commands can reach whatever credentials and logins the host exposes.",
+  );
+});
+
+test("diagnostic capture reads the saved mode, when a change applies and that stored diagnostics stay", () => {
+  assert.equal(
+    diagnosticCaptureLine("enhanced"),
+    "Diagnostic capture is enhanced for this project.",
+  );
+  assert.equal(
+    diagnosticCaptureLine("baseline"),
+    "Diagnostic capture is baseline for this project.",
+  );
+  assert.equal(
+    diagnosticCaptureLine(undefined),
+    "The service does not report this project's mode, so it cannot be changed here.",
+  );
+  assert.equal(
+    diagnosticCaptureAppliesNote,
+    "A change applies to executions started afterwards and erases no stored diagnostics.",
   );
 });
 
