@@ -567,8 +567,37 @@ again once on the same thread, so the next start resumes it without a hold and
 without using retries. Anything it could not see end keeps the hold described under
 recovery, as does a crash or kill. That includes a runtime that stays silent and a
 turn so new that App Server still refuses the interrupt ("no active turn to
-interrupt"). Drafting runs and direct `run` turns keep that hold too. The wait
-plus runtime stop stays under launchd's default 20-second exit timeout.
+interrupt"). Drafting runs and direct `run` turns keep that hold too. So, for now,
+does the requeued turn of a task imported from a source, which still holds after the
+restart with `task-revision-changed`
+([#1454](https://github.com/chrisbanes/cab/issues/1454)). The wait plus runtime
+stop stays under launchd's default 20-second exit timeout.
+
+Runtime and probe children own isolated process groups with piped stdio; cab keeps
+handles and awaits exit. Ctrl-C cannot directly fan out to those children before
+cab's protocol interrupt. This is not descendant containment, and repeated signals
+are not a guarantee of clean drain. Awaiting exit applies only when cab drains in
+an orderly way. launchd kills a dead job's process group, and these children are
+not in it. So after a service crash, or launchd's SIGKILL at the 20-second exit
+timeout, Codex App Server and Claude Code processes can keep running without cab.
+Their turns stay held, and `cab recovery get` shows the bound-turn path blocked by
+`termination-live`. End each exact process it reports (PID and start time, never a
+name match) and confirm it has exited before bound-turn recovery.
+
+For a held bound turn, use `cab recovery get ASSIGNMENT_ID`, then
+`cab recovery prepare bound-turn-recover ASSIGNMENT_ID --work WORK_ID --out FILE
+--evidence-file EVIDENCE_FILE` and `cab recovery submit --file FILE`. The evidence
+file's `receipt` asserts `termination: {"kind":"process-exit"}`, `effects: "settled"`
+and `workspace: "preserved"` or `"reconciled"`. The read supplies the exact generation,
+thread, turn and runtime process identity; the service independently verifies exit.
+Settings → Runtime lists assignment recovery destinations; task detail's Recovery
+link and retained `/runtime/assignment/:id` expose the same reviewable operation.
+Review the exact identity and permanent effect before confirming; Cancel records
+nothing. On refusal or lost reply keep the original evidence/key, check the original
+operation receipt, then retry only that exact command if no receipt is recorded.
+Reconciliation cannot be undone and starts no work. Task Stop, project pause,
+approvals and delivery holds remain; inspect and resolve each deliberately before
+an explicit continuation. Never infer termination from silence or an interrupt ack.
 
 Restart state lives in memory, so a service restart starts afresh. The "next at"
 time is the service's local time on the `/runtime` page and the browser's or

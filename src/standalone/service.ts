@@ -241,6 +241,8 @@ import {
 } from "./power.js";
 import {
   ArchivedResumeRejectedError,
+  type BoundTurnRecoveryCommand,
+  boundTurnRecoveryCommandSchema,
   type HistoricalNoTurnAdoption,
   type HistoricalPreTurnAdoption,
   type NoTurnRecoveryCommand,
@@ -249,6 +251,7 @@ import {
   preTurnRecoveryCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import type {
   RecoveryReceipt,
   RecoveryRecord,
@@ -676,18 +679,26 @@ function harnessForWork(
   return state.workHarness(workId);
 }
 
+/** The writer and successors whose ownership a terminal conflict or survivor retracts. */
+function retractableIds(state: ExecutionState, writer: ExecutionIntent) {
+  return state
+    .writerAndSuccessors(writer.workId)
+    .filter(
+      (item) =>
+        item.state === "completed" ||
+        item.state === "submitting" ||
+        item.state === "running",
+    )
+    .map((item) => item.id);
+}
+
 function retractWriterAndSuccessors(
   state: ExecutionState,
   writer: ExecutionIntent,
   reason: string,
 ): void {
-  for (const item of state.writerAndSuccessors(writer.workId))
-    if (
-      item.state === "completed" ||
-      item.state === "submitting" ||
-      item.state === "running"
-    )
-      state.holdTerminalConflict(item.id, reason);
+  for (const id of retractableIds(state, writer))
+    state.holdTerminalConflict(id, reason);
 }
 
 /**
@@ -806,6 +817,14 @@ export class StandaloneService {
   private readonly nativeWaiters = new Map<
     string,
     { workId: string; interactionId: string; resolve: () => void }
+  >();
+  private readonly boundRecoveryRequests = new Map<
+    string,
+    {
+      material: string;
+      generation: ExecutionState;
+      result: Promise<{ id: string; workId: string; state: "reconciled" }>;
+    }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
   /** Drafting commands in flight, by key. */
@@ -1556,7 +1575,11 @@ export class StandaloneService {
               ),
           };
         },
-        this.options.supervisor,
+        {
+          ...this.options.supervisor,
+          hasPendingCallbacks: (workId) =>
+            (this.callbacks.get(workId)?.size ?? 0) > 0,
+        },
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
       acquire("supervisor", supervisor);
@@ -3084,6 +3107,50 @@ export class StandaloneService {
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
     return this.started().supervisor.resolveHeldExecution(receipt);
+  }
+  boundTurnRecoveryEligibility(workId: string, assignmentId: string) {
+    return this.started().supervisor.boundTurnRecoveryEligibility(
+      workId,
+      assignmentId,
+    );
+  }
+  recoverBoundTurnExecution(command: BoundTurnRecoveryCommand) {
+    const value = boundTurnRecoveryCommandSchema.parse(command);
+    const { state, supervisor } = this.started();
+    const replay = state.preTurnCommandReplay("recover-bound-turn", value);
+    if (replay)
+      return Promise.resolve(
+        z
+          .object({
+            id: z.string().uuid(),
+            workId: z.string().min(1),
+            state: z.literal("reconciled"),
+          })
+          .strict()
+          .parse(replay),
+      );
+    const material = canonicalMaterial(value);
+    const pending = this.boundRecoveryRequests.get(value.key);
+    if (pending) {
+      if (pending.material !== material || pending.generation !== state)
+        throw new RecoveryRejectedError(
+          "Recovery command key is already pending with different material or service generation",
+        );
+      return pending.result;
+    }
+    const result: Promise<{ id: string; workId: string; state: "reconciled" }> =
+      Promise.resolve()
+        .then(() => supervisor.resolveHeldExecution(value.receipt, value))
+        .finally(() => {
+          if (this.boundRecoveryRequests.get(value.key)?.result === result)
+            this.boundRecoveryRequests.delete(value.key);
+        });
+    this.boundRecoveryRequests.set(value.key, {
+      material,
+      generation: state,
+      result,
+    });
+    return result;
   }
   adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption) {
     return this.started().state.adoptHistoricalPreTurnRejection(command);
@@ -5047,26 +5114,25 @@ export class StandaloneService {
     if (!intent || intent.state === "ready")
       throw new Error("No active execution to hold");
     const holdReason = `Known unfinished execution: ${reason}`;
+    // Refuses recovery in this process before any write; the durable marker and holds
+    // then commit together, and only then is the evidence recorded.
     supervisor.noteSurvivor(workId);
-    if (
-      intent.state === "reconciled" &&
-      coordination.recoveryDispositionForWork(workId) === "operator-reconciled"
-    ) {
-      state.holdReconciledContinuationSurvivor(workId, holdReason);
-    }
-    retractWriterAndSuccessors(state, intent, holdReason);
+    state.holdKnownSurvivor({
+      workId,
+      reason: holdReason,
+      reconciledContinuation:
+        intent.state === "reconciled" &&
+        coordination.recoveryDispositionForWork(workId) ===
+          "operator-reconciled",
+      holdIds: retractableIds(state, intent),
+    });
+    supervisor.recordSurvivorEvidence(workId);
   }
 
   registerExecutionCallback(workId: string, callback: Promise<unknown>): void {
     const { state: executions, coordination } = this.started();
     const state = executions.byWorkId(workId)?.state;
-    if (
-      state === "completed" ||
-      (state === "reconciled" &&
-        coordination.recoveryDispositionForWork(workId) ===
-          "operator-reconciled")
-    )
-      this.holdKnownSurvivor(workId, "late cab callback");
+    // Tracked first: a failed hold write must not leave the callback unseen.
     const set = this.callbacks.get(workId) ?? new Set<Promise<unknown>>();
     set.add(callback);
     this.callbacks.set(workId, set);
@@ -5076,6 +5142,13 @@ export class StandaloneService {
         if (set.size === 0) this.callbacks.delete(workId);
       })
       .catch(() => {});
+    if (
+      state === "completed" ||
+      (state === "reconciled" &&
+        coordination.recoveryDispositionForWork(workId) ===
+          "operator-reconciled")
+    )
+      this.holdKnownSurvivor(workId, "late cab callback");
   }
 
   private handleUserInputRequest(

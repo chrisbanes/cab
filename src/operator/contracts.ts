@@ -69,6 +69,8 @@ import {
   taskReviewReadSchema,
 } from "../core/task-review-contracts.js";
 import {
+  boundTurnRecoveryBodySchema,
+  boundTurnRecoveryBlockers,
   historicalNoTurnAdoptionBodySchema,
   historicalPreTurnAdoptionBodySchema,
   noTurnRecoveryBodySchema,
@@ -3041,6 +3043,13 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...base,
+      type: z.literal("recovery.bound-turn.recover"),
+      ...boundTurnRecoveryBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
       type: z.literal("recovery.conversation.replace"),
       ...replaceConversationBodySchema.shape,
     })
@@ -3268,6 +3277,7 @@ export const recoveryObservationSchema = z.enum([
   "conflicting",
   "no-proof",
   "unknown",
+  "known-survivor",
   "termination-verified",
   "termination-conflict",
   "termination-unknown",
@@ -3307,7 +3317,9 @@ const assignmentRecoveryRecordSchema = z
       .enum(["queued", "active", "completed", "held", "unknown"])
       .nullable(),
     holds: recoveryHolds,
-    observations: z.array(recoveryObservationSchema).max(12),
+    observations: z
+      .array(recoveryObservationSchema)
+      .max(recoveryObservationSchema.options.length),
     pendingEffectCount: time,
     noTurnSubmission: z
       .object({
@@ -3345,6 +3357,7 @@ export const assignmentRecoverySchema = envelope(
 );
 /** Closed reasons a recovery path is not currently eligible; advisory, the service decides. */
 export const recoveryBlockerSchema = z.enum([
+  ...boundTurnRecoveryBlockers,
   "not-held",
   "ownership-released",
   "context-unavailable",
@@ -3396,7 +3409,9 @@ export const recoveryOptionsSchema = envelope(
               intentState: assignmentRecoveryRecordSchema.shape.intentState,
               requestState: assignmentRecoveryRecordSchema.shape.requestState,
               holds: recoveryHolds,
-              observations: z.array(recoveryObservationSchema).max(12),
+              observations: z
+                .array(recoveryObservationSchema)
+                .max(recoveryObservationSchema.options.length),
               process: z
                 .object({
                   processId: boundedText,
@@ -3405,6 +3420,8 @@ export const recoveryOptionsSchema = envelope(
                 })
                 .strict()
                 .nullable(),
+              threadId: boundedText.nullable(),
+              turnId: boundedText.nullable(),
               retainedReason: boundedText.nullable(),
               writerSequence: revision.nullable(),
               conversationRevision: revision.nullable(),
@@ -3436,7 +3453,7 @@ export const recoveryOptionsSchema = envelope(
                     })
                     .strict(),
                 )
-                .max(4),
+                .max(5),
             })
             .strict(),
         )
@@ -4111,7 +4128,11 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       kind: z.literal("recovery-resolution"),
       key: uuid,
       recorded: z.literal(true),
-      path: z.enum(["pre-turn-recover", "no-turn-recover"]),
+      path: z.enum([
+        "pre-turn-recover",
+        "no-turn-recover",
+        "bound-turn-recover",
+      ]),
       assignmentId: uuid,
       workId: z.string().min(1).max(512),
       receiptId: uuid,
@@ -4725,6 +4746,7 @@ export const operationTypeSchema = z.enum([
   "recovery.pre-turn.recover",
   "recovery.no-turn.adopt",
   "recovery.no-turn.recover",
+  "recovery.bound-turn.recover",
   "recovery.conversation.replace",
 ]);
 /** `project:<id>`, `profile:<id>`, `assignment:<id>`, `system:capacity` or `system:runtime:<harness>`; nothing else is a readable scope. */

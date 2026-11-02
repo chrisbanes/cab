@@ -131,13 +131,23 @@ directories with a live, missing or unreadable owner are kept. Test evidence
 outlives the run only when `CAB_TEST_EVIDENCE_DIR` is set, as in CI. Harnesses run
 directly (the `*:live` commands) and `node --test` invocations bypass the runner and
 manage their own temp directories. The per-run override applies to POSIX `TMPDIR`
-only.
+only. A direct `node --test` of a suite that starts a service, such as
+`dist/test/execution/process-signal-shutdown.test.js`, needs a symlink-free
+`TMPDIR`. On macOS the default `/var/folders/...` resolves through `/var`, and
+the service refuses that data directory, so pass the resolved `/private/var/...`
+path as the runner does.
 
 Real App Server
 qualification is separate and runs only when requested explicitly, for example
 `npm run recovery:live`, `npm run planned-restart:live` and `npm run routing:live`,
 which require their `--live` opt-in
-(see the other `*:live` scripts in `package.json`). These checks do not prove
+(see the other `*:live` scripts in `package.json`). Signal restart and bound-turn
+recovery use `node test/execution/signal-qualification/live-signals.mjs --live
+--max-turns 20 --max-attempts 1 --deadline-ms 1800000 --grant GRANT_FILE`. It
+refuses without a root grant naming the clean head and tree, and it rebuilds
+`dist/` first. Its offline contract test runs without opt-in. Set
+`CAB_SIGNAL_OFFLINE_MATRIX=1` on macOS to also run the full six-case journey over
+model-free fake runtimes before a live attempt. These checks do not prove
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.
 
@@ -231,6 +241,20 @@ revision, and `recordTaskResult` rejects early or stale results. `archiveTask`
 requires delivery and preservation evidence and refuses unresolved task work.
 These service contracts do not provide physical process containment. An untracked
 detached child may overlap a later writer after qualified normal success.
+
+Bound-turn recovery uses `recoverBoundTurnExecution` with scope `recover-bound-turn`.
+The wrapper reads durable replay before verifying, shares identical concurrent
+requests, and calls only `Supervisor.resolveHeldExecution` to atomically record
+its receipt and release the exact writer/capacity ownership. Options use a bounded,
+read-only termination check; submission verifies again. Unknown/live/conflicting
+process proof, pending callbacks/effects and stale identities fail closed.
+SPA assignment recovery and retained `/runtime/control/bound-turn/recover` controls
+collect the same assertions and require review/cancel/confirm. After an uncertain
+reply, GET `/api/operator/operations` for the original assignment/type/key precedes
+any exact-body retry. Independent holds remain and reconciliation dispatches nothing.
+The retained factory receives the same privacy-aware `OperatorApi` as the SPA.
+Offline signal fixtures exercise real adapter child spawns without model turns;
+real-runtime signal/recovery qualification remains separate from browser coverage.
 
 ## Operator CLI
 
@@ -676,7 +700,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      revision, holds and up to the 20 newest recovery generations: work ID,
      generation, intent and request state, process identity, held reason,
      predecessor, witnesses, observations and receipt, and for each path
-     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`,
+     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`, `bound-turn-recover`,
      plus `conversation-replace` for the assignment) whether it is eligible, what
      blocks it and the inputs it requires. Eligibility is advisory; the service
      re-checks everything. A string that redaction would change is withheld (gap
@@ -699,7 +723,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      `true`); `no-turn-adopt` — `evidence` (the same plus `invocationLedgerSha256`)
      and `attestation` (`completeSynchronousWriteAheadLedger`,
      `noStartTurnInvocation`, `independentlyReviewed`, `idleThreadMayExist`);
-     either recovery — `receipt` (`termination: {"kind":"process-exit"}`,
+     each recovery — `receipt` (`termination: {"kind":"process-exit"}`,
      `effects: "settled"`, `workspace: "preserved"|"reconciled"`). A missing,
      `false`, extra or malformed item exits 2 before any request; there is no
      `--yes`, `--confirm`, `--force` or attestation flag. An ineligible path exits 4
@@ -718,8 +742,12 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      the same command.
 
    Adoption, recovery and replacement cannot be undone, and adoption here records
-   evidence: it is unrelated to `assignment apply-current`. The bound-turn
-   receipt has no CLI or operator route.
+   evidence: it is unrelated to `assignment apply-current`. Bound-turn recovery
+   uses `recovery prepare bound-turn-recover` and the corresponding operator
+   recovery controls. Browser assertions and pending request state are local to
+   the page visit: navigation, sign-out or full reload discards them. Preserve the
+   original command/key before leaving an uncertain outcome; recorded server
+   receipts remain durable and can be read back through the operation endpoint.
 
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are

@@ -3133,6 +3133,33 @@ test("a survivor discovered after successful terminal status retracts writer rel
   }
 });
 
+test("a late callback still holds and is tracked when the survivor observation cannot be written", async () => {
+  const f = await fixture();
+  try {
+    assert.equal(
+      (await f.service.submitTask("first", f.assignmentId, "write")).state,
+      "completed",
+    );
+    startedOf(f.service).state.recordRecoveryObservation = () => {
+      throw new Error("database is locked");
+    };
+    const pending = deferred();
+    f.service.registerExecutionCallback("first", pending.promise);
+    assert.equal(
+      f.service.list().find((item) => item.workId === "first")?.state,
+      "held",
+    );
+    assert.equal(f.service.isCurrentResult("first"), false);
+    const callbacks = (
+      f.service as unknown as { callbacks: Map<string, Set<unknown>> }
+    ).callbacks;
+    assert.equal(callbacks.get("first")?.size, 1, "late callback tracked");
+    pending.resolve();
+  } finally {
+    await f.close();
+  }
+});
+
 test("missing task workspace holds execution visibly", async () => {
   const f = await fixture();
   try {

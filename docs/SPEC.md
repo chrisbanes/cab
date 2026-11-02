@@ -121,7 +121,7 @@ and drive the existing refresh, handback settlement and staged comment commands;
 `delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
 publish a local task as a GitHub issue with the operator UI's own commands. `recovery
 get|prepare|submit` inspect an assignment's held generations and submit the
-existing adoption, pre-turn and no-turn recovery and conversation-replacement
+existing adoption, pre-turn, no-turn and bound-turn recovery and conversation-replacement
 commands from an owner-only, digest-bound document built from observed identity and
 an explicit operator evidence file; none resumes or dispatches work. Further CLI
 delivery sequencing belongs in GitHub under
@@ -329,6 +329,36 @@ requeued as a fresh generation on the same thread, admitted on the next start un
 every current admission check, without using the transient-retry allowance. A turn
 that completes within the interval completes normally. Everything else, including
 drafting and direct turns, keeps today's restart hold.
+
+Owned Codex and Claude runtime/probe children start in separate process groups,
+with piped stdio and retained lifecycle ownership. Terminal group SIGINT therefore
+reaches cab's handler without pre-empting its protocol interrupt. cab still awaits
+owned exit; this does not contain descendants or guarantee a clean drain after
+repeated signals. Awaiting exit applies only to a coordinated drain. If the service
+process dies, for example in a crash or when launchd kills it after its exit
+timeout, those children are outside its process group, are not killed with it and
+can keep running. Bound-turn recovery then refuses while the exact recorded
+process is alive, until the operator ends it.
+
+Manual bound-turn recovery is distinct from planned shutdown: it requires verified
+exit of the exact stored process (PID, birth identity and boot identity), exact work
+revision, request sequence, thread and turn, ended callbacks, settled effects and
+an explicit preserved/reconciled workspace assertion. Missing, redacted, live,
+unknown, conflicting or stale identity refuses recovery and retains ownership.
+CLI `recovery get|prepare|submit`, Settings → Runtime → assignment recovery, task
+detail's Recovery link, and retained `/runtime/assignment/:id` controls use the same
+keyed `recovery.bound-turn.recover` operation. Eligibility is advisory. Review and
+confirmation precede durable, irreversible reconciliation; cancel records nothing.
+An unknown reply freezes the original body/key: read its operation receipt before
+retrying that exact command. A matching replay returns the original receipt.
+Reconciliation clears only that execution's ownership, never task Stop, project
+pause, approval or delivery holds, and starts no work. Inspect those independent
+holds before an explicit supported continuation.
+
+Browser recovery drafts and pending request state last only for the current page
+visit. Navigation, sign-out or a full reload discards local assertions and request
+details; it does not erase a recorded server receipt. Preserve the original command
+and key before leaving an uncertain outcome so its operation can be read back.
 
 **Codex home.** Codex App Server runs with a `CODEX_HOME` and an isolated `HOME` that
 cab owns under its data directory ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
@@ -1039,8 +1069,8 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 Each runtime's effective policy lists its disclosed limits. For Claude, the
 subprocess token scrub is qualified for sandboxed Bash only; hooks run in process and
 no stdio MCP servers are allowed. A Claude CLI process can outlive a crashed service,
-so the operator verifies its exit before recovering the turn; bound-turn recovery
-has no operator HTTP or CLI route yet. Recovery continues
+so the operator verifies its exit before recovering the turn through the supported
+CLI or operator recovery controls. Recovery continues
 from the assignment's latest completed turn, so a crash during its first turn
 continues in a fresh session. Surfaces the journeys did not test remain limits.
 The token comes from the operator's own subscription through `claude setup-token`.

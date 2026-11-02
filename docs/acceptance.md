@@ -206,6 +206,27 @@ sibling of #1413. Foreground evidence does not qualify that integration, npm
 publication, a production deployment or cutover. The required final-head `check`
 CI context remains a merge gate even when local checks pass.
 
+Bound-turn recovery requires offline coverage of both runtime identities, exact
+work revision/request/thread/turn/process binding, live/unknown/conflicting proof
+refusals, pending effects/callbacks, keyed replay and independent hold preservation.
+Both SPA assignment recovery (reachable from task detail and Runtime settings) and
+retained runtime controls must qualify review/cancel/confirm, frozen unknown outcome,
+original operation readback before retry, keyboard focus, and 1366px/390px layouts.
+Reconciliation is irreversible, releases only the verified execution, and dispatches
+nothing. Planned shutdown instead trusts its exact acknowledged failed terminal
+plus ended callbacks/effects; neither proof substitutes for the other. Browser and
+fake-process evidence do not qualify real-runtime interruption or host restart.
+Real-runtime qualification uses the finite disposable six-case driver
+(`test/execution/signal-qualification/live-signals.mjs --live`). The case
+matrix is group SIGINT and service-PID SIGTERM, each with two restarts, plus one
+uncertain bound-turn CLI recovery, for each runtime. It needs a root grant and
+at most 20 model turns. No production incident or installed prototype may be used
+as a fixture. The [dated record](evidence/issue-1416-signal-recovery-2026-11-02.md)
+qualifies both adapters' foreground signal restart and CLI bound-turn recovery for
+non-imported tasks. It does not qualify the installed LaunchAgent restart, repeated
+signals, descendant containment, or the restart of imported tasks, which still hold
+(#1454).
+
 ### Operator CLI acceptance
 
 CLI01–CLI06 qualify the operator CLI release under

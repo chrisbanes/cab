@@ -83,6 +83,40 @@ export const recoveryReceiptBaseSchema = z.object({
   effects: z.literal("settled"),
   workspace: z.enum(["preserved", "reconciled"]),
 });
+export const boundTurnRecoveryReceiptSchema = recoveryReceiptBaseSchema
+  .extend({
+    kind: z.literal("bound-turn"),
+    workId: z.string().min(1).max(512),
+    workRevision: z.number().int().positive().safe(),
+    requestSequence: z.number().int().positive().safe(),
+    threadId: z.string().min(1).max(512),
+    turnId: z.string().min(1).max(512),
+  })
+  .strict();
+export const boundTurnRecoveryBodySchema = z
+  .object({
+    assignmentId: z.string().uuid(),
+    receipt: boundTurnRecoveryReceiptSchema,
+  })
+  .strict();
+export const boundTurnRecoveryBlockers = [
+  "bound-identity-missing",
+  "pending-effects",
+  "known-survivor",
+  "callback-pending",
+  "termination-live",
+  "termination-conflict",
+  "termination-unknown",
+  "identity-changed",
+] as const;
+export type BoundTurnRecoveryBlocker =
+  | (typeof boundTurnRecoveryBlockers)[number]
+  | "not-held"
+  | "ownership-released"
+  | "context-unavailable"
+  | "other-witness"
+  | "already-reconciled";
+
 export const preTurnRecoveryReceiptSchema = recoveryReceiptBaseSchema
   .extend({
     kind: z.literal("pre-turn-rejection"),
@@ -109,12 +143,13 @@ export const replaceConversationBodySchema = z
   })
   .strict();
 
-/** The five operator recovery paths, in the order an operator meets them. */
+/** The operator recovery paths, in the order an operator meets them. */
 export const recoveryPaths = [
   "pre-turn-adopt",
   "pre-turn-recover",
   "no-turn-adopt",
   "no-turn-recover",
+  "bound-turn-recover",
   "conversation-replace",
 ] as const;
 export type RecoveryPath = (typeof recoveryPaths)[number];
@@ -124,6 +159,7 @@ export const recoveryCommandTypes = {
   "pre-turn-recover": "recovery.pre-turn.recover",
   "no-turn-adopt": "recovery.no-turn.adopt",
   "no-turn-recover": "recovery.no-turn.recover",
+  "bound-turn-recover": "recovery.bound-turn.recover",
   "conversation-replace": "recovery.conversation.replace",
 } as const satisfies Record<RecoveryPath, string>;
 
@@ -157,6 +193,11 @@ export const recoveryRequirements: Record<
     receipt: [],
   },
   "no-turn-recover": {
+    evidence: [],
+    attestations: [],
+    receipt: ["termination", "effects", "workspace"],
+  },
+  "bound-turn-recover": {
     evidence: [],
     attestations: [],
     receipt: ["termination", "effects", "workspace"],

@@ -12,6 +12,7 @@ import {
   recoveryOptionsSchema,
   type recoveryBlockerSchema,
 } from "../operator/contracts.js";
+import { boundTurnRecoveryCommandSchema } from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import type { StandaloneService } from "./service.js";
 
@@ -23,7 +24,7 @@ type Base = z.infer<typeof assignmentRecoverySchema>;
  * binds and advisory eligibility. `exact` returns a string only when redaction leaves it
  * unchanged; anything withheld blocks the paths that would send it.
  */
-export function recoveryOptions(
+export async function recoveryOptions(
   service: StandaloneService,
   base: Base,
   projectId: string,
@@ -40,108 +41,136 @@ export function recoveryOptions(
     if (kept === null || kept.length > max) withheld = true;
     return kept !== null && kept.length <= max ? kept : null;
   };
-  const records = base.data.records.map((r) => {
-    const material =
-      r.workId === null ? undefined : service.recoveryMaterial(r.workId);
-    const own = material?.assignmentId === assignmentId ? material : undefined;
-    if (r.workId !== null && !own) withheld = true;
-    const context = own?.preTurn ?? own?.noTurn;
-    const process = context
-      ? {
-          processId: keep(context.processId, 128),
-          processStartedAt: keep(context.processStartedAt, 128),
-          bootId: keep(context.bootId, 128),
-        }
-      : null;
-    const predecessor =
-      own?.preTurn &&
-      own.preTurn.predecessorWorkId !== null &&
-      own.preTurn.predecessorThreadId !== null
+  const records = await Promise.all(
+    base.data.records.map(async (r) => {
+      const material =
+        r.workId === null ? undefined : service.recoveryMaterial(r.workId);
+      const own =
+        material?.assignmentId === assignmentId ? material : undefined;
+      if (r.workId !== null && !own) withheld = true;
+      const context = own?.preTurn ?? own?.noTurn;
+      const processSource = context ?? own?.bound?.processIdentity;
+      const process = processSource
         ? {
-            workId: keep(own.preTurn.predecessorWorkId, 512),
-            threadId: keep(own.preTurn.predecessorThreadId, 512),
+            processId: keep(processSource.processId, 128),
+            processStartedAt: keep(processSource.processStartedAt, 128),
+            bootId: keep(processSource.bootId, 128),
           }
         : null;
-    const exactProcess =
-      process?.processId != null &&
-      process.processStartedAt != null &&
-      process.bootId != null
-        ? {
-            processId: process.processId,
-            processStartedAt: process.processStartedAt,
-            bootId: process.bootId,
-          }
-        : null;
-    const exactPredecessor =
-      predecessor?.workId != null && predecessor.threadId != null
-        ? { workId: predecessor.workId, threadId: predecessor.threadId }
-        : null;
-    const reason =
-      own &&
-      own.intent.reason !== null &&
-      own.intent.reason === own.request?.reason
-        ? keep(own.intent.reason, 4000)
-        : null;
-    const identityWithheld =
-      !own ||
-      (context !== undefined && exactProcess === null) ||
-      (own.preTurn !== undefined && exactPredecessor === null);
-    const witnesses = {
-      preTurn: r.preTurnRejection
-        ? { id: r.preTurnRejection.id, source: r.preTurnRejection.source }
-        : null,
-      noTurn: r.noTurnSubmission ? { id: r.noTurnSubmission.id } : null,
-    };
-    const reconciled = r.receiptRecorded || r.intentState === "reconciled";
-    const blockers = (path: RecoveryPath): Blocker[] => {
-      const preTurn = path.startsWith("pre-turn");
-      const adopt = path.endsWith("adopt");
-      const mine = preTurn ? witnesses.preTurn : witnesses.noTurn;
-      const other = preTurn ? witnesses.noTurn : witnesses.preTurn;
-      const b: Blocker[] = [];
-      if (reconciled) b.push("already-reconciled");
-      else if (r.intentState !== "held" || (adopt && r.requestState !== "held"))
-        b.push("not-held");
-      else if (!r.holds.capacity || (!adopt && !r.holds.writer))
-        b.push("ownership-released");
-      if (!(preTurn ? own?.preTurn : own?.noTurn))
-        b.push("context-unavailable");
-      if (adopt && mine) b.push("witness-present");
-      if (!adopt && !mine) b.push("witness-missing");
-      if (other) b.push("other-witness");
-      // Adoption must restate the held reason exactly; a withheld or split reason cannot be.
-      if (adopt && reason === null) b.push("reason-withheld");
-      if (identityWithheld) b.push("identity-withheld");
-      return [...new Set(b)];
-    };
-    return {
-      workId: own ? r.workId : null,
-      generation: r.generation,
-      intentState: r.intentState,
-      requestState: r.requestState,
-      holds: r.holds,
-      observations: r.observations,
-      process: exactProcess,
-      retainedReason: reason,
-      writerSequence: numberOrNull(context?.writerSequence),
-      conversationRevision: numberOrNull(context?.conversationRevision),
-      predecessor: exactPredecessor,
-      witnesses,
-      receiptRecorded: r.receiptRecorded,
-      workspace: r.workspace,
-      paths: (
-        [
-          "pre-turn-adopt",
-          "pre-turn-recover",
-          "no-turn-adopt",
-          "no-turn-recover",
-        ] as const
-      ).map((path) => {
-        const blockedBy = blockers(path);
-        return { path, eligible: blockedBy.length === 0, blockedBy };
-      }),
-    };
-  });
+      const predecessor =
+        own?.preTurn &&
+        own.preTurn.predecessorWorkId !== null &&
+        own.preTurn.predecessorThreadId !== null
+          ? {
+              workId: keep(own.preTurn.predecessorWorkId, 512),
+              threadId: keep(own.preTurn.predecessorThreadId, 512),
+            }
+          : null;
+      const exactProcess =
+        process?.processId != null &&
+        process.processStartedAt != null &&
+        process.bootId != null
+          ? {
+              processId: process.processId,
+              processStartedAt: process.processStartedAt,
+              bootId: process.bootId,
+            }
+          : null;
+      const exactPredecessor =
+        predecessor?.workId != null && predecessor.threadId != null
+          ? { workId: predecessor.workId, threadId: predecessor.threadId }
+          : null;
+      const reason =
+        own &&
+        own.intent.reason !== null &&
+        own.intent.reason === own.request?.reason
+          ? keep(own.intent.reason, 4000)
+          : null;
+      const identityWithheld =
+        !own ||
+        (context !== undefined && exactProcess === null) ||
+        (own.preTurn !== undefined && exactPredecessor === null);
+      const threadId = keep(own?.bound?.threadId, 512);
+      const turnId = keep(own?.bound?.turnId, 512);
+      const boundWithheld =
+        !own ||
+        (!!own.bound &&
+          ((!!own.bound.threadId && threadId === null) ||
+            (!!own.bound.turnId && turnId === null) ||
+            (!!own.bound.processIdentity && exactProcess === null)));
+      const boundBlocked: Blocker[] =
+        boundWithheld || excluded === undefined
+          ? ["identity-withheld"]
+          : !own?.bound
+            ? ["context-unavailable"]
+            : await service.boundTurnRecoveryEligibility(
+                own.bound.workId,
+                assignmentId,
+              );
+      const witnesses = {
+        preTurn: r.preTurnRejection
+          ? { id: r.preTurnRejection.id, source: r.preTurnRejection.source }
+          : null,
+        noTurn: r.noTurnSubmission ? { id: r.noTurnSubmission.id } : null,
+      };
+      const reconciled = r.receiptRecorded || r.intentState === "reconciled";
+      const blockers = (path: RecoveryPath): Blocker[] => {
+        if (path === "bound-turn-recover") return boundBlocked;
+        const preTurn = path.startsWith("pre-turn");
+        const adopt = path.endsWith("adopt");
+        const mine = preTurn ? witnesses.preTurn : witnesses.noTurn;
+        const other = preTurn ? witnesses.noTurn : witnesses.preTurn;
+        const b: Blocker[] = [];
+        if (reconciled) b.push("already-reconciled");
+        else if (
+          r.intentState !== "held" ||
+          (adopt && r.requestState !== "held")
+        )
+          b.push("not-held");
+        else if (!r.holds.capacity || (!adopt && !r.holds.writer))
+          b.push("ownership-released");
+        if (!(preTurn ? own?.preTurn : own?.noTurn))
+          b.push("context-unavailable");
+        if (adopt && mine) b.push("witness-present");
+        if (!adopt && !mine) b.push("witness-missing");
+        if (other) b.push("other-witness");
+        // Adoption must restate the held reason exactly; a withheld or split reason cannot be.
+        if (adopt && reason === null) b.push("reason-withheld");
+        if (identityWithheld) b.push("identity-withheld");
+        return [...new Set(b)];
+      };
+      return {
+        workId: own ? r.workId : null,
+        generation: r.generation,
+        intentState: r.intentState,
+        requestState: r.requestState,
+        holds: r.holds,
+        observations: r.observations,
+        process: exactProcess,
+        threadId,
+        turnId,
+        retainedReason: reason,
+        writerSequence: numberOrNull(context?.writerSequence),
+        conversationRevision: numberOrNull(context?.conversationRevision),
+        predecessor: exactPredecessor,
+        witnesses,
+        receiptRecorded: r.receiptRecorded,
+        workspace: r.workspace,
+        paths: (
+          [
+            "pre-turn-adopt",
+            "pre-turn-recover",
+            "no-turn-adopt",
+            "no-turn-recover",
+            "bound-turn-recover",
+          ] as const
+        ).map((path) => {
+          const blockedBy = blockers(path);
+          return { path, eligible: blockedBy.length === 0, blockedBy };
+        }),
+      };
+    }),
+  );
   const facts = service.replacementFacts(assignmentId);
   const replacementBlockers: Blocker[] = [
     ...(service.taskHold(taskId) !== undefined ? (["task-held"] as const) : []),
@@ -254,6 +283,11 @@ export async function executeRecovery(
       result = await service.recoverPreTurnExecution(command);
       break;
     }
+    case "recovery.bound-turn.recover": {
+      const { type: _t, ...command } = c;
+      result = await service.recoverBoundTurnExecution(command);
+      break;
+    }
     case "recovery.no-turn.recover": {
       const { type: _t, assignmentId: _a, ...command } = c;
       result = await service.recoverNoTurnExecution(command);
@@ -282,6 +316,7 @@ const storedResult: Record<
   "recovery.pre-turn.recover": resolutionResult,
   "recovery.no-turn.adopt": adoptionResult,
   "recovery.no-turn.recover": resolutionResult,
+  "recovery.bound-turn.recover": resolutionResult,
   "recovery.conversation.replace": z
     .object({ revision: z.number().int().positive() })
     .strict(),
@@ -292,6 +327,7 @@ const storedScope: Record<RecoveryCommand["type"], string> = {
   "recovery.pre-turn.recover": "recover",
   "recovery.no-turn.adopt": "adopt-no-turn",
   "recovery.no-turn.recover": "recover-no-turn",
+  "recovery.bound-turn.recover": "recover-bound-turn",
   "recovery.conversation.replace": "replace-conversation",
 };
 export const isRecoveryType = (type: string): type is RecoveryCommand["type"] =>
@@ -314,6 +350,16 @@ export function readRecoveryOperation(
   const result: Record<string, unknown> = storedResult[type].parse(
     JSON.parse(row.result),
   );
+  if (type === "recovery.bound-turn.recover") {
+    const payload = boundTurnRecoveryCommandSchema
+      .extend({ key: z.literal(key) })
+      .parse(JSON.parse(row.payloadMaterial));
+    if (
+      payload.assignmentId !== assignmentId ||
+      payload.receipt.workId !== result.workId
+    )
+      return { state: "not-recorded" };
+  }
   const owner =
     type === "recovery.conversation.replace"
       ? replaceConversationBodySchema

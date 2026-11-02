@@ -1566,3 +1566,68 @@ test("a subagent's tool calls are recorded with their attribution, and a denied 
     ],
   );
 });
+
+test("settings probe cleanup awaits its existing SIGKILL fallback", {
+  timeout: 10000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-claude-probe-exit-"));
+  const safety = runtimeSafetyFixture();
+  const { sdk } = fakeSdk([], []);
+  let probe: import("node:child_process").ChildProcess | undefined;
+  let ready!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  let exited = false;
+  sdk.query = ({ options }) =>
+    Object.assign(
+      (async function* () {
+        probe = options.spawnClaudeCodeProcess?.({
+          command: process.execPath,
+          args: [
+            "-e",
+            'process.on("SIGTERM",()=>{});setInterval(()=>{},60000);process.stdout.write("ready")',
+          ],
+          env: {},
+          signal: new AbortController().signal,
+        }) as unknown as import("node:child_process").ChildProcess;
+        probe.stdout?.once("data", () => ready());
+        probe.once("exit", () => {
+          exited = true;
+        });
+        await new Promise<void>((resolve) =>
+          options.abortController?.signal.addEventListener(
+            "abort",
+            () => resolve(),
+            { once: true },
+          ),
+        );
+      })(),
+      { supportedModels: () => new Promise<never>(() => {}) },
+    );
+  const runtime = new ClaudeRuntime({
+    safety: safety.safety,
+    sdk,
+    claude: {
+      configDirectory: join(root, "config"),
+      turnEnvironment: () => ({ env: {}, token: "offline-probe-fixture" }),
+    },
+    resolveExecutable: async () => process.execPath,
+    sandboxSelfTest: async () => true,
+    exitTimeoutMs: 10,
+  });
+  try {
+    await runtime.start();
+    for (let attempt = 0; attempt < 100 && !probe; attempt++) {
+      await runtime.preflightTurn({ workspace: root });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await reached;
+    await runtime.stop();
+    assert.equal(exited, true);
+    assert.equal(probe?.signalCode, "SIGKILL");
+  } finally {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

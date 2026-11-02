@@ -936,6 +936,13 @@ for (const layout of [
         .count(),
       0,
     );
+    await page
+      .getByText(
+        "Process PRIVATE PROCESS · birth PRIVATE START · boot PRIVATE BOOT",
+        { exact: true },
+      )
+      .first()
+      .waitFor();
     await capture(page, `${layout.name}-omitted-recovery`);
     assert.equal(
       await page.evaluate(
@@ -943,10 +950,22 @@ for (const layout of [
       ),
       false,
     );
-    assert.equal(
-      (await page.locator("body").innerText()).includes("PRIVATE"),
-      false,
-    );
+    const recoveryText = await page.locator("body").innerText();
+    for (const confidential of [
+      "PRIVATE RECOVERY PROMPT",
+      "/PRIVATE/RECOVERY/PATH",
+      "PRIVATE RECOVERY REASON",
+      "PRIVATE OBSERVATION REASON",
+    ])
+      assert.equal(recoveryText.includes(confidential), false, confidential);
+    for (const identity of [
+      "PRIVATE THREAD",
+      "PRIVATE TURN",
+      "PRIVATE PROCESS",
+      "PRIVATE START",
+      "PRIVATE BOOT",
+    ])
+      assert.equal(recoveryText.includes(identity), true, identity);
     assert.deepEqual(external, []);
     assert.deepEqual(errors, []);
     assert.equal(f.runtime.turns, 0);

@@ -1,3 +1,5 @@
+import type { OperatorApi } from "./operator-api.js";
+import { boundTurnRecoveryCommandSchema } from "./pre-turn-recovery.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
@@ -99,6 +101,7 @@ export interface RuntimeOperatorApi {
   adoptHistoricalPreTurnRejection?: StandaloneService["adoptHistoricalPreTurnRejection"];
   adoptHistoricalNoTurnSubmission?: StandaloneService["adoptHistoricalNoTurnSubmission"];
   recoverPreTurnExecution?: StandaloneService["recoverPreTurnExecution"];
+  recoverBoundTurnExecution?: StandaloneService["recoverBoundTurnExecution"];
   recoverNoTurnExecution?: StandaloneService["recoverNoTurnExecution"];
   replaceConversationCommand?: StandaloneService["replaceConversationCommand"];
 }
@@ -586,8 +589,25 @@ function assignmentPage(
   return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="${taskHref(String(task.id))}">${escapeHtml(task.title)}</a> in ${escapeHtml(project.name)}.</p><p>Execution status: ${escapeHtml(status)}.</p><p>${runtimeLine(assignment, api)}</p><p>Accountable project lead: ${leadProfile ? escapeHtml(leadProfile.name) : "No project lead is configured"}; lead accountability remains with the project.</p><p>Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.</p><p>Result destination: ${escapeHtml(assignment.resultDestination)}.</p><p><a href="/app/tasks/${encodeURIComponent(String(task.id))}?assignment=${encodeURIComponent(assignmentId)}">Assignment conversation</a></p>${executionHoldSection(String(task.id), api)}<section><h2>Instruction revisions</h2><p>Changing configuration does not change this assignment until explicitly applied for its next turn.</p>${apply}</section></main>`;
 }
 
+function boundReview(
+  command: ReturnType<typeof boundTurnRecoveryCommandSchema.parse>,
+  csrfToken: string,
+  message: string,
+  phase: "review" | "check" | "retry" | "recorded" | "blocked",
+): string {
+  const payload = JSON.stringify(command);
+  const confirm = phase === "review" || phase === "retry";
+  return `<main><h1>Bound-turn reconciliation</h1><p role="status">${escapeHtml(message)}</p>${phase === "blocked" ? `<p>Independent assertions retained: exact process exit confirmed; effects and callbacks settled; workspace ${escapeHtml(command.receipt.workspace)}.</p>` : ""}<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(payload)}</pre>${phase === "recorded" || phase === "blocked" ? "" : `<form method="post" action="${confirm ? "/runtime/control/bound-turn/recover" : "/runtime/control/bound-turn/check"}">${hidden("csrfToken", csrfToken)}${hidden("payload", payload)}${confirm ? hidden("confirmed", "yes") : ""}<button>${confirm ? "Confirm reconciliation" : "Check original receipt"}</button></form>`}<p><a ${phase === "review" ? "autofocus" : ""} href="${assignmentHref(command.assignmentId)}">${phase === "review" ? "Cancel and return to evidence" : phase === "recorded" ? "Review remaining holds" : phase === "blocked" ? "Inspect current generation; preserve this original evidence" : "Inspect evidence; keep this original request for readback"}</a></p></main>`;
+}
+
 export class RuntimeOperatorRoutes {
-  constructor(private readonly api: RuntimeOperatorApi) {}
+  constructor(
+    private readonly api: RuntimeOperatorApi,
+    private readonly recovery?: Pick<
+      OperatorApi,
+      "readRecoveryOptions" | "readOperation"
+    >,
+  ) {}
 
   get routes(): OperatorRoute[] {
     return [
@@ -599,6 +619,204 @@ export class RuntimeOperatorRoutes {
           body: overview(this.api, csrfToken),
         }),
       },
+      ...(this.api.recoverBoundTurnExecution && this.recovery
+        ? [
+            {
+              method: "POST" as const,
+              path: "/runtime/control/bound-turn/review",
+              handler: async ({
+                fields,
+                csrfToken,
+              }: import("./operator-routes.js").OperatorRouteContext) => {
+                const input = z
+                  .object({
+                    payload: z.string().max(12000),
+                    termination: z.literal("confirmed"),
+                    effects: z.literal("settled"),
+                    workspace: z.enum(["preserved", "reconciled"]),
+                  })
+                  .strict()
+                  .parse(fields);
+                const original = boundTurnRecoveryCommandSchema.parse(
+                  JSON.parse(input.payload),
+                );
+                const submitted = boundTurnRecoveryCommandSchema.parse({
+                  ...original,
+                  receipt: { ...original.receipt, workspace: input.workspace },
+                });
+                try {
+                  const options = await this.recovery!.readRecoveryOptions(
+                    original.assignmentId,
+                  );
+                  const r = options.data.records.find(
+                    (r) => r.workId === original.receipt.workId,
+                  );
+                  if (
+                    !r ||
+                    options.data.gaps.length ||
+                    !r.paths.some(
+                      (p) => p.path === "bound-turn-recover" && p.eligible,
+                    )
+                  )
+                    throw new Error(
+                      "Bound recovery is not eligible; inspect current recovery options",
+                    );
+                  const command = boundTurnRecoveryCommandSchema.parse({
+                    key: original.key,
+                    assignmentId: original.assignmentId,
+                    receipt: {
+                      kind: "bound-turn",
+                      workId: r.workId,
+                      workRevision: r.generation.workRevision,
+                      requestSequence: r.generation.requestSequence,
+                      processIdentity: r.process,
+                      threadId: r.threadId,
+                      turnId: r.turnId,
+                      termination: { kind: "process-exit" },
+                      effects: "settled",
+                      workspace: input.workspace,
+                    },
+                  });
+                  if (
+                    JSON.stringify({
+                      ...original.receipt,
+                      workspace: input.workspace,
+                    }) !== JSON.stringify(command.receipt)
+                  )
+                    throw new Error(
+                      "Recovery identity changed; inspect the current generation before asserting new proof",
+                    );
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      command,
+                      csrfToken,
+                      "Review permanent reconciliation. It cannot be undone. Stop, project pause, approvals and delivery holds remain. No turn will start.",
+                      "review",
+                    ),
+                  };
+                } catch {
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      submitted,
+                      csrfToken,
+                      "Review unavailable: eligibility is blocked, identity changed, or its lookup failed. Original evidence and assertions are retained. Reconciliation is disabled. Inspect the current generation before asserting new proof; never substitute it into this original request.",
+                      "blocked",
+                    ),
+                  };
+                }
+              },
+            },
+            {
+              method: "POST" as const,
+              path: "/runtime/control/bound-turn/recover",
+              handler: async ({
+                fields,
+                csrfToken,
+              }: import("./operator-routes.js").OperatorRouteContext) => {
+                const { payload } = z
+                  .object({
+                    payload: z.string().max(12000),
+                    confirmed: z.literal("yes"),
+                  })
+                  .strict()
+                  .parse(fields);
+                const command = boundTurnRecoveryCommandSchema.parse(
+                  JSON.parse(payload),
+                );
+                try {
+                  const result =
+                    await this.api.recoverBoundTurnExecution!(command);
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      command,
+                      csrfToken,
+                      `Execution reconciled. Receipt ${result.id}. No work was started. Review remaining holds before an explicit continuation.`,
+                      "recorded",
+                    ),
+                  };
+                } catch {
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      command,
+                      csrfToken,
+                      "Recovery refused or outcome unknown. Original evidence is retained. Check the original receipt before retrying.",
+                      "check",
+                    ),
+                  };
+                }
+              },
+            },
+            {
+              method: "POST" as const,
+              path: "/runtime/control/bound-turn/check",
+              handler: async ({
+                fields,
+                csrfToken,
+              }: import("./operator-routes.js").OperatorRouteContext) => {
+                const { payload } = z
+                  .object({ payload: z.string().max(12000) })
+                  .strict()
+                  .parse(fields);
+                const command = boundTurnRecoveryCommandSchema.parse(
+                  JSON.parse(payload),
+                );
+                try {
+                  const read = await this.recovery!.readOperation(
+                    new URLSearchParams({
+                      scope: `assignment:${command.assignmentId}`,
+                      type: "recovery.bound-turn.recover",
+                      key: command.key,
+                    }),
+                  );
+                  if (
+                    read.data.state === "recorded" &&
+                    read.data.receipt.kind === "recovery-resolution" &&
+                    read.data.receipt.path === "bound-turn-recover" &&
+                    read.data.receipt.key === command.key &&
+                    read.data.receipt.assignmentId === command.assignmentId &&
+                    read.data.receipt.workId === command.receipt.workId
+                  )
+                    return {
+                      kind: "html" as const,
+                      body: boundReview(
+                        command,
+                        csrfToken,
+                        `Execution reconciled. Receipt ${JSON.stringify(read.data.receipt)}. No work was started. Review remaining holds before an explicit continuation.`,
+                        "recorded",
+                      ),
+                    };
+                  if (read.data.state === "recorded")
+                    throw new Error(
+                      "Receipt does not match the original recovery",
+                    );
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      command,
+                      csrfToken,
+                      "No receipt is recorded. Retry only this exact original command; the service rechecks its proof.",
+                      "retry",
+                    ),
+                  };
+                } catch {
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      command,
+                      csrfToken,
+                      "Readback unavailable. Keep the original evidence; retry remains blocked.",
+                      "check",
+                    ),
+                  };
+                }
+              },
+            },
+          ]
+        : []),
       ...(this.api.adoptHistoricalPreTurnRejection
         ? [
             {
@@ -739,10 +957,35 @@ export class RuntimeOperatorRoutes {
       {
         method: "GET",
         path: "/runtime/assignment/:assignmentId",
-        handler: ({ params, csrfToken }) => ({
-          kind: "html",
-          body: assignmentPage(params.assignmentId ?? "", this.api, csrfToken),
-        }),
+        handler: async ({ params, csrfToken }) => {
+          const id = params.assignmentId ?? "";
+          const link = `<p><a href="/app/assignments/${encodeURIComponent(id)}/recovery">Review bound-turn recovery</a></p>`;
+          let controls = link;
+          // A failed advisory read must not blank Stop, holds and instructions on this page.
+          const options =
+            this.recovery && this.api.recoverBoundTurnExecution
+              ? await this.recovery.readRecoveryOptions(id).catch(() => null)
+              : undefined;
+          if (options === null)
+            controls = `<p>Recovery evidence could not be read.</p>${link}`;
+          if (options) {
+            controls = `<section><h2>Bound-turn recovery</h2><p>Eligibility is advisory. Submission verifies the exact identity again. Reconciliation is permanent and does not resume work.</p>${options.data.records
+              .map((r) => {
+                const path = r.paths.find(
+                  (p) => p.path === "bound-turn-recover",
+                );
+                return `<article><h3>Work ${escapeHtml(r.workId)}; revision ${r.generation.workRevision}; request ${r.generation.requestSequence}</h3><p>Thread ${escapeHtml(r.threadId)}; turn ${escapeHtml(r.turnId)}; process ${escapeHtml(r.process?.processId)}; birth ${escapeHtml(r.process?.processStartedAt)}; boot ${escapeHtml(r.process?.bootId)}</p><p>${path?.eligible && !options.data.gaps.length ? "Eligible for review" : `Recovery blocked: ${escapeHtml([...(path?.blockedBy ?? ["bound-identity-missing"]), ...options.data.gaps].join(", "))}`}</p>${path?.eligible && !options.data.gaps.length ? `<form method="post" action="/runtime/control/bound-turn/review">${hidden("csrfToken", csrfToken)}${hidden("payload", JSON.stringify({ key: randomUUID(), assignmentId: id, receipt: { kind: "bound-turn", workId: r.workId, workRevision: r.generation.workRevision, requestSequence: r.generation.requestSequence, processIdentity: r.process, threadId: r.threadId, turnId: r.turnId, termination: { kind: "process-exit" }, effects: "settled", workspace: "preserved" } }))}<label><input required type="checkbox" name="termination" value="confirmed">I independently confirmed this exact process exited</label><label><input required type="checkbox" name="effects" value="settled">All effects and callbacks are settled</label><label>Workspace disposition<select required name="workspace"><option value="">Choose after inspection</option><option value="preserved">Preserved</option><option value="reconciled">Reconciled</option></select></label><button>Review reconciliation</button></form>` : ""}</article>`;
+              })
+              .join("")}</section>`;
+          }
+          return {
+            kind: "html",
+            body: assignmentPage(id, this.api, csrfToken).replace(
+              "</main>",
+              `${controls}</main>`,
+            ),
+          };
+        },
       },
       {
         method: "POST",
@@ -810,6 +1053,7 @@ export class RuntimeOperatorRoutes {
 
 export function runtimeOperatorRoutes(
   api: RuntimeOperatorApi,
+  recovery?: Pick<OperatorApi, "readRecoveryOptions" | "readOperation">,
 ): OperatorRoute[] {
-  return new RuntimeOperatorRoutes(api).routes;
+  return new RuntimeOperatorRoutes(api, recovery).routes;
 }

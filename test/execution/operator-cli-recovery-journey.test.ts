@@ -1,3 +1,5 @@
+import { boundWorld } from "./bound-turn-recovery-fixture.js";
+import { startedOf } from "../fixtures/service-internals.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -186,3 +188,132 @@ test("concurrent, stale and read-only submissions apply at most once", async (t)
   );
   assert.equal(receipts.size, 1);
 });
+
+for (const harness of ["codex", "claude"] as const)
+  test(`${harness}: bound CLI recovery replays and only explicit allowed continuation resumes the existing conversation`, async (t) => {
+    const w = await boundWorld(t, harness, [], false, true);
+    const start = w.runtime.turnInvocations.length;
+    const resumedBefore = w.runtime.resumed.length;
+    const c = await w.cli();
+    const evidence = c.file(
+      "bound-evidence.json",
+      JSON.stringify({
+        schema: "cab.cli.recovery-evidence/v1",
+        receipt: {
+          termination: { kind: "process-exit" },
+          effects: "settled",
+          workspace: "preserved",
+        },
+      }),
+    );
+    const document = join(c.h.dir, "bound-recovery.json");
+    w.setMode("live");
+    let result = await c.cli("ro", ["recovery", "get", w.g.assignmentId]);
+    assert.equal(result.code, 0, result.err);
+    assert.match(result.out, /termination-live/);
+    result = await c.cli("ro", [
+      "recovery",
+      "prepare",
+      "bound-turn-recover",
+      w.g.assignmentId,
+      "--work",
+      w.g.workId,
+      "--evidence-file",
+      evidence,
+      "--out",
+      document,
+    ]);
+    assert.equal(result.code, 4);
+    w.setMode("verified");
+    result = await c.cli("ro", [
+      "recovery",
+      "prepare",
+      "bound-turn-recover",
+      w.g.assignmentId,
+      "--work",
+      w.g.workId,
+      "--evidence-file",
+      evidence,
+      "--out",
+      document,
+    ]);
+    assert.equal(result.code, 0, result.err + result.out);
+    assert.match(result.out, /cannot be undone/);
+    await w.s.f.service.stopTask(w.g.taskId);
+    const pause = (paused: boolean) =>
+      w.command({
+        type: "project.configure",
+        projectId: w.g.projectId,
+        expectedVersion: Number(
+          w.s.f.service.domain().project(w.g.projectId).version,
+        ),
+        paused,
+      });
+    pause(true);
+    result = await c.cli("ro", ["recovery", "submit", "--file", document]);
+    assert.notEqual(result.code, 0, "read credential cannot recover");
+    result = await c.cli("rw", ["recovery", "submit", "--file", document]);
+    assert.equal(result.code, 0, result.err + result.out);
+    const receipt = result.json().data.receipt;
+    assert.equal(receipt.path, "bound-turn-recover");
+    const human = await c.h.run([
+      "recovery",
+      "submit",
+      "--file",
+      document,
+      "--connection",
+      "rw",
+    ]);
+    assert.equal(human.code, 0, human.err);
+    assert.match(human.out, /Not resumed; nothing was dispatched/);
+    assert.doesNotMatch(human.out, /needs conversation replacement/);
+    assert.equal(w.s.f.service.isTaskStopped(w.g.taskId), true);
+    assert.equal(
+      Boolean(w.s.f.service.domain().project(w.g.projectId).paused),
+      true,
+    );
+    assert.equal(w.runtime.turnInvocations.length, start);
+    w.setMode("unknown");
+    const checks = w.checks();
+    await w.s.restart();
+    result = await c.cli("rw", ["recovery", "submit", "--file", document]);
+    assert.equal(result.code, 0, result.err + result.out);
+    assert.deepEqual(result.json().data.receipt, receipt);
+    assert.equal(
+      w.checks(),
+      checks,
+      "restart replay does not need process evidence again",
+    );
+    result = await c.cli("rw", ["task", "resume", w.g.taskId]);
+    assert.equal(result.code, 0, result.err);
+    assert.equal(
+      Boolean(w.s.f.service.domain().project(w.g.projectId).paused),
+      true,
+    );
+    assert.equal(w.runtime.turnInvocations.length, start);
+    pause(false);
+    await startedOf(w.s.f.service).scheduler.wake();
+    assert.equal(
+      w.runtime.turnInvocations.length,
+      start,
+      "clearing holds alone sends no continuation",
+    );
+    w.runtime.complete = true;
+    result = await c.cli("rw", [
+      "task",
+      "message",
+      w.g.taskId,
+      "--to",
+      w.g.assignmentId,
+      "--expected-version",
+      String(w.s.f.service.domain().assignment(w.g.assignmentId).version),
+      "--message-file",
+      c.file("continue.txt", "Explicitly continue this conversation."),
+    ]);
+    assert.equal(result.code, 0, result.err + result.out);
+    await until(
+      () => w.runtime.turnInvocations.length === start + 1,
+      "one explicit continuation",
+    );
+    assert.deepEqual(w.runtime.resumed.slice(resumedBefore), [w.g.threadId]);
+  });

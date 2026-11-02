@@ -1,3 +1,4 @@
+import { boundWorld } from "./bound-turn-recovery-fixture.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -478,4 +479,72 @@ test("submit refuses altered, unsafe or foreign documents before sending", async
     assert.equal(r.code, 2, `${file}: ${r.out}`);
   }
   assert.equal(posts(w), before, "nothing was sent");
+});
+
+test("bound recovery lost response reads back its receipt without another reconciliation", async (t) => {
+  const w = await boundWorld(t);
+  const c = await w.cli();
+  const evidence = c.file(
+    "assertions.json",
+    JSON.stringify({
+      schema: "cab.cli.recovery-evidence/v1",
+      receipt: {
+        termination: { kind: "process-exit" },
+        effects: "settled",
+        workspace: "reconciled",
+      },
+    }),
+  );
+  const file = join(c.h.dir, "bound.json");
+  let r = await c.cli("ro", [
+    "recovery",
+    "prepare",
+    "bound-turn-recover",
+    w.g.assignmentId,
+    "--work",
+    w.g.workId,
+    "--evidence-file",
+    evidence,
+    "--out",
+    file,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const document = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(document.command.receipt.threadId, w.g.threadId);
+  assert.equal(document.command.receipt.turnId, w.g.turnId);
+  assert.equal(document.command.receipt.kind, "bound-turn");
+  const key = randomUUID();
+  r = await c.cli(
+    "rw",
+    ["recovery", "submit", "--file", file, "--request-id", key],
+    { fetch: c.lostReply },
+  );
+  assert.equal(r.code, 6, r.err + r.out);
+  const lost = r.json().error;
+  assert.equal(lost.outcome, "unknown");
+  const read = await c.cli("ro", [
+    "operation",
+    "get",
+    key,
+    "--scope",
+    lost.request.scope,
+    "--type",
+    lost.request.type,
+  ]);
+  assert.equal(read.code, 0, read.err + read.out);
+  const receipt = read.json().data.receipt;
+  w.setMode("unknown");
+  const checks = w.checks();
+  r = await c.cli("rw", [
+    "recovery",
+    "submit",
+    "--file",
+    file,
+    "--request-id",
+    key,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.deepEqual(r.json().data.receipt, receipt);
+  assert.equal(w.checks(), checks);
+  assert.equal(w.runtime.turnInvocations.length, 1);
 });
