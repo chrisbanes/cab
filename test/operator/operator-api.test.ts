@@ -1638,6 +1638,26 @@ test("the task read carries an imported task's issue brief apart from its outcom
   // The brief rides in the source revision history too, under the same exclusions.
   const review = await api.readReview(taskId);
   assert.equal(review.data.sources.at(-1)?.issueBrief, task.issueBrief);
+
+  // The project's source credential value inside a brief is withheld from both reads.
+  const canary = "issue-brief-canary-7731";
+  const previous = process.env.UI02_SYNTHETIC_REFERENCE;
+  process.env.UI02_SYNTHETIC_REFERENCE = canary;
+  t.after(() => {
+    if (previous === undefined) delete process.env.UI02_SYNTHETIC_REFERENCE;
+    else process.env.UI02_SYNTHETIC_REFERENCE = previous;
+  });
+  source.reconcileIssueBrief("I1", {
+    complete: true,
+    comments: [`## Agent Brief\nUse ${canary} to deploy`],
+    reason: null,
+  });
+  const withheld = await read();
+  assert.doesNotMatch(String(withheld.issueBrief), new RegExp(canary));
+  assert.equal(withheld.outcome, "The outcome");
+  const history = await api.readReview(taskId);
+  assert.equal(history.data.sources.at(-1)?.issueBrief, null);
+  assert.doesNotMatch(JSON.stringify(history), new RegExp(canary));
 });
 test("omitted-material denial replay remains exact after privacy-context change and service reopen", async (t) => {
   const f = await createOperatorFixture();
