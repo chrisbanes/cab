@@ -320,7 +320,11 @@ Owned Codex and Claude runtime/probe children start in separate process groups,
 with piped stdio and retained lifecycle ownership. Terminal group SIGINT therefore
 reaches cab's handler without pre-empting its protocol interrupt. cab still awaits
 owned exit; this does not contain descendants or guarantee a clean drain after
-repeated signals.
+repeated signals. Awaiting exit applies only to a coordinated drain. If the service
+process dies, for example in a crash or when launchd kills it after its exit
+timeout, those children are outside its process group, are not killed with it and
+can keep running. Bound-turn recovery then refuses while the exact recorded
+process is alive, until the operator ends it.
 
 Manual bound-turn recovery is distinct from planned shutdown: it requires verified
 exit of the exact stored process (PID, birth identity and boot identity), exact work

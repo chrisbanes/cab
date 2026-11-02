@@ -572,7 +572,13 @@ stop stays under launchd's default 20-second exit timeout.
 Runtime and probe children own isolated process groups with piped stdio; cab keeps
 handles and awaits exit. Ctrl-C cannot directly fan out to those children before
 cab's protocol interrupt. This is not descendant containment, and repeated signals
-are not a guarantee of clean drain.
+are not a guarantee of clean drain. Awaiting exit applies only when cab drains in
+an orderly way. launchd kills a dead job's process group, and these children are
+not in it. So after a service crash, or launchd's SIGKILL at the 20-second exit
+timeout, Codex App Server and Claude Code processes can keep running without cab.
+Their turns stay held, and `cab recovery get` shows the bound-turn path blocked by
+`termination-live`. End each exact process it reports (PID and start time, never a
+name match) and confirm it has exited before bound-turn recovery.
 
 For a held bound turn, use `cab recovery get ASSIGNMENT_ID`, then
 `cab recovery prepare bound-turn-recover ASSIGNMENT_ID --work WORK_ID --out FILE

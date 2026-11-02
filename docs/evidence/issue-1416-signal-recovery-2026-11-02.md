@@ -129,6 +129,14 @@ against fake protocol children. None of this is credited as real-runtime evidenc
   descendant containment or host restart, sleep or wake.
 - The installed LaunchAgent service (`kickstart -k`) was not exercised; the
   foreground service process received the signals.
+- Runtime children now run outside the service's process group, and the
+  LaunchAgent sets no `AbandonProcessGroup`. So when the service dies without a
+  coordinated drain (a crash, or launchd's SIGKILL after its exit timeout), launchd
+  does not kill Codex App Server or Claude Code with it. Those processes can keep
+  running; recovery stays held (`termination-live`, known survivor) until the
+  operator ends each exact process. This path was not exercised live.
+- Whether Codex App Server exits by itself when its stdin closes (its parent died)
+  is unproven.
 - Model behaviour is not guaranteed: briefs keep turns short, and the driver fails
   early on a delegating seed or wrong feedback route instead of proving
   compliance.
