@@ -4946,6 +4946,12 @@ test("Status mapping is keyboard operable at phone width", async (_t, journey) =
 });
 
 test("opaque saved rows support keyboard remove undo and discard while a visible source change keeps them", async (_t, journey) => {
+  const previous = process.env.HIDDEN_UI_SOURCE;
+  process.env.HIDDEN_UI_SOURCE = "S-1";
+  journey.cleanup(async () => {
+    if (previous === undefined) delete process.env.HIDDEN_UI_SOURCE;
+    else process.env.HIDDEN_UI_SOURCE = previous;
+  }, "restore-hidden-source-exclusion");
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/projects/:atlas/settings?tab=github",
@@ -4953,7 +4959,7 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   );
   const d = f.service.domain();
   const hidden = {
-    id: "HIDDEN_UI_SOURCE",
+    id: "S-1",
     kind: "search" as const,
     query: "private saved query",
   };
@@ -5010,6 +5016,24 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   await savedOutcome(page);
   assert.deepEqual(d.githubConfiguration(ids.atlas).selections, [hidden]);
   assert.equal(d.githubConfiguration(ids.atlas).closedIssues, "done");
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
+  await page
+    .getByLabel("Selection kind", { exact: true })
+    .selectOption("search");
+  await page
+    .getByLabel("Search query", { exact: true })
+    .fill("is:open added query");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  const savedSources = d.githubConfiguration(ids.atlas).selections;
+  assert.deepEqual(savedSources[0], hidden);
+  assert.match(savedSources[1]!.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(savedSources[1], {
+    id: savedSources[1]!.id,
+    kind: "search",
+    query: "is:open added query",
+  });
+  assert.deepEqual(d.githubActiveSelectionIds(ids.atlas), []);
   const api = new OperatorApi(f.service, [f.directory]);
   await api.execute({
     type: "repositories.configure",

@@ -444,9 +444,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                   onClick={() =>
                     add("selections", {
                       id: nextSelectionId(
-                        data.source.selections.flatMap((s) =>
-                          s.id ? [s.id] : [],
-                        ),
+                        data.source.selections.map((s) => s.id),
                         selections.map((s) => String(s.id)),
                       ),
                       kind: "repository",

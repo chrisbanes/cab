@@ -1843,6 +1843,39 @@ test("Jira review while private queries load does not keep an explicit identity 
   ]);
 });
 
+test("source identity allocation stays independent of hidden IDs during additions and conflict renumbering", () => {
+  assert.match(nextSelectionId([null], []), /^[0-9a-f-]{36}$/);
+  const source = {
+    ...config().source,
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: {
+          projectId,
+          section: "source" as const,
+          version: 4,
+          index: 0,
+        },
+      },
+      { id: "S-1", kind: "search" as const, descriptor: null, active: false },
+    ],
+  };
+  const adopted = parseRows(
+    adoptSourceRows(source, {
+      selections: JSON.stringify([
+        { id: "S-1", kind: "search", query: "new query" },
+      ]),
+    }).selections,
+  );
+  const added = adopted.find((row) => row.query === "new query")!;
+  assert.match(String(added.id), /^[0-9a-f-]{36}$/);
+  assert.ok(adopted.some((row) => row.unavailable));
+  assert.ok(adopted.some((row) => row.keep && row.id === "S-1"));
+});
+
 test("opaque row identity cannot alias a visible id containing the serialized reference", () => {
   const c = config();
   const reference = {

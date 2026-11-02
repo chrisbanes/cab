@@ -294,12 +294,13 @@ export function repositoryRowsFrom(saved: Repositories) {
   };
 }
 
-/** The next free `S-<n>` above every saved or drafted id, so no removed id is reused. */
-export function nextSelectionId(saved: string[], drafted: string[]) {
+/** Hidden saved IDs require independent allocation; otherwise keep sequential IDs above removed rows. */
+export function nextSelectionId(saved: (string | null)[], drafted: string[]) {
+  if (saved.includes(null)) return crypto.randomUUID();
   const highest = Math.max(
     0,
     ...[...saved, ...drafted].map((id) =>
-      Number(/^S-(\d+)$/.exec(id)?.[1] ?? 0),
+      Number(/^S-(\d+)$/.exec(id ?? "")?.[1] ?? 0),
     ),
   );
   return `S-${highest + 1}`;
@@ -493,7 +494,7 @@ const mergeRows = (
  */
 export function adoptSourceRows(source: Source, v: Values) {
   const loaded = sourceRowsFrom(source);
-  const saved = source.selections.flatMap((x) => (x.id ? [x.id] : []));
+  const saved = source.selections.map((x) => x.id);
   const taken = parseRows(v.selections).map((x) => String(x.id));
   const selections = parseRows(v.selections).map((r) => {
     if (r.keep || !saved.includes(String(r.id))) return r;
@@ -740,10 +741,7 @@ export function jiraRowsFrom(
 export function jiraSelections(source: Source, values: Values) {
   const kept = live(parseRows(values.selections)).map(keepOpaque);
   const ids = Array.isArray(values.jqlIds) ? [...values.jqlIds] : [];
-  const taken = source.selections.flatMap((row) =>
-    row.id === null ? [] : [row.id],
-  );
-  const hiddenIds = source.selections.some((row) => row.id === null);
+  const taken = source.selections.map((row) => row.id);
   const queries = String(values.jql ?? "")
     .split("\n")
     .map((line) => line.trim())
@@ -751,10 +749,7 @@ export function jiraSelections(source: Source, values: Values) {
   return [
     ...kept,
     ...queries.map((jql, index) => {
-      // An opaque row may already own any sequential id.
-      const id =
-        ids[index] ||
-        (hiddenIds ? crypto.randomUUID() : nextSelectionId(taken, ids));
+      const id = ids[index] || nextSelectionId(taken, ids);
       ids[index] = id;
       return { id, kind: "jql", jql };
     }),
