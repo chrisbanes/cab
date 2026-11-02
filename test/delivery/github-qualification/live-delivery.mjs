@@ -761,11 +761,12 @@ try {
       // Exactly one merge write, however many reads settled it.
       const writes = evidence.mergeAsync.filter((r) => r.method === "PUT");
       assert.equal(writes.length, 1);
+      // Only a pending request carries an id (a merged answer carries its commit), so a missing id leaves nothing to poll.
       const uuid = z
-        .object({ details: z.object({ uuid: z.string().min(1) }) })
+        .object({ details: z.object({ uuid: z.string().min(1).optional() }) })
         .parse(writes[0].response).details.uuid;
       // GitHub keeps the result, so the poll endpoint is read here when settling did not need it.
-      if (!evidence.mergeAsync.some((r) => r.method === "GET"))
+      if (uuid && !evidence.mergeAsync.some((r) => r.method === "GET"))
         evidence.mergeAsync.push({
           method: "GET",
           path: `/pulls/${j.pr.number}/merge-async/${uuid}`,

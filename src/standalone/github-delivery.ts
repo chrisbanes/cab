@@ -151,17 +151,23 @@ const hasLabel = (labels: { name: string }[], name: string): boolean =>
     name,
   );
 
-/** `merge-async`'s answer to a merge request and to a poll of it. */
+const asyncMergeId = z.string().trim().min(1).max(512);
+/**
+ * `merge-async`'s answer to a merge request and to a poll of it. `details` is one of three shapes: the
+ * pending request's (`uuid` and its merge options), a bare `message`, or a `message` with the merge
+ * commit `sha`; so only a pending request carries a `uuid`.
+ */
 const asyncMergeSchema = z.object({
   status: z.enum(["pending", "enqueued", "merged", "failed"]),
   details: z.object({
-    uuid: z.string().trim().min(1).max(512),
+    uuid: asyncMergeId.optional(),
     message: z.string().optional(),
+    sha: z.string().optional(),
   }),
 });
-/** The body of a 409: the request that is already pending. */
+/** The body of a 409: the request that is already pending, which the API says it names. */
 const asyncMergeConflictSchema = z.object({
-  details: z.object({ uuid: z.string().trim().min(1).max(512) }),
+  details: z.object({ uuid: asyncMergeId }),
 });
 
 class ProviderFailure extends Error {
@@ -1565,7 +1571,10 @@ export class GitHubHttpDeliveryProvider
               state: "uncertain",
               reason: "provider-merge-pending",
               receipt: null,
-              mergeRequest: { uuid: sent.uuid, status: sent.status },
+              mergeRequest: {
+                ...(sent.uuid ? { uuid: sent.uuid } : {}),
+                status: sent.status,
+              },
               ...(sent.message ? { hostReason: sent.message } : {}),
             },
           };
@@ -1709,6 +1718,8 @@ export class GitHubHttpDeliveryProvider
             mergeRequest: known,
           }
         : uncertain("provider-merge-enqueued");
+    // Only a pending request has an id to poll; without one the pull request alone settles it.
+    if (!known.uuid) return uncertain("provider-merge-outcome-unknown");
     let polled: z.output<typeof asyncMergeSchema>;
     try {
       polled = asyncMergeSchema.parse(

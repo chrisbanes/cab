@@ -120,6 +120,8 @@ export function scriptedDeliveryProvider() {
         http: 200,
         status: "merged",
         message: undefined as string | undefined,
+        /** A `merged` answer before the pull request itself shows the merge. */
+        lagging: false,
       },
       /** A 409 that names this pending request instead. */
       conflict: undefined as string | undefined,
@@ -171,6 +173,20 @@ export function scriptedDeliveryProvider() {
     lostThreadReply: false,
     lostThreadResolve: false,
   };
+  /** The `details` GitHub documents for each status of a merge request. */
+  const mergeDetails = (status: string, uuid: string, message?: string) =>
+    status === "pending"
+      ? {
+          message: message ?? "Merge request accepted",
+          uuid,
+          merge_method: "squash",
+          merge_action: "merge",
+          expected_head_sha: state.head,
+          bypass_rules: false,
+        }
+      : status === "merged"
+        ? { message: message ?? "Pull request merged", sha: "9".repeat(40) }
+        : { message: message ?? `Merge ${status}` };
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -198,15 +214,12 @@ export function scriptedDeliveryProvider() {
           { status: 409 },
         );
       if (state.unknownEffect) throw Error("scripted lost merge response");
-      if (put.status === "merged") state.merged = true;
+      if (put.status === "merged" && !put.lagging) state.merged = true;
       if (state.lostResponse) throw Error("scripted lost merge response");
       return Response.json(
         {
           status: put.status,
-          details: {
-            uuid: "u-1",
-            ...(put.message ? { message: put.message } : {}),
-          },
+          details: mergeDetails(put.status, "u-1", put.message),
         },
         { status: put.http },
       );
@@ -221,10 +234,7 @@ export function scriptedDeliveryProvider() {
       if (next.status === "merged") state.merged = true;
       return Response.json({
         status: next.status,
-        details: {
-          uuid,
-          ...(next.message ? { message: next.message } : {}),
-        },
+        details: mergeDetails(next.status, uuid, next.message),
       });
     }
     if (

@@ -609,10 +609,10 @@ export const actionObservationSchema = z
     outsideDeleted: z.boolean().optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
     resumeAt: z.number().int().positive().optional(),
-    /** The code host's asynchronous merge request and the last status read for it. */
+    /** The code host's asynchronous merge request and the last status read for it; the id is present while the request is pending. */
     mergeRequest: z
       .object({
-        uuid: identity,
+        uuid: identity.optional(),
         status: z.enum(["pending", "enqueued", "merged", "failed"]),
       })
       .strict()

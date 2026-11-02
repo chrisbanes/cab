@@ -1723,7 +1723,7 @@ test("an enqueued merge is settled by the pull request, and a dequeued one is a 
       assert.deepEqual(action(), {
         state: "uncertain",
         reason: "provider-merge-enqueued",
-        mergeRequest: { uuid: "u-1", status: "enqueued" },
+        mergeRequest: { status: "enqueued" },
         hostReason: null,
       });
       await refreshDelivery(f);
@@ -1906,6 +1906,105 @@ test("a merge request id survives a failed read straight after the write, so a l
       reason: "provider-merge-failed",
       mergeRequest: { uuid: "u-1", status: "failed" },
       hostReason: "Required status check is failing",
+    });
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an already merged answer carries a commit and no request id, and the pull request confirms it", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "merged",
+  });
+  try {
+    assert.equal((await send()).success, true);
+    assert.deepEqual(action(), {
+      state: "confirmed-success",
+      reason: null,
+      mergeRequest: null,
+      hostReason: null,
+    });
+    assert.equal(f.scripted.state.writes, 1);
+    assert.deepEqual(f.scripted.state.polled, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a merged answer the pull request does not show yet has no id to poll, so it waits for the pull request and never writes again", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "merged",
+    lagging: true,
+  });
+  try {
+    assert.equal((await send()).success, false);
+    assert.deepEqual(action(), {
+      state: "uncertain",
+      reason: "provider-merge-outcome-unknown",
+      mergeRequest: { status: "merged" },
+      hostReason: null,
+    });
+    await refreshDelivery(f);
+    assert.equal(action().state, "uncertain");
+    f.scripted.state.merged = true;
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+    assert.deepEqual(f.scripted.state.polled, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a poll that merged carries a commit and no id, and the recorded id is kept", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "pending" },
+    { status: "merged" },
+  ]);
+  try {
+    await send();
+    await refreshDelivery(f);
+    assert.deepEqual(action().mergeRequest, { uuid: "u-1", status: "merged" });
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a failed answer with only a message is a confirmed failure that records it", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "failed",
+    message: "Merge conflict",
+  });
+  try {
+    await send();
+    assert.deepEqual(action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { status: "failed" },
+      hostReason: "Merge conflict",
     });
     assert.equal(f.scripted.state.writes, 1);
   } finally {
