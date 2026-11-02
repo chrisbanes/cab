@@ -654,7 +654,11 @@ export function realBackend(root, marker, journalFile, grant, options = {}) {
       );
     },
     async snapshot(host) {
-      const durable = snapshot(host.root);
+      // After a spent turn (e.g. right after the active barrier) a transient BUSY retries.
+      const durable = await readDurable(
+        host.root,
+        Math.min(journal.deadline, Date.now() + LIMITS.readyMs),
+      );
       trace(join(host.root, "trace.jsonl"), "durable-snapshot", {
         resolutions: durable.resolutions.length,
         receipts: durable.receipts.length,
@@ -928,6 +932,16 @@ export function pollRead(read, state, limit = 20) {
     state.failures = (state.failures ?? 0) + 1;
     if (!transientRead(error) || state.failures > limit) throw error;
     return undefined;
+  }
+}
+/** A read-only snapshot through pollRead, retried until it succeeds or `deadline` passes. */
+export async function readDurable(root, deadline, read = snapshot) {
+  const state = {};
+  while (true) {
+    const value = pollRead(() => read(root), state);
+    if (value) return value;
+    if (Date.now() >= deadline) throw fixed("durable snapshot: deadline");
+    await pause(25);
   }
 }
 /** Fsynced adapter-process rows written by this host before its IPC notice. */

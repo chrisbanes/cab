@@ -1469,6 +1469,7 @@ test(
         driver.jsonlRows(readFileSync(fixtureTrace, "utf8"));
       await backend.signal(host, "group-SIGINT");
       assert.equal(await backend.close(host), true);
+      const generation0 = host.owned.pid;
       host = await backend.start(caseOf(id), 1, Date.now() + LIMITS.readyMs);
       const until = Date.now() + 30000;
       const outcome = () =>
@@ -1490,6 +1491,25 @@ test(
         saved && Date.parse(saved.at) <= Date.parse(proof.at),
         "prompt saved before the barrier",
       );
+      // Token custody: generation 0 restores only after its reference (exclusion) exists;
+      // the restarted generation restores in the factory, before successor dispatch.
+      const tokenRows = (pid: number) =>
+        driver
+          .jsonlRows(readFileSync(join(host.root, "trace.jsonl"), "utf8"))
+          .filter(
+            (r: { pid: number; event: string }) =>
+              r.pid === pid && r.event.startsWith("claude-token-"),
+          )
+          .map((r: { event: string; detail?: { stage?: string } }) =>
+            [r.event, r.detail?.stage].filter(Boolean).join(":"),
+          );
+      assert.deepEqual(tokenRows(generation0), [
+        "claude-token-reference-configured",
+        "claude-token-restored:after-reference-configured",
+      ]);
+      assert.deepEqual(tokenRows(host.owned.pid), [
+        "claude-token-restored:factory-reference-configured",
+      ]);
       await backend.completed(host, Date.now() + LIMITS.readyMs, 2);
       assert.equal(await backend.close(host), true);
       assert.ok(!kinds(s.journal).includes("failed"));
@@ -1690,4 +1710,48 @@ test("polling reads skip a torn trace line and tolerate bounded SQLite BUSY; oth
       3,
     ),
   );
+});
+test("durable snapshots after a spent turn retry a transient BUSY within their deadline", async () => {
+  const { root } = fixture();
+  const fs = await import("node:fs");
+  const { DatabaseSync } = await import("node:sqlite");
+  fs.mkdirSync(join(root, "data"));
+  const writer = new DatabaseSync(join(root, "data", "standalone.sqlite"));
+  for (const table of [
+    "execution_intents",
+    "execution_shutdown_resolutions",
+    "execution_recovery_identities",
+    "task_writer_admissions",
+    "execution_capacity_reservations",
+    "execution_recovery_receipts",
+    "coordination_results",
+  ])
+    writer.exec(`CREATE TABLE ${table}(id TEXT)`);
+  writer.exec(
+    "CREATE TABLE coordination_inbox_events(eventId TEXT, recipientAssignmentId TEXT, sequence INTEGER)",
+  );
+  writer.exec("BEGIN EXCLUSIVE");
+  setTimeout(() => writer.exec("COMMIT"), 150);
+  const value = await driver.readDurable(root, Date.now() + 5000);
+  assert.deepEqual(value.intents, []);
+  writer.exec("BEGIN EXCLUSIVE");
+  await assert.rejects(
+    driver.readDurable(root, Date.now() + 100),
+    /deadline|locked|busy/i,
+  );
+  if (process.platform === "darwin") {
+    // The backend's own snapshot (the clean case's `before`) goes through the same retry.
+    const s = offlineSession();
+    const backend = driver.realBackend(
+      s.root,
+      s.marker,
+      s.journalFile,
+      s.grant,
+      s.options,
+    );
+    setTimeout(() => writer.exec("COMMIT"), 150);
+    const durable = await backend.snapshot({ root });
+    assert.deepEqual(durable.inbox, []);
+  } else writer.exec("COMMIT");
+  writer.close();
 });

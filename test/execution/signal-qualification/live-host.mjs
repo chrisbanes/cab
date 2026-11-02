@@ -40,6 +40,13 @@ export async function host(config, offline = false) {
     : undefined;
   const token = tokenName ? process.env[tokenName] : undefined;
   if (tokenName) delete process.env[tokenName];
+  let tokenRestored = false;
+  const restoreToken = (stage) => {
+    if (tokenRestored || token === undefined) return;
+    process.env[tokenName] = token;
+    tokenRestored = true;
+    log("claude-token-restored", { stage });
+  };
   // Driver death closes IPC: stop through the same service signal path.
   process.once("disconnect", () => {
     if (!leaving) process.kill(process.pid, "SIGTERM");
@@ -142,9 +149,14 @@ export async function host(config, offline = false) {
           : {}),
       };
       // The factory runs after the service's start-time environment snapshot and before any
-      // dispatch, including a restarted generation's shutdown successor.
-      if (harness === "claude" && token !== undefined)
-        process.env[tokenName] = token;
+      // dispatch, including a restarted generation's shutdown successor. Restore here only
+      // when the reference (and so its exclusion) is already configured: "empty" means a
+      // configured reference whose variable is absent; "not-configured" waits for start.
+      if (harness === "claude" && token !== undefined) {
+        const probe = context.claude.turnEnvironment();
+        if ("unavailable" in probe && probe.code === "empty")
+          restoreToken("factory-reference-configured");
+      }
       runtime =
         harness === "codex"
           ? new CodexRuntime(
@@ -592,11 +604,15 @@ export async function host(config, offline = false) {
   service.start = async () => {
     await bounded(start, readyDeadline, "service readiness");
     if (harness === "claude") {
-      if (service.domain().claudeTokenReference() === null)
+      if (service.domain().claudeTokenReference() === null) {
         command({
           type: "claude-token.configure",
           credentialRef: grant.claudeTokenRef,
         });
+        log("claude-token-reference-configured");
+      }
+      // Generation 0: no helper child could inherit the value before its exclusion existed.
+      restoreToken("after-reference-configured");
     }
     const probe = createServer();
     await new Promise((resolve, reject) => {
