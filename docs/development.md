@@ -653,6 +653,16 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      among the projects whose source matched an imported task (N is the task
      version). It neither starts work nor grants repository access and is final
      once the task has an assignment.
+   - `delivery configure PROJECT_ID [--out FILE] [--expected-version N]
+     [--repository REPO_ID]... [--level open-prs|merge-with-approval|merge-when-ready]
+     [--merge-method merge|squash|rebase|none] [--required-check NAME]...
+     [--required-checks none] [--credential-ref env:NAME|gh:github.com|none]
+     [--branch-prefix PREFIX | --branch-prefix-default]` writes a `delivery.configure`
+     change document for the project's delivery policy (`delivery.version` in `project
+     get`); apply it with `project apply --file FILE`. `--level`, `--merge-method` and the
+     required-check flags apply to each `--repository` and replace what it had; grants,
+     checks and the prefix it is not asked to change are kept, and withheld saved rows
+     are kept by reference. No change writes no document.
    - `delivery refresh TASK_ID` runs the existing installation-wide refresh: it
      reconciles unfinished delivery actions (it may re-attempt prepared or
      retryable ones) and re-reads every registered PR, then reports `outcome:

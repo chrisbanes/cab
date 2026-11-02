@@ -989,17 +989,34 @@ Change or Clear uses the versioned, keyed source save, preserves definitions and
 imported history, invalidates activation and requires preview at the new version.
 Unknown save outcomes retain the draft and reconcile the same request.
 
-All source credentials are excluded by name and value from Codex spawn, Claude turns
+Guided setup also records a delivery default, stated beside the source credential
+before Create: Open PRs on every repository the setup links, and, when the GitHub CLI
+login is signed in and a GitHub repository is linked, `gh:github.com` as the project's
+GitHub delivery credential. The project's delivery policy is written at version 1 in the
+create transaction, in `reviewable-pr` mode; the server trusts the operator's stated
+login as it does for the source credential and runs no `gh` probe of its own. Creates
+from the HTML fallback or CLI, projects created without a repository, and repositories
+linked after setup record nothing, so a project is granted exactly what its operator
+saw. The ready check adds an informational delivery line that reports linked
+repositories with no code-host grants and a missing or unusable GitHub delivery
+credential, linking to the Delivery tab; it never blocks Resume. A GitHub project's
+delivery credential is `env:NAME` or exactly `gh:github.com`; GitLab repositories keep
+using the installation's GitLab credential.
+
+All source and delivery credentials are excluded by name and value from Codex spawn, Claude turns
 and helper environments, independently of discovery. Successfully resolved gh values
 remain in process memory solely for exclusion and redaction after Clear or rotation;
 they are never reused for reads or persisted. Each value is bounded to 512 bytes,
 while distinct rotations grow this retained set until restart. Existing Codex spawn
 environments need a service restart to apply changed exclusions. Runtime permissions
-may still let agents reach the host gh login or keychain. Delivery and routing remain
-env-only, so a LaunchDaemon (whose plist carries no environment variable) cannot supply
-a delivery credential yet; cab supplies no separate host sandbox. On a daemon host
-the `gh:github.com` source credential works through a file-based `gh` login;
-there is no `file:` GitHub reference. See the
+may still let agents reach the host gh login or keychain. Routing remains
+env-only. A GitHub delivery credential is `env:NAME` or `gh:github.com`, resolved afresh
+on each delivery action, read and refresh and excluded by name and value like a source
+credential; a failed resolution never falls back to another credential, `GH_TOKEN`
+included. Agents running as the same OS user can reach the host's GitHub CLI login; cab
+supplies no separate host sandbox. On a daemon host the `gh:github.com` source and
+delivery credentials work through a file-based `gh` login; there is no `file:` GitHub
+reference. See the
 [macOS operations procedure](operations/standalone-macos.md#launchdaemon-mode).
 
 Each GitLab host has one installation-level credential, set in Settings → GitLab
@@ -2171,6 +2188,11 @@ The Delivery tab derives each linked repository's shepherd level from its grants
 The project lead's context for each turn states every linked repository's level from the current policy's grants, using the Delivery tab's rules, so a policy change reaches its next wake. At **Open PRs** it stops at a green PR because the operator merges; at either merge level it requests (**Merge with my approval**, which waits for operator approval) or performs (**Merge when ready**) the merge once the PR has no merge blockers; **Not set up** and **Custom** say which code-host actions are granted. Where `pr.merge` is granted, the line names the repository's configured merge method, or says that no method is configured so `pr.merge` is held until the operator sets one. When the delivery mode is not through-merge, the merge levels add that `pr.merge` is refused, so the lead stops at a green PR. At every level the lead is told to ask the operator through `cab_ask_question` after three unsuccessful repairs of the same failure or when reviewers give conflicting direction. This guidance is advisory and not enforced: cab tools still enforce grants, and project instructions apply in addition. Assignee prompts do not carry it.
 
 Choosing a level edits the existing advanced draft and saves mode and grants in one keyed, versioned command. Presets preserve unrelated rows, required checks, prefix and credential intent. Mode becomes through-merge if any recognized repository grant set is at a merge level, including unlinked grant scopes, otherwise reviewable-pr. The advanced mode control remains explicit. Linking repositories grants nothing; ungranted links are flagged. **Apply to all linked repositories** requires an explicit target level and the complete saved link snapshot. Oversized proposals are refused without partial changes. Opaque grants prevent presets; opaque check rows and prefixes remain preservable.
+**Apply Open PRs** appears while any linked code-host repository is Not set up; it puts exactly those repositories at Open PRs in the draft, and Save delivery persists it. It is derived from the draft, so it needs no stored marker.
+
+One store migration, recorded once in `delivery_migrations`, gives every existing project's linked code-host repositories that have no code-host grant the Open PRs grants, appended to the saved grants; a project whose policy it changes is saved at its version plus one, once. It never removes or downgrades a grant, and never changes the mode, credential, branch prefix or any other row. It skips a project with an open pull-request binding, an open approval or an unresolved delivery action, because a version change would invalidate the settlements and approvals bound to the policy version, and it skips a project whose grants would exceed the 256-row limit; such a project shows Apply Open PRs. A repository linked afterwards, in a project the migration visited or in any later project, is never granted automatically, and a fresh store records the migration with nothing to change.
+
+`cab delivery configure PROJECT_ID` prepares a `delivery.configure` change document, as the other configuration commands do, and `cab project apply --file` sends it with the shared request ID, dry run, journal and exit codes. For each `--repository` it sets the level (`--level open-prs|merge-with-approval|merge-when-ready`), merge method (`--merge-method merge|squash|rebase|none`) and additional required checks (`--required-check NAME`, or `--required-checks none`), replacing what the repository had; `--credential-ref env:NAME|gh:github.com|none` and `--branch-prefix PREFIX | --branch-prefix-default` set the credential and the prefix. Levels and mode follow the Delivery tab's rules; everything the command is not asked to change, including grants the read withholds, is kept. A command that changes nothing writes no document.
 
 Each linked repository has its own merge method and required checks. The policy holds one entry per repository with its merge method (`merge`, `squash` or `rebase`) and cab's additional required checks (a name and an optional GitHub App ID). A policy stored with the earlier project-wide `requiredChecks` list is still read: the list applies to every repository, the configuration read shows it among each linked repository's additional checks, and the first save of per-repository settings empties the project-wide list. The saved entries carry what the operator saved for each visible repository; each repository the operator cannot see keeps its entry with the project-wide list appended, and a linked one without an entry gets one carrying the list. A `delivery.configure` command without per-repository settings keeps the saved entries, and is recorded without them. For each visible linked repository the configuration read reports the configured method, the additional checks, the code host's required checks and allowed methods from a fresh read bounded to 5 seconds (or `unavailable` with `credential-missing`, `provider-error`, `timeout` or `unsupported`; a failed read never fails the configuration read), up to 50 check names seen on that repository's recorded PR observations that nothing requires yet, and whether no check is required. Withheld check names stay opaque kept rows indexed per repository.
 
@@ -2181,10 +2203,14 @@ The merge gate evaluates each repository's settings on the fresh provider read t
 Stepping up to Merge when ready requires confirmation that the lead merges without asking once the merge gate reports no blockers and that cab cannot unmerge or revert. Cancellation changes nothing; stepping down needs no escalation confirmation. Advanced edits newly deriving this level use the same warning at Save. Confirmation is bound to the policy version, repository snapshot, operation and proposed grants; relevant edits, Discard and context changes invalidate it. An unchanged confirmed proposal or saved level needs no second warning. Unknown operations stay frozen and reconcile the original receipt without another confirmation or new request identity.
 
 The service implements operator-owned, versioned project delivery policy. Absent
-action grants deny writes; imported identity and repository access supply no write
-authority. Configured delivery credentials stay in service memory and are excluded
-from the Codex spawn environment, including nonempty exact-value aliases. Adding a
-credential already inherited by a running runtime holds activation until restart.
+action grants deny writes, but guided setup and the one-time migration grant Open PRs
+(see Delivery tab below), so external actions are no longer denied by default for those
+projects; delivery authority is granted when a project is created. Imported identity and
+repository access supply no write authority. Configured delivery credentials stay in
+service memory and are excluded from the Codex spawn environment, including nonempty
+exact-value aliases; a `gh:github.com` reference excludes gh's token variables and every
+token value resolved. Adding a credential already inherited by a running runtime holds
+activation until restart.
 Host-permitted reads and the existing login boundary remain accepted limitations.
 
 Issue actions (`issue.*` and `project.*`) go to the project's issue tracker and their grants are
