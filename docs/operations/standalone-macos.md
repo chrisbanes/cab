@@ -923,6 +923,12 @@ filesystem. Pruning deletes payload items only and keeps per-execution gap
 counts. There is no manual purge, and older snapshots keep any payloads they
 held until those snapshots are deleted.
 
+A project's diagnostic capture (`enhanced` or `baseline`) is edited in the web
+operator UI under the project's Settings, General tab, next to Command network
+access, or with `project prepare --diagnostic-capture`. A change applies to
+executions started afterwards and erases no stored diagnostics. A service that
+does not report the mode shows it as not reported, and the control is absent.
+
 ## Startup snapshot
 
 Whenever the service starts against an existing database with migrations pending, it
