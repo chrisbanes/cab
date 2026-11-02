@@ -1469,7 +1469,8 @@ history.
   releases it.
 - **Availability.** The task must be open and not Ready, and have a configured,
   unrevoked lead that has not started ordinary work. One draft turn is queued, held or running
-  per task. Otherwise the command is refused with 409 `conflict` and a reason
+  per task; one that its completed retry or planned-shutdown requeue replaced no longer
+  counts. Otherwise the command is refused with 409 `conflict` and a reason
   (`task-not-open`, `task-ready`, `lead-unconfigured`, `lead-revoked`, `lead-unavailable`,
   `draft-turn-active`), which the task read also reports. A Ready task keeps the ordinary
   reply. Project pause, task Stop and capacity do not refuse a draft turn; they hold the

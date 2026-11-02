@@ -350,16 +350,17 @@ export class SchedulerStore {
   }
 
   /**
-   * The task's draft turn that is still queued, held or running, if any. A request refused
-   * before it ever ran (it has a refusal row; Stop writes none) is finished, not active.
+   * The task's draft-turn requests that are still queued, held or running, oldest first. A
+   * request refused before it ever ran (it has a refusal row; Stop writes none) is finished.
+   * A held request may be history a completed retry or requeue replaced: the caller decides.
    */
-  activeDraftTurn(taskId: string): TurnRequest | undefined {
+  unfinishedDraftTurns(taskId: string): TurnRequest[] {
     const refusals = this.db
       .prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_request_refusals'",
       )
       .get();
-    const row = this.db
+    return this.db
       .prepare(`SELECT * FROM turn_requests WHERE taskId = ? AND draftTurn = 1
         AND state IN ('queued','active','held')
         ${
@@ -368,9 +369,9 @@ export class SchedulerStore {
           refusal WHERE refusal.workId = turn_requests.workId))`
             : ""
         }
-        ORDER BY sequence DESC LIMIT 1`)
-      .get(taskId);
-    return row ? this.parse(row as Record<string, unknown>) : undefined;
+        ORDER BY sequence`)
+      .all(taskId)
+      .map((row) => this.parse(row as Record<string, unknown>));
   }
 
   forTask(taskId: string): TurnRequest[] {

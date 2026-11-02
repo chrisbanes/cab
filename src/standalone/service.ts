@@ -4801,8 +4801,16 @@ export class StandaloneService {
         : null,
       // A queued batch of the lead's means an earlier draft turn still owns the message queue,
       // so a new one could not queue (a refused draft whose batch is not released yet).
+      // A draft request that a completed retry or shutdown requeue replaced stays held as history.
       draftTurnActive:
-        this.started().schedulerStore.activeDraftTurn(taskId) !== undefined ||
+        this.started()
+          .schedulerStore.unfinishedDraftTurns(taskId)
+          .some(
+            (request) =>
+              !this.started().coordination.isHistoricalWorkResolved(
+                request.workId,
+              ),
+          ) ||
         (binding !== undefined &&
           this.started()
             .coordination.queuedDeliveries()
