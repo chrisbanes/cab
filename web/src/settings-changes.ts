@@ -490,14 +490,15 @@ const mergeRows = (
 /**
  * Rows for a newly adopted revision. Kept rows take the latest saved definition; rows saved
  * elsewhere join as kept rows; kept rows removed elsewhere are dropped; a new selection whose
- * id was saved elsewhere takes the next free id.
+ * id was saved elsewhere or cannot be checked against withheld identities gets a fresh id.
  */
 export function adoptSourceRows(source: Source, v: Values) {
   const loaded = sourceRowsFrom(source);
   const saved = source.selections.map((x) => x.id);
   const taken = parseRows(v.selections).map((x) => String(x.id));
   const selections = parseRows(v.selections).map((r) => {
-    if (r.keep || !saved.includes(String(r.id))) return r;
+    if (r.keep || (!saved.includes(null) && !saved.includes(String(r.id))))
+      return r;
     const id = nextSelectionId(saved, taken);
     taken.push(id);
     return { ...r, id };

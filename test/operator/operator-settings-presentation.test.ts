@@ -1876,6 +1876,57 @@ test("source identity allocation stays independent of hidden IDs during addition
   assert.ok(adopted.some((row) => row.keep && row.id === "S-1"));
 });
 
+test("conflict adoption reallocates unsaved identities when every latest identity is withheld", () => {
+  const source = {
+    ...config().source,
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: {
+          projectId,
+          section: "source" as const,
+          version: 4,
+          index: 0,
+        },
+      },
+    ],
+  };
+  let values = {
+    selections: JSON.stringify([
+      { id: "S-1", kind: "search", query: "first", rowKey: "first" },
+      { id: "S-2", kind: "search", query: "second", rowKey: "second" },
+    ]),
+  };
+  for (const version of [4, 5]) {
+    const latest = {
+      ...source,
+      version,
+      selections: source.selections.map((row) => ({
+        ...row,
+        savedRow: { ...row.savedRow, version },
+      })),
+    };
+    values = { selections: adoptSourceRows(latest, values).selections };
+    const rows = parseRows(values.selections);
+    const unsaved = rows.filter((row) => !row.keep);
+    assert.equal(unsaved.length, 2);
+    assert.deepEqual(
+      unsaved.map((row) => row.rowKey),
+      ["first", "second"],
+    );
+    assert.deepEqual(
+      unsaved.map((row) => row.query),
+      ["first", "second"],
+    );
+    for (const row of unsaved) assert.match(String(row.id), /^[0-9a-f-]{36}$/);
+    assert.equal(new Set(unsaved.map((row) => row.id)).size, 2);
+    assert.equal(rows.filter((row) => row.unavailable && row.keep).length, 1);
+  }
+});
+
 test("opaque row identity cannot alias a visible id containing the serialized reference", () => {
   const c = config();
   const reference = {
