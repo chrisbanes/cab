@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { DeliveryStore } from "../../src/core/delivery.js";
 import { type DomainCommand, DomainStore } from "../../src/core/domain.js";
 import { syncDependencyRecords } from "../../src/core/stacked-dependencies.js";
 import { Store } from "../../src/core/store.js";
@@ -174,6 +176,11 @@ test("a local single-blocker dependent starts on its blocker's open PR at its la
     restack: null,
   });
   assert.deepEqual(f.reasons(D), ["local-dependency"], "today's behaviour");
+  assert.equal(
+    f.domain.recordStackedDependency(D),
+    null,
+    "provisions as today",
+  );
   f.stacking(true);
   assert.equal(f.domain.stacking(p), true);
   assert.deepEqual(f.domain.stackFacts(D), {
@@ -290,7 +297,8 @@ test("only linear same-repository chains stack; other shapes wait with their rea
   assert.deepEqual(f.reasons(E), ["local-dependency"]);
   f.domain.recordStackedDependency(D);
   assert.equal(f.domain.stackFacts(E)?.reason, "sibling-stacked");
-  assert.equal(f.domain.recordStackedDependency(E), null);
+  // A blocked dependent that cannot stack gets no workspace until its blocker is Done.
+  assert.throws(() => f.domain.recordStackedDependency(E), /sibling-stacked/);
   // A blocker working in another repository than the dependent's.
   f.db
     .prepare(
@@ -325,7 +333,7 @@ test("a dependent that already has a workspace is never newly stacked", (t) => {
   f.db.prepare("INSERT INTO task_workspace_bindings VALUES (?)").run(D);
   assert.equal(f.domain.stackFacts(D)?.reason, "dependent-started");
   assert.deepEqual(f.reasons(D), ["local-dependency"]);
-  assert.equal(f.domain.recordStackedDependency(D), null);
+  assert.throws(() => f.domain.recordStackedDependency(D), /dependent-started/);
 });
 
 test("imported native edges stack only between same-project tasks", (t) => {
@@ -396,7 +404,7 @@ test("restack reconcile queues once per blocker head and advances after the depe
   f.publish(B, { pushed: head("b") });
   reconcile();
   reconcile();
-  assert.deepEqual(queued, [`restack:R1:${head("b")}`]);
+  assert.deepEqual(queued, [`restack:R1:1:${head("b")}`]);
   assert.equal(f.domain.stackFacts(D)?.restack, "pending");
   assert.equal(f.domain.stackFacts(D)?.parentHead, head("b"));
   f.publish(D, { pushed: head("d") });
@@ -415,4 +423,208 @@ test("restack reconcile queues once per blocker head and advances after the depe
   f.publish(B, { pushed: head("c") });
   reconcile();
   assert.equal(queued.length, 1);
+});
+
+test("a blocker added after recording holds the dependent as an ordinary dependency", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  assert.deepEqual(f.reasons(D), []);
+  f.depend(D, C);
+  assert.deepEqual(f.reasons(D), ["local-dependency"]);
+  assert.equal(f.domain.stackFacts(D)?.reason, "multiple-blockers");
+  f.run({
+    type: "task.configure",
+    actor: "operator",
+    projectId: p,
+    taskId: C,
+    expectedVersion: f.version(C),
+    state: "done",
+  });
+  assert.deepEqual(f.reasons(D), [], "the recorded blocker's gate again");
+});
+
+/** D and E are imported, each blocked by the GitHub issue I_B; `blocker` is imported as B when given. */
+function importedSiblings(f: ReturnType<typeof fixture>, blocker: boolean) {
+  const item = (taskId: string, nodeId: string) => {
+    f.domain.markImportedTask(taskId, nodeId, "R1");
+    f.db
+      .prepare(
+        "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels) VALUES ('github', 'github.com', ?, ?, 'R1', 'o/r', 1, 't', 'b', 'open', '[]')",
+      )
+      .run(nodeId, taskId);
+    f.db
+      .prepare(
+        "INSERT INTO external_item_status (provider, instance, externalId, status, refreshedAt) VALUES ('github', 'github.com', ?, 'open', 'now')",
+      )
+      .run(nodeId);
+  };
+  if (blocker) item(B, "I_B");
+  for (const [taskId, nodeId] of [
+    [D, "I_D"],
+    [E, "I_E"],
+  ] as const) {
+    item(taskId, nodeId);
+    f.db
+      .prepare(
+        "INSERT INTO source_native_blockers VALUES ('github', 'github.com', ?, 'I_B', 'R1', 'o/r', 2, 'open')",
+      )
+      .run(nodeId);
+    syncDependencyRecords(f.db, taskId);
+    f.db
+      .prepare(
+        "UPDATE domain_tasks SET importedBlockers = 'blocked' WHERE id = ?",
+      )
+      .run(taskId);
+  }
+  return item;
+}
+
+test("a native blocker added after recording keeps the GitHub dependency hold", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  const item = importedSiblings(f, true);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  assert.ok(!f.reasons(D).includes("imported-blockers-blocked"));
+  item(C, "I_C");
+  f.db
+    .prepare(
+      "INSERT INTO source_native_blockers VALUES ('github', 'github.com', 'I_D', 'I_C', 'R1', 'o/r', 3, 'open')",
+    )
+    .run();
+  assert.ok(f.reasons(D).includes("imported-blockers-blocked"));
+  assert.equal(f.domain.stackFacts(D)?.reason, "multiple-blockers");
+});
+
+test("a blocker imported after its dependents keeps first-edge-wins", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  const item = importedSiblings(f, false);
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM task_dependency_records").get()?.n,
+    0,
+    "no records before the blocker is a task",
+  );
+  item(B, "I_B");
+  f.publish(B);
+  assert.deepEqual(
+    f.db
+      .prepare(
+        "SELECT taskId FROM task_dependency_records WHERE blockerTaskId = ? ORDER BY seq",
+      )
+      .all(B)
+      .map((row) => row.taskId),
+    [D, E],
+  );
+  assert.equal(f.domain.stackFacts(D)?.state, "stacked");
+  assert.equal(f.domain.stackFacts(E)?.reason, "sibling-stacked");
+  f.domain.recordStackedDependency(D);
+  assert.throws(() => f.domain.recordStackedDependency(E), /sibling-stacked/);
+});
+
+test("a parent head that returns to an earlier commit is announced again", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  f.domain.ensureLeadAssignment(D);
+  const queued: string[] = [];
+  const reconcile = () =>
+    f.domain.reconcileRestacks({
+      queue: (_task, _reason, identity) => queued.push(identity),
+      advance: () => {},
+    });
+  for (const c of ["b", "a", "b"]) {
+    f.publish(B, { pushed: head(c) });
+    reconcile();
+  }
+  assert.deepEqual(queued, [
+    `restack:R1:1:${head("b")}`,
+    `restack:R1:2:${head("a")}`,
+    `restack:R1:3:${head("b")}`,
+  ]);
+  assert.equal(new Set(queued).size, 3);
+});
+
+test("the parent head waits while the dependent has a push prepared, in flight or unresolved", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  f.domain.ensureLeadAssignment(D);
+  f.run({
+    type: "delivery.configure",
+    actor: "operator",
+    projectId: p,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [{ action: "branch.push", repositoryId: "R1", mode: "allow" }],
+    requiredChecks: [],
+  });
+  const delivery = new DeliveryStore(f.db);
+  const operationId = randomUUID();
+  // D's push is proved against the recorded head before it is attempted.
+  const prepared = delivery.prepareAction(
+    {
+      operationId,
+      action: {
+        kind: "branch.push",
+        target: { repositoryId: "R1" },
+        commitSha: head("d"),
+      },
+    },
+    {
+      projectId: p,
+      taskId: D,
+      assignmentId: randomUUID(),
+      taskVersion: f.version(D),
+      assignmentVersion: 1,
+      workId: "w",
+      workRevision: 1,
+      conversationRevision: 1,
+    },
+    false,
+  );
+  assert.equal(prepared.state, "prepared");
+  const queued: string[] = [];
+  const reconcile = () =>
+    f.domain.reconcileRestacks({
+      queue: (_task, _reason, identity) => queued.push(identity),
+      advance: () => {},
+    });
+  f.publish(B, { pushed: head("b") });
+  reconcile();
+  const parent = () => f.domain.stackedDependency(D)?.parentHead;
+  assert.equal(parent(), head("a"), "held while prepared");
+  const branch = delivery.taskBranch(D, "R1")?.branch ?? "";
+  delivery.beginAttempt(
+    operationId,
+    { branch, beforeHead: null, lastPushedSha: null, uncommittedEntries: 0 },
+    () => {},
+  );
+  delivery.recordObservation(operationId, {
+    state: "uncertain",
+    reason: "unproved",
+    receipt: null,
+  });
+  reconcile();
+  assert.equal(parent(), head("a"), "held while unresolved");
+  assert.deepEqual(queued, []);
+  // The push on the old head lands; only then does the head move, and the restack stays pending.
+  delivery.recordObservation(operationId, {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "R1", ref: branch, headSha: head("d") },
+  });
+  reconcile();
+  assert.equal(parent(), head("b"));
+  assert.deepEqual(queued, [`restack:R1:1:${head("b")}`]);
+  reconcile();
+  assert.equal(f.domain.stackFacts(D)?.restack, "pending");
 });

@@ -33,7 +33,8 @@ export const stackingTables = `
     blockerTaskId TEXT NOT NULL UNIQUE REFERENCES domain_tasks(id),
     repositoryId TEXT NOT NULL, parentHead TEXT NOT NULL,
     restack TEXT NOT NULL CHECK(restack IN ('current','pending')),
-    restackFromSha TEXT, recordedAt INTEGER NOT NULL
+    restackFromSha TEXT, restackSeq INTEGER NOT NULL DEFAULT 0,
+    recordedAt INTEGER NOT NULL
   );`;
 
 /** The durable order of task dependency edges: the lowest `seq` is the first recorded edge. */
@@ -72,6 +73,24 @@ export function syncDependencyRecords(db: Database, taskId: string): void {
     db.prepare(
       `DELETE FROM ${table} WHERE taskId = ? AND blockerTaskId NOT IN (${localEdges} UNION ${nativeEdges})`,
     ).run(taskId, taskId, taskId);
+}
+
+/**
+ * Records the edges of dependents whose native blockers name `blockerTaskId`, once it has been
+ * imported: their refresh may have run before it was a task. Run inside the caller's transaction.
+ */
+export function syncDependentsOf(db: Database, blockerTaskId: string): void {
+  const dependents = db
+    .prepare(
+      `SELECT DISTINCT d.taskId FROM imported_tasks b
+      JOIN source_native_blockers n ON n.provider = b.provider AND n.instance = b.instance
+        AND n.blockerExternalId = b.externalId
+      JOIN imported_tasks d ON d.provider = n.provider AND d.instance = n.instance
+        AND d.externalId = n.externalId
+      WHERE b.taskId = ? ORDER BY n.rowid`,
+    )
+    .all(blockerTaskId) as Array<{ taskId: string }>;
+  for (const { taskId } of dependents) syncDependencyRecords(db, taskId);
 }
 
 /** Seeds edge records for every dependent once, local edges first in insertion order. */

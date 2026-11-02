@@ -81,6 +81,7 @@ import {
   type StackFacts,
   type StackReason,
   syncDependencyRecords,
+  syncDependentsOf,
 } from "./stacked-dependencies.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -1441,6 +1442,7 @@ export class DomainStore {
         label.parse(nodeId),
         label.parse(repositoryId),
       );
+    syncDependentsOf(this.db, taskId);
   }
 
   /**
@@ -2214,7 +2216,14 @@ export class DomainStore {
       const existing = this.stackedDependency(taskId);
       if (existing) return existing;
       const { facts, gate } = this.stackDecision(id.parse(taskId));
-      if (!gate || !facts?.blockerTaskId) return null;
+      // Stacking off provisions as before; recorded dependencies returned above.
+      if (!facts || facts.reason === "stacking-off") return null;
+      // A blocked dependent that cannot stack gets no workspace from the link base until Done.
+      if (!gate)
+        throw new DomainConflictError(
+          `Dependent waits for its blockers: ${facts.reason ?? "blocked"}`,
+        );
+      if (!facts.blockerTaskId) return null;
       if (gate !== "ok" || !facts.repositoryId)
         throw new DomainConflictError(
           `Stacked dependency is waiting: stacked-blocker-${gate}`,
@@ -2268,9 +2277,12 @@ export class DomainStore {
       const head = this.blocksDependents(blocker)
         ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
         : null;
+      // A push prepared, in flight or unresolved was proved against the current parent head;
+      // the head moves only once it settles, so a landed push is never mistaken for the restack.
       const moved =
         !!head &&
         head !== parentHead &&
+        delivery.actionBlockers(taskId).length === 0 &&
         !!this.one(
           "SELECT 1 AS present FROM task_lead_bindings WHERE taskId = ?",
           taskId,
@@ -2279,13 +2291,14 @@ export class DomainStore {
         parentHead = head;
         this.db
           .prepare(
-            "UPDATE stacked_dependencies SET parentHead = ?, restack = 'pending', restackFromSha = ? WHERE taskId = ?",
+            "UPDATE stacked_dependencies SET parentHead = ?, restack = 'pending', restackFromSha = ?, restackSeq = restackSeq + 1 WHERE taskId = ?",
           )
           .run(parentHead, own, taskId);
         effects.queue(
           taskId,
           `The blocker's branch moved to ${parentHead}. Rebase this task's branch onto ${parentHead} and publish it with branch.force-push (branch.push if it was never pushed); the push must descend from ${parentHead}.`,
-          `restack:${repositoryId}:${parentHead}`,
+          // Numbered, so a head that returns to an earlier commit is still announced.
+          `restack:${repositoryId}:${Number(row.restackSeq) + 1}:${parentHead}`,
         );
       }
       return landed || moved;
@@ -2299,11 +2312,14 @@ export class DomainStore {
         transaction(this.db, () => step(String(taskId), true));
   }
 
+  /** Set once the standalone service's workspace table exists; a bare domain store has none. */
+  private workspaceTable = false;
   private hasWorkspace(taskId: string): boolean {
+    this.workspaceTable ||= !!this.one(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'task_workspace_bindings'",
+    );
     return (
-      !!this.one(
-        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'task_workspace_bindings'",
-      ) &&
+      this.workspaceTable &&
       !!this.one(
         "SELECT 1 AS present FROM task_workspace_bindings WHERE taskId = ?",
         taskId,
@@ -2361,13 +2377,33 @@ export class DomainStore {
   } {
     const recorded = this.stackedDependency(taskId);
     if (recorded) {
-      const gate = this.blocksDependents(recorded.blockerTaskId)
-        ? this.blockerGate(recorded.blockerTaskId, recorded.repositoryId)
-        : null;
+      // A blocker added after recording is not stacked: it holds as an ordinary dependency.
+      const others =
+        this.blockingDependencies(taskId).some(
+          (blocker) => blocker !== recorded.blockerTaskId,
+        ) ||
+        !!this.one(
+          `SELECT 1 AS present FROM imported_tasks d
+          JOIN source_native_blockers n ON n.provider = d.provider AND n.instance = d.instance
+            AND n.externalId = d.externalId
+          LEFT JOIN imported_tasks bi ON bi.provider = n.provider AND bi.instance = n.instance
+            AND bi.externalId = n.blockerExternalId
+          WHERE d.taskId = ? AND n.status = 'open' AND (bi.taskId IS NULL OR bi.taskId != ?)`,
+          taskId,
+          recorded.blockerTaskId,
+        );
+      const gate =
+        !others && this.blocksDependents(recorded.blockerTaskId)
+          ? this.blockerGate(recorded.blockerTaskId, recorded.repositoryId)
+          : null;
       return {
         facts: {
           state: "stacked",
-          reason: gate && gate !== "ok" ? `blocker-${gate}` : null,
+          reason: others
+            ? "multiple-blockers"
+            : gate && gate !== "ok"
+              ? `blocker-${gate}`
+              : null,
           ...recorded,
         },
         gate,

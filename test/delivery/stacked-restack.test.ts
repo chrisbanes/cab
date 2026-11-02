@@ -47,7 +47,7 @@ test("a blocker's new head queues one restack for its dependent, which publishes
   await f.service.refreshGitHub();
   await f.showPr(B);
   assert.deepEqual(f.restackNotices(), [
-    `${D} restack:${repositoryId}:${moved}`,
+    `${D} restack:${repositoryId}:1:${moved}`,
   ]);
   const stack = f.service.domain().stackFacts(D);
   assert.equal(stack?.restack, "pending");
@@ -94,15 +94,17 @@ test("restacks run bottom-up through a chain", async (t) => {
   const a2 = await f.commit(A, "a2");
   succeeded(await f.push(A, a2));
   await until(() => f.restackNotices().length === 1, "B's restack");
-  assert.deepEqual(f.restackNotices(), [`${B} restack:${repositoryId}:${a2}`]);
+  assert.deepEqual(f.restackNotices(), [
+    `${B} restack:${repositoryId}:1:${a2}`,
+  ]);
   await f.showPr(A);
 
   const b2 = await rebase(f, B, a1, a2);
   succeeded(await f.push(B, b2, "branch.force-push"));
   await until(() => f.restackNotices().length === 2, "C's restack");
   assert.deepEqual(f.restackNotices(), [
-    `${B} restack:${repositoryId}:${a2}`,
-    `${C} restack:${repositoryId}:${b2}`,
+    `${B} restack:${repositoryId}:1:${a2}`,
+    `${C} restack:${repositoryId}:1:${b2}`,
   ]);
   assert.equal(f.service.domain().stackFacts(B)?.restack, "current");
   assert.equal(f.service.domain().stackFacts(C)?.parentHead, b2);
@@ -126,7 +128,7 @@ test("a restack missed before a restart is queued once after it; a Done blocker 
   await f.restart();
   await f.service.refreshGitHub();
   assert.deepEqual(f.restackNotices(), [
-    `${D} restack:${repositoryId}:${missed}`,
+    `${D} restack:${repositoryId}:1:${missed}`,
   ]);
 
   await f.restart((db) => {
