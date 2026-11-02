@@ -36,21 +36,36 @@ const hash = (value) => createHash("sha256").update(value).digest("hex");
 const rootDir = fileURLToPath(new URL("../../../", import.meta.url));
 const command = (args) =>
   execFileSync("git", args, { cwd: rootDir, encoding: "utf8" }).trim();
-async function bounded(action, deadline, label) {
+export async function bounded(action, deadline, label, now = Date.now) {
   let timer;
   try {
     return await Promise.race([
-      Promise.resolve().then(action),
+      Promise.resolve()
+        .then(action)
+        .then((value) => {
+          if (now() > deadline) throw Error(`${label}-deadline`);
+          return value;
+        }),
       new Promise((_, reject) => {
         timer = setTimeout(
           () => reject(Error(`${label}-deadline`)),
-          Math.max(1, deadline - Date.now()),
+          Math.max(1, deadline - now()),
         );
       }),
     ]);
   } finally {
     clearTimeout(timer);
   }
+}
+export function cleanupIsVerified(cleanup, deadline, now = Date.now()) {
+  return (
+    now <= deadline &&
+    cleanup.verification.kind === "verified" &&
+    Object.values(cleanup.operations).every((v) => v === "settled") &&
+    cleanup.lateResources.every(
+      (r) => r.state === "settled" && r.settledWithinCleanupDeadline === true,
+    )
+  );
 }
 export function consumeGrantMarker(grant, startedAt) {
   const fd = openSync(grant.consumedMarker, "wx", 0o600);
@@ -271,6 +286,8 @@ export async function runQualification(options = {}) {
             record.settledWithinCleanupDeadline = Date.now() <= cleanupDeadline;
             save();
             throw error;
+          } finally {
+            if (label === "service-start") fixture?.onLateServiceCleanup?.();
           }
           throw Error(`${label}-late-creation-cleaned`);
         }
@@ -342,12 +359,17 @@ export async function runQualification(options = {}) {
               }
             : {}),
         });
-        if (fixture?.delayRuntimeStart) {
+        if (fixture?.runtimeStartGate || fixture?.delayRuntimeStart) {
           const startRuntime = runtime.start.bind(runtime);
           runtime.start = async () => {
-            await new Promise((resolve) =>
-              setTimeout(resolve, fixture.delayRuntimeStart),
-            );
+            if (fixture.runtimeStartGate) {
+              fixture.onRuntimeStart?.();
+              await fixture.runtimeStartGate;
+            } else {
+              await new Promise((resolve) =>
+                setTimeout(resolve, fixture.delayRuntimeStart),
+              );
+            }
             return startRuntime();
           };
         }
@@ -713,6 +735,8 @@ export async function runQualification(options = {}) {
       void operation.then(recordLateSettlement);
       try {
         const outcome = await bounded(() => operation, cleanupDeadline, name);
+        if (outcome.settledMs > cleanupDeadline - start)
+          throw Error(`${name}-deadline`);
         if (outcome.state === "failed") throw Error(outcome.reason);
         stage.state = "settled";
         evidence.cleanup.operations[name] = "settled";
@@ -775,12 +799,10 @@ export async function runQualification(options = {}) {
         reason: "verification-deadline",
       };
     }
-    evidence.cleanup.verified =
-      evidence.cleanup.verification.kind === "verified" &&
-      Object.values(evidence.cleanup.operations).every(
-        (v) => v === "settled",
-      ) &&
-      evidence.cleanup.lateResources.every((r) => r.state === "settled");
+    evidence.cleanup.verified = cleanupIsVerified(
+      evidence.cleanup,
+      cleanupDeadline,
+    );
     if (!evidence.cleanup.verified) evidence.status = "failed";
     save();
     if (!fixture) {

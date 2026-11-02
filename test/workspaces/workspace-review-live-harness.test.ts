@@ -28,34 +28,113 @@ browserTest(
 );
 
 test("timed-out service startup keeps its late service-stop owner without racing runtime shutdown", async () => {
-  const r = await module.runQualification({
-    fixture: { delayRuntimeStart: 4200 },
+  const barrier = () => {
+    let release: () => void = () => {};
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { promise, resolve: () => release() };
+  };
+  const entered = barrier();
+  const gate = barrier();
+  const cleaned = barrier();
+  const qualification = module.runQualification({
+    fixture: {
+      runtimeStartGate: gate.promise,
+      onRuntimeStart: entered.resolve,
+      onLateServiceCleanup: cleaned.resolve,
+    },
   });
-  assert.equal(r.status, "failed");
-  assert.match(r.failure.reason, /service-start-deadline/);
-  assert.equal(r.counts.threads, 0);
-  assert.equal(r.counts.turns, 0);
-  assert.equal(r.cleanup.operations["pending-setup-settlement"], "unresolved");
-  assert.equal(
-    r.cleanup.stages.find(
-      ({ operation }: { operation: string }) =>
-        operation === "pending-setup-settlement",
-    )?.state,
-    "unresolved",
+  try {
+    await entered.promise;
+    const r = await qualification;
+    assert.equal(r.status, "failed");
+    assert.match(r.failure.reason, /service-start-deadline/);
+    assert.equal(r.counts.threads, 0);
+    assert.equal(r.counts.turns, 0);
+    assert.equal(
+      r.cleanup.operations["pending-setup-settlement"],
+      "unresolved",
+    );
+    assert.equal(
+      r.cleanup.stages.find(
+        ({ operation }: { operation: string }) =>
+          operation === "pending-setup-settlement",
+      )?.state,
+      "unresolved",
+    );
+    assert.equal(r.cleanup.operations["exact-runtime-stop"], undefined);
+    assert.equal(r.cleanup.operations["service-close"], undefined);
+    assert.equal(r.cleanup.verified, false);
+    gate.resolve();
+    await cleaned.promise;
+    assert.equal(r.cleanup.lateResources[0]?.state, "settled");
+    assert.equal(
+      r.cleanup.lateResources[0]?.settledWithinCleanupDeadline,
+      false,
+    );
+    assert.equal(r.cleanup.lateVerification?.kind, "verified");
+    assert.equal(r.cleanup.verified, false);
+    assert.equal(
+      r.cleanup.operations["pending-setup-settlement"],
+      "unresolved",
+    );
+    assert.equal(r.counts.threads, 0);
+    assert.equal(r.counts.turns, 0);
+    console.log("startup-gate-cleanup-evidence", JSON.stringify(r.cleanup));
+  } finally {
+    gate.resolve();
+    await qualification;
+    await cleaned.promise;
+  }
+});
+
+test("absolute deadline rejects promise settlement before a delayed timer callback and preserves timely settlement", async () => {
+  let now = 0;
+  await assert.rejects(
+    module.bounded(
+      () => {
+        now = 101;
+        return "late";
+      },
+      100,
+      "cleanup",
+      () => now,
+    ),
+    /cleanup-deadline/,
   );
-  assert.equal(r.cleanup.operations["exact-runtime-stop"], undefined);
-  assert.equal(r.cleanup.operations["service-close"], undefined);
-  assert.equal(r.cleanup.verified, false);
-  const observationDeadline = Date.now() + 1000;
-  while (
-    (!r.cleanup.lateResources[0] || !r.cleanup.lateVerification) &&
-    Date.now() < observationDeadline
-  )
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(r.cleanup.lateResources[0]?.state, "settled");
-  assert.equal(r.cleanup.lateResources[0]?.settledWithinCleanupDeadline, false);
-  assert.equal(r.cleanup.lateVerification?.kind, "verified");
-  assert.equal(r.cleanup.verified, false);
+  now = 0;
+  assert.equal(
+    await module.bounded(
+      () => {
+        now = 100;
+        return "timely";
+      },
+      100,
+      "cleanup",
+      () => now,
+    ),
+    "timely",
+  );
+});
+
+test("cleanup credit requires timely final proof and timely settled late resources", () => {
+  const lateResource = { state: "settled", settledWithinCleanupDeadline: true };
+  const cleanup = {
+    verification: { kind: "verified" },
+    operations: { close: "settled" },
+    lateResources: [lateResource],
+  };
+  assert.equal(module.cleanupIsVerified(cleanup, 100, 100), true);
+  assert.equal(module.cleanupIsVerified(cleanup, 100, 101), false);
+  lateResource.settledWithinCleanupDeadline = false;
+  assert.equal(module.cleanupIsVerified(cleanup, 100, 100), false);
+  lateResource.settledWithinCleanupDeadline = true;
+  cleanup.operations.close = "unresolved";
+  assert.equal(module.cleanupIsVerified(cleanup, 100, 100), false);
+  cleanup.operations.close = "settled";
+  cleanup.verification.kind = "unknown";
+  assert.equal(module.cleanupIsVerified(cleanup, 100, 100), false);
 });
 
 test("grant consumption atomically rejects replay and retains immutable scoped marker", () => {
