@@ -4,6 +4,10 @@ import { record } from "./trace.js";
 const file = process.env.SIGNAL_TRACE;
 if (!file) throw new Error("Missing owned trace");
 let preempted = false;
+// Opt-in per-process turn script ("complete,hold"): unique turn IDs; a held turn shows activity and never ends.
+const script = process.env.SIGNAL_TURNS?.split(",");
+let turns = 0;
+let currentTurn = "signal-turn";
 const ownGroup = Number(
   execFileSync("ps", ["-p", String(process.pid), "-o", "pgid="], {
     encoding: "utf8",
@@ -47,6 +51,17 @@ for await (const line of createInterface({ input: process.stdin })) {
     continue;
   }
   if (m.method === undefined) {
+    if (script && typeof m.id === "number" && m.id >= 700) {
+      record(file, "result-saved", m.result);
+      write({
+        method: "turn/completed",
+        params: {
+          threadId: "signal-thread",
+          turn: { id: `script-turn-${m.id - 700}`, status: "completed" },
+        },
+      });
+      continue;
+    }
     if (m.id === 700) {
       record(file, "result-saved", m.result);
       write({
@@ -67,6 +82,8 @@ for await (const line of createInterface({ input: process.stdin })) {
       config: { approval_policy: "never", sandbox_mode: "workspace-write" },
     };
   if (m.method === "model/list") result = { data: [] };
+  if (m.method === "skills/list") result = { data: [] };
+  if (m.method === "thread/list") result = { data: [], nextCursor: null };
   if (m.method === "thread/start" || m.method === "thread/resume")
     record(file, "conversation-open", {
       method: m.method,
@@ -78,6 +95,41 @@ for await (const line of createInterface({ input: process.stdin })) {
       approvalPolicy: "never",
       sandbox: { type: "workspaceWrite" },
     };
+  if (m.method === "turn/start" && script) {
+    const n = turns++;
+    currentTurn = `script-turn-${n}`;
+    const mode = script[n] ?? "complete";
+    write({ id: m.id, result: { turn: { id: currentTurn } } });
+    record(file, "child-active", { turn: currentTurn, mode });
+    const turnId = currentTurn;
+    setTimeout(
+      () =>
+        write(
+          mode === "hold"
+            ? {
+                method: "item/started",
+                params: {
+                  threadId: "signal-thread",
+                  turnId,
+                  item: { id: `script-item-${n}`, type: "agentMessage" },
+                },
+              }
+            : {
+                id: 700 + n,
+                method: "item/tool/call",
+                params: {
+                  threadId: "signal-thread",
+                  turnId,
+                  callId: `script-result-${n}`,
+                  tool: "cab_report_result",
+                  arguments: { summary: "Offline scripted turn settled" },
+                },
+              },
+        ),
+      30,
+    );
+    continue;
+  }
   if (m.method === "turn/start") {
     result = {
       turn: {
@@ -99,7 +151,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       method: "turn/completed",
       params: {
         threadId: "signal-thread",
-        turn: { id: "signal-turn", status: "failed" },
+        turn: { id: currentTurn, status: "failed" },
       },
     });
     continue;

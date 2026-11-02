@@ -297,8 +297,6 @@ export async function runCases(backend, journal, cases = CASES) {
         await backend.call(host, "followup");
         stage = "bound-held";
         await backend.held(host, deadline());
-        stage = "holds";
-        await backend.call(host, "holds");
         const before = await backend.snapshot(host);
         stage = "get-ineligible";
         const get = await backend.call(host, "get");
@@ -314,6 +312,10 @@ export async function runCases(backend, journal, cases = CASES) {
         );
         stage = "end-runtime";
         await backend.endRuntime(host);
+        // Independent holds come after the exact end: a Stop interrupt would otherwise end a
+        // per-turn Claude CLI itself, leaving no live process for get to refuse.
+        stage = "holds";
+        await backend.call(host, "holds");
         await backend.close(host);
         stage = "recovery-restart";
         host = await start(1, `${testCase.id}-recovery`);
@@ -471,7 +473,15 @@ export function realBackend(root, marker, journalFile, grant, options = {}) {
           caseId: testCase.id,
           sessionRoot: root,
           marker,
-          ...(options.offline ? { offline: options.offline } : {}),
+          ...(options.offline
+            ? {
+                offline: {
+                  executable: options.offline.executable,
+                  // Fake turn script for this case generation (offline fixtures only).
+                  turns: options.offline.script?.(testCase, generation),
+                },
+              }
+            : {}),
         }),
         { mode: 0o600 },
       );

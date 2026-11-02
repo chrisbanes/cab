@@ -69,6 +69,9 @@ export async function host(config, offline = false) {
   if (offline) {
     // Fixture children append to an existing trace; the runtime env inherits this path.
     process.env.SIGNAL_TRACE = join(root, "fixture-trace.jsonl");
+    // Optional per-generation fake turn script (e.g. complete, then hold), read by both fakes.
+    if (config.offline.turns)
+      process.env.SIGNAL_TURNS = config.offline.turns.join(",");
     writeFileSync(process.env.SIGNAL_TRACE, "", { flag: "a", mode: 0o600 });
   }
   const readyDeadline = Math.min(journal.deadline, config.readyDeadline);
@@ -283,6 +286,7 @@ export async function host(config, offline = false) {
             generation > 0,
             // Upper bound of the observed 0.48-0.85 s CLI boot (issue-822 probes).
             { saveDelayMs: 850 },
+            config.offline.turns,
           )
         : await import("@anthropic-ai/claude-agent-sdk");
   const fencedSdk = rawSdk
@@ -323,6 +327,12 @@ export async function host(config, offline = false) {
     service.domain().execute({ key: randomUUID(), actor: "operator", ...body });
   const prompt = SIGNAL_BRIEF;
   const idsFile = join(root, "ids.json");
+  // Uncertain journeys continue an existing conversation: only a completed task lead can be
+  // resumed (a completed worker refuses messages), so there the case harness is the lead and
+  // runs the seed. Clean cases keep a worker and an opposite-harness lead that never runs.
+  const uncertain = config.kind === "uncertain";
+  const SEED_OUTCOME =
+    "Call cab_report_result exactly once with summary SEED DONE, then end the turn. No other tools.";
   const seed = async () => {
     const ids = {
       projectId: randomUUID(),
@@ -335,7 +345,9 @@ export async function host(config, offline = false) {
     };
     for (const [profileId, name, target] of [
       [ids.profileId, "Signal worker", harness],
-      [ids.leadId, "Unused lead", harness === "codex" ? "claude" : "codex"],
+      uncertain
+        ? [ids.leadId, "Signal lead", harness]
+        : [ids.leadId, "Unused lead", harness === "codex" ? "claude" : "codex"],
     ])
       command({
         type: "profile.create",
@@ -382,24 +394,23 @@ export async function host(config, offline = false) {
         projectId: ids.projectId,
         taskId,
         title: inbox ? "Stopped inbox preservation" : "Signal qualification",
-        outcome: "Bounded qualification only",
+        outcome:
+          uncertain && !inbox ? SEED_OUTCOME : "Bounded qualification only",
         ready: false,
       });
       await service.provisionTask(taskId);
-      command({
-        type: "assignment.create",
-        actor: "agent",
-        projectId: ids.projectId,
-        taskId,
-        assignmentId,
-        profileId: ids.profileId,
-        brief:
-          config.kind === "uncertain"
-            ? "Call cab_report_result exactly once with summary SEED DONE, then end the turn. No other tools."
-            : prompt,
-        resultDestination: "operator",
-        requesterAssignmentId: null,
-      });
+      if (!(uncertain && !inbox))
+        command({
+          type: "assignment.create",
+          actor: "agent",
+          projectId: ids.projectId,
+          taskId,
+          assignmentId,
+          profileId: ids.profileId,
+          brief: prompt,
+          resultDestination: "operator",
+          requesterAssignmentId: null,
+        });
       if (inbox) await service.stopTask(taskId);
       else
         command({
@@ -410,7 +421,30 @@ export async function host(config, offline = false) {
           ready: true,
         });
     }
-    ids.workId = `assignment:${ids.assignmentId}:initial`;
+    if (uncertain) {
+      // The scheduler creates and dispatches the ready task's lead; read, never create, it.
+      const lead = await bounded(
+        async () => {
+          while (true) {
+            const binding = service
+              .domain()
+              .leadBindings()
+              .find((b) => b.taskId === ids.taskId);
+            const work = binding
+              ? service
+                  .list()
+                  .find((r) => r.workId.includes(String(binding.assignmentId)))
+              : undefined;
+            if (work) return { id: String(binding.assignmentId), work };
+            await new Promise((r) => setTimeout(r, 20));
+          }
+        },
+        Math.min(journal.deadline, Date.now() + LIMITS.readyMs),
+        "lead dispatch",
+      );
+      ids.assignmentId = lead.id;
+      ids.workId = lead.work.workId;
+    } else ids.workId = `assignment:${ids.assignmentId}:initial`;
     writeFileSync(idsFile, JSON.stringify(ids), { mode: 0o600 });
     return ids;
   };
@@ -494,6 +528,26 @@ export async function host(config, offline = false) {
     assert.equal(result.code, 0, `CLI message refused: ${cliCode(result)}`);
     return result;
   };
+  // Feedback to the task lead: an ordinary message while it is pending or running, a
+  // follow-up that resumes its existing conversation once it has completed.
+  const feedLead = async (ids, body, name) => {
+    const lead = service.domain().assignment(ids.assignmentId);
+    if (lead.state !== "completed")
+      return message(ids.taskId, ids.assignmentId, body, name);
+    const file = join(root, name);
+    writeFileSync(file, body, { mode: 0o600 });
+    const result = await runCli([
+      "task",
+      "follow-up",
+      ids.taskId,
+      "--expected-version",
+      String(lead.version),
+      "--message-file",
+      file,
+    ]);
+    assert.equal(result.code, 0, `CLI follow-up refused: ${cliCode(result)}`);
+    return result;
+  };
   const operations = {
     seed,
     inspect: () => {
@@ -519,7 +573,7 @@ export async function host(config, offline = false) {
     followup: async () => {
       loseObservation = true;
       const ids = JSON.parse(readFileSync(idsFile));
-      await message(ids.taskId, ids.assignmentId, prompt, "followup.txt");
+      await feedLead(ids, prompt, "followup.txt");
     },
     holds: async () => {
       const ids = JSON.parse(readFileSync(idsFile));
@@ -581,12 +635,7 @@ export async function host(config, offline = false) {
         paused: false,
       });
       loseObservation = false;
-      await message(
-        ids.taskId,
-        ids.assignmentId,
-        CONTINUATION_MESSAGE,
-        "continue.txt",
-      );
+      await feedLead(ids, CONTINUATION_MESSAGE, "continue.txt");
     },
     stop: async () => {
       await service.stop();

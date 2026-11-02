@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   existsSync,
+  readdirSync as fsReaddir,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -1783,8 +1784,124 @@ test("the brief keeps a long first delivery, a one-sentence continuation, and th
   );
   // Clean-case assignments and the uncertain follow-up both carry the same long brief.
   assert.match(source, /const prompt = SIGNAL_BRIEF;/);
+  assert.match(source, /feedLead\(ids, prompt, "followup\.txt"\)/);
   assert.match(
     source,
-    /message\(ids\.taskId, ids\.assignmentId, prompt, "followup\.txt"\)/,
+    /feedLead\(ids, CONTINUATION_MESSAGE, "continue\.txt"\)/,
   );
+});
+for (const harness of ["codex", "claude"] as const)
+  test(
+    `offline ${harness}-uncertain runs the complete live journey through the real driver and host`,
+    darwin,
+    async () => {
+      const s = offlineSession();
+      // Present in the driver, as live: a Codex host must still run without it.
+      process.env.CAB_SIGNAL_OFFLINE_TOKEN = "offline-fixture-token";
+      const backend = driver.realBackend(
+        s.root,
+        s.marker,
+        s.journalFile,
+        s.grant,
+        {
+          ...s.options,
+          // Generation 0: the seed settles, the follow-up stays live until ended.
+          offline: {
+            ...s.options.offline,
+            script: (_: unknown, generation: number) =>
+              generation === 0 ? ["complete", "hold"] : undefined,
+          },
+        },
+      );
+      const testCase = driver.CASES.find(
+        (c: { id: string }) => c.id === `${harness}-uncertain`,
+      );
+      try {
+        const results = await driver
+          .runCases(backend, s.journal, [testCase])
+          .catch((error: { results?: unknown }) => {
+            assert.fail(
+              `uncertain journey failed: ${JSON.stringify(error.results ?? String(error))}`,
+            );
+          });
+        assert.equal(results[0].failure, undefined);
+        assert.equal(results[0].cleanup.verified, true);
+        const rows = s.journal.entries();
+        assert.equal(rows.filter((r: Row) => r.kind === "reserve").length, 3);
+        assert.ok(!rows.some((r: Row) => r.kind === "failed"));
+        const caseRoot = fsReaddir(s.root)
+          .map((d) => join(s.root, d))
+          .find((d) => d.includes(`${harness}-uncertain-`));
+        assert.ok(caseRoot);
+        const trace = driver.jsonlRows(
+          readFileSync(join(caseRoot, "trace.jsonl"), "utf8"),
+        );
+        const tokenRows = trace.filter((r: { event: string }) =>
+          r.event.startsWith("claude-token-"),
+        );
+        if (harness === "codex")
+          assert.deepEqual(tokenRows, [], "Codex host never holds the token");
+        else assert.ok(tokenRows.length >= 2);
+        const ids = JSON.parse(
+          readFileSync(join(caseRoot, "ids.json"), "utf8"),
+        );
+        assert.match(ids.workId, new RegExp(ids.assignmentId));
+        assert.ok(existsSync(join(caseRoot, "followup.txt")));
+        assert.ok(existsSync(join(caseRoot, "continue.txt")));
+      } finally {
+        delete process.env.CAB_SIGNAL_OFFLINE_TOKEN;
+        await backend.closeAll();
+      }
+    },
+  );
+// Pre-live gate, opt-in for its ~2.5 min of fixed 30 s no-duplicate observations.
+test("offline six-case matrix runs the exact live journey: expected 14 turns, 6 settings reads, no failure", {
+  skip:
+    process.platform !== "darwin" ||
+    process.env.CAB_SIGNAL_OFFLINE_MATRIX !== "1"
+      ? "set CAB_SIGNAL_OFFLINE_MATRIX=1 on macOS"
+      : false,
+  timeout: 400000,
+}, async () => {
+  const s = offlineSession();
+  process.env.CAB_SIGNAL_OFFLINE_TOKEN = "offline-fixture-token";
+  const backend = driver.realBackend(s.root, s.marker, s.journalFile, s.grant, {
+    ...s.options,
+    offline: {
+      ...s.options.offline,
+      script: (c: { kind: string }, generation: number) =>
+        generation !== 0
+          ? undefined
+          : c.kind === "uncertain"
+            ? ["complete", "hold"]
+            : ["hold"],
+    },
+  });
+  try {
+    const results = await driver
+      .runCases(backend, s.journal)
+      .catch((error: { results?: unknown }) =>
+        assert.fail(
+          `matrix failed: ${JSON.stringify(error.results ?? String(error))}`,
+        ),
+      );
+    assert.deepEqual(
+      results.map((r: { caseId: string }) => r.caseId),
+      driver.CASES.map((c: { id: string }) => c.id),
+    );
+    assert.ok(
+      results.every(
+        (r: { failure?: unknown; cleanup: { verified: boolean } }) =>
+          r.failure === undefined && r.cleanup.verified,
+      ),
+    );
+    const rows = s.journal.entries();
+    assert.equal(rows.filter((r: Row) => r.kind === "reserve").length, 14);
+    assert.equal(rows.filter((r: Row) => r.kind === "consume").length, 14);
+    assert.equal(rows.filter((r: Row) => r.kind === "settings").length, 6);
+    assert.ok(!rows.some((r: Row) => r.kind === "failed"));
+  } finally {
+    delete process.env.CAB_SIGNAL_OFFLINE_TOKEN;
+    await backend.closeAll();
+  }
 });

@@ -14,7 +14,10 @@ export function signalSdk(
   executable: string,
   completing = false,
   sessions?: { saveDelayMs: number },
+  /** Opt-in per-model-query script; absent entries follow `completing`. */
+  turns?: readonly ("complete" | "hold")[],
 ): ClaudeSdk {
+  let queries = 0;
   return {
     createSdkMcpServer: ((options: { tools: unknown[] }) => ({
       type: "sdk",
@@ -52,6 +55,9 @@ export function signalSdk(
             });
             return;
           }
+          const settles =
+            (turns?.[queries++] ?? (completing ? "complete" : "hold")) ===
+            "complete";
           const child = options.spawnClaudeCodeProcess?.({
             command: executable,
             args: [],
@@ -81,6 +87,8 @@ export function signalSdk(
           });
           const first = await prompt[Symbol.asyncIterator]().next();
           if (first.done) throw new Error("No admitted prompt");
+          // A turn that settles has saved its session, however quickly it ran.
+          let saveSession: (() => void) | undefined;
           if (sessions) {
             const config = options.env?.CLAUDE_CONFIG_DIR;
             const id = options.resume ?? options.sessionId;
@@ -99,14 +107,18 @@ export function signalSdk(
               child.kill("SIGTERM");
               throw new Error("No conversation found");
             }
-            const save = setTimeout(() => {
+            let saved = false;
+            saveSession = () => {
+              if (saved) return;
+              saved = true;
               mkdirSync(join(projects, "fixture"), { recursive: true });
               appendFileSync(
                 join(projects, "fixture", `${id}.jsonl`),
                 `${JSON.stringify({ type: "user", sessionId: id })}\n`,
               );
               record(file, "session-saved", { session: id });
-            }, sessions.saveDelayMs);
+            };
+            const save = setTimeout(saveSession, sessions.saveDelayMs);
             options.abortController?.signal.addEventListener(
               "abort",
               () => clearTimeout(save),
@@ -121,7 +133,8 @@ export function signalSdk(
             session_id: options.sessionId ?? options.resume,
             claude_code_version: "2.1.296",
           };
-          if (completing) {
+          if (settles) {
+            saveSession?.();
             const args = { summary: "Offline successor settled" };
             const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
             await hook?.(
