@@ -222,6 +222,7 @@ test("Delivery opaque rows and prefix are kept by default, removable and restore
   await grant(page)
     .getByText("Unavailable saved row · kept until removed")
     .waitFor();
+  assert.equal(await levelControl(page).isDisabled(), true);
   assert.equal(
     await page.getByLabel("Branch prefix choice").inputValue(),
     "preserve",
@@ -400,6 +401,8 @@ test("Delivery not-recorded Check deliberately retries identical frozen bytes; r
 
 test("Delivery session expiry purges newly entered references and drafts", async (_t, journey) => {
   const { page, web, f } = await startSettings(journey, path, phone);
+  await levelControl(page).selectOption("merge-when-ready");
+  await acceptMerge(page).click();
   await page.getByLabel("Credential reference change").selectOption("set");
   await page
     .getByLabel("New environment reference")
@@ -420,6 +423,10 @@ test("Delivery session expiry purges newly entered references and drafts", async
     "preserve",
   );
   assert.equal(await page.getByLabel("New environment reference").count(), 0);
+  assert.equal(await levelControl(page).inputValue(), "");
+  await levelControl(page).selectOption("merge-when-ready");
+  await dialog(page).waitFor();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
 test("Delivery warns before reducing a public grant while its mapping view is withheld", async (_t, journey) => {
@@ -498,4 +505,261 @@ test("Delivery warns before reducing a public grant while its mapping view is wi
   await page.getByRole("button", { name: "Discard changes" }).click();
   await grant(page).waitFor();
   await page.getByRole("alert").waitFor({ state: "hidden" });
+});
+
+const levelControl = (page: Page) =>
+  page.getByLabel("Shepherd level for acme/atlas", { exact: true });
+const dialog = (page: Page) => page.getByRole("dialog");
+const acceptMerge = (page: Page) =>
+  page.getByRole("button", { name: "Allow Merge when ready", exact: true });
+
+test("shepherd levels share the advanced draft and confirm upward changes with keyboard focus", async (_t, journey) => {
+  const { page } = await startSettings(journey, path);
+  await page
+    .getByText("This linked repository has no delivery grants.", {
+      exact: true,
+    })
+    .waitFor();
+  const tabs = page.getByRole("navigation", {
+    name: "Project configuration sections",
+  });
+  await tabs.getByRole("link", { name: "General", exact: true }).click();
+  await tabs.getByRole("link", { name: "Delivery", exact: true }).click();
+  await levelControl(page).selectOption("open-prs");
+  await levelControl(page).selectOption("merge-when-ready");
+  await dialog(page).waitFor();
+  await page.getByRole("button", { name: "Cancel", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await levelControl(page).inputValue(), "open-prs");
+  assert.equal(
+    await levelControl(page).evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await levelControl(page).selectOption("merge-when-ready");
+  await captureBrowserEvidence(page, "shepherd-confirmation", {
+    fullPage: false,
+  });
+  await acceptMerge(page).click();
+  assert.equal(await levelControl(page).inputValue(), "merge-when-ready");
+  await captureBrowserEvidence(page, "shepherd-desktop");
+  await page.setViewportSize(phone);
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "shepherd-phone");
+  await page
+    .getByRole("heading", { name: "Repository shepherd levels", exact: true })
+    .scrollIntoViewIfNeeded();
+  await captureBrowserEvidence(page, "shepherd-phone-controls", {
+    fullPage: false,
+  });
+  const request = body(page);
+  await save(page).click();
+  await request;
+  await savedOutcome(page);
+  assert.equal(await dialog(page).count(), 0);
+  await levelControl(page).selectOption("merge-with-approval");
+  assert.equal(await dialog(page).count(), 0);
+  await levelControl(page).selectOption("open-prs");
+  assert.equal(await dialog(page).count(), 0);
+  await grant(page)
+    .getByLabel("Authority", { exact: true })
+    .selectOption("approval");
+  await page
+    .getByRole("region", { name: "Repository acme/atlas", exact: true })
+    .getByText("Custom", { exact: true })
+    .waitFor();
+  assert.equal(
+    await grant(page).getByLabel("Authority", { exact: true }).inputValue(),
+    "approval",
+  );
+  await levelControl(page).selectOption("open-prs");
+  await page
+    .getByRole("button", { name: "Discard changes", exact: true })
+    .click();
+  assert.equal(await levelControl(page).inputValue(), "merge-when-ready");
+});
+
+test("advanced edits use the same upward warning and refresh invalidates a pending proposal", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  await levelControl(page).selectOption("merge-with-approval");
+  await grant(page, 8)
+    .getByLabel("Authority", { exact: true })
+    .selectOption("allow");
+  await save(page).click();
+  await dialog(page).waitFor();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(await levelControl(page).inputValue(), "merge-when-ready");
+  await save(page).click();
+  await acceptMerge(page).click();
+  await savedOutcome(page);
+  await levelControl(page).selectOption("open-prs");
+  await levelControl(page).selectOption("merge-when-ready");
+  await dialog(page).waitFor();
+  f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [],
+    requiredChecks: [],
+  });
+  const refreshed = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      /configuration$/.test(response.url()),
+  );
+  await page
+    .getByRole("button", { name: "Refresh", exact: true, includeHidden: true })
+    .evaluate((button) => (button as HTMLButtonElement).click());
+  await refreshed;
+  await dialog(page).waitFor({ state: "hidden" });
+  await levelControl(page).selectOption("merge-when-ready");
+  await dialog(page).waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await levelControl(page).inputValue(), "open-prs");
+});
+
+test("bulk targets the complete saved link snapshot and cancels without editing", async (_t, journey) => {
+  const { page } = await startSettings(journey, path, phone);
+  let linkVersion = 0;
+  await page.route("**/projects/*/configuration", async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.data.repositories.version += linkVersion;
+    json.data.repositories.links.push({
+      repositoryId: "42",
+      codeHost: "gitlab",
+      host: "gitlab.example",
+      ref: "main",
+    });
+    await route.fulfill({ response, json });
+  });
+  await read(page);
+  await page
+    .getByRole("region", { name: "Repository 42", exact: true })
+    .getByText("Not set up", { exact: true })
+    .waitFor();
+  const bulk = page.getByRole("button", {
+    name: "Apply to all linked repositories",
+    exact: true,
+  });
+  assert.equal(await bulk.isDisabled(), true);
+  await page
+    .getByLabel("Level for all linked repositories", { exact: true })
+    .selectOption("merge-when-ready");
+  await bulk.click();
+  await dialog(page).getByText("acme/atlas, 42", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(await levelControl(page).inputValue(), "");
+  await bulk.click();
+  await dialog(page).waitFor();
+  linkVersion++;
+  const refreshed = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      /configuration$/.test(response.url()),
+  );
+  await page
+    .getByRole("button", { name: "Refresh", exact: true, includeHidden: true })
+    .evaluate((button) => (button as HTMLButtonElement).click());
+  await refreshed;
+  await dialog(page).waitFor({ state: "hidden" });
+  assert.equal(await levelControl(page).inputValue(), "");
+  await bulk.click();
+  await acceptMerge(page).click();
+  assert.equal(
+    await page
+      .getByLabel("Shepherd level for 42", { exact: true })
+      .inputValue(),
+    "merge-when-ready",
+  );
+  assert.equal(await levelControl(page).inputValue(), "merge-when-ready");
+  await noPageOverflow(page);
+  const sent = body(page);
+  await save(page).click();
+  assert.equal((await sent).type, "delivery.configure");
+  await savedOutcome(page);
+});
+
+test("preset unknown saves retain frozen bytes and reconcile without confirmation", async (_t, journey) => {
+  const { page } = await startSettings(journey, path);
+  await levelControl(page).selectOption("merge-when-ready");
+  await acceptMerge(page).click();
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  const original = body(page);
+  await save(page).click();
+  const frozen = await original;
+  await page.getByText("We couldn't confirm the save.").waitFor();
+  assert.equal(await levelControl(page).isDisabled(), true);
+  assert.equal(await dialog(page).count(), 0);
+  await page.unroute("**/api/operator/commands");
+  const retry = body(page);
+  await page.getByRole("button", { name: "Check whether it saved" }).click();
+  assert.deepEqual(await retry, frozen);
+  await savedOutcome(page);
+  assert.equal(await dialog(page).count(), 0);
+});
+
+test("bulk refuses overflow atomically and withheld links cannot be silently skipped", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: Array.from({ length: 250 }, () => ({
+      action: "issue.comment" as const,
+      repositoryId: "tracker",
+      mode: "allow" as const,
+    })),
+    requiredChecks: [],
+  });
+  await read(page);
+  await page
+    .getByLabel("Level for all linked repositories", { exact: true })
+    .selectOption("open-prs");
+  const bulk = page.getByRole("button", {
+    name: "Apply to all linked repositories",
+    exact: true,
+  });
+  await bulk.click();
+  await page
+    .getByText(
+      "This level would exceed 256 grants. Remove grants or select fewer repositories.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await levelControl(page).inputValue(), "");
+  assert.equal(await save(page).isDisabled(), true);
+  await page.route("**/projects/*/configuration", async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.data.repositories.links[0] = {
+      repositoryId: null,
+      codeHost: "github",
+      host: null,
+      ref: null,
+      savedRow: {
+        projectId: ids.atlas,
+        section: "repositories",
+        version: json.data.repositories.version,
+        index: 0,
+      },
+    };
+    await route.fulfill({ response, json });
+  });
+  await read(page);
+  await page.getByText("Unavailable repository", { exact: true }).waitFor();
+  assert.equal(await bulk.isDisabled(), true);
+  assert.equal(
+    await page
+      .getByLabel("Shepherd level for unavailable", { exact: true })
+      .isDisabled(),
+    true,
+  );
 });
