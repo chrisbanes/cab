@@ -760,24 +760,55 @@ test("a restart moves an inbox batch stranded under a failed work to its live re
   assert.deepEqual(batches(w), before);
 });
 
-test("a restart leaves a batch under a failed work whose retry failed for good", async (t) => {
-  const w = await liveTextWorld();
-  t.after(() => w.close());
+/** A retry that completed and went idle, with its batch stranded and its intent rewritten. */
+async function strandedBehind(w: World, retryState: string, rebind = false) {
   const retryWorkId = await retryRunning(w);
   await reportIn(w, "turn-3", "thread-2");
   w.end("turn-3");
   await idle(w);
   const failedWorkId = strand(w, retryWorkId);
-  databaseOf(w.service)
-    .prepare(
-      "UPDATE execution_intents SET state = 'resolved-failed' WHERE workId = ?",
-    )
-    .run(retryWorkId);
+  const db = databaseOf(w.service);
+  db.prepare("UPDATE execution_intents SET state = ? WHERE workId = ?").run(
+    retryState,
+    retryWorkId,
+  );
+  if (rebind)
+    db.prepare(
+      "UPDATE task_execution_bindings SET assignmentId = ? WHERE workId = ?",
+    ).run(randomUUID(), retryWorkId);
+  return { retryWorkId, failedWorkId };
+}
+
+test("a restart moves a stranded batch onto a retry that is held", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const { retryWorkId } = await strandedBehind(w, "held");
+  await w.restart();
+  assert.deepEqual(
+    batches(w).map((b) => [b.deliveryWorkId, b.state]),
+    [[retryWorkId, "queued"]],
+  );
+});
+
+test("a restart leaves a stranded batch whose newest work is bound to another assignment", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  const { failedWorkId } = await strandedBehind(w, "held", true);
   await w.restart();
   assert.deepEqual(
     batches(w).map((b) => [b.deliveryWorkId, b.state]),
     [[failedWorkId, "queued"]],
   );
+});
+
+test("a task whose lead turn was retried and completed can be reset", async (t) => {
+  const w = await liveTextWorld();
+  t.after(() => w.close());
+  await retryRunning(w);
+  await reportIn(w, "turn-3", "thread-2");
+  w.end("turn-3");
+  await idle(w);
+  assert.deepEqual(w.service.resetAvailability(w.taskId), { available: true });
 });
 
 test("a retried reporting repair keeps its repair instruction", async (t) => {
