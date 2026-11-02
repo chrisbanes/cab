@@ -49,6 +49,16 @@ export function controlledGit(root?: string) {
     encoding: "utf8",
   }).stdout.trim();
   writeFileSync(controlPath, JSON.stringify({}));
+  const ownerStartedAt = ownerStartTime();
+  // Production code spawns the fake git, so the owner process is only
+  // observable by polling its identity. Never watch the parent: the holdPipe
+  // descendant must outlive its fake git.
+  const ownerWatch = `setInterval(() => {
+  const result = spawnSync("ps", ["-ww", "-p", ${JSON.stringify(String(process.pid))}, "-o", "lstart="], { encoding: "utf8", timeout: 1000 });
+  if (result.error) return;
+  if (result.status !== 0 || result.stdout.trim().split(/\\s+/).join(" ") !== ${JSON.stringify(ownerStartedAt)}) process.exit(0);
+}, 500).unref();
+`;
   const source = `#!${process.execPath}
 const { appendFileSync, readFileSync } = require("node:fs");
 const { spawn, spawnSync } = require("node:child_process");
@@ -59,7 +69,7 @@ const fixtureToken = ${JSON.stringify(fixtureToken)};
 const executable = ${JSON.stringify(executable)};
 const descendantExecutable = ${JSON.stringify(descendantExecutable)};
 let ownProcessStartedAt;
-const args = process.argv.slice(2);
+${ownerWatch}const args = process.argv.slice(2);
 const cwdIndex = args.indexOf("-C");
 const cwd = cwdIndex >= 0 ? args[cwdIndex + 1] : process.cwd();
 const command = args.slice(cwdIndex >= 0 ? cwdIndex + 2 : 0).join(" ");
@@ -138,9 +148,10 @@ if (control.behavior && command.startsWith(control.commandPrefix) && (!control.c
 }
 `;
   const descendantSource = `#!${process.execPath}
+const { spawnSync } = require("node:child_process");
 if (process.argv[2] !== ${JSON.stringify(fixtureToken)}) process.exit(91);
 process.on("SIGTERM", () => process.exit(0));
-setInterval(() => {}, 1000);
+${ownerWatch}setInterval(() => {}, 1000);
 `;
   writeFileSync(executable, source);
   writeFileSync(descendantExecutable, descendantSource);
@@ -218,23 +229,7 @@ setInterval(() => {}, 1000);
           identity,
         );
       }
-      for (const identity of identities.values()) {
-        const current = verifyOwnedProcess(identity);
-        if (current === "unverifiable")
-          throw new Error(
-            "Controlled Git fixture process identity could not be verified",
-          );
-        if (current !== "owned") continue;
-
-        signalOwnedProcess(identity, "SIGTERM");
-        if (!(await waitUntil(() => processIsGoneOrChanged(identity), 250))) {
-          signalOwnedProcess(identity, "SIGKILL");
-          if (!(await waitUntil(() => processIsGoneOrChanged(identity), 1000)))
-            throw new Error(
-              "Controlled Git fixture child did not stop within its cleanup bound",
-            );
-        }
-      }
+      await stopRecordedProcesses(identities.values());
       if (unresolvedIdentity)
         throw new Error(
           "Controlled Git fixture has a live process without a captured birth identity",
@@ -244,12 +239,64 @@ setInterval(() => {}, 1000);
   };
 }
 
-type ProcessIdentity = {
+export type ProcessIdentity = {
   pid: number;
   fixtureToken: string;
   processPath: string;
   processStartedAt: string;
 };
+
+function ownerStartTime(): string {
+  const result = spawnSync(
+    "ps",
+    ["-ww", "-p", String(process.pid), "-o", "lstart="],
+    { encoding: "utf8", timeout: 5000 },
+  );
+  const startedAt = result.stdout?.trim().split(/\s+/).join(" ");
+  if (result.error || result.status !== 0 || !startedAt)
+    throw new Error(
+      "Controlled Git fixture could not record its owner identity",
+    );
+  return startedAt;
+}
+
+async function stopOwnedProcess(identity: ProcessIdentity): Promise<void> {
+  const current = verifyOwnedProcess(identity);
+  if (current === "unverifiable")
+    throw new Error(
+      "Controlled Git fixture process identity could not be verified",
+    );
+  if (current !== "owned") return;
+
+  signalOwnedProcess(identity, "SIGTERM");
+  if (!(await waitUntil(() => processIsGoneOrChanged(identity), 250))) {
+    signalOwnedProcess(identity, "SIGKILL");
+    if (!(await waitUntil(() => processIsGoneOrChanged(identity), 1000)))
+      throw new Error(
+        "Controlled Git fixture child did not stop within its cleanup bound",
+      );
+  }
+}
+
+/** Attempt every identity so one failure cannot strand the later ones. */
+export async function stopRecordedProcesses(
+  identities: Iterable<ProcessIdentity>,
+  stop: (identity: ProcessIdentity) => Promise<void> = stopOwnedProcess,
+): Promise<void> {
+  const errors: unknown[] = [];
+  for (const identity of identities) {
+    try {
+      await stop(identity);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length)
+    throw new AggregateError(
+      errors,
+      "Controlled Git fixture could not stop every recorded process",
+    );
+}
 
 function currentProcessIdentity(pid: number): {
   processStartedAt: string;
@@ -276,7 +323,7 @@ function currentProcessIdentity(pid: number): {
   };
 }
 
-function verifyOwnedProcess(
+export function verifyOwnedProcess(
   identity: ProcessIdentity,
 ): "owned" | "gone" | "changed" | "unverifiable" {
   try {
@@ -314,7 +361,7 @@ function isAlive(pid: number): boolean {
   }
 }
 
-function signalOwnedProcess(
+export function signalOwnedProcess(
   identity: ProcessIdentity,
   signal: NodeJS.Signals,
 ): void {
