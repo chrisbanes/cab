@@ -981,7 +981,8 @@ test("a draft turn's completed transient-failure retry makes draft turns availab
   const { w } = d;
   await startDraft(d, "First question.", 1);
   // A retry needs the turn's result effect settled, and a draft turn cannot report a result
-  // (it is not Ready), so settle it directly to reach the retry rows a retry writes.
+  // (it is not Ready), so in production its transient failure stays held and is never retried.
+  // Settle the effect directly to reach the rows a retry writes, which availability reads.
   databaseOf(w.service)
     .prepare(
       "UPDATE execution_pending_effects SET state = 'settled' WHERE effectKey = 'assignment-result'",
