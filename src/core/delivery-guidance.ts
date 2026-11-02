@@ -23,10 +23,13 @@ export function leadDeliveryGuidance(
       case "not-set-up":
         return "Not set up: no code-host actions are granted for this repository.";
       case "custom": {
-        const granted = policy.grants
-          .filter((g) => isCodeHostGrant(g) && g.repositoryId === repositoryId)
-          .map((g) => `${g.action} (${g.mode})`);
-        return `Custom: granted code-host actions are ${granted.join(", ")}.`;
+        const granted = policy.grants.filter(
+          (g) => isCodeHostGrant(g) && g.repositoryId === repositoryId,
+        );
+        const caveat = granted.some((g) => g.action === "pr.merge")
+          ? mergeCaveat
+          : "";
+        return `Custom: granted code-host actions are ${granted.map((g) => `${g.action} (${g.mode})`).join(", ")}.${caveat}`;
       }
     }
   };

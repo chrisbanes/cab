@@ -33,6 +33,15 @@ test("merge levels carry the refusal caveat only outside through-merge", () => {
     leadDeliveryGuidance({ mode: "through-merge", grants }, ["R1"]),
     caveat,
   );
+  const custom = [
+    { action: "pr.merge", repositoryId: "R1", mode: "allow" },
+  ] as const;
+  assert.match(
+    leadDeliveryGuidance({ mode: "reviewable-pr", grants: [...custom] }, [
+      "R1",
+    ]),
+    caveat,
+  );
 });
 
 test("no linked repositories still states the escalation rule", () => {
