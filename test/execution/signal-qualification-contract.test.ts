@@ -21,6 +21,10 @@ const driver = await import(
   pathToFileURL(resolve("test/execution/signal-qualification/live-signals.mjs"))
     .href
 );
+const hostModule = await import(
+  pathToFileURL(resolve("test/execution/signal-qualification/live-host.mjs"))
+    .href
+);
 const { Journal, Owner, LIMITS, fenceAdapters, reasonOf } = control;
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "cab-signal-contract-"));
@@ -1541,6 +1545,11 @@ test(
       await backend.call(host, "seed");
       // Arms the injected loss before the first turn's wait; that turn never yields text.
       await backend.call(host, "followup");
+      // The follow-up is the long first-time request, not the short continuation.
+      assert.equal(
+        readFileSync(join(host.root, "followup.txt"), "utf8"),
+        hostModule.SIGNAL_BRIEF,
+      );
       await backend.held(host, Date.now() + LIMITS.readyMs);
       const get = await backend.call(host, "get");
       assert.equal(get.code, 0);
@@ -1754,4 +1763,28 @@ test("durable snapshots after a spent turn retry a transient BUSY within their d
     assert.deepEqual(durable.inbox, []);
   } else writer.exec("COMMIT");
   writer.close();
+});
+test("the brief keeps a long first delivery, a one-sentence continuation, and the explicit continuation is unchanged", () => {
+  const brief: string = hostModule.SIGNAL_BRIEF;
+  assert.match(brief, /Write a long original story \(about 1500 words\)/);
+  assert.ok(
+    brief.endsWith(
+      "If this conversation already contains this request (you are continuing after an interruption), do not write or finish the story: reply with one sentence, call cab_report_result once with summary SIGNAL QUALIFICATION DONE, and end the turn.",
+    ),
+  );
+  assert.doesNotMatch(brief, /finish the story and report once/);
+  assert.equal(
+    hostModule.CONTINUATION_MESSAGE,
+    "Explicit continuation: call cab_report_result once with summary CONTINUATION DONE and end this existing conversation. No other tools.",
+  );
+  const source = readFileSync(
+    resolve("test/execution/signal-qualification/live-host.mjs"),
+    "utf8",
+  );
+  // Clean-case assignments and the uncertain follow-up both carry the same long brief.
+  assert.match(source, /const prompt = SIGNAL_BRIEF;/);
+  assert.match(
+    source,
+    /message\(ids\.taskId, ids\.assignmentId, prompt, "followup\.txt"\)/,
+  );
 });

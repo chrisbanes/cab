@@ -15,6 +15,14 @@ import {
   trace,
 } from "./live-control.mjs";
 
+/**
+ * First delivery stays long so the turn is still running when signalled; a resumed successor
+ * already holds the request and must stay well inside the 120 s turn deadline.
+ */
+export const SIGNAL_BRIEF =
+  "Disposable repository-free qualification. Use no shell, file, network, delegation or other tools. Write a long original story (about 1500 words), then call cab_report_result once with summary SIGNAL QUALIFICATION DONE and end the turn. If this conversation already contains this request (you are continuing after an interruption), do not write or finish the story: reply with one sentence, call cab_report_result once with summary SIGNAL QUALIFICATION DONE, and end the turn.";
+export const CONTINUATION_MESSAGE =
+  "Explicit continuation: call cab_report_result once with summary CONTINUATION DONE and end this existing conversation. No other tools.";
 let leaving = false;
 /** `offline` swaps only the runtime executable/SDK for the model-free fixtures; it never accepts a live grant. */
 export async function host(config, offline = false) {
@@ -313,8 +321,7 @@ export async function host(config, offline = false) {
     : null;
   const command = (body) =>
     service.domain().execute({ key: randomUUID(), actor: "operator", ...body });
-  const prompt =
-    "Disposable repository-free qualification. Use no shell, file, network, delegation or other tools. Write a long original story (about 1500 words), then call cab_report_result once with summary SIGNAL QUALIFICATION DONE and end the turn. If this is a continuation after interruption, finish the story and report once.";
+  const prompt = SIGNAL_BRIEF;
   const idsFile = join(root, "ids.json");
   const seed = async () => {
     const ids = {
@@ -577,7 +584,7 @@ export async function host(config, offline = false) {
       await message(
         ids.taskId,
         ids.assignmentId,
-        "Explicit continuation: call cab_report_result once with summary CONTINUATION DONE and end this existing conversation. No other tools.",
+        CONTINUATION_MESSAGE,
         "continue.txt",
       );
     },
