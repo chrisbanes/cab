@@ -851,7 +851,10 @@ function ghTransport(
   } = {},
 ) {
   const parsed = new URL(url);
-  if (parsed.origin !== API || !parsed.pathname.startsWith("/repos/"))
+  if (
+    parsed.origin !== API ||
+    !/^\/(?:repos\/|repositories\/\d+\/)/.test(parsed.pathname)
+  )
     throw Error("Refusing GitHub API URL outside repository API");
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
@@ -968,10 +971,27 @@ export async function paginateActions(
   const repoMatch = original.pathname.match(/^(\/repos\/[^/]+\/[^/]+)\//);
   if (original.origin !== API || !repoMatch)
     throw Error("Refusing Actions query outside repository API");
+  const suffix = original.pathname.slice(repoMatch[1].length);
+  let repositoryPrefix;
   while (true) {
     const parsed = new URL(next);
-    if (parsed.origin !== API || parsed.pathname !== original.pathname)
+    if (parsed.origin !== API) {
       throw Error("GitHub pagination link escaped repository API");
+    }
+    if (parsed.pathname !== original.pathname) {
+      // GitHub's next links name the repository by numeric ID, not owner/name.
+      if (!parsed.pathname.startsWith("/repositories/"))
+        throw Error("GitHub pagination link escaped repository API");
+      if (!repositoryPrefix) {
+        const lookup = await transport(`${API}${repoMatch[1]}`);
+        const id = lookup.ok ? responseJson(lookup).id : undefined;
+        if (!Number.isSafeInteger(id))
+          throw Error("GitHub pagination repository lookup failed");
+        repositoryPrefix = `/repositories/${id}`;
+      }
+      if (parsed.pathname !== `${repositoryPrefix}${suffix}`)
+        throw Error("GitHub pagination link escaped repository API");
+    }
     if (visited.has(parsed.href))
       throw Error("GitHub pagination link repeated a page");
     visited.add(parsed.href);
