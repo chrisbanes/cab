@@ -34,8 +34,9 @@ const neutralReads: Record<(typeof previousSourceTables)[number], string> = {
     "SELECT externalId AS nodeId, blockerExternalId AS blockerNodeId, containerId AS repositoryId, containerName AS repositoryName, number AS issueNumber, status FROM source_native_blockers",
   github_dependency_observations:
     "SELECT externalId AS nodeId, complete, reason, refreshedAt FROM source_dependency_observations",
+  // Only past decisions survive: the accepted digest gated text that is now live.
   github_source_reviews:
-    "SELECT externalId AS nodeId, observedDigest, acceptedDigest, decision, decidedAt FROM source_reviews",
+    "SELECT externalId AS nodeId, decision, decidedAt FROM source_review_decisions",
   github_source_holds:
     "SELECT externalId AS nodeId, active, reason, generation FROM source_holds",
   github_imported_tasks:
@@ -262,8 +263,18 @@ test("source records from the previous schema migrate once and read back identic
 
     domain.migrate();
 
-    // Every column moves byte for byte, except the readiness rule, which is re-encoded.
+    // Every column moves byte for byte, except the readiness rule, which is re-encoded, and
+    // source reviews, of which only decisions remain.
     const migrated = structuredClone(before);
+    const decisions = (before.github_source_reviews ?? [])
+      .filter((row) => row.decision !== null)
+      .map((row) => ({
+        nodeId: row.nodeId ?? null,
+        decision: row.decision ?? null,
+        decidedAt: row.decidedAt ?? null,
+      }));
+    assert.equal(decisions.length, 1);
+    migrated.github_source_reviews = decisions;
     assert.equal(migrated.project_github_sources?.[0]?.readiness, legacyRule);
     (migrated.project_github_sources as Record<string, unknown>[])[0] = {
       ...migrated.project_github_sources?.[0],
@@ -291,6 +302,24 @@ test("source records from the previous schema migrate once and read back identic
     assert.deepEqual(readNeutral(db), migrated);
 
     const sources = new GitHubSourceStore(db);
+    // Every imported task takes its issue's observed text; its version is unchanged.
+    assert.deepEqual(
+      [t1, t2, t3].map((id) => [
+        domain.task(id).title,
+        domain.task(id).outcome,
+        domain.task(id).version,
+      ]),
+      [
+        ["First", 'Body "1"', 1],
+        ["Second", "", 1],
+        ["Third \u{1F680}", "Body 3", 1],
+      ],
+    );
+    assert.deepEqual(
+      { ...sources.reviewDecision("I_3") },
+      { decision: "clarification", decidedAt: "2026-10-03T00:00:00Z" },
+    );
+    assert.equal(tableNames(db).includes("source_reviews"), false);
     assert.deepEqual(domain.githubConfiguration(p1), {
       version: 3,
       credentialRef: "env:TOKEN",
@@ -512,6 +541,191 @@ test("upgrading re-encodes readiness conditions without changing Ready, versions
       assert.deepEqual(tasks(), tasksBefore);
       assert.deepEqual(holds("source_holds", "externalId"), holdsBefore);
     }
+  } finally {
+    db.close();
+  }
+});
+
+/**
+ * A store from before source text was live: the neutral schema with its `source_reviews`
+ * table, holds of every reason, and repeated item IDs across trackers.
+ */
+function reviewedTextDatabase() {
+  const world = previousSchemaDatabase(1);
+  const { db, domain } = world;
+  domain.migrate();
+  db.exec(`CREATE TABLE source_reviews (
+      provider TEXT NOT NULL, instance TEXT NOT NULL, externalId TEXT NOT NULL,
+      observedDigest TEXT NOT NULL, acceptedDigest TEXT NOT NULL, decision TEXT, decidedAt TEXT,
+      PRIMARY KEY(provider, instance, externalId),
+      FOREIGN KEY(provider, instance, externalId) REFERENCES external_items(provider, instance, externalId)
+    )`);
+  const trackers = [
+    ["github", "github.com"],
+    ["jira", "a.atlassian.net"],
+    ["jira", "b.atlassian.net"],
+  ] as const;
+  const reasons = [
+    "changed-text",
+    "closed",
+    "closure-attribution-unproved",
+    "closure-read-unavailable",
+    "readiness-lost",
+    "withdrawn",
+    null,
+    "changed-text-inactive",
+  ] as const;
+  const tasks: string[] = [];
+  for (const [provider, instance] of trackers)
+    reasons.forEach((reason, index) => {
+      const taskId = randomUUID();
+      tasks.push(taskId);
+      const externalId = `X_${index}`;
+      db.prepare(
+        "INSERT INTO tasks (id, projectId, title) VALUES (?, ?, 'Accepted title')",
+      ).run(taskId, world.projectId);
+      db.prepare(
+        "INSERT INTO domain_tasks (id, projectId, version, outcome, ready, state, importedBlockers) VALUES (?, ?, 5, 'Accepted body', 1, ?, 'clear')",
+      ).run(taskId, world.projectId, index % 2 ? "done" : "open");
+      db.prepare(
+        "INSERT INTO imported_tasks (taskId, provider, instance, externalId, containerId) VALUES (?, ?, ?, ?, 'R_1')",
+      ).run(taskId, provider, instance, externalId);
+      db.prepare(
+        "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels) VALUES (?, ?, ?, ?, 'R_1', 'org/repo', ?, ?, ?, 'open', '[]')",
+      ).run(
+        provider,
+        instance,
+        externalId,
+        taskId,
+        index + 1,
+        `${instance} title ${index}`,
+        `${instance} body ${index}`,
+      );
+      db.prepare("INSERT INTO source_reviews VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        provider,
+        instance,
+        externalId,
+        digest("a"),
+        digest(reason === "changed-text" ? "b" : "a"),
+        index === 2 ? "resume-source-hold" : null,
+        index === 2 ? "2026-10-05T00:00:00Z" : null,
+      );
+      if (reason)
+        db.prepare("INSERT INTO source_holds VALUES (?, ?, ?, ?, ?, ?)").run(
+          provider,
+          instance,
+          externalId,
+          reason === "changed-text-inactive" ? 0 : 1,
+          reason === "changed-text-inactive" ? "changed-text" : reason,
+          index + 2,
+        );
+    });
+  // A level-4 store also holds #1434's stacking records, restack columns included.
+  const [dependent, blocker] = tasks as [string, string];
+  db.prepare(
+    "INSERT INTO task_dependency_records (taskId, blockerTaskId) VALUES (?, ?)",
+  ).run(dependent, blocker);
+  db.prepare(
+    "INSERT INTO stacked_dependencies (taskId, blockerTaskId, repositoryId, parentHead, settledHead, restack, restackFromSha, restackSeq, recordedAt) VALUES (?, ?, 'R_1', 'head-2', 'head-1', 'pending', 'head-1', 3, 1)",
+  ).run(dependent, blocker);
+  return { ...world, tasks };
+}
+
+const stackingRows = (db: DatabaseSync) => ({
+  stacked: rows(db, "SELECT * FROM stacked_dependencies ORDER BY taskId"),
+  records: rows(db, "SELECT * FROM task_dependency_records ORDER BY seq"),
+});
+
+const holdRows = (db: DatabaseSync) =>
+  rows(
+    db,
+    "SELECT provider, instance, externalId, active, reason, generation FROM source_holds ORDER BY provider, instance, externalId",
+  );
+const taskRows = (db: DatabaseSync) =>
+  rows(
+    db,
+    "SELECT t.id, t.title, d.outcome, d.version, d.ready, d.state FROM tasks t JOIN domain_tasks d ON d.id = t.id ORDER BY t.id",
+  );
+
+test("an upgrade from reviewed source text adopts observed text and releases only changed-text holds", () => {
+  const { db, domain } = reviewedTextDatabase();
+  try {
+    const holdsBefore = holdRows(db);
+    const tasksBefore = taskRows(db);
+    const stackingBefore = stackingRows(db);
+    assert.equal(stackingBefore.stacked.length, 1);
+    const expectedHolds = holdsBefore.map((hold) =>
+      hold.reason === "changed-text" ? { ...hold, active: 0 } : hold,
+    );
+    const expectedTasks = tasksBefore.map((task) => {
+      const item = db
+        .prepare(
+          "SELECT observedTitle, observedBody FROM external_items WHERE taskId = ?",
+        )
+        .get(String(task.id)) as {
+        observedTitle: string;
+        observedBody: string;
+      };
+      return { ...task, title: item.observedTitle, outcome: item.observedBody };
+    });
+    for (let pass = 0; pass < 2; pass++) {
+      domain.migrate();
+      assert.deepEqual(holdRows(db), expectedHolds);
+      assert.deepEqual(taskRows(db), expectedTasks);
+      assert.deepEqual(stackingRows(db), stackingBefore);
+      assert.equal(tableNames(db).includes("source_reviews"), false);
+      assert.deepEqual(
+        rows(
+          db,
+          "SELECT provider, instance, externalId, decision, decidedAt FROM source_review_decisions ORDER BY id",
+        ),
+        [
+          ["github", "github.com"],
+          ["jira", "a.atlassian.net"],
+          ["jira", "b.atlassian.net"],
+        ].map(([provider, instance]) => ({
+          provider,
+          instance,
+          externalId: "X_2",
+          decision: "resume-source-hold",
+          decidedAt: "2026-10-05T00:00:00Z",
+        })),
+      );
+      assert.deepEqual(rows(db, "PRAGMA foreign_key_check"), []);
+    }
+    // Only structural holds remain active and admission no longer knows source review.
+    assert.ok(
+      holdRows(db).every(
+        (hold) => hold.reason !== "changed-text" || hold.active === 0,
+      ),
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("a failed reviewed-text upgrade releases nothing and keeps the review table", () => {
+  const { db, domain } = reviewedTextDatabase();
+  try {
+    const holdsBefore = holdRows(db);
+    const tasksBefore = taskRows(db);
+    const reviewsBefore = rows(
+      db,
+      "SELECT * FROM source_reviews ORDER BY rowid",
+    );
+    db.exec(
+      "CREATE TEMP TRIGGER refuse_release BEFORE UPDATE OF active ON source_holds BEGIN SELECT RAISE(ABORT, 'release refused'); END",
+    );
+    assert.throws(() => domain.migrate(), /release refused/);
+    assert.deepEqual(holdRows(db), holdsBefore);
+    assert.deepEqual(taskRows(db), tasksBefore);
+    assert.deepEqual(
+      rows(db, "SELECT * FROM source_reviews ORDER BY rowid"),
+      reviewsBefore,
+    );
+    db.exec("DROP TRIGGER refuse_release");
+    domain.migrate();
+    assert.equal(tableNames(db).includes("source_reviews"), false);
   } finally {
     db.close();
   }

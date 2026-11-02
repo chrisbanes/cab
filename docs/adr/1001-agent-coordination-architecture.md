@@ -96,8 +96,10 @@ Removing readiness, leaving all selections, or external closure holds new
 delegation and asks the owner to reach a safe stopping point. Operator resolution
 is required to resume, except closure confirmed as this task's own delivery and a withdrawn or
 readiness-lost hold that a later complete read of the listed, Ready issue releases.
-Harmless clarifications can be incorporated; changes to the admitted outcome or
-material scope expansion hold affected work for operator clarification.
+Issue text is live: a title or body edit updates the task and holds nothing, and
+the lead sees the change on its next turn. Anyone who can edit the issue, including
+its author, can therefore change a Ready task's scope before it starts; cab accepts
+this limit rather than checking editors, and issue text grants no permissions.
 
 Recovery resumes an agent conversation when supported, or reconstructs context
 from the assignment, handoff records, and current workspace. External effects

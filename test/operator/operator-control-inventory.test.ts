@@ -146,9 +146,6 @@ test("retained rendered form actions, fields and mounted route controls match do
       externalId: "I1",
     });
     db.prepare(
-      "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
-    ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
-    db.prepare(
       "INSERT INTO source_holds VALUES ('github','github.com','I1',1,'source hold',1)",
     ).run();
   });
@@ -279,6 +276,7 @@ test("retained rendered form actions, fields and mounted route controls match do
   const actions = new Set<string>(),
     commands = new Set<string>(),
     fields = new Set<string>(),
+    options = new Set<string>(),
     destinations = new Set<string>();
   let forms = 0;
   for (const path of paths) {
@@ -295,6 +293,8 @@ test("retained rendered form actions, fields and mounted route controls match do
       /<(?:input|textarea|select)\b[^>]*name="([^"]+)"/g,
     ))
       fields.add(match[1] ?? "");
+    for (const match of html.matchAll(/<option\b[^>]*value="([^"]+)"/g))
+      options.add(match[1] ?? "");
     for (const match of html.matchAll(/href="([^"]+)"/g))
       destinations.add(match[1] ?? "");
   }
@@ -328,6 +328,11 @@ test("retained rendered form actions, fields and mounted route controls match do
     "decision",
   ])
     assert.ok(fields.has(name), `${name} remains rendered`);
+  // Imported text is live: the source form only resumes a hold, with no text digest to review.
+  assert.ok(!fields.has("observedDigest"));
+  assert.ok(options.has("resume-source-hold"));
+  for (const removed of ["clarification", "accept-revised-scope"])
+    assert.ok(!options.has(removed), `${removed} is not offered`);
   for (const path of [
     "/",
     `/app/projects/${projectId}/settings`,

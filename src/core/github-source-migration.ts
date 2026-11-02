@@ -10,6 +10,7 @@ const legacyTables: {
   to: string;
   columns: string;
   select: string;
+  where?: string;
 }[] = [
   {
     from: "project_github_sources",
@@ -66,11 +67,12 @@ const legacyTables: {
     select: `${github}, nodeId, complete, reason, refreshedAt`,
   },
   {
+    // Only past decisions survive; the accepted digest gated text that is now live.
     from: "github_source_reviews",
-    to: "source_reviews",
-    columns:
-      "provider, instance, externalId, observedDigest, acceptedDigest, decision, decidedAt",
-    select: `${github}, nodeId, observedDigest, acceptedDigest, decision, decidedAt`,
+    to: "source_review_decisions",
+    columns: "provider, instance, externalId, decision, decidedAt",
+    select: `${github}, nodeId, decision, decidedAt`,
+    where: "decision IS NOT NULL AND decidedAt IS NOT NULL",
   },
   {
     from: "github_source_holds",
@@ -178,9 +180,9 @@ export function moveLegacyGitHubSourceStorage(db: Database): void {
       !columnsOf(db, table).includes(column)
     )
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  for (const { from, to, columns, select } of present)
+  for (const { from, to, columns, select, where } of present)
     db.exec(
-      `INSERT INTO ${to} (${columns}) SELECT ${select} FROM ${from} ORDER BY rowid`,
+      `INSERT INTO ${to} (${columns}) SELECT ${select} FROM ${from}${where ? ` WHERE ${where}` : ""} ORDER BY rowid`,
     );
   // Children before the parent they reference.
   for (const { from } of [...present].reverse()) db.exec(`DROP TABLE ${from}`);

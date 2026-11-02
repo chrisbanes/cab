@@ -1,6 +1,7 @@
 import { DeliveryStore } from "./delivery.js";
+import { LeadTextStore } from "./lead-text.js";
 import { TaskReviewStore } from "./task-review.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { githubIssueTracker } from "./github-source-contracts.js";
@@ -306,12 +307,6 @@ function closureReadinessProof(
   );
 }
 
-export function sourceTextDigest(title: string, body: string): string {
-  return createHash("sha256")
-    .update(JSON.stringify([title, body]))
-    .digest("hex");
-}
-
 /** Provider-owned observations. Each selection's complete generation commits atomically. */
 export class GitHubSourceStore {
   /**
@@ -483,10 +478,11 @@ export class GitHubSourceStore {
       .get(projectId, selectionId) as Row | undefined;
   }
 
-  review(nodeId: string): Row | undefined {
+  /** The latest operator decision on the item's source hold; history only, it gates nothing. */
+  reviewDecision(nodeId: string): Row | undefined {
     return this.db
       .prepare(
-        `SELECT observedDigest, acceptedDigest, decision, decidedAt FROM source_reviews WHERE ${itemIs()}`,
+        `SELECT decision, decidedAt FROM source_review_decisions WHERE ${itemIs()} ORDER BY id DESC LIMIT 1`,
       )
       .get(...this.key(nodeId)) as Row | undefined;
   }
@@ -560,6 +556,7 @@ export class GitHubSourceStore {
           String(task.nodeId),
           new Date().toISOString(),
         );
+      new LeadTextStore(this.db).recordHandback(taskId, "done");
       return true;
     });
   }
@@ -947,6 +944,8 @@ export class GitHubSourceStore {
         supplied: { title: string; body: string };
       }[] = [];
       const sourceKind = this.tracker.provider === "jira" ? "jira" : "github";
+      // Tasks imported Done: later edits are changes since that handback.
+      const importedDone: string[] = [];
       for (const issue of snapshot.issues) {
         if (issue.providerInstance !== this.tracker.instance)
           throw new Error("Provider identity mismatch");
@@ -1003,47 +1002,17 @@ export class GitHubSourceStore {
               issue.status ? JSON.stringify(issue.status) : null,
               issue.selectFields ? JSON.stringify(issue.selectFields) : null,
             );
-          const digest = sourceTextDigest(issue.title, issue.body);
-          this.db
-            .prepare(
-              "INSERT INTO source_reviews (provider, instance, externalId, observedDigest, acceptedDigest) VALUES (?, ?, ?, ?, ?)",
-            )
-            .run(...this.key(issue.nodeId), digest, digest);
-          if (issue.state === "closed")
+          if (issue.state === "closed") {
             this.db
               .prepare(
                 "INSERT INTO source_completions (taskId, provider, instance, externalId, completedAt) VALUES (?, ?, ?, ?, ?)",
               )
               .run(taskId, ...this.key(issue.nodeId), new Date().toISOString());
+            importedDone.push(taskId);
+          }
         } else {
           taskId = String(existing.taskId);
-          const digest = sourceTextDigest(issue.title, issue.body);
-          const prior = this.db
-            .prepare(
-              `SELECT observedDigest FROM source_reviews WHERE ${itemIs()}`,
-            )
-            .get(...this.key(issue.nodeId)) as Row | undefined;
-          if (prior?.observedDigest !== digest) {
-            this.db
-              .prepare(
-                "INSERT INTO source_reviews (provider, instance, externalId, observedDigest, acceptedDigest) VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider, instance, externalId) DO UPDATE SET observedDigest = excluded.observedDigest",
-              )
-              .run(
-                ...this.key(issue.nodeId),
-                digest,
-                prior?.observedDigest ??
-                  sourceTextDigest(
-                    String(existing.observedTitle),
-                    String(existing.observedBody),
-                  ),
-              );
-            this.db
-              .prepare(
-                "UPDATE domain_tasks SET version = version + 1 WHERE id = ?",
-              )
-              .run(taskId);
-            this.setSourceHold(issue.nodeId, "changed-text");
-          }
+          this.adoptText(taskId, issue);
           this.db
             .prepare(
               `UPDATE external_items SET containerId = ?, containerName = ?, number = ?, observedTitle = ?, observedBody = ?, observedState = ?, labels = ?, observedStatus = ?, observedFields = ? WHERE ${itemIs()}`,
@@ -1082,6 +1051,9 @@ export class GitHubSourceStore {
         if (snapshot.complete) this.releaseSourceHold(taskId);
       }
       new TaskReviewStore(this.db).captureSources(sourceCaptures);
+      const leadText = new LeadTextStore(this.db);
+      for (const taskId of importedDone)
+        leadText.recordHandback(taskId, "done");
       if (snapshot.complete) {
         const old = this.db
           .prepare(
@@ -1233,8 +1205,7 @@ export class GitHubSourceStore {
     itemNodeId: string | null;
     projectFields: z.output<typeof projectFieldsSchema>;
   }): void {
-    const digest = sourceTextDigest(input.title, input.body),
-      now = Date.now();
+    const now = Date.now();
     this.db
       .prepare(
         "INSERT INTO imported_tasks (taskId, provider, instance, externalId, containerId) VALUES (?, ?, ?, ?, ?)",
@@ -1255,11 +1226,7 @@ export class GitHubSourceStore {
         input.body,
         JSON.stringify(input.labels),
       );
-    this.db
-      .prepare(
-        "INSERT INTO source_reviews (provider, instance, externalId, observedDigest, acceptedDigest) VALUES (?, ?, ?, ?, ?)",
-      )
-      .run(...this.key(input.nodeId), digest, digest);
+    this.adoptText(input.taskId, input);
     // Local dependents keep treating the task as an open blocker, not an unknown one.
     this.db
       .prepare(
@@ -1340,19 +1307,7 @@ export class GitHubSourceStore {
       ) {
         return false;
       }
-      const digest = sourceTextDigest(snapshot.title, snapshot.body),
-        review = this.review(snapshot.nodeId);
-      if (review?.observedDigest !== digest) {
-        this.db
-          .prepare(
-            `UPDATE source_reviews SET observedDigest=? WHERE ${itemIs()}`,
-          )
-          .run(digest, ...this.key(snapshot.nodeId));
-        this.db
-          .prepare("UPDATE domain_tasks SET version=version+1 WHERE id=?")
-          .run(String(issue.taskId));
-        this.setSourceHold(snapshot.nodeId, "changed-text");
-      }
+      this.adoptText(String(issue.taskId), snapshot);
       this.db
         .prepare(
           `UPDATE external_items SET observedState='closed',observedTitle=?,observedBody=?,labels=?,observedStatus=COALESCE(?,observedStatus) WHERE ${itemIs()}`,
@@ -1923,6 +1878,24 @@ export class GitHubSourceStore {
         ];
       }),
     );
+  }
+
+  /**
+   * An imported task's title and outcome are its issue's latest text. Text is not structure: it
+   * sets no hold and leaves the task version, and so queued turns and routing, valid.
+   */
+  private adoptText(
+    taskId: string,
+    text: { title: string; body: string },
+  ): void {
+    this.db
+      .prepare("UPDATE tasks SET title = ? WHERE id = ? AND title IS NOT ?")
+      .run(text.title, taskId, text.title);
+    this.db
+      .prepare(
+        "UPDATE domain_tasks SET outcome = ? WHERE id = ? AND outcome IS NOT ?",
+      )
+      .run(text.body, taskId, text.body);
   }
 
   private setSourceHold(nodeId: string, reason: string): void {

@@ -2700,6 +2700,7 @@ export class OperatorApi {
                 excluded,
               ),
               reasons,
+              started: this.service.assignmentHasStartedExecution(assignmentId),
             },
           ]
         : [];
@@ -3837,6 +3838,9 @@ export class OperatorApi {
         version: Number(t.version),
         state: t.state,
         ready: Boolean(t.ready),
+        issueChangedSinceHandback: this.service
+          .leadText()
+          .changedSinceHandback(taskId),
       },
       lead: profile
         ? {
@@ -4793,7 +4797,7 @@ export class OperatorApi {
   ) {
     const store = this.sourceStore(identity),
       facts = this.issueFacts(identity, issue, excluded, false);
-    const review = store.review(identity.nodeId),
+    const review = store.reviewDecision(identity.nodeId),
       hold = store.hold(identity.nodeId);
     return {
       identity,
@@ -4858,11 +4862,8 @@ export class OperatorApi {
       })),
       review: review
         ? {
-            observedDigest: String(review.observedDigest),
-            acceptedDigest: String(review.acceptedDigest),
             decision: this.safe(review.decision, excluded),
-            decidedAt:
-              review.decidedAt === null ? null : String(review.decidedAt),
+            decidedAt: String(review.decidedAt),
           }
         : null,
       hold: hold

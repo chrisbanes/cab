@@ -48,13 +48,11 @@ test("a Draft task published to a repository becomes the issue's imported task a
   await f.service.refreshGitHub();
   assert.equal(f.taskCount(), before);
   assert.equal(f.gh.posts, 1);
-  const review2 = f.service.githubSources().review(String(created[0]?.nodeId));
-  assert.equal(review2?.observedDigest, review2?.acceptedDigest);
-  assert.ok(
-    !f.service
-      .domain()
-      .admission(taskId)
-      .reasons.includes("source-review-required"),
+  // The task follows the issue's text, marker included, and holds nothing.
+  assert.equal(f.domain().task(taskId).outcome, created[0]?.body);
+  assert.equal(
+    f.service.githubSources().hold(String(created[0]?.nodeId)),
+    undefined,
   );
 });
 

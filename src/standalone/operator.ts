@@ -179,9 +179,6 @@ export class LocalOperatorUi {
     const blockers = imported
       ? (this.githubSources?.nativeBlockers(String(imported.nodeId)) ?? [])
       : [];
-    const review = imported
-      ? this.githubSources?.review(String(imported.nodeId))
-      : undefined;
     const readiness = imported
       ? this.githubSources?.readinessByTask([taskId]).get(taskId)
       : undefined;
@@ -200,34 +197,21 @@ export class LocalOperatorUi {
     const closure = this.store.providerClosure(taskId);
     const provenance = external
       ? `<h2>GitHub source</h2>${closure ? `<p>${closureDetail[closure]}</p>` : ""}<p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
-          review &&
-          (review.observedDigest !== review.acceptedDigest || hold?.active)
+          hold?.active
             ? form(
                 "source.review",
                 field("projectId", String(task.projectId), "hidden") +
                   field("taskId", taskId, "hidden") +
                   field("expectedVersion", String(task.version), "hidden") +
-                  field(
-                    "observedDigest",
-                    String(review.observedDigest),
-                    "hidden",
-                  ) +
                   selectField(
                     "decision",
                     [
-                      { value: "clarification", label: "Clarification" },
-                      {
-                        value: "accept-revised-scope",
-                        label: "Accept revised scope",
-                      },
                       {
                         value: "resume-source-hold",
                         label: "Resume source hold",
                       },
                     ],
-                    review.observedDigest !== review.acceptedDigest
-                      ? "accept-revised-scope"
-                      : "resume-source-hold",
+                    "resume-source-hold",
                   ),
                 undefined,
                 csrfToken,
@@ -328,14 +312,7 @@ export class LocalOperatorUi {
           projectId: required("projectId"),
           taskId: required("taskId"),
           expectedVersion: version(),
-          observedDigest: required("observedDigest"),
-          decision: z
-            .enum([
-              "clarification",
-              "accept-revised-scope",
-              "resume-source-hold",
-            ])
-            .parse(required("decision")),
+          decision: z.literal("resume-source-hold").parse(required("decision")),
         };
         break;
       case "assignment.create":

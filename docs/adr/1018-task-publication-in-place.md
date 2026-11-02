@@ -14,8 +14,8 @@ delivery scope lives in [#1167](https://github.com/chrisbanes/cab/issues/1167).
 - **The same task becomes the issue's imported task.** After the create resolves, one
   transaction gives the task the issue's external identity and writes what the sync would have
   written: the imported-task row, the observed issue (title and the body as created, marker
-  included), a source review with observed and accepted digests equal so the first sync raises
-  none, the target membership with the Project fields confirmed so far, an `open` issue
+  included), the task's title and outcome set to that observed text (source text is live, so
+  the first sync changes nothing), the target membership with the Project fields confirmed so far, an `open` issue
   status so local dependents keep an open blocker rather than an unknown one, and the
   captured GitHub source text. The task keeps its id, history, version line and Ready flag;
   `importedBlockers` becomes `unknown` and the next sync recomputes everything it owns.

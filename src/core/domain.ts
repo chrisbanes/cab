@@ -66,6 +66,7 @@ import {
   type StoredRepositoryLink,
 } from "./repository-links.js";
 import { extractLegacyRepositoryLinks } from "./github-source-migration.js";
+import { LeadTextStore } from "./lead-text.js";
 import { upgradeReadinessConditions } from "./readiness-condition-migration.js";
 import {
   itemIs,
@@ -294,12 +295,7 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       taskId: id,
       expectedVersion: z.number().int().positive(),
-      observedDigest: z.string().regex(/^[0-9a-f]{64}$/),
-      decision: z.enum([
-        "clarification",
-        "accept-revised-scope",
-        "resume-source-hold",
-      ]),
+      decision: z.literal("resume-source-hold"),
     })
     .strict(),
   z
@@ -910,6 +906,7 @@ export class DomainStore {
           WHERE id IN (SELECT taskId FROM imported_tasks)`);
       }
       upgradeReadinessConditions(this.db);
+      new LeadTextStore(this.db).migrate();
     });
   }
 
@@ -2107,12 +2104,6 @@ export class DomainStore {
       if (!external) reasons.push("source-unknown");
       else {
         const key = itemOf(external);
-        const review = this.one(
-          `SELECT observedDigest, acceptedDigest FROM source_reviews WHERE ${itemIs()}`,
-          ...key,
-        );
-        if (review && review.observedDigest !== review.acceptedDigest)
-          reasons.push("source-review-required");
         if (
           this.one(
             `SELECT 1 AS active FROM source_holds WHERE ${itemIs()} AND active = 1 AND (?=0 OR reason<>'closed')`,
@@ -3389,40 +3380,16 @@ export class DomainStore {
         if (!imported) throw new DomainConflictError("Task is not imported");
         const key = itemOf(imported);
         const external = this.one(
-          `SELECT observedTitle, observedBody, observedState FROM external_items WHERE ${itemIs()}`,
-          ...key,
-        );
-        const review = this.one(
-          `SELECT observedDigest, acceptedDigest FROM source_reviews WHERE ${itemIs()}`,
+          `SELECT observedState FROM external_items WHERE ${itemIs()}`,
           ...key,
         );
         const hold = this.one(
           `SELECT active FROM source_holds WHERE ${itemIs()}`,
           ...key,
         );
-        if (
-          !external ||
-          !review ||
-          review.observedDigest !== command.observedDigest ||
-          (review.acceptedDigest === review.observedDigest && !hold?.active)
-        )
-          throw new DomainConflictError(
-            "Source review digest is stale or already classified",
-          );
-        if (command.decision === "resume-source-hold" && !hold?.active)
+        if (!external) throw new DomainConflictError("Source item unavailable");
+        if (!hold?.active)
           throw new DomainConflictError("No source hold to resume");
-        if (
-          command.decision === "resume-source-hold" &&
-          review.acceptedDigest !== review.observedDigest
-        )
-          throw new DomainConflictError(
-            "Changed text requires explicit text review",
-          );
-        if (
-          command.decision !== "resume-source-hold" &&
-          review.acceptedDigest === review.observedDigest
-        )
-          throw new DomainConflictError("Source text is already classified");
         const reasons = this.admission(command.taskId).reasons;
         if (
           external.observedState !== "open" ||
@@ -3435,20 +3402,15 @@ export class DomainStore {
           );
         this.db
           .prepare(
-            `UPDATE source_reviews SET acceptedDigest = observedDigest, decision = ?, decidedAt = ? WHERE ${itemIs()}`,
+            "INSERT INTO source_review_decisions (provider, instance, externalId, decision, decidedAt) VALUES (?, ?, ?, ?, ?)",
           )
-          .run(command.decision, new Date().toISOString(), ...key);
+          .run(...key, command.decision, new Date().toISOString());
         this.db
           .prepare(`UPDATE source_holds SET active = 0 WHERE ${itemIs()}`)
           .run(...key);
         this.db
-          .prepare("UPDATE tasks SET title = ? WHERE id = ?")
-          .run(String(external.observedTitle), command.taskId);
-        this.db
-          .prepare(
-            "UPDATE domain_tasks SET outcome = ?, version = version + 1 WHERE id = ?",
-          )
-          .run(String(external.observedBody), command.taskId);
+          .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
+          .run(command.taskId);
         return this.task(command.taskId);
       }
       case "assignment.create": {

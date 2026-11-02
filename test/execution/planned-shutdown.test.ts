@@ -547,6 +547,11 @@ test("a shutdown-interrupted turn is released and requeued in one transaction wi
   assert.ok(result);
   assert.equal(result.interruptedWorkId, f.workId);
   assert.match(result.requeueWorkId, /^shutdown:/);
+  // The requeue's lineage reaches the interrupted request, whose bound material it carries.
+  assert.deepEqual(state.workLineage(result.requeueWorkId), [
+    result.requeueWorkId,
+    f.workId,
+  ]);
 
   assert.equal(state.byWorkId(f.workId)?.state, "resolved-failed");
   assert.deepEqual(

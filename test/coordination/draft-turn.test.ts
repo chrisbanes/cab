@@ -425,11 +425,14 @@ test("draft turns and the first ordinary turn after them carry the current task"
     title: "A reworked title",
     outcome: "A reworked outcome",
   });
-  const current =
-    /Current task \(revision \d+\): A reworked title\nCurrent outcome: A reworked outcome/;
+  const current = /^Task: A reworked title\nOutcome: A reworked outcome\n/;
+  const changed =
+    /Changes \(- before, \+ now\):\nTitle:\n- .+\n\+ A reworked title\n/;
   await task.api.execute(startCommand(f, task.taskId, "Continue."));
   await until(() => f.runtime.hasPending(2), "second draft turn");
   assert.match(f.runtime.prompts[1] ?? "", current);
+  assert.match(f.runtime.prompts[1] ?? "", changed);
+  assert.match(f.runtime.prompts[1] ?? "", /operator-message: .*Continue\./);
   assert.match(
     f.runtime.prompts[0] ?? "",
     /^Profile instructions:\nPRIVATE REVIEW INSTRUCTIONS$/m,
@@ -452,6 +455,8 @@ test("draft turns and the first ordinary turn after them carry the current task"
   });
   await until(() => f.runtime.hasPending(3), "initial turn");
   assert.match(f.runtime.prompts[2] ?? "", current);
+  // The second draft turn confirmed this text, so no diff repeats.
+  assert.doesNotMatch(f.runtime.prompts[2] ?? "", /Changes \(- before/);
   assert.doesNotMatch(f.runtime.prompts[2] ?? "", /instructions:/);
 });
 

@@ -276,14 +276,18 @@ test("a Jira project imports, deduplicates, updates, withdraws, holds and surviv
     .forTracker({ provider: "jira", instance: site });
   assert.equal(stores.memberships("10002").length, 2);
 
-  // An update to one issue changes its stored text and holds the task for review.
+  // An update to one issue is live: the task takes the text, with no hold and no new version.
+  const renamedId = String(stores.issue("10001")?.taskId);
+  const version = Number(domain.task(renamedId).version);
   f.state.issues["project = ABC"] = [
     jiraIssue(1, { summary: "Renamed" }),
     jiraIssue(2),
   ];
   await f.api.refreshSources();
   assert.equal(stores.issue("10001")?.observedTitle, "Renamed");
-  assert.equal(stores.hold("10001")?.reason, "changed-text");
+  assert.equal(domain.task(renamedId).title, "Renamed");
+  assert.equal(Number(domain.task(renamedId).version), version);
+  assert.equal(stores.hold("10001"), undefined);
 
   // A partial read withdraws nothing, and imported Jira tasks are not admitted.
   f.state.fail["project = ABC"] = 500;

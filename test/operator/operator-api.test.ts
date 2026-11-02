@@ -2479,7 +2479,7 @@ test("a routing fallback on a task with no project lead clears without operator 
   assert.equal(Number(d.task(never.taskId).version), version);
   assert.deepEqual(await listedAttention(api, never.taskId), []);
 });
-test("a task read reports source review, hold and unknown source as source-held", async (t) => {
+test("a task read reports a source hold and unknown source as source-held", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const d = f.service.domain(),
@@ -2532,14 +2532,10 @@ test("a task read reports source review, hold and unknown source as source-held"
       externalId: "I1",
     });
     db.prepare(
-      "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
-    ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
-    db.prepare(
       "INSERT INTO source_holds VALUES ('github','github.com','I1',1,'source hold',1)",
     ).run();
   });
   assert.ok(d.admission(taskId).reasons.includes("source-hold"));
-  assert.ok(d.admission(taskId).reasons.includes("source-review-required"));
   const read = await reasons();
   assert.ok(read.includes("source-held"), read.join());
   assert.ok(!read.includes("admission-blocked"), read.join());
@@ -3543,15 +3539,15 @@ test("a revoked profile on the next assignment is a wait with an Open profile Fi
     revoked: true,
   });
   const fix = { kind: "open-profile", profileId: ids.worker };
-  // Revoking bumps the profile's version, so the revision wait follows the revoked one.
+  // Revoking bumps the profile's version, but a never-started assignment's first turn takes
+  // the current revision, so only the revocation waits.
   assert.deepEqual((await api.readTask(ids.taskId)).data.waits, [
     paused,
     { code: "assignment-profile-revoked", fix, links: [], detail: "Worker" },
-    { code: "assignment-profile-stale", fix, links: [], detail: "Worker" },
   ]);
 });
 
-test("a changed profile revision on the next assignment is a wait with an Open profile Fix", async (t) => {
+test("a changed profile revision on a never-started next assignment adds no wait, since its first turn takes it", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const ids = await seedPendingWorker(f),
@@ -3565,32 +3561,27 @@ test("a changed profile revision on the next assignment is a wait with an Open p
     expectedVersion: Number(d.profile(ids.worker).version),
     instructions: "build differently",
   });
-  assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), [
-    {
-      code: "assignment-profile-stale",
-      fix: { kind: "open-profile", profileId: ids.worker },
-      links: [],
-      detail: "Worker",
-    },
-  ]);
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), []);
+});
+
+test("changed project instructions add no wait for never-started assignments, since their first turn takes them", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: Number(d.project(ids.projectId).version),
+    instructions: "New project instructions",
+  });
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), []);
 });
 
 for (const [reason, code, named, change] of [
-  [
-    "changed project instructions",
-    "assignment-instructions-stale",
-    // The lead's pending assignment is stale too and comes first.
-    "Lead",
-    (d: DomainStore, ids: { projectId: string }) =>
-      d.execute({
-        type: "project.configure",
-        actor: "operator",
-        key: randomUUID(),
-        projectId: ids.projectId,
-        expectedVersion: Number(d.project(ids.projectId).version),
-        instructions: "New project instructions",
-      }),
-  ],
   [
     "a profile project routing no longer permits",
     "assignment-profile-not-permitted",
@@ -3718,10 +3709,10 @@ test("a request the scheduler refused for stale revisions keeps its assignment's
   hold(
     `${refusedRevisionPrefix}project-paused, profile-revoked, assignment-profile-revision-stale)`,
   );
+  // The assignment never started, so its stale revision is not a wait; the revocation is.
   assert.deepEqual(await codes(), [
     "project-paused",
     "assignment-profile-revoked",
-    "assignment-profile-stale",
   ]);
 });
 
@@ -3753,7 +3744,6 @@ test("a revoked lead keeps its own assignment's waits beside the project's lead 
       links: [],
     },
     { code: "assignment-profile-revoked", fix, links: [], detail: "Lead" },
-    { code: "assignment-profile-stale", fix, links: [], detail: "Lead" },
   ]);
 });
 
@@ -3781,11 +3771,7 @@ test("a lead's own task-level reasons are not repeated, and a name the exclusion
   const waits = (await api.readTask(ids.taskId)).data.waits;
   assert.deepEqual(
     waits.map((w) => w.code),
-    [
-      "project-paused",
-      "assignment-profile-revoked",
-      "assignment-profile-stale",
-    ],
+    ["project-paused", "assignment-profile-revoked"],
   );
   for (const wait of waits.slice(1)) assert.ok(!("detail" in wait), wait.code);
 });

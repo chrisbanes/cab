@@ -24,7 +24,7 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
 | Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
 | /task/:id | task.configure | local title; outcome; readiness | Retained task page | yes |
-| /task/:id | source.review | source identity; body; status; Project fields; native blockers; review; hold resolution | Retained task page | no |
+| /task/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Retained task page | no |
 | /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
 | /runtime/task/:id | /runtime/control/dependency/add | local dependency add | Retained Runtime task page | yes |
 | /runtime/task/:id | /runtime/control/dependency/remove | local dependency remove | Retained Runtime task page | yes |

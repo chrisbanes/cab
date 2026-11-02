@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { githubIssueTracker } from "./github-source-contracts.js";
 import { moveLegacyGitHubSourceStorage } from "./github-source-migration.js";
 import type { Database } from "./store.js";
@@ -38,6 +39,10 @@ export const sameItem = (a: string, b: string) =>
  * inside the caller's transaction.
  */
 export function migrateSourceStorage(db: Database): void {
+  // Source text was once gated by an accepted digest; such a store adopts the observed text once.
+  const textWasReviewed = ["source_reviews", "github_source_reviews"].some(
+    (table) => tableExists(db, table),
+  );
   db.exec(`
     CREATE TABLE IF NOT EXISTS project_task_sources (
       projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -88,10 +93,10 @@ export function migrateSourceStorage(db: Database): void {
       PRIMARY KEY(provider, instance, externalId),
       FOREIGN KEY(provider, instance, externalId) REFERENCES external_items(provider, instance, externalId)
     );
-    CREATE TABLE IF NOT EXISTS source_reviews (
+    CREATE TABLE IF NOT EXISTS source_review_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       provider TEXT NOT NULL, instance TEXT NOT NULL, externalId TEXT NOT NULL,
-      observedDigest TEXT NOT NULL, acceptedDigest TEXT NOT NULL, decision TEXT, decidedAt TEXT,
-      PRIMARY KEY(provider, instance, externalId),
+      decision TEXT NOT NULL, decidedAt TEXT NOT NULL,
       FOREIGN KEY(provider, instance, externalId) REFERENCES external_items(provider, instance, externalId)
     );
     CREATE TABLE IF NOT EXISTS source_holds (
@@ -140,6 +145,40 @@ export function migrateSourceStorage(db: Database): void {
     if (!columns.includes(column))
       db.exec(`ALTER TABLE external_items ADD COLUMN ${column} TEXT`);
   moveLegacyGitHubSourceStorage(db);
+  if (tableExists(db, "source_reviews")) {
+    db.exec(`INSERT INTO source_review_decisions (provider, instance, externalId, decision, decidedAt)
+      SELECT provider, instance, externalId, decision, decidedAt FROM source_reviews
+      WHERE decision IS NOT NULL AND decidedAt IS NOT NULL ORDER BY rowid;
+      DROP TABLE source_reviews;`);
+  }
+  if (textWasReviewed) adoptObservedSourceText(db);
+}
+
+const tableExists = (db: Database, name: string) =>
+  db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name) !== undefined;
+
+/**
+ * Imported text is live: every imported task takes its issue's observed title and body, and
+ * only `changed-text` holds are released. Other holds keep their row and generation, and the
+ * task's structural version is unchanged. A hold an earlier `changed-text` overwrote is not
+ * recoverable from the single hold row; the next authoritative sync re-establishes it.
+ */
+function adoptObservedSourceText(db: Database): void {
+  const imported = `SELECT e.taskId FROM external_items e JOIN imported_tasks i ON ${sameItem("i", "e")}`;
+  db.exec(`UPDATE tasks SET title = (SELECT observedTitle FROM external_items WHERE taskId = tasks.id)
+      WHERE id IN (${imported});
+    UPDATE domain_tasks SET outcome = (SELECT observedBody FROM external_items WHERE taskId = domain_tasks.id)
+      WHERE id IN (${imported});
+    UPDATE source_holds SET active = 0 WHERE active = 1 AND reason = 'changed-text';`);
+}
+
+/** The identity of an issue's text, as an operator delivery caller names it. */
+export function sourceTextDigest(title: string, body: string): string {
+  return createHash("sha256")
+    .update(JSON.stringify([title, body]))
+    .digest("hex");
 }
 
 /** The issue tracker a project's task source names, or null when the project has none. */

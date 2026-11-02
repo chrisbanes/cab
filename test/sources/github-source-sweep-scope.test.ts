@@ -101,7 +101,6 @@ test("the GitHub adapter's sweeps leave another provider's items alone", () => {
       "imported_tasks",
       "source_memberships",
       "source_holds",
-      "source_reviews",
       "external_item_status",
       "source_dependency_observations",
     ])

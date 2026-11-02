@@ -210,14 +210,16 @@ test("startup completes a newly visible Jira closure only after complete current
   assert.ok(f.sources().providerCompletion(f.taskId));
 });
 
-test("changed text remains stricter than a Jira closure", async (t) => {
+test("changed text does not hold back a settled Jira closure", async (t) => {
   const f = await fixture(t);
   f.observed.title = "Changed scope";
   await f.service.refreshGitHub();
+  assert.equal(f.sources().hold("10007"), undefined);
   f.observed.closed = true;
   await f.service.refreshGitHub();
-  assert.equal(f.sources().hold("10007")?.reason, "changed-text");
-  assert.equal(f.service.domain().task(f.taskId).state, "open");
+  assert.equal(f.service.domain().task(f.taskId).title, "Changed scope");
+  assert.equal(f.service.domain().task(f.taskId).state, "done");
+  assert.ok(f.sources().providerCompletion(f.taskId));
 });
 
 for (const hold of ["stop", "uncertain"] as const)

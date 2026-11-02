@@ -1237,6 +1237,24 @@ export class ExecutionState {
     );
   }
 
+  /**
+   * This work, then the works it replaced as a transient-failure retry or a planned-shutdown
+   * requeue, back to the request that was first queued. Material bound to that request (its
+   * inbox batch, reporting repair or explicit prompt) belongs to every successor.
+   */
+  workLineage(workId: string): string[] {
+    const lineage = [workId];
+    for (;;) {
+      const current = lineage.at(-1) as string;
+      const row = this.db
+        .prepare(`SELECT failedWorkId AS workId FROM execution_retry_resolutions WHERE retryWorkId = ?
+          UNION ALL SELECT interruptedWorkId FROM execution_shutdown_resolutions WHERE requeueWorkId = ?`)
+        .get(current, current) as { workId: string } | undefined;
+      if (!row || lineage.includes(row.workId)) return lineage;
+      lineage.push(row.workId);
+    }
+  }
+
   /** The shutdown resolution that queued this work as its interrupted generation's successor. */
   shutdownRequeue(
     workId: string,

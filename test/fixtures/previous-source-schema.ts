@@ -114,7 +114,7 @@ const neutralSourceTables = [
   "external_item_status",
   "imported_tasks",
   "source_holds",
-  "source_reviews",
+  "source_review_decisions",
   "source_dependency_observations",
   "source_native_blockers",
   "source_placement_decisions",

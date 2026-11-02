@@ -84,12 +84,12 @@ test("fresh operator message continues a refused canonical initial with exact cu
       successor.taskVersion,
       Number(service.domain().task(f.taskId).version) - 1,
     );
-    assert.match(f.runtime.prompts[0] ?? "", /CURRENT_TITLE/);
+    // The lead's turn carries the task as it is now, not its frozen brief.
     assert.match(
       f.runtime.prompts[0] ?? "",
-      /Preserved assignment brief:\nTask: Old title\nOutcome: OLD_OUTCOME/,
+      /^Task: CURRENT_TITLE\nOutcome: CURRENT_OUTCOME\n/,
     );
-    assert.match(f.runtime.prompts[0] ?? "", /CURRENT_OUTCOME/);
+    assert.doesNotMatch(f.runtime.prompts[0] ?? "", /Old title|OLD_OUTCOME/);
     assert.match(f.runtime.prompts[0] ?? "", /PRESERVED_PROFILE/);
     assert.match(f.runtime.prompts[0] ?? "", /PRESERVED_PROJECT/);
     assert.match(f.runtime.prompts[0] ?? "", /FRESH_OPERATOR_CONTINUATION/);

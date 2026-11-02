@@ -833,6 +833,9 @@ async function run(
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
         `State:   ${column}${closureSuffix(read.data.source?.closure)}`,
+        ...(task.issueChangedSinceHandback
+          ? ["Issue:   changed since handback; nothing reopened"]
+          : []),
         `Version: ${task.version}`,
         ...(lead
           ? [

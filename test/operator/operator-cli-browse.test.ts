@@ -654,6 +654,24 @@ test("task get names the lead assignment, execution and who acts next", async (t
       `^Lead: +\\(unavailable\\) \\(assignment ${leadAssignmentId}\\)$`,
     ),
   );
+  // The issue changed after the handback: one informational line, absent otherwise.
+  assert.equal(line(human, "Issue"), undefined);
+  const changed = await h.run(["task", "get", id], {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (!String(input).endsWith(`/api/operator/tasks/${id}`)) return response;
+      const body = (await response.json()) as Json;
+      body.data.task.issueChangedSinceHandback = true;
+      return new Response(JSON.stringify(body), {
+        status: response.status,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  assert.equal(
+    line(changed.out, "Issue"),
+    "Issue:   changed since handback; nothing reopened",
+  );
   // A project with no lead has no Lead line; its Waiting line says so.
   const bare = (await h.run(["task", "get", s.taskId])).out;
   assert.equal(line(bare, "Lead"), undefined);
