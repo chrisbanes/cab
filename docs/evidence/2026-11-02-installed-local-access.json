@@ -1,0 +1,232 @@
+{
+  "steps": {
+    "1-preflight": {
+      "labelAbsent": true,
+      "portsAvoidRealService": true,
+      "disposableHomeAndConfig": true
+    },
+    "2-packages": {
+      "a": "0.1.0",
+      "b": "0.1.1-live.1414",
+      "startedNothing": true
+    },
+    "3-install-local": {
+      "output": {
+        "ok": true,
+        "operation": "install",
+        "mode": "agent",
+        "label": "local.cab.validation-1414-cdd67ad6",
+        "version": "0.1.0",
+        "origin": "http://127.0.0.1:55558",
+        "plist": "<root>/agents/local.cab.validation-1414-cdd67ad6.plist",
+        "logs": [
+          "<root>/logs/local.cab.validation-1414-cdd67ad6.0.1.0.20261102T144540Z.out.log",
+          "<root>/logs/local.cab.validation-1414-cdd67ad6.0.1.0.20261102T144540Z.err.log"
+        ],
+        "accessMode": "local",
+        "connection": null,
+        "credentialActive": false,
+        "sessionOpen": false
+      },
+      "doctorRan": true,
+      "savedConnection": false,
+      "passwordTyped": "hidden prompt, not recorded"
+    },
+    "4-local-read-write": {
+      "recordSelector": true,
+      "savedLocalConnection": "smoke",
+      "readProjectsBefore": true,
+      "createdProject": "repository-free, no lead profile",
+      "doctor": "exit 0"
+    },
+    "5-equal-version-reload": {
+      "output": {
+        "ok": true,
+        "operation": "upgrade",
+        "label": "local.cab.validation-1414-cdd67ad6",
+        "version": "0.1.0",
+        "snapshot": null,
+        "logs": [
+          "<root>/logs/local.cab.validation-1414-cdd67ad6.0.1.0.20261102T144555Z.out.log",
+          "<root>/logs/local.cab.validation-1414-cdd67ad6.0.1.0.20261102T144555Z.err.log"
+        ],
+        "readiness": [
+          {
+            "id": "runtime-enabled",
+            "status": "pass"
+          },
+          {
+            "id": "codex-executable",
+            "status": "pass"
+          },
+          {
+            "id": "codex-login",
+            "status": "pass"
+          },
+          {
+            "id": "git",
+            "status": "pass"
+          },
+          {
+            "id": "github-discovery",
+            "status": "not-configured"
+          },
+          {
+            "id": "claude-executable",
+            "status": "pass"
+          },
+          {
+            "id": "claude-token",
+            "status": "not-configured"
+          },
+          {
+            "id": "runtime-harness",
+            "status": "not-configured"
+          },
+          {
+            "id": "data-paths",
+            "status": "pass"
+          },
+          {
+            "id": "gitlab-credentials",
+            "status": "not-configured"
+          }
+        ]
+      },
+      "sameInstallation": true,
+      "noLogin": true
+    },
+    "6-upgrade": {
+      "output": {
+        "ok": true,
+        "operation": "upgrade",
+        "label": "local.cab.validation-1414-cdd67ad6",
+        "version": "0.1.1-live.1414",
+        "snapshot": null,
+        "logs": [
+          "<root>/logs/local.cab.validation-1414-cdd67ad6.0.1.1-live.1414.20261102T144620Z.out.log",
+          "<root>/logs/local.cab.validation-1414-cdd67ad6.0.1.1-live.1414.20261102T144620Z.err.log"
+        ],
+        "readiness": [
+          {
+            "id": "runtime-enabled",
+            "status": "pass"
+          },
+          {
+            "id": "codex-executable",
+            "status": "pass"
+          },
+          {
+            "id": "codex-login",
+            "status": "pass"
+          },
+          {
+            "id": "git",
+            "status": "pass"
+          },
+          {
+            "id": "github-discovery",
+            "status": "not-configured"
+          },
+          {
+            "id": "claude-executable",
+            "status": "pass"
+          },
+          {
+            "id": "claude-token",
+            "status": "not-configured"
+          },
+          {
+            "id": "runtime-harness",
+            "status": "not-configured"
+          },
+          {
+            "id": "data-paths",
+            "status": "pass"
+          },
+          {
+            "id": "gitlab-credentials",
+            "status": "not-configured"
+          }
+        ]
+      },
+      "sameInstallation": true,
+      "savedLocalConnectionKept": true
+    },
+    "7-uninstall": {
+      "output": {
+        "ok": true,
+        "operation": "uninstall",
+        "mode": "agent",
+        "label": "local.cab.validation-1414-cdd67ad6",
+        "installed": true
+      },
+      "kept": [
+        "data",
+        "auth",
+        "versions"
+      ]
+    },
+    "8-foreground": {
+      "localStatus": "read-write, no expiry",
+      "readWriteReadback": true,
+      "doctor": "exit 0 before and after restart",
+      "restartSameInstallation": true,
+      "gracefulStop": "SIGTERM to the owned child, exit confirmed",
+      "upgrade": "not applicable to a foreground server"
+    },
+    "9-postflight": {
+      "unchanged": true,
+      "labelGone": true,
+      "processesGone": true
+    }
+  },
+  "durationsMs": {
+    "1-preflight": 131,
+    "2-packages": 5575,
+    "3-install-local": 22287,
+    "4-local-read-write": 24294,
+    "5-equal-version-reload": 38785,
+    "6-upgrade": 62539,
+    "7-uninstall": 63732,
+    "8-foreground": 85532,
+    "9-postflight": 88646
+  },
+  "mode": "local-access",
+  "label": "local.cab.validation-1414-cdd67ad6",
+  "headCommit": "8b144a64492e0b3d4f1885a88d9cdcff0309339f",
+  "node": "v26.13.0",
+  "npm": "12.2.1",
+  "packages": {
+    "a": {
+      "version": "0.1.0",
+      "integrity": "sha512-srrP09pIHZ3zMqgsy6GEAFZAeQh8VJhHB7hglqjhCSEDnYslpzDT4UeJkVb50Z1ewgo7qdIlsMHIAl0NeRPgbw=="
+    },
+    "b": {
+      "version": "0.1.1-live.1414",
+      "integrity": "sha512-2JYuYwn5QwIZzoTsESoaY+fubsIZNpb6nAoNbKgciqbwo8NkwFBWE9VxZGbYf9sf76CJZZVZKpjm139TsuhWGA=="
+    }
+  },
+  "baseline": {
+    "changes": {
+      "launchctlLabels": {
+        "removed": [],
+        "added": []
+      },
+      "launchAgents": {
+        "removed": [],
+        "added": []
+      },
+      "applicationSupportcab": {
+        "removed": [],
+        "added": []
+      },
+      "logs": {
+        "removed": [],
+        "added": []
+      }
+    }
+  },
+  "rootRemoved": true,
+  "result": "pass"
+}

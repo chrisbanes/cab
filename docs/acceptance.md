@@ -208,9 +208,13 @@ explicit record selection, adoption and token precedence against real services),
 preservation, token-install refusals) and `test/operations/npm-service-lifecycle.test.ts`
 (a spawned installed service: local install doctor, restart and upgrade through
 the same local selection, and a revoked selected token refusing before the job
-stops). The bounded live installed and foreground smoke on a disposable label is
-still required evidence for this integration. None of this qualifies npm
-publication, a production deployment or cutover. The required final-head `check`
+stops). One bounded live run of the guarded smoke
+(`live-service-lifecycle.mjs --local-access --live`) passed on a disposable label: an
+installed service with local access through install, doctor, saved local selection,
+read and write, equal-version reload, upgrade and uninstall, then a foreground server
+through read and write, doctor and restart, with real folders and launchd labels
+unchanged ([evidence](evidence/2026-11-02-installed-local-access.md)). None of this
+qualifies npm publication, a production deployment or cutover. The required final-head `check`
 CI context remains a merge gate even when local checks pass.
 
 Bound-turn recovery requires offline coverage of both runtime identities, exact
