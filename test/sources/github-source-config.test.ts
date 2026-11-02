@@ -23,7 +23,6 @@ const link = (repositoryId: string, path: string, ref = "main") => ({
 });
 
 import { DomainCommands, DomainStore } from "../../src/core/domain.js";
-import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { restorePreviousSourceSchema } from "../fixtures/previous-source-schema.js";
 import { StandaloneService } from "../../src/standalone/service.js";
@@ -187,106 +186,6 @@ test("github.activate reports whether the selection was already active at the so
       "a row at an older version is not active",
     );
     assert.equal(activate("repo", 3), true);
-  } finally {
-    db.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("operator pages distinguish GitHub sync, provenance and source holds while escaping provider text", () => {
-  const root = mkdtempSync(join(tmpdir(), "cab-github-ui-"));
-  const db = new DatabaseSync(join(root, "db.sqlite"));
-  try {
-    new Store(db).ensureHost("test");
-    const domain = new DomainStore(db);
-    domain.migrate();
-    const sources = new GitHubSourceStore(db);
-    sources.migrate();
-    const projectId = randomUUID();
-    domain.execute({
-      type: "project.create",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      name: "Alpha",
-      leadProfileId: null,
-    });
-    domain.execute({
-      type: "github.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      expectedVersion: 1,
-      credentialRef: "env:CAB_TEST_GITHUB",
-      selections: [
-        {
-          id: "repo",
-          kind: "repository",
-          repositoryId: "R_1",
-          owner: "org",
-          name: "repo",
-        },
-      ],
-      readiness: {
-        mode: "any",
-        conditions: [{ kind: "label", operator: "has", name: "ready" }],
-      },
-    });
-    domain.execute({
-      type: "github.activate",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      selectionId: "repo",
-      expectedVersion: 2,
-    });
-    sources.reconcileSelection(projectId, "repo", {
-      complete: true,
-      issues: [
-        {
-          providerInstance: "github.com",
-          nodeId: "I_1",
-          repositoryId: "R_1",
-          repositoryName: "org/repo",
-          number: 1,
-          title: "<img src=x onerror=alert(1)>",
-          body: "<script>alert(2)</script>",
-          state: "open",
-          labels: ["ready"],
-          projectFields: [],
-        },
-      ],
-      reason: null,
-    });
-    sources.reconcileBlockers("I_1", {
-      complete: false,
-      blockers: [],
-      reason: "http-403",
-    });
-    // The label is removed on GitHub: nothing matches and the task names why.
-    sources.reconcileSelection(projectId, "repo", {
-      complete: true,
-      issues: [
-        {
-          providerInstance: "github.com",
-          nodeId: "I_1",
-          repositoryId: "R_1",
-          repositoryName: "org/repo",
-          number: 1,
-          title: "<img src=x onerror=alert(1)>",
-          body: "<script>alert(2)</script>",
-          state: "open",
-          labels: [],
-          projectFields: [],
-        },
-      ],
-      reason: null,
-    });
-    sources.reconcileSelection(projectId, "repo", {
-      complete: false,
-      issues: [],
-      reason: "http-403",
-    });
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });

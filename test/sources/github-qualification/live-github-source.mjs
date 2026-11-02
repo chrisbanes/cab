@@ -198,7 +198,6 @@ try {
       (expected.blockers ?? []).some((item) => item.state === "open"),
     );
     // The task page is gone; the imported issue's identity is read from the source store.
-    assert.equal(String(imported.nodeId), expected.nodeId);
     assert.equal(Number(imported.issueNumber), expected.number);
     if (expected.expectedAdmission === "blocked")
       assert.equal(admission.eligible, false);

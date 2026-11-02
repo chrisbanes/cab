@@ -771,7 +771,7 @@ test("task get names the next assignment's revoked profile and prints its Settin
   );
 });
 
-test("task get, the task read, the catalog and the HTML page agree on GitHub closure", async (t) => {
+test("task get, the task read and the catalog agree on GitHub closure", async (t) => {
   const o = await startCliOperator(t);
   const { d, s } = o;
   const taskId = seedImported(o);
