@@ -100,9 +100,17 @@ export function scriptedDeliveryProvider() {
     unknownEffect: false,
     /** `PUT .../merge-async` calls: the one merge write. */
     writes: 0,
+    /** Once a merge has been written, every later read is unavailable. */
+    failReadsAfterWrite: false,
     /** The bound PR's base branch, and the pull request that used to be its base (null: none exists). */
     baseRef: "main",
-    lower: null as null | { merged: boolean; open: boolean },
+    lower: null as null | {
+      merged: boolean;
+      open: boolean;
+      /** Where its head lives (a fork reads another repository), and the branch it merged into. */
+      headRepo?: string | null;
+      into?: string;
+    },
     /** Bodies of the merge writes, and the request ids polled. */
     mergeBodies: [] as unknown[],
     polled: [] as string[],
@@ -169,7 +177,11 @@ export function scriptedDeliveryProvider() {
     const route = `${method} ${url.pathname}`;
     state.requests.push(route);
     assert.equal(url.origin, "https://api.github.com");
-    if (state.outage) throw Error("scripted provider unavailable");
+    if (
+      state.outage ||
+      (state.failReadsAfterWrite && state.writes > 0 && method === "GET")
+    )
+      throw Error("scripted provider unavailable");
     if (route === "PUT /repos/org/repo/pulls/7/merge-async") {
       const body = JSON.parse(String(init?.body));
       assert.deepEqual(body, {
@@ -224,7 +236,14 @@ export function scriptedDeliveryProvider() {
         {
           state: state.lower.open ? "open" : "closed",
           merged_at: state.lower.merged ? "2026-10-05T12:00:00Z" : null,
-          head: { ref: "stack-lower", repo: { node_id: "R1" } },
+          head: {
+            ref: "stack-lower",
+            repo:
+              state.lower.headRepo === null
+                ? null
+                : { node_id: state.lower.headRepo ?? "R1" },
+          },
+          base: { ref: state.lower.into ?? "main" },
         },
       ]);
     if (route === "POST /repos/org/repo/issues/1/comments") {

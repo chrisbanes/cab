@@ -54,6 +54,12 @@ import {
   StatusSkipRefusal,
 } from "./issue-tracker.js";
 
+/** What the lead needs to know while the delivery's base change is held. */
+function baseSummary(binding: PrDeliveryBinding): string {
+  return binding.baseChange
+    ? `\nPR base change held: the code host shows base ${binding.baseChange.observedRef} but the delivery's accepted base is ${binding.acceptedBaseRef} (${binding.baseChange.reason}); edit, ready, merge and thread actions are refused until it is accepted or restored on the code host.`
+    : "";
+}
 /** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
 export function unresolvedThreadSummary(
   observation: PrDeliveryObservation,
@@ -732,11 +738,18 @@ export class DeliveryCoordinator {
       const policy = this.store.configuration(caller.projectId),
         taskVersion =
           this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion;
+      const bound = this.store.delivery(caller.taskId);
       const observation = await this.provider(
         caller.projectId,
         identity.repositoryId,
         policy,
-      ).inspectPr(identity, policy);
+      ).inspectPr(
+        {
+          ...identity,
+          ...(bound ? { recordedBaseRef: bound.acceptedBaseRef } : {}),
+        },
+        policy,
+      );
       return this.store.transaction(() => {
         this.options.authorize(caller);
         if (
@@ -760,6 +773,7 @@ export class DeliveryCoordinator {
           caller,
           observation,
           lead,
+          this.codeHost(caller.projectId, observation.repositoryId).ref,
         );
         if (outside)
           this.outsidePush(
@@ -883,7 +897,9 @@ export class DeliveryCoordinator {
           )
             .slice(-10)
             .map((f) => `${f.kind} ${f.nodeId} (${f.state}): ${f.body}`)
-            .join("\n")}\n${unresolvedThreadSummary(observation)}`.trimEnd(),
+            .join(
+              "\n",
+            )}\n${unresolvedThreadSummary(observation)}${baseSummary(result.binding)}`.trimEnd(),
           `${result.binding.revision}:${result.binding.observationDigest}`,
         );
       return result.binding;

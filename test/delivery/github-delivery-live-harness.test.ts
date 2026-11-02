@@ -227,6 +227,9 @@ test("live guard permits one asynchronous squash merge of the through-merge jour
     g.assertRequest(`${root}/pulls/4/merge-async/..%2F..`, { method: "GET" }),
   );
   assert.throws(() =>
+    g.assertRequest(`${root}/pulls/4/merge-async/a/b`, { method: "GET" }),
+  );
+  assert.throws(() =>
     g.assertRequest(`${root}/pulls/4/merge-async/6f1d2c3e-aaaa`, {
       method: "DELETE",
     }),

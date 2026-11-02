@@ -1570,8 +1570,9 @@ test("a retarget before the lower pull request merged is held, blocks every acti
     const accepted = boundDelivery(f);
     assert.equal(accepted.acceptedBaseRef, "main");
     assert.equal(accepted.baseChange, null);
-    assert.equal((await f.merge(randomUUID(), "main")).success, true);
-    assert.equal(f.scripted.state.writes, 1);
+    // The observation did not change, but lifting the hold is a new revision, so the lead is told.
+    assert.ok(accepted.revision > held.revision);
+    assert.equal(f.scripted.state.writes, 0);
   } finally {
     await f.close();
   }
@@ -1599,17 +1600,23 @@ test("a retarget to any other branch is held even when the lower pull request me
   }
 });
 
-test("a lower branch with another open pull request is not a merged base", async () => {
-  const f = await stackedDelivery();
-  try {
-    f.scripted.state.baseRef = "main";
-    // Merged once, but another pull request from the same branch is open again.
-    f.scripted.state.lower = { merged: true, open: true };
-    await refreshDelivery(f);
-    assert.equal(boundDelivery(f).acceptedBaseRef, "stack-lower");
-    assert.ok(boundDelivery(f).baseChange);
-  } finally {
-    await f.close();
+test("a lower pull request that is open, from a fork, or merged elsewhere is not a merged base", async () => {
+  for (const lower of [
+    { merged: true, open: true },
+    { merged: true, open: false, headRepo: "R-fork" },
+    { merged: true, open: false, headRepo: null },
+    { merged: true, open: false, into: "release" },
+  ]) {
+    const f = await stackedDelivery();
+    try {
+      f.scripted.state.baseRef = "main";
+      f.scripted.state.lower = lower;
+      await refreshDelivery(f);
+      assert.equal(boundDelivery(f).acceptedBaseRef, "stack-lower");
+      assert.ok(boundDelivery(f).baseChange, JSON.stringify(lower));
+    } finally {
+      await f.close();
+    }
   }
 });
 
@@ -1872,6 +1879,34 @@ test("an unreadable poll keeps the merge request id for the next pass", async ()
     await refreshDelivery(f);
     await refreshDelivery(f);
     assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a merge request id survives a failed read straight after the write, so a later failure is still recorded", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "failed", message: "Required status check is failing" },
+  ]);
+  try {
+    // Every read after the write fails: only the write's own answer holds the request id.
+    f.scripted.state.failReadsAfterWrite = true;
+    assert.equal((await send()).success, false);
+    assert.equal(action().state, "uncertain");
+    assert.equal(action().mergeRequest?.uuid, "u-1");
+    f.scripted.state.failReadsAfterWrite = false;
+    await refreshDelivery(f);
+    assert.deepEqual(action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { uuid: "u-1", status: "failed" },
+      hostReason: "Required status check is failing",
+    });
     assert.equal(f.scripted.state.writes, 1);
   } finally {
     await f.close();

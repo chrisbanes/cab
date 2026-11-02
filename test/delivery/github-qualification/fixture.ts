@@ -278,8 +278,9 @@ export class FixtureGuard {
         m.journeys.some(
           (j) =>
             j.mode === "through-merge" &&
-            path.startsWith(`/pulls/${j.pr.number}/merge-async/`) &&
-            /^[0-9A-Za-z-]+$/.test(path.slice(path.lastIndexOf("/") + 1)),
+            new RegExp(
+              `^/pulls/${j.pr.number}/merge-async/[0-9A-Za-z-]+$`,
+            ).test(path),
         )
       )
         return;

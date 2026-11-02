@@ -41,6 +41,8 @@ const mergeBlockerSentences: Record<string, string> = {
     "No required checks: neither the code host nor cab requires a check, so the merge is held.",
   "merge-method-not-configured":
     "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
+  "pr-base-change-held":
+    "Base changed: the code host moved this pull request to a base cab has not accepted, so its actions are held until it is restored or the branch it was stacked on merges.",
 };
 /** A merge-gate code as a sentence when it has one; any other code is shown as it is. */
 export const mergeBlockerText = (code: string) =>

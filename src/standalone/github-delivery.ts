@@ -154,11 +154,14 @@ const hasLabel = (labels: { name: string }[], name: string): boolean =>
 /** `merge-async`'s answer to a merge request and to a poll of it. */
 const asyncMergeSchema = z.object({
   status: z.enum(["pending", "enqueued", "merged", "failed"]),
-  details: z.object({ uuid: name, message: z.string().optional() }),
+  details: z.object({
+    uuid: z.string().trim().min(1).max(512),
+    message: z.string().optional(),
+  }),
 });
 /** The body of a 409: the request that is already pending. */
 const asyncMergeConflictSchema = z.object({
-  details: z.object({ uuid: name }),
+  details: z.object({ uuid: z.string().trim().min(1).max(512) }),
 });
 
 class ProviderFailure extends Error {
@@ -1222,6 +1225,7 @@ export class GitHubHttpDeliveryProvider
               repo,
               identity.repositoryId,
               identity.recordedBaseRef,
+              raw.base.ref,
             ),
           }
         : undefined;
@@ -1257,12 +1261,13 @@ export class GitHubHttpDeliveryProvider
   }
   /**
    * Whether the change request that was the base (the pull requests of branch `ref` in this repository)
-   * is merged: at least one is, and none is open. A read that fails reads as not merged.
+   * is merged into `into`, the new base: at least one is, and none is open. A read that fails reads as not merged.
    */
   private async priorMerged(
     repo: { path: string; owner: string },
     repositoryId: string,
     ref: string,
+    into: string,
   ): Promise<boolean> {
     try {
       const lower = (
@@ -1279,6 +1284,7 @@ export class GitHubHttpDeliveryProvider
                 ref: name,
                 repo: z.object({ node_id: name }).nullable(),
               }),
+              base: z.object({ ref: name }),
             })
             .parse(v),
         )
@@ -1286,7 +1292,7 @@ export class GitHubHttpDeliveryProvider
           (p) => p.head.ref === ref && p.head.repo?.node_id === repositoryId,
         );
       return (
-        lower.some((p) => p.merged_at !== null) &&
+        lower.some((p) => p.merged_at !== null && p.base.ref === into) &&
         !lower.some((p) => p.state === "open")
       );
     } catch {
@@ -1969,7 +1975,13 @@ export class GitHubHttpDeliveryProvider
         state: "uncertain",
         reason: "provider-readback-unavailable",
         receipt: null,
-        // A readback failure never forgets that Git reported the push done.
+        // A readback failure never forgets the code host's merge request, nor that Git reported the push done.
+        ...(record.observation?.mergeRequest
+          ? { mergeRequest: record.observation.mergeRequest }
+          : {}),
+        ...(record.observation?.hostReason
+          ? { hostReason: record.observation.hostReason }
+          : {}),
         ...(record.observation?.pushed ? { pushed: true } : {}),
         ...(record.observation?.rejected ? { rejected: true } : {}),
         ...(record.observation?.ambiguous ? { ambiguous: true } : {}),

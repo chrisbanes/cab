@@ -982,7 +982,11 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       identity.recordedBaseRef !== mr.target_branch
         ? {
             fromRef: identity.recordedBaseRef,
-            priorMerged: await this.priorMerged(id, identity.recordedBaseRef),
+            priorMerged: await this.priorMerged(
+              id,
+              identity.recordedBaseRef,
+              mr.target_branch,
+            ),
           }
         : undefined;
     return prObservationSchema.parse({
@@ -1014,9 +1018,13 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   }
   /**
    * Whether the merge request that was the base (those from source branch `ref` within this project)
-   * is merged: at least one is, and none is open. A read that fails reads as not merged.
+   * is merged into `into`, the new base: at least one is, and none is open. A read that fails reads as not merged.
    */
-  private async priorMerged(id: string, ref: string): Promise<boolean> {
+  private async priorMerged(
+    id: string,
+    ref: string,
+    into: string,
+  ): Promise<boolean> {
     try {
       const lower = (
         await this.pages(
@@ -1028,6 +1036,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
             .object({
               state: z.string(),
               source_branch: z.string(),
+              target_branch: z.string(),
               source_project_id: z.number().int(),
               target_project_id: z.number().int(),
             })
@@ -1040,7 +1049,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
             String(m.target_project_id) === id,
         );
       return (
-        lower.some((m) => m.state === "merged") &&
+        lower.some((m) => m.state === "merged" && m.target_branch === into) &&
         !lower.some((m) => m.state === "opened" || m.state === "locked")
       );
     } catch {

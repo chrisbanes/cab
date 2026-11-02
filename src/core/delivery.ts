@@ -2236,6 +2236,7 @@ export class DeliveryStore {
     caller: RuntimeDeliveryCaller,
     observation: PrDeliveryObservation,
     leadAssignmentId: string,
+    linkRef?: string | null,
   ): PrDeliveryBinding {
     const current = this.delivery(caller.taskId),
       policy = this.configuration(caller.projectId);
@@ -2248,8 +2249,11 @@ export class DeliveryStore {
         current.observation.repositoryId !== observation.repositoryId
       )
         throw new Error("Task already has another PR delivery");
-      return this.observePrWithinTransaction(caller.taskId, observation)
-        .binding;
+      return this.observePrWithinTransaction(
+        caller.taskId,
+        observation,
+        linkRef,
+      ).binding;
     }
     const binding: PrDeliveryBinding = {
       taskId: caller.taskId,
@@ -2303,13 +2307,15 @@ export class DeliveryStore {
     )
       throw new Error("PR observation identity changed");
     const digest = materialDigest(observation),
-      changed = digest !== binding.observationDigest;
+      before = canonicalMaterial({
+        accepted: binding.acceptedBaseRef,
+        held: binding.baseChange,
+      });
     const firstSeen = !this.db
       .prepare(
         "SELECT 1 FROM delivery_observations WHERE taskId=? AND digest=?",
       )
       .get(taskId, digest);
-    if (changed || binding.readError) binding.revision++;
     if (
       observation.headSha !== binding.observation.headSha ||
       observation.state !== binding.observation.state ||
@@ -2336,7 +2342,7 @@ export class DeliveryStore {
           "baseRef" in a.target &&
           "nodeId" in a.target &&
           a.target.nodeId === observation.nodeId &&
-          ["prepared", "attempting", "uncertain"].includes(record.state)
+          ["attempting", "uncertain"].includes(record.state)
         )
           this.save({ ...record, acceptedBaseRef: observation.baseRef });
       }
@@ -2345,6 +2351,15 @@ export class DeliveryStore {
         observedRef: observation.baseRef,
         reason: "prior-change-request-not-merged",
       };
+    // Lifting or moving a hold changes what the lead may do even when the observation does not change.
+    const changed =
+      digest !== binding.observationDigest ||
+      before !==
+        canonicalMaterial({
+          accepted: binding.acceptedBaseRef,
+          held: binding.baseChange,
+        });
+    if (changed || binding.readError) binding.revision++;
     binding.observation = observation;
     binding.observationDigest = digest;
     binding.observedAt = Date.now();

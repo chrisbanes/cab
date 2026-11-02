@@ -385,3 +385,22 @@ test("a merge request retargeted to another branch is held even when the lower o
     await w.f.close();
   }
 });
+
+test("a merged request from another project, or into another branch, is not the merged base", async (t) => {
+  for (const other of [
+    { source_project_id: 99 },
+    { target_branch: "release" },
+  ]) {
+    const w = await gitlabWorld(t);
+    try {
+      const s = await stacked(w, "merged");
+      Object.assign(s.below, other);
+      s.mr.target_branch = "main";
+      await s.refresh();
+      assert.equal(s.delivery()?.acceptedBaseRef, "stack-lower");
+      assert.ok(s.delivery()?.baseChange, JSON.stringify(other));
+    } finally {
+      await w.f.close();
+    }
+  }
+});
