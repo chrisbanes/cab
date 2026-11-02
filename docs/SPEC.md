@@ -335,8 +335,11 @@ A shutdown requeue of an imported task whose revision was current when the servi
 stopped takes the re-observed revision once complete reconciliation shows the task
 still admissible, then runs under every admission check. A readiness, blocker,
 membership or source-hold change while the service was down holds the requeue with
-that reason, not as stale. A provider read that stays incomplete keeps it waiting. A
-revision after that point holds it as stale, as for local tasks.
+that reason, not as stale. A paused project or an incomplete provider read keeps it
+waiting with that allowance, and revisions or re-observation during the wait are
+absorbed when admission is then clean; a structural change during the wait holds it.
+Only a revision after the requeue has taken the re-observed revision holds it as
+stale, as for local tasks.
 
 Owned Codex and Claude runtime/probe children start in separate process groups,
 with piped stdio and retained lifecycle ownership. Terminal group SIGINT therefore
