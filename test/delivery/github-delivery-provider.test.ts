@@ -283,7 +283,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     const url = new URL(String(input));
     if (init?.method === "PUT") {
       writes++;
-      return Response.json({ merged: true });
+      return Response.json({ status: "merged", details: { uuid: "u-1" } });
     }
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
@@ -736,9 +736,14 @@ test("all eleven concrete action transports preserve exact target, incremental l
         method: init?.method ?? "GET",
         body: init?.body ? JSON.parse(String(init.body)) : null,
       });
+      const path = new URL(String(input)).pathname;
       return init?.method === "DELETE"
         ? new Response(null, { status: 204 })
-        : Response.json({ data: {} });
+        : Response.json(
+            path.endsWith("/merge-async")
+              ? { status: "pending", details: { uuid: "u-1" } }
+              : { data: {} },
+          );
     },
   );
   const issue = { repositoryId: "R1", nodeId: "I7", number: 7 },
@@ -809,7 +814,7 @@ test("all eleven concrete action transports preserve exact target, incremental l
       ["POST", "/repos/org/repo/pulls"],
       ["PATCH", "/repos/org/repo/pulls/7"],
       ["POST", "/graphql"],
-      ["PUT", "/repos/org/repo/pulls/7/merge"],
+      ["PUT", "/repos/org/repo/pulls/7/merge-async"],
       ["PATCH", "/repos/org/repo/issues/7"],
       ["POST", "/graphql"],
       ["POST", "/graphql"],
@@ -818,6 +823,7 @@ test("all eleven concrete action transports preserve exact target, incremental l
   assert.deepEqual(writes[8]?.body, {
     sha: pr.expectedHeadSha,
     merge_method: "squash",
+    bypass_rules: false,
   });
   assert.deepEqual(writes[2]?.body, { labels: ["progress"] });
   assert.match(JSON.stringify(writes[0]?.body), /cab-operation:/);

@@ -273,6 +273,16 @@ export class FixtureGuard {
         )
       )
         return;
+      // Polling the merge request of a through-merge journey's own pull request.
+      if (
+        m.journeys.some(
+          (j) =>
+            j.mode === "through-merge" &&
+            path.startsWith(`/pulls/${j.pr.number}/merge-async/`) &&
+            /^[0-9A-Za-z-]+$/.test(path.slice(path.lastIndexOf("/") + 1)),
+        )
+      )
+        return;
       if (
         m.journeys.some(
           (j) =>
@@ -362,14 +372,15 @@ export class FixtureGuard {
       method === "PUT" &&
       match?.[1] === "pulls" &&
       number === j.pr.number &&
-      suffix === "/merge"
+      suffix === "/merge-async"
     ) {
       this.permits("pr.merge");
       if (
         j.mode === "through-merge" &&
         body.sha === j.pr.headSha &&
         body.merge_method === "squash" &&
-        Object.keys(body).length === 2
+        body.bypass_rules === false &&
+        Object.keys(body).length === 3
       )
         return;
       throw new Error("Unexpected fixture merge");

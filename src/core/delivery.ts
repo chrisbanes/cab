@@ -187,6 +187,23 @@ export function repositoryDeliverySettings(
   };
 }
 
+/**
+ * The bases a bound change request may be retargeted to: the repository link's base branch. The link
+ * names a local rev, so one leading `refs/heads/`, `refs/remotes/origin/` or `origin/` is dropped and a
+ * commit id yields none. This is the seam where a code host's stack base is added.
+ */
+export function acceptableBaseRefs(
+  linkRef: string | null | undefined,
+): string[] {
+  const branch = linkRef?.replace(
+    /^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/,
+    "",
+  );
+  return branch && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(branch)
+    ? [branch]
+    : [];
+}
+
 const targetSchema = z
   .object({
     repositoryId: identity,
@@ -592,6 +609,16 @@ export const actionObservationSchema = z
     outsideDeleted: z.boolean().optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
     resumeAt: z.number().int().positive().optional(),
+    /** The code host's asynchronous merge request and the last status read for it. */
+    mergeRequest: z
+      .object({
+        uuid: identity,
+        status: z.enum(["pending", "enqueued", "merged", "failed"]),
+      })
+      .strict()
+      .optional(),
+    /** The code host's own reason for a failed merge, bounded. */
+    hostReason: z.string().max(500).optional(),
   })
   .strict();
 export type ProviderActionObservation = z.output<
@@ -663,6 +690,11 @@ export const prObservationSchema = z
       .optional(),
     closedIssueNodeIds: z.array(identity).default([]),
     allowedMethods: z.array(z.enum(["merge", "squash", "rebase"])),
+    /** Present only when the base is not the delivery's accepted base: whether the change request that was the base is merged. */
+    retarget: z
+      .object({ fromRef: identity, priorMerged: z.boolean() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type PrDeliveryObservation = z.output<typeof prObservationSchema>;
@@ -697,6 +729,20 @@ const prBindingSchema = z
     revision: z.number().int().positive(),
     mode: z.enum(["reviewable-pr", "through-merge"]),
     observation: prObservationSchema,
+    /** The base the delivery's actions are authorised against. Absent before it was recorded: the stored observation's base. */
+    acceptedBaseRef: identity.optional(),
+    /** A base change the delivery holds on: the observed base is not an accepted retarget. */
+    baseChange: z
+      .object({
+        observedRef: identity,
+        reason: z.enum([
+          "base-not-repository-base",
+          "prior-change-request-not-merged",
+        ]),
+      })
+      .strict()
+      .nullable()
+      .default(null),
     observationDigest: z.string().length(64),
     observedAt: z.number(),
     readError: identity.nullable(),
@@ -712,7 +758,11 @@ const prBindingSchema = z
       .strict()
       .nullable(),
   })
-  .strict();
+  .strict()
+  .transform((b) => ({
+    ...b,
+    acceptedBaseRef: b.acceptedBaseRef ?? b.observation.baseRef,
+  }));
 export type PrDeliveryBinding = z.output<typeof prBindingSchema>;
 export type TaskDeliveryView = ReturnType<DeliveryStore["publicTask"]>;
 const actionRecordSchema = z
@@ -732,6 +782,8 @@ const actionRecordSchema = z
     attempts: z.number().int().nonnegative(),
     beforeState: z.record(z.string(), z.json()).nullable(),
     observation: actionObservationSchema.nullable(),
+    /** The delivery's accepted base when the action was prepared, moved with an accepted retarget; the request itself never changes. */
+    acceptedBaseRef: identity.optional(),
     createdAt: z.number(),
     updatedAt: z.number(),
   })
@@ -905,6 +957,24 @@ export class DeliveryStore {
       ),
     ];
   }
+  /** The task's PR delivery when `action` acts on that pull request (an edit, ready, merge or thread action). */
+  private boundPrOf(
+    taskId: string,
+    action: ExternalAction,
+  ): PrDeliveryBinding | null {
+    if (
+      !action.kind.startsWith("pr.") ||
+      action.kind === "pr.create" ||
+      !("nodeId" in action.target)
+    )
+      return null;
+    const bound = this.delivery(taskId);
+    return bound &&
+      bound.observation.nodeId === action.target.nodeId &&
+      bound.observation.repositoryId === action.target.repositoryId
+      ? bound
+      : null;
+  }
   authorize(
     request: ExternalActionArguments,
     binding: DeliveryCaller,
@@ -1061,6 +1131,14 @@ export class DeliveryStore {
       )
         throw new Error("Review thread is not on the task's bound PR");
     }
+    const boundPr = this.boundPrOf(binding.taskId, action);
+    if (
+      boundPr &&
+      (boundPr.baseChange ||
+        ("baseRef" in action.target &&
+          action.target.baseRef !== boundPr.acceptedBaseRef))
+    )
+      throw new Error("PR base is not the delivery's accepted base");
     const source = this.db
       .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(binding.projectId) as { readiness: string } | undefined;
@@ -1756,6 +1834,10 @@ export class DeliveryStore {
           request.action.target.repositoryId,
         );
       const now = Date.now();
+      const accepted = this.boundPrOf(
+        binding.taskId,
+        request.action,
+      )?.acceptedBaseRef;
       const record: DeliveryActionRecord = {
         operationId: request.operationId,
         request,
@@ -1771,6 +1853,7 @@ export class DeliveryStore {
               receipt: null,
             }
           : null,
+        ...(accepted === undefined ? {} : { acceptedBaseRef: accepted }),
         createdAt: now,
         updatedAt: now,
       };
@@ -1822,10 +1905,20 @@ export class DeliveryStore {
     input: ProviderActionObservation,
     within?: (record: DeliveryActionRecord) => void,
   ): DeliveryActionRecord {
-    const observation = actionObservationSchema.parse(input);
+    let observation = actionObservationSchema.parse(input);
     return this.transaction(() => {
       const record = this.action(operationId);
       if (record.state === "confirmed-success") return record;
+      // A read that failed or timed out must not forget the code host's merge request.
+      if (
+        observation.state === "uncertain" &&
+        !observation.mergeRequest &&
+        record.observation?.mergeRequest
+      )
+        observation = {
+          ...observation,
+          mergeRequest: record.observation.mergeRequest,
+        };
       const previous = record.state;
       record.state = observation.state;
       record.observation = observation;
@@ -2166,6 +2259,8 @@ export class DeliveryStore {
       revision: 1,
       mode: policy.mode,
       observation,
+      acceptedBaseRef: observation.baseRef,
+      baseChange: null,
       observationDigest: materialDigest(observation),
       observedAt: Date.now(),
       readError: null,
@@ -2182,9 +2277,14 @@ export class DeliveryStore {
       );
     return binding;
   }
+  /**
+   * `linkRef` is the repository link's base. A base other than the accepted one is accepted only when it is
+   * an acceptable base and the change request it used to target is merged; otherwise it is held.
+   */
   observePrWithinTransaction(
     taskId: string,
     input: PrDeliveryObservation,
+    linkRef?: string | null,
   ): {
     binding: PrDeliveryBinding;
     changed: boolean;
@@ -2192,7 +2292,8 @@ export class DeliveryStore {
     /** Newly recorded: the PR's head is on the task branch but is no commit cab pushed. */
     outsideHead: boolean;
   } {
-    const observation = prObservationSchema.parse(input),
+    // The retarget fact decides below and is not kept: it is read afresh while the base differs.
+    const { retarget, ...observation } = prObservationSchema.parse(input),
       binding = this.delivery(taskId);
     if (!binding) throw new Error("Unknown PR delivery");
     if (
@@ -2215,6 +2316,35 @@ export class DeliveryStore {
       observation.draft !== binding.observation.draft
     )
       binding.settlement = null;
+    if (observation.baseRef === binding.acceptedBaseRef)
+      binding.baseChange = null;
+    else if (!acceptableBaseRefs(linkRef).includes(observation.baseRef))
+      binding.baseChange = {
+        observedRef: observation.baseRef,
+        reason: "base-not-repository-base",
+      };
+    else if (
+      retarget?.priorMerged &&
+      retarget.fromRef === binding.acceptedBaseRef
+    ) {
+      binding.acceptedBaseRef = observation.baseRef;
+      binding.baseChange = null;
+      for (const record of this.actions(taskId)) {
+        const a = record.request.action;
+        if (
+          a.kind.startsWith("pr.") &&
+          "baseRef" in a.target &&
+          "nodeId" in a.target &&
+          a.target.nodeId === observation.nodeId &&
+          ["prepared", "attempting", "uncertain"].includes(record.state)
+        )
+          this.save({ ...record, acceptedBaseRef: observation.baseRef });
+      }
+    } else
+      binding.baseChange = {
+        observedRef: observation.baseRef,
+        reason: "prior-change-request-not-merged",
+      };
     binding.observation = observation;
     binding.observationDigest = digest;
     binding.observedAt = Date.now();
@@ -2388,6 +2518,23 @@ export class DeliveryStore {
       reasons.push("reviewable-pr-awaiting-current-settlement");
     return [...new Set(reasons)];
   }
+  /** A held base change reads as a merge blocker where the delivery is shown; the stored observation is unchanged. */
+  private withBaseHold(binding: PrDeliveryBinding | null) {
+    return binding?.baseChange
+      ? {
+          ...binding,
+          observation: {
+            ...binding.observation,
+            mergeBlockers: [
+              ...new Set([
+                ...binding.observation.mergeBlockers,
+                "pr-base-change-held",
+              ]),
+            ],
+          },
+        }
+      : binding;
+  }
   publicTask(taskId: string) {
     const task = this.db
       .prepare("SELECT projectId,version FROM domain_tasks WHERE id=?")
@@ -2445,7 +2592,7 @@ export class DeliveryStore {
       projectFieldObservations: projectFields,
       policyVersion: configuration.version,
       mode: configuration.mode,
-      binding: this.delivery(taskId),
+      binding: this.withBaseHold(this.delivery(taskId)),
       branches: this.taskBranches(taskId),
       blockers: this.completionBlockers(taskId, task.version),
       actions: this.actions(taskId).map((a) => ({

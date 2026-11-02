@@ -104,6 +104,8 @@ const evidence = {
     cleanup: "unproved",
   },
   journeys: [],
+  /** Every merge-async request cab made and the poll read here, as GitHub answered: the fields the SPEC rests on. */
+  mergeAsync: [],
   runtime: {
     turns: [],
     terminals: [],
@@ -121,6 +123,25 @@ const evidence = {
     "Fixture repository/Project retained unless a separate explicit disposal grant exists",
   ],
 };
+function recordMergeAsync(fetcher) {
+  return async (input, init) => {
+    const response = await fetcher(input, init),
+      url = new URL(String(input));
+    if (/\/pulls\/\d+\/merge-async(\/|$)/.test(url.pathname))
+      evidence.mergeAsync.push({
+        method: init?.method ?? "GET",
+        path: url.pathname.replace(/^\/repos\/[^/]+\/[^/]+/, ""),
+        apiVersion: new Headers(init?.headers).get("x-github-api-version"),
+        httpStatus: response.status,
+        request: init?.body ? JSON.parse(String(init.body)) : null,
+        response: await response
+          .clone()
+          .json()
+          .catch(() => null),
+      });
+    return response;
+  };
+}
 function save() {
   writeFileSync(
     join(root, "evidence.json"),
@@ -306,7 +327,7 @@ async function start() {
     undefined,
     {
       routingClient: null,
-      delivery: { fetcher: guard.fetcher() },
+      delivery: { fetcher: recordMergeAsync(guard.fetcher()) },
       issueTrackers: {
         readerFactories: { github: sourceReader },
         intervalMs: 1000000,
@@ -737,6 +758,24 @@ try {
       j.mode === "through-merge",
     );
     if (j.mode === "through-merge") {
+      // Exactly one merge write, however many reads settled it.
+      const writes = evidence.mergeAsync.filter((r) => r.method === "PUT");
+      assert.equal(writes.length, 1);
+      const uuid = z
+        .object({ details: z.object({ uuid: z.string().min(1) }) })
+        .parse(writes[0].response).details.uuid;
+      // GitHub keeps the result, so the poll endpoint is read here when settling did not need it.
+      if (!evidence.mergeAsync.some((r) => r.method === "GET"))
+        evidence.mergeAsync.push({
+          method: "GET",
+          path: `/pulls/${j.pr.number}/merge-async/${uuid}`,
+          apiVersion: "2022-11-28",
+          httpStatus: 200,
+          request: null,
+          response: await provider(
+            `${repoPath}/pulls/${j.pr.number}/merge-async/${uuid}`,
+          ),
+        });
       assert.equal((await issueSnapshot(j)).state, "closed");
       assert.equal(service.domain().hasOwnDeliveryClosure(taskId), true);
       const before = service.delivery().actions(taskId);

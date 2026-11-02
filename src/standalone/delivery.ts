@@ -93,7 +93,7 @@ export interface DeliveryCoordinatorOptions {
   codeHostOf?: (
     projectId: string,
     repositoryId: string,
-  ) => { codeHost: CodeHost; host: string } | null;
+  ) => { codeHost: CodeHost; host: string; ref?: string } | null;
   authorize: (
     caller: DeliveryCaller,
     exceptOperationId?: string,
@@ -165,7 +165,7 @@ export class DeliveryCoordinator {
   private codeHost(
     projectId: string,
     repositoryId: string,
-  ): { codeHost: CodeHost; host: string } {
+  ): { codeHost: CodeHost; host: string; ref?: string } {
     // shortcut: an unlinked target defaults to GitHub on github.com, replace when every delivery target has a repository link
     return (
       this.options.codeHostOf?.(projectId, repositoryId) ?? {
@@ -855,6 +855,7 @@ export class DeliveryCoordinator {
           prNumber: p.number,
           expectedPrNodeId: p.nodeId,
           expectedHeadSha: p.headSha,
+          recordedBaseRef: binding.acceptedBaseRef,
         },
         policy,
       );
@@ -866,7 +867,11 @@ export class DeliveryCoordinator {
       const current = this.store.delivery(taskId);
       if (!current || current.revision !== binding.revision)
         throw new Error("PR delivery changed during inspection");
-      const result = this.store.observePrWithinTransaction(taskId, observation);
+      const result = this.store.observePrWithinTransaction(
+        taskId,
+        observation,
+        this.codeHost(current.projectId, observation.repositoryId).ref,
+      );
       // One event: an outside head is the more specific notice for a changed PR.
       if (result.outsideHead)
         this.outsidePush(taskId, observation.repositoryId, observation.headSha);

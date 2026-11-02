@@ -11,7 +11,10 @@ import {
   repositoryId,
   token,
 } from "../fixtures/gitlab-delivery.js";
-import { gitLabDiscussion } from "../fixtures/gitlab-remote.js";
+import {
+  gitLabDiscussion,
+  gitLabMergeRequest,
+} from "../fixtures/gitlab-remote.js";
 
 type World = Awaited<ReturnType<typeof gitlabWorld>>;
 
@@ -276,6 +279,108 @@ test("the delivery and approval reads name the GitLab merge request, its link an
     assert.equal(withheld?.url, undefined);
     assert.equal(withheld?.repositoryName, repositoryId);
     assert.equal(withheld?.codeHost, "gitlab");
+  } finally {
+    await w.f.close();
+  }
+});
+
+/** A draft merge request bound while it targets `stack-lower`, with the merge request from that branch scripted as `lower`. */
+async function stacked(w: World, lower: "merged" | "opened") {
+  w.f.grant(...allow("branch.push", "pr.create", "pr.ready"));
+  const m = await opened(w, true, "stack-lower");
+  const below = gitLabMergeRequest({
+    id: 8000,
+    iid: 80,
+    source_branch: "stack-lower",
+    target_branch: "main",
+    state: lower,
+  });
+  w.remote.state.mergeRequests.push(below);
+  const delivery = () => w.f.service.delivery().delivery(w.f.taskId);
+  const refresh = () =>
+    w.f.service.coordinationView().refreshDelivery(w.f.taskId);
+  return { ...m, below, delivery, refresh };
+}
+
+test("a merge request retargeted to the repository base after the lower one merged is accepted, and its actions follow the new base", async (t) => {
+  const w = await gitlabWorld(t);
+  try {
+    const s = await stacked(w, "merged");
+    assert.equal(s.delivery()?.acceptedBaseRef, "stack-lower");
+    s.mr.target_branch = "main";
+    await s.refresh();
+    assert.equal(s.delivery()?.acceptedBaseRef, "main");
+    assert.equal(s.delivery()?.baseChange, null);
+    const stale = await s.act({
+      kind: "pr.ready",
+      target: { ...s.pr, baseRef: "stack-lower" },
+    });
+    assert.equal(stale.success, false);
+    const ready = await s.act({
+      kind: "pr.ready",
+      target: { ...s.pr, baseRef: "main" },
+    });
+    assert.equal(ready.success, true, ready.text);
+    assert.equal(s.mr.draft, false);
+    assertNoToken(w);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a merge request retargeted before the lower one merged is held and refused every action, then accepted once it merges", async (t) => {
+  const w = await gitlabWorld(t);
+  try {
+    const s = await stacked(w, "opened");
+    s.mr.target_branch = "main";
+    await s.refresh();
+    assert.equal(s.delivery()?.acceptedBaseRef, "stack-lower");
+    assert.deepEqual(s.delivery()?.baseChange, {
+      observedRef: "main",
+      reason: "prior-change-request-not-merged",
+    });
+    const before = writes(w);
+    for (const baseRef of ["main", "stack-lower"])
+      assert.equal(
+        (await s.act({ kind: "pr.ready", target: { ...s.pr, baseRef } }))
+          .success,
+        false,
+        baseRef,
+      );
+    assert.equal(writes(w), before);
+    assert.equal(s.mr.draft, true);
+
+    s.below.state = "merged";
+    await s.refresh();
+    assert.equal(s.delivery()?.acceptedBaseRef, "main");
+    assert.equal(s.delivery()?.baseChange, null);
+    assert.equal(
+      (await s.act({ kind: "pr.ready", target: { ...s.pr, baseRef: "main" } }))
+        .success,
+      true,
+    );
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a merge request retargeted to another branch is held even when the lower one merged", async (t) => {
+  const w = await gitlabWorld(t);
+  try {
+    const s = await stacked(w, "merged");
+    s.mr.target_branch = "release";
+    await s.refresh();
+    assert.equal(s.delivery()?.acceptedBaseRef, "stack-lower");
+    assert.equal(s.delivery()?.baseChange?.reason, "base-not-repository-base");
+    assert.equal(
+      (
+        await s.act({
+          kind: "pr.ready",
+          target: { ...s.pr, baseRef: "release" },
+        })
+      ).success,
+      false,
+    );
   } finally {
     await w.f.close();
   }

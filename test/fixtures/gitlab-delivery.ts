@@ -94,7 +94,7 @@ export function assertNoToken(w: Awaited<ReturnType<typeof gitlabWorld>>) {
 type GitLabWorld = Awaited<ReturnType<typeof gitlabWorld>>;
 
 /** Pushes the task branch, then opens a merge request on it through the lead's tools. */
-export async function opened(w: GitLabWorld, draft = true) {
+export async function opened(w: GitLabWorld, draft = true, base = "main") {
   const sha = w.commit("one.txt");
   assert.equal((await w.push(sha)).success, true);
   const created = await w.f.call("cab_external_action", {
@@ -115,6 +115,8 @@ export async function opened(w: GitLabWorld, draft = true) {
   assert.equal(created.success, true, created.text);
   const mr = w.remote.state.mergeRequests[0];
   assert.ok(mr);
+  // A merge request stacked on another branch is registered against that base.
+  mr.target_branch = base;
   mr.head_pipeline = {
     id: 54,
     sha,
@@ -136,7 +138,7 @@ export async function opened(w: GitLabWorld, draft = true) {
   assert.equal(registered.success, true, registered.text);
   const pr = {
     ...target,
-    baseRef: "main",
+    baseRef: base,
     headRef: String(branchOf(w)?.branch),
     expectedHeadSha: sha,
   };
