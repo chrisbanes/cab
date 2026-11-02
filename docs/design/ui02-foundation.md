@@ -26,11 +26,11 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /task/:id | task.configure | local title; outcome; readiness | Retained task page | yes |
 | /task/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Retained task page | no |
 | /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
-| /runtime/task/:id | /runtime/control/dependency/add | local dependency add | Task Execution tab (`dependency.add`); retained Runtime task page pending parity approval | yes |
-| /runtime/task/:id | /runtime/control/dependency/remove | local dependency remove | Task Execution tab (`dependency.remove`); retained Runtime task page pending parity approval | yes |
-| /runtime/task/:id | /runtime/control/instruction-apply | apply project instructions and profile revisions | Task inspector stale assignment row (`assignment.apply`); retained Runtime task and assignment pages | yes |
-| /runtime/task/:id | /runtime/control/stop | stop request and observation | Task header Stop… (`task.stop`); retained Runtime task page pending parity approval | yes |
-| /runtime/task/:id | /runtime/control/resume | explicit resume | Task header Resume… (`task.resume`); retained Runtime task page pending parity approval | yes |
+| /app/tasks/:id | dependency.add | local dependency add | Task Execution tab | yes |
+| /app/tasks/:id | dependency.remove | local dependency remove | Task Execution tab | yes |
+| /runtime/assignment/:id | /runtime/control/instruction-apply | apply project instructions and profile revisions | Task inspector stale assignment row (`assignment.apply`); retained assignment page | yes |
+| /app/tasks/:id | task.stop | stop request and observation | Task header Stop… | yes |
+| /app/tasks/:id | task.resume | explicit resume | Task header Resume… | yes |
 | /runtime/assignment/:id | read | generation; holds; advanced recovery evidence | Assignment recovery | read subset |
 | /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card; delegated assignment sub-conversation header | yes |
 | /app/tasks/:id | result.recipient | unresolved results; destination reconciliation | Task decision card | yes |
@@ -62,8 +62,8 @@ Programmatic support (no new HTTP exposure):
 | --- | --- | --- |
 | `assignment.create` | Task composer; retained assignment page | Optional initial assignment in atomic `task.create`; standalone assignment creation remains programmatic |
 | `assignment.apply` | Task inspector stale assignment row; retained assignment page | `/api/operator/commands` and retained `/runtime/control/instruction-apply` |
-| `dependency.add` | Task Execution tab; retained Runtime task page | `/api/operator/commands` and retained `/runtime/control/dependency/add` |
-| `dependency.remove` | Task Execution tab; retained Runtime task page | `/api/operator/commands` and retained `/runtime/control/dependency/remove` |
+| `dependency.add` | Task Execution tab | `/api/operator/commands` |
+| `dependency.remove` | Task Execution tab | `/api/operator/commands` |
 | `imported-blockers.set` | Explicitly unsupported operator exposure | Existing programmatic case only; no HTTP or JSON endpoint |
 
 `LocalOperatorUi.submit` cases that are not current HTTP controls: `assignment.create`, `assignment.apply`, `dependency.add`, `dependency.remove`, `imported-blockers.set`. The latter remains unexposed. `github.activate` is applied from the existing preview flow and has no arbitrary JSON adapter.

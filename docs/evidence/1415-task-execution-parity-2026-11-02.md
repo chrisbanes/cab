@@ -1,6 +1,6 @@
 # Task Execution additive parity — 2026-11-02
 
-This is the additive parity record for [#1415](https://github.com/chrisbanes/cab/issues/1415) under [plan 6565437333](https://github.com/chrisbanes/cab/issues/1415#issuecomment-6565437333), following the #745 retained-control process. It records what the task workspace now replaces, what it does not, and the evidence. **It is not removal authority.** `/runtime/task/:id`, its four exclusive POST routes (`/runtime/control/dependency/add`, `/runtime/control/dependency/remove`, `/runtime/control/stop`, `/runtime/control/resume`) and `taskPage()` remain implemented and callable. Removal needs a separate, explicit maintainer approval of this record and its candidate.
+This is the additive parity record for [#1415](https://github.com/chrisbanes/cab/issues/1415) under [plan 6565437333](https://github.com/chrisbanes/cab/issues/1415#issuecomment-6565437333), following the #745 retained-control process. It records what the task workspace now replaces, what it does not, and the evidence. At the additive checkpoint it was not removal authority: `/runtime/task/:id`, its four exclusive POST routes (`/runtime/control/dependency/add`, `/runtime/control/dependency/remove`, `/runtime/control/stop`, `/runtime/control/resume`) and `taskPage()` remain implemented and callable. Removal needs a separate, explicit maintainer approval of this record and its candidate.
 
 ## Candidate
 
@@ -112,3 +112,25 @@ Node 26.13.0 / npm 12.2.1 on local macOS, with Playwright Chromium 1248 and WebK
 ## Limits
 
 No new runtime capability, changed hold or recovery semantics, or release or cutover qualification is claimed. The newest-generation hold scope of `execution` is pre-existing; only the Execution tab compensates for it.
+
+## Removal
+
+The maintainer approved removal for this record and candidate `ae8a55af`: [approval](https://github.com/chrisbanes/cab/issues/1415#issuecomment-6580397694). On `main` `d159dfc0` the branch removes:
+
+- `GET /runtime/task/:id`;
+- `POST /runtime/control/dependency/add`, `/runtime/control/dependency/remove`, `/runtime/control/stop` and `/runtime/control/resume`;
+- `taskPage()`, `dependencyForm()`, their field parsers, and the `stopTask`/`resumeTask` members of the runtime routes' service interface;
+- `test/operator/operator-runtime-task-controls.test.ts` and the task-page parts of the runtime, coordination, recovery, targeted-read and browser tests. Their status and hold assertions moved to the task read.
+
+`/runtime`, `/runtime/assignment/:id`, `/runtime/control/instruction-apply`, `taskHref` (now the Execution tab) and the status, hold and evidence helpers the assignment page uses remain.
+
+The removed routes answer a signed-in, same-origin request with a valid CSRF token exactly as an unknown route does: `404`, the same body, no `Location`, and no dependency or Stop change. `operator-http.test.ts` asserts this once, along with `/runtime` and `/runtime/assignment/:id` returning 200 and `instruction-apply` redirecting to its assignment page. Bookmarks of `/runtime/task/:id` therefore reach the ordinary not-found page, with no redirect.
+
+`rg -n 'runtime/task|runtime/control/(stop|resume|dependency)' src web test scripts` matches only those two negative tests (`operator-http.test.ts` and the rendered-forms check in `operator-control-inventory.test.ts`). Under `docs/`, only dated evidence records still mention the old routes.
+
+The four opt-in live harnesses were rewritten and pass `node --check`. None was run live; re-qualifying them needs its own approval.
+
+- `live-journey-ui.mjs`: dependency Add through the Execution tab, then an exact replay of the captured `dependency.add` command; Stop and Resume through the header; task state and gates read from the tab.
+- `live-operator.mjs`: now mounts the React app and JSON API; Stop through the header; holds read from the Execution tab before and after a restart.
+- `live-sleep.mjs`: still serves the legacy routes only, so it reads the status and task-wide holds from the lead assignment's retained page.
+- `live-journey.mjs`: its bearer-refusal case posts to the retained `/runtime/control/instruction-apply`.

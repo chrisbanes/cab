@@ -769,10 +769,10 @@ server-rendered routes: local task edits and Resume source hold on `/task/:id`,
 reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
-is stopped, Resume…, and a stale assignment row applies current instructions for its next
-turn. These use the same receipted JSON commands as the CLI. The retained
-`/runtime/task/:id` page and its forms are no longer linked and remain only until the
-parity review approves their removal. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
+is stopped, Resume…, and a stale row of a started assignment applies current instructions
+for its next turn. These use the same receipted JSON commands as the CLI. The Runtime
+overview (`/runtime`) and each assignment's retained page (`/runtime/assignment/:id`,
+with its exact recovery evidence and Apply) remain. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
