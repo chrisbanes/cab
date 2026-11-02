@@ -589,11 +589,11 @@ function boundReview(
   command: ReturnType<typeof boundTurnRecoveryCommandSchema.parse>,
   csrfToken: string,
   message: string,
-  phase: "review" | "check" | "retry" | "recorded",
+  phase: "review" | "check" | "retry" | "recorded" | "blocked",
 ): string {
   const payload = JSON.stringify(command);
   const confirm = phase === "review" || phase === "retry";
-  return `<main><h1>Bound-turn reconciliation</h1><p role="status">${escapeHtml(message)}</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(payload)}</pre>${phase === "recorded" ? "" : `<form method="post" action="${confirm ? "/runtime/control/bound-turn/recover" : "/runtime/control/bound-turn/check"}">${hidden("csrfToken", csrfToken)}${hidden("payload", payload)}${confirm ? hidden("confirmed", "yes") : ""}<button>${confirm ? "Confirm reconciliation" : "Check original receipt"}</button></form>`}<p><a ${phase === "review" ? "autofocus" : ""} href="${assignmentHref(command.assignmentId)}">${phase === "review" ? "Cancel and return to evidence" : phase === "recorded" ? "Review remaining holds" : "Inspect evidence; keep this original request for readback"}</a></p></main>`;
+  return `<main><h1>Bound-turn reconciliation</h1><p role="status">${escapeHtml(message)}</p>${phase === "blocked" ? `<p>Independent assertions retained: exact process exit confirmed; effects and callbacks settled; workspace ${escapeHtml(command.receipt.workspace)}.</p>` : ""}<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(payload)}</pre>${phase === "recorded" || phase === "blocked" ? "" : `<form method="post" action="${confirm ? "/runtime/control/bound-turn/recover" : "/runtime/control/bound-turn/check"}">${hidden("csrfToken", csrfToken)}${hidden("payload", payload)}${confirm ? hidden("confirmed", "yes") : ""}<button>${confirm ? "Confirm reconciliation" : "Check original receipt"}</button></form>`}<p><a ${phase === "review" ? "autofocus" : ""} href="${assignmentHref(command.assignmentId)}">${phase === "review" ? "Cancel and return to evidence" : phase === "recorded" ? "Review remaining holds" : phase === "blocked" ? "Inspect current generation; preserve this original evidence" : "Inspect evidence; keep this original request for readback"}</a></p></main>`;
 }
 
 export class RuntimeOperatorRoutes {
@@ -636,56 +636,72 @@ export class RuntimeOperatorRoutes {
                 const original = boundTurnRecoveryCommandSchema.parse(
                   JSON.parse(input.payload),
                 );
-                const options = await this.recovery!.readRecoveryOptions(
-                  original.assignmentId,
-                );
-                const r = options.data.records.find(
-                  (r) => r.workId === original.receipt.workId,
-                );
-                if (
-                  !r ||
-                  options.data.gaps.length ||
-                  !r.paths.some(
-                    (p) => p.path === "bound-turn-recover" && p.eligible,
-                  )
-                )
-                  throw new Error(
-                    "Bound recovery is not eligible; inspect current recovery options",
-                  );
-                const command = boundTurnRecoveryCommandSchema.parse({
-                  key: original.key,
-                  assignmentId: original.assignmentId,
-                  receipt: {
-                    kind: "bound-turn",
-                    workId: r.workId,
-                    workRevision: r.generation.workRevision,
-                    requestSequence: r.generation.requestSequence,
-                    processIdentity: r.process,
-                    threadId: r.threadId,
-                    turnId: r.turnId,
-                    termination: { kind: "process-exit" },
-                    effects: "settled",
-                    workspace: input.workspace,
-                  },
+                const submitted = boundTurnRecoveryCommandSchema.parse({
+                  ...original,
+                  receipt: { ...original.receipt, workspace: input.workspace },
                 });
-                if (
-                  JSON.stringify({
-                    ...original.receipt,
-                    workspace: input.workspace,
-                  }) !== JSON.stringify(command.receipt)
-                )
-                  throw new Error(
-                    "Recovery identity changed; inspect the current generation before asserting new proof",
+                try {
+                  const options = await this.recovery!.readRecoveryOptions(
+                    original.assignmentId,
                   );
-                return {
-                  kind: "html" as const,
-                  body: boundReview(
-                    command,
-                    csrfToken,
-                    "Review permanent reconciliation. It cannot be undone. Stop, project pause, approvals and delivery holds remain. No turn will start.",
-                    "review",
-                  ),
-                };
+                  const r = options.data.records.find(
+                    (r) => r.workId === original.receipt.workId,
+                  );
+                  if (
+                    !r ||
+                    options.data.gaps.length ||
+                    !r.paths.some(
+                      (p) => p.path === "bound-turn-recover" && p.eligible,
+                    )
+                  )
+                    throw new Error(
+                      "Bound recovery is not eligible; inspect current recovery options",
+                    );
+                  const command = boundTurnRecoveryCommandSchema.parse({
+                    key: original.key,
+                    assignmentId: original.assignmentId,
+                    receipt: {
+                      kind: "bound-turn",
+                      workId: r.workId,
+                      workRevision: r.generation.workRevision,
+                      requestSequence: r.generation.requestSequence,
+                      processIdentity: r.process,
+                      threadId: r.threadId,
+                      turnId: r.turnId,
+                      termination: { kind: "process-exit" },
+                      effects: "settled",
+                      workspace: input.workspace,
+                    },
+                  });
+                  if (
+                    JSON.stringify({
+                      ...original.receipt,
+                      workspace: input.workspace,
+                    }) !== JSON.stringify(command.receipt)
+                  )
+                    throw new Error(
+                      "Recovery identity changed; inspect the current generation before asserting new proof",
+                    );
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      command,
+                      csrfToken,
+                      "Review permanent reconciliation. It cannot be undone. Stop, project pause, approvals and delivery holds remain. No turn will start.",
+                      "review",
+                    ),
+                  };
+                } catch {
+                  return {
+                    kind: "html" as const,
+                    body: boundReview(
+                      submitted,
+                      csrfToken,
+                      "Review unavailable: eligibility is blocked, identity changed, or its lookup failed. Original evidence and assertions are retained. Reconciliation is disabled. Inspect the current generation before asserting new proof; never substitute it into this original request.",
+                      "blocked",
+                    ),
+                  };
+                }
               },
             },
             {

@@ -1251,15 +1251,48 @@ test("retained bound-turn controls review without writes, retain refusal and rea
   assert.equal(service.recoveryForTask(w.g.taskId)[0]?.receipt, null);
   const stale = structuredClone(original);
   stale.receipt.turnId = "another-turn";
-  await assert.rejects(
-    () =>
-      call("/runtime/control/bound-turn/review", {
-        ...fields,
-        payload: JSON.stringify(stale),
-      }),
-    /identity changed/,
-  );
+  const staleReview = await call("/runtime/control/bound-turn/review", {
+    ...fields,
+    payload: JSON.stringify(stale),
+  });
+  assert.match(staleReview, /identity changed/);
+  assert.match(staleReview, /another-turn/);
+  assert.match(staleReview, new RegExp(original.key));
+  assert.doesNotMatch(staleReview, /<button>Confirm reconciliation|<form/);
   w.setMode("live");
+  const blockedReview = await call("/runtime/control/bound-turn/review", {
+    ...fields,
+    workspace: "reconciled",
+  });
+  assert.match(blockedReview, /Independent assertions retained/);
+  assert.match(blockedReview, /workspace reconciled/);
+  assert.match(blockedReview, /&quot;workspace&quot;:&quot;reconciled&quot;/);
+  assert.match(blockedReview, new RegExp(original.key));
+  assert.doesNotMatch(blockedReview, /<button>Confirm reconciliation|<form/);
+  const unavailable = runtimeOperatorRoutes(service, {
+    readRecoveryOptions: async () => {
+      throw new Error("lookup unavailable");
+    },
+    readOperation: api.readOperation.bind(api),
+  }).find((route) => route.path === "/runtime/control/bound-turn/review");
+  assert.ok(unavailable);
+  const unavailableReview = await unavailable.handler({
+    fields: { ...fields, workspace: "reconciled" },
+    params: {},
+    csrfToken: "fixture-csrf",
+  });
+  assert.equal(unavailableReview.kind, "html");
+  if (unavailableReview.kind === "html") {
+    assert.match(unavailableReview.body, /lookup failed/);
+    assert.match(unavailableReview.body, /workspace reconciled/);
+    assert.match(unavailableReview.body, new RegExp(original.key));
+    assert.doesNotMatch(
+      unavailableReview.body,
+      /<button>Confirm reconciliation|<form/,
+    );
+  }
+  assert.equal(service.recoveryForTask(w.g.taskId)[0]?.receipt, null);
+  assert.equal(service.recoveryForTask(w.g.taskId)[0]?.holds.writer, true);
   const refused = await call("/runtime/control/bound-turn/recover", {
     payload,
     confirmed: "yes",

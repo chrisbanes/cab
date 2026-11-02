@@ -695,8 +695,12 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      the same command.
 
    Adoption, recovery and replacement cannot be undone, and adoption here records
-   evidence: it is unrelated to `assignment apply-current`. The bound-turn
-   receipt has no CLI or operator route.
+   evidence: it is unrelated to `assignment apply-current`. Bound-turn recovery
+   uses `recovery prepare bound-turn-recover` and the corresponding operator
+   recovery controls. Browser assertions and pending request state are local to
+   the page visit: navigation, sign-out or full reload discards them. Preserve the
+   original command/key before leaving an uncertain outcome; recorded server
+   receipts remain durable and can be read back through the operation endpoint.
 
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are
