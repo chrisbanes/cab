@@ -1,6 +1,6 @@
 # UI06 configuration and recovery contract
 
-The React operator provides the setup, configuration and recovery surfaces, served by the existing listener. Authenticated task, profile, assignment and Runtime HTML controls stay reachable; project configuration uses React Settings. UI07 (#745) owns final visual/usability parity and removal approval; these surfaces do not qualify release, cutover, real provider access or native structured input.
+The React operator provides the setup, configuration and recovery surfaces, served by the existing listener. Authenticated task, profile, assignment and Runtime HTML controls stay reachable; project configuration uses React Settings. UI07 (#745) owns final visual/usability parity; these surfaces do not qualify release, cutover, real provider access or native structured input.
 
 ## Configuration and receipt behavior
 
@@ -22,15 +22,15 @@ Notifications (`/app/settings#notifications`, between CLI credentials and Readin
 
 Delivery policy and authority are edited at `/app/projects/:id/settings?tab=delivery`: completion mode, branch prefix, all 17 scoped action kinds, required checks/app bindings and explicit credential Preserve/Set/Clear. Unavailable saved grants, checks and prefix are preserved through version-bound references until explicitly removed or replaced. The former project editor returns 404; the four Settings links and exclusive legacy form handlers are removed. Delivery issue/Project/PR/provider/local facts, guarded Accept handback/Settle as closed and observation refresh are in the task's Changes tab. Settings provides its structured Delivery tab and retains task/Runtime recovery destinations. The authenticated JSON API exposes curated delivery policy with credential presence only, and accepts `delivery.configure` with minimal receipts. Native callback qualification retains its failed one-turn/zero-callback evidence and consumed budget; these surfaces grant no retry or native adapter.
 
-Jira source Settings uses `jira.configure` for site, JQL selections, readiness and closed-issue mode; it is reached through the existing source section or `?tab=github&tracker=jira`. The retained project renderer has no Jira form. Saved query fields can render empty before their version-matched private read completes; unavailable selections remain opaque keep/remove rows. Validated Jira selections become active when saved under the existing Jira contract; this does not prove an observation refresh or successful import. GitHub configuration saves do not activate selections: GitHub preview/activation and observation refresh remain separate operations.
+Jira source Settings uses `jira.configure` for site, JQL selections, readiness and closed-issue mode; it is reached through the existing source section or `?tab=github&tracker=jira`. Saved query fields can render empty before their version-matched private read completes; unavailable selections remain opaque keep/remove rows. Validated Jira selections become active when saved under the existing Jira contract; this does not prove an observation refresh or successful import. GitHub configuration saves do not activate selections: GitHub preview/activation and observation refresh remain separate operations.
 
-Excluded source/repository identities are never replaced with sanitized identities. Keep references bind project, section, source kind, version and ordinal; Remove omits the row and Discard restores the loaded draft. Delivery grants/checks use the same version-bound preservation principle. If any projected status-mapping identity cannot be disclosed, the existing optional view is withheld as a whole; stored mapping remains unchanged. Reductions of public status authority still show a conservative warning while that view is absent. Neither withholding nor the warning clears a mapping, changes authority or blocks Save. The legacy project route, four Settings links and eight exclusive form discriminants are removed under the approved [project parity record](../evidence/1418-project-settings-parity-2026-11-02.md). Shared project/profile creation, task editing, source review and programmatic form capabilities remain.
+Excluded source/repository identities are never replaced with sanitized identities. Keep references bind project, section, source kind, version and ordinal; Remove omits the row and Discard restores the loaded draft. Delivery grants/checks use the same version-bound preservation principle. If any projected status-mapping identity cannot be disclosed, the existing optional view is withheld as a whole; stored mapping remains unchanged. Reductions of public status authority still show a conservative warning while that view is absent. Neither withholding nor the warning clears a mapping, changes authority or blocks Save. The legacy project route, four Settings links and eight exclusive form discriminants are absent. Shared project/profile creation, task editing, source review and programmatic form capabilities remain.
 
 Advanced original recovery/Apply, task Stop/Resume/dependencies and task/source review remain linked to their exact retained destinations; captured history, messages, results, questions and approvals are in the task view. Recovery is read-only: identities, receipts, acknowledgement and elapsed time do not establish termination or authorize ownership release. Resume clears operator Stop independently of other holds. Phone layouts explain current state and link the desktop-first advanced evidence.
 
 ## Individual control dispositions
 
-Every semicolon-separated foundation inventory control appears individually below. Project and coordination forms have been removed after parity approval; task, profile, assignment and Runtime controls retain the dispositions below.
+Every semicolon-separated foundation inventory control appears individually below. Project configuration uses Settings and coordination uses the task view; task, profile, assignment and Runtime controls retain the dispositions below.
 
 | Command/action | Control/read operation | Retained destination | Reachable replacement or retained destination | Disposition |
 | --- | --- | --- | --- | --- |
@@ -48,33 +48,33 @@ Every semicolon-separated foundation inventory control appears individually belo
 | profile.create | instructions | / | /app/settings/profiles/new | Implemented replacement; original control retained. |
 | profile.create | capabilities | / | /app/settings/profiles/new | Implemented replacement; original control retained. |
 | profile.create | runtime, model and reasoning effort | none (React only) | /app/settings/profiles/new | Implemented; the retained `/` form creates a Codex profile. |
-| project.configure | name | removed project form | /app/projects/:id/settings | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| project.configure | lead | removed project form | /app/projects/:id/settings | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| project.configure | instructions | removed project form | /app/projects/:id/settings | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| project.configure | pause | removed project form | /app/projects/:id/settings | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
+| project.configure | name | Project Settings | /app/projects/:id/settings | Available at the listed destination; shared command capability remains. |
+| project.configure | lead | Project Settings | /app/projects/:id/settings | Available at the listed destination; shared command capability remains. |
+| project.configure | instructions | Project Settings | /app/projects/:id/settings | Available at the listed destination; shared command capability remains. |
+| project.configure | pause | Project Settings | /app/projects/:id/settings | Available at the listed destination; shared command capability remains. |
 | profile.configure | name | /profile/:id | /app/profiles/:id/settings | Implemented replacement; original control retained. |
 | profile.configure | instructions | /profile/:id | /app/profiles/:id/settings | Revealed from the session-only private-values read and edited in place in React; an unedited reveal is omitted, so the saved text is kept. Original control retained. |
 | profile.configure | capabilities | /profile/:id | /app/profiles/:id/settings | Edited in place in React from the loaded read; replace-only when the read omits them. Original control retained. |
 | profile.configure | revoke | /profile/:id | /app/profiles/:id/settings | Revoke and Restore toggle one draft field saved with the profile; original control retained. |
 | profile.configure | runtime, model and reasoning effort | /profile/:id (read-only) | /app/profiles/:id/settings | Implemented in React; the retained page shows the runtime and its save keeps it. A change saves a new revision for new conversations only. |
-| routing.configure | enable | removed project form | /app/projects/:id/settings?tab=routing | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| routing.configure | guidance | removed project form | /app/projects/:id/settings?tab=routing | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| routing.configure | candidates | removed project form | /app/projects/:id/settings?tab=routing | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| routing.configure | set/clear credential reference | removed project form | /app/projects/:id/settings?tab=routing | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.configure | selections | removed project form | /app/projects/:id/settings?tab=github | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.configure | readiness | removed project form | /app/projects/:id/settings?tab=github | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.configure | closed-issue mode | removed project form | /app/projects/:id/settings?tab=github | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| repositories.configure | repositories | removed project form | /app/projects/:id/settings?tab=repositories | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.configure | set/clear credential reference | removed project form | /app/projects/:id/settings?tab=github | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.preview | preview selections | removed project form | /app/projects/:id/settings?tab=sync | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.preview | activation via preview receipt | removed project form | /app/projects/:id/settings?tab=sync | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.refresh | refresh observation | removed project form | /app/projects/:id/settings?tab=sync | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| github.place | conflicting placement | removed project form | /app/projects/:id/settings?tab=sync | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| delivery.configure | completion mode | removed project form | /app/projects/:id/settings?tab=delivery | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| delivery.configure | branch prefix | removed project form | /app/projects/:id/settings?tab=delivery | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| delivery.configure | scoped grants | removed project form | /app/projects/:id/settings?tab=delivery | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| delivery.configure | required checks | removed project form | /app/projects/:id/settings?tab=delivery | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| delivery.configure | set/clear credential reference | removed project form | /app/projects/:id/settings?tab=delivery | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
+| routing.configure | enable | Project Settings | /app/projects/:id/settings?tab=routing | Available at the listed destination; shared command capability remains. |
+| routing.configure | guidance | Project Settings | /app/projects/:id/settings?tab=routing | Available at the listed destination; shared command capability remains. |
+| routing.configure | candidates | Project Settings | /app/projects/:id/settings?tab=routing | Available at the listed destination; shared command capability remains. |
+| routing.configure | set/clear credential reference | Project Settings | /app/projects/:id/settings?tab=routing | Available at the listed destination; shared command capability remains. |
+| github.configure | selections | Project Settings | /app/projects/:id/settings?tab=github | Available at the listed destination; shared command capability remains. |
+| github.configure | readiness | Project Settings | /app/projects/:id/settings?tab=github | Available at the listed destination; shared command capability remains. |
+| github.configure | closed-issue mode | Project Settings | /app/projects/:id/settings?tab=github | Available at the listed destination; shared command capability remains. |
+| repositories.configure | repositories | Project Settings | /app/projects/:id/settings?tab=repositories | Available at the listed destination; shared command capability remains. |
+| github.configure | set/clear credential reference | Project Settings | /app/projects/:id/settings?tab=github | Available at the listed destination; shared command capability remains. |
+| github.preview | preview selections | Project Settings | /app/projects/:id/settings?tab=sync | Available at the listed destination; shared command capability remains. |
+| github.preview | activation via preview receipt | Project Settings | /app/projects/:id/settings?tab=sync | Available at the listed destination; shared command capability remains. |
+| github.refresh | refresh observation | Project Settings | /app/projects/:id/settings?tab=sync | Available at the listed destination; shared command capability remains. |
+| github.place | conflicting placement | Project Settings | /app/projects/:id/settings?tab=sync | Available at the listed destination; shared command capability remains. |
+| delivery.configure | completion mode | Project Settings | /app/projects/:id/settings?tab=delivery | Available at the listed destination; shared command capability remains. |
+| delivery.configure | branch prefix | Project Settings | /app/projects/:id/settings?tab=delivery | Available at the listed destination; shared command capability remains. |
+| delivery.configure | scoped grants | Project Settings | /app/projects/:id/settings?tab=delivery | Available at the listed destination; shared command capability remains. |
+| delivery.configure | required checks | Project Settings | /app/projects/:id/settings?tab=delivery | Available at the listed destination; shared command capability remains. |
+| delivery.configure | set/clear credential reference | Project Settings | /app/projects/:id/settings?tab=delivery | Available at the listed destination; shared command capability remains. |
 | delivery.read | issue observation | /app/tasks/:id | /app/tasks/:id | Delivery facts read in the task's Changes tab from the task read; the retired coordination page no longer shows them. |
 | delivery.read | Project field observations | /app/tasks/:id | /app/tasks/:id | Delivery facts read in the task's Changes tab from the task read; the retired coordination page no longer shows them. |
 | delivery.read | PR identity/head/state | /app/tasks/:id | /app/tasks/:id | Delivery facts read in the task's Changes tab from the task read; the retired coordination page no longer shows them. |
@@ -87,9 +87,9 @@ Every semicolon-separated foundation inventory control appears individually belo
 | delivery.settle | task/delivery/policy revisions | /app/tasks/:id | /app/tasks/:id | Settled in the task's Changes tab through `delivery.settle`, bound to the task, delivery and policy revisions and the PR head; refusals record nothing. |
 | delivery.settle | head guard | /app/tasks/:id | /app/tasks/:id | Settled in the task's Changes tab through `delivery.settle`, bound to the task, delivery and policy revisions and the PR head; refusals record nothing. |
 | delivery.refresh | refresh delivery observations | /app/tasks/:id | /app/tasks/:id | Requested from the task's Changes tab through `delivery.refresh`; it reads provider state only. |
-| task.create | draft | removed project form | /app/tasks/new | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| task.create | create and start | removed project form | /app/tasks/new | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
-| task.create | shared task creation capability | removed project form | /app/tasks/new | Implemented at the React replacement; approved legacy project form removed, shared command capability preserved. |
+| task.create | draft | Task composer | /app/tasks/new | Available at the listed destination; shared command capability remains. |
+| task.create | create and start | Task composer | /app/tasks/new | Available at the listed destination; shared command capability remains. |
+| task.create | shared task creation capability | Task composer | /app/tasks/new | Available at the listed destination; shared command capability remains. |
 | task.configure | local title | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
 | task.configure | outcome | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |
 | task.configure | readiness | /task/:id | /task/:id | Retained at this exact destination; no replacement in Settings or recovery. |

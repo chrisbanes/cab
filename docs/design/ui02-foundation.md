@@ -4,25 +4,25 @@ The React operator is served at `/app`; `/` and the retained operator forms rema
 
 ## Retained-control inventory
 
-Each semicolon-separated control has an individual disposition. The approved project parity record retires the project route and eight exclusive form handlers; project controls use the listed React destinations. Shared form capabilities remain. Coordination task and assignment controls use their task-view destinations. JSON readiness says whether a curated JSON adapter exists. [UI06 configuration and recovery](ui06-configuration.md) records the individual control dispositions.
+Each semicolon-separated control has an individual disposition. Project controls use the listed React destinations and JSON commands; the legacy project route and its exclusive form handlers are absent. Shared form capabilities remain. Coordination task and assignment controls use their task-view destinations. JSON readiness says whether a curated JSON adapter exists. [UI06 configuration and recovery](ui06-configuration.md) records the individual control dispositions.
 
 | Existing destination | Command/action | Controls/read destinations | React surface or retained destination | JSON readiness |
 | --- | --- | --- | --- | --- |
 | / | project.create | create project; name; lead | Settings | no |
 | / | profile.create | create profile; name; instructions; capabilities | Settings | no |
-| removed project form | project.configure | name; lead; instructions; pause | `/app/projects/:id/settings` | yes |
+| Project Settings | project.configure | name; lead; instructions; pause | `/app/projects/:id/settings` | yes |
 | /profile/:id | profile.configure | name; instructions; capabilities; revoke | Settings | no |
-| removed project form | routing.configure | enable; guidance; candidates; set/clear credential reference | `/app/projects/:id/settings?tab=routing` | yes |
-| removed project form | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | `/app/projects/:id/settings?tab=github` | yes |
-| removed project form | repositories.configure | repositories | `/app/projects/:id/settings?tab=repositories` | yes |
-| removed project form | github.preview | preview selections; activation via preview receipt | `/app/projects/:id/settings?tab=sync` | yes |
-| removed project form | github.refresh | refresh observation | `/app/projects/:id/settings?tab=sync` | guarded observation POST |
-| removed project form | github.place | conflicting placement | `/app/projects/:id/settings?tab=sync` | yes |
-| removed project form | delivery.configure | completion mode; branch prefix; scoped grants; required checks; set/clear credential reference | `/app/projects/:id/settings?tab=delivery` | yes |
+| Project Settings | routing.configure | enable; guidance; candidates; set/clear credential reference | `/app/projects/:id/settings?tab=routing` | yes |
+| Project Settings | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | `/app/projects/:id/settings?tab=github` | yes |
+| Project Settings | repositories.configure | repositories | `/app/projects/:id/settings?tab=repositories` | yes |
+| Project Settings | github.preview | preview selections; activation via preview receipt | `/app/projects/:id/settings?tab=sync` | yes |
+| Project Settings | github.refresh | refresh observation | `/app/projects/:id/settings?tab=sync` | guarded observation POST |
+| Project Settings | github.place | conflicting placement | `/app/projects/:id/settings?tab=sync` | yes |
+| Project Settings | delivery.configure | completion mode; branch prefix; scoped grants; required checks; set/clear credential reference | `/app/projects/:id/settings?tab=delivery` | yes |
 | /app/tasks/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Task Changes tab | yes |
 | /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
 | /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
-| removed project form | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
+| Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
 | /task/:id | task.configure | local title; outcome; readiness | Retained task page | yes |
 | /task/:id | source.review | source identity; body; status; Project fields; native blockers; review; hold resolution | Retained task page | no |
 | /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
@@ -42,9 +42,9 @@ Each semicolon-separated control has an individual disposition. The approved pro
 | all views | navigation | delivered overview/project List/Board/composer; retained task/profile/assignment/Runtime destinations | App shell and retained destinations | curated reads |
 | /assignment/:id | read | captured instructions/profile revision and result destination | Retained assignment page | curated subset |
 
-The delivery rows cover the retained policy editor and the additive structured Delivery tab, with curated JSON reads, `delivery.configure` and minimal receipts. All 17 action kinds, optional scopes, required-check app bindings and absent versus empty prefixes retain their existing meanings. Unavailable saved rows and prefix are preserved without revealing them. The task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
+The delivery rows describe the structured Delivery tab, with curated JSON reads, `delivery.configure` and minimal receipts. All 17 action kinds, optional scopes, required-check app bindings and absent versus empty prefixes retain their existing meanings. Unavailable saved rows and prefix are preserved without revealing them. The task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
 
-Jira source definitions and readiness use the existing source Settings section, selected by the saved tracker or `?tab=github&tracker=jira`; the retained project renderer has no Jira form. Source and repository rows withheld by exclusions remain keep/remove placeholders bound to project, section, version and ordinal. An unsafe optional status-mapping view is omitted as a whole, leaving the persisted mapping unchanged. Delivery reductions still warn conservatively when mapping details are unavailable. A missing view is not an editable empty mapping. The approved [project parity record](../evidence/1418-project-settings-parity-2026-11-02.md) supports removal of the legacy project route, four Settings links and eight exclusive form handlers. Project Settings and the task composer provide the current controls; shared task creation and other retained form capabilities remain.
+Jira source definitions and readiness use the existing source Settings section, selected by the saved tracker or `?tab=github&tracker=jira`. Source and repository rows withheld by exclusions remain keep/remove placeholders bound to project, section, version and ordinal. An unsafe optional status-mapping view is omitted as a whole, leaving the persisted mapping unchanged. Delivery reductions still warn conservatively when mapping details are unavailable. A missing view is not an editable empty mapping. The legacy project route, four links and eight exclusive form handlers are absent. Project Settings and the task composer provide the current controls; shared task creation and other retained form capabilities remain.
 
 Advanced authenticated recovery routes have no rendered form or React control. The host operator supplies the reviewed evidence and exact command material under the existing Origin, session and CSRF checks; model tools have no adoption authority. The operator CLI reaches the same service methods through receipted `recovery.*` commands on `/api/operator/commands`; a command key recorded through either entry point replays through the other, and these session routes stay closed to bearer credentials.
 
