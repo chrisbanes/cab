@@ -1,6 +1,10 @@
 import { isAbsolute } from "node:path";
 import { glabTokenVariables } from "../../../src/standalone/glab-credential.js";
-import { GuardDenied } from "../gitlab-qualification/gitlab-guard.js";
+import {
+  GuardMechanics,
+  rateHeaders,
+  type RateLimitEvidence,
+} from "../qualification-guard-mechanics.js";
 
 /** The only Jira site and project a qualification run may reach. */
 export const qualificationSite = {
@@ -60,42 +64,38 @@ const routeCaps: Record<string, number> = {
 export class JiraGuard {
   /** Issues this run created (or a cleanup recognised as a run's), by id. */
   readonly issues = new Map<string, string>();
-  readonly log: Array<{ route: string; status: number | null }> = [];
+  readonly log: GuardMechanics["log"];
   /** Every request the guard refused; a clean run has none. */
-  readonly denied: string[] = [];
+  readonly denied: string[];
   /** Requests sent, by method and route shape. */
-  readonly counts: Record<string, number> = {};
+  readonly counts: Record<string, number>;
   /** Each 429 Jira answered: where it fell in the run, every rate-limit header value, and its text. */
-  readonly rateLimited: Array<{
-    route: string;
-    request: number;
-    atSeconds: number;
-    lastMinute: number;
-    headers: Record<string, string>;
-    retryAfter: string | null;
-    body: string;
-  }> = [];
+  readonly rateLimited: RateLimitEvidence[];
   /** The latest rate-limit header values seen on any response. */
   lastRateHeaders: Record<string, string> = {};
   /** Set by a cleanup: only then may an issue be deleted or `cab-ready` removed. */
   cleaning = false;
   private run: string | null = null;
   private readonly lookups = new Set<string>();
-  private readonly sentAt: number[] = [];
+  private readonly mechanics: GuardMechanics;
   private readonly sent: Record<string, number> = {};
-  private nextSlot = 0;
-  private writes = 0;
   private route: string | null = null;
 
   constructor(
-    private readonly limit = maxJiraWrites,
-    private readonly paceMs = 0,
+    limit = maxJiraWrites,
+    paceMs = 0,
     /** Writes kept for cleanup: a journey write that would leave fewer is refused. */
-    private readonly cleanupReserve = jiraCleanupWrites,
-  ) {}
+    cleanupReserve = jiraCleanupWrites,
+  ) {
+    this.mechanics = new GuardMechanics(limit, paceMs, cleanupReserve);
+    this.log = this.mechanics.log;
+    this.denied = this.mechanics.denied;
+    this.counts = this.mechanics.counts;
+    this.rateLimited = this.mechanics.rateLimited;
+  }
 
   get writeCount() {
-    return this.writes;
+    return this.mechanics.writeCount;
   }
   /** Fixes the run whose label every search and created issue must carry. */
   bindRun(run: string) {
@@ -113,8 +113,7 @@ export class JiraGuard {
   }
 
   private deny(reason: string): never {
-    this.denied.push(reason);
-    throw new GuardDenied(reason);
+    return this.mechanics.deny(reason);
   }
   private known(idOrKey: string) {
     return (
@@ -130,14 +129,12 @@ export class JiraGuard {
   private spend(route: string) {
     const cleanup = route === "DELETE issue" || route === "PUT remove-ready";
     if (cleanup && !this.cleaning) this.deny("cleanup-only");
-    if (this.writes >= this.limit - (cleanup ? 0 : this.cleanupReserve))
-      this.deny("write-cap");
+    this.mechanics.checkBudget(cleanup);
     if ((this.sent[route] ?? 0) >= (routeCaps[route] ?? 0))
       this.deny("route-cap");
     this.sent[route] = (this.sent[route] ?? 0) + 1;
-    this.writes++;
+    this.mechanics.recordSpend(route);
     this.route = route;
-    this.log.push({ route, status: null });
   }
 
   /** A fetch that reaches Jira only as far as the run's scope allows. */
@@ -166,23 +163,20 @@ export class JiraGuard {
       this.route = null;
       this.check(method, path, url.search, body);
       const route = this.route;
-      this.count(method, path);
-      this.sentAt.push(Date.now());
-      // Reserve the next slot before waiting, so concurrent requests are spaced too.
-      const slot = Math.max(Date.now(), this.nextSlot);
-      this.nextSlot = slot + this.paceMs;
-      if (slot > Date.now())
-        await new Promise((r) => setTimeout(r, slot - Date.now()));
+      await this.mechanics.admit(this.shape(method, path));
       const response = await next(input, init);
-      const headers = this.headersOf(response);
+      const headers = rateHeaders(response, rateHeader);
       if (Object.keys(headers).length) this.lastRateHeaders = headers;
       if (response.status === 429) {
-        await this.noteRateLimit(method, path, response, headers);
+        await this.mechanics.noteRateLimit(
+          this.shape(method, path),
+          response,
+          headers,
+        );
         // A request answered 429 was not processed: it may be sent again, though the write stays counted.
         if (route) this.sent[route] = (this.sent[route] ?? 1) - 1;
       }
-      const last = this.log.at(-1);
-      if (route && last && last.status === null) last.status = response.status;
+      if (route) this.mechanics.settle(response.status);
       if (route === "POST issue" && response.ok) await this.record(response);
       return response;
     }) as typeof fetch;
@@ -191,38 +185,6 @@ export class JiraGuard {
   private shape(method: string, path: string) {
     return `${method} ${path.replace(/^\/issue\/[^/]+/, "/issue/:id")}`;
   }
-  private count(method: string, path: string) {
-    const key = this.shape(method, path);
-    this.counts[key] = (this.counts[key] ?? 0) + 1;
-  }
-  private headersOf(response: Response) {
-    return Object.fromEntries(
-      [...response.headers.entries()].filter(([name]) => rateHeader.test(name)),
-    );
-  }
-  private async noteRateLimit(
-    method: string,
-    path: string,
-    response: Response,
-    headers: Record<string, string>,
-  ) {
-    const now = Date.now();
-    this.rateLimited.push({
-      route: this.shape(method, path),
-      request: this.sentAt.length,
-      atSeconds: Math.round((now - (this.sentAt[0] ?? now)) / 1000),
-      lastMinute: this.sentAt.filter((t) => now - t <= 60_000).length,
-      headers,
-      retryAfter: response.headers.get("retry-after"),
-      body: (
-        await response
-          .clone()
-          .text()
-          .catch(() => "")
-      ).slice(0, 4096),
-    });
-  }
-
   private check(
     method: string,
     path: string,
