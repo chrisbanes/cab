@@ -377,6 +377,25 @@ for (const [name, viewport] of [
     assert.equal(f.service.domain().runtimeEnabled("claude"), true);
   });
 
+/** Answers workspace reads from the service, but only after `release()`; `entered` resolves at the first one. */
+const holdWorkspaceReads = async (page: Page) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  await page.route("**/api/operator/workspace", async (route) => {
+    const response = await route.fetch();
+    enter();
+    await gate;
+    await route.fulfill({ response });
+  });
+  return { entered, release };
+};
+
 test("turning off a runtime that tasks use confirms first; Keep leaves it on and Turn off saves", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
@@ -441,16 +460,37 @@ test("turning off a runtime that tasks use confirms first; Keep leaves it on and
     )
     .waitFor();
   assert.equal(f.service.domain().runtimeEnabled("claude"), true);
+  // The receipt precedes the workspace read that updates the switch: hold that read so the
+  // order is deterministic instead of depending on machine load.
+  const workspaceRead = await holdWorkspaceReads(page);
+  journey.cleanup(async () => workspaceRead.release());
   await dialog.getByRole("button", { name: "Turn off Claude" }).click();
   await runtimesPanel(page)
     .getByText("Claude turned off.", { exact: true })
     .waitFor();
+  await workspaceRead.entered;
   assert.equal(f.service.domain().runtimeEnabled("claude"), false);
+  assert.equal(
+    await control.isChecked(),
+    true,
+    "the switch follows the refreshed status, not the receipt",
+  );
+  workspaceRead.release();
+  const row = runtimeRow(page, "Claude");
+  await row.getByText("Disabled in Settings", { exact: true }).waitFor();
+  assert.equal(await control.isChecked(), false);
   assert.deepEqual(
     posts.map((p) => JSON.parse(p).confirmedBoundTasks),
     [1, 2],
   );
-  assert.equal(await control.isChecked(), false);
+
+  await control.click();
+  await runtimesPanel(page)
+    .getByText("Claude turned on.", { exact: true })
+    .waitFor();
+  await row.getByText("Available", { exact: true }).waitFor();
+  assert.equal(await control.isChecked(), true);
+  assert.equal(f.service.domain().runtimeEnabled("claude"), true);
 });
 
 /** Frame callbacks run before the page's own render, the order a loaded machine sometimes produces. */
