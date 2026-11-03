@@ -667,11 +667,11 @@ test("shepherd levels share the advanced draft and confirm upward changes with k
   await dialog(page).waitFor();
   await page.getByRole("button", { name: "Cancel", exact: true }).focus();
   await page.keyboard.press("Enter");
+  await dialog(page).waitFor({ state: "hidden" });
   assert.equal(await levelControl(page).inputValue(), "open-prs");
-  assert.equal(
-    await levelControl(page).evaluate((el) => el === document.activeElement),
-    true,
-  );
+  // onCloseAutoFocus runs in a timer after the dialog unmounts.
+  const control = await levelControl(page).elementHandle();
+  await page.waitForFunction((el) => el === document.activeElement, control);
   await levelControl(page).selectOption("merge-when-ready");
   await captureBrowserEvidence(page, "shepherd-confirmation", {
     fullPage: false,
