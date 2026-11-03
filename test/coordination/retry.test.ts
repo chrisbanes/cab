@@ -13,6 +13,13 @@ import type {
 import { StandaloneService } from "../../src/standalone/service.js";
 import { startedOf } from "../fixtures/service-internals.js";
 
+/**
+ * How long a test watches for a turn, confirmation or write that must NOT happen when no
+ * event marks the work as settled. Generous so a loaded runner cannot let a regression
+ * slip past a window that closed before it ran.
+ */
+const QUIET_WINDOW_MS = 200;
+
 interface RetryRuntime extends Runtime {
   failureEvidence(
     threadId: string,
@@ -402,7 +409,7 @@ test("the shared retry budget permits no more than two later turns", async () =>
       await waitUntil(() => f.service.turnRequests().length === 3),
       true,
     );
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 3);
     assert.equal(
       f.service
@@ -446,7 +453,7 @@ test("reported Codex retry usage consumes the same persisted allowance", async (
       "one provider retry plus one cab retry should exhaust the shared allowance",
     );
     await first;
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 2);
     assert.equal(f.service.turnRequests().length, 2);
     assert.equal(
@@ -511,7 +518,9 @@ test("retry count and queued generation survive restart without duplicating work
         "the persisted retry generation should resume after restart",
       );
       await secondRuntime.failureEntered.promise;
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, QUIET_WINDOW_MS),
+      );
       assert.equal(
         secondRuntime.turns,
         1,
