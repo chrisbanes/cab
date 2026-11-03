@@ -232,3 +232,57 @@ export const stubReadiness = (
       body: readinessBody(failing),
     }),
   );
+
+/** Every command the page sends from now on. */
+export const sentCommands = (page: Page) => {
+  const sent: { type: string; [field: string]: unknown }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      sent.push(r.postDataJSON());
+  });
+  return sent;
+};
+
+export const resumeLabel = "Resume and create first task";
+/** Add the verified acme/atlas checkout as the project's repository. */
+export async function addRepository(page: Page) {
+  await chooseRepository(page, "acme/atlas");
+  const path = page.getByLabel("Local repository path");
+  await path.fill("~/src/atlas");
+  await path.blur();
+  await page
+    .getByText(
+      "Verified on this Mac: git checkout · origin acme/atlas · main available.",
+    )
+    .waitFor();
+}
+/** Create the project as entered (repository-free unless the test added one) and wait for its ready check. */
+export async function createProject(
+  page: Page,
+  sent: ReturnType<typeof sentCommands>,
+  lead = "Mira",
+) {
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page
+    .getByLabel("Lead profile", { exact: true })
+    .selectOption({ label: lead });
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  const ready = page.getByRole("region", { name: "Ready check" });
+  await ready.waitFor();
+  const projectId = String(
+    sent.find((c) => c.type === "project.create")?.projectId,
+  );
+  return {
+    ready,
+    projectId,
+    resume: ready.getByRole("button", { name: resumeLabel, exact: true }),
+    composer: (id = projectId) =>
+      page.waitForURL(
+        (url) =>
+          url.pathname === "/app/tasks/new" &&
+          url.searchParams.get("project") === id,
+      ),
+  };
+}
