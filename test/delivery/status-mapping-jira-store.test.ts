@@ -114,28 +114,6 @@ function setup(rule: Rule = readyRule) {
     );
   read(issue(TODO));
   const taskId = String(sources.issue("20001")?.taskId);
-  const grant = (
-    statusIds: string[],
-    mode: "allow" | "approval" = "allow",
-  ) => ({
-    action: "issue.status" as const,
-    repositoryId: "10001",
-    mode,
-    statusIds,
-  });
-  const configureGrants = (grants: ReturnType<typeof grant>[]) =>
-    domain.execute({
-      type: "delivery.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      expectedVersion: delivery.configuration(projectId).version,
-      mode: "reviewable-pr",
-      credentialRef: null,
-      grants,
-      requiredChecks: [],
-    });
-  configureGrants([grant([TODO, PROGRESS, REVIEW, DONE])]);
   const status = new StatusMappingStore(db);
   const save = (input: StatusMapping | null, expectedVersion?: number) =>
     domain.execute({
@@ -159,8 +137,6 @@ function setup(rule: Rule = readyRule) {
     projectId,
     taskId,
     read,
-    grant,
-    configureGrants,
     save,
     refusal,
     caller: (
@@ -176,7 +152,11 @@ function setup(rule: Rule = readyRule) {
     write: (
       statusId: string,
       expected: string | null = TODO,
-      target: Partial<{ repositoryId: string; number: number }> = {},
+      target: Partial<{
+        repositoryId: string;
+        number: number;
+        nodeId: string;
+      }> = {},
     ) => ({
       operationId: randomUUID(),
       action: {
@@ -194,26 +174,9 @@ function setup(rule: Rule = readyRule) {
   };
 }
 
-test("a Jira mapping is refused for a status without an allow grant, naming the event", () => {
+test("a Jira mapping saves with no issue status grant", () => {
   const f = setup();
   try {
-    f.configureGrants([f.grant([TODO, PROGRESS, DONE])]);
-    assert.throws(
-      () => f.save(mapping()),
-      f.refusal("ungranted", "handedBack"),
-    );
-    f.configureGrants([
-      f.grant([TODO, PROGRESS, DONE]),
-      f.grant([REVIEW], "approval"),
-    ]);
-    assert.throws(
-      () => f.save(mapping()),
-      f.refusal("approval-only", "handedBack"),
-    );
-    // Nothing was saved by the refusals.
-    assert.equal(f.status.current(f.projectId).version, 1);
-    // A grant for another statuses list is not a grant for this status.
-    f.configureGrants([f.grant([TODO]), f.grant([PROGRESS, REVIEW, DONE])]);
     assert.equal(f.save(mapping()).version, 2);
   } finally {
     f.db.close();
@@ -240,7 +203,7 @@ test("an in-flight Jira status must keep the task Ready; terminal events may rem
   }
 });
 
-test("a not-in status rule refuses the excluded status, and a rule with no status condition accepts any granted one", () => {
+test("a not-in status rule refuses the excluded status, and a rule with no status condition accepts any one", () => {
   const notIn = setup({
     mode: "all",
     conditions: [{ kind: "status", operator: "not-in", statusIds: [DONE] }],
@@ -392,37 +355,6 @@ test("a stored GitHub mapping without a tracker still parses as the GitHub varia
   }
 });
 
-test("grants: issue.status needs statusIds and nothing else takes them", () => {
-  const f = setup();
-  try {
-    assert.throws(
-      () =>
-        f.configureGrants([
-          { ...f.grant([TODO]), statusIds: undefined } as never,
-        ]),
-      /statusIds/,
-    );
-    assert.throws(
-      () => f.configureGrants([{ ...f.grant([TODO]), statusIds: [] }]),
-      /statusIds/,
-    );
-    assert.throws(
-      () =>
-        f.configureGrants([
-          {
-            action: "issue.comment",
-            repositoryId: "10001",
-            mode: "allow",
-            statusIds: [TODO],
-          } as never,
-        ]),
-      /statusIds/,
-    );
-  } finally {
-    f.db.close();
-  }
-});
-
 test("only the service may write an issue status, and only the mapped one for a Ready task", () => {
   const f = setup();
   try {
@@ -495,20 +427,32 @@ test("only the service may write an issue status, and only the mapped one for a 
   }
 });
 
-test("an issue in another Jira project is denied at write time", () => {
+test("with no grant, an issue in another Jira project that is a current member is authorized and one that is not is refused", () => {
   const f = setup();
   try {
     f.save(mapping());
-    f.configureGrants([
-      { ...f.grant([TODO, PROGRESS, REVIEW, DONE]), repositoryId: "10002" },
-    ]);
-    const record = f.delivery.prepareAction(
-      f.write(PROGRESS),
-      f.caller("turnStarted"),
-      false,
-    );
-    assert.equal(record.state, "denied");
-    assert.equal(record.observation?.reason, "delivery-authority-denied");
+    const other = issue(TODO, {
+      nodeId: "20002",
+      repositoryId: "10002",
+      repositoryName: "OTH",
+      number: 2,
+    });
+    f.read(issue(TODO), other);
+    const taskId = String(f.sources.issue("20002")?.taskId);
+    const write = () =>
+      f.delivery.prepareAction(
+        f.write(PROGRESS, TODO, {
+          repositoryId: "10002",
+          number: 2,
+          nodeId: "20002",
+        }),
+        { ...f.caller("turnStarted"), taskId } as DeliveryCaller,
+        false,
+      );
+    assert.equal(write().state, "prepared");
+    // The issue leaves the source: no current membership.
+    f.read(issue(TODO));
+    assert.equal(write().state, "denied");
   } finally {
     f.db.close();
   }

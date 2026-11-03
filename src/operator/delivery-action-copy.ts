@@ -36,11 +36,6 @@ export const deliveryActionCopy: Record<
     description:
       "Set one GitHub Project field to one of the chosen options on issues of the repository.",
   },
-  "issue.status": {
-    label: "Move Jira issues to a status",
-    description:
-      "Move Jira issues of the container to one of the listed statuses.",
-  },
   "pr.create": {
     label: "Open pull requests",
     description: "Open pull requests in the repository.",
@@ -92,11 +87,16 @@ export const deliveryActionKinds = Object.keys(
   deliveryActionCopy,
 ) as ActionKind[];
 
+/** Kinds the service records but no grant covers, so they are not in the grant editor's list. */
+const recordedOnlyLabels: Record<string, string> = {
+  "issue.status": "Move Jira issues to a status",
+};
+
 /** The label of a known kind; a recorded action can carry any text, which is shown as it is. */
 export const deliveryActionLabel = (kind: string) =>
   Object.hasOwn(deliveryActionCopy, kind)
     ? deliveryActionCopy[kind as ActionKind].label
-    : kind;
+    : (recordedOnlyLabels[kind] ?? kind);
 
 /** What a grant's IDs are called, where a read supplied the name; `options` follows `optionNodeIds`. */
 export type GrantNames = {

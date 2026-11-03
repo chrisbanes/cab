@@ -270,6 +270,28 @@ test("rejects schemas that normalize result identities", () => {
   );
 });
 
+test("a delivery receipt recorded with a retired issue.status grant still parses", () => {
+  const recorded = {
+    mode: "reviewable-pr",
+    grants: [
+      { action: "issue.comment", repositoryId: "J1", mode: "allow" },
+      {
+        action: "issue.status",
+        repositoryId: "J1",
+        mode: "allow",
+        statusIds: ["1"],
+      },
+    ],
+    requiredChecks: [],
+    version: 3,
+    credentialConfigured: false,
+  };
+  assert.deepEqual(parseDomainCommandOutcome("delivery.configure", recorded), {
+    type: "delivery.configure",
+    result: recorded,
+  });
+});
+
 test("accepts unchanged material with whitespace, reordered keys, and null prototypes", () => {
   const reorderedNullPrototypeProject = Object.assign(Object.create(null), {
     instructions: "  preserve these instructions\n",

@@ -291,12 +291,6 @@ async function fixture(
         repositoryId: target.repositoryId,
         mode: "allow" as const,
       })),
-      {
-        action: "issue.status" as const,
-        repositoryId: target.repositoryId,
-        mode: "allow" as const,
-        statusIds: [TODO, PROGRESS, REVIEW, DONE],
-      },
     ],
     requiredChecks: [],
   });
@@ -520,6 +514,24 @@ test("each event is written once per transition as one transition POST and confi
     f.writes().map((w) => w.request.action.kind),
     Array(5).fill("issue.status"),
   );
+});
+
+test("a Jira mapping saves and writes with an empty delivery policy", async (t) => {
+  const f = await fixture(t);
+  f.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: f.service.delivery().configuration(f.projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [],
+    requiredChecks: [],
+  });
+  await f.run();
+  assert.deepEqual(f.posted(), [PROGRESS]);
+  assert.equal(f.writes()[0]?.state, "confirmed-success");
 });
 
 test("a status that moved in Jira since cab last saw it skips the write and shows on the task; a refresh while Ready re-bases the next write", async (t) => {

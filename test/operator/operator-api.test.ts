@@ -4315,7 +4315,7 @@ test("runtime.configure refuses a missing executable, asks to confirm bound work
   ]);
 });
 
-test("the status mapping is read with its Project selections and granted options, saved only against a Status field GitHub lists, and conflicts on a stale version", async (t) => {
+test("the status mapping is read with its Project selections, saved with no grant against a Status field GitHub lists, replays its receipt, and conflicts on a stale version", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const projectId = randomUUID();
@@ -4364,16 +4364,18 @@ test("the status mapping is read with its Project selections and granted options
       expectedVersion: f.service.delivery().configuration(projectId).version,
       mode: "reviewable-pr",
       credentialRef: null,
-      grants: [
-        {
-          action: "project.field",
-          repositoryId: "R_1",
-          mode: "allow",
-          projectNodeId: "PVT_1",
-          fieldNodeId: "F_status",
-          optionNodeIds: options,
-        },
-      ],
+      grants: options.length
+        ? [
+            {
+              action: "project.field",
+              repositoryId: "R_1",
+              mode: "allow",
+              projectNodeId: "PVT_1",
+              fieldNodeId: "F_status",
+              optionNodeIds: options,
+            },
+          ]
+        : [],
       requiredChecks: [],
     });
   grant(["O_todo", "O_done"]);
@@ -4413,14 +4415,12 @@ test("the status mapping is read with its Project selections and granted options
     availability: "available",
     mapping: null,
     selections: [{ id: "S-1", projectNodeId: "PVT_1", active: false }],
-    granted: [
-      {
-        projectNodeId: "PVT_1",
-        fieldNodeId: "F_status",
-        optionNodeIds: ["O_todo", "O_done"],
-      },
-    ],
   });
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.delivery!
+      .statusMappingAuthority,
+    null,
+  );
   const mapping = (
     events: Record<string, string | null>,
     field = "F_status",
@@ -4492,6 +4492,33 @@ test("the status mapping is read with its Project selections and granted options
   });
   assert.equal((await read())?.version, 2);
   assert.equal((await read())?.mapping?.events.held, "O_done");
+  // The delivery reads summarize what the saved mapping lets cab write; a task read shows the same.
+  const authority = {
+    tracker: "github",
+    selectionId: "S-1",
+    projectNodeId: "PVT_1",
+    statuses: [{ id: "O_done", name: null }],
+  };
+  assert.deepEqual(
+    (await api.readProjectConfiguration(projectId)).data.delivery!
+      .statusMappingAuthority,
+    authority,
+  );
+  const taskId = randomUUID();
+  domain.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "T",
+    outcome: "O",
+    ready: true,
+  });
+  assert.deepEqual(
+    (await api.readTask(taskId)).data.delivery?.statusMappingAuthority,
+    authority,
+  );
   // A save prepared against the old version conflicts and changes nothing.
   assert.equal((await refused(save(null, 1))).status, 409);
   assert.equal((await read())?.version, 2);
@@ -4506,13 +4533,15 @@ test("the status mapping is read with its Project selections and granted options
   };
   const first = await api.execute(command);
   unreadable = true;
+  // Even with every grant removed, the replay returns its recorded receipt.
+  grant([]);
   assert.deepEqual(await api.execute(command), first);
   unreadable = false;
   assert.equal((await save(null, 3)).kind, "configuration");
   assert.equal((await read())?.mapping, null);
 });
 
-test("a Jira project's status mapping is read with its granted statuses, saved without reading GitHub, and refused in Jira words", async (t) => {
+test("a Jira project's status mapping is read with its observed status names, saved with no grant or GitHub read, and refused in Jira words", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const projectId = randomUUID();
@@ -4550,26 +4579,6 @@ test("a Jira project's status mapping is read with its granted statuses, saved w
       conditions: [{ kind: "status", operator: "in", statusIds: ["10003"] }],
     },
   });
-  const grants = (statusIds: string[]) =>
-    domain.execute({
-      type: "delivery.configure",
-      key: randomUUID(),
-      actor: "operator",
-      projectId,
-      expectedVersion: f.service.delivery().configuration(projectId).version,
-      mode: "reviewable-pr",
-      credentialRef: null,
-      grants: [
-        {
-          action: "issue.status",
-          repositoryId: "10001",
-          mode: "allow",
-          statusIds,
-        },
-      ],
-      requiredChecks: [],
-    });
-  grants(["10003", "10005"]);
   const api = new OperatorApi(f.service, [f.directory]);
   const read = async () =>
     (await api.readProjectConfiguration(projectId)).data.statusMapping;
@@ -4578,7 +4587,7 @@ test("a Jira project's status mapping is read with its granted statuses, saved w
     version: 1,
     availability: "available",
     mapping: null,
-    granted: ["10003", "10005"],
+    statusNames: {},
   });
   const mapping = (events: Record<string, string | null>) => ({
     tracker: "jira" as const,
@@ -4613,12 +4622,6 @@ test("a Jira project's status mapping is read with its granted statuses, saved w
     unaccepted.publicMessage ?? "",
     /First turn started → 10005: the readiness rule does not accept this status/,
   );
-  const ungranted = await refused(mapping({ held: "10004" }));
-  assert.deepEqual(ungranted.fieldPaths, ["mapping.events.held"]);
-  assert.match(
-    ungranted.publicMessage ?? "",
-    /no issue status grant covers this status/,
-  );
   assert.equal((await read())?.version, 1);
   const receipt = await api.execute({
     type: "status-mapping.configure",
@@ -4633,67 +4636,64 @@ test("a Jira project's status mapping is read with its granted statuses, saved w
     version: 2,
     availability: "available",
     mapping: mapping({ held: "10003", done: "10005" }),
-    granted: ["10003", "10005"],
+    statusNames: {},
   });
-});
-
-test("the Jira view lists each granted status once, however many grants repeat it", async (t) => {
-  const f = await createOperatorFixture();
-  t.after(() => f.close());
-  const projectId = randomUUID();
-  const domain = f.service.domain();
-  domain.execute({
-    type: "project.create",
-    key: randomUUID(),
-    actor: "operator",
-    projectId,
-    name: "Mapped",
-    leadProfileId: null,
-  });
-  domain.execute({
-    type: "issue-tracker-credential.configure",
-    key: randomUUID(),
-    actor: "operator",
-    issueTracker: "jira",
-    instance: "example.atlassian.net",
-    credential: {
-      siteRef: "env:FIXTURE_JIRA_SITE",
-      emailRef: "env:FIXTURE_JIRA_EMAIL",
-      tokenRef: "env:FIXTURE_JIRA_TOKEN",
+  assert.deepEqual(
+    (await api.readProjectConfiguration(projectId)).data.delivery!
+      .statusMappingAuthority,
+    {
+      tracker: "jira",
+      statuses: [
+        { id: "10003", name: null },
+        { id: "10005", name: null },
+      ],
     },
-  });
-  domain.execute({
-    type: "jira.configure",
-    key: randomUUID(),
-    actor: "operator",
+  );
+  // Statuses the project's issues were last seen in are named.
+  const store = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: "example.atlassian.net" });
+  store.reconcileSelection(
     projectId,
-    expectedVersion: 1,
-    instance: "example.atlassian.net",
-    selections: [{ id: "S-1", kind: "jql", jql: "project = KAN" }],
-    readiness: null,
-  });
-  const ids = Array.from({ length: 256 }, (_, i) => String(i + 1));
-  domain.execute({
-    type: "delivery.configure",
-    key: randomUUID(),
-    actor: "operator",
-    projectId,
-    expectedVersion: f.service.delivery().configuration(projectId).version,
-    mode: "reviewable-pr",
-    credentialRef: null,
-    grants: ["10001", "10002"].map((repositoryId) => ({
-      action: "issue.status" as const,
-      repositoryId,
-      mode: "allow" as const,
-      statusIds: ids,
-    })),
-    requiredChecks: [],
-  });
-  const view = (
-    await new OperatorApi(f.service, [f.directory]).readProjectConfiguration(
+    "S-1",
+    {
+      complete: true,
+      issues: [
+        {
+          providerInstance: "example.atlassian.net",
+          nodeId: "20001",
+          repositoryId: "10001",
+          repositoryName: "KAN",
+          number: 1,
+          title: "Imported",
+          body: "",
+          state: "open",
+          labels: [],
+          status: { id: "10005", name: "Done", categoryKey: "done" },
+          selectFields: [],
+          projectFields: [],
+        },
+      ],
+      reason: null,
+    },
+    {
       projectId,
-    )
-  ).data.statusMapping;
-  assert.ok(view && "tracker" in view);
-  assert.deepEqual(view.granted, ids);
+      configVersion: domain.jiraConfiguration(projectId)?.version ?? 0,
+      credentialRef: null,
+    },
+  );
+  const named = await read();
+  assert.ok(named && "tracker" in named);
+  assert.deepEqual(named.statusNames, { "10005": "Done" });
+  assert.deepEqual(
+    (await api.readProjectConfiguration(projectId)).data.delivery!
+      .statusMappingAuthority,
+    {
+      tracker: "jira",
+      statuses: [
+        { id: "10003", name: null },
+        { id: "10005", name: "Done" },
+      ],
+    },
+  );
 });

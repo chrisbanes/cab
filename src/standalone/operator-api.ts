@@ -47,6 +47,8 @@ import { StatusMappingRefusal } from "../core/status-mapping.js";
 import {
   isJiraMapping,
   type GitHubStatusMapping,
+  type StatusMapping,
+  statusMappingEvents,
 } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
 import {
@@ -5965,6 +5967,10 @@ export class OperatorApi {
       blockers: v.blockers.slice(0, 128),
       omittedBlockerCount: Math.max(0, v.blockers.length - 128),
       omittedActionCount: Math.max(0, v.actions.length - 128),
+      ...this.authorityField(
+        String(this.requireTask(taskId).projectId),
+        excluded,
+      ),
       branches: v.branches.slice(0, 20).map((r) => ({
         repositoryName: deliveryRepositoryLabel(source, r.repositoryId),
         branch: this.safe(r.branch, excluded),
@@ -6631,6 +6637,7 @@ export class OperatorApi {
             excluded,
           )),
           credential: await deliveryCredential,
+          ...this.authorityField(projectId, excluded),
         },
         statusMapping: this.statusMappingView(
           projectId,
@@ -6769,7 +6776,7 @@ export class OperatorApi {
         );
     return new Map(field.options.map((o) => [o.optionNodeId, o.name]));
   }
-  /** The saved status mapping with what its editor needs: Project selections and granted options (GitHub), or granted statuses (Jira). */
+  /** The saved status mapping with what its editor needs: Project selections (GitHub), or the names last observed for its statuses (Jira). */
   private statusMappingView(
     projectId: string,
     selections: ReturnType<DomainStore["githubConfiguration"]>["selections"],
@@ -6778,11 +6785,7 @@ export class OperatorApi {
     excluded: readonly string[] | undefined,
   ) {
     const d = this.domain(),
-      view = d.statusMapping(projectId),
-      grants = this.service
-        .delivery()
-        .configuration(projectId)
-        .grants.filter((g) => g.mode === "allow");
+      view = d.statusMapping(projectId);
     // A mapping left by the other tracker is not shown: this editor starts afresh and replaces it.
     const mapping =
       view.mapping && isJiraMapping(view.mapping) === jira
@@ -6795,13 +6798,9 @@ export class OperatorApi {
           // A Jira project always has the source the mapping binds to.
           availability: "available" as const,
           mapping,
-          granted: [
-            ...new Set(
-              grants.flatMap((g) =>
-                g.action === "issue.status" ? (g.statusIds ?? []) : [],
-              ),
-            ),
-          ],
+          statusNames: mapping
+            ? this.jiraStatusNames(projectId, mapping, excluded)
+            : {},
         }
       : {
           version: view.version,
@@ -6824,33 +6823,12 @@ export class OperatorApi {
                 ]
               : [],
           ),
-          granted: grants.flatMap((g) =>
-            g.action === "project.field" && g.projectNodeId && g.fieldNodeId
-              ? [
-                  {
-                    projectNodeId: g.projectNodeId,
-                    fieldNodeId: g.fieldNodeId,
-                    optionNodeIds: g.optionNodeIds ?? [],
-                  },
-                ]
-              : [],
-          ),
         };
     // Withhold the optional view as a whole: absent data cannot masquerade as an editable empty mapping.
-    const publicMapping = result.mapping
-      ? {
-          ...result.mapping,
-          events: Object.values(result.mapping.events).filter(
-            (id): id is string => id !== null,
-          ),
-        }
-      : {};
     if (
-      !this.deliveryRowDisclosable(publicMapping, excluded) ||
-      !result.granted.every((grant) =>
-        typeof grant === "string"
-          ? this.disclosable(grant, excluded)
-          : this.deliveryRowDisclosable(grant, excluded),
+      !this.deliveryRowDisclosable(
+        this.publicMapping(result.mapping),
+        excluded,
       ) ||
       ("selections" in result &&
         !result.selections.every((selection) =>
@@ -6859,6 +6837,112 @@ export class OperatorApi {
     )
       return undefined;
     return result;
+  }
+  /** The authority summary as an optional property of a delivery read: absent when withheld. */
+  private authorityField(
+    projectId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const statusMappingAuthority = this.statusMappingAuthority(
+      projectId,
+      excluded,
+    );
+    return statusMappingAuthority === undefined
+      ? {}
+      : { statusMappingAuthority };
+  }
+  /** The mapping reduced to what the exclusions are checked against: its IDs and its event targets. */
+  private publicMapping(mapping: StatusMapping | null) {
+    return mapping
+      ? {
+          ...mapping,
+          events: Object.values(mapping.events).filter(
+            (id): id is string => id !== null,
+          ),
+        }
+      : {};
+  }
+  /** The names last observed for a Jira mapping's statuses, each only when the exclusions leave it whole. */
+  private jiraStatusNames(
+    projectId: string,
+    mapping: StatusMapping,
+    excluded: readonly string[] | undefined,
+  ) {
+    const observed = this.service.githubSources().observedNames(projectId);
+    return Object.fromEntries(
+      Object.values(mapping.events).flatMap((id) => {
+        const name = id === null ? undefined : observed.statuses.get(id);
+        return id !== null &&
+          name !== undefined &&
+          this.exact(name, excluded, textMaxLength) !== null
+          ? [[id, name]]
+          : [];
+      }),
+    );
+  }
+  /**
+   * What the saved mapping lets cab write, for the delivery reads: the distinct targets in event
+   * order with the names the exclusions leave whole. `null` is no usable mapping; undefined
+   * withholds the summary, whenever the status mapping view would be.
+   */
+  private statusMappingAuthority(
+    projectId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    if (excluded === undefined) return undefined;
+    const d = this.domain(),
+      view = d.statusMapping(projectId),
+      jira = Boolean(d.jiraConfiguration(projectId)),
+      mapping =
+        view.mapping && isJiraMapping(view.mapping) === jira
+          ? view.mapping
+          : null;
+    if (!mapping || (!jira && view.availability !== "available")) return null;
+    if (
+      !this.deliveryRowDisclosable(this.publicMapping(mapping), excluded) ||
+      // The view is withheld by any Project selection it cannot disclose, so is this summary.
+      (!jira &&
+        !d
+          .githubConfiguration(projectId)
+          .selections.every((selection) =>
+            this.deliveryRowDisclosable(
+              selection.kind === "project"
+                ? { id: selection.id, projectNodeId: selection.projectNodeId }
+                : {},
+              excluded,
+            ),
+          ))
+    )
+      return undefined;
+    const ids = [
+      ...new Set(
+        statusMappingEvents.flatMap((event) => mapping.events[event] ?? []),
+      ),
+    ];
+    if (isJiraMapping(mapping)) {
+      const names = this.jiraStatusNames(projectId, mapping, excluded);
+      return {
+        tracker: "jira" as const,
+        statuses: ids.map((id) => ({ id, name: names[id] ?? null })),
+      };
+    }
+    const named = this.fieldNames(
+      ids.map((optionNodeId) => ({
+        projectNodeId: mapping.projectNodeId,
+        fieldNodeId: mapping.fieldNodeId,
+        optionNodeId,
+      })),
+      excluded,
+    );
+    return {
+      tracker: "github" as const,
+      selectionId: mapping.selectionId,
+      projectNodeId: mapping.projectNodeId,
+      statuses: named.map((n) => ({
+        id: n.optionNodeId,
+        name: n.optionName ?? null,
+      })),
+    };
   }
   async readRuntimeSettings() {
     return this.readWithExclusionFence(() => this.readRuntimeSettingsOnce());

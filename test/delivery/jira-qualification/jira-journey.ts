@@ -550,7 +550,7 @@ export async function runJiraQualification(
       host: gitlabHost,
       credentialRef: "env:CAB_GITLAB_TOKEN",
     } as never);
-    const configureDelivery = (statusIds: string[]) => {
+    const configureDelivery = () => {
       const delivery = f.service.delivery();
       domain.execute({
         ...command(),
@@ -567,12 +567,6 @@ export async function runJiraQualification(
               mode: "allow" as const,
             }),
           ),
-          {
-            action: "issue.status",
-            repositoryId: projectId,
-            mode: "allow",
-            statusIds,
-          },
           ...(["branch.push", "pr.create"] as const).map((action) => ({
             action,
             repositoryId,
@@ -598,7 +592,7 @@ export async function runJiraQualification(
       }
       return "saved";
     };
-    configureDelivery([status.todo, status.progress, status.done]);
+    configureDelivery();
     assert.equal(
       refused({
         turnStarted: status.done,
@@ -614,13 +608,6 @@ export async function runJiraQualification(
       held: status.todo,
       done: status.done,
     };
-    assert.equal(refused(wanted), "ungranted");
-    configureDelivery([
-      status.todo,
-      status.progress,
-      status.review,
-      status.done,
-    ]);
     assert.equal(refused(wanted), "saved");
     domain.execute({
       ...command(),
@@ -629,10 +616,7 @@ export async function runJiraQualification(
       expectedVersion: 2,
       paused: false,
     });
-    pass(
-      "configured",
-      "refused readiness, then ungranted, then saved the mapping",
-    );
+    pass("configured", "refused readiness, then saved the mapping");
 
     const store = f.service
       .githubSources()

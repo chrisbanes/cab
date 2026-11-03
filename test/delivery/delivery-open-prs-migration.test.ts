@@ -358,3 +358,38 @@ test("service start applies it once to an upgraded store and never again", async
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a policy still holding issue.status grants is stripped before the Open PRs migration parses it", () => {
+  const w = world();
+  const projectId = w.project(["R1"]);
+  const policy = {
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [
+      issueComment("R1"),
+      {
+        action: "issue.status",
+        repositoryId: "J1",
+        mode: "allow",
+        statusIds: ["10003"],
+      },
+    ],
+    requiredChecks: [],
+    repositories: [],
+  };
+  w.db
+    .prepare("INSERT INTO delivery_policies VALUES (?, 3, ?)")
+    .run(projectId, JSON.stringify(policy));
+  // Unstripped, the policy no longer parses.
+  assert.throws(() => w.read(projectId), /Invalid persisted delivery policy/);
+  w.delivery.migrate();
+  w.migrate();
+  const after = w.read(projectId);
+  // The strip keeps the version; the Open PRs level then moves it once.
+  assert.equal(after.version, 4);
+  assert.equal(
+    after.grants.some((grant) => grant.action === "issue.comment"),
+    true,
+  );
+  assert.equal(levelOf(after.grants, "R1"), "open-prs");
+});

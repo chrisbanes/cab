@@ -3092,7 +3092,6 @@ export class DomainStore {
           command.projectId,
           command.expectedVersion,
           command.mapping,
-          new DeliveryStore(this.db).configuration(command.projectId),
         );
       }
       case "github.configure": {

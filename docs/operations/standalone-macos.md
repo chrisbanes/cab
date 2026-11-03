@@ -1036,6 +1036,13 @@ data directory takes no snapshot. The level lives in the database, so a director
 from a snapshot already at the current level takes none either; a snapshot from before a
 migration is behind the build and is snapshotted again.
 
+One data-only migration deletes data. Level 11 removes every `issue.status` grant from the
+delivery policies, because the status mapping is its own write authority
+([ADR-1024](../adr/1024-status-mapping-write-authority.md)); every other grant and the policy
+version stay as they were. There is no restore in the application, so the snapshot taken
+before that start is the only way back: restore it to a distinct data directory as described
+below to read the grants it held.
+
 A service refuses to start, before it writes anything, on a database at a higher migration
 level than the build applies, or whose schema version it does not support. The refusal
 reaches the launchd log as a `StartupRefusedError` with a stable `code`

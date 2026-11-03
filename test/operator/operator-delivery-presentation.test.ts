@@ -386,6 +386,12 @@ test("every action kind has a label and description, and an unknown kind reads a
     ],
   );
   assert.equal(deliveryActionLabel("unknown.kind"), "unknown.kind");
+  // The service's Jira status write keeps its label although no grant covers it.
+  assert.equal(
+    deliveryActionLabel("issue.status"),
+    "Move Jira issues to a status",
+  );
+  assert.equal(deliveryActionKinds.includes("issue.status" as never), false);
 });
 
 test("a grant reads as a sentence of names, and an ID with no name says so", () => {

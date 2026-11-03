@@ -7,7 +7,9 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import { fakeDiscovery } from "../fixtures/setup-home.js";
+import { replaceProjectFieldNames } from "../../src/core/project-field-names.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { databaseOf } from "../fixtures/service-internals.js";
 import {
   createCheckout,
   startSettings,
@@ -71,8 +73,16 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
       .getByLabel("Action", { exact: true })
       .locator("option")
       .count(),
-    17,
+    16,
   );
+  assert.equal(
+    await grant(page)
+      .getByLabel("Action", { exact: true })
+      .locator("option", { hasText: "Jira" })
+      .count(),
+    0,
+  );
+  assert.equal(await page.getByText("Status IDs").count(), 0);
   await grant(page)
     .getByLabel("Repository", { exact: true })
     .selectOption("R_atlas");
@@ -496,7 +506,84 @@ test("Delivery session expiry purges newly entered references and drafts", async
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
-test("Delivery warns before reducing a public grant while its mapping view is withheld", async (_t, journey) => {
+test("Delivery names what the saved mapping allows, links to its editor and claims no lost authority", async (_t, journey) => {
+  const { page, f, ids } = await startDiscovery(journey);
+  const domain = f.service.domain();
+  replaceProjectFieldNames(databaseOf(f.service), "PVT_atlas", [
+    {
+      projectNodeId: "PVT_atlas",
+      fieldNodeId: "PVTSSF_status",
+      name: "Status",
+      options: [{ optionNodeId: "PVTSSO_ready", name: "Ready" }],
+    },
+  ]);
+  domain.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [
+      {
+        action: "project.field",
+        repositoryId: "R_atlas",
+        mode: "allow",
+        projectNodeId: "PVT_atlas",
+        fieldNodeId: "PVTSSF_status",
+        optionNodeIds: ["PVTSSO_ready"],
+      },
+    ],
+    requiredChecks: [],
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: domain.statusMapping(ids.atlas).version,
+    mapping: {
+      selectionId: "S-3",
+      projectNodeId: "PVT_atlas",
+      fieldNodeId: "PVTSSF_status",
+      events: {
+        turnStarted: null,
+        handedBack: null,
+        held: null,
+        done: "PVTSSO_ready",
+      },
+    },
+  });
+  await page.reload();
+  await page
+    .getByText(
+      "Status mapping: cab may set Status to Ready on Project Atlas roadmap",
+      { exact: false },
+    )
+    .waitFor();
+  // Removing every grant, or reducing one, claims no lost mapping authority.
+  await grant(page)
+    .getByLabel("Authority", { exact: true })
+    .selectOption("approval");
+  assert.equal(await page.getByRole("alert").count(), 0);
+  await page
+    .getByRole("button", { name: "Remove grant 1", exact: true })
+    .click();
+  assert.equal(await page.getByRole("alert").count(), 0);
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await page.getByRole("link", { name: "Edit status mapping" }).click();
+  await page.waitForURL(/tab=github#status-mapping$/);
+  await page
+    .getByRole("heading", { name: "Status mapping", exact: true })
+    .waitFor();
+  // The link lands on the panel: it holds focus.
+  await page.waitForFunction(
+    () => document.activeElement?.id === "status-mapping",
+  );
+});
+
+test("Delivery shows no mapping line, warning or hidden value while the mapping is withheld", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path, phone);
   const domain = f.service.domain();
   const hiddenSelection = "HIDDEN_MAPPING_SELECTION";
@@ -546,32 +633,15 @@ test("Delivery warns before reducing a public grant while its mapping view is wi
   });
   await read(page);
   await grant(page).getByLabel("Action", { exact: true }).waitFor();
-  assert.doesNotMatch(
-    await page.locator("body").innerText(),
-    new RegExp(hiddenSelection),
-  );
-  let posts = 0;
-  page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().endsWith("/commands"))
-      posts++;
-  });
   await grant(page)
     .getByLabel("Authority", { exact: true })
     .selectOption("approval");
-  await page.getByRole("alert").waitFor();
   await noPageOverflow(page);
-  await captureBrowserEvidence(page, "delivery-withheld-mapping-warning");
-  assert.equal(posts, 0);
-  await page.getByRole("button", { name: "Discard changes" }).click();
-  await page.getByRole("alert").waitFor({ state: "hidden" });
-  await page
-    .getByRole("button", { name: "Remove grant 1", exact: true })
-    .click();
-  await page.getByRole("alert").waitFor();
-  assert.equal(posts, 0);
-  await page.getByRole("button", { name: "Discard changes" }).click();
-  await grant(page).waitFor();
-  await page.getByRole("alert").waitFor({ state: "hidden" });
+  await captureBrowserEvidence(page, "delivery-withheld-mapping");
+  const text = await page.locator("body").innerText();
+  assert.doesNotMatch(text, new RegExp(hiddenSelection));
+  assert.doesNotMatch(text, /Status mapping: /);
+  assert.equal(await page.getByRole("alert").count(), 0);
 });
 
 const levelControl = (page: Page) =>

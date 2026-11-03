@@ -443,9 +443,9 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   (made through the git-data API, not a foreign `git push`), then pushed on top of the adopted head, with verified cleanup; it was coordinator-level with no model
   turns and a harness stand-in for the operator's approval. Evidence:
   [branch recovery](evidence/2026-10-28-branch-recovery.md).
-- **Status mapping** (#1194, ADR-1017) — **Bounded.** Deterministic tests cover the
-  mapping save rules (grants, in-flight readiness, unavailable source, versions), the service
-  caller's authority and its readiness exemption, each event's write once per transition, the
+- **Status mapping** (#1194, ADR-1017, ADR-1024) — **Bounded.** Deterministic tests cover the
+  mapping save rules (in-flight readiness, unavailable source, versions), the service
+  caller's authority from the saved mapping alone and its readiness exemption, each event's write once per transition, the
   conditional re-read and its skipped write, uncertain and non-holding records, restart
   resumption, and the editor and task presentation (`status-mapping-store`,
   `status-mapping-service`, `github-delivery-provider`, `operator-api`,
@@ -456,7 +456,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   run on the final product code is the fourth. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
   Evidence: [status mapping live run](evidence/2026-10-21-status-mapping-live.md).
   The Jira variant (#1321, ADR-1020) is **Bounded.** Deterministic tests cover the mapping save rules by
-  grant and readiness, the service-only `issue.status` authority, the single-transition write with its
+  readiness, the service-only `issue.status` authority from the saved mapping, the single-transition write with its
   four skips, the status-write queue and its limit, Done on closure, `issue.close` narrowed to the mapped
   done status, and the Jira source tab editor and task notes (`status-mapping-jira-store`,
   `status-mapping-jira-service`, `jira-issue-delivery-provider`, `operator-api`,

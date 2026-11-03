@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { GitHubStatusMapping as StatusMapping } from "../../src/core/status-mapping-contracts.js";
 import {
+  jiraStatusMappingBoundary,
+  statusMappingAuthorityLine,
+  statusMappingBoundary,
+  statusMappingSaveStatement,
+} from "../../src/operator/status-mapping-copy.js";
+import {
+  draftTargets,
   jiraDraftMapping,
   jiraStatusMappingPlan,
   statusFieldNodeId,
@@ -152,4 +159,77 @@ test("the Jira draft maps typed status IDs, and lists one line per changed event
     mapping: null,
     lines: [],
   });
+});
+
+const github = {
+  tracker: "github" as const,
+  projectNodeId: "PVT_1",
+  statuses: [
+    { id: "O_r", name: "Ready" },
+    { id: "O_d", name: "Done" },
+  ],
+};
+const jira = {
+  tracker: "jira" as const,
+  statuses: [
+    { id: "3", name: "In Progress" },
+    { id: "10005", name: "Done" },
+  ],
+};
+
+test("saving the mapping states what it allows, naming the options and the Project, with IDs where a name is unknown", () => {
+  assert.equal(
+    statusMappingSaveStatement(github, "Atlas roadmap"),
+    "Saving allows cab to set Status to Ready, Done on Project Atlas roadmap",
+  );
+  assert.equal(
+    statusMappingSaveStatement(
+      { ...github, statuses: [github.statuses[0]!, { id: "O_d", name: null }] },
+      "Atlas roadmap",
+    ),
+    "Saving allows cab to set Status to Ready, O_d on Project Atlas roadmap",
+  );
+  assert.equal(
+    statusMappingSaveStatement(github),
+    "Saving allows cab to set Status to Ready, Done on Project PVT_1",
+  );
+  assert.equal(
+    statusMappingSaveStatement(jira),
+    "Saving allows cab to move issues to In Progress, Done",
+  );
+});
+
+test("the delivery line reads the same authority, and says so when no mapping is set", () => {
+  assert.equal(
+    statusMappingAuthorityLine({
+      ...github,
+      statuses: [github.statuses[0]!],
+    }),
+    "Status mapping: cab may set Status to Ready on Project PVT_1",
+  );
+  assert.equal(
+    statusMappingAuthorityLine({ ...jira, statuses: [jira.statuses[1]!] }),
+    "Status mapping: cab may move issues to Done",
+  );
+  assert.equal(statusMappingAuthorityLine(null), "Status mapping: not set");
+});
+
+test("the draft's targets are its distinct non-empty events in event order", () => {
+  assert.deepEqual(
+    draftTargets({ turnStarted: "b", handedBack: " ", held: "a", done: "b" }),
+    ["b", "a"],
+  );
+});
+
+test("neither boundary says a grant is needed beyond saying none is", () => {
+  for (const item of [...statusMappingBoundary, ...jiraStatusMappingBoundary])
+    assert.doesNotMatch(
+      item.replace("no delivery grant is needed", ""),
+      /grant/i,
+    );
+  assert.match(statusMappingBoundary[0] ?? "", /no delivery grant is needed/);
+  assert.match(
+    jiraStatusMappingBoundary[0] ?? "",
+    /no delivery grant is needed/,
+  );
 });

@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   canonicalMaterial,
   deliveryPolicySchema,
+  policyGrantSchema,
   repositorySettingsSchema,
 } from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
@@ -124,9 +125,22 @@ export const routingCommandResultSchema = z
   })
   .strict();
 
+/** An `issue.status` grant, retired with the status mapping's own authority; receipts recorded before then still carry one. */
+const retiredIssueStatusGrantSchema = z
+  .object({
+    action: z.literal("issue.status"),
+    repositoryId: z.string(),
+    mode: z.enum(["allow", "approval"]),
+    statusIds: z.array(z.string()),
+  })
+  .strict();
+
 export const deliveryCommandResultSchema = deliveryPolicySchema
   .omit({ credentialRef: true })
   .extend({
+    grants: z
+      .array(z.union([policyGrantSchema, retiredIssueStatusGrantSchema]))
+      .max(256),
     // Results recorded before per-repository settings have none.
     repositories: repositorySettingsSchema.optional(),
     /** The digest of the operator request a per-repository save recorded; never part of a receipt. */

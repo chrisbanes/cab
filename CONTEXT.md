@@ -135,7 +135,8 @@ _Avoid_: Export or sync when referring to creating the external item
 **Status mapping**:
 A project's rules for which external status option (a GitHub Project Status
 option or a Jira status) cab writes when its own work reaches a given point. It reflects cab work back to the external system
-and never makes a task Ready.
+and never makes a task Ready. Saving it is the operator's authority for cab to write exactly those
+statuses; it needs no separate grant.
 _Avoid_: Board sync or column mapping
 
 **Drafting run**:

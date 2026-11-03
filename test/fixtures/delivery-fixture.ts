@@ -457,23 +457,6 @@ export async function deliveryFixture(
       { action: "issue.edit", repositoryId: "R1", mode: "allow" },
       { action: "issue.close", repositoryId: "R1", mode: "allow" },
       { action: "pr.merge", repositoryId: "R1", mode: "allow" },
-      ...(projectStatus
-        ? [
-            {
-              action: "project.field" as const,
-              repositoryId: "R1",
-              mode: "allow" as const,
-              projectNodeId: fixtureProject.projectNodeId,
-              fieldNodeId: fixtureProject.fieldNodeId,
-              optionNodeIds: [
-                fixtureProject.todo,
-                fixtureProject.inProgress,
-                fixtureProject.inReview,
-                fixtureProject.done,
-              ],
-            },
-          ]
-        : []),
     ],
     requiredChecks: [],
   });

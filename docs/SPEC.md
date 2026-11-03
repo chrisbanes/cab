@@ -2277,7 +2277,7 @@ conditions; observed PR auto-closure is reconciled, not assumed to complete all 
 Writes record confirmed success, confirmed failure or uncertainty; local edits
 cannot masquerade as confirmed remote updates.
 
-The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 17 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. When that view is unavailable, reducing public status-related allow coverage shows a conservative warning that mapped status writes may lose authority; the warning grants no write permission. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
+The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
 
 A grant row reads as a sentence of names ("Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas"); an ID no read names shows as "<ID> (name not found)", and a row still being filled in shows "(not chosen)". Its Action select shows each kind's plain label and a one-line description, from the one wording the task's delivery actions and `cab delivery get` also use (a recorded action whose kind this version does not know keeps its recorded text). Its Repository is chosen from the project's linked repositories and, when GitHub discovery lists them, the others the credential can see; its Project, field and options are chosen from what discovery lists, the Project from the owner's Projects as well as those linked, with Other… to type a Project's node ID. Where discovery cannot list a value, or the saved value is not in the list, the control is a typed node-ID field labelled as the fallback and stays typed while it is shown. A Jira container is a typed Jira project ID, as no read lists them. Stored grants, the `delivery.configure` command and replay are unchanged: names are display only, and every value stays an ID. A save the service refuses for a named field shows the service's fixed sentence for it in the save outcome, as a refused status mapping does, with a Go to field action that focuses the first highlighted control; the draft stays.
 
@@ -2411,7 +2411,7 @@ refusal while a pipeline has not passed is covered by scripted tests only.
 On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
 Jira project ID as the repository, the key's number and the issue ID as the node ID. Only
 `issue.comment`, `issue.labels`, `issue.close` and the service-only `issue.status` of the
-[status mapping](#github-and-completion) are delivered; every other issue action on a Jira
+[status mapping](#github-and-completion), which needs no grant, are delivered; every other issue action on a Jira
 task is refused as `issue-tracker-delivery-unavailable`. A comment is sent as Atlassian Document Format
 converted from Markdown (paragraphs, hard breaks and code blocks; everything else, including `@name`
 and links, stays literal text, and no mention or media is ever emitted) with a hidden `cab-operation`
@@ -2488,19 +2488,27 @@ an agent, writes it as a distinct caller through the same delivery lifecycle, la
 "Status mapping" on the task; projects without a mapping and unmapped events create no
 records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 
-- **Authority.** Every mapped option must be covered by an `allow` `project.field` grant for
-  the exact Project, field and option, and the grant's repository: it covers only that
-  repository's issues, so an issue of another repository is denied at write time and shows on
-  the task. A Jira status is written by `issue.status`, which only the service may submit (agents,
-  the operator and publication are refused, and an agent's request is denied). It is granted per Jira
-  project with `statusIds`, which an `issue.status` grant requires and no other grant takes; its
-  target is the Jira project ID, the key's number and the issue ID, and it carries the status
-  the issue must still show. The write checks the task's imported Jira issue and a current
-  membership in the project's JQL selections. A save naming an uncovered option, or one whose only
-  grant needs approval, is refused, and the write checks the grant again; a grant revoked before the write is
-  denied (`delivery-authority-denied`, or `delivery-authority-stale-or-held` once the write was
-  prepared) and shows on the task. Agents and the operator keep the refusal of
-  readiness labels and fields.
+- **Authority.** The saved mapping is the authority for these writes
+  ([ADR-1024](adr/1024-status-mapping-write-authority.md)): saving it is the operator's
+  authority for cab to write exactly the mapped options or statuses, and it needs no delivery
+  grant. A save is refused only when the project has no source it can bind to or when an
+  in-flight event names an option the readiness rule does not accept. A write still checks the
+  mapping version it was prepared under, the exact option or status mapped for the event, the
+  imported issue's own Project item (GitHub) or a current membership in the project's JQL
+  selections (Jira), that the task is Ready (or Done on closure), the readiness of in-flight
+  events, and the conditional write. It has no repository limit. A write prepared under a
+  mapping that was changed or cleared since is refused when attempted
+  (`delivery-authority-stale-or-held`) and shows on the task. A Jira status is written by
+  `issue.status`, which only the service may submit (agents, the operator and publication are
+  refused, and an agent's request is denied); `issue.status` is not a grant action. Its target
+  is the Jira project ID, the key's number and the issue ID, and it carries the status the issue
+  must still show. Agents and the operator keep the refusal of readiness labels and fields.
+  The editor states "Saving allows cab to set Status to <options> on Project <title>" (or
+  "…move issues to <statuses>"), and Delivery settings and `cab delivery get` show what the saved
+  mapping allows. A store migration (startup migration level 11) deleted every stored
+  `issue.status` grant, leaving other grants and the policy version unchanged; only the
+  [startup snapshot](operations/standalone-macos.md#startup-snapshot) taken before it
+  restores them.
 - **Readiness.** The service writes only for a task that is Ready when it writes, so the
   mapping never makes work Ready. The one exception is Done on closure: a done task whose issue
   is observed closed (provider closure, `issue.close`, a closing-keyword merge) is no longer
@@ -2514,7 +2522,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
   readiness rule accepts (an `in` set holding it, a `not-in` set leaving it out), checked at save and again at write against the task's stored facts with only
   that value replaced; for Jira the rule's `status` conditions decide, and a rule with none accepts
-  any granted status. A terminal event may name an option that removes readiness, and the
+  any status. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
   an in-flight Status drops the item from the selection on the next sync and the ordinary
   leave-selection hold applies: cab validates the readiness rule, not filter text.

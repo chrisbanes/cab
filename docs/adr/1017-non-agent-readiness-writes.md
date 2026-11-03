@@ -1,5 +1,6 @@
 ---
 status: accepted
+partially_superseded_by: ADR-1024
 ---
 
 # Allow named non-agent callers to write readiness fields
@@ -26,9 +27,8 @@ caller type, so a new one is a new decision that extends this record, not a flag
   goes through `DeliveryStore.authorize` and the delivery lifecycle (operation ids,
   intent before effect, readback, retained uncertainty, no blind replay) like every
   other caller. Its conditions:
-  - The mapped option is covered by an operator-configured `allow` `project.field`
-    grant for the exact Project, field and option. It never has an approval, so a grant
-    in `approval` mode fails closed, at save and at write.
+  - The saved mapping is the authority ([ADR-1024](1024-status-mapping-write-authority.md));
+    no grant is consulted. It never has an approval.
   - The task is Ready when the write is authorized. No write can make a non-Ready task
     Ready, because only a task that already is qualifies. The one exception is Done on
     closure: a done task whose issue is observed closed may have its mapped Done option

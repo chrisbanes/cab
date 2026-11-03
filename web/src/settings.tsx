@@ -696,6 +696,7 @@ export function ChangeList({
 /** A titled panel of the settings layouts. */
 export function Panel({
   id,
+  tabIndex,
   title,
   description,
   action,
@@ -704,6 +705,8 @@ export function Panel({
 }: {
   /** The fragment that links to this section. */
   id?: string;
+  /** Lets a script focus the section when a link lands on its fragment. */
+  tabIndex?: number;
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
@@ -713,6 +716,7 @@ export function Panel({
   return (
     <section
       id={id}
+      tabIndex={tabIndex}
       className={`settings-panel${className ? ` ${className}` : ""}`}
     >
       <div className="settings-panel-header">

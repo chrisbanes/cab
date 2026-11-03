@@ -145,3 +145,12 @@ export function jiraStatusMappingPlan(i: {
     }),
   };
 }
+
+/** The distinct Status options or Jira statuses the draft maps, in event order. */
+export const draftTargets = (v: Values): string[] => [
+  ...new Set(
+    statusMappingEvents
+      .map((e) => String(v[e] ?? "").trim())
+      .filter((id) => id !== ""),
+  ),
+];

@@ -1,5 +1,8 @@
 import { deliveryActionLabel } from "../operator/delivery-action-copy.js";
-import { statusMappingActionLabel } from "../operator/status-mapping-copy.js";
+import {
+  statusMappingActionLabel,
+  statusMappingAuthorityText,
+} from "../operator/status-mapping-copy.js";
 import { createHash } from "node:crypto";
 import { absentBranchHead } from "../core/delivery.js";
 import {
@@ -144,6 +147,13 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
       [
         "Delivery",
         d ? `${d.mode}, policy version ${d.policyVersion}` : "not reported",
+      ],
+      [
+        "Status mapping",
+        d?.statusMappingAuthority === undefined
+          ? "not reported"
+          : // The CLI reads no Project title, so the text names the Project by node ID.
+            statusMappingAuthorityText(d.statusMappingAuthority),
       ],
       [
         "Pull request",

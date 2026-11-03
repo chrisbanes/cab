@@ -207,32 +207,13 @@ function reconfigureReadiness(
   });
 }
 
-test("saving a mapping refuses an ungranted or approval-only option, naming the event and option", () => {
+test("a mapping saves with no grant and with only approval grants", () => {
   const f = setup();
   try {
-    f.configureGrants([f.grant([TODO, PROGRESS, REVIEW])]);
-    assert.throws(
-      () => f.save(mapping()),
-      (error: unknown) =>
-        error instanceof StatusMappingRefusal &&
-        error.reason === "ungranted" &&
-        error.event === "done" &&
-        error.optionNodeId === DONE,
-    );
-    f.configureGrants([
-      f.grant([TODO, PROGRESS, DONE]),
-      f.grant([REVIEW], "approval"),
-    ]);
-    assert.throws(
-      () => f.save(mapping()),
-      (error: unknown) =>
-        error instanceof StatusMappingRefusal &&
-        error.reason === "approval-only" &&
-        error.event === "handedBack" &&
-        error.optionNodeId === REVIEW,
-    );
-    // Nothing was saved by the refusals.
-    assert.equal(f.status.current(f.projectId).version, 1);
+    f.configureGrants([]);
+    assert.equal(f.save(mapping()).version, 2);
+    f.configureGrants([f.grant([TODO, PROGRESS, REVIEW, DONE], "approval")]);
+    assert.equal(f.save(mapping({ done: TODO })).version, 3);
   } finally {
     f.db.close();
   }
@@ -587,36 +568,46 @@ test("an in-flight write is checked against the readiness rule at write time", (
   }
 });
 
-test("a grant revoked after the save denies the write", () => {
+test("the service writes a mapped option with no grant or only approval grants; an unmapped option or stale version is still refused", () => {
   const f = setup();
   try {
     f.save(mapping());
-    f.configureGrants([f.grant([TODO, REVIEW, DONE])]);
-    const record = f.delivery.prepareAction(
-      f.write(PROGRESS),
-      f.caller("turnStarted"),
-      false,
-    );
-    assert.equal(record.state, "denied");
-    assert.equal(record.observation?.reason, "delivery-authority-denied");
-  } finally {
-    f.db.close();
-  }
-});
-
-test("an approval-mode grant created after the save fails closed for the service", () => {
-  const f = setup();
-  try {
-    f.save(mapping());
-    f.configureGrants([f.grant([TODO, PROGRESS, REVIEW, DONE], "approval")]);
-    assert.equal(
-      f.delivery.prepareAction(
+    for (const grants of [
+      [],
+      [f.grant([TODO, PROGRESS, REVIEW, DONE], "approval")],
+    ]) {
+      f.configureGrants(grants);
+      const record = f.delivery.prepareAction(
         f.write(PROGRESS),
         f.caller("turnStarted"),
         false,
-      ).state,
-      "denied",
-    );
+      );
+      assert.equal(record.state, "prepared");
+      f.delivery.recordObservation(record.operationId, {
+        state: "confirmed-failure",
+        reason: "test",
+        receipt: null,
+      });
+      assert.equal(
+        f.delivery.prepareAction(
+          f.write(REVIEW),
+          f.caller("turnStarted"),
+          false,
+        ).state,
+        "denied",
+      );
+      assert.equal(
+        f.delivery.prepareAction(
+          f.write(PROGRESS),
+          {
+            ...(f.caller("turnStarted") as ServiceCaller),
+            mappingVersion: 1,
+          },
+          false,
+        ).state,
+        "denied",
+      );
+    }
   } finally {
     f.db.close();
   }
@@ -740,27 +731,6 @@ test("a late proof of the last write that may have landed is observed even after
       receipt: { nodeId: "I_1" },
     });
     assert.equal(f.status.taskState(f.taskId).observedOptionNodeId, PROGRESS);
-  } finally {
-    f.db.close();
-  }
-});
-
-test("the service uses an allow grant even when an approval grant for the option is listed first", () => {
-  const f = setup();
-  try {
-    f.configureGrants([
-      f.grant([TODO, PROGRESS, REVIEW, DONE], "approval"),
-      f.grant([TODO, PROGRESS, REVIEW, DONE], "allow"),
-    ]);
-    f.save(mapping());
-    assert.equal(
-      f.delivery.prepareAction(
-        f.write(PROGRESS),
-        f.caller("turnStarted"),
-        false,
-      ).state,
-      "prepared",
-    );
   } finally {
     f.db.close();
   }
