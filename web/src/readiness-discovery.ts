@@ -79,6 +79,8 @@ export function projectChoices(
   repositories: RepositoriesRead | undefined,
   saved: { repositoryId: string }[],
   projectReads: Record<string, ProjectsRead | undefined>,
+  /** Also the owner's Projects that are not linked to a repository. */
+  owned = false,
 ):
   | { state: "loading" }
   | { state: "typed"; note: string }
@@ -98,7 +100,7 @@ export function projectChoices(
     if (read.state === "unavailable")
       return { state: "typed", note: unavailableNote(read) };
     if (read.truncated) return { state: "typed", note: truncatedNote() };
-    for (const p of read.linked)
+    for (const p of owned ? [...read.linked, ...read.owned] : read.linked)
       found.set(p.projectNodeId, {
         title: p.title || "Untitled Project",
         owner: read.ownerLogin,

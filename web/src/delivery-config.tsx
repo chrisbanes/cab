@@ -213,6 +213,7 @@ function DeliveryPolicyForm(p: TabProps) {
     csrfToken: p.session.csrfToken,
     enabled: projectGrants.length > 0,
     labels: false,
+    ownedProjects: true,
     repositories: editableGrants.length > 0,
     saved: p.data.repositories.links.map((link) => ({
       repositoryId: link.repositoryId ?? "",
@@ -1190,6 +1191,7 @@ function GrantProject({
         discovery={discovery}
         operator={false}
         fieldControls={field}
+        otherProject
         wording={{
           project: "Project",
           field: "Field",

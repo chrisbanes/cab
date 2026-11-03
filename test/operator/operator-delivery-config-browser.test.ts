@@ -829,6 +829,44 @@ test("without a discovery credential a grant offers typed IDs labelled as the fa
   ]);
 });
 
+test("a grant can name an owner Project no repository links, or type a Project ID after Other", async (_t, journey) => {
+  const { page } = await startDiscovery(journey);
+  const add = page.getByRole("button", { name: "Add grant", exact: true });
+  for (const index of [1, 2]) {
+    await add.click();
+    const row = grant(page, index);
+    await row
+      .getByLabel("Action", { exact: true })
+      .selectOption("project.item.add");
+    await row
+      .getByLabel("Repository", { exact: true })
+      .selectOption({ label: "acme/atlas" });
+    await row.getByLabel("Authority", { exact: true }).selectOption("allow");
+  }
+  // Atlas roadmap is linked to the repository; Web is only owned by its owner.
+  const first = grant(page, 1).getByLabel("Project", { exact: true });
+  assert.deepEqual(
+    (await first.locator("option").allTextContents()).slice(1, 3),
+    ["Atlas roadmap", "Web"],
+  );
+  await first.selectOption({ label: "Web" });
+  await grant(page, 2)
+    .getByLabel("Project", { exact: true })
+    .selectOption({ label: "Other…" });
+  await grant(page, 2)
+    .getByLabel("Project node ID (fallback)", { exact: true })
+    .fill("PVT_typed");
+  const sent = body(page);
+  await save(page).click();
+  assert.deepEqual(
+    ((await sent).grants as { projectNodeId: string }[]).map(
+      (g) => g.projectNodeId,
+    ),
+    ["PVT_web", "PVT_typed"],
+  );
+  await savedOutcome(page);
+});
+
 test("typed option IDs follow a Discard back to the saved IDs and the next save sends what they show", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path);
   f.service.domain().execute({

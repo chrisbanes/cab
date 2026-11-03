@@ -49,6 +49,9 @@ import {
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 
+const otherValue = "\u0000other";
+const otherProjectNote =
+  "The Project is not in the list, so its node IDs are typed.";
 const unreadable = { state: "unavailable", reason: "unreadable" } as const;
 
 /**
@@ -66,6 +69,8 @@ export function useReadinessDiscovery(p: {
   repositories?: boolean;
   saved: { repositoryId: string }[];
   projectIds: string[];
+  /** Whether the owner's unlinked Projects are listed too, as a grant may name any of them. */
+  ownedProjects?: boolean;
 }) {
   const [repositories, setRepositories] = useState<RepositoriesRead>();
   const [projectReads, setProjectReads] = useState<
@@ -150,7 +155,12 @@ export function useReadinessDiscovery(p: {
     }
   }, [names.join("\n"), p.labels, p.client]);
 
-  const choices = projectChoices(repositories, p.saved, projectReads);
+  const choices = projectChoices(
+    repositories,
+    p.saved,
+    projectReads,
+    p.ownedProjects,
+  );
   // Only listed Project IDs are requested, never arbitrary typed text.
   const wanted =
     choices.state === "ready"
@@ -343,6 +353,8 @@ export function ProjectFieldPicker(p: {
   operator?: boolean;
   /** Whether the field and option controls show; a Project alone otherwise. */
   fieldControls?: boolean;
+  /** Whether the Project select offers "Other…", which turns the row into typed node IDs. */
+  otherProject?: boolean;
 }) {
   const prefix = p.idPrefix ?? `source-conditions-${p.index}`;
   const wording = p.wording ?? readinessPickerWording;
@@ -363,13 +375,16 @@ export function ProjectFieldPicker(p: {
     !fieldControls,
   );
   const sticky = useRef<string | null>(null);
+  const [other, setOther] = useState(false);
   // Only a new round of reads (the credential changed) lets a typed row become a picker.
   const round = useRef(p.discovery.generation);
   if (round.current !== p.discovery.generation) {
     round.current = p.discovery.generation;
     sticky.current = null;
+    if (other) setOther(false);
   }
   if (state.state === "typed") sticky.current = state.note;
+  else if (other) sticky.current = otherProjectNote;
   const operator = showOperator && (
     <label className="field body" htmlFor={`${prefix}-operator`}>
       Readiness operator
@@ -438,6 +453,9 @@ export function ProjectFieldPicker(p: {
             {o.name}
           </option>
         ))}
+        {name === "projectNodeId" && p.otherProject && (
+          <option value={otherValue}>Other…</option>
+        )}
       </NativeSelect>
     </label>
   );
@@ -448,7 +466,8 @@ export function ProjectFieldPicker(p: {
         wording.project,
         "Choose a Project",
         projects.map((x) => ({ id: x.projectNodeId, name: x.label })),
-        (v) => p.onChange(selectProject(v)),
+        (v) =>
+          v === otherValue ? setOther(true) : p.onChange(selectProject(v)),
         loading && !state.projects,
       )}
       {fieldControls &&
