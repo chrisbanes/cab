@@ -1330,6 +1330,7 @@ const aggregateLog =
 test("aggregate failure accounting follows complete dependencies and retains owning failures", async () => {
   for (const variant of [
     "guard",
+    "split-topology",
     "ordinary",
     "mixed",
     "checkout",
@@ -1368,6 +1369,22 @@ test("aggregate failure accounting follows complete dependencies and retains own
       );
     if (variant === "extra-job")
       jobs.push({ ...jobs[0]!, id: 999, name: "historical-extra-job" });
+    if (variant === "split-topology") {
+      // Browser-only lanes: execution and workspaces fold into integrations.
+      for (const name of ["execution-1", "workspaces-1"])
+        jobs.splice(
+          jobs.findIndex((job) => job.name === name),
+          1,
+        );
+      owning.name = "operator-3";
+      const passing = jobs.find((job) => job.name === "operator-1")!;
+      for (const [index, name] of [
+        "operator-4",
+        "service-3",
+        "service-4",
+      ].entries())
+        jobs.push({ ...passing, id: 711 + index, name });
+    }
     if (variant === "unfinished") jobs[0]!.status = "in_progress";
     const ordinary = variant === "ordinary" || variant === "mixed";
     const report = await api.renderReport({
@@ -1430,13 +1447,16 @@ test("aggregate failure accounting follows complete dependencies and retains own
         throw Error(`Unexpected fixture endpoint ${url}`);
       },
     });
-    const positive = ["guard", "ordinary", "mixed"].includes(variant);
+    const positive = ["guard", "split-topology", "ordinary", "mixed"].includes(
+      variant,
+    );
     const aggregateAccounted = positive || variant.startsWith("guard-");
     const aggregate = report.runs[0].attempts[0].jobs.find(
       (job: { name: string }) => job.name === "check",
     );
     assert.equal(Boolean(aggregate.accountedFor), aggregateAccounted, variant);
-    assert.equal(report.observedFailures, variant === "guard" ? 0 : 1, variant);
+    const guarded = variant === "guard" || variant === "split-topology";
+    assert.equal(report.observedFailures, guarded ? 0 : 1, variant);
     assert.equal(report.incomplete, positive ? 0 : 1, variant);
     assert.equal(report.confirmedUnrelated, 0, variant);
     if (variant.startsWith("guard-") && variant !== "guard") {
@@ -1459,7 +1479,10 @@ test("aggregate failure accounting follows complete dependencies and retains own
       assert.deepEqual(aggregate.accountedFor.diagnostics, [
         "suites: expected success, observed failure",
       ]);
-      assert.equal(aggregate.accountedFor.dependencies.length, 10);
+      assert.equal(
+        aggregate.accountedFor.dependencies.length,
+        variant === "split-topology" ? 11 : 10,
+      );
       assert.ok(aggregate.url);
     }
     if (ordinary) assert.equal(report.top[0].test, "independent test fails");

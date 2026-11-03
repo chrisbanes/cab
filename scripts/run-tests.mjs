@@ -386,11 +386,12 @@ export const logicalSuites = [
 
 export function parseTestOptions(args) {
   const options = {
-    profile: "all",
+    profile: "chromium",
     suite: "all",
     shard: 1,
     shards: 1,
     preflight: false,
+    browserFilesOnly: false,
   };
   const seen = new Set();
   for (const arg of args) {
@@ -398,12 +399,15 @@ export function parseTestOptions(args) {
     if (seen.has(key)) throw Error(`Duplicate test option: ${key}`);
     seen.add(key);
     if (arg === "--fixture-preflight") options.preflight = true;
+    else if (arg === "--browser-files-only") options.browserFilesOnly = true;
     else if (arg.startsWith("--profile=")) options.profile = arg.slice(10);
     else if (arg.startsWith("--suite=")) options.suite = arg.slice(8);
     else if (arg.startsWith("--shard=")) {
-      const match = /^--shard=([12])\/([12])$/.exec(arg);
+      const match = /^--shard=([1-9])\/([1-9])$/.exec(arg);
       if (!match || Number(match[1]) > Number(match[2]))
-        throw Error("Shard must be 1/1, 1/2 or 2/2");
+        throw Error(
+          "Shard must be <index>/<count> with 1 <= index <= count <= 9",
+        );
       options.shard = Number(match[1]);
       options.shards = Number(match[2]);
     } else throw Error(`Unknown test option: ${arg}`);
@@ -427,16 +431,28 @@ export function parseTestOptions(args) {
     throw Error(
       "Fixture preflight requires all suites, no sharding and browser coverage",
     );
+  if (options.browserFilesOnly && options.profile === "service")
+    throw Error("Browser files only requires a browser profile");
   return options;
 }
+
+/** Whether a compiled test's source registers browser cases, as AGENTS.md requires them to. */
+export const hasBrowserCases = (file, root = ".") =>
+  /\bbrowser(Suite|Test)\(/.test(
+    readFileSync(
+      resolve(root, file.replace(/^dist\//, "").replace(/\.js$/, ".ts")),
+      "utf8",
+    ),
+  );
 
 export function selectTestFiles(files, options, timings = {}) {
   const selected = files.filter(
     (file) =>
-      options.suite === "all" ||
-      options.suite
-        .split(",")
-        .some((suite) => file.startsWith(`dist/test/${suite}/`)),
+      (options.suite === "all" ||
+        options.suite
+          .split(",")
+          .some((suite) => file.startsWith(`dist/test/${suite}/`))) &&
+      (!options.browserFilesOnly || hasBrowserCases(file)),
   );
   if (!selected.length)
     throw Error(`No tests selected for suite ${options.suite}`);
@@ -641,6 +657,10 @@ export async function runGuarded(
   return finishRun(guard.result, guard, name, options);
 }
 
+// A failed browser journey may hold state a live client could still use, which keeps
+// its file's event loop alive; force-exit ends the file once it has reported.
+export const testFileFlags = ["--test", "--test-force-exit"];
+
 export async function main(
   base = realpathSync(tmpdir()),
   environment = process.env,
@@ -676,10 +696,10 @@ async function runSelected(root, operatorCodexHome) {
       );
   if (!files.length) throw Error("No compiled test files found");
   process.stdout.write(
-    `Test selection: suite=${options.suite} profile=${options.profile} shard=${options.shard}/${options.shards} files=${files.length}\n`,
+    `Test selection: suite=${options.suite} profile=${options.profile} shard=${options.shard}/${options.shards}${options.browserFilesOnly ? " browser-files-only" : ""} files=${files.length}\n`,
   );
   const args = [
-    "--test",
+    ...testFileFlags,
     // Half the cores plus one: Node's default (cores - 1) overloads dev machines.
     `--test-concurrency=${Math.ceil((availableParallelism() + 1) / 2)}`,
     ...(preflight

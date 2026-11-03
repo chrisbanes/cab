@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "0 5 * * *"
   workflow_dispatch:
+    inputs:
+      webkit:
+        description: Also run WebKit browser tests
+        type: boolean
+        default: false
   workflow_call:
 permissions:
   contents: read
@@ -62,17 +67,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { lane: integrations, suite: "coordination,sources,delivery,operations,infrastructure", shard: 1, shards: 1, preflight: true }
-          - { lane: execution, suite: execution, shard: 1, shards: 2 }
-          - { lane: execution, suite: execution, shard: 2, shards: 2 }
-          - { lane: workspaces, suite: workspaces, shard: 1, shards: 1 }
-          - { lane: operator, suite: operator, shard: 1, shards: 2 }
-          - { lane: operator, suite: operator, shard: 2, shards: 2 }
-          # No browser executables: non-browser cases must run without them.
-          - { lane: service, suite: all, shard: 1, shards: 2, profile: service }
-          - { lane: service, suite: all, shard: 2, shards: 2, profile: service }
+          # Browser lanes run only files with browser cases; the service lanes run every
+          # non-browser case once, without browser executables.
+          - { lane: integrations, suite: "coordination,sources,delivery,operations,infrastructure,execution,workspaces", shard: 1, shards: 1, preflight: true }
+          - { lane: operator, suite: operator, shard: 1, shards: 4 }
+          - { lane: operator, suite: operator, shard: 2, shards: 4 }
+          - { lane: operator, suite: operator, shard: 3, shards: 4 }
+          - { lane: operator, suite: operator, shard: 4, shards: 4 }
+          - { lane: service, suite: all, shard: 1, shards: 4, profile: service }
+          - { lane: service, suite: all, shard: 2, shards: 4, profile: service }
+          - { lane: service, suite: all, shard: 3, shards: 4, profile: service }
+          - { lane: service, suite: all, shard: 4, shards: 4, profile: service }
     env:
-      TEST_PROFILE: ${{ matrix.profile || ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'all' || 'chromium') }}
+      TEST_PROFILE: ${{ matrix.profile || ((github.event_name == 'schedule' || inputs.webkit == true || startsWith(github.ref, 'refs/tags/')) && 'all' || 'chromium') }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -109,7 +116,7 @@ jobs:
         if: matrix.preflight == true
         run: npm run test:built -- --fixture-preflight --profile="$TEST_PROFILE"
       - name: Run logical suite
-        run: npm run test:built -- --suite=${{ matrix.suite }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --profile="$TEST_PROFILE"
+        run: npm run test:built -- --suite=${{ matrix.suite }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --profile="$TEST_PROFILE" ${{ matrix.profile != 'service' && '--browser-files-only' || '' }}
       - name: Upload synthetic test evidence
         if: always()
         uses: actions/upload-artifact@v7.0.2

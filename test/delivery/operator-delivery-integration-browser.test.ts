@@ -260,6 +260,8 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     await web.close();
     const writes = f.scripted.state.writes;
     await f.reopen();
+    // The reopened owner gets its own startup budget, not what the first journey left.
+    j.restart();
     const reopenedWeb = await j.start("fixture.reopened-web", () =>
       f.startWeb(),
     );
@@ -427,6 +429,8 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   browser = undefined;
   await web.close();
   await f.reopen();
+  // The reopened owner gets its own startup budget, not what the first journey left.
+  j.restart();
   const restarted = await j.start("fixture.reopened-web", () => f.startWeb());
   browser = await j.start("browser.reopened", () => chromium.launch());
   page = await browser.newPage();

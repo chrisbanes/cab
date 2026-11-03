@@ -29,12 +29,14 @@ without restoring TypeScript caches.
 Tests include deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and browser tests. CI
-builds once and runs eight test jobs: six Chromium suite jobs and two service jobs
-without browser executables. Coordination, sources, delivery, operations and
-infrastructure share one lane; workspaces has one lane; execution and operator
-have two shards each. Logical suites remain separate directories even when they
+builds once and runs nine test jobs. Browser jobs run only the test files that register
+browser cases (`--browser-files-only`): one lane for every suite except operator, and
+four operator shards. Four service jobs run every test file without browser
+executables, so each non-browser case runs once. The slowest shard sets the required
+check's time, so refresh the weights below when one shard finishes well after the
+others. Logical suites remain separate directories even when they
 share a CI lane. Runtime retention tests are split by terminal events, threads and
-native input so the expensive workloads can run on different execution shards.
+native input so the expensive workloads can run on different service shards.
 
 Shards use separate `all`, `chromium` and `service` weights in
 `scripts/test-timings.json`. Weights measure complete file durations, including
@@ -93,17 +95,18 @@ Daily CI at 05:00 UTC skips the build and tests only when the previous scheduled
 run on the same branch completed successfully on the same commit. Changed commits,
 first nights and failed, cancelled or unfinished previous runs execute all checks;
 a history lookup failure fails CI. Manual workflow runs always
-run the complete checks. Nightly, manual and release-tag suite jobs add WebKit.
-These triggers become available when the
-workflow reaches the default branch. Local `npm run check` continues to run all
-tests and both browsers. For focused checks after building, use:
+run the complete checks. Nightly and release-tag suite jobs add WebKit; a manual
+run adds it when started with the `webkit` input. These triggers become available
+when the workflow reaches the default branch. Local `npm run check` runs all tests
+in Chromium. For focused checks after building, use:
 
 ```sh
-npm run test:built -- --suite=operator --profile=chromium --shard=1/2
+npm run test:built -- --suite=operator --shard=1/4
 npm run test:built -- --profile=service
+npm run test:built -- --profile=all   # adds WebKit
 ```
 
-`all` is the default profile; `chromium` excludes WebKit, and `service` excludes
+`chromium` is the default profile; `all` adds WebKit, and `service` excludes
 browser-dependent cases while retaining service assertions in mixed test files.
 Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards
@@ -113,7 +116,7 @@ the synthetic evidence. Refresh a profile from the evidence of a run, or any of
 its shards, using:
 
 ```sh
-node scripts/update-test-timings.mjs chromium 24 /path/to/evidence
+node scripts/update-test-timings.mjs chromium 26 /path/to/evidence
 ```
 
 Use `all 24` or `service 26` for the other profiles. Keep receipts from one run
@@ -125,6 +128,13 @@ duplicate receipt for one file. A stale weight only unbalances shards; the runne
 falls back to the median for a file without one.
 The Chromium and service weights use hosted CI receipts; the `all` profile uses
 local measurements. Refresh each profile as runner performance changes.
+
+When a browser fixture's `browser.close` does not complete, the fixture kills the
+process group of the browser that launch started and records `browser.kill` in the
+cleanup evidence; it closes listeners, auth and backing state only once that process
+has exited. Otherwise, or when execution times out, that state stays held. The runner passes
+`--test-force-exit`, so a file holding such state exits once its tests have reported
+instead of idling until the run deadline; Playwright kills its browsers on exit.
 
 `test:built` and `check` run the tests under a per-run `cab-run-*` directory in the
 OS temp root, passed to the test process tree as `TMPDIR`, so fixtures that call

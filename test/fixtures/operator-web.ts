@@ -43,6 +43,7 @@ import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
+import { killBrowser } from "./browser-diagnostics.js";
 import { tmpdir } from "./temp.js";
 import {
   FixtureLifecycle,
@@ -586,7 +587,17 @@ export async function createOperatorFixture<
               );
         browserStep = step;
         steps.push(step);
-        clientsClosed = fixtureStepCompleted(step);
+        if (!fixtureStepCompleted(step)) {
+          const killed = await lifecycle.attempt(
+            "browser.kill",
+            "cleanup",
+            () => killBrowser(client),
+            lifecycle.cleanupTimeoutMs,
+          );
+          steps.push(killed);
+          if (fixtureStepCompleted(killed)) browserStep = killed;
+        }
+        clientsClosed = fixtureStepCompleted(browserStep);
       }
       let listenersClosed = clientsClosed;
       for (const listener of listeners.values()) {

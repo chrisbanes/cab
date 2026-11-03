@@ -265,6 +265,26 @@ for (const [name, viewport] of viewports) {
     await page.getByRole("group", { name: "Proposed title" }).waitFor();
   });
 
+  test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport, {
+      lead: false,
+    });
+    await open();
+    await openPanel(page);
+    await panel(page)
+      .getByText(/has no project lead, so nobody can draft/)
+      .waitFor();
+    assert.equal(await draftButton(page).isDisabled(), true);
+    assert.equal(commands("drafting.start").length, 0);
+    assert.deepEqual(
+      f.service.list().filter((item) => item.workId.startsWith("drafting:")),
+      [],
+    );
+  });
+}
+
+// Protocol cases assert nothing width-specific, so they run once, at desktop.
+for (const [name, viewport] of viewports.slice(0, 1)) {
   test(`${name}: changing the project stops the old project's draft and drops its proposal`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport);
     const other = await seedDraftingProject(f, { name: "Relay" });
@@ -554,23 +574,6 @@ for (const [name, viewport] of viewports) {
     assert.notEqual(stops[0]?.key, stops[1]?.key);
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await panel(page).getByText("Draft interrupted", { exact: true }).waitFor();
-  });
-
-  test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
-    const { f, page, commands, open } = await launch(j, viewport, {
-      lead: false,
-    });
-    await open();
-    await openPanel(page);
-    await panel(page)
-      .getByText(/has no project lead, so nobody can draft/)
-      .waitFor();
-    assert.equal(await draftButton(page).isDisabled(), true);
-    assert.equal(commands("drafting.start").length, 0);
-    assert.deepEqual(
-      f.service.list().filter((item) => item.workId.startsWith("drafting:")),
-      [],
-    );
   });
 }
 

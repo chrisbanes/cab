@@ -5,7 +5,12 @@ import {
   captureBrowserEvidence,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
-const test = browserSuite("operator-responsive-browser");
+// Each journey makes 51 full page loads: loaded CI runners took 15-29 s (Chromium) and
+// 22-44 s (WebKit), once passing the 45 s default, so the budget has 2x headroom.
+const test = browserSuite("operator-responsive-browser", {
+  executionMs: 90000,
+  overallMs: 120000,
+});
 import { chromium, webkit, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { choiceForm } from "../fixtures/question-data.js";

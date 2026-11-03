@@ -89,6 +89,12 @@ function track(page: Page) {
   };
 }
 
+/**
+ * A press waits for the installation-wide refresh, which answers only after the scheduler wake it
+ * starts: each newly ready imported task gets a workspace (about ten git processes) first. That is
+ * about a second here, but has exceeded the 5 s default on a contended CI runner.
+ */
+const refreshed = { timeout: 15_000 };
 const importPanel = (page: Page) =>
   page.getByRole("region", { name: "Import issues" });
 const importButton = (page: Page) =>
@@ -364,7 +370,7 @@ test("saved source imports through Preview and import now", async (_t, journey) 
   assert.match(lead, /^Saved\. .*acme\/extra.* imported yet\.$/);
   await importButton(page).click();
   const activation = outcomeMessages(page).filter({ hasText: /^Previewed/ });
-  await activation.waitFor();
+  await activation.waitFor(refreshed);
   assert.match(
     await activation.locator(".action-outcome-message").innerText(),
     /^Previewed \d\d:\d\d\. .* are active\.$/,
@@ -372,7 +378,7 @@ test("saved source imports through Preview and import now", async (_t, journey) 
   const read = outcomeMessages(page).filter({
     hasText: /Read .* completely at/,
   });
-  await read.waitFor();
+  await read.waitFor(refreshed);
   assert.match(
     await read.locator(".action-outcome-message").innerText(),
     /^Read .* completely at \d\d:\d\d\.$/,
@@ -415,7 +421,7 @@ for (const state of ["complete", "partial", "never", "unavailable"] as const)
     await importButton(page).click();
     const imported = page.getByRole("link", { name: "View imported tasks" });
     if (state === "complete") {
-      await imported.waitFor();
+      await imported.waitFor(refreshed);
       return;
     }
     await outcomeMessages(page)
@@ -423,7 +429,7 @@ for (const state of ["complete", "partial", "never", "unavailable"] as const)
         hasText:
           state === "partial" ? /only partly/ : /nothing was imported from/,
       })
-      .waitFor();
+      .waitFor(refreshed);
     assert.equal(await imported.count(), 0);
     assert.doesNotMatch(
       await importPanel(page).innerText(),
@@ -443,7 +449,7 @@ test("step 1 succeeds and step 2 fails", async (_t, journey) => {
   await importButton(page).click();
   await outcomeMessages(page)
     .filter({ hasText: /^Previewed/ })
-    .waitFor();
+    .waitFor(refreshed);
   const warning = outcomeMessages(page).filter({
     hasText: "We couldn't confirm the refresh. The sources are active.",
   });
@@ -452,7 +458,9 @@ test("step 1 succeeds and step 2 fails", async (_t, journey) => {
   assert.equal(seen.refreshes(), 1);
   fail = false;
   await warning.getByRole("button", { name: "Refresh again" }).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.equal(seen.refreshes(), 2, "one refresh, no preview again");
   assert.equal(seen.previews.length, 3);
 });
@@ -469,7 +477,7 @@ test("a preview that never reached the service is checked with the same key", as
   });
   await importButton(page).click();
   const check = page.getByRole("button", { name: "Check whether it saved" });
-  await check.waitFor();
+  await check.waitFor(refreshed);
   assert.equal(
     seen.refreshes(),
     0,
@@ -485,7 +493,9 @@ test("a preview that never reached the service is checked with the same key", as
   await check.waitFor();
   assert.equal(seen.previews.length, 1);
   await check.click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.equal(seen.previews[1]?.key, seen.previews[0]?.key);
   assert.deepEqual(seen.steps, [
     "preview S-1",
@@ -517,10 +527,14 @@ test("a preview whose reply was lost reads as active and is not sent again", asy
   });
   await importButton(page).click();
   // The service recorded it, so the next read shows the source active and the press resumes.
-  await row(page, "acme/atlas").getByText("Active", { exact: true }).waitFor();
+  await row(page, "acme/atlas")
+    .getByText("Active", { exact: true })
+    .waitFor(refreshed);
   assert.equal(seen.refreshes(), 0);
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.deepEqual(seen.steps, [
     "preview S-1",
     "preview S-2",
@@ -530,7 +544,7 @@ test("a preview whose reply was lost reads as active and is not sent again", asy
   assert.equal(seen.previews.filter((p) => p.selectionId === "S-1").length, 1);
   await outcomeMessages(page)
     .filter({ hasText: /Read acme\/atlas.* completely/ })
-    .waitFor();
+    .waitFor(refreshed);
 });
 
 test("a lost refresh reply that never reached the service is offered again after a remount", async (_t, journey) => {
@@ -543,7 +557,7 @@ test("a lost refresh reply that never reached the service is offered again after
   await importButton(page).click();
   await outcomeMessages(page)
     .filter({ hasText: "We couldn't confirm the refresh." })
-    .waitFor();
+    .waitFor(refreshed);
   drop = false;
   await page.getByRole("link", { name: "Sync & placement" }).click();
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
@@ -551,7 +565,9 @@ test("a lost refresh reply that never reached the service is offered again after
   await importPanel(page).waitFor();
   const before = seen.previews.length;
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.equal(
     seen.previews.length,
     before,
@@ -573,7 +589,7 @@ test("a lost refresh reply that reached the service leaves nothing to import aft
   await importButton(page).click();
   await outcomeMessages(page)
     .filter({ hasText: "We couldn't confirm the refresh." })
-    .waitFor();
+    .waitFor(refreshed);
   await page.getByRole("link", { name: "Sync & placement" }).click();
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
   await page.getByRole("link", { name: "GitHub source" }).click();
@@ -602,7 +618,7 @@ test("Refresh again reports on the sources of the press it continues", async (_t
   const warning = outcomeMessages(page).filter({
     hasText: "We couldn't confirm the refresh.",
   });
-  await warning.waitFor();
+  await warning.waitFor(refreshed);
   // The reads now show every source synced; the retry still answers for this press.
   await row(page, "acme/atlas")
     .getByText(/^Synced \d\d:\d\d/)
@@ -611,13 +627,15 @@ test("Refresh again reports on the sources of the press it continues", async (_t
   // The retry's own progress is shown while it runs.
   await page.getByText("Refreshing from GitHub…").waitFor();
   gate.release();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   await outcomeMessages(page)
     .filter({ hasText: /^Previewed/ })
     .waitFor();
   await outcomeMessages(page)
     .filter({ hasText: /Read acme\/atlas.* completely/ })
-    .waitFor();
+    .waitFor(refreshed);
   assert.equal(seen.previews.length, 3);
   assert.equal(seen.refreshes(), 2);
 });
@@ -637,13 +655,13 @@ test("Refresh again still runs when the credential stopped being usable", async 
     const warning = outcomeMessages(page).filter({
       hasText: "We couldn't confirm the refresh.",
     });
-    await warning.waitFor();
+    await warning.waitFor(refreshed);
     // The re-read shows the credential unusable, and the retry is not a silent no-op.
     await page.locator("#source-credential-reason").waitFor();
     await warning.getByRole("button", { name: "Refresh again" }).click();
     await outcomeMessages(page)
       .filter({ hasText: /nothing was imported from/ })
-      .waitFor();
+      .waitFor(refreshed);
     assert.equal(seen.refreshes(), 2);
   } finally {
     process.env.FIXTURE_GITHUB = "offline-import-source-value";
@@ -672,7 +690,9 @@ test("double click sends each step once", async (_t, journey) => {
   );
   await button.click({ force: true });
   gate.release();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.equal(seen.previews.length, 3);
   assert.equal(seen.refreshes(), 1);
 });
@@ -700,7 +720,7 @@ test("source edited between save and import", async (_t, journey) => {
   const warning = outcomeMessages(page).filter({
     hasText: "Nothing was refreshed.",
   });
-  await warning.waitFor();
+  await warning.waitFor(refreshed);
   assert.equal(seen.refreshes(), 0);
   const stale = seen.previews[0];
   await warning.getByRole("button", { name: "Review changes" }).click();
@@ -713,7 +733,9 @@ test("source edited between save and import", async (_t, journey) => {
     "focus stays in the panel after the control that had it is gone",
   );
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   const fresh = seen.previews.at(-1);
   assert.equal(fresh?.expectedVersion, (stale?.expectedVersion ?? 0) + 1);
   assert.notEqual(fresh?.key, stale?.key);
@@ -762,7 +784,9 @@ test("private query never leaves the session view", async (_t, journey) => {
   });
   await row(page, query).first().waitFor();
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.equal(page.url().includes("PRIVATE"), false);
   assert.deepEqual(leaks, []);
   // Every element that shows the query is marked, so evidence masks it.
@@ -818,10 +842,10 @@ test("Sync & placement previews, activates and refreshes in one press", async (_
   await importButton(page).click();
   await outcomeMessages(page)
     .filter({ hasText: /^Previewed/ })
-    .waitFor();
+    .waitFor(refreshed);
   await outcomeMessages(page)
     .filter({ hasText: /Read .* completely at/ })
-    .waitFor();
+    .waitFor(refreshed);
   assert.deepEqual(seen.steps, [
     "preview S-1",
     "preview S-2",
@@ -842,7 +866,9 @@ test("Sync & placement after Preview and import now needs no action", async (_t,
   const { page, ids, web } = await start(journey);
   await addAndSave(page);
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   const config = await page.request.get(
     `${web.origin}/api/operator/projects/${ids.atlas}/configuration`,
   );
@@ -871,7 +897,9 @@ test("Sync & placement asks again only after a source save", async (_t, journey)
   const { page } = s;
   await addAndSave(page);
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   await saveElsewhere(s);
   await page.getByRole("link", { name: "Sync & placement" }).click();
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
@@ -933,7 +961,7 @@ for (const [label, viewport] of [
       hasText: /Read .* completely/,
     });
     const link = page.getByRole("link", { name: "View imported tasks" });
-    await link.waitFor();
+    await link.waitFor(refreshed);
     for (const target of [activation, read, link])
       assert.equal(
         await inFirstViewport(page, target),

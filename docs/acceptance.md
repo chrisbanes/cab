@@ -449,7 +449,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   conditional re-read and its skipped write, uncertain and non-holding records, restart
   resumption, and the editor and task presentation (`status-mapping-store`,
   `status-mapping-service`, `github-delivery-provider`, `operator-api`,
-  `operator-project-config-browser`, `status-mapping-live-harness`). One bounded live run on a
+  `operator-project-readiness-browser`, `status-mapping-live-harness`). One bounded live run on a
   scratch user-owned Project wrote `turnStarted` and `handedBack` through the real writer,
   coordinator and provider, each read back by the provider and independently by `gh`, with 0
   model turns, and deleted the Project with verified cleanup; two earlier attempts failed in the harness's own setup; the passing

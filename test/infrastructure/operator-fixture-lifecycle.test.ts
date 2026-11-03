@@ -4,7 +4,12 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { Browser } from "playwright";
+import { chromium, type Browser } from "playwright";
+import {
+  killBrowser,
+  launchedBrowserProcess,
+} from "../fixtures/browser-diagnostics.js";
+import { browserTest } from "../fixtures/browser-engines.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { FixtureCleanupError } from "../fixtures/fixture-lifecycle.js";
 import type { FixtureLifecycle } from "../fixtures/fixture-lifecycle.js";
@@ -531,6 +536,11 @@ test("a stalled browser close remains uncertain until its eventual completion", 
     );
     assert.equal(step?.status, "timed-out");
     assert.equal(step.eventual, undefined);
+    assert.equal(
+      fixture.lifecycle.steps.find((step) => step.name === "browser.kill")
+        ?.status,
+      "failed",
+    );
     cleanupTimeoutMs = 10000; // Resumed real cleanup uses the ordinary bound.
     finish();
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -548,6 +558,48 @@ test("a stalled browser close remains uncertain until its eventual completion", 
     await fixture.close();
   }
 });
+
+browserTest(
+  "a stalled browser close is killed before the fixture stops its listeners and service",
+  async () => {
+    const fixture = await createOperatorFixture(null, undefined, undefined, {
+      cleanupTimeoutMs: 1000,
+    });
+    const web = await fixture.startWeb();
+    const browser = await chromium.launch();
+    const child = launchedBrowserProcess(browser);
+    try {
+      assert.ok(child?.pid);
+      // A stopped browser never answers close, as in the stalled WebKit runs.
+      process.kill(-child.pid, "SIGSTOP");
+      await assert.rejects(
+        fixture.close(browser),
+        /browser.close: timed-out after \d+ ms/,
+      );
+      assert.deepEqual(
+        fixture.lifecycle.steps
+          .filter((step) => step.phase === "cleanup")
+          .map((step) => [step.name, step.status]),
+        [
+          ["browser.close", "timed-out"],
+          ["browser.kill", "completed"],
+          ["listener-1.close", "completed"],
+          ["auth-1.close", "completed"],
+          ["service.stop", "completed"],
+          ["directory.remove", "completed"],
+        ],
+      );
+      assert.throws(() => process.kill(child.pid as number, 0), {
+        code: "ESRCH",
+      });
+      await assert.rejects(access(fixture.directory));
+      await assert.rejects(fetch(web.origin));
+    } finally {
+      await killBrowser(browser).catch(() => undefined);
+      await fixture.close().catch(() => undefined);
+    }
+  },
+);
 
 test("one rejected listener preserves the primary assertion and closes an independent listener", async () => {
   const attempts: string[] = [];

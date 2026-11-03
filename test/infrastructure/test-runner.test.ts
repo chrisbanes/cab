@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -45,10 +46,17 @@ const runner = (await import(
     shard: number;
     shards: number;
     preflight: boolean;
+    browserFilesOnly: boolean;
   };
+  hasBrowserCases(file: string): boolean;
   selectTestFiles(
     files: string[],
-    options: { suite: string; shard: number; shards: number },
+    options: {
+      suite: string;
+      shard: number;
+      shards: number;
+      browserFilesOnly?: boolean;
+    },
     timings?: Record<string, number>,
   ): string[];
   runTestProcess(
@@ -117,11 +125,12 @@ const runner = (await import(
 
 test("CI options reject ambiguous, empty and incompatible selections", () => {
   assert.deepEqual(runner.parseTestOptions([]), {
-    profile: "all",
+    profile: "chromium",
     suite: "all",
     shard: 1,
     shards: 1,
     preflight: false,
+    browserFilesOnly: false,
   });
   for (const args of [
     ["--profile=unknown"],
@@ -132,36 +141,54 @@ test("CI options reject ambiguous, empty and incompatible selections", () => {
     ["--suite=operator,"],
     ["--shard=0/2"],
     ["--shard=3/2"],
-    ["--shard=1/3"],
+    ["--shard=1/0"],
+    ["--shard=1/10"],
     ["--profile=all", "--profile=service"],
     ["--unknown"],
     ["--fixture-preflight", "--profile=service"],
     ["--fixture-preflight", "--suite=operator"],
     ["--fixture-preflight", "--shard=1/2"],
+    ["--browser-files-only", "--profile=service"],
   ])
     assert.throws(() => runner.parseTestOptions(args), args.join(" "));
+  assert.equal(runner.parseTestOptions(["--shard=3/3"]).shards, 3);
+  assert.equal(
+    runner.parseTestOptions(["--browser-files-only"]).browserFilesOnly,
+    true,
+  );
 });
 
-test("CI logical suite shards cover the current source inventory exactly once", () => {
+test("CI shards run each browser file once in browser lanes and every file once in service lanes", () => {
   const all = runner.discoverTestFiles(".");
-  const selected = [
-    {
-      suite: "coordination,sources,delivery,operations,infrastructure",
-      shards: 1,
-    },
-    { suite: "execution", shards: 2 },
-    { suite: "operator", shards: 2 },
-    { suite: "workspaces", shards: 1 },
-  ].flatMap(({ suite, shards }) =>
-    Array.from({ length: shards }, (_, index) =>
-      runner.selectTestFiles(all, { suite, shard: index + 1, shards }),
-    ).flat(),
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const lanes = [
+    ...workflow.matchAll(
+      /- \{ lane: [\w-]+, suite: "?([\w,]+)"?, shard: (\d+), shards: (\d+)(, preflight: true)?(, profile: service)? \}/g,
+    ),
+  ].map((m) => ({
+    suite: m[1]!,
+    shard: Number(m[2]),
+    shards: Number(m[3]),
+    service: Boolean(m[5]),
+  }));
+  assert.equal(
+    lanes.length,
+    workflow.match(/^ {10}- \{ lane:/gm)?.length,
+    "every matrix entry parses",
   );
-  assert.equal(selected.length, new Set(selected).size);
-  assert.deepEqual(selected.sort(), all);
-  const service = [1, 2].flatMap((shard) =>
-    runner.selectTestFiles(all, { suite: "all", shard, shards: 2 }),
+  const run = (service: boolean) =>
+    lanes
+      .filter((lane) => lane.service === service)
+      .flatMap((lane) =>
+        runner.selectTestFiles(all, { ...lane, browserFilesOnly: !service }),
+      );
+  const browser = run(false);
+  assert.equal(browser.length, new Set(browser).size);
+  assert.deepEqual(
+    browser.sort(),
+    all.filter((file) => runner.hasBrowserCases(file)),
   );
+  const service = run(true);
   assert.equal(service.length, new Set(service).size);
   assert.deepEqual(service.sort(), all);
 });

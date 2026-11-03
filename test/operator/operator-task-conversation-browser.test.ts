@@ -906,6 +906,8 @@ test("a delegate is replied to from its sub-conversation header through the shar
   assert.equal(view.comments.length, 1);
   assert.equal(await box.inputValue(), "");
   // The conversation shows the comment once, at the task root, not inside the delegation.
+  // The notice comes from the receipt; the timeline shows the comment after its own re-read.
+  await log.getByText("Also cover toolbar launch.").waitFor();
   assert.equal(await log.getByText("Also cover toolbar launch.").count(), 1);
   assert.equal(await waiter.getByText("Also cover toolbar launch.").count(), 0);
 });

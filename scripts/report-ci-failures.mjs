@@ -415,19 +415,30 @@ async function candidateAttempts(
 }
 
 function accountAggregateFailure(attempt, logs) {
-  // Only this retrieved topology is qualified; historical or extra jobs remain unknown.
-  const lanes = [
-    "integrations-1",
-    "execution-1",
-    "execution-2",
-    "workspaces-1",
-    "operator-1",
-    "operator-2",
-    "service-1",
-    "service-2",
-  ];
-  const names = ["changes", "quality", ...lanes, "check"];
+  // Only these retrieved topologies (before and after browser lanes stopped repeating
+  // service cases) are qualified; other or extra jobs remain unknown.
   const jobs = attempt.jobs;
+  const lanes = [
+    [
+      "integrations-1",
+      "execution-1",
+      "execution-2",
+      "workspaces-1",
+      "operator-1",
+      "operator-2",
+      "service-1",
+      "service-2",
+    ],
+    [
+      "integrations-1",
+      ...[1, 2, 3, 4].flatMap((shard) => [
+        `operator-${shard}`,
+        `service-${shard}`,
+      ]),
+    ],
+  ].find((candidate) => candidate.length + 3 === jobs.length);
+  if (!lanes) return;
+  const names = ["changes", "quality", ...lanes, "check"];
   if (
     jobs.length !== names.length ||
     new Set(jobs.map((job) => job.id)).size !== jobs.length ||
