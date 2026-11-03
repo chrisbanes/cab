@@ -55,7 +55,9 @@ export function readinessInputs(
     string,
   ];
   const source = db
-    .prepare("SELECT readiness FROM project_task_sources WHERE projectId = ?")
+    .prepare(
+      "SELECT readiness, selections FROM project_task_sources WHERE projectId = ?",
+    )
     .get(String(item.projectId)) as Row | undefined;
   const ruleText = source ? String(source.readiness) : null;
   const rule = ruleText
@@ -66,6 +68,31 @@ export function readinessInputs(
       `SELECT selectionId, fields FROM source_memberships WHERE ${itemIs()} AND projectId = ?`,
     )
     .all(...key, String(item.projectId)) as Row[];
+  // A Project's fields are read only through a selection on that Project: a repository
+  // selection's memberships carry none, so they are no evidence about it.
+  const projectSelections = new Map(
+    z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            kind: z.string(),
+            projectNodeId: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .parse(JSON.parse(String(source?.selections ?? "[]")))
+      .flatMap((s) =>
+        s.kind === "project" && s.projectNodeId
+          ? [[s.id, s.projectNodeId]]
+          : [],
+      ),
+  );
+  const readProjects = new Set(
+    memberships.flatMap(
+      (m) => projectSelections.get(String(m.selectionId)) ?? [],
+    ),
+  );
   const facts = observedFacts(item);
   const fields = memberships.flatMap((row) =>
     projectFieldsSchema.parse(JSON.parse(String(row.fields))),
@@ -103,10 +130,10 @@ export function readinessInputs(
     else
       components.set(
         `project-field:${c.projectNodeId}:${c.fieldNodeId}`,
-        // An item outside the Project has no field page to have read. A closed one that a
-        // filtered listing dropped after the close is not an observation of its fields either:
-        // keep what the settlement froze, as no read can ever show more.
-        memberships.length === 0
+        // An item the Project's selection does not list has no field page to have read. A closed
+        // one that a filtered listing dropped after the close is not an observation of its fields
+        // either: keep what the settlement froze, as no read can ever show more.
+        !readProjects.has(c.projectNodeId)
           ? item.observedState === "closed"
             ? (frozen?.components.find(
                 (f) =>

@@ -1510,6 +1510,52 @@ test("a move to an option the rule accepts during an own close ends the settleme
   }
 });
 
+// A repository selection lists the closed issue; the open-only Project selection stops listing it.
+const projectAndRepository = () =>
+  deliveryFixture("reviewable-pr", true, true, undefined, undefined, true);
+
+test("a Project selection that stops listing the closed issue keeps the settlement while a repository selection still does", async () => {
+  const f = await projectAndRepository();
+  try {
+    await settleThenClose(f);
+    // The Project membership is dropped after two complete reads without the issue.
+    for (let i = 0; i < 3; i++) await f.service.refreshGitHub();
+    const memberships = databaseOf(f.service)
+      .prepare("SELECT selectionId FROM source_memberships")
+      .all() as { selectionId: string }[];
+    assert.deepEqual(
+      memberships.map((m) => m.selectionId),
+      ["repo-all"],
+    );
+    assert.equal(latched(f), 0);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    assert.equal(receipts(f), 1);
+    await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a Project field that changes while its membership remains ends the settlement, whatever a repository selection lists", async () => {
+  const f = await projectAndRepository();
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setStatus(fixtureProject.inReview);
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    f.setActionOutcome(closedOk);
+    f.onInspection(() => f.setIssueOpen(false));
+    await closeFixtureIssue(f);
+    f.onInspection(undefined);
+    for (let i = 0; i < 3; i++) await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
 test("a closed issue a filtered listing drops keeps the settlement's Project field values", async () => {
   const f = await deliveryFixture("reviewable-pr", true, true);
   try {
