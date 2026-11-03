@@ -248,6 +248,7 @@ test("initial and later incomplete native blocker reads hold imported admission"
       projectId,
       taskId,
       expectedVersion: resumedVersion,
+      expectedHoldRevision: Number(sources.hold("I_1")?.generation),
       decision: "resume-source-hold" as const,
     };
     assert.throws(

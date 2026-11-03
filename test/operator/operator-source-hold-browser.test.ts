@@ -106,6 +106,10 @@ test("a source hold shows its reason and text with only Resume source hold, refu
   await card.getByText(/Not resumed:/).waitFor();
   assert.equal(commands.length, 1);
   assert.equal(commands[0]?.decision, "resume-source-hold");
+  assert.equal(
+    commands[0]?.expectedHoldRevision,
+    f.service.githubSources().hold("I-COMMENT")?.generation,
+  );
   assert.equal(await resume(page).count(), 1);
   assert.equal(f.service.githubSources().hold("I-COMMENT")?.active, 1);
 
@@ -118,6 +122,10 @@ test("a source hold shows its reason and text with only Resume source hold, refu
   await card.getByText(/Source hold resumed/).waitFor();
   assert.equal(await resume(page).count(), 0);
   assert.equal(commands.length, 2);
+  assert.equal(
+    commands[1]?.expectedHoldRevision,
+    f.service.githubSources().hold("I-COMMENT")?.generation,
+  );
   assert.equal(f.service.githubSources().hold("I-COMMENT")?.active, 0);
   await inspector.getByText(/Source hold ·/).waitFor({ state: "hidden" });
   await inspector
@@ -168,5 +176,45 @@ test("the decisions link opens on the card and Resume source hold is keyboard op
   await page.keyboard.press("Enter");
   await card.getByText(/Source hold resumed/).waitFor();
   assert.equal(commands.length, 1);
+  assert.equal(
+    commands[0]?.expectedHoldRevision,
+    f.service.githubSources().hold("I-COMMENT")?.generation,
+  );
+  assert.equal(f.service.githubSources().hold("I-COMMENT")?.active, 0);
+});
+
+test("a stale hold decision conflicts, refreshes the hold and requires a new decision", async (_t, j) => {
+  const { f, imported, sync, web, page, commands } = await start(j, {
+    width: 1366,
+    height: 900,
+  });
+  sync("open");
+  await signIn(page, web, `/app/tasks/${imported.taskId}`);
+  const card = page.locator("[data-source-hold]");
+  await card.waitFor();
+  const original = Number(
+    f.service.githubSources().hold("I-COMMENT")?.generation,
+  );
+  const version = f.service.domain().task(imported.taskId).version;
+  f.service.githubSources().recordDeliveryClosureUnavailable("I-COMMENT");
+  assert.equal(f.service.domain().task(imported.taskId).version, version);
+  assert.equal(
+    f.service.githubSources().hold("I-COMMENT")?.generation,
+    original + 1,
+  );
+  await resume(page).click();
+  await card.getByText(/Not resumed:/).waitFor();
+  await card
+    .getByText(/could not read whether it closed the issue itself/)
+    .waitFor();
+  assert.equal(commands[0]?.expectedHoldRevision, original);
+  assert.equal(f.service.githubSources().hold("I-COMMENT")?.active, 1);
+  assert.equal(
+    f.service.githubSources().reviewDecision("I-COMMENT"),
+    undefined,
+  );
+  await resume(page).click();
+  await card.getByText(/Source hold resumed/).waitFor();
+  assert.equal(commands[1]?.expectedHoldRevision, original + 1);
   assert.equal(f.service.githubSources().hold("I-COMMENT")?.active, 0);
 });

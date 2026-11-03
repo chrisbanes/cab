@@ -2675,6 +2675,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("source.review"),
       taskId: uuid,
       expectedVersion: revision,
+      expectedHoldRevision: revision.optional(),
       decision: z.literal("resume-source-hold"),
     })
     .strict(),

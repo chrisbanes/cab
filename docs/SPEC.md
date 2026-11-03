@@ -369,8 +369,8 @@ is reverted still counts, and a later Done transition does not clear it. It is i
 no settlement, completion or admission. A later handback anchors again.
 
 `source.review` has one decision, `resume-source-hold`: operator-only, at the expected
-task version, for an imported task with an active hold, an open issue and current
-complete source and readiness evidence. Each recorded decision is kept in source
+task version and the observed hold revision, for an imported task with an active hold, an open issue and current
+complete source and readiness evidence. A different hold revision refuses the new decision; previously recorded legacy commands without a revision still replay their original receipt. Each recorded decision is kept in source
 history. Upgrading a store that held text for review adopts every imported task's
 observed text, releases only `changed-text` holds and keeps earlier decisions. A hold
 that a `changed-text` hold once replaced cannot be recovered from the old single hold

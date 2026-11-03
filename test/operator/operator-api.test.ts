@@ -1,6 +1,6 @@
 import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   insertExternalItem,
   insertSourceMembership,
@@ -1678,6 +1678,7 @@ test("source.review resumes a source hold through the command flow and refuses d
     projectId: ids.projectId,
     taskId: id,
     expectedVersion,
+    expectedHoldRevision: Number(source.hold("I1")?.generation ?? 1),
     decision: "resume-source-hold" as const,
   });
   const refused = (error: unknown) =>
@@ -1694,6 +1695,10 @@ test("source.review resumes a source hold through the command flow and refuses d
     reasonCode: "source-held",
     reason: "readiness-lost",
   });
+  await assert.rejects(
+    api.execute(resume((await read()).task.version)),
+    refused,
+  );
   // Closing replaces the hold; reopening does not release a closure hold.
   sync("open");
   sync("closed");
@@ -1723,6 +1728,65 @@ test("source.review resumes a source hold through the command flow and refuses d
     false,
   );
 
+  // A new generation may arrive without changing the task version.
+  const stale = resume(held.task.version);
+  source.recordDeliveryClosureUnavailable("I1");
+  const current = await read();
+  assert.equal(current.task.version, held.task.version);
+  assert.equal(current.source?.hold?.revision, stale.expectedHoldRevision + 1);
+  let before: unknown;
+  f.seedPersistedState((db) => {
+    before = db
+      .prepare("SELECT * FROM source_holds WHERE externalId = 'I1'")
+      .get();
+  });
+  await assert.rejects(api.execute(stale), refused);
+  f.seedPersistedState((db) => {
+    assert.deepEqual(
+      db.prepare("SELECT * FROM source_holds WHERE externalId = 'I1'").get(),
+      before,
+    );
+    assert.equal(
+      (
+        db
+          .prepare("SELECT count(*) AS n FROM source_review_decisions")
+          .get() as { n: number }
+      ).n,
+      0,
+    );
+    assert.equal(
+      db
+        .prepare("SELECT key FROM command_receipts WHERE key = ?")
+        .get(stale.key),
+      undefined,
+    );
+  });
+  assert.equal((await read()).task.version, held.task.version);
+  await assert.rejects(
+    api.execute({
+      ...stale,
+      key: randomUUID(),
+      expectedHoldRevision: stale.expectedHoldRevision + 2,
+    }),
+    refused,
+  );
+  const { expectedHoldRevision: _revision, ...legacyFresh } = resume(
+    held.task.version,
+  );
+  await assert.rejects(api.execute(legacyFresh), refused);
+  assert.throws(
+    () => d.execute({ ...legacyFresh, actor: "operator" }),
+    /revision/i,
+  );
+  for (const revision of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    assert.equal(
+      operatorCommandSchema.safeParse({
+        ...stale,
+        expectedHoldRevision: revision,
+      }).success,
+      false,
+    );
+
   const command = resume(held.task.version);
   const receipt = await api.execute(command);
   assert.equal(receipt.kind, "domain");
@@ -1731,7 +1795,7 @@ test("source.review resumes a source hold through the command flow and refuses d
   assert.equal(resumed.task.version, held.task.version + 1);
   assert.deepEqual(resumed.source?.hold, {
     active: false,
-    revision: held.source?.hold?.revision,
+    revision: command.expectedHoldRevision,
     reasonCode: "source-held",
     reason: null,
   });
@@ -1743,10 +1807,34 @@ test("source.review resumes a source hold through the command flow and refuses d
   assert.equal(reheld.task.version, resumed.task.version);
   assert.deepEqual(reheld.source?.hold, {
     active: true,
-    revision: (held.source?.hold?.revision ?? 0) + 1,
+    revision: command.expectedHoldRevision + 1,
     reasonCode: "source-held",
     reason: "closure-read-unavailable",
   });
+  assert.deepEqual(await api.execute(command), receipt);
+  assert.deepEqual((await read()).source?.hold, reheld.source?.hold);
+  // Seed the legacy hash and receipt in the format stored before this field existed.
+  const { expectedHoldRevision: _removed, ...legacy } = command;
+  const legacyDomain = { ...legacy, actor: "operator" };
+  const canonical = `{${Object.entries(legacyDomain)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${JSON.stringify(key)}:${JSON.stringify(value)}`)
+    .join(",")}}`;
+  const hash = createHash("sha256").update(canonical).digest("hex");
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE command_receipts SET payloadHash = ? WHERE key = ?")
+      .run(hash, legacy.key),
+  );
+  assert.deepEqual(await api.execute(legacy), receipt);
+  await assert.rejects(
+    api.execute({
+      ...legacy,
+      expectedHoldRevision: command.expectedHoldRevision,
+    }),
+    refused,
+  );
+  assert.deepEqual((await read()).source?.hold, reheld.source?.hold);
   // Put the resumed state back for the checks below.
   f.seedPersistedState((db) =>
     db
