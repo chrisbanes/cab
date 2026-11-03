@@ -29,13 +29,14 @@ without restoring TypeScript caches.
 Tests include deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and browser tests. CI
-builds once and runs eleven test jobs: eight Chromium suite jobs and three service
-jobs without browser executables. Coordination, sources, delivery, operations and
-infrastructure share one lane with two shards; workspaces has one shard, execution
-has two and operator has three. The slowest shard sets the required check's time,
-so refresh the weights below when one shard finishes well after the others. Logical suites remain separate directories even when they
+builds once and runs nine test jobs. Browser jobs run only the test files that register
+browser cases (`--browser-files-only`): one lane for every suite except operator, and
+four operator shards. Four service jobs run every test file without browser
+executables, so each non-browser case runs once. The slowest shard sets the required
+check's time, so refresh the weights below when one shard finishes well after the
+others. Logical suites remain separate directories even when they
 share a CI lane. Runtime retention tests are split by terminal events, threads and
-native input so the expensive workloads can run on different execution shards.
+native input so the expensive workloads can run on different service shards.
 
 Shards use separate `all`, `chromium` and `service` weights in
 `scripts/test-timings.json`. Weights measure complete file durations, including
@@ -100,7 +101,7 @@ when the workflow reaches the default branch. Local `npm run check` runs all tes
 in Chromium. For focused checks after building, use:
 
 ```sh
-npm run test:built -- --suite=operator --shard=1/3
+npm run test:built -- --suite=operator --shard=1/4
 npm run test:built -- --profile=service
 npm run test:built -- --profile=all   # adds WebKit
 ```

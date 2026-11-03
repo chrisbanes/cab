@@ -415,29 +415,28 @@ async function candidateAttempts(
 }
 
 function accountAggregateFailure(attempt, logs) {
-  // Only these retrieved topologies (before and after the 11-lane split) are qualified;
-  // other or extra jobs remain unknown.
+  // Only these retrieved topologies (before and after browser lanes stopped repeating
+  // service cases) are qualified; other or extra jobs remain unknown.
   const jobs = attempt.jobs;
   const lanes = [
-    ["integrations-1", "operator-2", "service-2"],
     [
       "integrations-1",
-      "integrations-2",
-      "operator-2",
-      "operator-3",
-      "service-2",
-      "service-3",
-    ],
-  ]
-    .map((multi) => [
-      ...multi,
       "execution-1",
       "execution-2",
       "workspaces-1",
       "operator-1",
+      "operator-2",
       "service-1",
-    ])
-    .find((candidate) => candidate.length + 3 === jobs.length);
+      "service-2",
+    ],
+    [
+      "integrations-1",
+      ...[1, 2, 3, 4].flatMap((shard) => [
+        `operator-${shard}`,
+        `service-${shard}`,
+      ]),
+    ],
+  ].find((candidate) => candidate.length + 3 === jobs.length);
   if (!lanes) return;
   const names = ["changes", "quality", ...lanes, "check"];
   if (

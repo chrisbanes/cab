@@ -1369,13 +1369,22 @@ test("aggregate failure accounting follows complete dependencies and retains own
       );
     if (variant === "extra-job")
       jobs.push({ ...jobs[0]!, id: 999, name: "historical-extra-job" });
-    if (variant === "split-topology")
+    if (variant === "split-topology") {
+      // Browser-only lanes: execution and workspaces fold into integrations.
+      for (const name of ["execution-1", "workspaces-1"])
+        jobs.splice(
+          jobs.findIndex((job) => job.name === name),
+          1,
+        );
+      owning.name = "operator-3";
+      const passing = jobs.find((job) => job.name === "operator-1")!;
       for (const [index, name] of [
-        "integrations-2",
-        "operator-3",
+        "operator-4",
         "service-3",
+        "service-4",
       ].entries())
-        jobs.push({ ...jobs[2]!, id: 711 + index, name });
+        jobs.push({ ...passing, id: 711 + index, name });
+    }
     if (variant === "unfinished") jobs[0]!.status = "in_progress";
     const ordinary = variant === "ordinary" || variant === "mixed";
     const report = await api.renderReport({
@@ -1472,7 +1481,7 @@ test("aggregate failure accounting follows complete dependencies and retains own
       ]);
       assert.equal(
         aggregate.accountedFor.dependencies.length,
-        variant === "split-topology" ? 13 : 10,
+        variant === "split-topology" ? 11 : 10,
       );
       assert.ok(aggregate.url);
     }

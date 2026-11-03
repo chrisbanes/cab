@@ -391,6 +391,7 @@ export function parseTestOptions(args) {
     shard: 1,
     shards: 1,
     preflight: false,
+    browserFilesOnly: false,
   };
   const seen = new Set();
   for (const arg of args) {
@@ -398,6 +399,7 @@ export function parseTestOptions(args) {
     if (seen.has(key)) throw Error(`Duplicate test option: ${key}`);
     seen.add(key);
     if (arg === "--fixture-preflight") options.preflight = true;
+    else if (arg === "--browser-files-only") options.browserFilesOnly = true;
     else if (arg.startsWith("--profile=")) options.profile = arg.slice(10);
     else if (arg.startsWith("--suite=")) options.suite = arg.slice(8);
     else if (arg.startsWith("--shard=")) {
@@ -429,16 +431,28 @@ export function parseTestOptions(args) {
     throw Error(
       "Fixture preflight requires all suites, no sharding and browser coverage",
     );
+  if (options.browserFilesOnly && options.profile === "service")
+    throw Error("Browser files only requires a browser profile");
   return options;
 }
+
+/** Whether a compiled test's source registers browser cases, as AGENTS.md requires them to. */
+export const hasBrowserCases = (file, root = ".") =>
+  /\bbrowser(Suite|Test)\(/.test(
+    readFileSync(
+      resolve(root, file.replace(/^dist\//, "").replace(/\.js$/, ".ts")),
+      "utf8",
+    ),
+  );
 
 export function selectTestFiles(files, options, timings = {}) {
   const selected = files.filter(
     (file) =>
-      options.suite === "all" ||
-      options.suite
-        .split(",")
-        .some((suite) => file.startsWith(`dist/test/${suite}/`)),
+      (options.suite === "all" ||
+        options.suite
+          .split(",")
+          .some((suite) => file.startsWith(`dist/test/${suite}/`))) &&
+      (!options.browserFilesOnly || hasBrowserCases(file)),
   );
   if (!selected.length)
     throw Error(`No tests selected for suite ${options.suite}`);
@@ -678,7 +692,7 @@ async function runSelected(root, operatorCodexHome) {
       );
   if (!files.length) throw Error("No compiled test files found");
   process.stdout.write(
-    `Test selection: suite=${options.suite} profile=${options.profile} shard=${options.shard}/${options.shards} files=${files.length}\n`,
+    `Test selection: suite=${options.suite} profile=${options.profile} shard=${options.shard}/${options.shards}${options.browserFilesOnly ? " browser-files-only" : ""} files=${files.length}\n`,
   );
   const args = [
     "--test",
