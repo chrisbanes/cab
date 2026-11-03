@@ -376,6 +376,11 @@ observed text, releases only `changed-text` holds and keeps earlier decisions. A
 that a `changed-text` hold once replaced cannot be recovered from the old single hold
 row; the next authoritative sync re-establishes structural holds. Finished work handed
 back before the upgrade anchors at the text observed then. The upgrade is one-way.
+The task read's `source.hold` is null when the task has no hold row. Otherwise it carries `active`,
+the hold's `revision`, which rises when a hold is set while inactive or with a different reason (this
+can happen without a change to the task version), and `reason`, null when the hold is inactive or the
+stored reason is not one the read names. The task workspace shows Resume source hold again when an
+active hold has a higher revision than the one a recorded resume answered.
 
 ## Execution and recovery
 
@@ -766,9 +771,14 @@ transient failures.
 The operator UI is a React application at `/app`, served with same-origin
 `/api/operator` JSON by the production `operator` command. Approval decisions, handback
 settlement, result-destination reconciliation and messages to delegated assignments
-are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
-server-rendered routes: local task edits and Resume source hold on `/task/:id`,
-reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
+are task-view controls, and the CLI offers the same commands. A local task's title, outcome
+and Ready are edited from Edit task… in the task header, and an imported task's active source hold
+is resumed from the decision card in its Overview, through the receipted `task.configure` and
+`source.review` JSON commands. Edit task… is offered only for a local task whose title and outcome
+the task read discloses exactly (`task.textExact`); text the service redacts or withholds is never
+offered for editing or written back, and the dialog sends only the fields the operator changed. A
+task with redacted text changes Ready through `cab task configure TASK_ID --ready true|false`. The retained server-rendered `/task/:id` page offers the same two
+controls until its removal; it is reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions

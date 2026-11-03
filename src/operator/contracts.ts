@@ -1375,6 +1375,15 @@ export const unresolvedResultSchema = z
     availability: z.enum(["available", "recipient-unavailable"]),
   })
   .strict();
+export const sourceHoldReasonSchema = z.enum([
+  "closed",
+  "withdrawn",
+  "readiness-lost",
+  "closure-read-unavailable",
+  "closure-attribution-unproved",
+]);
+export type SourceHoldReason = z.infer<typeof sourceHoldReasonSchema>;
+
 const source = z
   .object({
     identity: sourceIdentity,
@@ -1441,6 +1450,8 @@ const source = z
         active: z.boolean(),
         revision,
         reasonCode: z.literal("source-held"),
+        /** Why it holds; null when it is inactive or the stored reason is outside this set. */
+        reason: sourceHoldReasonSchema.nullable(),
       })
       .strict()
       .nullable(),
@@ -1756,6 +1767,11 @@ export const taskSchema = envelope(
           projectId: uuid,
           title: safeText,
           outcome: safeText,
+          /**
+           * Whether `title` and `outcome` are the stored text, not a redacted or withheld projection;
+           * only then may a client send them back.
+           */
+          textExact: z.boolean(),
           /** The issue's brief comment and later trusted notes; null without one or when withheld. */
           issueBrief: z.string().max(32768).nullable(),
           /** Notes or brief text were cut to fit the 32 KB cap. */
@@ -2577,6 +2593,15 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       title: z.string().trim().min(1).max(512).optional(),
       outcome: text.optional(),
       ready: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("source.review"),
+      taskId: uuid,
+      expectedVersion: revision,
+      decision: z.literal("resume-source-hold"),
     })
     .strict(),
   z

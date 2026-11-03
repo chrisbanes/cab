@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import type { TaskRead } from "../../src/operator/contracts.js";
+import {
+  sourceHoldReasonSchema,
+  type TaskRead,
+} from "../../src/operator/contracts.js";
 import { optionalSummary } from "../../web/src/composer-summary.js";
 import { emptyInput } from "../../web/src/composer-state.js";
 import {
@@ -9,7 +12,10 @@ import {
   briefParts,
   criterionRows,
   originLabel,
+  projectFieldRows,
   sourceFacts,
+  sourceHoldReasonText,
+  sourceHoldResumeCaveat,
   stopConsequences,
   taskIdentity,
   taskReadiness,
@@ -464,4 +470,44 @@ test("sourceFacts reports the latest successful sync across every selection", ()
     "2026-10-10T11:02:00Z",
   );
   assert.equal(sourceFacts(source([membership(null)])).synced, null);
+});
+
+test("sourceHoldReasonText names every hold reason and tells closed ones to reopen first", () => {
+  const texts = sourceHoldReasonSchema.options.map(sourceHoldReasonText);
+  assert.equal(new Set(texts).size, texts.length);
+  for (const reason of [
+    "closed",
+    "closure-read-unavailable",
+    "closure-attribution-unproved",
+  ] as const)
+    assert.match(sourceHoldReasonText(reason), /Reopen the issue|Reopen it/);
+  assert.match(sourceHoldReasonText("readiness-lost"), /ready/);
+  assert.equal(sourceHoldReasonText(null), "The source holds this task.");
+  // Neither a provider's name nor the hold code leaks into the wording.
+  assert.doesNotMatch(texts.join(" "), /GitHub|Jira|source-held/);
+  assert.match(sourceHoldResumeCaveat, /do not confirm runtime admission/);
+});
+
+test("projectFieldRows shows field and option names and falls back to node IDs", () => {
+  const source = {
+    memberships: [
+      {
+        selectionId: "repo",
+        projectFields: [
+          {
+            projectNodeId: "P1",
+            fieldNodeId: "F1",
+            optionNodeId: "O1",
+            fieldName: "Status",
+            optionName: "Ready",
+          },
+          { projectNodeId: "P1", fieldNodeId: "F2", optionNodeId: "O2" },
+        ],
+      },
+    ],
+  } as unknown as NonNullable<Data["source"]>;
+  assert.deepEqual(
+    projectFieldRows(source).map((r) => r.text),
+    ["Status: Ready", "F2: O2"],
+  );
 });

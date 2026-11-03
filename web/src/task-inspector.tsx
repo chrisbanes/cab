@@ -13,7 +13,9 @@ import {
   deliveryApplies,
   executionFacts,
   jiraFacts,
+  projectFieldRows,
   sourceFacts,
+  sourceHoldReasonText,
   taskColumnOf,
   taskIdentity,
   trackerName,
@@ -86,7 +88,8 @@ export function TaskInspector({
               {(() => {
                 const identity = taskIdentity(data),
                   { state, synced, problem } = sourceFacts(source),
-                  { status, site } = jiraFacts(source);
+                  { status, site } = jiraFacts(source),
+                  fields = projectFieldRows(source);
                 return (
                   <>
                     {identity.url ? (
@@ -105,6 +108,30 @@ export function TaskInspector({
                         : "no successful sync"}
                       {problem && ` · ${problem}`}
                     </p>
+                    {source.hold?.active && (
+                      <p>
+                        Source hold · {sourceHoldReasonText(source.hold.reason)}
+                      </p>
+                    )}
+                    {source.review && (
+                      <p className="muted">
+                        Last source decision ·{" "}
+                        {source.review.decision === "resume-source-hold"
+                          ? "Resumed source hold"
+                          : (source.review.decision ?? "recorded")}{" "}
+                        · {clockLabel(Date.parse(source.review.decidedAt))}
+                      </p>
+                    )}
+                    {fields.length > 0 && (
+                      <>
+                        <h5 className="inspector-label">Project fields</h5>
+                        <ul className="inspector-rows">
+                          {fields.map((f) => (
+                            <li key={f.key}>{f.text}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
                     <p className="muted">
                       {trackerName(source)} owns the issue. cab coordinates the
                       work.

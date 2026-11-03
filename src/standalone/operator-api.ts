@@ -157,6 +157,7 @@ import {
   taskMessagePageSchema,
   taskRecordQuerySchema,
   taskResultPageSchema,
+  sourceHoldReasonSchema,
   taskSchema,
   taskTimelineSchema,
   taskToolOutputSchema,
@@ -3899,6 +3900,9 @@ export class OperatorApi {
         projectId,
         title: this.safe(t.title, excluded),
         outcome: this.safe(t.outcome, excluded),
+        textExact:
+          this.disclosable(t.title, excluded) &&
+          this.disclosable(t.outcome, excluded),
         issueBrief: this.safe(issueBrief?.text, excluded, issueBriefByteLimit),
         issueBriefTruncated: issueBrief?.truncated ?? false,
         version: Number(t.version),
@@ -4945,6 +4949,10 @@ export class OperatorApi {
             active: Boolean(hold.active),
             revision: Number(hold.generation),
             reasonCode: "source-held",
+            // Stored text is persisted data: an inactive or unrecognised reason reads as null.
+            reason: hold.active
+              ? (sourceHoldReasonSchema.safeParse(hold.reason).data ?? null)
+              : null,
           }
         : null,
     };

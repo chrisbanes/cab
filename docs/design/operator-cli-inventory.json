@@ -1693,7 +1693,7 @@
     },
     {
       "id": "source.review",
-      "reason": "design excludes from first release: docs/design/operator-cli.md (Sources and delivery) lists source.review as not a CLI command; CLI4 record 'Not exposed'."
+      "reason": "design excludes from first release: docs/design/operator-cli.md (Sources and delivery) lists source.review as a JSON command used by the web task workspace and not a CLI command; CLI4 record 'Not exposed'."
     },
     {
       "id": "handback settlement",

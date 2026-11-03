@@ -170,13 +170,14 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     ((await strip.locator("[data-task-readiness]").textContent()) ?? "")
       .length > 0,
   );
-  // Exactly three header actions (Execution, Reset task, Stop), and the direct-load Back names the project.
+  // Exactly four header actions (Execution, Edit task, Reset task, Stop), and the direct-load Back names the project.
   assert.deepEqual(
     await header
       .locator(".task-header-actions > *")
       .evaluateAll((els) => els.map((e) => [e.tagName, e.textContent])),
     [
       ["A", "Execution"],
+      ["BUTTON", "Edit task…"],
       ["BUTTON", "Reset task…"],
       ["BUTTON", "Stop…"],
     ],
@@ -4649,6 +4650,8 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await page.keyboard.press("Tab");
   await activeIs("Execution");
   await page.keyboard.press("Tab");
+  await activeIs("Edit task…");
+  await page.keyboard.press("Tab");
   await activeIs("Stop…");
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("alertdialog", {
@@ -4721,7 +4724,10 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header
       .locator(".task-header-actions > *")
       .evaluateAll((els) => els.map((e) => [e.tagName, e.textContent])),
-    [["A", "Execution"]],
+    [
+      ["A", "Execution"],
+      ["BUTTON", "Edit task…"],
+    ],
   );
 
   // A recorded Stop offers Resume… in place of Stop….
