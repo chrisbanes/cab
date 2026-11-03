@@ -62,15 +62,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { lane: integrations, suite: "coordination,sources,delivery,operations,infrastructure", shard: 1, shards: 1, preflight: true }
+          - { lane: integrations, suite: "coordination,sources,delivery,operations,infrastructure", shard: 1, shards: 2, preflight: true }
+          - { lane: integrations, suite: "coordination,sources,delivery,operations,infrastructure", shard: 2, shards: 2 }
           - { lane: execution, suite: execution, shard: 1, shards: 2 }
           - { lane: execution, suite: execution, shard: 2, shards: 2 }
           - { lane: workspaces, suite: workspaces, shard: 1, shards: 1 }
-          - { lane: operator, suite: operator, shard: 1, shards: 2 }
-          - { lane: operator, suite: operator, shard: 2, shards: 2 }
+          - { lane: operator, suite: operator, shard: 1, shards: 3 }
+          - { lane: operator, suite: operator, shard: 2, shards: 3 }
+          - { lane: operator, suite: operator, shard: 3, shards: 3 }
           # No browser executables: non-browser cases must run without them.
-          - { lane: service, suite: all, shard: 1, shards: 2, profile: service }
-          - { lane: service, suite: all, shard: 2, shards: 2, profile: service }
+          - { lane: service, suite: all, shard: 1, shards: 3, profile: service }
+          - { lane: service, suite: all, shard: 2, shards: 3, profile: service }
+          - { lane: service, suite: all, shard: 3, shards: 3, profile: service }
     env:
       TEST_PROFILE: ${{ matrix.profile || ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'all' || 'chromium') }}
     steps:

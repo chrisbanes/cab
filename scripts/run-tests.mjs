@@ -401,9 +401,11 @@ export function parseTestOptions(args) {
     else if (arg.startsWith("--profile=")) options.profile = arg.slice(10);
     else if (arg.startsWith("--suite=")) options.suite = arg.slice(8);
     else if (arg.startsWith("--shard=")) {
-      const match = /^--shard=([12])\/([12])$/.exec(arg);
+      const match = /^--shard=([1-9])\/([1-9])$/.exec(arg);
       if (!match || Number(match[1]) > Number(match[2]))
-        throw Error("Shard must be 1/1, 1/2 or 2/2");
+        throw Error(
+          "Shard must be <index>/<count> with 1 <= index <= count <= 9",
+        );
       options.shard = Number(match[1]);
       options.shards = Number(match[2]);
     } else throw Error(`Unknown test option: ${arg}`);

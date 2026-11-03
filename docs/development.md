@@ -29,10 +29,11 @@ without restoring TypeScript caches.
 Tests include deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and browser tests. CI
-builds once and runs eight test jobs: six Chromium suite jobs and two service jobs
-without browser executables. Coordination, sources, delivery, operations and
-infrastructure share one lane; workspaces has one lane; execution and operator
-have two shards each. Logical suites remain separate directories even when they
+builds once and runs eleven test jobs: eight Chromium suite jobs and three service
+jobs without browser executables. Coordination, sources, delivery, operations and
+infrastructure share one lane with two shards; workspaces has one shard, execution
+has two and operator has three. The slowest shard sets the required check's time,
+so refresh the weights below when one shard finishes well after the others. Logical suites remain separate directories even when they
 share a CI lane. Runtime retention tests are split by terminal events, threads and
 native input so the expensive workloads can run on different execution shards.
 
@@ -113,7 +114,7 @@ the synthetic evidence. Refresh a profile from the evidence of a run, or any of
 its shards, using:
 
 ```sh
-node scripts/update-test-timings.mjs chromium 24 /path/to/evidence
+node scripts/update-test-timings.mjs chromium 26 /path/to/evidence
 ```
 
 Use `all 24` or `service 26` for the other profiles. Keep receipts from one run
