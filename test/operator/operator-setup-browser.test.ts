@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ReadinessResult } from "../../src/operator/readiness.js";
 import assert from "node:assert/strict";
 import { realpath } from "node:fs/promises";
@@ -1845,4 +1846,58 @@ test("Setup waits for a pending readiness read only while the starter option is 
   await page.getByLabel("Lead profile", { exact: true }).waitFor();
   assert.equal(f.service.domain().profiles().length, 1);
   settle(JSON.parse(readinessBody()));
+});
+
+test("Setup recovers explicitly from a revoked starter candidate while preserving the lead and draft", async (_t, journey) => {
+  const { page, f } = await setupJourney(journey, {
+    profiles: false,
+    readiness: async () => JSON.parse(readinessBody()),
+  });
+  const sent = sentCommands(page);
+  const inline = profileGroup(page);
+  await page
+    .getByLabel("Project name", { exact: true })
+    .fill("Preserved project");
+  await page
+    .getByLabel("Instructions", { exact: true })
+    .fill("Preserved instructions");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  const lead = page.getByLabel("Lead profile", { exact: true });
+  await lead.waitFor();
+  const created = sent.find((c) => c.type === "profile.create")!;
+  const reviewerId = (created.starter as { reviewerId: string }).reviewerId;
+  f.service.domain().execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewerId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  await page.getByRole("button", { name: "Create paused project" }).click();
+  const recovery = page.getByRole("group", {
+    name: "Starter candidates unavailable",
+  });
+  await recovery.waitFor();
+  assert.equal(f.service.domain().projects().length, 0);
+  await recovery
+    .getByRole("button", { name: "Continue without starter candidates" })
+    .click();
+  assert.equal(await lead.inputValue(), created.profileId);
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Preserved project",
+  );
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).inputValue(),
+    "Preserved instructions",
+  );
+  assert.equal(f.service.domain().profile(reviewerId).revoked, 1);
+  await page.getByRole("button", { name: "Create paused project" }).click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const projects = sent.filter((c) => c.type === "project.create");
+  assert.equal(projects.length, 2);
+  assert.equal(projects[1]?.leadProfileId, created.profileId);
+  assert.equal(Object.hasOwn(projects[1]!, "candidateProfileIds"), false);
 });

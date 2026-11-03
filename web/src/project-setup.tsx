@@ -549,7 +549,18 @@ export function ProjectSetup(
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (currentHold()) return;
-    void sendDraft(e.currentTarget, d, p.client, p.session, command, p.refresh);
+    void sendDraft(
+      e.currentTarget,
+      d,
+      p.client,
+      p.session,
+      command,
+      p.refresh,
+    ).then(() => {
+      // A refused candidate may have been revoked since the workspace read.
+      if (d.phase === "rejected" && values.candidateProfileIds?.length)
+        p.refresh();
+    });
   };
   const noteId = useId();
 
@@ -686,6 +697,31 @@ export function ProjectSetup(
                 </DraftField>
               )}
             </div>
+            {values.candidateProfileIds?.some(
+              (id) =>
+                p.workspace &&
+                !p.workspace.data.profiles.some(
+                  (profile) => profile.id === id && !profile.revoked,
+                ),
+            ) && (
+              <fieldset
+                className="setup-profile"
+                aria-label="Starter candidates unavailable"
+              >
+                <p className="metadata muted">
+                  A starter profile is unavailable. Keep this lead and choose
+                  worker candidates later.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={disabled}
+                  onClick={() => d.set("candidateProfileIds", [])}
+                >
+                  Continue without starter candidates
+                </Button>
+              </fieldset>
+            )}
             {inlineProfile && (
               <fieldset
                 ref={profileBox}

@@ -35,6 +35,9 @@ note, **Cancel** and then **Create paused project** at every width.
    Unchecking preserves lead-only creation. The subsequent project receives the workers
    as candidates only while the inline lead stays selected; routing remains disabled,
    with blank guidance and no credential. Later projects choose candidates normally.
+   If a worker is revoked before project creation, setup offers **Continue without
+   starter candidates**, preserving the lead and every other field; it does not
+   silently remove candidates or restore the revoked profile.
 2. **Instructions.** Unchanged.
 3. **Repositories.** Discovered repository and ref, folder picker, checkout
    verification, typed fallback. While discovery is unconfigured the step starts

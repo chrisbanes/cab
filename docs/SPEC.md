@@ -949,7 +949,9 @@ the lead selects it without losing other setup values. Profile and project creat
 remain separate submissions. Only the subsequent project using that inline lead
 receives both workers as candidates, with routing disabled, blank guidance and no
 routing credential; its coordination context permits them. Changing the selected
-lead adds no starter candidates. Later projects use ordinary candidate selection.
+lead adds no starter candidates. If a worker is revoked before project creation,
+setup offers an explicit way to continue without starter candidates while preserving
+the lead and remaining draft. Later projects use ordinary candidate selection.
 While discovery is unconfigured the repository step starts collapsed behind "Add
 a repository". The project is created paused; the ready check replaces setup and
 its primary action resumes the project and opens the composer; its secondary keeps
