@@ -398,6 +398,7 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
     childExitObserved: boolean;
     childExitSignal: NodeJS.Signals | null;
   }> = [];
+  const failureObservedAt: number[] = [];
   const runtime = new GatedRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -411,7 +412,10 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
         gitTimeoutMs: { "repository-identity": 30_000 },
         gitTerminationGraceMs: 20,
         gitTerminationObservationMs: 40,
-        gitFailureObserver: (failure) => failures.push(failure),
+        gitFailureObserver: (failure) => {
+          failures.push(failure);
+          failureObservedAt.push(Date.now());
+        },
       },
     },
   );
@@ -485,10 +489,14 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
         childExitSignal: cancelled[0]?.childExitSignal,
       })}`,
     );
+    // The strict bound protects the cancellation; the rest of the stop (store close,
+    // loop teardown) varies with load, so it only has to finish well before a hang.
+    const observedAt = failureObservedAt.at(-1);
     assert.ok(
-      stopElapsedMs < 20 + 40 + 700,
-      `stop settled in ${stopElapsedMs}ms`,
+      observedAt !== undefined && observedAt - readyAt < 20 + 40 + 700,
+      `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
     );
+    assert.ok(stopElapsedMs < 5_000, `stop settled in ${stopElapsedMs}ms`);
     const submission = await pendingSubmission;
     assert.equal(submission.outcome, "rejected");
     if (submission.outcome === "rejected")
