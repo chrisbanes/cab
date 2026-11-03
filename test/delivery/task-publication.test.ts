@@ -687,9 +687,12 @@ test("Abandon waits for a read-back already in flight and the abandoned create s
   f.gh.inspectGate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  const inspectEntered = new Promise<void>((resolve) => {
+    f.gh.onInspectGated = resolve;
+  });
   // A refresh reads the unproved create back; Abandon arrives while that read is open.
   const refreshing = f.service.refreshGitHub();
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await inspectEntered;
   const abandoning = f.service.abandonTaskPublication({
     taskId,
     publicationId: review.publicationId,
