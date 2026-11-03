@@ -757,6 +757,43 @@ test("a Project field grant is chosen by name without typing an ID, and reads as
   await grant(page).getByText(sentence, { exact: true }).waitFor();
 });
 
+test("an item-add grant picks a Project alone and carries no field left from a field grant", async (_t, journey) => {
+  const { page } = await startDiscovery(journey);
+  await page.getByRole("button", { name: "Add grant", exact: true }).click();
+  const row = grant(page);
+  await row.getByLabel("Action", { exact: true }).selectOption("project.field");
+  await row
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "acme/atlas" });
+  await row
+    .getByLabel("Project", { exact: true })
+    .selectOption({ label: "Atlas roadmap" });
+  await row
+    .getByLabel("Field", { exact: true })
+    .selectOption({ label: "Status" });
+  await row
+    .getByLabel("Action", { exact: true })
+    .selectOption("project.item.add");
+  assert.equal(await row.getByLabel("Field", { exact: true }).count(), 0);
+  await row.getByLabel("Authority", { exact: true }).selectOption("allow");
+  await row
+    .getByText("Allow: add issues in acme/atlas to Project Atlas roadmap", {
+      exact: true,
+    })
+    .waitFor();
+  const sent = body(page);
+  await save(page).click();
+  assert.deepEqual((await sent).grants, [
+    {
+      action: "project.item.add",
+      repositoryId: "R_atlas",
+      mode: "allow",
+      projectNodeId: "PVT_atlas",
+    },
+  ]);
+  await savedOutcome(page);
+});
+
 test("without a discovery credential a grant offers typed IDs labelled as the fallback", async (_t, journey) => {
   const { page } = await startSettings(journey, path);
   await page.getByRole("button", { name: "Add grant", exact: true }).click();

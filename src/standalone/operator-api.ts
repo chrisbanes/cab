@@ -8921,13 +8921,8 @@ export class OperatorApi {
           ? domain.deliveryCredentialReference(c.projectId)
           : c.credentialRef,
     });
-    try {
-      return receipt(await this.commands.execute(command(policy)));
-    } catch (error) {
-      // A field refusal keeps its fixed message for `refuseDeliveryField`; every other error maps as before.
-      if (error instanceof DomainPolicyError) throw error;
-      throw domainApiError(error) ?? error;
-    }
+    // Not `executeDomain`: a field refusal keeps its fixed message for `refuseDeliveryField`.
+    return receipt(await this.commands.execute(command(policy)));
   }
 
   /** A field-specific refusal of `delivery.configure` carries its fixed sentence; nothing else gains a message. */

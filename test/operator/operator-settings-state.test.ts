@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { genericInvalidInputMessage } from "../../src/operator/contracts.js";
 import { OperatorClient } from "../../web/src/api.js";
 import {
   ConfigurationDraft,
@@ -1258,6 +1259,20 @@ test("a refused status mapping or delivery policy puts the service's sentence in
       command.type,
     );
     assert.equal(draft.fieldRefusal, true, command.type);
+  }
+  // The generic line the service sends when it has no sentence of its own is not one.
+  for (const command of [mapping, delivery]) {
+    const generic = new ConfigurationDraft();
+    await generic.submit(
+      rejectWith(["grants.0.action"], genericInvalidInputMessage),
+      command,
+      "csrf",
+    );
+    assert.deepEqual(generic.errors, {
+      "grants.0.action": "Check this field.",
+    });
+    assert.equal(generic.notice, outcomeCopy.fields(1));
+    assert.equal(generic.fieldRefusal, false);
   }
   const other = new ConfigurationDraft();
   await other.submit(

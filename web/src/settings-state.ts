@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import {
+  genericInvalidInputMessage,
   operatorCommandSchema,
   type OperatorCommand,
   type CommandReceipt,
@@ -625,12 +626,15 @@ export class ConfigurationDraft {
         fieldPaths[0] === "name"
           ? result.message
           : undefined;
+      // The service's own sentence, not the generic line it sends when it has none.
+      const ownSentence = (message: string | undefined) =>
+        message === genericInvalidInputMessage ? undefined : message;
       // A refused status mapping names the event and the option in the service's own words.
       const mappingRefusal =
         result.state !== "recorded" &&
         c.type === "status-mapping.configure" &&
         result.code === "invalid-input"
-          ? result.message
+          ? ownSentence(result.message)
           : undefined;
       // Jira's own verdict on a rejected query, in the service's words.
       const jqlRefusal =
@@ -657,7 +661,7 @@ export class ConfigurationDraft {
         c.type === "delivery.configure" &&
         result.code === "invalid-input" &&
         fieldPaths.length > 0
-          ? result.message
+          ? ownSentence(result.message)
           : undefined;
       this.errors = Object.fromEntries(
         fieldPaths.map((p) => [

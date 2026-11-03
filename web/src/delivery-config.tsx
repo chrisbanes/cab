@@ -299,6 +299,11 @@ function DeliveryPolicyForm(p: TabProps) {
       else row[field] = value;
     if (section === "grants" && patch.action === "branch.adopt")
       row.mode = "approval";
+    // An item-add grant has a Project only; a field or options left from a field grant would be hidden.
+    if (section === "grants" && patch.action === "project.item.add") {
+      delete row.fieldNodeId;
+      delete row.optionNodeIds;
+    }
     rows[index] = row;
     d.set(section, JSON.stringify(rows));
   };
@@ -1135,6 +1140,7 @@ function GrantRepository({
           label="Repository"
           empty="Choose a repository"
           value={row.repositoryId}
+          // shortcut: a project with no linked repository ID swaps this typed field for a select if discovery lists later; rare, upgrade if reported.
           options={options.length ? options : null}
           unlistedNote="This repository is not in the lists, so it stays as its node ID."
           invalid={Boolean(error)}
