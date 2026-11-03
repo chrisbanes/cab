@@ -250,7 +250,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .click();
   await page.getByLabel("Editable reply").fill("Exact operator comment body");
   await page
-    .getByRole("button", { name: "Message task lead", exact: true })
+    .getByRole("button", { name: "Comment on task", exact: true })
     .click();
   await page
     .getByLabel("Editable reply")
@@ -262,17 +262,12 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page
     .getByRole("button", { name: "Ask lead about brief", exact: true })
     .click();
+  // The contextual ask is the lead's own draft; the shared comment's text is untouched beside it.
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
-    "Unfinished local message beside GitHub draft",
+    "Please review source revision 1.",
   );
-  assert.equal(await page.getByText(/^Immutable reference:/).count(), 0);
-  await page
-    .getByText(
-      "Existing lead draft and reference retained. Finish or clear it before starting a new contextual reply.",
-      { exact: true },
-    )
-    .waitFor();
+  assert.equal(await page.getByText(/^Immutable reference:/).count(), 1);
   assert.equal(
     await page
       .getByLabel("Editable reply")
@@ -287,7 +282,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     "Exact operator comment body",
   );
   await page
-    .getByRole("button", { name: "Message task lead", exact: true })
+    .getByRole("button", { name: "Comment on task", exact: true })
     .click();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
@@ -298,6 +293,13 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page
     .getByRole("button", { name: "Ask lead about brief", exact: true })
     .click();
+  // The lead draft and its reference were kept, so a second ask retargets nothing.
+  await page
+    .getByText(
+      "Existing lead draft and reference retained. Finish or clear it before starting a new contextual reply.",
+      { exact: true },
+    )
+    .waitFor();
   assert.deepEqual(
     JSON.parse(
       (await page.getByText(/^Immutable reference:/).textContent())!.slice(

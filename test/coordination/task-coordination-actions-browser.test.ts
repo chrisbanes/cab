@@ -96,47 +96,43 @@ test("the task view delivers an undelivered result and messages a delegated assi
     0,
   );
 
-  // A pending delegated assignment takes a durable message from its sub-conversation header.
+  // A pending delegated assignment is replied to from its sub-conversation header, through the
+  // shared comment composer addressed to exactly that assignment.
   const assignment = page.locator(`[data-record-id="delegation:${pendingId}"]`);
   await assignment.getByRole("button").first().click();
-  const send = assignment.getByRole("button", { name: /^Send to / });
+  await assignment.getByRole("button", { name: /^Reply to / }).click();
+  const box = page.getByLabel("Editable reply");
+  const send = page.getByRole("button", { name: "Send comment" });
   assert.equal(await send.isDisabled(), true, "nothing to send yet");
-  await assignment
-    .getByRole("textbox", { name: /^Message / })
-    .fill("Also cover toolbar launch.");
-  await send.click();
-  await assignment.getByText(/^Sent to /).waitFor();
-  const message = f.service
-    .coordinationView()
-    .readTask(a.taskId)
-    .messages.find(
-      (m) =>
-        m.recipientAssignmentId === pendingId &&
-        m.eventType === "operator-message",
-    );
-  assert.equal(message?.text, "Also cover toolbar launch.");
   assert.equal(
-    await assignment.getByRole("textbox", { name: /^Message / }).inputValue(),
-    "",
+    await page
+      .locator(`.recipient-chip[data-assignment-id="${pendingId}"]`)
+      .count(),
+    1,
   );
-  // A second message is a new command, not blocked by the first's receipt.
-  await assignment
-    .getByRole("textbox", { name: /^Message / })
-    .fill("And the shortcut hint.");
+  assert.equal(await page.locator(".recipient-chip").count(), 1);
+  await box.fill("Also cover toolbar launch.");
   await send.click();
-  await until(
-    () =>
-      f.service
-        .coordinationView()
-        .readTask(a.taskId)
-        .messages.filter(
-          (m) =>
-            m.recipientAssignmentId === pendingId &&
-            m.eventType === "operator-message",
-        ).length === 2,
-  );
-  // The lead keeps its own reply card, and a completed delegate takes no message.
-  for (const id of [a.assignmentId, delegateId])
+  await page.getByText(/^Comment sent to /).waitFor();
+  const comments = () =>
+    f.service
+      .coordinationView()
+      .readTask(a.taskId)
+      .messages.filter(
+        (m) =>
+          m.recipientAssignmentId === pendingId &&
+          m.eventType === "operator-message" &&
+          m.sharedCommentId,
+      );
+  assert.equal(comments()[0]?.text, "Also cover toolbar launch.");
+  assert.equal(await box.inputValue(), "");
+  // A second comment is a new command, not blocked by the first's receipt. Reply selects it again.
+  await assignment.getByRole("button", { name: /^Reply to / }).click();
+  await box.fill("And the shortcut hint.");
+  await send.click();
+  await until(() => comments().length === 2);
+  // The lead keeps its own composer, and no delegate holds the older direct form.
+  for (const id of [a.assignmentId, delegateId, pendingId])
     assert.equal(
       await page
         .locator(`[data-record-id="delegation:${id}"] form.assignment-message`)
@@ -328,16 +324,19 @@ test("a check settles as refused only on a definite refusal, and a new session s
   const { page, web, commands } = await openTask(f, j, a.taskId, hold);
   const assignment = page.locator(`[data-record-id="delegation:${pendingId}"]`);
   await assignment.getByRole("button").first().click();
-  const box = assignment.getByRole("textbox", { name: /^Message / });
-  const messages = () =>
+  await assignment.getByRole("button", { name: /^Reply to / }).click();
+  const box = page.getByLabel("Editable reply");
+  const comments = () =>
     f.service
       .coordinationView()
       .readTask(a.taskId)
-      .messages.filter((m) => m.recipientAssignmentId === pendingId);
+      .messages.filter(
+        (m) => m.recipientAssignmentId === pendingId && m.sharedCommentId,
+      );
   await page.route("**/api/operator/commands", (route) => route.abort());
   await box.fill("Also cover toolbar launch.");
-  await assignment.getByRole("button", { name: /^Send to / }).click();
-  await check(assignment).waitFor();
+  await page.getByRole("button", { name: "Send comment" }).click();
+  await check(page).waitFor();
 
   // Authentication, session and availability failures say nothing about the first send.
   for (const [status, code] of [
@@ -359,16 +358,18 @@ test("a check settles as refused only on a definite refusal, and a new session s
         (r) =>
           r.url().endsWith("/api/operator/commands") && r.status() === status,
       ),
-      check(assignment).click(),
+      check(page).click(),
     ]);
     assert.equal(
       commands.length,
       before + 1,
       `the ${status} check sent exactly one request`,
     );
-    // The check button stays while a send is in flight; the outcome's code shows it settled.
-    await assignment
-      .locator(".action-outcome-fields dd")
+    // The check stays and the draft stays frozen: the first send is still unknown.
+    await check(page).waitFor();
+    assert.equal(await box.isDisabled(), true);
+    await page
+      .locator("[data-slot=action-outcome] .action-outcome-fields dd")
       .filter({ hasText: new RegExp(`^${code}$`) })
       .waitFor({ state: "attached" });
   }
@@ -385,24 +386,28 @@ test("a check settles as refused only on a definite refusal, and a new session s
     ).run(pendingId);
   });
   await page.unroute("**/api/operator/commands");
-  await check(assignment).click();
-  await assignment
-    .getByText(
-      /^Not sent: .* changed since it was read\. Your message is still here\./,
-    )
+  await check(page).click();
+  await page
+    .getByText("This task changed since you opened it. Your draft is kept.")
     .waitFor();
   assert.equal(await box.inputValue(), "Also cover toolbar launch.");
   assert.equal(await box.isEditable(), true);
-  assert.equal(messages().length, 0);
-  assert.equal(await check(assignment).count(), 0);
+  assert.equal(comments().length, 0);
+  assert.equal(await check(page).count(), 0);
+  // The refusal keeps the selection too, and re-reads who can receive it now.
+  assert.equal(
+    await page
+      .locator(`.recipient-chip[data-assignment-id="${pendingId}"]`)
+      .count(),
+    1,
+  );
 
   // A fresh unconfirmed send does not outlive the session that made it.
   await page.route("**/api/operator/commands", (route) => route.abort());
-  await assignment.getByRole("button", { name: /^Send to / }).click();
-  await check(assignment).waitFor();
+  await page.getByRole("button", { name: "Send comment" }).click();
+  await check(page).waitFor();
   await signOutFromSidebar(page);
   await signIn(page, web, `/app/tasks/${a.taskId}`);
-  await assignment.getByRole("button").first().click();
   assert.equal(await check(page).count(), 0);
   assert.equal(await box.inputValue(), "");
 });

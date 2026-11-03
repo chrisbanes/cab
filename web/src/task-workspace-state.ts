@@ -182,22 +182,29 @@ export type DraftWrite =
 class TaskReplyState {
   sourceObservation: "known" | "pending" | "unknown" = "known";
   sourceRefreshFailed = false;
-  private drafts = { lead: "", github: "" };
+  private drafts = { comment: "", lead: "", github: "" };
   get draft() {
     return this.drafts[this.destination];
   }
   set draft(value: string) {
     this.drafts[this.destination] = value;
   }
-  destination: "lead" | "github" = "lead";
+  /**
+   * "comment" is the shared task comment; "lead" is the reference-bound message or the draft turn;
+   * "github" is the tracker comment. Each keeps its own draft and notice.
+   */
+  destination: "comment" | "lead" | "github" = "comment";
+  /**
+   * The operator's explicit recipient set for a shared comment. Null is an untouched composer,
+   * which addresses the lead; an empty array is a deliberate record-only comment.
+   */
+  commentRecipients: string[] | null = null;
   reference: FeedbackReference | undefined;
   frozen: OperatorCommand | null = null;
   commentReview: Extract<CommandReceipt, { kind: "comment-review" }> | null =
     null;
-  private notices: Record<"lead" | "github", ReplyOutcome | null> = {
-    lead: null,
-    github: null,
-  };
+  private notices: Record<"comment" | "lead" | "github", ReplyOutcome | null> =
+    { comment: null, lead: null, github: null };
   get notice() {
     return this.notices[this.destination];
   }
@@ -205,6 +212,15 @@ class TaskReplyState {
     this.notices[this.destination] = value;
   }
   uncertain = false;
+  /** The lead destination holds a draft, reference, outcome or unconfirmed send, so it must stay reachable. */
+  get leadInUse() {
+    return (
+      this.drafts.lead !== "" ||
+      this.notices.lead !== null ||
+      this.reference !== undefined ||
+      this.frozen?.type === "message"
+    );
+  }
 }
 export type { ReviewAnchorCandidate };
 
@@ -345,6 +361,15 @@ export class TaskWorkspaceState {
   }
   set destination(value: TaskReplyState["destination"]) {
     this.reply.destination = value;
+  }
+  get commentRecipients() {
+    return this.reply.commentRecipients;
+  }
+  set commentRecipients(value: TaskReplyState["commentRecipients"]) {
+    this.reply.commentRecipients = value;
+  }
+  get leadInUse() {
+    return this.reply.leadInUse;
   }
   get reference() {
     return this.reply.reference;

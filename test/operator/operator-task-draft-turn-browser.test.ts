@@ -80,6 +80,9 @@ for (const [name, viewport] of Object.entries(viewports)) {
       await page.goto(`${web.origin}/app/tasks/${taskId}`);
       await page.getByRole("heading", { name: title, level: 1 }).waitFor();
     };
+    // The shared comment is the default reply; a Draft task's draft turn is its own explicit choice.
+    const chooseDraftTurn = () =>
+      page.getByRole("button", { name: /^Draft turn with / }).click();
     const startButton = () =>
       page.getByRole("button", { name: "Start draft turn", exact: true });
 
@@ -93,17 +96,18 @@ for (const [name, viewport] of Object.entries(viewports)) {
       [active, "Active task", /already queued, held or running/],
     ] as const) {
       await visit(task.taskId, title);
+      await chooseDraftTurn();
       await page.getByText(sentence).waitFor();
       await startButton().waitFor();
       assert.equal(await startButton().isDisabled(), true, title);
     }
     // A project without a lead keeps the ordinary reply.
     await visit(noLead.taskId, "No lead task");
-    await page.getByRole("button", { name: "Send to task lead" }).waitFor();
+    await page.getByRole("button", { name: "Send comment" }).waitFor();
     assert.equal(await startButton().count(), 0);
     // A Ready task keeps the ordinary reply.
     await visit(ready.taskId, "Ready task");
-    await page.getByRole("button", { name: "Send to task lead" }).waitFor();
+    await page.getByRole("button", { name: "Send comment" }).waitFor();
     assert.equal(await startButton().count(), 0);
     assert.deepEqual(commands, []);
 
@@ -116,6 +120,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // The available entry point posts exactly one command and shows the sent line.
     await visit(open.taskId, "Open task");
+    await chooseDraftTurn();
     await page.getByText(/Read-only: Task lead reads the task/).waitFor();
     assert.equal(await startButton().isDisabled(), true);
     await page.locator("#workspace-reply").fill("Why is the check flaky?");
@@ -127,6 +132,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // A confirmed refusal keeps the typed text: the turn started elsewhere meanwhile.
     await visit(stale.taskId, "Stale task");
+    await chooseDraftTurn();
     await page.locator("#workspace-reply").fill("My unsent question");
     await start(stale.taskId, "Started from the CLI.");
     await startButton().click();

@@ -46,10 +46,12 @@ why meant reassembling it across tabs, so the task view was hard to read.
   diagnostic retention and activity a harness does not capture appear as inline gap
   markers, with identifiers in the marker's detail. Tool activity remains diagnostic:
   an absent tool row is not evidence that no tool ran.
-- Interaction does not change. A reply still goes to one assignment with its
-  destination shown first. Mentions that wake other agents remain the separate
-  proposal in [#842](https://github.com/chrisbanes/cab/issues/842), which can build on
-  this timeline.
+- The timeline's interaction is the shared task comment: one operator contribution
+  with zero or more recipients chosen by assignment identity, shown once at the task
+  root. Recording it starts nothing and text never wakes an agent; delivery uses the
+  existing inbox, follow-up and admission rules. Contextual feedback, Local review
+  and the draft turn keep their own single destinations (see the SPEC's shared task
+  comments).
 
 ## Considered options
 

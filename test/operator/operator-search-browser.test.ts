@@ -617,7 +617,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
   let originalKey = "";
   await page.route("**/api/operator/commands", async (route) => {
     const input = route.request().postDataJSON();
-    if (input.type !== "message" || originalKey) {
+    if (input.type !== "task.comment.send" || originalKey) {
       await route.continue();
       return;
     }
@@ -630,7 +630,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
   });
   try {
     await page
-      .getByRole("button", { name: "Send to task lead", exact: true })
+      .getByRole("button", { name: "Send comment", exact: true })
       .click();
     await arrival;
     await page.getByRole("link", { name: "Tasks", exact: true }).click();
@@ -653,7 +653,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
     assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
     assert.equal(
       await page
-        .getByRole("button", { name: "Message task lead", exact: true })
+        .getByRole("button", { name: "Comment on task", exact: true })
         .isDisabled(),
       true,
     );

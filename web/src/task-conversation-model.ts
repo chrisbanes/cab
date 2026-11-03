@@ -143,6 +143,7 @@ export function pendingBelow(
   const limit = keyOf(floor);
   return window.entries.some(
     (e) =>
+      e.assignmentId !== null &&
       running.has(e.assignmentId) &&
       isPending(e) &&
       compareTimelineKeys(keyOf(e), limit) < 0,
@@ -196,7 +197,11 @@ export function conversationTree(
       delegations.set(entry.assignmentId, entry);
       continue;
     }
-    const stream = known.has(entry.assignmentId) ? entry.assignmentId : root;
+    // A task comment has no assignment: it sits once in the root stream, lead or not.
+    const stream =
+      entry.assignmentId !== null && known.has(entry.assignmentId)
+        ? entry.assignmentId
+        : root;
     const mine = own.get(stream) ?? [];
     mine.push(entry);
     own.set(stream, mine);

@@ -366,7 +366,7 @@ Node.js version and package tooling; distribution follows
 | `auth`, `connection` | Login, status, logout; select/list/remove named connections; deliberately adopt local access |
 | `project` | List/get/create; inspect and prepare/apply supported configuration, instructions, routing and source settings |
 | `profile` | List/get/create; inspect revisions; prepare/apply supported fields and restore earlier content as a new revision |
-| `task` | List/search/get/create/configure; dependencies; existing task controls, messages, follow-up and draft turns |
+| `task` | List/search/get/create/configure; dependencies; existing task controls, messages, follow-up and draft turns. `task message` and `task follow-up` keep their single explicit recipient; shared task comments with several recipients are a browser and `task.comment.send` JSON command surface only |
 | `assignment` | Get/history; compare bound/current instructions; explicit current-revision adoption |
 | `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material |
 | `execution`, `logs`, `doctor` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow; the service readiness checks |

@@ -444,6 +444,72 @@ test("validated recovery requires a new operator message, processes old batch wi
   }
 });
 
+test("a shared comment's input delivery records the recovery continuation; a record-only comment does not", async () => {
+  const f = await heldFixture();
+  let service = f.service;
+  try {
+    await service.resolveHeldExecution(f.receipt);
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    f.pause(true);
+    const view = () => service.coordinationView();
+    const idle = await view().postTaskComment({
+      key: randomUUID(),
+      taskId: f.taskId,
+      body: "Noting this for the record.",
+      recipients: [],
+    });
+    assert.deepEqual(idle.deliveries, []);
+    assert.equal(
+      internals(service).coordination.hasRecoveryContinuation(f.old.workId),
+      false,
+    );
+    const comment = {
+      key: randomUUID(),
+      taskId: f.taskId,
+      body: f.message.message,
+      recipients: [
+        {
+          assignmentId: String(f.old.assignmentId),
+          expectedAssignmentVersion: Number(f.old.assignmentVersion),
+        },
+      ],
+    };
+    const receipt = await view().postTaskComment(comment);
+    assert.equal(receipt.deliveries[0]?.effect, "input");
+    const retained = audit(service, f.old.workId) as Record<string, unknown>;
+    assert.equal(retained.operatorEventId, receipt.deliveries[0]?.eventId);
+    assert.equal(retained.operatorCommandKey, comment.key);
+    assert.equal(
+      internals(service).coordination.hasRecoveryContinuation(f.old.workId),
+      true,
+    );
+    assert.deepEqual(await view().postTaskComment(comment), receipt);
+    assert.deepEqual(audit(service, f.old.workId), retained);
+    await service.stop();
+    service = f.makeService();
+    await service.start();
+    assert.equal(
+      internals(service).coordination.hasRecoveryContinuation(f.old.workId),
+      true,
+    );
+    assert.equal(f.runtime.turns, 2, "recording a comment starts no turn");
+    f.pause(false, service);
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await until(
+      () => service.domain().task(f.taskId).state === "done",
+      "fresh completion",
+    );
+    assert.equal(f.runtime.turns, 3);
+    assert.match(f.runtime.prompts[2] ?? "", /FRESH_COMPLETION_ONLY/);
+    assert.doesNotMatch(
+      f.runtime.prompts[2] ?? "",
+      /OLD_BATCH_SHOULD_NOT_REPLAY/,
+    );
+  } finally {
+    await close(f, service);
+  }
+});
+
 test("an invalidated recovery continuation keeps the successor waiting without scanning every request", async () => {
   const f = await heldFixture();
   try {

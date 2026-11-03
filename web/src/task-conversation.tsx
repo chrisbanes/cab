@@ -31,6 +31,7 @@ import {
   type TimelineWindow,
   type ToolEntry,
 } from "./task-conversation-model.js";
+import { recipientLabel } from "./task-comment-model.js";
 import { MarkdownPreview } from "./task-files.js";
 import type { TaskWorkspaceState } from "./task-workspace-state.js";
 
@@ -457,8 +458,36 @@ function Entry({
   entry: Extract<ConversationItem, { type: "entry" }>["entry"];
   ctx: Context;
 }) {
-  const who = ctx.names.get(entry.assignmentId) ?? "Agent";
+  const who =
+    entry.assignmentId === null
+      ? "You"
+      : (ctx.names.get(entry.assignmentId) ?? "Agent");
   switch (entry.kind) {
+    case "task-comment": {
+      const people = ctx.data.assignments;
+      const to = entry.deliveries.map((d) => {
+        const person = people.find((a) => a.assignmentId === d.assignmentId);
+        const name = person ? recipientLabel(person, people) : "an assignment";
+        return d.effect === "resume" ? `${name} (resumed)` : name;
+      });
+      return (
+        <article
+          className="conv-entry conv-operator"
+          data-record-id={`c:${entry.entryId}`}
+          data-comment-id={entry.commentId}
+        >
+          <header>
+            <strong>You</strong> {time(entry)}
+            <span className="muted">
+              {" "}
+              ·{" "}
+              {to.length ? `to ${to.join(", ")}` : "recorded for the task only"}
+            </span>
+          </header>
+          <p className="conv-text">{entry.text}</p>
+        </article>
+      );
+    }
     case "assistant": {
       const raw = ctx.expanded(`c:raw:${entry.entryId}`);
       return (
@@ -799,9 +828,11 @@ function Delegation({
   const a: Assignment | undefined = item.assignment;
   const runtime = item.entry?.runtime ?? a?.runtime;
   const state = a?.state ?? item.entry?.state;
+  // Reply is offered where a comment would reach the assignment; the service decides that.
   const canMessage =
-    (state === "pending" || state === "running") &&
-    item.id !== ctx.data.leadAssignmentId;
+    item.id !== ctx.data.leadAssignmentId &&
+    (ctx.data.commentRecipients?.find((r) => r.assignmentId === item.id)
+      ?.mode ?? "unavailable") !== "unavailable";
   const brief = a?.brief?.trim().split("\n")[0];
   const result = ctx.data.results
     .filter((r) => r.assignmentId === item.id)

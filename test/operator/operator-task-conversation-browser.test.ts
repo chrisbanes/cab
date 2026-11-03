@@ -836,13 +836,13 @@ test("a link to a record beyond the ten-page bound stops at the conversation's t
   );
 });
 
-test("a delegate is messaged from its sub-conversation header, and an unconfirmed send keeps its draft and key", async (_t, j) => {
+test("a delegate is replied to from its sub-conversation header through the shared composer, and an unconfirmed send keeps its draft and key", async (_t, j) => {
   const { f, s, web, page } = await openFixture(j);
   const sent: Array<{
     type: string;
     key: string;
-    message?: string;
-    recipientAssignmentId?: string;
+    body?: string;
+    recipients?: { assignmentId: string }[];
     raw: string;
   }> = [];
   page.on("request", (request) => {
@@ -852,49 +852,60 @@ test("a delegate is messaged from its sub-conversation header, and an unconfirme
     )
       sent.push({ ...request.postDataJSON(), raw: request.postData() ?? "" });
   });
+  const reads: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/operator/operations?"))
+      reads.push(`${sent.length}`);
+  });
   await signIn(page, web, `/app/tasks/${s.taskId}`);
   const log = page.getByRole("log", { name: "Task conversation" });
   await log.getByText("Second: all steps ran.").waitFor();
-  // Only a pending or running delegate takes a message; the finished one has no form.
-  const done = log.locator(`[data-record-id="delegation:${s.worker}"]`);
-  await done.getByRole("button").first().click();
-  await done.getByText("Worker found the menu opens on Enter.").waitFor();
-  assert.equal(await done.locator("form.assignment-message").count(), 0);
+  // The older direct form is gone: Reply is the only entry, and it never holds a second composer.
   const waiter = log.locator(`[data-record-id="delegation:${s.waiter}"]`);
-  assert.equal(
-    await waiter.locator("form.assignment-message").count(),
-    0,
-    "collapsed",
-  );
   await waiter.getByRole("button").first().click();
-  const box = waiter.getByRole("textbox", { name: /^Message / });
-  const send = waiter.getByRole("button", { name: /^Send to / });
-  assert.equal(await send.isDisabled(), true, "nothing to send yet");
+  assert.equal(await waiter.locator("form.assignment-message").count(), 0);
+  await waiter.getByRole("button", { name: /^Reply to / }).click();
+  // Reply selects exactly that assignment, replacing the default lead.
+  const box = page.getByLabel("Editable reply");
+  assert.equal(await page.locator(".recipient-chip").count(), 1);
+  assert.equal(
+    await page
+      .locator(`.recipient-chip[data-assignment-id="${s.waiter}"]`)
+      .count(),
+    1,
+  );
+  assert.equal(await box.evaluate((e) => e === document.activeElement), true);
+  const send = page.getByRole("button", { name: "Send comment" });
 
-  // The reply never reaches the service: the draft stays, and the check replays the same command.
+  // The reply never reaches the service: the draft stays, and the check reads the receipt first.
   await page.route("**/api/operator/commands", (route) => route.abort());
   await box.fill("Also cover toolbar launch.");
   await send.click();
-  await waiter
-    .getByRole("button", { name: "Check whether it saved" })
-    .waitFor();
+  await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
   assert.equal(await box.inputValue(), "Also cover toolbar launch.");
   assert.equal(sent.length, 1);
   await page.unroute("**/api/operator/commands");
-  await waiter.getByRole("button", { name: "Check whether it saved" }).click();
-  await waiter.getByText(/^Sent to /).waitFor();
+  await page.getByRole("button", { name: "Check whether it saved" }).click();
+  await page.getByText(/^Comment sent to /).waitFor();
   assert.equal(sent.length, 2);
   assert.equal(sent[1]?.raw, sent[0]?.raw, "same key and body");
-  assert.equal(sent[0]?.type, "message");
-  assert.equal(sent[0]?.recipientAssignmentId, s.waiter);
-  const messages = f.service
-    .coordinationView()
-    .readTask(s.taskId)
-    .messages.filter(
-      (m) =>
-        m.recipientAssignmentId === s.waiter &&
-        m.eventType === "operator-message",
-    );
-  assert.equal(messages.length, 1, "one message, one receipt");
+  assert.deepEqual(reads, ["1"], "the receipt is read before the retry");
+  assert.equal(sent[0]?.type, "task.comment.send");
+  assert.deepEqual(
+    sent[0]?.recipients?.map((r) => r.assignmentId),
+    [s.waiter],
+  );
+  const view = f.service.coordinationView().readTask(s.taskId);
+  assert.equal(
+    view.messages.filter(
+      (m) => m.recipientAssignmentId === s.waiter && m.sharedCommentId,
+    ).length,
+    1,
+    "one comment, one delivery",
+  );
+  assert.equal(view.comments.length, 1);
   assert.equal(await box.inputValue(), "");
+  // The conversation shows the comment once, at the task root, not inside the delegation.
+  assert.equal(await log.getByText("Also cover toolbar launch.").count(), 1);
+  assert.equal(await waiter.getByText("Also cover toolbar launch.").count(), 0);
 });
