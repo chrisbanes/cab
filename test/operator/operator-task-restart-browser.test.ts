@@ -278,6 +278,8 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // The same in the Inbox, where a refresh drops the request from the queue.
     const lostInbox = await refusedTask(f);
+    // The phone has no Refresh: a fake clock drives its 15s Inbox poll.
+    if (viewport.width < 760) await page.clock.install();
     await page.goto(
       `${web.origin}/app/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(`intervention:${lostInbox.taskId}`)}`,
     );
@@ -290,9 +292,8 @@ for (const [name, viewport] of Object.entries(viewports)) {
         .getByRole("button", { name: /^Refresh/ })
         .first()
         .click();
-    await page
-      .getByText(/has left the current queue/)
-      .waitFor({ timeout: 20000 });
+    else await page.clock.runFor(15000);
+    await page.getByText(/has left the current queue/).waitFor();
     await check().click();
     await page.getByText(/Queued again\./).waitFor();
     sameKeyTwice("task.start-again", lostInbox.taskId);
