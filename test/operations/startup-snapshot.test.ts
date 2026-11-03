@@ -621,6 +621,7 @@ const SCHEMA_PINS: Record<number, string> = {
   6: "0a25b3231ade756ae83f66cd224366011da0edd17681c3ba7a9695c4522574c4",
   7: "0a25b3231ade756ae83f66cd224366011da0edd17681c3ba7a9695c4522574c4",
   8: "f3dcc59069f5df2e6d18b39c7a48aa3c80dd4b8bff05c119c4ee6739bbb453ee",
+  9: "d9f5956ac94f581bb96dbe9b64834101e1205da1153d4357352c4bf758d6ad91",
 };
 
 test("the migration level matches the schema this build creates", async () => {

@@ -152,8 +152,10 @@ test("handback settlement inspects provider-only head changes and rechecks local
 
 import {
   deliveryFixture,
+  fixtureProject,
   unusedIssueInspection,
 } from "../fixtures/delivery-fixture.js";
+import { databaseOf } from "../fixtures/service-internals.js";
 for (const mode of ["reviewable-pr", "through-merge"] as const)
   test(`${mode} issue close cannot bypass the configured PR delivery boundary`, async () => {
     const f = await deliveryFixture(mode, true);
@@ -1127,7 +1129,10 @@ async function settleThenClose(
   return settled;
 }
 /** The closure-hold notice starts a fresh lead turn once the current one ends; completion is requested there. */
-async function requestCompletionAfterClose(f: Fixture) {
+async function requestCompletionAfterClose(
+  f: Fixture,
+  beforeRequest?: () => Promise<void>,
+) {
   const next = f.turns.length;
   f.turns.at(-1)?.release();
   const deadline = Date.now() + 5000;
@@ -1136,6 +1141,7 @@ async function requestCompletionAfterClose(f: Fixture) {
     await f.service.refreshGitHub();
     await new Promise<void>((r) => setTimeout(r, 5));
   }
+  await beforeRequest?.();
   return f.call("cab_request_completion", { reviewedResultIds: [] }, next);
 }
 function blockers(f: Fixture) {
@@ -1342,6 +1348,296 @@ test("a replacement settlement after another change survives a later lagging clo
     await f.service.refreshGitHub();
     f.setIssueOpen(false);
     await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+/** A fresh operator settlement of the PR as it stands now. */
+async function settleAgain(
+  f: Fixture,
+  key: ReturnType<typeof randomUUID> = randomUUID(),
+  decision: "accepted" | "closed" = "accepted",
+) {
+  const delivery = f.service.delivery();
+  return f.service.settleHandback({
+    actor: "operator",
+    key,
+    taskId: f.taskId,
+    expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+    expectedDeliveryRevision: delivery.delivery(f.taskId)?.revision ?? 0,
+    expectedPolicyVersion: delivery.configuration(f.projectId).version,
+    repositoryId: "R1",
+    prNumber: 7,
+    expectedPrNodeId: "P7",
+    expectedHeadSha: f.getPr().headSha,
+    decision,
+  });
+}
+const receipts = (f: Fixture) =>
+  Number(
+    (
+      databaseOf(f.service)
+        .prepare("SELECT COUNT(*) AS n FROM delivery_settlement_receipts")
+        .get() as { n: number }
+    ).n,
+  );
+
+// Ready and the task version only move when the rule's result flips: a value that moves between two
+// satisfying values changes neither, so the settlement itself has to bind the values the rule reads.
+test("a Project field moved between two Ready options ends the settlement without moving Ready or the version", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    const settled = Number(f.domain.task(f.taskId).version);
+    assert.equal(receipts(f), 1);
+    f.setStatus(fixtureProject.inReview);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 1);
+    assert.equal(Number(f.domain.task(f.taskId).version), settled);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    // The change is latched: reading the old option again does not bring the settlement back.
+    f.setStatus(fixtureProject.todo);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    // Replaying the old key returns its receipt and recovers nothing.
+    const old = databaseOf(f.service)
+      .prepare("SELECT commandKey AS key FROM delivery_settlement_readiness")
+      .get() as { key: string } | undefined;
+    assert.ok(old);
+    await assert.rejects(
+      () => settleAgain(f, old.key as ReturnType<typeof randomUUID>),
+      /different material/,
+    );
+    assert.equal(receipts(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    // A fresh settlement captures what is observed now.
+    await settleAgain(f);
+    assert.equal(receipts(f), 2);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a settlement is held by a Project field change seen with the close, and one fresh settlement recovers it", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f, closedOk, () =>
+      f.setStatus(fixtureProject.inReview),
+    );
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    await settleAgain(f);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a close with no other change needs exactly one settlement for a Project field rule", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.equal(receipts(f), 1);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+// GitHub's "Item closed" Project workflow sets Status to Done, which the fixture rule does not accept.
+test("a Project Status moved to Done by the workflow after cab's own close keeps the one settlement and the completion request", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.equal(receipts(f), 1);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    // The workflow runs after the close was proven: the next Project read shows Done.
+    const completion = await requestCompletionAfterClose(f, async () => {
+      f.setStatus(fixtureProject.done);
+      await f.service.refreshGitHub();
+      assert.equal(latched(f), 0);
+      assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    });
+    assert.equal(completion.success, true, completion.text);
+    assert.equal(receipts(f), 1);
+  } finally {
+    await f.close();
+  }
+});
+
+const latched = (f: Fixture) =>
+  Number(
+    (
+      databaseOf(f.service)
+        .prepare("SELECT invalidated FROM delivery_settlement_readiness")
+        .get() as { invalidated: number }
+    ).invalidated,
+  );
+
+test("the same Status move with no own close ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setStatus(fixtureProject.done);
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a move to an option the rule accepts during an own close ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f, closedOk, () =>
+      f.setStatus(fixtureProject.inReview),
+    );
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+// A repository selection lists the closed issue; the open-only Project selection stops listing it.
+const projectAndRepository = () =>
+  deliveryFixture("reviewable-pr", true, true, undefined, undefined, true);
+
+test("a Project selection that stops listing the closed issue keeps the settlement while a repository selection still does", async () => {
+  const f = await projectAndRepository();
+  try {
+    await settleThenClose(f);
+    // The Project membership is dropped after two complete reads without the issue.
+    for (let i = 0; i < 3; i++) await f.service.refreshGitHub();
+    const memberships = databaseOf(f.service)
+      .prepare("SELECT selectionId FROM source_memberships")
+      .all() as { selectionId: string }[];
+    assert.deepEqual(
+      memberships.map((m) => m.selectionId),
+      ["repo-all"],
+    );
+    assert.equal(latched(f), 0);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    assert.equal(receipts(f), 1);
+    await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a Project field that changes while its membership remains ends the settlement, whatever a repository selection lists", async () => {
+  const f = await projectAndRepository();
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setStatus(fixtureProject.inReview);
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    f.setActionOutcome(closedOk);
+    f.onInspection(() => f.setIssueOpen(false));
+    await closeFixtureIssue(f);
+    f.onInspection(undefined);
+    for (let i = 0; i < 3; i++) await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a closed issue a filtered listing drops keeps the settlement's Project field values", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    databaseOf(f.service).exec("DELETE FROM source_memberships");
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("accepting a handback needs observed inputs, and closing the outcome does not", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    f.turns[0]?.release();
+    databaseOf(f.service).exec("DELETE FROM source_memberships");
+    await assert.rejects(() => settleAgain(f), /not fully observed/);
+    await settleAgain(f, randomUUID(), "closed");
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a readiness label removed while another still satisfies the rule ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, false, undefined, [
+    "ready",
+    "approved",
+  ]);
+  try {
+    f.setSourceLabels(["ready", "approved"]);
+    await f.service.refreshGitHub();
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    const settled = Number(f.domain.task(f.taskId).version);
+    // Case, order and unrelated labels are not inputs.
+    f.setSourceLabels(["Approved", "chore", "READY"]);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    f.setSourceLabels(["approved", "chore"]);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 1);
+    assert.equal(Number(f.domain.task(f.taskId).version), settled);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a label change seen with the close holds the settlement even though Ready stays true", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, false, undefined, [
+    "ready",
+    "approved",
+  ]);
+  try {
+    f.setSourceLabels(["ready", "approved"]);
+    await f.service.refreshGitHub();
+    await settleThenClose(f, closedOk, () => f.setSourceLabels(["approved"]));
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a settlement without captured readiness inputs, or inputs a read cannot vouch for, holds", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    // A selection without a complete read cannot vouch for the old values.
+    databaseOf(f.service).exec("UPDATE source_sync_state SET complete = 0");
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    databaseOf(f.service).exec("UPDATE source_sync_state SET complete = 1");
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    // A settlement made before inputs were captured is held until settled again.
+    databaseOf(f.service).exec("DELETE FROM delivery_settlement_readiness");
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    await settleAgain(f);
     assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
   } finally {
     await f.close();

@@ -391,6 +391,11 @@ function snapshot(
         ? [{ fieldId, optionId: value.data.id, name: value.data.value }]
         : [];
     }),
+    // A requested field that came back neither a value nor null is unread, not empty.
+    unreadSelectFields: fieldIds.filter((fieldId) => {
+      const value = issue.fields[fieldId];
+      return value !== null && !selectValueSchema.safeParse(value).success;
+    }),
     blockedBy: blockedBy(instance, issue.fields.issuelinks),
     projectFields: [],
   };

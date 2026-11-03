@@ -45,6 +45,13 @@ export async function deliveryFixture(
   projectStatus = false,
   /** How long a status-mapping write's provider call may take before it is given up. */
   statusWriteTimeoutMs?: number,
+  /** The labels an imported label-rule task is Ready by (any of them); defaults to `ready` alone. */
+  readinessLabels: string[] = ["ready"],
+  /**
+   * With a Project selection: also read the issue through a repository selection, which lists it
+   * whatever its state and carries no Project fields, while the Project selection lists open issues only.
+   */
+  alsoRepository = false,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-delivery-bound-"))),
     projectId = randomUUID(),
@@ -258,7 +265,10 @@ export async function deliveryFixture(
       issueTrackers: {
         readerFactories: {
           github: () => ({
-            async readSelection() {
+            async readSelection(selection: { kind: string }) {
+              const viaProject = selection.kind === "project";
+              if (alsoRepository && viaProject && issueOpen === false)
+                return { complete: true, issues: [], reason: null };
               return {
                 complete: true,
                 // Open-only discovery unless a test sets the issue state explicitly.
@@ -277,7 +287,9 @@ export async function deliveryFixture(
                           state: issueOpen === false ? "closed" : "open",
                           labels: sourceLabels,
                           projectFields:
-                            projectStatus && status
+                            projectStatus &&
+                            status &&
+                            (viaProject || !alsoRepository)
                               ? [
                                   {
                                     projectNodeId: fixtureProject.projectNodeId,
@@ -286,7 +298,7 @@ export async function deliveryFixture(
                                   },
                                 ]
                               : [],
-                          ...(projectStatus
+                          ...(projectStatus && (viaProject || !alsoRepository)
                             ? { projectItemNodeId: fixtureProject.itemNodeId }
                             : {}),
                         },
@@ -344,6 +356,17 @@ export async function deliveryFixture(
       expectedVersion: 1,
       credentialRef: "env:FIXTURE_SOURCE",
       selections: [
+        ...(projectStatus && alsoRepository
+          ? [
+              {
+                id: "repo-all",
+                kind: "repository" as const,
+                repositoryId: "R1",
+                owner: "org",
+                name: "repo",
+              },
+            ]
+          : []),
         projectStatus
           ? {
               id: "repo",
@@ -363,17 +386,32 @@ export async function deliveryFixture(
         mode: "any",
         conditions: projectStatus
           ? [
-              fixtureProject.todo,
-              fixtureProject.inProgress,
-              fixtureProject.inReview,
-            ].map((optionNodeId) => ({
-              kind: "project-field" as const,
-              projectNodeId: fixtureProject.projectNodeId,
-              fieldNodeId: fixtureProject.fieldNodeId,
-              operator: "in" as const,
-              optionNodeIds: [optionNodeId],
-            }))
-          : [{ kind: "label", operator: "has", name: "ready" }],
+              ...[
+                fixtureProject.todo,
+                fixtureProject.inProgress,
+                fixtureProject.inReview,
+              ].map((optionNodeId) => ({
+                kind: "project-field" as const,
+                projectNodeId: fixtureProject.projectNodeId,
+                fieldNodeId: fixtureProject.fieldNodeId,
+                operator: "in" as const,
+                optionNodeIds: [optionNodeId],
+              })),
+              ...(alsoRepository
+                ? [
+                    {
+                      kind: "label" as const,
+                      operator: "has" as const,
+                      name: "ready",
+                    },
+                  ]
+                : []),
+            ]
+          : readinessLabels.map((name) => ({
+              kind: "label" as const,
+              operator: "has" as const,
+              name,
+            })),
       },
     });
     domain.execute({
@@ -384,6 +422,15 @@ export async function deliveryFixture(
       selectionId: "repo",
       expectedVersion: 2,
     });
+    if (projectStatus && alsoRepository)
+      domain.execute({
+        type: "github.activate",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        selectionId: "repo-all",
+        expectedVersion: 2,
+      });
     await service.refreshGitHub();
     taskId = String(service.githubSources().issue("I1")?.taskId);
   } else

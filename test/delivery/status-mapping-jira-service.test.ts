@@ -8,6 +8,8 @@ import {
   type PrDeliveryObservation,
   isServiceDeliveryCaller,
 } from "../../src/core/delivery.js";
+import type { z } from "zod";
+import type { jiraReadinessSchema } from "../../src/core/github-source-contracts.js";
 import type { StatusMapping } from "../../src/core/status-mapping-contracts.js";
 import { statusMappingActionNote } from "../../src/operator/status-mapping-copy.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
@@ -27,6 +29,7 @@ import {
 import { databaseOf, startedOf } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 
+type JiraReadiness = z.output<typeof jiraReadinessSchema>;
 const site = "example.atlassian.net";
 const names = {
   site: "FIXTURE_JIRA_SITE",
@@ -87,6 +90,8 @@ async function fixture(
   statusWriteTimeoutMs?: number,
   closedIssues: "skip" | "done" = "skip",
   handedBackTarget = REVIEW,
+  /** Replaces the default rule: Ready while the status is open and labelled `ready`. */
+  readiness?: JiraReadiness,
 ) {
   for (const key of Object.keys(names) as (keyof typeof names)[]) {
     const previous = process.env[names[key]];
@@ -107,6 +112,11 @@ async function fixture(
   let postReached: (() => void) | undefined;
   /** A search that has not caught up with a change: it answers this status instead of the live one. */
   let lagging: typeof jira.state.status | undefined;
+  /** The single-select custom field a rule may read: a value, null for empty, undefined for not returned. */
+  let select: { id: string; value: string } | null | undefined =
+    readiness?.conditions.some((c) => c.kind === "select-field")
+      ? { id: "A", value: "A" }
+      : undefined;
   const fetcher: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/jql/parse")) return json({ queries: [{ query: "q" }] });
@@ -117,7 +127,10 @@ async function fixture(
           jiraIssue(7, {
             done: status.category === "done",
             status: { id: status.id, name: status.name },
-            fields: { labels: jira.state.labels },
+            fields: {
+              labels: jira.state.labels,
+              ...(select === undefined ? {} : { customfield_10001: select }),
+            },
           }),
         ],
       });
@@ -240,7 +253,7 @@ async function fixture(
     instance: site,
     closedIssues,
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
-    readiness: {
+    readiness: readiness ?? {
       mode: "all",
       conditions: [
         {
@@ -356,6 +369,9 @@ async function fixture(
     domain,
     lagSearch: (value: typeof lagging) => {
       lagging = value;
+    },
+    setSelect: (value: typeof select) => {
+      select = value;
     },
     /** Ends the running lead turn and waits until the service records it completed. */
     endTurn: async () => {
@@ -724,17 +740,29 @@ test("a task can be Ready while blocked: it is written as held, and readiness is
   assert.equal(f.domain().task(f.taskId).ready, 1);
 });
 
-async function settleThenClose(t: Parameters<typeof fixture>[0]) {
-  const f = await fixture(t);
+/** Registers the PR, lets the mapped status writes land, then has the operator settle it once. */
+async function settledPr(
+  t: Parameters<typeof fixture>[0],
+  readiness?: JiraReadiness,
+  labels?: string[],
+) {
+  const f = await fixture(t, undefined, "skip", REVIEW, readiness);
+  if (labels) {
+    f.jira.state.labels = labels;
+    await f.service.refreshGitHub();
+  }
   await f.registerPr();
+  await f.run();
   await f.endTurn();
+  await f.run();
+  // The mapped writes are source changes too: let a read observe them before settling.
+  await f.service.refreshGitHub();
   await f.settle();
   await f.nextTurn(1);
-  // The mapped In Progress write lands within the readiness rule, then the lead closes the issue.
-  await f.run();
-  assert.ok(!f.blockers().includes(awaitingSettlement));
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
   return f;
 }
+const settleThenClose = (t: Parameters<typeof fixture>[0]) => settledPr(t);
 const awaitingSettlement = "reviewable-pr-awaiting-current-settlement";
 
 test("a settlement survives cab's own confirmed close of a Jira issue and completes without settling again", async (t) => {
@@ -916,4 +944,102 @@ test("confirmed own Jira closure stays distinct until a later pinned event super
   await f.service.refreshGitHub();
   assert.equal(f.domain().task(f.taskId).state, "done");
   assert.ok(closureStore(f).providerCompletion(f.taskId));
+});
+
+const receiptCount = (f: Awaited<ReturnType<typeof fixture>>) =>
+  Number(
+    (
+      databaseOf(f.service)
+        .prepare("SELECT COUNT(*) AS n FROM delivery_settlement_receipts")
+        .get() as { n: number }
+    ).n,
+  );
+const FIELD = "customfield_10001";
+const selectRule: JiraReadiness = {
+  mode: "all",
+  conditions: [
+    { kind: "label", operator: "has", name: "ready" },
+    {
+      kind: "select-field",
+      fieldId: FIELD,
+      operator: "in",
+      optionIds: ["A", "B"],
+    },
+  ],
+};
+const labelRule: JiraReadiness = {
+  mode: "any",
+  conditions: [
+    { kind: "label", operator: "has", name: "ready" },
+    { kind: "label", operator: "has", name: "approved" },
+  ],
+};
+
+test("a close with no other change completes a Jira issue on one settlement", async (t) => {
+  const f = await settleThenClose(t);
+  assert.equal(receiptCount(f), 1);
+  assert.equal((await f.close()).success, true);
+  await f.service.refreshGitHub();
+  assert.equal(f.jira.state.status.id, DONE);
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
+  assert.equal(receiptCount(f), 1);
+});
+
+test("a person's move between two Ready statuses ends the Jira settlement without moving Ready", async (t) => {
+  const f = await settleThenClose(t);
+  const version = Number(f.domain().task(f.taskId).version);
+  const other = f.jira.state.status.id === PROGRESS ? TODO : PROGRESS;
+  f.jira.state.status = { id: other, name: "Other", category: "indeterminate" };
+  await f.service.refreshGitHub();
+  assert.equal(f.domain().task(f.taskId).ready, 1);
+  assert.equal(Number(f.domain().task(f.taskId).version), version);
+  assert.ok(f.blockers().includes(awaitingSettlement));
+});
+
+test("a Jira close to a Done other than the one the close moved to ends the settlement", async (t) => {
+  const f = await settleThenClose(t);
+  assert.equal((await f.close()).success, true);
+  f.jira.state.status = { id: "10", name: "Closed", category: "done" };
+  await f.service.refreshGitHub();
+  assert.ok(f.blockers().includes(awaitingSettlement));
+});
+
+test("a Jira select field moved between two Ready options ends the settlement, and an unread one cannot be settled against", async (t) => {
+  const f = await fixture(t, undefined, "skip", REVIEW, selectRule);
+  await f.registerPr();
+  await f.endTurn();
+  // A read that returns no field cannot be settled against.
+  f.setSelect(undefined);
+  await f.service.refreshGitHub();
+  await assert.rejects(() => f.settle(), /not fully observed/);
+  f.setSelect({ id: "A", value: "A" });
+  await f.service.refreshGitHub();
+  await f.settle();
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
+  // A renamed option is not a change.
+  f.setSelect({ id: "A", value: "A (renamed)" });
+  await f.service.refreshGitHub();
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
+  const version = Number(f.domain().task(f.taskId).version);
+  // A -> B satisfies the rule as A did, and still ends the settlement.
+  f.setSelect({ id: "B", value: "B" });
+  await f.service.refreshGitHub();
+  assert.equal(f.domain().task(f.taskId).ready, 1);
+  assert.equal(Number(f.domain().task(f.taskId).version), version);
+  assert.ok(f.blockers().includes(awaitingSettlement));
+  f.setSelect({ id: "A", value: "A" });
+  await f.service.refreshGitHub();
+  assert.ok(f.blockers().includes(awaitingSettlement));
+});
+
+test("a Jira label removed while another still satisfies the rule ends the settlement", async (t) => {
+  const f = await settledPr(t, labelRule, ["ready", "approved"]);
+  // Case, order and unrelated labels are not inputs.
+  f.jira.state.labels = ["Approved", "chore", "READY"];
+  await f.service.refreshGitHub();
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
+  f.jira.state.labels = ["approved", "chore"];
+  await f.service.refreshGitHub();
+  assert.equal(f.domain().task(f.taskId).ready, 1);
+  assert.ok(f.blockers().includes(awaitingSettlement));
 });

@@ -8,6 +8,7 @@ import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sourceCredentialReference } from "./credential-reference.js";
+import { DeliveryReadinessStore, type OwnClose } from "./delivery-readiness.js";
 import { applyRepositoryLevel, isCodeHostGrant } from "./delivery-levels.js";
 import { githubIssueTracker } from "./github-source-contracts.js";
 import {
@@ -855,6 +856,12 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_closure_versions (
       operationId TEXT PRIMARY KEY REFERENCES delivery_actions(operationId),
       taskId TEXT NOT NULL REFERENCES domain_tasks(id), baseVersion INTEGER NOT NULL, version INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS delivery_settlement_readiness (
+      commandKey TEXT PRIMARY KEY, taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+      inputsJson TEXT NOT NULL, invalidated INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS delivery_settlement_readiness_task ON delivery_settlement_readiness(taskId);
+    CREATE TABLE IF NOT EXISTS delivery_readiness_coverage (
+      taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), unreadSelectFields TEXT NOT NULL);
     `);
   }
   transaction<T>(run: () => T): T {
@@ -2484,6 +2491,18 @@ export class DeliveryStore {
       (binding.observation.draft || binding.observation.state === "CLOSED")
     )
       throw new HandbackSettlementRefusedError("PR is not reviewable");
+    // Frozen before the binding changes: unobserved inputs refuse an acceptance whole. Closing
+    // the outcome stays possible and, without a record, holds until settled again.
+    if (
+      !new DeliveryReadinessStore(this.db).capture(
+        command.key,
+        command.taskId,
+        command.decision === "accepted",
+      )
+    )
+      throw new HandbackSettlementRefusedError(
+        "Readiness inputs are not fully observed",
+      );
     binding.revision++;
     binding.settlement = {
       key: command.key,
@@ -2522,6 +2541,11 @@ export class DeliveryStore {
       !binding.settlement ||
       binding.settlement.headSha !== binding.observation.headSha ||
       binding.settlement.policyVersion !== policy.version ||
+      this.readiness().holds(
+        taskId,
+        binding.settlement.key,
+        this.ownClose(taskId, true),
+      ) ||
       (taskVersion !== undefined &&
         binding.settlement.taskVersion !== taskVersion &&
         !this.closureCarriesSettlement(
@@ -2629,6 +2653,52 @@ export class DeliveryStore {
         updatedAt: a.updatedAt,
       })),
     };
+  }
+  private readiness(): DeliveryReadinessStore {
+    return new DeliveryReadinessStore(this.db);
+  }
+  /** The inputs as read now; differing across an await means source facts moved under it. */
+  readinessMaterial(taskId: string): string | null {
+    return this.readiness().material(taskId);
+  }
+  /** Jira select fields the last read of the task's issue left unread. */
+  recordReadinessCoverage(taskId: string, unreadSelectFields: string[]): void {
+    this.readiness().recordCoverage(taskId, unreadSelectFields);
+  }
+  /** Called after a committed source write: latches settlements whose inputs it changed. */
+  observeReadinessInputs(taskId: string): void {
+    this.readiness().observe(taskId, () => this.ownClose(taskId, false));
+  }
+  /**
+   * Cab's own `issue.close` on the item, whose effects are not input changes. Pending: any
+   * unsuperseded close in flight, uncertain or confirmed. Proven: the confirmed closure the
+   * issue is observed closed under. `statusId` is a Jira close's recorded Done target.
+   */
+  private ownClose(taskId: string, proven: boolean): OwnClose | undefined {
+    const item = this.db
+      .prepare(
+        "SELECT externalId, observedState FROM external_items WHERE taskId=?",
+      )
+      .get(taskId) as { externalId: string; observedState: string } | undefined;
+    if (!item || (proven && item.observedState !== "closed")) return undefined;
+    const superseded = this.supersededClosures(taskId, item.externalId);
+    const operation = proven
+      ? this.ownClosureOperation(taskId, item.externalId)
+      : this.actions(taskId)
+          .filter(
+            (a) =>
+              a.request.action.kind === "issue.close" &&
+              a.request.action.target.nodeId === item.externalId &&
+              ["attempting", "uncertain", "confirmed-success"].includes(
+                a.state,
+              ) &&
+              a.beforeState?.state === "open" &&
+              !superseded.has(a.operationId),
+          )
+          .at(-1);
+    if (operation?.request.action.kind !== "issue.close") return undefined;
+    const target = operation.beforeState?.targetStatusId;
+    return typeof target === "string" ? { statusId: target } : {};
   }
   ownsConfirmedClosure(taskId: string, nodeId: string): boolean {
     return !!this.ownClosureOperation(taskId, nodeId);
