@@ -3964,8 +3964,13 @@ for (const engine of ["chromium", "webkit"] as const)
         "brief",
         "assignments",
       ];
-      // WebKit does not Tab onto the conversation's buttons by default.
-      assert.deepEqual(visited, engine === "webkit" ? order.slice(1) : order);
+      // WebKit on macOS does not Tab onto the conversation's buttons by default; Linux WebKit does.
+      assert.deepEqual(
+        visited,
+        engine === "webkit" && process.platform === "darwin"
+          ? order.slice(1)
+          : order,
+      );
     },
   );
 

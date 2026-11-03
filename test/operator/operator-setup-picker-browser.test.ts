@@ -186,7 +186,9 @@ test(
     const dialog = page.getByRole("dialog", {
       name: "Choose repository folder",
     });
-    await dialog.getByRole("button", { name: /^src/ }).click();
+    // Enter, not click: in loaded Linux CI, headless WebKit has produced no animation frame for
+    // the 5 s click stability check (no "not stable" retries), so the click never ran.
+    await dialog.getByRole("button", { name: /^src/ }).press("Enter");
     await dialog.getByRole("button", { name: /^atlas/ }).waitFor();
   },
 );
