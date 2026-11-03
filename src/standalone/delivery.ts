@@ -923,10 +923,13 @@ export class DeliveryCoordinator {
         prior.observation.number !== command.prNumber
       )
         throw new HandbackSettlementRefusedError("Handback target changed");
+      // Source facts can change under the await without moving the task version.
+      const inputs = this.store.readinessMaterial(command.taskId);
       const observed = await this.inspectBinding(command.taskId);
       // Changed observations and their durable feedback survive a rejected command.
       return this.store.transaction(() => {
         if (
+          this.store.readinessMaterial(command.taskId) !== inputs ||
           taskVersion !== command.expectedTaskVersion ||
           (this.options.taskVersion?.(command.taskId) ?? taskVersion) !==
             taskVersion ||

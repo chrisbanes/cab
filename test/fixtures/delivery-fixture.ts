@@ -45,6 +45,8 @@ export async function deliveryFixture(
   projectStatus = false,
   /** How long a status-mapping write's provider call may take before it is given up. */
   statusWriteTimeoutMs?: number,
+  /** The labels an imported label-rule task is Ready by (any of them); defaults to `ready` alone. */
+  readinessLabels: string[] = ["ready"],
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-delivery-bound-"))),
     projectId = randomUUID(),
@@ -373,7 +375,11 @@ export async function deliveryFixture(
               operator: "in" as const,
               optionNodeIds: [optionNodeId],
             }))
-          : [{ kind: "label", operator: "has", name: "ready" }],
+          : readinessLabels.map((name) => ({
+              kind: "label" as const,
+              operator: "has" as const,
+              name,
+            })),
       },
     });
     domain.execute({

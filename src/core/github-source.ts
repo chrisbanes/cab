@@ -31,32 +31,6 @@ import {
 const parseRule = (json: unknown) =>
   readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
 
-const observedStatusSchema = z
-  .object({ id: z.string(), name: z.string() })
-  .passthrough();
-const observedFieldsSchema = z.array(
-  z
-    .object({ fieldId: z.string(), optionId: z.string(), name: z.string() })
-    .passthrough(),
-);
-
-/** An issue's labels, tracker status ID and select values as stored on its `external_items` row. */
-const observedFacts = (row: Row) => ({
-  labels: z.array(z.string()).parse(JSON.parse(String(row.labels)) as unknown),
-  status:
-    row.observedStatus == null
-      ? null
-      : observedStatusSchema.parse(
-          JSON.parse(String(row.observedStatus)) as unknown,
-        ).id,
-  selectFields:
-    row.observedFields == null
-      ? []
-      : observedFieldsSchema.parse(
-          JSON.parse(String(row.observedFields)) as unknown,
-        ),
-});
-
 /** Why an imported task is or is not Draft, with its project's rule. */
 export interface TaskReadiness {
   rule: Readiness | null;
@@ -79,6 +53,8 @@ export interface IssueSnapshot {
   status?: { id: string; name: string; categoryKey: string };
   /** The tracker's single-select field values, stored for Jira; GitHub has none. */
   selectFields?: Array<{ fieldId: string; optionId: string; name: string }>;
+  /** Jira: requested select fields the read returned neither a value nor null for. */
+  unreadSelectFields?: string[];
   /** Jira: the issues this one "is blocked by", read with it. Not stored with the issue. */
   blockedBy?: IssueSnapshot[];
   projectFields: Array<{
@@ -140,6 +116,9 @@ import {
   selectionSchema,
   jiraSelectionSchema,
   evaluateReadiness,
+  observedFacts,
+  observedFieldsSchema,
+  observedStatusSchema,
   type Readiness,
   type ReadinessCondition,
 } from "./github-source-contracts.js";
@@ -1104,6 +1083,11 @@ export class GitHubSourceStore {
               ...this.key(issue.nodeId),
             );
         }
+        if (issue.unreadSelectFields)
+          new DeliveryStore(this.db).recordReadinessCoverage(
+            taskId,
+            issue.unreadSelectFields,
+          );
         this.db
           .prepare(
             "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields, itemId, readAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, provider, instance, externalId) DO UPDATE SET fields = excluded.fields, itemId = excluded.itemId, readAt = excluded.readAt, missedReads = NULL",
@@ -1649,6 +1633,8 @@ export class GitHubSourceStore {
       this.db
         .prepare("UPDATE domain_tasks SET readinessRule = ? WHERE id = ?")
         .run(String(config.readiness), taskId);
+    // Every committed source write passes here, whether or not it moved Ready.
+    new DeliveryStore(this.db).observeReadinessInputs(taskId);
   }
 
   /** The stored readiness rule; `null` filters nothing. */

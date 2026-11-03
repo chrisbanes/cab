@@ -152,8 +152,10 @@ test("handback settlement inspects provider-only head changes and rechecks local
 
 import {
   deliveryFixture,
+  fixtureProject,
   unusedIssueInspection,
 } from "../fixtures/delivery-fixture.js";
+import { databaseOf } from "../fixtures/service-internals.js";
 for (const mode of ["reviewable-pr", "through-merge"] as const)
   test(`${mode} issue close cannot bypass the configured PR delivery boundary`, async () => {
     const f = await deliveryFixture(mode, true);
@@ -1342,6 +1344,162 @@ test("a replacement settlement after another change survives a later lagging clo
     await f.service.refreshGitHub();
     f.setIssueOpen(false);
     await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+/** A fresh operator settlement of the PR as it stands now. */
+async function settleAgain(
+  f: Fixture,
+  key: ReturnType<typeof randomUUID> = randomUUID(),
+) {
+  const delivery = f.service.delivery();
+  return f.service.settleHandback({
+    actor: "operator",
+    key,
+    taskId: f.taskId,
+    expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+    expectedDeliveryRevision: delivery.delivery(f.taskId)?.revision ?? 0,
+    expectedPolicyVersion: delivery.configuration(f.projectId).version,
+    repositoryId: "R1",
+    prNumber: 7,
+    expectedPrNodeId: "P7",
+    expectedHeadSha: f.getPr().headSha,
+    decision: "accepted",
+  });
+}
+const receipts = (f: Fixture) =>
+  Number(
+    (
+      databaseOf(f.service)
+        .prepare("SELECT COUNT(*) AS n FROM delivery_settlement_receipts")
+        .get() as { n: number }
+    ).n,
+  );
+
+// Ready and the task version only move when the rule's result flips: a value that moves between two
+// satisfying values changes neither, so the settlement itself has to bind the values the rule reads.
+test("a Project field moved between two Ready options ends the settlement without moving Ready or the version", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    const settled = Number(f.domain.task(f.taskId).version);
+    assert.equal(receipts(f), 1);
+    f.setStatus(fixtureProject.inReview);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 1);
+    assert.equal(Number(f.domain.task(f.taskId).version), settled);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    // The change is latched: reading the old option again does not bring the settlement back.
+    f.setStatus(fixtureProject.todo);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    // Replaying the old key returns its receipt and recovers nothing.
+    const old = databaseOf(f.service)
+      .prepare("SELECT commandKey AS key FROM delivery_settlement_readiness")
+      .get() as { key: string } | undefined;
+    assert.ok(old);
+    await settleAgain(f, old.key as ReturnType<typeof randomUUID>).catch(
+      () => undefined,
+    );
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    // A fresh settlement captures what is observed now.
+    await settleAgain(f);
+    assert.equal(receipts(f), 2);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a settlement is held by a Project field change seen with the close, and one fresh settlement recovers it", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f, closedOk, () =>
+      f.setStatus(fixtureProject.inReview),
+    );
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    await settleAgain(f);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a close with no other change needs exactly one settlement for a Project field rule", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.equal(receipts(f), 1);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a readiness label removed while another still satisfies the rule ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, false, undefined, [
+    "ready",
+    "approved",
+  ]);
+  try {
+    f.setSourceLabels(["ready", "approved"]);
+    await f.service.refreshGitHub();
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    const settled = Number(f.domain.task(f.taskId).version);
+    // Case, order and unrelated labels are not inputs.
+    f.setSourceLabels(["Approved", "chore", "READY"]);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    f.setSourceLabels(["approved", "chore"]);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 1);
+    assert.equal(Number(f.domain.task(f.taskId).version), settled);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a label change seen with the close holds the settlement even though Ready stays true", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, false, undefined, [
+    "ready",
+    "approved",
+  ]);
+  try {
+    f.setSourceLabels(["ready", "approved"]);
+    await f.service.refreshGitHub();
+    await settleThenClose(f, closedOk, () => f.setSourceLabels(["approved"]));
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a settlement without captured readiness inputs, or inputs a read cannot vouch for, holds", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    // A selection without a complete read cannot vouch for the old values.
+    databaseOf(f.service).exec("UPDATE source_sync_state SET complete = 0");
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    databaseOf(f.service).exec("UPDATE source_sync_state SET complete = 1");
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    // A settlement made before inputs were captured is held until settled again.
+    databaseOf(f.service).exec("DELETE FROM delivery_settlement_readiness");
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    await settleAgain(f);
     assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
   } finally {
     await f.close();

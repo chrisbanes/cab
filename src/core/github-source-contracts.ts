@@ -139,6 +139,34 @@ export const hasLabelName = (
   name: string,
 ): boolean => labels.some((l) => l.toLowerCase() === name.toLowerCase());
 
+export const observedStatusSchema = z
+  .object({ id: z.string(), name: z.string() })
+  .passthrough();
+export const observedFieldsSchema = z.array(
+  z
+    .object({ fieldId: z.string(), optionId: z.string(), name: z.string() })
+    .passthrough(),
+);
+
+/** An issue's labels, tracker status ID and select values as stored on its `external_items` row. */
+export const observedFacts = (
+  row: Record<string, string | number | null | undefined>,
+) => ({
+  labels: z.array(z.string()).parse(JSON.parse(String(row.labels)) as unknown),
+  status:
+    row.observedStatus == null
+      ? null
+      : observedStatusSchema.parse(
+          JSON.parse(String(row.observedStatus)) as unknown,
+        ).id,
+  selectFields:
+    row.observedFields == null
+      ? []
+      : observedFieldsSchema.parse(
+          JSON.parse(String(row.observedFields)) as unknown,
+        ),
+});
+
 /**
  * The readiness predicate over one issue's labels, Project fields, and (Jira) status and
  * select fields. An unobserved status or field never satisfies a condition. A `null` rule

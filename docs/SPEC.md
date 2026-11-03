@@ -2573,19 +2573,35 @@ PR-dependent completion inspect GitHub freshly and revalidate local revisions af
 the await. Changed heads invalidate settlement and wake the retained lead. New
 comment/review/check identities also wake it; unchanged polls are deduplicated.
 
-A settlement is bound to the PR head, the policy version and the task version. It stays
-valid across a task-version change made only by cab's own confirmed `issue.close`: the
-closure and the readiness it removes, while the issue is observed closed. A source read
-that still lists the issue open does not end it once a later read shows the issue
-closed with nothing else changed. Any other task change (a title or description edit, or
-a readiness label or field change that moves readiness, including one in the same read),
-a closure outside cab, an unconfirmed close or a reopen requires a new settlement. The
-rule is the same for GitHub and Jira. Three narrow limits stay accepted: a reopen and
-manual re-close that both happen before an explicit closure's first proof (the
-attribution limit below); for Jira, a person's move to an open status outside the
-readiness rule that lands just before cab's close, because the closure read exempts a
-status condition; and a label or field change that leaves the readiness rule satisfied,
-which moves no task version and so is not detected when it coincides with the close.
+A settlement is bound to the PR head, the policy version, the task version and the values
+the imported task's readiness rule reads. Those values are the presence of each label the
+rule names (compared case-insensitively), the complete option set of each Project field
+or Jira select field it names, and a Jira status it names; other labels, fields, names
+and display text are not compared, and neither is the order or repetition of a set. They
+are frozen with the settlement and compared on every committed source update, whether or
+not it moves Ready or the task version, so a change between two values that both satisfy
+the rule ends the settlement. An observed change stays recorded: reading the old values
+again does not restore it, and only a new settlement, which freezes the values then
+observed, does. A settlement made without frozen values, or whose values the source cannot
+currently vouch for (an input not returned by the last read, an item outside the Project,
+a selection without a complete read, a changed rule), holds until a complete read or a new
+settlement; a new settlement is refused while the values are not observed.
+
+It stays valid across a task-version change made only by cab's own confirmed
+`issue.close`: the closure and the readiness it removes, while the issue is observed
+closed, and for Jira the move to the Done status the close recorded as its target. No
+other status counts as that move, and every label, field and Project value is still
+compared in the same read. A source read that still lists the issue open does not end it
+once a later read shows the issue closed with nothing else changed. Any other task
+change that moves readiness, a change to a value the rule reads, a closure outside cab, an
+unconfirmed close or a reopen requires a new settlement. Cab's own mapped status writes
+after the settlement are changes to the values like any other. The rule is the same for
+GitHub and Jira. Accepted limits: a change and its reversion that both fall between two
+source observations is not detected; a reopen and manual re-close that both happen before an
+explicit closure's first proof (the attribution limit below); and for Jira, a person's
+move to a status just before cab's close that no source read observed, because the
+close's own move to Done is exempt and the status before it is not recorded by a
+conditional transition.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;
@@ -2595,7 +2611,7 @@ pinned to the closing operation; a fresh read showing the issue open, or closed 
 different ClosedEvent, proves a reopen and supersedes that own closure. When a
 readiness rule exists, current label readiness must still hold, and
 repository-selection proof must hold in every case. Field/search cases
-without that proof, independent holds and changed source text remain held. Explicit
+without that proof and independent holds remain held. Explicit
 issue closure requires observed open before the effect; a concurrent independent
 closure between that read and write remains an attribution limit, as does a reopen
 and manual re-close with no closer that both happen before an explicit closure's
