@@ -5021,10 +5021,23 @@ test("an in-flight Status the readiness rule does not accept is refused naming t
   await panel
     .getByRole("button", { name: "Save status mapping", exact: true })
     .click();
-  const refusal = panel.getByRole("alert").filter({
+  // The save outcome says which event and option, and Go to field returns to the select.
+  const refusal = outcomeMessages(panel).filter({
     hasText: "First turn started → Todo: the readiness rule does not accept",
   });
   await refusal.waitFor();
+  await panel
+    .getByLabel("Stopped, uncertain or blocked", { exact: true })
+    .focus();
+  await refusal
+    .getByRole("button", { name: "Go to field", exact: true })
+    .click();
+  assert.equal(
+    await panel
+      .getByLabel("First turn started", { exact: true })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
   assert.equal(
     await panel
       .getByLabel("First turn started", { exact: true })

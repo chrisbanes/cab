@@ -573,7 +573,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page
     .getByRole("button", { name: "Refresh delivery status", exact: true })
     .click();
-  await page.getByText(/issue.comment: confirmed-success/).waitFor();
+  await page.getByText(/Comment on issues: confirmed-success/).waitFor();
   await openTaskTab(page, "Overview");
   assert.equal(effects, 1);
   assert.equal(

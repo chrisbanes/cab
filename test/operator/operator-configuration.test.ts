@@ -4066,6 +4066,53 @@ test("advanced submission preserves opaque grants checks and prefix alongside pu
   assert.equal(f.runtime.turns, 0);
 });
 
+test("a field-specific delivery refusal carries its fixed sentence and a stale version does not", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const saved = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  const send = (expectedVersion: number) =>
+    api
+      .execute({
+        type: "delivery.configure",
+        key: randomUUID(),
+        projectId,
+        expectedVersion,
+        mode: saved.mode,
+        grants: [
+          {
+            action: "project.field",
+            repositoryId: "R_linked",
+            mode: "allow",
+            projectNodeId: "PVT_x",
+          },
+        ],
+        requiredChecks: [],
+      })
+      .then(
+        () => assert.fail("expected rejection"),
+        (error: unknown) => error as OperatorApiError,
+      );
+  const refusal = await send(saved.version);
+  assert.equal(refusal.status, 400);
+  assert.equal(refusal.code, "invalid-input");
+  assert.deepEqual(refusal.fieldPaths, [
+    "grants.0.fieldNodeId",
+    "grants.0.optionNodeIds",
+  ]);
+  assert.equal(
+    refusal.publicMessage,
+    "Project field grant requires exact field and options",
+  );
+  const stale = await send(saved.version + 5);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.code, "conflict");
+  assert.equal(stale.publicMessage, undefined);
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.delivery!.version,
+    saved.version,
+  );
+  assert.equal(f.runtime.turns, 0);
+});
+
 /** A project with a linked repository the operator cannot see (its ID is a credential's name) and a visible one. */
 async function hiddenRepositoryFixture(t: TestContext) {
   const { f, api, projectId } = await deliveryFixture(t);

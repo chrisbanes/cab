@@ -409,7 +409,7 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   await page.goto(`${web.origin}/app/tasks/${f.taskId}?section=changes`);
   await page
     .locator("#changes")
-    .getByText(/pr.merge: uncertain/)
+    .getByText(/Merge pull requests: uncertain/)
     .waitFor();
   assert.equal(f.scripted.state.writes, 1);
   await captureBrowserEvidence(page, "phone-uncertain-effect");
@@ -437,7 +437,7 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
     .locator("#changes")
-    .getByText(/pr.merge: uncertain/)
+    .getByText(/Merge pull requests: uncertain/)
     .waitFor();
   // The hold line is in Overview's decision card; the strip names the state on every tab.
   await openTaskTab(page, "Overview");

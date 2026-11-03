@@ -12,25 +12,6 @@ import {
   repositoryLevelGrants,
   type RepositoryDeliveryLevel,
 } from "../../src/core/delivery-levels.js";
-export const deliveryActionKinds = [
-  "issue.comment",
-  "issue.labels",
-  "issue.edit",
-  "issue.create",
-  "project.item.add",
-  "project.field",
-  "issue.status",
-  "pr.create",
-  "pr.edit",
-  "pr.ready",
-  "pr.merge",
-  "issue.close",
-  "pr.thread.reply",
-  "pr.thread.resolve",
-  "branch.push",
-  "branch.force-push",
-  "branch.adopt",
-] as const;
 export type DeliveryAction = DeliveryPolicy["grants"][number]["action"];
 export type DeliveryGrant = DeliveryPolicy["grants"][number];
 type DeliveryConfiguration = z.infer<typeof deliveryConfigurationSchema>;
@@ -741,10 +722,10 @@ export function grantIdentityNames(
     field?.state === "ready"
       ? field.fields.find((f) => f.fieldNodeId === row.fieldNodeId)
       : undefined;
-  const options = (row.optionNodeIds ?? []).flatMap((id) => {
-    const name = listed?.options.find((o) => o.optionNodeId === id)?.name;
-    return name ? [name] : [];
-  });
+  // Follows `optionNodeIds`, so a name that could not be found leaves its place empty.
+  const options = (row.optionNodeIds ?? []).map(
+    (id) => listed?.options.find((o) => o.optionNodeId === id)?.name,
+  );
   return {
     repository:
       links.find((l) => l.repositoryId === row.repositoryId)?.name || undefined,
@@ -755,6 +736,6 @@ export function grantIdentityNames(
           )?.label
         : undefined,
     field: listed?.name,
-    options: options.length ? options : undefined,
+    options: options.some(Boolean) ? options : undefined,
   };
 }

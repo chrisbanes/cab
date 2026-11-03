@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { genericInvalidInputMessage } from "../../src/operator/contracts.js";
 import { OperatorClient } from "../../web/src/api.js";
 import {
   ConfigurationDraft,
@@ -1216,6 +1217,76 @@ test("a refused project name is cleared by the retry that records", async () => 
   await draft.submit(accept, command, "csrf");
   assert.equal(draft.phase, "recorded");
   assert.deepEqual(draft.errors, {});
+});
+test("a refused status mapping or delivery policy puts the service's sentence in the outcome, and no other command does", async () => {
+  const mapping = {
+    type: "status-mapping.configure" as const,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    expectedVersion: 1,
+    mapping: null,
+  };
+  const delivery = {
+    type: "delivery.configure" as const,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    expectedVersion: 1,
+    mode: "reviewable-pr" as const,
+    grants: [],
+    requiredChecks: [],
+  };
+  const cases = [
+    [
+      mapping,
+      "mapping.events.turnStarted",
+      "First turn started → Todo: the readiness rule does not accept it.",
+    ],
+    [
+      delivery,
+      "grants.0.fieldNodeId",
+      "Project field grant requires exact field",
+    ],
+  ] as const;
+  for (const [command, path, message] of cases) {
+    const draft = new ConfigurationDraft();
+    await draft.submit(rejectWith([path], message), command, "csrf");
+    assert.equal(draft.phase, "rejected", command.type);
+    assert.deepEqual(draft.errors, { [path]: message }, command.type);
+    // A message without a closing period gets one, so the notice reads as two sentences.
+    assert.equal(
+      draft.notice,
+      `${message.replace(/\.?$/, ".")} Your changes are still here.`,
+      command.type,
+    );
+    assert.equal(draft.fieldRefusal, true, command.type);
+  }
+  // The generic line the service sends when it has no sentence of its own is not one.
+  for (const command of [mapping, delivery]) {
+    const generic = new ConfigurationDraft();
+    await generic.submit(
+      rejectWith(["grants.0.action"], genericInvalidInputMessage),
+      command,
+      "csrf",
+    );
+    assert.deepEqual(generic.errors, {
+      "grants.0.action": "Check this field.",
+    });
+    assert.equal(generic.notice, outcomeCopy.fields(1));
+    assert.equal(generic.fieldRefusal, false);
+  }
+  const other = new ConfigurationDraft();
+  await other.submit(
+    rejectWith(["leadProfileId"], "Safe"),
+    projectCreate("atlas"),
+    "csrf",
+  );
+  assert.equal(other.notice, outcomeCopy.fields(1));
+  assert.equal(other.fieldRefusal, false);
+  // No named field, or no message, keeps the generic outcome.
+  const bare = new ConfigurationDraft();
+  await bare.submit(rejectWith([], "Safe"), delivery, "csrf");
+  assert.equal(bare.notice, outcomeCopy.rejected);
+  assert.equal(bare.fieldRefusal, false);
 });
 test("a discovery credential save elsewhere is unsettled until it is confirmed", async () => {
   const drafts = new ConfigurationDrafts();

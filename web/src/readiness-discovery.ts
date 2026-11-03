@@ -79,6 +79,8 @@ export function projectChoices(
   repositories: RepositoriesRead | undefined,
   saved: { repositoryId: string }[],
   projectReads: Record<string, ProjectsRead | undefined>,
+  /** Also the owner's Projects that are not linked to a repository. */
+  owned = false,
 ):
   | { state: "loading" }
   | { state: "typed"; note: string }
@@ -98,7 +100,7 @@ export function projectChoices(
     if (read.state === "unavailable")
       return { state: "typed", note: unavailableNote(read) };
     if (read.truncated) return { state: "typed", note: truncatedNote() };
-    for (const p of read.linked)
+    for (const p of owned ? [...read.linked, ...read.owned] : read.linked)
       found.set(p.projectNodeId, {
         title: p.title || "Untitled Project",
         owner: read.ownerLogin,
@@ -158,6 +160,8 @@ export function rowState(
   ids: ConditionIds,
   choices: ReturnType<typeof projectChoices>,
   fieldReads: Record<string, FieldsRead | undefined>,
+  /** A Project alone is chosen, so its fields are never read. */
+  projectOnly = false,
 ): PickerState {
   if (choices.state !== "ready") return choices;
   const { projectNodeId, fieldNodeId } = ids;
@@ -168,6 +172,8 @@ export function rowState(
       : { state: "picker", projects: choices.projects, fields: [] };
   if (!choices.projects.some((p) => p.projectNodeId === projectNodeId))
     return { state: "typed", note: unlistedNote };
+  if (projectOnly)
+    return { state: "picker", projects: choices.projects, fields: [] };
   const read = fieldReads[projectNodeId];
   // The Project list is known, so its select stays usable while the fields load.
   if (!read) return { state: "loading", projects: choices.projects };

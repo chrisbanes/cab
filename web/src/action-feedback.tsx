@@ -1,5 +1,11 @@
 import { Check } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "./components.js";
 import type { ReceiptDetails } from "./outcome-copy.js";
 import { Alert } from "./ui/alert.js";
@@ -43,7 +49,12 @@ export function ActionOutcome({
   title?: string | undefined;
   message: ReactNode;
   /** The single thing to do next. */
-  action?: { label: string; onClick: () => void | Promise<void> } | undefined;
+  action?:
+    | {
+        label: string;
+        onClick: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
+      }
+    | undefined;
   /**
    * Take focus as the message appears, when the control the operator used is gone: the
    * action if there is one, otherwise the message itself.

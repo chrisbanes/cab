@@ -1,3 +1,4 @@
+import { deliveryActionLabel } from "../operator/delivery-action-copy.js";
 import { statusMappingActionLabel } from "../operator/status-mapping-copy.js";
 import { createHash } from "node:crypto";
 import { absentBranchHead } from "../core/delivery.js";
@@ -86,8 +87,8 @@ const actionRows = (actions: Action[]) =>
     actions.map((a) => [
       a.operationId,
       a.caller === "service" && a.event
-        ? `${a.kind} (${statusMappingActionLabel}: ${a.event})`
-        : a.kind,
+        ? `${deliveryActionLabel(a.kind)} (${statusMappingActionLabel}: ${a.event})`
+        : deliveryActionLabel(a.kind),
       a.state,
       a.reason ?? "-",
     ]),

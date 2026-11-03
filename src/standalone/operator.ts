@@ -1,6 +1,7 @@
 import type { LocalAccess } from "../operator/local-access.js";
 import { cabFaviconSvg, cabMarkSvg } from "../operator/brand.js";
 import {
+  genericInvalidInputMessage,
   questionCommandRawLimit,
   runtimeSummary,
 } from "../operator/contracts.js";
@@ -341,7 +342,7 @@ function publicMessage(code: string): string {
     forbidden: "Request denied.",
     "not-found": "Not found.",
     "method-not-allowed": "Method not allowed.",
-    "invalid-input": "Review the request fields.",
+    "invalid-input": genericInvalidInputMessage,
     "unsupported-media": "JSON input required.",
     "body-too-large": "Request is too large.",
     conflict:

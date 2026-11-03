@@ -498,6 +498,19 @@ export function DraftMessage({
               : undefined
           }
           message={draft.notice}
+          action={
+            draft.fieldRefusal
+              ? {
+                  label: "Go to field",
+                  // The rule `sendDraft` uses after a rejection; no control to reach is not an error.
+                  onClick: (event) =>
+                    event.currentTarget
+                      .closest("form")
+                      ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+                      ?.focus(),
+                }
+              : undefined
+          }
           focus={answersCheck}
           details={details}
         />

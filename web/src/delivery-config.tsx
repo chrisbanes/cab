@@ -1,5 +1,8 @@
 import { useId, useState, useRef, useEffect, type ReactNode } from "react";
-import { useReadinessDiscovery } from "./readiness-picker.js";
+import {
+  ProjectFieldPicker,
+  useReadinessDiscovery,
+} from "./readiness-picker.js";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -7,7 +10,6 @@ import {
   deliveryLevelView,
   type DeliveryPolicyDraft,
   type RepositoryDeliveryLevel,
-  deliveryActionKinds,
   deliveryEditorValues,
   deliveryEditorDraft,
   deliveryPolicySubmission,
@@ -61,13 +63,21 @@ import {
   unconfirmedChecksNote,
   type CodeHost,
 } from "./delivery-presentation.js";
-import { repositoryLabel } from "./presentation.js";
+import { repositoryLabel, type RepositoryNames } from "./presentation.js";
+import {
+  deliveryActionCopy,
+  deliveryActionKinds,
+  grantSentence,
+} from "../../src/operator/delivery-action-copy.js";
+import { ListedChoice } from "./settings-rows.js";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog.js";
+/** A grant row the operator can edit; an unavailable saved row is kept as it is. */
+type VisibleGrant = Exclude<GrantRow, { savedRow: unknown }>;
 type Preset = Exclude<RepositoryDeliveryLevel, "not-set-up" | "custom">;
 const presets: Preset[] = [
   "open-prs",
@@ -190,20 +200,28 @@ function DeliveryPolicyForm(p: TabProps) {
   }, [p.session, p.projectId]);
   const initial = saved ? deliveryEditorValues(saved) : null;
   useLoadedDraft(d, initial, p.loadedAt, saved);
-  // Names beside the grant ID inputs: the repository's name and, for a Project grant, what discovery lists.
-  const projectGrants = deliveryRows<GrantRow>(d.values.grants).filter(
-    (row) => !("savedRow" in row) && row.projectNodeId,
+  // Names for the grant pickers: the repositories and, for a Project grant, what discovery lists.
+  const editableGrants = deliveryRows<GrantRow>(d.values.grants).filter(
+    (row): row is VisibleGrant => !("savedRow" in row),
+  );
+  const projectGrants = editableGrants.filter(
+    (row) =>
+      row.action === "project.field" || row.action === "project.item.add",
   );
   const discovery = useReadinessDiscovery({
     client: p.client,
     csrfToken: p.session.csrfToken,
     enabled: projectGrants.length > 0,
     labels: false,
+    ownedProjects: true,
+    repositories: editableGrants.length > 0,
     saved: p.data.repositories.links.map((link) => ({
       repositoryId: link.repositoryId ?? "",
     })),
     projectIds: projectGrants.flatMap((row) =>
-      "savedRow" in row || !row.projectNodeId ? [] : [row.projectNodeId],
+      row.action === "project.field" && row.projectNodeId
+        ? [row.projectNodeId]
+        : [],
     ),
   });
   if (!saved || !initial)
@@ -216,10 +234,33 @@ function DeliveryPolicyForm(p: TabProps) {
   const v = d.values;
   const draft = deliveryEditorDraft(v);
   const grants = deliveryRows<GrantRow>(v.grants);
-  const grantNames = grants.map((row) =>
+  const links = p.data.repositories.links;
+  // Linked repositories name first; a discovered one the project does not link names the rest.
+  const discovered =
+    discovery.repositories?.state === "ready"
+      ? discovery.repositories.repositories
+      : [];
+  const repositoryNames: RepositoryNames = [
+    ...links,
+    ...discovered.map((r) => ({
+      repositoryId: r.repositoryId,
+      name: `${r.owner}/${r.name}`,
+    })),
+  ];
+  // The browser bundle cannot take the delivery store, so this repeats `isIssueTrackerAction`.
+  const jiraContainer = (action: string) =>
+    p.data.source.tracker === "jira" &&
+    (action.startsWith("issue.") || action.startsWith("project."));
+  const sentences = grants.map((row) =>
     "savedRow" in row
       ? undefined
-      : grantIdentityNames(row, p.data.repositories.links, discovery),
+      : grantSentence(row, {
+          ...grantIdentityNames(row, repositoryNames, discovery),
+          // A Jira container is typed, so its ID is what the operator knows it by.
+          ...(jiraContainer(row.action)
+            ? { repository: row.repositoryId }
+            : {}),
+        }),
   );
   const repositoryRows = deliveryRows<RepositoryRow>(v.repositories);
   const requirements = saved.repositories ?? [];
@@ -247,21 +288,32 @@ function DeliveryPolicyForm(p: TabProps) {
     rows[index] = change(row);
     d.set("repositories", JSON.stringify(rows));
   };
+  const patchRow = (
+    section: "grants" | "requiredChecks",
+    index: number,
+    patch: Record<string, string | string[] | undefined>,
+  ) => {
+    const rows = deliveryRows<Record<string, unknown>>(v[section]);
+    const row = { ...rows[index] };
+    for (const [field, value] of Object.entries(patch))
+      if (value === undefined) delete row[field];
+      else row[field] = value;
+    if (section === "grants" && patch.action === "branch.adopt")
+      row.mode = "approval";
+    // An item-add grant has a Project only; a field or options left from a field grant would be hidden.
+    if (section === "grants" && patch.action === "project.item.add") {
+      delete row.fieldNodeId;
+      delete row.optionNodeIds;
+    }
+    rows[index] = row;
+    d.set(section, JSON.stringify(rows));
+  };
   const setRow = (
     section: "grants" | "requiredChecks",
     index: number,
     field: string,
     value: string | string[] | undefined,
-  ) => {
-    const rows = deliveryRows<Record<string, unknown>>(v[section]);
-    const row = { ...rows[index] };
-    if (value === undefined) delete row[field];
-    else row[field] = value;
-    if (section === "grants" && field === "action" && value === "branch.adopt")
-      row.mode = "approval";
-    rows[index] = row;
-    d.set(section, JSON.stringify(rows));
-  };
+  ) => patchRow(section, index, { [field]: value });
   const focus = (id: string) =>
     d.afterRender(() => document.getElementById(id)?.focus());
   const remove = (section: "grants" | "requiredChecks", index: number) => {
@@ -302,7 +354,6 @@ function DeliveryPolicyForm(p: TabProps) {
           JSON.stringify(row.savedRow) === JSON.stringify(g.savedRow),
       ),
   );
-  const links = p.data.repositories.links;
   const label = (id: string | null) =>
     id === null ? null : repositoryLabel(id, links);
   // Derived from the draft, so a project the migration skipped offers it and a set-up one does not.
@@ -698,10 +749,12 @@ function DeliveryPolicyForm(p: TabProps) {
                     <p>Unavailable saved row · kept until removed</p>
                   ) : (
                     <>
+                      <p className="body">{sentences[index]}</p>
                       <Field
                         id={row.rowKey}
                         label="Action"
                         error={error(`grants.${index}.action`)}
+                        note={deliveryActionCopy[row.action].description}
                         value={row.action}
                         onChange={(value) =>
                           setRow("grants", index, "action", value)
@@ -709,19 +762,16 @@ function DeliveryPolicyForm(p: TabProps) {
                       >
                         {deliveryActionKinds.map((action) => (
                           <option key={action} value={action}>
-                            {action}
+                            {deliveryActionCopy[action].label}
                           </option>
                         ))}
                       </Field>
-                      <Field
-                        label="Repository or tracker container ID"
+                      <GrantRepository
+                        row={row}
+                        jira={jiraContainer(row.action)}
+                        links={links}
+                        discovered={discovered}
                         error={error(`grants.${index}.repositoryId`)}
-                        note={
-                          grantNames[index]?.repository
-                            ? `Repository: ${grantNames[index]?.repository}`
-                            : undefined
-                        }
-                        value={row.repositoryId}
                         onChange={(value) =>
                           setRow("grants", index, "repositoryId", value)
                         }
@@ -739,65 +789,47 @@ function DeliveryPolicyForm(p: TabProps) {
                           <option value="allow">Allow</option>
                         )}
                       </Field>
+                      {row.action === "project.field" ||
+                      row.action === "project.item.add" ? (
+                        <GrantProject
+                          row={row}
+                          index={index}
+                          discovery={discovery}
+                          error={error}
+                          onChange={(patch) => patchRow("grants", index, patch)}
+                        />
+                      ) : null}
                       {(
                         [
-                          [
-                            "projectNodeId",
-                            "Project ID",
-                            row.action === "project.field" ||
-                              row.action === "project.item.add",
-                          ],
-                          [
-                            "fieldNodeId",
-                            "Field ID",
-                            row.action === "project.field",
-                          ],
-                          [
-                            "optionNodeIds",
-                            "Option IDs",
-                            row.action === "project.field",
-                          ],
-                          [
-                            "statusIds",
-                            "Status IDs",
-                            row.action === "issue.status",
-                          ],
+                          ["projectNodeId", "Project ID"],
+                          ["fieldNodeId", "Field ID"],
+                          ["optionNodeIds", "Option IDs"],
+                          ["statusIds", "Status IDs"],
                         ] as const
-                      ).map(([field, label, required]) => {
-                        const named =
-                          field === "projectNodeId"
-                            ? grantNames[index]?.project
-                            : field === "fieldNodeId"
-                              ? grantNames[index]?.field
-                              : field === "optionNodeIds"
-                                ? grantNames[index]?.options?.join(", ")
-                                : undefined;
-                        return (
+                      ).flatMap(([field, label]) => {
+                        const project =
+                          row.action === "project.field" ||
+                          row.action === "project.item.add";
+                        // The pickers above carry a Project grant's scope; the rest is optional or Jira's.
+                        if (field !== "statusIds" && project) return [];
+                        return [
                           <ScopeField
                             key={field}
                             label={label}
-                            required={required}
+                            required={
+                              field === "statusIds" &&
+                              row.action === "issue.status"
+                            }
                             value={row[field]}
                             array={
                               field === "optionNodeIds" || field === "statusIds"
                             }
                             error={error(`grants.${index}.${field}`)}
-                            note={
-                              named
-                                ? `${
-                                    field === "projectNodeId"
-                                      ? "Project"
-                                      : field === "fieldNodeId"
-                                        ? "Field"
-                                        : "Options"
-                                  }: ${named}`
-                                : undefined
-                            }
                             onChange={(value) =>
                               setRow("grants", index, field, value)
                             }
-                          />
-                        );
+                          />,
+                        ];
                       })}
                     </>
                   )}
@@ -1056,6 +1088,188 @@ function RepositoryMergeSettings({
   );
 }
 
+/** A grant's repository: a name select, or the typed ID where nothing can be listed. */
+function GrantRepository({
+  row,
+  jira,
+  links,
+  discovered,
+  error,
+  onChange,
+}: {
+  row: VisibleGrant;
+  /** A Jira project container has no list to choose from. */
+  jira: boolean;
+  links: RepositoryNames;
+  discovered: readonly { repositoryId: string; owner: string; name: string }[];
+  error: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const errorId = `${row.rowKey}-repository-error`;
+  const typed = (label: string) => (
+    <TypedId
+      label={label}
+      value={row.repositoryId}
+      invalid={Boolean(error)}
+      errorId={errorId}
+      onChange={onChange}
+    />
+  );
+  const linked = links.flatMap((link) =>
+    link.repositoryId
+      ? [
+          {
+            value: link.repositoryId,
+            label: repositoryLabel(link.repositoryId, links),
+          },
+        ]
+      : [],
+  );
+  const options = [
+    ...linked,
+    ...discovered
+      .filter((r) => !linked.some((l) => l.value === r.repositoryId))
+      .map((r) => ({ value: r.repositoryId, label: `${r.owner}/${r.name}` })),
+  ];
+  return (
+    <>
+      {jira ? (
+        typed("Jira project ID")
+      ) : (
+        <ListedChoice
+          id={`${row.rowKey}-repository`}
+          label="Repository"
+          empty="Choose a repository"
+          value={row.repositoryId}
+          // shortcut: a project with no linked repository ID swaps this typed field for a select if discovery lists later; rare, upgrade if reported.
+          options={options.length ? options : null}
+          unlistedNote="This repository is not in the lists, so it stays as its node ID."
+          invalid={Boolean(error)}
+          describedBy={errorId}
+          onChoose={onChange}
+          typed={typed("Repository node ID (fallback)")}
+        />
+      )}
+      {error && (
+        <p id={errorId} className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** A grant's Project, and for a field grant its field and options, by name where discovery lists them. */
+function GrantProject({
+  row,
+  index,
+  discovery,
+  error,
+  onChange,
+}: {
+  row: VisibleGrant;
+  index: number;
+  discovery: ReturnType<typeof useReadinessDiscovery>;
+  error: (path: string) => string | undefined;
+  onChange: (patch: Record<string, string | string[]>) => void;
+}) {
+  const field = row.action === "project.field";
+  const errorId = `${row.rowKey}-scope-error`;
+  const messages = (["projectNodeId", "fieldNodeId", "optionNodeIds"] as const)
+    .flatMap((name) => error(`grants.${index}.${name}`) ?? [])
+    .filter((message, at, all) => all.indexOf(message) === at);
+  return (
+    <>
+      <ProjectFieldPicker
+        index={index}
+        idPrefix={`${row.rowKey}-scope`}
+        row={{
+          projectNodeId: row.projectNodeId ?? "",
+          fieldNodeId: row.fieldNodeId ?? "",
+          optionNodeIds: row.optionNodeIds ?? [],
+        }}
+        discovery={discovery}
+        operator={false}
+        fieldControls={field}
+        otherProject
+        wording={{
+          project: "Project",
+          field: "Field",
+          options: "Options",
+          projectTyped: "Project node ID (fallback)",
+          fieldTyped: "Field node ID (fallback)",
+          optionsTyped: "Option node IDs (fallback)",
+          errorId,
+        }}
+        invalid={(name) => Boolean(error(`grants.${index}.${name}`))}
+        // An item-add grant has a Project only; choosing one must not add an empty field.
+        onChange={(patch) =>
+          onChange(
+            field
+              ? Object.fromEntries(
+                  Object.entries(patch).filter(([, v]) => v !== undefined),
+                )
+              : { projectNodeId: patch.projectNodeId ?? "" },
+          )
+        }
+        input={(name, label) => (
+          <TypedId
+            id={
+              name === "projectNodeId"
+                ? `${row.rowKey}-scope-projectNodeId`
+                : undefined
+            }
+            label={label}
+            value={String(row[name as "projectNodeId" | "fieldNodeId"] ?? "")}
+            invalid={Boolean(error(`grants.${index}.${name}`))}
+            errorId={errorId}
+            onChange={(value) => onChange({ [name]: value })}
+          />
+        )}
+      />
+      {messages.length > 0 && (
+        <div id={errorId} role="alert" className="error-text">
+          {messages.map((message) => (
+            <p key={message}>{message}</p>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function TypedId({
+  id: suppliedId,
+  label,
+  value,
+  invalid,
+  errorId,
+  onChange,
+}: {
+  id?: string | undefined;
+  label: string;
+  value: string;
+  invalid: boolean;
+  errorId: string;
+  onChange: (value: string) => void;
+}) {
+  const generated = useId(),
+    id = suppliedId ?? generated;
+  return (
+    <label className="field body" htmlFor={id}>
+      {label}
+      <Input
+        id={id}
+        aria-label={label}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? errorId : undefined}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
 function Field({
   id: suppliedId,
   label,
@@ -1121,7 +1335,6 @@ function ScopeField({
   value,
   onChange,
   error,
-  note,
   required = false,
   array = false,
 }: {
@@ -1129,7 +1342,6 @@ function ScopeField({
   value: string | string[] | undefined;
   onChange: (value: string | string[] | undefined) => void;
   error?: string | undefined;
-  note?: string | undefined;
   required?: boolean;
   array?: boolean;
 }) {
@@ -1158,7 +1370,6 @@ function ScopeField({
           value={Array.isArray(value) ? value.join("\n") : (value ?? "")}
           multiline={array}
           error={error}
-          note={note}
           onChange={(text) =>
             onChange(array ? (text === "" ? [] : text.split("\n")) : text)
           }

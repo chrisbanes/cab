@@ -5319,3 +5319,6 @@ export const executionEventsSchema = envelope(
     })
     .strict(),
 );
+
+/** What the HTTP layer says of any `invalid-input` refusal that gave no sentence of its own. */
+export const genericInvalidInputMessage = "Review the request fields.";
