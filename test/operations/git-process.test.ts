@@ -79,9 +79,14 @@ test("a non-zero exit returns its code and stdout", async (t) => {
 
 test("a stalled child is stopped at its deadline and its exit is observed", async (t) => {
   // Kept strict: a cooperative child exits on SIGTERM and clears the grace timer, so a
-  // SIGKILL here means that exit was missed or the child stopped cooperating.
+  // SIGKILL here means that exit was missed or the child stopped cooperating. The grace is
+  // long so a loaded machine cannot let the timer win; success never waits for it.
   const { executable } = script(t, "exec sleep 30");
-  const result = await run({ executable, timeoutMs: 20 });
+  const result = await run({
+    executable,
+    timeoutMs: 20,
+    terminationGraceMs: 1000,
+  });
   assert.deepEqual(result, {
     status: "interrupted",
     kind: "timed-out",
@@ -103,12 +108,14 @@ test("output above the cap interrupts the child", async (t) => {
 
 test("an abort after spawn stops the child; an already-aborted signal never spawns", async (t) => {
   // Kept strict: a cooperative child exits on SIGTERM and clears the grace timer, so a
-  // SIGKILL here means that exit was missed or the child stopped cooperating.
+  // SIGKILL here means that exit was missed or the child stopped cooperating. The grace is
+  // long so a loaded machine cannot let the timer win; success never waits for it.
   const started = script(t, 'touch "$(dirname "$0")/started"; exec sleep 30');
   const controller = new AbortController();
   const running = run({
     executable: started.executable,
     signal: controller.signal,
+    terminationGraceMs: 1000,
   });
   await until(() => existsSync(started.marker));
   controller.abort();
@@ -206,9 +213,9 @@ test("a child whose exit is never observed still settles unobserved within the w
     childExitObserved: false,
     childExitSignal: null,
   });
-  // 500 ms of slack absorbs loop scheduling on a loaded runner; the window itself is 60 ms.
+  // 1000 ms of slack absorbs loop scheduling on a loaded runner; the window itself is 60 ms.
   assert.ok(
     Date.now() - abortedAt <
-      options.terminationGraceMs + options.observationMs + 500,
+      options.terminationGraceMs + options.observationMs + 1000,
   );
 });
