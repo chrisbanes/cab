@@ -873,6 +873,20 @@ test("typed option IDs follow a Discard back to the saved IDs and the next save 
   await savedOutcome(page);
 });
 
+test("typed option IDs that do not survive a join and parse neither loop nor crash the form", async (_t, journey) => {
+  const { page } = await startSettings(journey, path);
+  await page.getByRole("button", { name: "Add grant", exact: true }).click();
+  const row = grant(page);
+  await row.getByLabel("Include Option IDs").check();
+  // A trailing newline leaves an empty entry in the list.
+  await row.getByLabel("Option IDs (one per line)").fill("x\n");
+  await row.getByLabel("Action", { exact: true }).selectOption("project.field");
+  const options = row.getByLabel("Option node IDs (fallback)", { exact: true });
+  await options.waitFor();
+  await options.fill("a,b");
+  assert.equal(await options.inputValue(), "a,b");
+});
+
 test("a saved grant whose Project discovery does not list shows its ID with a note and keeps the value", async (_t, journey) => {
   const { page, f, ids } = await startDiscovery(journey);
   f.service.domain().execute({

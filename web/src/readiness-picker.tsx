@@ -283,9 +283,14 @@ function OptionIdsInput(p: {
   onChange: (ids: string[]) => void;
 }) {
   const [text, setText] = useState(p.value.join(", "));
-  // An external change (Discard, a reread) replaces the text; what parses to the value is kept as typed.
-  if (parseIds(text).join("\0") !== p.value.join("\0"))
-    setText(p.value.join(", "));
+  // An external change to the value (Discard, a reread) replaces the text; text that parses to it is kept as typed.
+  // Keyed on the value, not the text, so an ID that does not survive a join and parse cannot loop.
+  const current = p.value.join("\0");
+  const [seen, setSeen] = useState(current);
+  if (current !== seen) {
+    setSeen(current);
+    if (parseIds(text).join("\0") !== current) setText(p.value.join(", "));
+  }
   return (
     <label className="field body" htmlFor={p.id}>
       {p.label}
