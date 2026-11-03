@@ -8,7 +8,7 @@ import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sourceCredentialReference } from "./credential-reference.js";
-import { DeliveryReadinessStore } from "./delivery-readiness.js";
+import { DeliveryReadinessStore, type OwnClose } from "./delivery-readiness.js";
 import { applyRepositoryLevel, isCodeHostGrant } from "./delivery-levels.js";
 import { githubIssueTracker } from "./github-source-contracts.js";
 import {
@@ -2544,7 +2544,7 @@ export class DeliveryStore {
       this.readiness().holds(
         taskId,
         binding.settlement.key,
-        this.closeTargetStatus(taskId, true),
+        this.ownClose(taskId, true),
       ) ||
       (taskVersion !== undefined &&
         binding.settlement.taskVersion !== taskVersion &&
@@ -2667,19 +2667,14 @@ export class DeliveryStore {
   }
   /** Called after a committed source write: latches settlements whose inputs it changed. */
   observeReadinessInputs(taskId: string): void {
-    this.readiness().observe(taskId, () =>
-      this.closeTargetStatus(taskId, false),
-    );
+    this.readiness().observe(taskId, () => this.ownClose(taskId, false));
   }
   /**
-   * The Jira status cab's own `issue.close` moves the item to, the one status change that is
-   * not an input change. Pending: any unsuperseded close in flight, uncertain or confirmed.
-   * Proven: the confirmed closure the issue is observed closed under.
+   * Cab's own `issue.close` on the item, whose effects are not input changes. Pending: any
+   * unsuperseded close in flight, uncertain or confirmed. Proven: the confirmed closure the
+   * issue is observed closed under. `statusId` is a Jira close's recorded Done target.
    */
-  private closeTargetStatus(
-    taskId: string,
-    proven: boolean,
-  ): string | undefined {
+  private ownClose(taskId: string, proven: boolean): OwnClose | undefined {
     const item = this.db
       .prepare(
         "SELECT externalId, observedState FROM external_items WHERE taskId=?",
@@ -2703,7 +2698,7 @@ export class DeliveryStore {
           .at(-1);
     if (operation?.request.action.kind !== "issue.close") return undefined;
     const target = operation.beforeState?.targetStatusId;
-    return typeof target === "string" ? target : undefined;
+    return typeof target === "string" ? { statusId: target } : {};
   }
   ownsConfirmedClosure(taskId: string, nodeId: string): boolean {
     return !!this.ownClosureOperation(taskId, nodeId);

@@ -2591,19 +2591,24 @@ not observed; closing the outcome is not.
 
 It stays valid across a task-version change made only by cab's own confirmed
 `issue.close`: the closure and the readiness it removes, while the issue is observed
-closed, and for Jira the move to the Done status the close recorded as its target. No
-other status counts as that move, and every label, field and Project value is still
-compared in the same read. A source read that still lists the issue open does not end it
+closed. The close's own effects on the values are not changes: for Jira, the move to the
+Done status the close recorded as its target, and for a Project field the rule reads, a
+move to an option the rule does not accept (a Project workflow that sets Status to Done
+when the issue closes). While the close is in flight, uncertain or confirmed such a move
+does not latch the settlement; completion accepts it once the close is confirmed and the
+issue observed closed. No other status counts as the Jira move, a move to an option the
+rule accepts is a change, and every label and other value is still compared in the same
+read. A source read that still lists the issue open does not end it
 once a later read shows the issue closed with nothing else changed. Any other task
 change that moves readiness, a change to a value the rule reads, a closure outside cab, an
 unconfirmed close or a reopen requires a new settlement. Cab's own mapped status writes
 after the settlement are changes to the values like any other. The rule is the same for
 GitHub and Jira. Accepted limits: a change and its reversion that both fall between two
 source observations is not detected; a reopen and manual re-close that both happen before an
-explicit closure's first proof (the attribution limit below); and for Jira, a person's
-move to a status just before cab's close that no source read observed, because the
-close's own move to Done is exempt and the status before it is not recorded by a
-conditional transition.
+explicit closure's first proof (the attribution limit below); and a person's move, just
+before cab's close and unseen by any source read, to the Jira status or the unaccepted
+Project option the close's own effect would also reach, because that effect is exempt and
+the value before it is not recorded by a conditional transition.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;

@@ -150,14 +150,41 @@ export function readinessInputs(
   };
 }
 
+/** Cab's own `issue.close` on the item; `statusId` is the Done status a Jira close moved it to. */
+export type OwnClose = { statusId?: string };
+
+/** Whether the rule accepts the option set of one Project field: no condition on it is met. */
+function acceptsProjectField(
+  rule: string | null,
+  id: string,
+  options: string[],
+): boolean {
+  return (
+    readinessSchema
+      .nullable()
+      .parse(rule ? (JSON.parse(rule) as unknown) : null)
+      ?.conditions.some(
+        (c) =>
+          c.kind === "project-field" &&
+          `project-field:${c.projectNodeId}:${c.fieldNodeId}` === id &&
+          (c.operator === "in"
+            ? options.some((o) => c.optionNodeIds.includes(o))
+            : options.length > 0 &&
+              !options.some((o) => c.optionNodeIds.includes(o))),
+      ) ?? false
+  );
+}
+
 /**
  * `changed` is an observed difference; `unknown` is an input the current read does not carry.
- * `exemptStatus` is the one status value an own issue close may have moved the item to.
+ * An own issue close exempts what the close itself causes: a Jira status moving to its recorded
+ * Done target, and a Project field moving to an option the rule does not accept (a Project
+ * workflow setting Status to Done). Labels and every other value are still compared.
  */
 export function compareInputs(
   frozen: ReadinessInputs,
   current: ReadinessInputs,
-  exemptStatus?: string,
+  ownClose?: OwnClose,
 ): "same" | "unknown" | "changed" {
   if (frozen.item !== current.item || frozen.rule !== current.rule)
     return "changed";
@@ -166,15 +193,15 @@ export function compareInputs(
   for (const { id, value } of frozen.components) {
     const seen = now.get(id);
     if (!seen || !value) result = "unknown";
-    else if (seen.join() !== value.join())
-      if (
-        !(
-          id === "status" &&
-          exemptStatus !== undefined &&
-          seen[0] === exemptStatus
-        )
-      )
-        return "changed";
+    else if (seen.join() !== value.join()) {
+      const exempt =
+        ownClose !== undefined &&
+        (id === "status"
+          ? ownClose.statusId !== undefined && seen[0] === ownClose.statusId
+          : id.startsWith("project-field:") &&
+            !acceptsProjectField(current.rule, id, seen));
+      if (!exempt) return "changed";
+    }
   }
   return result;
 }
@@ -208,14 +235,14 @@ export class DeliveryReadinessStore {
    * Latches a settlement whose inputs a committed source write changed. Once latched it stays
    * so, even if a later read shows the old values again: only a fresh settlement recovers.
    */
-  observe(taskId: string, exemptStatus: () => string | undefined): void {
+  observe(taskId: string, ownClose: () => OwnClose | undefined): void {
     const rows = this.db
       .prepare(
         "SELECT commandKey, inputsJson FROM delivery_settlement_readiness WHERE taskId = ? AND invalidated = 0",
       )
       .all(taskId) as { commandKey: string; inputsJson: string }[];
     if (!rows.length) return;
-    const exempt = exemptStatus();
+    const exempt = ownClose();
     for (const row of rows) {
       const frozen = inputsSchema.parse(JSON.parse(row.inputsJson));
       const now = readinessInputs(this.db, taskId, frozen);
@@ -229,7 +256,7 @@ export class DeliveryReadinessStore {
   }
 
   /** Whether the settlement no longer vouches for the task's current inputs. A settlement made before this record held none. */
-  holds(taskId: string, commandKey: string, exemptStatus?: string): boolean {
+  holds(taskId: string, commandKey: string, ownClose?: OwnClose): boolean {
     const row = this.db
       .prepare(
         "SELECT inputsJson, invalidated FROM delivery_settlement_readiness WHERE commandKey = ? AND taskId = ?",
@@ -244,7 +271,7 @@ export class DeliveryReadinessStore {
       !frozen ||
       row.invalidated === 1 ||
       !now.complete ||
-      compareInputs(frozen, now.inputs, exemptStatus) !== "same"
+      compareInputs(frozen, now.inputs, ownClose) !== "same"
     );
   }
 

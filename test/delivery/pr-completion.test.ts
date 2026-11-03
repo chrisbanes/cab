@@ -1129,7 +1129,10 @@ async function settleThenClose(
   return settled;
 }
 /** The closure-hold notice starts a fresh lead turn once the current one ends; completion is requested there. */
-async function requestCompletionAfterClose(f: Fixture) {
+async function requestCompletionAfterClose(
+  f: Fixture,
+  beforeRequest?: () => Promise<void>,
+) {
   const next = f.turns.length;
   f.turns.at(-1)?.release();
   const deadline = Date.now() + 5000;
@@ -1138,6 +1141,7 @@ async function requestCompletionAfterClose(f: Fixture) {
     await f.service.refreshGitHub();
     await new Promise<void>((r) => setTimeout(r, 5));
   }
+  await beforeRequest?.();
   return f.call("cab_request_completion", { reviewedResultIds: [] }, next);
 }
 function blockers(f: Fixture) {
@@ -1442,6 +1446,65 @@ test("a close with no other change needs exactly one settlement for a Project fi
     assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
     assert.equal((await requestCompletionAfterClose(f)).success, true);
     await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+// GitHub's "Item closed" Project workflow sets Status to Done, which the fixture rule does not accept.
+test("a Project Status moved to Done by the workflow after cab's own close keeps the one settlement and the completion request", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.equal(receipts(f), 1);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    // The workflow runs after the close was proven: the next Project read shows Done.
+    const completion = await requestCompletionAfterClose(f, async () => {
+      f.setStatus(fixtureProject.done);
+      await f.service.refreshGitHub();
+      assert.equal(latched(f), 0);
+      assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    });
+    assert.equal(completion.success, true, completion.text);
+    assert.equal(receipts(f), 1);
+  } finally {
+    await f.close();
+  }
+});
+
+const latched = (f: Fixture) =>
+  Number(
+    (
+      databaseOf(f.service)
+        .prepare("SELECT invalidated FROM delivery_settlement_readiness")
+        .get() as { invalidated: number }
+    ).invalidated,
+  );
+
+test("the same Status move with no own close ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setStatus(fixtureProject.done);
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a move to an option the rule accepts during an own close ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f, closedOk, () =>
+      f.setStatus(fixtureProject.inReview),
+    );
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
   } finally {
     await f.close();
   }
