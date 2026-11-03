@@ -53,6 +53,11 @@ async function signIn(
 
 const trigger = (page: Page) =>
   page.getByRole("button", { name: "Edit task…", exact: true });
+/** Radix restores focus in a timer after the dialog unmounts, so wait for it. */
+const triggerFocused = (page: Page) =>
+  page.waitForFunction(
+    () => document.activeElement?.textContent === "Edit task…",
+  );
 
 test("a local task is edited from its header with version fencing and a conflict shows the latest values", async (_t, j) => {
   const { f, open } = await start(j, { width: 1366, height: 900 });
@@ -137,9 +142,7 @@ test("a local task is edited from its header with version fencing and a conflict
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   await page.getByRole("heading", { name: "Final title", level: 1 }).waitFor();
-  await page.waitForFunction(
-    () => document.activeElement?.textContent === "Edit task…",
-  );
+  await triggerFocused(page);
 });
 
 test("Edit task… is keyboard operable and Escape closes it without saving", async (_t, j) => {
@@ -169,7 +172,7 @@ test("Edit task… is keyboard operable and Escape closes it without saving", as
   await dialog.getByLabel("Title").fill("Never saved");
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "hidden" });
-  assert.ok(await trigger(page).evaluate((e) => e === document.activeElement));
+  await triggerFocused(page);
   const d = f.service.domain();
   assert.equal(d.task(task.taskId).title, "Keyboard task");
   assert.equal(Number(d.task(task.taskId).version), version);
@@ -216,7 +219,7 @@ test("an imported task has no Edit task… and a phone keeps it in Task actions"
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await trigger(page).isVisible(), true);
-  assert.ok(await trigger(page).evaluate((e) => e === document.activeElement));
+  await triggerFocused(page);
   await page.keyboard.press("Escape");
   assert.equal(await trigger(page).isVisible(), false);
 });
