@@ -472,10 +472,15 @@ test("Sent stays shown when the claimed run is read back as accepted before the 
     await new Promise((resolve) => setTimeout(resolve, 400));
     await route.continue();
   });
+  // The read-back that sees the run accepted, registered before the action that causes it.
+  const readBack = page.waitForResponse(
+    async (r) =>
+      /\/drafting-runs\//.test(r.url()) &&
+      (await r.text().catch(() => "")).includes('"accepted"'),
+  );
   const runId = await draftAndLoad(ctx);
   await until(() => ctx.f.service.readDrafting(runId)?.state === "accepted");
-  // Let the delayed read-back of the accepted run arrive before sending.
-  await page.waitForTimeout(1200);
+  await readBack;
   await panel(page).getByRole("button", { name: "Review changes" }).click();
   await panel(page)
     .getByRole("button", { name: "Send edit to GitHub" })
