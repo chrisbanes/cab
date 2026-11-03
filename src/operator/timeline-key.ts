@@ -24,6 +24,7 @@ export const timelineRank = {
   request: 5,
   result: 6,
   message: 7,
+  taskComment: 8,
 } as const;
 
 export function serializeTimelineKey(key: TimelineKey): string {

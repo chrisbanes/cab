@@ -45,7 +45,7 @@ let ordinal = 0;
 function entry(
   body: Record<string, unknown> & { kind: string },
   o: {
-    assignmentId?: string;
+    assignmentId?: string | null;
     timeMs?: number;
     id?: string;
     rank?: number;
@@ -60,7 +60,7 @@ function entry(
       ordinal,
       id,
     }),
-    assignmentId: o.assignmentId ?? lead,
+    assignmentId: o.assignmentId === undefined ? lead : o.assignmentId,
     at: 1_000_000 + ordinal,
     precision: "ms",
     ...body,
@@ -295,6 +295,66 @@ test("a delegated assignment nests under its delegation and a grandchild under t
   );
   const [nested] = delegations(inner);
   assert.equal(nested?.type === "delegation" && nested.items.length, 1);
+});
+
+const taskComment = (id: string) =>
+  entry(
+    {
+      kind: "task-comment",
+      commentId: randomUUID(),
+      author: "operator",
+      text: id,
+      deliveries: [{ assignmentId: worker, effect: "input" }],
+    },
+    { assignmentId: null, rank: timelineRank.taskComment, id },
+  );
+
+test("a task comment sits once in the root stream, with or without a lead, never under a delegate", () => {
+  const entries = [
+    text("lead plan"),
+    delegation(worker, lead),
+    text("worker output", worker),
+    taskComment("shared-1"),
+  ];
+  const tree = conversationTree(entries, assignments, lead);
+  const rootIds = tree.flatMap((i) => (i.type === "entry" ? [i.id] : []));
+  assert.ok(rootIds.includes("shared-1"));
+  const [child] = delegations(tree);
+  const inner = child?.type === "delegation" ? child.items : [];
+  assert.equal(
+    inner.some((i) => i.type === "entry" && i.id === "shared-1"),
+    false,
+  );
+  // With no lead binding the comment is still at the root, and the delegate keeps its own stream.
+  const noLead = conversationTree(entries, assignments, null);
+  assert.ok(noLead.some((i) => i.type === "entry" && i.id === "shared-1"));
+  const everywhere = JSON.stringify(noLead).split('"shared-1"').length - 1;
+  assert.ok(
+    everywhere >= 1 &&
+      everywhere === JSON.stringify(tree).split('"shared-1"').length - 1,
+  );
+  // A task comment never counts as unfinished work of a running assignment.
+  assert.equal(
+    pendingBelow(
+      window(entries),
+      entries[0] as TimelineEntry,
+      new Set([worker]),
+    ),
+    false,
+  );
+});
+
+test("task comments merge, page and reset like any other entry", () => {
+  const a = taskComment("c-1"),
+    b = taskComment("c-2");
+  const merged = mergeTimeline(null, page([a, b]));
+  assert.deepEqual(ids(merged.window.entries), ["c-1", "c-2"]);
+  const older = prependTimeline(window([b]), page([a]));
+  assert.deepEqual(ids(older?.entries ?? []), ["c-1", "c-2"]);
+  assert.equal(
+    prependTimeline(window([b]), page([a], { visibilityRevision: v2 })),
+    null,
+  );
 });
 
 test("a delegation whose entry is not loaded takes its header from the assignment record", () => {

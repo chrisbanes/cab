@@ -35,6 +35,10 @@ import {
   overviewCard,
 } from "../fixtures/task-tabs.js";
 import { clockLabel } from "../../web/src/presentation.js";
+import {
+  commentNote,
+  recordOnlyText,
+} from "../../web/src/task-comment-model.js";
 
 const test = browserSuite("ui-task-detail");
 const testForEngine = (
@@ -374,8 +378,8 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     .locator("#conversation .conv-delegation")
     .filter({ hasText: "Nothing captured for this assignment yet." });
   await placeholder.waitFor();
-  // A pending delegate can be messaged from there, though nothing of it is captured yet.
-  await placeholder.getByRole("button", { name: /^Send to / }).waitFor();
+  // A pending delegate can be replied to from there, though nothing of it is captured yet.
+  await placeholder.getByRole("button", { name: /^Reply to / }).waitFor();
   assert.equal(await selectedTab(page), "Overview");
 
   // Expanded assignment facts and an unsent reply survive a refresh.
@@ -2519,16 +2523,27 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
     "Changes and delivery",
   );
 
-  // A local task's Send is a lead message, never a comment.
+  // A local task's Send is a shared task comment to the lead, never a GitHub comment.
   await openTaskTab(page, "Overview");
-  await page.getByRole("button", { name: "Send to task lead" }).click();
-  await page.getByText("Sent.", { exact: false }).first().waitFor();
+  await page.getByRole("button", { name: "Send comment" }).click();
+  await page
+    .getByText(/^Comment sent to /)
+    .first()
+    .waitFor();
   assert.deepEqual(
     commands.map((c) => {
-      const command = c as Record<string, unknown>;
-      return [command.type, command.message, command.recipientAssignmentId];
+      const command = c as {
+        type: string;
+        body: string;
+        recipients: { assignmentId: string }[];
+      };
+      return [
+        command.type,
+        command.body,
+        command.recipients.map((r) => r.assignmentId),
+      ];
     }),
-    [["message", "Keep this draft", a.assignmentId]],
+    [["task.comment.send", "Keep this draft", [a.assignmentId]]],
   );
 });
 
@@ -2544,9 +2559,11 @@ test("The reply box has one sentence above it", async (_t, j) => {
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
   await page.getByLabel("Editable reply").waitFor();
-  // The lead completed its assignment, so a message resumes it.
+  // The shared comment names its one rule; the lead's completed assignment is previewed below the box.
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${commentNote}`]);
+  await page.getByText(/Task lead resumes the same assignment/).waitFor();
+  // Contextual feedback is the lead's own destination: a completed lead resumes with it.
   const resumes = leadResumeNotice("Task lead");
-  assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
   assert.doesNotMatch(
     await page.locator("body").innerText(),
     /Local cab inbox|Sending does not bypass/,
@@ -2554,6 +2571,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
 
   // The immutable reference sits below the box; one sentence still sits above.
   await page.getByRole("button", { name: "Ask lead about result" }).click();
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
   const reference = page.getByText(/^Immutable reference:/);
   await reference.waitFor();
   assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
@@ -2631,9 +2649,9 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
   await page.getByLabel("Editable reply").waitFor();
-  assert.deepEqual(await sentencesAboveReply(page), [
-    "P:This project has no lead to message yet.",
-  ]);
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${commentNote}`]);
+  // With no lead, nothing is selected: the comment is recorded for the task only.
+  await page.getByText(recordOnlyText).waitFor();
   assert.equal(
     await page.getByRole("button", { name: "Post GitHub comment" }).count(),
     0,
@@ -2760,7 +2778,7 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-  const lead = page.getByRole("button", { name: "Message task lead" });
+  const lead = page.getByRole("button", { name: "Comment on task" });
   await lead.waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
   await inspector.getByText("GitHub commenting permitted").waitFor();

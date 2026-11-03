@@ -1,8 +1,9 @@
 import { ApprovalReview } from "./approval-review.js";
 import { IssueChangedSinceHandback } from "./issue-change-notice.js";
 import { useSendEntry } from "./command-send.js";
+import { isDefiniteRefusal } from "./command-lifecycle.js";
 import {
-  AssignmentMessage,
+  AssignmentReply,
   HandbackSettlement,
   ResultDestination,
   RetainedSends,
@@ -10,6 +11,16 @@ import {
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import { SourceHoldCard } from "./source-hold.js";
+import { CommentRecipients } from "./task-comment-composer.js";
+import {
+  commentNote,
+  commentUnavailableNote,
+  hasBlockedRecipient,
+  receiptSettles,
+  recipientLabel,
+  selectedRecipientIds,
+  sentText,
+} from "./task-comment-model.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
 import { CommandNetworkLine, PolicyDisclosure } from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
@@ -38,7 +49,7 @@ import {
   type Workspace,
 } from "../../src/operator/contracts.js";
 import { holdLines } from "../../src/operator/wait-reasons.js";
-import type { OperatorClient } from "./api.js";
+import type { CommandState, OperatorClient } from "./api.js";
 import {
   ActionLink,
   Button,
@@ -333,6 +344,11 @@ const writeCopy = (type: OperatorCommand["type"]) => {
   switch (type) {
     case "message":
       return { failed: "Couldn't send the reply", unknown: "it was sent" };
+    case "task.comment.send":
+      return {
+        failed: "Couldn't send the comment",
+        unknown: "the comment was sent",
+      };
     case "task.draft-turn":
       return {
         failed: "Couldn't start the draft turn",
@@ -1062,6 +1078,7 @@ export function TaskWorkspace({
       input.type === "comment.review" || input.type === "comment.confirm";
     const reply =
       input.type === "message" ||
+      input.type === "task.comment.send" ||
       input.type === "task.draft-turn" ||
       input.type === "comment.send" ||
       reviewIntent;
@@ -1121,7 +1138,17 @@ export function TaskWorkspace({
     replyInFlight.current = input.key;
     sent.current = true;
     setAux(null);
-    const outcome = await client.command(input, session.csrfToken);
+    // A comment whose response was lost is checked against its stored receipt before any retry.
+    const checking = input.type === "task.comment.send" && state.uncertain;
+    const outcome: CommandState =
+      input.type === "task.comment.send" && state.uncertain
+        ? await recordedOrRetry(input)
+        : await client.command(input, session.csrfToken);
+    const settles =
+      input.type === "task.comment.send" &&
+      outcome.state === "recorded" &&
+      outcome.receipt.kind === "task-comment" &&
+      (await receiptSettles(input, outcome.receipt));
     if (!scope.current || !current()) return;
     setPending(false);
     if (replyInFlight.current === input.key) replyInFlight.current = null;
@@ -1197,10 +1224,12 @@ export function TaskWorkspace({
         outcome.receipt.taskId !== taskId ||
         (input.type === "message"
           ? outcome.receipt.kind !== "coordination"
-          : input.type === "task.draft-turn"
-            ? outcome.receipt.kind !== "draft-turn"
-            : outcome.receipt.kind !== "delivery" ||
-              outcome.receipt.operationId !== input.key))
+          : input.type === "task.comment.send"
+            ? !settles
+            : input.type === "task.draft-turn"
+              ? outcome.receipt.kind !== "draft-turn"
+              : outcome.receipt.kind !== "delivery" ||
+                outcome.receipt.operationId !== input.key))
     ) {
       state.uncertain = true;
       state.notice = {
@@ -1228,11 +1257,13 @@ export function TaskWorkspace({
             ? "The comment wasn't posted. Your draft is kept."
             : delivery
               ? "Comment posted."
-              : receipt.kind === "draft-turn"
-                ? draftTurnSentNotice(data?.lead?.name ?? "the lead")
-                : receipt.kind === "coordination" && receipt.resumedLead
-                  ? `Sent. ${data?.lead?.name ?? "The lead"} resumed with this feedback.`
-                  : `Sent to ${data?.lead?.name ?? "the lead"}.`,
+              : receipt.kind === "task-comment"
+                ? sentText(receipt.deliveries, data?.commentRecipients ?? [])
+                : receipt.kind === "draft-turn"
+                  ? draftTurnSentNotice(data?.lead?.name ?? "the lead")
+                  : receipt.kind === "coordination" && receipt.resumedLead
+                    ? `Sent. ${data?.lead?.name ?? "The lead"} resumed with this feedback.`
+                    : `Sent to ${data?.lead?.name ?? "the lead"}.`,
         details: rows(
           receipt,
           undefined,
@@ -1248,10 +1279,13 @@ export function TaskWorkspace({
       };
       if (
         receipt.kind === "coordination" ||
+        receipt.kind === "task-comment" ||
         receipt.kind === "draft-turn" ||
         (delivery && delivery.state === "confirmed-success")
       ) {
         state.draft = "";
+        // The next comment starts from the default recipient again.
+        if (input.type === "task.comment.send") state.commentRecipients = null;
         if (input.type === "message") state.reference = undefined;
         state.commentReview = null;
       }
@@ -1260,7 +1294,11 @@ export function TaskWorkspace({
       } else state.frozen = null;
       refresh();
     } else {
-      state.uncertain = outcome.state === "unknown";
+      // A check that gets anything but a definite refusal (an expired session, an unavailable
+      // service) says nothing about the first send, so the draft stays frozen as unknown.
+      state.uncertain =
+        outcome.state === "unknown" ||
+        (checking && !isDefiniteRefusal(outcome));
       state.notice = {
         tone: state.uncertain ? "warning" : "error",
         message: state.uncertain
@@ -1271,9 +1309,48 @@ export function TaskWorkspace({
         details: rows(undefined, outcome.code),
       };
       if (!state.uncertain) state.frozen = null;
+      // The previews come from the read, so a refusal re-reads them to say who is unavailable now.
+      if (!state.uncertain && input.type === "task.comment.send") refresh();
     }
     changed();
   }
+  /**
+   * Reads the stored receipt for a comment whose response was lost, and only when none is recorded
+   * retries the identical frozen command and key. A failed read stays unknown; it never retries
+   * with a new key. The receipt is validated against the frozen command by the caller.
+   */
+  async function recordedOrRetry(
+    input: Extract<OperatorCommand, { type: "task.comment.send" }>,
+  ): Promise<CommandState> {
+    try {
+      const read = await client.operation({
+        scope: `task:${taskId}`,
+        type: "task.comment.send",
+        key: input.key,
+      });
+      if (read.data.state === "recorded")
+        return { state: "recorded", receipt: read.data.receipt };
+    } catch {
+      return {
+        state: "unknown",
+        command: input,
+        code: "command-outcome-unknown",
+      };
+    }
+    return client.command(input, session.csrfToken);
+  }
+  /** Assignment Reply: the shared composer, addressed to exactly that assignment. */
+  const replyTo = (assignmentId: string) => {
+    if (state.uncertain || pending) return;
+    state.destination = "comment";
+    state.commentRecipients = [assignmentId];
+    setAux(null);
+    selectTab("overview");
+    changed();
+    requestAnimationFrame(() =>
+      document.getElementById("workspace-reply")?.focus(),
+    );
+  };
   const ask = (reference: Reference, label: string) => {
     if (state.uncertain || pending) return;
     state.destination = "lead";
@@ -1587,8 +1664,7 @@ export function TaskWorkspace({
   // lead, so draft, notice, reference and approval all follow one destination. A reply that is
   // in flight or unresolved keeps its own until it is checked. The GitHub draft is kept.
   if (data && !data.source && state.destination === "github" && !state.frozen)
-    state.destination = "lead";
-  const destination = state.destination;
+    state.destination = state.reference ? "lead" : "comment";
   // A Draft task's lead reply starts a read-only draft turn instead of queueing a message.
   // The ordinary reply stays for a lead that is missing or has started, which it already explains.
   const draftTurn =
@@ -1598,6 +1674,26 @@ export function TaskWorkspace({
     data.draftTurn?.reason !== "lead-unavailable"
       ? data.draftTurn
       : undefined;
+  // The lead destination exists for a reference-bound message or a draft turn; without either,
+  // and with nothing in flight, the shared comment is the one ordinary reply.
+  if (
+    data &&
+    state.destination === "lead" &&
+    !draftTurn &&
+    !state.leadInUse &&
+    !state.frozen
+  )
+    state.destination = "comment";
+  const destination = state.destination;
+  // The shared comment's recipients are the server's per-assignment read, never inferred from text.
+  const commentFacts = data?.commentRecipients ?? [];
+  const commentIds = selectedRecipientIds(
+    commentFacts,
+    state.commentRecipients,
+  );
+  const commentBlocked =
+    data?.commentRecipients === undefined ||
+    hasBlockedRecipient(commentFacts, commentIds);
   async function send() {
     if (!state.draft.trim() || pending) return;
     if (state.frozen) {
@@ -1606,7 +1702,23 @@ export function TaskWorkspace({
     }
     const key = crypto.randomUUID();
     let input: OperatorCommand;
-    if (destination === "lead" && draftTurn) {
+    if (destination === "comment") {
+      if (commentBlocked) return;
+      input = {
+        type: "task.comment.send",
+        key,
+        taskId,
+        body: state.draft,
+        recipients: commentIds.flatMap((assignmentId) => {
+          const fact = commentFacts.find(
+            (f) => f.assignmentId === assignmentId,
+          );
+          return fact
+            ? [{ assignmentId, expectedAssignmentVersion: fact.version }]
+            : [];
+        }),
+      };
+    } else if (destination === "lead" && draftTurn) {
       if (!draftTurn.available) return;
       input = {
         type: "task.draft-turn",
@@ -1738,40 +1850,62 @@ export function TaskWorkspace({
   const comment = commentAvailability(data.commentPolicy);
   // Exactly one sentence sits above the box: what this destination does now.
   const replyNote =
-    destination === "lead" && draftTurn
-      ? draftTurn.available
-        ? `${draftTurnAccessNotice(leadName)} ${draftTurnQueueNotice(leadName)}`
-        : draftTurnUnavailableNotice(
-            draftTurn.reason ?? "lead-unavailable",
-            leadName,
-            data.task.state,
-          )
-      : destination === "lead"
-        ? !lead
-          ? "This project has no lead to message yet."
-          : leadMode === "resumes"
-            ? leadResumeNotice(leadName)
-            : leadMode === "receives"
-              ? leadReceivesNotice(leadName)
-              : leadUnavailableNotice(leadName)
-        : (comment.sentence ??
-          (data.commentPolicy?.mode === "approval"
-            ? "You review the exact comment before it posts to the GitHub issue."
-            : "Posts a comment on the GitHub issue."));
+    destination === "comment"
+      ? data.commentRecipients === undefined
+        ? commentUnavailableNote
+        : commentNote
+      : destination === "lead" && draftTurn
+        ? draftTurn.available
+          ? `${draftTurnAccessNotice(leadName)} ${draftTurnQueueNotice(leadName)}`
+          : draftTurnUnavailableNotice(
+              draftTurn.reason ?? "lead-unavailable",
+              leadName,
+              data.task.state,
+            )
+        : destination === "lead"
+          ? !lead
+            ? "This project has no lead to message yet."
+            : leadMode === "resumes"
+              ? leadResumeNotice(leadName)
+              : leadMode === "receives"
+                ? leadReceivesNotice(leadName)
+                : leadUnavailableNotice(leadName)
+          : (comment.sentence ??
+            (data.commentPolicy?.mode === "approval"
+              ? "You review the exact comment before it posts to the GitHub issue."
+              : "Posts a comment on the GitHub issue."));
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
       <div className="task-actions">
         <Button
-          variant={destination === "lead" ? "primary" : "secondary"}
+          variant={destination === "comment" ? "primary" : "secondary"}
           disabled={pending || state.uncertain}
           onClick={() => {
-            state.destination = "lead";
+            // A sent lead message's outcome is read by now; leaving it would keep that destination.
+            if (
+              state.destination === "lead" &&
+              state.notice?.tone === "success"
+            )
+              state.notice = null;
+            state.destination = "comment";
             changed();
           }}
         >
-          {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
+          Comment on task
         </Button>
+        {(draftTurn || state.leadInUse || destination === "lead") && (
+          <Button
+            variant={destination === "lead" ? "primary" : "secondary"}
+            disabled={pending || state.uncertain}
+            onClick={() => {
+              state.destination = "lead";
+              changed();
+            }}
+          >
+            {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
+          </Button>
+        )}
         {data.source && (
           <Button
             variant={destination === "github" ? "primary" : "secondary"}
@@ -1817,6 +1951,17 @@ export function TaskWorkspace({
       />
       {destination === "lead" && state.reference && (
         <p>Immutable reference: {JSON.stringify(state.reference)}</p>
+      )}
+      {destination === "comment" && data.commentRecipients !== undefined && (
+        <CommentRecipients
+          facts={commentFacts}
+          selection={state.commentRecipients}
+          disabled={pending || state.uncertain}
+          onChange={(ids) => {
+            state.commentRecipients = ids;
+            changed();
+          }}
+        />
       )}
       {destination === "github" && data.commentPolicy?.mode === "approval" && (
         <>
@@ -1866,6 +2011,7 @@ export function TaskWorkspace({
           disabled={
             pending ||
             !state.draft.trim() ||
+            (destination === "comment" && commentBlocked && !state.uncertain) ||
             (destination === "lead" &&
               (draftTurn
                 ? !draftTurn.available
@@ -1881,11 +2027,13 @@ export function TaskWorkspace({
         >
           {pending
             ? "Sending…"
-            : destination === "lead"
-              ? draftTurn
-                ? draftTurnStart
-                : "Send to task lead"
-              : "Post comment"}
+            : destination === "comment"
+              ? "Send comment"
+              : destination === "lead"
+                ? draftTurn
+                  ? draftTurnStart
+                  : "Send to task lead"
+                : "Post comment"}
         </Button>
       )}
       {!pending && outcome && (
@@ -2294,12 +2442,9 @@ export function TaskWorkspace({
                 following={!updates}
                 openChanges={() => selectTab("changes")}
                 messageAssignment={(assignment) => (
-                  <AssignmentMessage
-                    client={client}
-                    session={session}
-                    taskId={taskId}
-                    assignment={assignment}
-                    onChanged={refreshAll}
+                  <AssignmentReply
+                    label={recipientLabel(assignment, data.assignments)}
+                    onReply={() => replyTo(assignment.assignmentId)}
                   />
                 )}
               />

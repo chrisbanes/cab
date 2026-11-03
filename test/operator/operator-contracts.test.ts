@@ -10,6 +10,8 @@ import {
   localReviewOperationReadSchema,
   operatorCommandSchema,
   operationScopeSchema,
+  operationTypeSchema,
+  taskTimelineSchema,
   materialSchema,
   workspaceComparisonReadSchema,
   workspaceSchema,
@@ -941,4 +943,115 @@ test("delivery policy read and keep-row contracts never accept partial unavailab
       operatorCommandSchema.safeParse({ ...command, grants: [row] }).success,
       false,
     );
+});
+
+test("shared task comments have a strict command, receipt, operation scope and task-scoped timeline entry", () => {
+  const other = "00000000-0000-4000-8000-000000000002";
+  const command = {
+    type: "task.comment.send",
+    key,
+    taskId: key,
+    body: "  Please sync.  ",
+    recipients: [{ assignmentId: other, expectedAssignmentVersion: 2 }],
+  };
+  assert.equal(operatorCommandSchema.parse(command).type, "task.comment.send");
+  assert.equal(
+    operatorCommandSchema.safeParse({ ...command, recipients: [] }).success,
+    true,
+    "no recipients is a record-only comment",
+  );
+  for (const bad of [
+    { ...command, body: "   " },
+    { ...command, body: "x".repeat(16001) },
+    { ...command, recipients: [command.recipients[0], command.recipients[0]] },
+    { ...command, recipients: [{ assignmentId: other }] },
+    {
+      ...command,
+      recipients: [{ name: "lead", expectedAssignmentVersion: 1 }],
+    },
+    { ...command, actor: "agent" },
+    { ...command, effect: "resume" },
+  ])
+    assert.equal(operatorCommandSchema.safeParse(bad).success, false);
+
+  const receipt = {
+    kind: "task-comment",
+    key,
+    recorded: true,
+    taskId: key,
+    commentId: other,
+    payloadHash: "a".repeat(64),
+    createdAt: 1,
+    deliveries: [
+      {
+        assignmentId: other,
+        eventId: key,
+        effect: "resume",
+        assignmentVersion: 3,
+        followUpId: key,
+      },
+    ],
+  };
+  assert.deepEqual(commandReceiptSchema.parse(receipt), receipt);
+  assert.equal(
+    commandReceiptSchema.safeParse({
+      ...receipt,
+      deliveries: [{ ...receipt.deliveries[0], effect: "resumedLead" }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    operationTypeSchema.safeParse("task.comment.send").success,
+    true,
+  );
+  assert.equal(operationScopeSchema.safeParse(`task:${key}`).success, true);
+
+  const entry = {
+    entryId: other,
+    key: "1.8.1.x",
+    at: 1000,
+    precision: "s",
+    kind: "task-comment",
+    commentId: other,
+    author: "operator",
+    text: "Hello",
+    deliveries: [],
+  };
+  const page = (e: unknown) => ({
+    data: {
+      visibilityRevision: "b".repeat(64),
+      olderCursor: null,
+      entries: [e],
+    },
+    observedAt: 1,
+  });
+  assert.equal(
+    taskTimelineSchema.safeParse(page({ ...entry, assignmentId: null }))
+      .success,
+    true,
+  );
+  // Only a task comment is task scoped; every older kind still names its assignment.
+  assert.equal(
+    taskTimelineSchema.safeParse(page({ ...entry, assignmentId: key })).success,
+    false,
+  );
+  assert.equal(
+    taskTimelineSchema.safeParse(
+      page({
+        entryId: other,
+        key: "1.7.0.x",
+        at: 1000,
+        precision: "s",
+        assignmentId: null,
+        kind: "message",
+        messageKind: "operator-message",
+        requester: null,
+        interactionId: null,
+        decision: null,
+        text: "Hi",
+        questionAnswers: null,
+      }),
+    ).success,
+    false,
+  );
 });

@@ -186,6 +186,18 @@ feedback to a task's completed project lead while the task is still open; it
 never reopens a done task.
 _Avoid_: Reassignment or a new assignment when the same assignment continues
 
+**Task comment**:
+An immutable operator-authored contribution to a task's shared conversation, sent to
+zero or more explicitly selected recipients. Recording it is not starting work: each
+recipient receives it as input to its next eligible turn or, if it has completed and
+is resumable, resumes as an operator follow-up.
+_Avoid_: Mention when referring to the selection, since text never selects a recipient
+
+**Comment recipient**:
+An existing assignment of the task, the lead or a delegate, chosen by identity and
+expected version for one task comment.
+_Avoid_: Mentioned agent
+
 **Agent conversation**:
 The interaction history used by an agent to carry out work. An assignment can continue across replacement conversations.
 _Avoid_: Assignment when referring only to its conversation history

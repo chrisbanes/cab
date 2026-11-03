@@ -890,7 +890,7 @@ a.task-source-chip:hover {
     position: sticky;
     bottom: 0;
     z-index: 2;
-    max-height: 40vh;
+    max-height: 50vh;
     overflow-y: auto;
   }
 }
@@ -1208,4 +1208,63 @@ a.task-source-chip:hover {
   .execution-add [data-slot="native-select"] {
     min-width: 0;
   }
+}
+
+/* A shared comment's recipients: chips, the picker, and what Send does for each. */
+.comment-recipients {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.comment-recipients p,
+.comment-recipients ul {
+  margin: 0;
+}
+.recipient-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.recipient-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding: 0;
+  list-style: none;
+}
+.recipient-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 0 0 var(--space-8);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--raised);
+}
+.recipient-picker {
+  position: relative;
+}
+/* The open picker floats over the composer's rest, so choosing never makes the docked card scroll. */
+.recipient-picker ul {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: max-content;
+  padding: var(--space-8);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--raised);
+  list-style: none;
+}
+.comment-preview ul {
+  padding-left: var(--space-16);
+}
+.comment-preview p {
+  margin: 0;
 }

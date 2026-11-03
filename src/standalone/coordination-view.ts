@@ -15,6 +15,11 @@ import {
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
 import type { StructuredQuestionAnswers } from "../core/structured-questions.js";
+import type {
+  TaskComment,
+  TaskCommentReceipt,
+  TaskCommentRecipient,
+} from "../core/task-comments.js";
 import { z } from "zod";
 import type {
   AssignmentResult,
@@ -127,6 +132,8 @@ export interface CoordinationViewMessage {
   reference?: z.infer<typeof feedbackReferenceSchema>;
   /** Who requested a follow-up: an agent assignment or the operator. */
   requester?: "assignment" | "operator";
+  /** Set when this event is one recipient's delivery of a shared task comment. */
+  sharedCommentId?: string;
 }
 
 export interface CoordinationInteractionAttention {
@@ -190,6 +197,8 @@ export interface CoordinationTaskView {
   results: AssignmentResult[];
   unresolvedResults: UnresolvedResultDestination[];
   messages: CoordinationViewMessage[];
+  /** Shared task comments, oldest first; their deliveries are also in `messages`. */
+  comments: TaskComment[];
   questions: CoordinationInteraction[];
   questionForms?: Array<{ interactionId: string; requestState: string }>;
   runtimeQuestions?: Array<
@@ -436,9 +445,20 @@ export class CoordinationView {
         .queuedDeliveriesForTask(id)
         .flatMap((delivery) => delivery.events.map((event) => event.eventId)),
     );
+    const comments = this.coordination.taskComments(id);
+    const commentOf = new Map(
+      comments.flatMap((comment) =>
+        comment.deliveries.map((d) => [d.eventId, comment.commentId] as const),
+      ),
+    );
     const messages = inbox
       .sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence)
-      .map((event) => this.messageView(event, pending, queued));
+      .map((event) => ({
+        ...this.messageView(event, pending, queued),
+        ...(commentOf.has(event.eventId)
+          ? { sharedCommentId: commentOf.get(event.eventId) as string }
+          : {}),
+      }));
     const interactions = this.coordination.interactions(id);
     const operatorAttention = this.coordination.operatorAttention(id);
     const completionRequests = this.coordination.completionRequests(id);
@@ -517,6 +537,7 @@ export class CoordinationView {
       results: this.coordination.results(id),
       unresolvedResults: this.coordination.unresolvedResultDestinations(id),
       messages,
+      comments,
       questionForms: this.coordination.questionFormSummaries(id),
       runtimeQuestions: this.coordination
         .runtimeQuestions(id)
@@ -612,6 +633,49 @@ export class CoordinationView {
     return this.commitCommand(
       this.coordination.postOperatorMessage({ actor: "operator", ...command }),
     );
+  }
+
+  /**
+   * Records one shared comment with its recipient deliveries, then wakes the scheduler once.
+   * A refusal throws before anything is stored; a lost wake-up leaves the receipt readable.
+   */
+  async postTaskComment(input: {
+    key: string;
+    taskId: string;
+    body: string;
+    recipients: { assignmentId: string; expectedAssignmentVersion: number }[];
+  }): Promise<TaskCommentReceipt> {
+    this.requireTask(uuid.parse(input.taskId));
+    const receipt = this.coordination.postTaskComment({
+      actor: "operator",
+      ...input,
+    });
+    // A record-only comment queues nothing, so there is nothing to admit.
+    if (receipt.deliveries.length) await this.notifyOperatorCommand();
+    return receipt;
+  }
+
+  /** The stored receipt of a comment send, or undefined while none is recorded. */
+  recordedTaskComment(taskId: string, key: string) {
+    return this.coordination.recordedTaskComment(
+      uuid.parse(taskId),
+      commandKey.parse(key),
+    );
+  }
+
+  taskComments(taskId: string): TaskComment[] {
+    return this.coordination.taskComments(uuid.parse(taskId));
+  }
+
+  /** What a comment would do for each of the task's assignments right now. */
+  taskCommentRecipients(taskId: string): TaskCommentRecipient[] {
+    return this.domain.assignments(uuid.parse(taskId)).flatMap((row) => {
+      const recipient = this.coordination.taskCommentRecipient(
+        taskId,
+        String(row.id),
+      );
+      return recipient ? [recipient] : [];
+    });
   }
 
   async reconcileResultRecipient(

@@ -1,6 +1,5 @@
 import {
   operatorCommandSchema,
-  textMaxLength,
   type Session,
   type TaskRead,
 } from "../../src/operator/contracts.js";
@@ -18,7 +17,6 @@ import { Button, ShortId } from "./components.js";
 import { codeHostName } from "./delivery-presentation.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { IssueChangedSinceHandback } from "./issue-change-notice.js";
-import { Textarea } from "./ui/textarea.js";
 
 type Task = TaskRead["data"];
 
@@ -340,94 +338,22 @@ export function ResultDestination({
   );
 }
 
-/** A durable message to one pending or running assignment, delivered on its next eligible turn. */
-export function AssignmentMessage({
-  client,
-  session,
-  taskId,
-  assignment,
-  onChanged,
+/**
+ * A delegated assignment's Reply: it selects that assignment, alone, in the task's shared
+ * comment composer, which owns the send, its preview and its unconfirmed-outcome check.
+ */
+export function AssignmentReply({
+  label,
+  onReply,
 }: {
-  client: OperatorClient;
-  session: Session;
-  taskId: string;
-  assignment: Task["assignments"][number];
-  /** Rereads the task after a recorded message or a conflict. */
-  onChanged: () => void;
+  /** The assignment's name, with its short identity when another assignment shares it. */
+  label: string;
+  onReply: () => void;
 }) {
-  const [, draftEdited] = useReducer((n: number) => n + 1, 0);
-  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
-    client,
-    session,
-    `${taskId}:message:${assignment.assignmentId}`,
-    (c, r) =>
-      c.type === "message" &&
-      r.kind === "coordination" &&
-      r.key === c.key &&
-      r.taskId === taskId &&
-      r.recipientAssignmentId === c.recipientAssignmentId &&
-      r.eventType === "operator-message",
-    (kind) => {
-      if (kind === "recorded" || kind === "conflict") onChanged();
-    },
-  );
-  const name = assignment.name ?? "this assignment",
-    id = `assignment-message-${assignment.assignmentId}`;
   return (
-    <form
-      className="assignment-message"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!entry.text.trim()) return;
-        void send(
-          operatorCommandSchema.parse({
-            type: "message",
-            key: crypto.randomUUID(),
-            taskId,
-            recipientAssignmentId: assignment.assignmentId,
-            expectedAssignmentVersion: assignment.version,
-            message: entry.text,
-          }),
-        );
-      }}
-    >
-      <label htmlFor={id} className="body">
-        Message {name}
-      </label>
-      <Textarea
-        id={id}
-        autoGrow
-        maxLength={textMaxLength}
-        value={entry.text}
-        disabled={Boolean(sending) || uncertain}
-        onChange={(e) => {
-          entry.edit(e.target.value);
-          draftEdited();
-        }}
-      />
-      <div className="assignment-message-bar">
-        <p className="metadata muted">
-          Delivered on {name}'s next eligible turn; pause and Stop still apply.
-        </p>
-        {!uncertain && (
-          <Button
-            type="submit"
-            variant="secondary"
-            disabled={Boolean(sending) || !entry.text.trim()}
-          >
-            {sending ? "Sending…" : `Send to ${name}`}
-          </Button>
-        )}
-      </div>
-      <SendFeedback
-        entry={entry}
-        outcome={outcome}
-        recorded={`Sent to ${name}.`}
-        conflict={`Not sent: ${name} changed since it was read. Your message is still here.`}
-        review={{ label: "Review current state", onClick: clear }}
-        check={() => void send()}
-      />
-    </form>
+    <Button variant="secondary" onClick={onReply}>
+      Reply to {label}
+    </Button>
   );
 }
 

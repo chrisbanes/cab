@@ -32,7 +32,8 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /app/tasks/:id | task.stop | stop request and observation | Task header Stop… | yes |
 | /app/tasks/:id | task.resume | explicit resume | Task header Resume… | yes |
 | /runtime/assignment/:id | read | generation; holds; advanced recovery evidence | Assignment recovery | read subset |
-| /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card; delegated assignment sub-conversation header | yes |
+| /app/tasks/:id | task.comment.send | comment recipients; exact versions; durable comment | Task reply card (Comment on task); delegated assignment Reply | yes |
+| /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card (Message task lead, after "Ask lead about …") | yes |
 | /app/tasks/:id | result.recipient | unresolved results; destination reconciliation | Task decision card | yes |
 | /app/tasks/:id | read | retained captured history; omissions; results | Task conversation | yes |
 | /app/tasks/:id | question.answer | plain question and exact revision answer | Inbox and task request view | yes |

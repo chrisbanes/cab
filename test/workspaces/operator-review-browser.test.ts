@@ -372,20 +372,23 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     "Existing lead draft and reference retained. Finish or clear it before starting a new contextual reply.",
     { exact: true },
   );
-  await reply.fill("Unfinished ordinary lead message");
-  for (const ask of [criterionAsk, artifactAsk]) {
-    await ask.click();
-    await retainedNotice.waitFor();
-    await page.waitForFunction(
-      () => document.activeElement?.id === "workspace-reply",
-    );
-    assert.equal(await reply.inputValue(), "Unfinished ordinary lead message");
-    assert.equal(await page.getByText(/^Immutable reference:/).count(), 0);
-    assert.equal(
-      await reply.evaluate((el) => el === document.activeElement),
-      true,
-    );
-  }
+  // An unfinished shared comment is its own draft: a contextual ask moves to the lead destination
+  // without touching it, and the comment is still there when the operator returns.
+  await reply.fill("Unfinished ordinary comment");
+  await criterionAsk.click();
+  await page.getByText(/^Immutable reference:/).waitFor();
+  await page.waitForFunction(
+    () => document.activeElement?.id === "workspace-reply",
+  );
+  assert.match(await reply.inputValue(), /^Please review /);
+  await page
+    .getByRole("button", { name: "Comment on task", exact: true })
+    .click();
+  assert.equal(await reply.inputValue(), "Unfinished ordinary comment");
+  assert.equal(await page.getByText(/^Immutable reference:/).count(), 0);
+  await page
+    .getByRole("button", { name: "Message task lead", exact: true })
+    .click();
   await reply.fill("");
   await criterionAsk.click();
   const criterionReference = await page
@@ -906,11 +909,9 @@ test("every lead composer shows the same resume line for a completed lead and ke
     name: "Send to task lead",
     exact: true,
   });
-  // Task composer, then contextual drafts from the result and the artifact.
-  await page
-    .getByRole("button", { name: "Message task lead", exact: true })
-    .click();
-  const seen = [await line.first().textContent()];
+  // The contextual drafts from the result and the artifact are lead feedback (the task composer's
+  // shared comment previews the same resume in its recipient lines).
+  const seen: (string | null)[] = [];
   await openOverviewCard(page, "evidence");
   for (const name of ["Ask lead about result", "Ask lead about artifact"]) {
     await reply.fill("");
@@ -919,7 +920,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
     seen.push(await line.first().textContent());
   }
   // The Local review panel renders the same leadResumeNotice (operator-local-review-browser).
-  assert.deepEqual(seen, [expected, expected, expected]);
+  assert.deepEqual(seen, [expected, expected]);
   assert.equal(await sendButton.isEnabled(), true);
 
   // A held lead refuses definitively and keeps the contextual draft.

@@ -48,6 +48,18 @@ import {
 import { transaction, type Database } from "./store.js";
 import { LeadTextStore } from "./lead-text.js";
 import { LocalReviewStore } from "./local-review.js";
+import {
+  taskCommentInputSchema,
+  taskCommentReceiptSchema,
+  taskCommentReceiptScope,
+  taskCommentSchemaSql,
+  type TaskComment,
+  type TaskCommentDelivery,
+  type TaskCommentInput,
+  type TaskCommentReceipt,
+  type TaskCommentRecipient,
+  type TaskCommentUnavailableReason,
+} from "./task-comments.js";
 
 // Results are unique per exact work; work revisions restart per conversation.
 const resultColumnNames = [
@@ -758,6 +770,7 @@ export class CoordinationStore {
         eventId TEXT NOT NULL UNIQUE REFERENCES coordination_inbox_events(eventId),
         PRIMARY KEY(nodeId, generation, recipientAssignmentId)
       );`);
+      this.db.exec(taskCommentSchemaSql);
       const interactionColumns = this.db
         .prepare("PRAGMA table_info(coordination_interactions)")
         .all() as Row[];
@@ -2430,6 +2443,258 @@ export class CoordinationStore {
     return { event, resumedLead: true };
   }
 
+  /**
+   * What a shared task comment would do for one of the task's assignments now.
+   * Pending or running assignments receive input; a completed one resumes through
+   * follow-up semantics. The lead's rules are `feedbackRecipient`'s; a delegate also
+   * needs a resolved result destination, as an agent follow-up does.
+   */
+  taskCommentRecipient(
+    taskId: string,
+    assignmentId: string,
+  ): TaskCommentRecipient | undefined {
+    return this.taskCommentPlan(taskId, assignmentId)?.recipient;
+  }
+
+  private taskCommentPlan(
+    taskId: string,
+    assignmentId: string,
+  ): { recipient: TaskCommentRecipient; result?: Row } | undefined {
+    const assignment = this.one(
+      "SELECT id, taskId, version, state FROM domain_assignments WHERE id = ? AND taskId = ?",
+      assignmentId,
+      taskId,
+    );
+    if (!assignment) return undefined;
+    const base = {
+      assignmentId,
+      version: Number(assignment.version),
+      role: this.isTaskLead(assignment)
+        ? ("lead" as const)
+        : ("delegate" as const),
+    };
+    const unavailable = (reason: TaskCommentUnavailableReason) => ({
+      recipient: { ...base, mode: "unavailable" as const, reason },
+    });
+    if (
+      this.one("SELECT state FROM domain_tasks WHERE id = ?", taskId)?.state !==
+      "open"
+    )
+      return unavailable("task-closed");
+    switch (assignment.state) {
+      case "pending":
+      case "running":
+        return { recipient: { ...base, mode: "input", reason: null } };
+      case "completed": {
+        const resumable = this.resumable(taskId, assignmentId);
+        if ("refusal" in resumable) return unavailable(resumable.code);
+        if (
+          base.role === "delegate" &&
+          resumable.result.destinationDisposition !== "resolved"
+        )
+          return unavailable("unresolved-destination");
+        return {
+          recipient: { ...base, mode: "resume", reason: null },
+          result: resumable.result,
+        };
+      }
+      case "held":
+        return unavailable("held");
+      default:
+        return unavailable("cancelled");
+    }
+  }
+
+  /**
+   * Records one immutable operator comment, its explicit recipient deliveries, any
+   * completed-assignment follow-ups and the command receipt in one transaction. Every
+   * recipient is validated before anything is written, so a refusal records nothing.
+   * It runs no turn: admission stays with the scheduler.
+   */
+  postTaskComment(input: TaskCommentInput): TaskCommentReceipt {
+    const command = taskCommentInputSchema.parse(input);
+    const recipients = [...command.recipients].sort((a, b) =>
+      a.assignmentId < b.assignmentId ? -1 : 1,
+    );
+    const payloadHash = materialDigest({
+      taskId: command.taskId,
+      body: command.body,
+      recipients,
+    });
+    return transaction(this.db, () => {
+      // A recorded key replays before current eligibility is consulted.
+      const replay = this.recordedTaskComment(
+        command.taskId,
+        command.key,
+        payloadHash,
+      );
+      if (replay) return replay;
+      const task = this.required(
+        "SELECT state FROM domain_tasks WHERE id = ?",
+        command.taskId,
+      );
+      if (task.state !== "open")
+        throw new DomainConflictError("Task is not open for comments");
+      const planned = recipients.map((recipient) => {
+        const plan = this.taskCommentPlan(
+          command.taskId,
+          recipient.assignmentId,
+        );
+        if (!plan)
+          throw new DomainPolicyError(
+            "forbidden",
+            "Comment recipient is not in this task",
+          );
+        if (plan.recipient.version !== recipient.expectedAssignmentVersion)
+          throw new DomainConflictError(
+            "Comment recipient assignment version conflict",
+          );
+        if (plan.recipient.mode === "unavailable")
+          throw new DomainConflictError(
+            `Comment recipient unavailable: ${plan.recipient.reason}`,
+          );
+        return { ...recipient, mode: plan.recipient.mode, result: plan.result };
+      });
+      const commentId = randomUUID();
+      const { createdAt } = this.required(
+        `INSERT INTO coordination_task_comments (commentId, taskId, author, body)
+        VALUES (?, ?, 'operator', ?) RETURNING createdAt`,
+        commentId,
+        command.taskId,
+        command.body,
+      );
+      const deliveries: TaskCommentDelivery[] = planned.map((target) => {
+        let eventId: string;
+        let followUpId: string | null = null;
+        let assignmentVersion = target.expectedAssignmentVersion;
+        if (target.mode === "resume" && target.result) {
+          const resumed = this.resumeCompletedAssignment(
+            target.result,
+            "operator",
+            target.assignmentId,
+            command.body,
+            { requester: "operator" },
+          );
+          eventId = resumed.event.eventId;
+          followUpId = resumed.followUpId;
+          assignmentVersion = Number(target.result.version) + 1;
+        } else {
+          const event = this.newEvent(
+            command.taskId,
+            target.assignmentId,
+            "operator-message",
+            null,
+            JSON.stringify({ message: command.body }),
+          );
+          eventId = event.eventId;
+          // Ordinary input keeps the recovery continuation an ordinary message records.
+          this.recordRecoveryContinuation(event, command.key, payloadHash);
+        }
+        this.db
+          .prepare(`INSERT INTO coordination_task_comment_deliveries
+          (commentId, recipientAssignmentId, eventId, expectedAssignmentVersion,
+            effect, assignmentVersion, followUpId) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(
+            commentId,
+            target.assignmentId,
+            eventId,
+            target.expectedAssignmentVersion,
+            target.mode === "resume" ? "resume" : "input",
+            assignmentVersion,
+            followUpId,
+          );
+        return {
+          assignmentId: target.assignmentId,
+          eventId,
+          effect: target.mode === "resume" ? "resume" : "input",
+          assignmentVersion,
+          followUpId,
+        };
+      });
+      const receipt: TaskCommentReceipt = {
+        kind: "task-comment",
+        key: command.key,
+        taskId: command.taskId,
+        commentId,
+        payloadHash,
+        createdAt: Number(createdAt),
+        deliveries,
+      };
+      this.db
+        .prepare(`INSERT INTO coordination_operator_receipts
+        (scope, commandKey, payloadHash, result) VALUES (?, ?, ?, ?)`)
+        .run(
+          taskCommentReceiptScope,
+          command.key,
+          payloadHash,
+          JSON.stringify(receipt),
+        );
+      return receipt;
+    });
+  }
+
+  /**
+   * The stored receipt of a committed comment send. With the request's hash it is a
+   * replay and a different payload under the key conflicts; without, it is a read.
+   */
+  recordedTaskComment(
+    taskId: string,
+    key: string,
+    payloadHash?: string,
+  ): TaskCommentReceipt | undefined {
+    const row = this.one(
+      "SELECT payloadHash, result FROM coordination_operator_receipts WHERE scope = ? AND commandKey = ?",
+      taskCommentReceiptScope,
+      key,
+    );
+    if (!row) return undefined;
+    const receipt = taskCommentReceiptSchema.parse(
+      JSON.parse(String(row.result)),
+    );
+    if (
+      receipt.key !== key ||
+      receipt.taskId !== taskId ||
+      receipt.payloadHash !== row.payloadHash ||
+      (payloadHash !== undefined && row.payloadHash !== payloadHash)
+    )
+      throw new DomainConflictError(
+        "Operator command key reused with different content",
+      );
+    return receipt;
+  }
+
+  /** The task's sent comments, oldest first, each with its recipient deliveries. */
+  taskComments(taskId: string): TaskComment[] {
+    const deliveries = this.db
+      .prepare(`SELECT d.commentId, d.recipientAssignmentId, d.eventId, d.effect,
+        d.assignmentVersion, d.followUpId
+        FROM coordination_task_comment_deliveries d
+        JOIN coordination_task_comments c ON c.commentId = d.commentId
+        WHERE c.taskId = ? ORDER BY d.rowid`)
+      .all(uuid.parse(taskId)) as Row[];
+    return (
+      this.db
+        .prepare(`SELECT sequence, commentId, taskId, body, createdAt
+        FROM coordination_task_comments WHERE taskId = ? ORDER BY sequence`)
+        .all(taskId) as Row[]
+    ).map((row) => ({
+      sequence: Number(row.sequence),
+      commentId: String(row.commentId),
+      taskId: String(row.taskId),
+      body: String(row.body),
+      createdAt: Number(row.createdAt),
+      deliveries: deliveries
+        .filter((d) => d.commentId === row.commentId)
+        .map((d) => ({
+          assignmentId: String(d.recipientAssignmentId),
+          eventId: String(d.eventId),
+          effect: z.enum(["input", "resume"]).parse(d.effect),
+          assignmentVersion: Number(d.assignmentVersion),
+          followUpId: d.followUpId === null ? null : String(d.followUpId),
+        })),
+    }));
+  }
+
   followUps(taskId?: string): FollowUpRequest[] {
     const sql =
       "SELECT followUpId, resultId, taskId, requester, requestingAssignmentId, " +
@@ -3520,20 +3785,12 @@ export class CoordinationStore {
       FROM coordination_inbox_events WHERE eventId = ?`,
       String(audit.operatorEventId),
     );
-    const receipt = this.one(
-      `SELECT payloadHash, result FROM coordination_operator_receipts
-      WHERE scope = 'operator-message' AND commandKey = ?`,
-      String(audit.operatorCommandKey),
-    );
     if (
-      !event ||
-      !receipt ||
-      event.eventType !== "operator-message" ||
+      event?.eventType !== "operator-message" ||
       event.taskId !== proof.taskId ||
       event.recipientAssignmentId !== proof.assignmentId ||
       event.payload !== audit.operatorEventPayload ||
-      receipt.payloadHash !== audit.operatorPayloadHash ||
-      receipt.result !== JSON.stringify({ eventId: audit.operatorEventId })
+      !this.operatorInputRecorded(audit)
     )
       return false;
     const batch = this.deliveryForWork(workId);
@@ -3543,6 +3800,38 @@ export class CoordinationStore {
         batch.state === "completed" &&
         batch.batchId === audit.batchId &&
         this.recoveryBatchMaterial(batch) === audit.batchMaterial,
+    );
+  }
+
+  /** Whether the audit's operator message receipt, direct or a shared comment's input delivery, still stands. */
+  private operatorInputRecorded(audit: Row): boolean {
+    const key = String(audit.operatorCommandKey);
+    const direct = this.one(
+      `SELECT payloadHash, result FROM coordination_operator_receipts
+      WHERE scope = 'operator-message' AND commandKey = ?`,
+      key,
+    );
+    if (
+      direct?.payloadHash === audit.operatorPayloadHash &&
+      direct?.result === JSON.stringify({ eventId: audit.operatorEventId })
+    )
+      return true;
+    const comment = this.one(
+      `SELECT payloadHash, result FROM coordination_operator_receipts
+      WHERE scope = ? AND commandKey = ?`,
+      taskCommentReceiptScope,
+      key,
+    );
+    if (!comment || comment.payloadHash !== audit.operatorPayloadHash)
+      return false;
+    const receipt = taskCommentReceiptSchema.safeParse(
+      JSON.parse(String(comment.result)),
+    );
+    return (
+      receipt.success &&
+      receipt.data.deliveries.some(
+        (d) => d.eventId === audit.operatorEventId && d.effect === "input",
+      )
     );
   }
 
@@ -4410,21 +4699,25 @@ export class CoordinationStore {
     );
   }
 
-  /** The completed lead's resumable result, or the definitive refusal. */
+  /** The completed assignment's resumable result, or the definitive refusal. */
   private resumable(
     taskId: string,
     assignmentId: string,
-  ): { result: Row } | { refusal: string } {
+  ): { result: Row } | { refusal: string; code: TaskCommentUnavailableReason } {
     if (
       this.one("SELECT state FROM domain_tasks WHERE id = ?", taskId)?.state !==
       "open"
     )
-      return { refusal: "Follow-up unavailable: task is not open" };
+      return {
+        refusal: "Follow-up unavailable: task is not open",
+        code: "task-closed",
+      };
     const result = this.resumableResult({ assignmentId });
     if (!result)
       return {
         refusal:
           "Follow-up unavailable: latest result is not the newest unambiguous work",
+        code: "no-resumable-result",
       };
     // Defensive: a follow-up returns the assignment to pending; any turn that completes it again has newer work.
     if (
@@ -4435,6 +4728,7 @@ export class CoordinationStore {
     )
       return {
         refusal: "Follow-up unavailable: latest result already has a follow-up",
+        code: "already-followed-up",
       };
     return { result };
   }

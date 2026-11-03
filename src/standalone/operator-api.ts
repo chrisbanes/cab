@@ -3912,6 +3912,7 @@ export class OperatorApi {
         : {}),
       ...(m.reference ? { reference: m.reference } : {}),
       ...(m.requester ? { requester: m.requester } : {}),
+      ...(m.sharedCommentId ? { sharedCommentId: m.sharedCommentId } : {}),
       ...(m.interactionId === undefined
         ? {}
         : { interactionId: m.interactionId }),
@@ -3964,6 +3965,24 @@ export class OperatorApi {
             },
           }
         : {}),
+      commentRecipients: this.coordination()
+        .taskCommentRecipients(taskId)
+        .flatMap((recipient) => {
+          const assignment = assignments.find(
+            (a) => String(a.id) === recipient.assignmentId,
+          );
+          return assignment
+            ? [
+                {
+                  ...recipient,
+                  name: this.safe(
+                    d.profile(String(assignment.profileId)).name,
+                    excluded,
+                  ),
+                },
+              ]
+            : [];
+        }),
       draftTurn: this.service.draftTurnAvailability(taskId),
       startAgain: this.service.startAgainAvailability(taskId),
       reset: this.service.resetAvailability(taskId),
@@ -4125,6 +4144,7 @@ export class OperatorApi {
           issue?.observedBody,
           issue?.observedTitle,
           ...view.messages.map((m) => m.text),
+          ...view.comments.map((c) => c.body),
           ...view.results.map((r) => r.summary),
           ...view.questions.map((i) => i.prompt),
           ...view.approvals.map((i) => i.prompt),
@@ -5239,7 +5259,7 @@ export class OperatorApi {
         rank: number,
         ordinal: number,
         id: string,
-        assignmentId: string,
+        assignmentId: string | null,
         body: TimelineCandidate["body"],
       ): TimelineCandidate => ({
         key: { timeMs: at * 1000, rank, ordinal, id },
@@ -5254,6 +5274,27 @@ export class OperatorApi {
         "approval-decision": "decision",
       };
       const records: TimelineCandidate[] = [
+        ...this.coordination()
+          .taskComments(taskId)
+          .map((c) =>
+            seconds(
+              c.createdAt,
+              timelineRank.taskComment,
+              c.sequence,
+              c.commentId,
+              null,
+              {
+                kind: "task-comment",
+                commentId: c.commentId,
+                author: "operator",
+                text: this.safe(c.body, excluded),
+                deliveries: c.deliveries.map((d) => ({
+                  assignmentId: d.assignmentId,
+                  effect: d.effect,
+                })),
+              },
+            ),
+          ),
         ...[...view.questions, ...view.approvals].map((i) =>
           seconds(
             i.createdAt,
@@ -5289,9 +5330,10 @@ export class OperatorApi {
           ),
         ),
         // The position in the task's message order is the event's own sequence order.
+        // A shared comment's recipient deliveries are execution input; the comment is the one post.
         ...view.messages.flatMap((m, index) => {
           const messageKind = messageKinds[m.eventType];
-          return messageKind === undefined
+          return messageKind === undefined || m.sharedCommentId !== undefined
             ? []
             : [
                 seconds(
@@ -6338,6 +6380,31 @@ export class OperatorApi {
     if (!scope.success || !type.success || !key.success)
       throw new OperatorApiError(400, "invalid-input");
     const [kind, id = ""] = scope.data.split(":");
+    if (type.data === "task.comment.send") {
+      if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
+      return this.readWithExclusionFence(async () => {
+        this.requireTask(id);
+        let recorded: ReturnType<CoordinationView["recordedTaskComment"]>;
+        try {
+          recorded = this.coordination().recordedTaskComment(id, key.data);
+        } catch (error) {
+          // A stored receipt that does not match its key or task is a conflict, never a draft's answer.
+          if (
+            error instanceof z.ZodError ||
+            error instanceof SyntaxError ||
+            error instanceof DomainConflictError
+          )
+            throw new OperatorApiError(409, "conflict");
+          throw error;
+        }
+        return operationReadSchema.parse({
+          data: recorded
+            ? { state: "recorded", receipt: { ...recorded, recorded: true } }
+            : { state: "not-recorded" },
+          observedAt: Date.now(),
+        });
+      });
+    }
     if (isRecoveryType(type.data)) {
       if (kind !== "assignment")
         throw new OperatorApiError(400, "invalid-input");
@@ -9392,6 +9459,11 @@ export class OperatorApi {
       }
       this.requireTask(c.taskId);
       const view = this.coordination();
+      if (c.type === "task.comment.send") {
+        const { type: _type, ...comment } = c;
+        const posted = await view.postTaskComment(comment);
+        return commandReceiptSchema.parse({ ...posted, recorded: true });
+      }
       const { type, ...submitted } = c;
       let command: typeof submitted = submitted;
       if (c.type === "approval.decide" && c.decision === "denied") {

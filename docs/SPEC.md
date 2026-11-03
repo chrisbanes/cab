@@ -2052,8 +2052,82 @@ Contract details:
   conversation is never resumed.
 - Follow-up messages in the operator task read carry `requester`
   (`assignment` or `operator`), shown in the task message history.
-- The task view offers a message composer only for pending or running
-  delegated assignments, the same rule the API enforces.
+- A delegated assignment's sub-conversation offers Reply where a shared comment
+  would reach it (pending, running, or completed and resumable); Reply selects it in
+  the task composer, whose send, preview and unconfirmed-outcome check are the
+  composer's own; the sub-conversation holds no second composer.
+
+#### Shared task comments
+
+A **task comment** is one immutable operator-authored contribution to the task's
+shared conversation, with zero or more explicitly selected **recipients**: existing
+assignments of that task, the lead or a delegate. It is the task Reply composer's
+ordinary send. It does not change `message`, `follow-up`, `review.send` or the
+explicit draft turn, which keep their single-recipient contracts, and contextual
+"Ask lead about …" feedback and the Local review panel stay lead-only with their
+exact references and anchors.
+
+- The composer starts with the lead as a visible, removable `@lead` recipient. Other
+  assignments are added from a task-scoped picker; two assignments of one profile are
+  told apart by their short assignment ID. Removing every recipient is a deliberate
+  record-only comment that wakes nobody, and a refresh never restores a removed
+  recipient. An assignment's Reply action selects exactly that assignment.
+- Recipients are chosen by assignment identity and expected version. A name, `@name` or
+  profile in the text, whoever wrote it, resolves nothing and wakes nothing; agents
+  keep using explicit delegation and follow-up tools. A comment never creates an
+  assignment, grants a permission, reopens a task or changes the lead binding.
+- Before Send the composer previews each selected recipient from the task read's
+  `commentRecipients`: `input` (a pending or running assignment receives the comment
+  on its next eligible turn), `resume` (a completed assignment resumes as the same
+  assignment through an operator follow-up) or `unavailable` with a bounded reason
+  code (`task-closed`, `held`, `cancelled`, `no-resumable-result`,
+  `already-followed-up`, `unresolved-destination`). A completed delegate also needs
+  a resolved result destination, as an agent follow-up does. The preview is
+  advisory; the service decides again at commit. Absent `commentRecipients` means the
+  service has no shared comments, and a client must not fall back to another send.
+- `task.comment.send` takes `{key, taskId, body, recipients:[{assignmentId,
+  expectedAssignmentVersion}]}` and records, in one transaction, the comment, one
+  delivery per recipient (an `operator-message` inbox event, or a follow-up and its
+  `assignment-follow-up` event), each ordinary-input recovery continuation, and the
+  receipt. Every recipient is validated first; one unavailable, unknown, wrong-task,
+  duplicate or stale recipient, a held assignment or a task that is not open
+  (even with no recipients) refuses the whole comment with nothing recorded, and the
+  draft stays editable. Refusals are definitive: `conflict` (409), `forbidden` for an
+  assignment outside the task (403) and `invalid-input` (400).
+- Recording a comment starts nothing. Delivery rides the existing inbox and
+  scheduler admission: pause, Stop, capacity, readiness, permissions, approval,
+  instruction and profile revisions, execution ownership and terminal or callback
+  uncertainty keep their authority, and a running turn is never overlapped. Later
+  comments to a running assignment are input for its next turn.
+- The `task-comment` receipt carries the comment ID, the canonical payload hash and
+  each delivery's assignment, event, recorded effect (`input` or `resume`),
+  resulting assignment version and follow-up. Recipients are canonicalised by
+  assignment ID, so the hash is independent of selection order. Replay of the same
+  key returns the stored receipt before any current eligibility is consulted, after
+  a restart, task completion or lead replacement; the same key with different
+  content conflicts. The receipt records enqueue or resume, not eventual execution.
+- `GET /api/operator/operations` reads `type=task.comment.send` with
+  `scope=task:<id>`. It never writes and returns the existing recorded or
+  not-recorded envelope. The browser's Check reads it first, accepts only a receipt
+  matching the frozen key, task, hash and recipients, and only on not-recorded
+  replays the identical frozen command. A not-recorded read does not prove an
+  in-flight request cannot commit, so a fresh key is never generated; a failed read
+  or mismatched receipt stays unknown. When the receipt shows the comment was recorded but its post-commit scheduler wake-up was
+  lost, the queued deliveries are admitted at the next scheduler wake-up (a later command,
+  a source refresh or a restart); the check does not repeat the wake-up.
+- A sent comment and its recipient set are immutable and cannot be recalled;
+  correction is a new comment. Pause and Stop are the recovery controls once work may
+  have started. An unsent draft stays editable after any definitive refusal.
+- The conversation timeline shows each comment once at the task root, with its
+  recipients and their effects (`kind: task-comment`, `assignmentId: null`, ordered
+  after messages by creation time and sequence), even when the task has no lead. Its
+  recipient events are execution input and are not separate posts; the task read
+  marks them with `sharedCommentId`. Older messages are unchanged and no comment is
+  backfilled from them.
+- Storage adds `coordination_task_comments` and `coordination_task_comment_deliveries`
+  and raises the startup migration level to 10; a database at a lower level is
+  snapshotted first. Existing receipts, events and local review anchors are not
+  rewritten.
 
 ### Readable task histories
 

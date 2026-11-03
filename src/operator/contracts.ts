@@ -12,6 +12,10 @@ import {
 } from "./github-reasons.js";
 import { publicationStates } from "../core/task-publication-contracts.js";
 import { stackReasons } from "../core/stacked-dependencies.js";
+import {
+  taskCommentReceiptSchema,
+  taskCommentUnavailableReasons,
+} from "../core/task-comments.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import {
@@ -1293,6 +1297,8 @@ const message = z
     interactionId: uuid.optional(),
     reference: feedbackReferenceSchema.optional(),
     requester: z.enum(["assignment", "operator"]).optional(),
+    /** Set when this event is one recipient's delivery of a shared task comment. */
+    sharedCommentId: uuid.optional(),
   })
   .strict();
 const result = z
@@ -1795,6 +1801,24 @@ export const taskSchema = envelope(
         })
         .strict()
         .optional(),
+      /**
+       * What a shared comment would do for each of the task's assignments now. Absent means the
+       * service has no shared comments, so a client must not fall back to a single-recipient send.
+       */
+      commentRecipients: z
+        .array(
+          z
+            .object({
+              assignmentId: uuid,
+              version: revision,
+              name: safeText,
+              role: z.enum(["lead", "delegate"]),
+              mode: z.enum(["input", "resume", "unavailable"]),
+              reason: z.enum(taskCommentUnavailableReasons).nullable(),
+            })
+            .strict(),
+        )
+        .optional(),
       /** Whether the operator can start a draft turn now, and why not. */
       draftTurn: z
         .object({
@@ -2141,6 +2165,27 @@ export const taskTimelineSchema = envelope(
                 decision: z.enum(["approved", "denied"]).nullable(),
                 text: safeText,
                 questionAnswers: questionAnswersSchema.nullable(),
+              })
+              .strict(),
+            // A comment belongs to the task, not to one assignment's stream.
+            z
+              .object({
+                ...timelineEntryBase,
+                assignmentId: z.null(),
+                kind: z.literal("task-comment"),
+                commentId: uuid,
+                author: z.literal("operator"),
+                text: safeText,
+                deliveries: z
+                  .array(
+                    z
+                      .object({
+                        assignmentId: uuid,
+                        effect: z.enum(["input", "resume"]),
+                      })
+                      .strict(),
+                  )
+                  .max(64),
               })
               .strict(),
             z
@@ -2644,6 +2689,26 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedAssignmentVersion: revision,
       message: z.string().trim().min(1).max(16000),
       reference: feedbackReferenceSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.comment.send"),
+      taskId: uuid,
+      body: z.string().trim().min(1).max(16000),
+      recipients: z
+        .array(
+          z
+            .object({ assignmentId: uuid, expectedAssignmentVersion: revision })
+            .strict(),
+        )
+        .max(64)
+        .refine(
+          (list) =>
+            new Set(list.map((r) => r.assignmentId)).size === list.length,
+          "Duplicate comment recipient",
+        ),
     })
     .strict(),
   z
@@ -4082,6 +4147,7 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       ]),
     })
     .strict(),
+  taskCommentReceiptSchema.extend({ recorded: z.literal(true) }).strict(),
   z
     .object({
       kind: z.literal("coordination"),
@@ -4915,12 +4981,13 @@ export const operationTypeSchema = z.enum([
   "recovery.no-turn.recover",
   "recovery.bound-turn.recover",
   "recovery.conversation.replace",
+  "task.comment.send",
 ]);
-/** `project:<id>`, `profile:<id>`, `assignment:<id>`, `system:capacity` or `system:runtime:<harness>`; nothing else is a readable scope. */
+/** `project:<id>`, `profile:<id>`, `assignment:<id>`, `task:<id>`, `system:capacity` or `system:runtime:<harness>`; nothing else is a readable scope. */
 export const operationScopeSchema = z
   .string()
   .regex(
-    /^(?:(?:project|profile|assignment):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity|system:runtime:(?:codex|claude))$/i,
+    /^(?:(?:project|profile|assignment|task):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity|system:runtime:(?:codex|claude))$/i,
   );
 export const operationReadSchema = envelope(
   z.discriminatedUnion("state", [

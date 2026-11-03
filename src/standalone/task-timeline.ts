@@ -14,8 +14,8 @@ import {
 /** One entry before its common fields are added: where it sorts and what it says. */
 export interface TimelineCandidate {
   key: TimelineKey;
-  /** The conversation the entry belongs to. */
-  assignmentId: string;
+  /** The conversation the entry belongs to; null only for a task-scoped comment. */
+  assignmentId: string | null;
   precision: "ms" | "s";
   body: { kind: string } & Record<string, unknown>;
 }

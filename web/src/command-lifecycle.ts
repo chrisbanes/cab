@@ -15,6 +15,10 @@ const refusalCodes = new Set([
   "unsupported-media",
   "redaction-limit",
 ]);
+/** Whether a resend's answer is a definite refusal, which alone settles an unconfirmed command as refused. */
+export const isDefiniteRefusal = (result: CommandState) =>
+  result.state === "conflict" ||
+  (result.state === "rejected" && refusalCodes.has(result.code));
 /** Owns the original validated operation; consumers own validation and effects. */
 export class CommandLifecycle<C extends OperatorCommand> {
   private command: C | null = null;
@@ -68,9 +72,7 @@ export class CommandLifecycle<C extends OperatorCommand> {
       this.unknown = false;
       return "recorded";
     }
-    const refused =
-      result.state === "conflict" ||
-      (result.state === "rejected" && refusalCodes.has(result.code));
+    const refused = isDefiniteRefusal(result);
     if (
       (this.unknown && !(options.settleRefusal && refused)) ||
       result.state === "unknown" ||
