@@ -141,6 +141,22 @@ export const policyGrantSchema = z
     (g) => g.action !== "branch.adopt" || g.mode === "approval",
     "branch.adopt is only grantable with approval",
   );
+/**
+ * The `issue.status` grant as the schema accepted it before the status mapping became its own
+ * authority. New policies refuse it; receipts recorded earlier still carry one, with whichever
+ * optional fields it was saved with.
+ */
+export const retiredIssueStatusGrantSchema = z
+  .object({
+    action: z.literal("issue.status"),
+    repositoryId: identity,
+    mode: z.enum(["allow", "approval"]),
+    projectNodeId: identity.optional(),
+    fieldNodeId: identity.optional(),
+    optionNodeIds: z.array(identity).optional(),
+    statusIds: z.array(identity).max(256).optional(),
+  })
+  .strict();
 export const deliveryPolicySchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),

@@ -4,6 +4,7 @@ import {
   deliveryPolicySchema,
   policyGrantSchema,
   repositorySettingsSchema,
+  retiredIssueStatusGrantSchema,
 } from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
 import { executionHarnessSchema } from "./execution-runtime.js";
@@ -122,16 +123,6 @@ export const routingCommandResultSchema = z
     guidance: z.string(),
     credentialAvailable: sqliteFlag,
     candidateProfileIds: candidateProfileIdsJson,
-  })
-  .strict();
-
-/** An `issue.status` grant, retired with the status mapping's own authority; receipts recorded before then still carry one. */
-const retiredIssueStatusGrantSchema = z
-  .object({
-    action: z.literal("issue.status"),
-    repositoryId: z.string(),
-    mode: z.enum(["allow", "approval"]),
-    statusIds: z.array(z.string()),
   })
   .strict();
 

@@ -281,6 +281,16 @@ test("a delivery receipt recorded with a retired issue.status grant still parses
         mode: "allow",
         statusIds: ["1"],
       },
+      // The Delivery editor also let an issue.status row carry Project scope fields.
+      {
+        action: "issue.status",
+        repositoryId: "J1",
+        mode: "approval",
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: ["O"],
+        statusIds: ["1"],
+      },
     ],
     requiredChecks: [],
     version: 3,
@@ -290,6 +300,13 @@ test("a delivery receipt recorded with a retired issue.status grant still parses
     type: "delivery.configure",
     result: recorded,
   });
+  // Only the fields the old grant shape accepted: nothing else is let through.
+  assert.throws(() =>
+    parseDomainCommandOutcome("delivery.configure", {
+      ...recorded,
+      grants: [{ ...recorded.grants[1], extra: true }],
+    }),
+  );
 });
 
 test("accepts unchanged material with whitespace, reordered keys, and null prototypes", () => {

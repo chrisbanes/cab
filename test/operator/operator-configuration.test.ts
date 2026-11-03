@@ -2291,6 +2291,47 @@ test("an issue.status grant, or a grant with statusIds, is refused as invalid in
   assert.equal(f.service.delivery().configuration(projectId).version, 1);
 });
 
+test("a receipt recorded with a retired issue.status grant carrying Project scope still answers its operation lookup", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const key = randomUUID();
+  const result = {
+    mode: "reviewable-pr",
+    grants: [
+      {
+        action: "issue.status",
+        repositoryId: "J1",
+        mode: "allow",
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: ["O"],
+        statusIds: ["10003"],
+      },
+    ],
+    requiredChecks: [],
+    version: 2,
+    credentialConfigured: false,
+  };
+  databaseOf(f.service)
+    .prepare("INSERT INTO command_receipts VALUES (?, ?, ?, ?)")
+    .run(projectId, key, "0".repeat(64), JSON.stringify(result));
+  const lookup = await api.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key,
+    }),
+  );
+  assert.equal(lookup.data.state, "recorded");
+  // New saves still refuse the retired action.
+  await assert.rejects(
+    api.execute(
+      deliveryInput(projectId, { grants: [result.grants[0] as never] }),
+    ),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 400,
+  );
+});
+
 test("delivery semantic refusals report indexed fields and do not write or leave receipts", async (t) => {
   const { f, api, projectId } = await deliveryFixture(t);
   const base = { repositoryId: "R", mode: "allow" };
