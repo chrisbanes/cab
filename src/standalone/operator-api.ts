@@ -6486,7 +6486,10 @@ export class OperatorApi {
           name: this.exact(row.name, excluded),
           summary: this.exact(row.summary, excluded),
         },
-        instructionPresent: Boolean(row.instructions),
+        instructionPresent: Boolean(
+          this.domain().profileRevision(profileId, Number(row.version))
+            .instructions,
+        ),
         instructionRevision: Number(row.version),
         capabilities: this.safe(row.capabilities, excluded),
         runtime,
