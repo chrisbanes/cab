@@ -319,6 +319,7 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       taskId: id,
       expectedVersion: z.number().int().positive(),
+      expectedHoldRevision: z.number().int().positive().safe().optional(),
       decision: z.literal("resume-source-hold"),
     })
     .strict(),
@@ -3424,12 +3425,14 @@ export class DomainStore {
           ...key,
         );
         const hold = this.one(
-          `SELECT active FROM source_holds WHERE ${itemIs()}`,
+          `SELECT active, generation FROM source_holds WHERE ${itemIs()}`,
           ...key,
         );
         if (!external) throw new DomainConflictError("Source item unavailable");
         if (!hold?.active)
           throw new DomainConflictError("No source hold to resume");
+        if (command.expectedHoldRevision !== hold.generation)
+          throw new DomainConflictError("Source hold revision changed");
         const reasons = this.admission(command.taskId).reasons;
         if (
           external.observedState !== "open" ||

@@ -68,7 +68,7 @@ export function SourceHoldCard({
       <p className="small-heading">
         {resolve ? "Source hold" : "Your decision · source hold"}
       </p>
-      {!resolve && source && (
+      {!resolve && source && hold?.active && (
         <>
           <p>{sourceHoldReasonText(hold?.reason ?? null)}</p>
           <dl className="inspector-facts">
@@ -83,7 +83,7 @@ export function SourceHoldCard({
               variant="secondary"
               disabled={Boolean(sending)}
               onClick={() => {
-                onSend?.(hold?.revision ?? 0);
+                onSend?.(hold.revision);
                 void send(
                   operatorCommandSchema.parse({
                     type: "source.review",
@@ -91,6 +91,7 @@ export function SourceHoldCard({
                     projectId: task.task.projectId,
                     taskId,
                     expectedVersion: task.task.version,
+                    expectedHoldRevision: hold.revision,
                     decision: "resume-source-hold",
                   }),
                 );
