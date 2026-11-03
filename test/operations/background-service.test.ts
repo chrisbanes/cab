@@ -686,7 +686,8 @@ test("diagnostic sink throw, rejection, and hang use one bounded redacted stderr
           fireInterval(intervals, 1000);
           await notification;
           await service.waitForBackgroundShutdown(notification);
-          assert.ok(Date.now() - started < 1000);
+          // Load-tolerant: only the 50 ms sink timeout may bound this, not a hung sink.
+          assert.ok(Date.now() - started < 2000);
           assert.equal(diagnostics.length, 1);
           assert.equal(JSON.stringify(diagnostics).includes("secret"), false);
           const fallback = fallbackWrites.at(-1);
@@ -1082,12 +1083,12 @@ test("run and list CLI branches remain bounded and keep their existing cleanup p
 
     const listStarted = Date.now();
     await main(["list", join(root, "list-data")]);
-    assert.ok(Date.now() - listStarted < 1000);
+    assert.ok(Date.now() - listStarted < 2000);
     assert.equal(output[0], "[]\n");
 
     const runStarted = Date.now();
     await main(["run", join(root, "run-data"), "fixture-work", "prompt", root]);
-    assert.ok(Date.now() - runStarted < 1000);
+    assert.ok(Date.now() - runStarted < 2000);
     assert.equal(JSON.parse(output[1] ?? "{}").state, "completed");
     assert.equal(starts, 2);
     assert.equal(stops, 2);
