@@ -544,6 +544,24 @@ export class ConfigurationDraft {
     let result: CommandState;
     if (translatedConfiguration(c) && !currentAuthentication()) {
       result = { state: "unknown", command: c, code: "unauthenticated" };
+    } else if (checkReceipt && c.type === "profile.create" && c.starter) {
+      try {
+        const operation = await client.operation({
+          scope: `profile:${c.profileId}`,
+          type: c.type,
+          key: c.key,
+        });
+        result =
+          currentAuthentication() && operation.data.state === "recorded"
+            ? { state: "recorded", receipt: operation.data.receipt }
+            : { state: "unknown", command: c, code: "unavailable" };
+      } catch (error) {
+        result = {
+          state: "unknown",
+          command: c,
+          code: error instanceof ClientError ? error.code : "unavailable",
+        };
+      }
     } else if (
       checkReceipt &&
       (c.type === "delivery.configure" ||

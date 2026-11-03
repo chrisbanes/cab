@@ -229,6 +229,14 @@ const commandSchema = z.discriminatedUnion("type", [
       capabilities: prose,
       runtime: profileRuntimeSchema.optional(),
       skills: profileSkillsSchema.optional(),
+      starter: z
+        .object({
+          implementerId: id,
+          reviewerId: id,
+          reviewerHarness: z.enum(["codex", "claude"]),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -2998,22 +3006,83 @@ export class DomainStore {
       }
       case "profile.create": {
         this.operator(command);
-        this.db
-          .prepare(
-            "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime, skills) VALUES (?, 1, ?, ?, ?, ?, 0, ?, ?)",
+        const runtime =
+          command.runtime ?? defaultProfileRuntime(this.enabledRuntimes());
+        if (command.starter) {
+          if (this.one("SELECT id FROM profiles LIMIT 1"))
+            throw new DomainPolicyError(
+              "invalid-input",
+              "Starter profiles require an empty installation",
+            );
+          if (
+            new Set([
+              command.profileId,
+              command.starter.implementerId,
+              command.starter.reviewerId,
+            ]).size !== 3
           )
-          .run(
-            command.profileId,
-            command.name,
-            command.summary ?? "",
-            command.instructions,
-            command.capabilities,
-            canonical(
-              command.runtime ?? defaultProfileRuntime(this.enabledRuntimes()),
-            ),
-            canonical(command.skills ?? noProfileSkills),
+            throw new DomainPolicyError(
+              "invalid-input",
+              "Starter profile IDs must be distinct",
+            );
+        }
+        const insert = (
+          profileId: string,
+          name: string,
+          summary: string,
+          instructions: string,
+          capabilities: string,
+          runtime: ProfileRuntime,
+          skills: ProfileSkills,
+        ) => {
+          this.db
+            .prepare(
+              "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime, skills) VALUES (?, 1, ?, ?, ?, ?, 0, ?, ?)",
+            )
+            .run(
+              profileId,
+              name,
+              summary,
+              instructions,
+              capabilities,
+              canonical(runtime),
+              canonical(skills),
+            );
+          this.snapshotProfile(profileId);
+        };
+        insert(
+          command.profileId,
+          command.name,
+          command.summary ?? "",
+          command.instructions,
+          command.capabilities,
+          runtime,
+          command.skills ?? noProfileSkills,
+        );
+        if (command.starter) {
+          const defaults = (harness: ExecutionHarness): ProfileRuntime =>
+            harness === "claude"
+              ? { harness, model: null, reasoningEffort: null }
+              : { harness };
+          insert(
+            command.starter.implementerId,
+            "Implementer",
+            "Builds scoped changes",
+            "Make the smallest complete change that meets the brief.\nValidate in proportion to the change and say what you ran.\nReport what changed, how you verified it, and anything left open.\nAsk the lead when scope or authority is unclear; don't widen the brief.",
+            "",
+            defaults(runtime.harness),
+            noProfileSkills,
           );
-        this.snapshotProfile(command.profileId);
+          insert(
+            command.starter.reviewerId,
+            "Reviewer",
+            "Independent review",
+            "Review the result against its brief; don't change files.\nRank findings by severity, each with evidence (file, line, failing case).\nEnd with a verdict: ship, fix-first or rethink.\nReport gaps you could not check rather than guessing.",
+            "",
+            defaults(command.starter.reviewerHarness),
+            noProfileSkills,
+          );
+        }
         return this.profile(command.profileId);
       }
       case "profile.configure": {

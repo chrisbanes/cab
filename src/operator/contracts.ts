@@ -2903,6 +2903,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       capabilities: text,
       runtime: profileRuntimeSchema.optional(),
       skills: profileSkillsSchema.optional(),
+      starter: z
+        .object({
+          implementerId: uuid,
+          reviewerId: uuid,
+          reviewerHarness: z.enum(["codex", "claude"]),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
