@@ -657,6 +657,10 @@ export async function runGuarded(
   return finishRun(guard.result, guard, name, options);
 }
 
+// A failed browser journey may hold state a live client could still use, which keeps
+// its file's event loop alive; force-exit ends the file once it has reported.
+export const testFileFlags = ["--test", "--test-force-exit"];
+
 export async function main(
   base = realpathSync(tmpdir()),
   environment = process.env,
@@ -695,7 +699,7 @@ async function runSelected(root, operatorCodexHome) {
     `Test selection: suite=${options.suite} profile=${options.profile} shard=${options.shard}/${options.shards}${options.browserFilesOnly ? " browser-files-only" : ""} files=${files.length}\n`,
   );
   const args = [
-    "--test",
+    ...testFileFlags,
     // Half the cores plus one: Node's default (cores - 1) overloads dev machines.
     `--test-concurrency=${Math.ceil((availableParallelism() + 1) / 2)}`,
     ...(preflight

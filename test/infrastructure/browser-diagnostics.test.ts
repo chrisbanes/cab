@@ -1,11 +1,18 @@
 import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { setTimeout, clearTimeout } from "node:timers";
-import { chromium } from "playwright";
-import { runBrowserJourney } from "../fixtures/browser-diagnostics.js";
+import { pathToFileURL } from "node:url";
+import { chromium, webkit } from "playwright";
+import {
+  killBrowser,
+  launchedBrowserProcess,
+  runBrowserJourney,
+} from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -233,6 +240,189 @@ test("local listener rejection preserves the assertion and backing state while o
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/** A local journey whose browser.close never settles; kill decides what follows. */
+async function stalledBrowserClose(kill: () => Promise<void>) {
+  const root = await mkdtemp(join(tmpdir(), "cab-stalled-browser-"));
+  const calls: string[] = [];
+  const original = Error("Original assertion before a stalled browser close");
+  try {
+    const started = performance.now();
+    await assert.rejects(
+      runBrowserJourney(
+        "diagnostics",
+        "stalled browser close",
+        async (journey) => {
+          journey.ownLocal({
+            browser: () => {
+              calls.push("browser");
+              return new Promise<void>(() => {});
+            },
+            killBrowser: async () => {
+              calls.push("kill");
+              await kill();
+            },
+            listeners: [
+              {
+                name: "http.stop",
+                close: async () => {
+                  calls.push("http");
+                },
+              },
+            ],
+            auth: () => {
+              calls.push("auth");
+            },
+            state: async () => {
+              calls.push("state");
+            },
+            directory: () => {
+              calls.push("directory");
+            },
+          });
+          throw original;
+        },
+        { evidenceRoot: root, cleanupStepMs: 50, overallMs: 3000 },
+      ),
+      (error: unknown) => error === original,
+    );
+    assert.ok(performance.now() - started < 2000);
+    const directory = (original as Error & { evidenceDirectory: string })
+      .evidenceDirectory;
+    const evidence = JSON.parse(
+      await readFile(join(directory, "manifest.json"), "utf8"),
+    ) as { cleanup: { steps: Array<{ name: string; status: string }> } };
+    const steps = Object.fromEntries(
+      evidence.cleanup.steps.map((step) => [step.name, step.status]),
+    );
+    return { calls, steps };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test("a stalled browser close is killed before the remaining local cleanup runs", async () => {
+  const { calls, steps } = await stalledBrowserClose(async () => {});
+  assert.deepEqual(calls, [
+    "browser",
+    "kill",
+    "http",
+    "auth",
+    "state",
+    "directory",
+  ]);
+  assert.deepEqual(steps, {
+    "browser.close": "timed-out",
+    "browser.kill": "completed",
+    "http.stop": "completed",
+    "auth.close": "completed",
+    "state.close": "completed",
+    "directory.remove": "completed",
+    "local-fixture.close": "failed",
+  });
+});
+
+test("an unconfirmed browser kill keeps listeners, auth and backing state held", async () => {
+  const { calls, steps } = await stalledBrowserClose(
+    () => new Promise<void>(() => {}),
+  );
+  assert.deepEqual(calls, ["browser", "kill"]);
+  assert.deepEqual(steps, {
+    "browser.close": "timed-out",
+    "browser.kill": "timed-out",
+    "http.stop": "dependency-skipped",
+    "auth.close": "dependency-skipped",
+    "state.close": "dependency-skipped",
+    "directory.remove": "dependency-skipped",
+    "local-fixture.close": "failed",
+  });
+});
+
+test("a test file holding a stalled journey's state exits promptly under the runner's flags", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cab-held-journey-"));
+  const harness = join(directory, "held.test.mjs");
+  const fixture = new URL(
+    "../fixtures/browser-diagnostics.js",
+    import.meta.url,
+  );
+  // The interval stands in for a listener the unconfirmed client may still use.
+  await writeFile(
+    harness,
+    `import { test } from "node:test";
+import { runBrowserJourney } from ${JSON.stringify(fixture.href)};
+const held = setInterval(() => {}, 1000);
+test("held journey", () =>
+  runBrowserJourney("diagnostics", "held journey", async (journey) => {
+    journey.ownLocal({
+      browser: () => new Promise(() => {}),
+      killBrowser: () => new Promise(() => {}),
+      listeners: [{ name: "http.stop", close: async () => clearInterval(held) }],
+    });
+    throw Error("Original held journey failure");
+  }, { evidenceRoot: ${JSON.stringify(join(directory, "evidence"))}, cleanupStepMs: 50, overallMs: 3000 }));
+`,
+  );
+  const { testFileFlags } = (await import(
+    pathToFileURL(resolve("scripts/run-tests.mjs")).href
+  )) as { testFileFlags: string[] };
+  // An inherited NODE_TEST_CONTEXT makes the nested `node --test` skip its files.
+  const { NODE_TEST_CONTEXT: _context, ...environment } = process.env;
+  const child = spawn(process.execPath, [...testFileFlags, harness], {
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => (output += chunk));
+  child.stderr.on("data", (chunk) => (output += chunk));
+  try {
+    const [code] = await once(child, "exit", {
+      signal: AbortSignal.timeout(20000),
+    });
+    assert.equal(code, 1, output);
+    assert.match(output, /Original held journey failure/);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill("SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const [engine, type] of [
+  ["chromium", chromium],
+  ["webkit", webkit],
+] as const)
+  browserTest(
+    `killBrowser ends a ${engine} browser whose close has stalled`,
+    { browserEngine: engine },
+    async () => {
+      const browser = await type.launch();
+      const child = launchedBrowserProcess(browser);
+      let closing: Promise<unknown> | undefined;
+      try {
+        assert.ok(child?.pid);
+        // A stopped browser never answers close, as in the stalled WebKit runs.
+        process.kill(-child.pid, "SIGSTOP");
+        closing = browser.close().catch(() => undefined);
+        const stalled = await Promise.race([
+          closing.then(() => false),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(true), 500),
+          ),
+        ]);
+        assert.ok(stalled);
+        await killBrowser(browser);
+        assert.notEqual(child.signalCode ?? child.exitCode, null);
+        assert.throws(() => process.kill(child.pid as number, 0), {
+          code: "ESRCH",
+        });
+        await closing;
+        assert.equal(browser.isConnected(), false);
+      } finally {
+        await killBrowser(browser).catch(() => undefined);
+        await closing;
+      }
+    },
+  );
 
 test("evidence write failure remains secondary to the original assertion", async () => {
   const root = await mkdtemp(join(tmpdir(), "cab-write-diagnostics-"));

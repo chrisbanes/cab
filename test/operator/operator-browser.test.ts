@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   browserSuite,
+  killBrowser,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 const test = browserSuite("operator");
@@ -230,6 +231,7 @@ test("Chromium verifies the independent login and guarded browser session", asyn
     browser: async () => {
       await browser?.close();
     },
+    killBrowser: () => killBrowser(browser),
     listeners: [
       {
         name: "http.stop",
@@ -629,6 +631,7 @@ test("authenticated project pause and resume preserve captured instructions whil
     browser: async () => {
       await browser?.close();
     },
+    killBrowser: () => killBrowser(browser),
     listeners: [
       {
         name: "http.stop",
@@ -883,6 +886,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     browser: async () => {
       await browser?.close();
     },
+    killBrowser: () => killBrowser(browser),
     listeners: [
       {
         name: "http.stop",

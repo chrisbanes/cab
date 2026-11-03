@@ -1,5 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
+import { subscribe } from "node:diagnostics_channel";
+import { once } from "node:events";
 import {
   lstat,
   mkdir,
@@ -10,7 +13,12 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { test as nodeTest, type TestContext } from "node:test";
-import type { Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserType,
+  type Page,
+} from "playwright";
 import { tmpdir } from "./temp.js";
 import {
   browserTestEngine,
@@ -55,10 +63,54 @@ type Cleanup = {
 };
 interface LocalFixture {
   browser: () => Promise<void>;
+  /** Runs when browser.close does not complete; see killBrowser. */
+  killBrowser?: () => Promise<void>;
   listeners: Array<{ name: string; close: () => Promise<void> }>;
   auth?: () => void;
   state?: () => Promise<void>;
   directory?: () => void;
+}
+// Each launch records the one process it spawns, so a stalled close can end exactly it.
+// Spawns are tied to their launch through async context, which holds for concurrent
+// launches; a launch that spawns anything else records nothing.
+const launchSpawns = new AsyncLocalStorage<ChildProcess[]>();
+const launchedProcesses = new WeakMap<Browser, ChildProcess>();
+subscribe("child_process", (message) => {
+  launchSpawns.getStore()?.push((message as { process: ChildProcess }).process);
+});
+const browserTypes = Object.getPrototypeOf(chromium) as BrowserType;
+const launch = browserTypes.launch;
+browserTypes.launch = async function (this: BrowserType, ...args) {
+  const spawned: ChildProcess[] = [];
+  const browser = await launchSpawns.run(spawned, () =>
+    launch.apply(this, args),
+  );
+  if (spawned.length === 1 && spawned[0])
+    launchedProcesses.set(browser, spawned[0]);
+  return browser;
+};
+/** The process a fixture-launched browser runs in, for tests that stall it. */
+export function launchedBrowserProcess(browser: Browser) {
+  return launchedProcesses.get(browser);
+}
+/**
+ * Force a launched browser to exit after its close stalls. Once close has begun the
+ * Playwright client refuses further calls, so this signals the browser's own process
+ * group, which Playwright starts detached, and resolves only once that process exited.
+ */
+export async function killBrowser(browser: Browser | undefined) {
+  if (!browser) return;
+  const child = launchedProcesses.get(browser);
+  if (!child?.pid) throw Error("browser.kill: launched process unknown");
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = once(child, "exit");
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch (error) {
+    // The group may already be gone while its exit event is still queued.
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+  await exited;
 }
 export class BrowserJourney {
   readonly cleanups: Cleanup[] = [];
@@ -194,7 +246,9 @@ export class BrowserJourney {
           return fixtureStepCompleted(step);
         };
         const skip = (name: string) => steps.push(this.lifecycle.skip(name));
-        const clientClosed = await attempt("browser.close", fixture.browser);
+        let clientClosed = await attempt("browser.close", fixture.browser);
+        if (!clientClosed && fixture.killBrowser)
+          clientClosed = await attempt("browser.kill", fixture.killBrowser);
         let listenersClosed = clientClosed;
         for (const listener of fixture.listeners) {
           if (clientClosed)

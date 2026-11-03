@@ -129,6 +129,13 @@ falls back to the median for a file without one.
 The Chromium and service weights use hosted CI receipts; the `all` profile uses
 local measurements. Refresh each profile as runner performance changes.
 
+When a browser fixture's `browser.close` does not complete, the fixture kills the
+process group of the browser that launch started and records `browser.kill` in the
+cleanup evidence; it closes listeners, auth and backing state only once that process
+has exited. Otherwise, or when execution times out, that state stays held. The runner passes
+`--test-force-exit`, so a file holding such state exits once its tests have reported
+instead of idling until the run deadline; Playwright kills its browsers on exit.
+
 `test:built` and `check` run the tests under a per-run `cab-run-*` directory in the
 OS temp root, passed to the test process tree as `TMPDIR`, so fixtures that call
 `os.tmpdir()` place their large sandboxes there. The runner removes the directory
