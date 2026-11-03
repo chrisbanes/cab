@@ -23,13 +23,7 @@ import type {
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
-
-/**
- * How long a test watches for a turn, confirmation or write that must NOT happen when no
- * event marks the work as settled. Generous so a loaded runner cannot let a regression
- * slip past a window that closed before it ran.
- */
-const QUIET_WINDOW_MS = 200;
+import { QUIET_WINDOW_MS } from "../fixtures/until.js";
 
 class GatedRuntime implements Runtime {
   starts = 0;

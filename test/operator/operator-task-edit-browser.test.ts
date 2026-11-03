@@ -54,9 +54,10 @@ async function signIn(
 const trigger = (page: Page) =>
   page.getByRole("button", { name: "Edit task…", exact: true });
 /** Radix restores focus in a timer after the dialog unmounts, so wait for it. */
-const triggerFocused = (page: Page) =>
+const triggerFocused = async (page: Page) =>
   page.waitForFunction(
-    () => document.activeElement?.textContent === "Edit task…",
+    (e) => e === document.activeElement,
+    await trigger(page).elementHandle(),
   );
 
 test("a local task is edited from its header with version fencing and a conflict shows the latest values", async (_t, j) => {

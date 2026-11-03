@@ -253,7 +253,10 @@ test("a denial sent before leaving the task reads as a denial when its response 
     r.url().endsWith("/api/operator/commands"),
   );
   release();
-  await landed;
+  // Headers alone are not handled: wait for the body, then yield a task so the page
+  // processes the response while still away from the task.
+  await (await landed).finished();
+  await s.page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
   await reopen();
   await s.page.getByText(denied).waitFor();
   assert.equal(await s.page.getByText(/^Approved\./).count(), 0);
