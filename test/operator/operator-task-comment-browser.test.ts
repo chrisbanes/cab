@@ -448,3 +448,35 @@ test("contextual feedback and the draft turn stay their own destinations, and as
     0,
   );
 });
+
+test("the recipient picker closes and stays closed while a send is unresolved, so the preview matches the frozen command", async (_t, j) => {
+  const { page, commands } = await open(j, "chromium");
+  const box = page.getByLabel("Editable reply");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await box.fill("Held while the picker was open.");
+  await page.getByRole("button", { name: "Add recipient" }).click();
+  const options = page.getByRole("list", { name: "Assignments to add" });
+  await options.waitFor();
+  const preview = page.getByRole("status", { name: "Before you send" });
+  const before = await preview.innerText();
+  await sendButton(page).click();
+  // The request is held: the picker closes, its trigger is off and the recipients cannot change.
+  await options.waitFor({ state: "detached" });
+  assert.equal(
+    await page.getByRole("button", { name: "Add recipient" }).isDisabled(),
+    true,
+  );
+  assert.equal(await preview.innerText(), before);
+  assert.equal(await chips(page).count(), 1);
+  release();
+  await page.getByText(/^Comment sent to /).waitFor();
+  assert.equal(commands.length, 1);
+  assert.equal((commands[0] as { recipients: unknown[] }).recipients.length, 1);
+});

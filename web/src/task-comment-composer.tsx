@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "./components.js";
 import {
   addRecipient,
@@ -34,6 +34,10 @@ export function CommentRecipients({
   const ids = selectedRecipientIds(facts, selection);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  // A send in flight or unresolved freezes the recipients, so an open picker closes with it.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   const pickable = pickableRecipients(facts, selection);
   const lines = previewLines(facts, ids);
   const focusTrigger = () =>
@@ -90,7 +94,7 @@ export function CommentRecipients({
           >
             Add recipient
           </Button>
-          {open && (
+          {open && !disabled && (
             <ul id="comment-recipient-options" aria-label="Assignments to add">
               {pickable.length === 0 && (
                 <li className="muted">
@@ -101,6 +105,7 @@ export function CommentRecipients({
                 <li key={fact.assignmentId}>
                   <Button
                     variant="secondary"
+                    disabled={disabled}
                     onKeyDown={onEscape}
                     onClick={() => {
                       onChange(
