@@ -2914,11 +2914,12 @@ export class OperatorApi {
     links: readonly { repositoryId: string; codeHost: string }[],
     excluded: readonly string[] | undefined,
   ) {
+    const names = new Map<string, string>();
+    if (excluded === undefined) return names;
     const ids = links
         .filter((link) => link.codeHost === "github")
         .map((link) => link.repositoryId),
-      observed = this.service.githubSources().repositoryNames(ids),
-      names = new Map<string, string>();
+      observed = this.service.githubSources().repositoryNames(ids);
     for (const id of ids) {
       const name = this.repositoryName(
         observed.get(id) ??

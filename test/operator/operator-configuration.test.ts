@@ -1212,6 +1212,13 @@ test("a GitHub link reads its observed or setup-verified name, withheld with its
     ["R_plain", null],
   ]);
   assert.deepEqual((await api.readTask(plainTask)).data.repositoryNames, []);
+  // Private text in the ID withholds the ID, and its name with it.
+  process.env[envKey] = "R_named";
+  assert.deepEqual(await names(), [
+    [null, null],
+    ["R_plain", null],
+  ]);
+  assert.deepEqual((await api.readTask(plainTask)).data.repositoryNames, []);
 });
 
 test("a new GitHub link needs a node ID, while a saved owner/name link keeps re-saving", async (t) => {

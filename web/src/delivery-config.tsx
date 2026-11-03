@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useId,
-  useState,
-  useRef,
-  useEffect,
-  type ReactNode,
-} from "react";
+import { useId, useState, useRef, useEffect, type ReactNode } from "react";
 import { useReadinessDiscovery } from "./readiness-picker.js";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
@@ -198,8 +191,7 @@ function DeliveryPolicyForm(p: TabProps) {
   const initial = saved ? deliveryEditorValues(saved) : null;
   useLoadedDraft(d, initial, p.loadedAt, saved);
   // Names beside the grant ID inputs: the repository's name and, for a Project grant, what discovery lists.
-  const grantRows = deliveryRows<GrantRow>(d.values.grants);
-  const projectGrants = grantRows.filter(
+  const projectGrants = deliveryRows<GrantRow>(d.values.grants).filter(
     (row) => !("savedRow" in row) && row.projectNodeId,
   );
   const discovery = useReadinessDiscovery({
@@ -231,7 +223,11 @@ function DeliveryPolicyForm(p: TabProps) {
   );
   const repositoryRows = deliveryRows<RepositoryRow>(v.repositories);
   const requirements = saved.repositories ?? [];
-  const lines = deliveryPolicyChangeText(saved, draft);
+  const lines = deliveryPolicyChangeText(
+    saved,
+    draft,
+    p.data.repositories.links,
+  );
   if (draft.credentialIntent !== "preserve")
     lines.push(
       draft.credentialIntent === "set"
@@ -720,16 +716,16 @@ function DeliveryPolicyForm(p: TabProps) {
                       <Field
                         label="Repository or tracker container ID"
                         error={error(`grants.${index}.repositoryId`)}
+                        note={
+                          grantNames[index]?.repository
+                            ? `Repository: ${grantNames[index]?.repository}`
+                            : undefined
+                        }
                         value={row.repositoryId}
                         onChange={(value) =>
                           setRow("grants", index, "repositoryId", value)
                         }
                       />
-                      {grantNames[index]?.repository && (
-                        <p className="metadata muted">
-                          Repository: {grantNames[index]?.repository}
-                        </p>
-                      )}
                       <Field
                         label="Authority"
                         value={row.mode}
@@ -777,31 +773,30 @@ function DeliveryPolicyForm(p: TabProps) {
                                 ? grantNames[index]?.options?.join(", ")
                                 : undefined;
                         return (
-                          <Fragment key={field}>
-                            <ScopeField
-                              label={label}
-                              required={required}
-                              value={row[field]}
-                              array={
-                                field === "optionNodeIds" ||
-                                field === "statusIds"
-                              }
-                              error={error(`grants.${index}.${field}`)}
-                              onChange={(value) =>
-                                setRow("grants", index, field, value)
-                              }
-                            />
-                            {named && (
-                              <p className="metadata muted">
-                                {field === "projectNodeId"
-                                  ? "Project"
-                                  : field === "fieldNodeId"
-                                    ? "Field"
-                                    : "Options"}
-                                : {named}
-                              </p>
-                            )}
-                          </Fragment>
+                          <ScopeField
+                            key={field}
+                            label={label}
+                            required={required}
+                            value={row[field]}
+                            array={
+                              field === "optionNodeIds" || field === "statusIds"
+                            }
+                            error={error(`grants.${index}.${field}`)}
+                            note={
+                              named
+                                ? `${
+                                    field === "projectNodeId"
+                                      ? "Project"
+                                      : field === "fieldNodeId"
+                                        ? "Field"
+                                        : "Options"
+                                  }: ${named}`
+                                : undefined
+                            }
+                            onChange={(value) =>
+                              setRow("grants", index, field, value)
+                            }
+                          />
                         );
                       })}
                     </>
@@ -1067,6 +1062,7 @@ function Field({
   value,
   onChange,
   error,
+  note,
   children,
   multiline = false,
   disabled = false,
@@ -1076,6 +1072,8 @@ function Field({
   value: string;
   onChange: (value: string) => void;
   error?: string | undefined;
+  /** What the ID refers to, read with the input and never part of its value. */
+  note?: string | undefined;
   children?: ReactNode;
   multiline?: boolean;
   disabled?: boolean;
@@ -1088,7 +1086,10 @@ function Field({
     value,
     disabled,
     "aria-invalid": Boolean(error),
-    "aria-describedby": error ? `${id}-error` : undefined,
+    "aria-describedby":
+      [error && `${id}-error`, note && `${id}-note`]
+        .filter(Boolean)
+        .join(" ") || undefined,
     onChange: (event: { target: { value: string } }) =>
       onChange(event.target.value),
   };
@@ -1101,6 +1102,11 @@ function Field({
         <Textarea {...props} rows={3} />
       ) : (
         <Input {...props} />
+      )}
+      {note && (
+        <span id={`${id}-note`} className="metadata muted">
+          {note}
+        </span>
       )}
       {error && (
         <span id={`${id}-error`} className="error-text" role="alert">
@@ -1115,6 +1121,7 @@ function ScopeField({
   value,
   onChange,
   error,
+  note,
   required = false,
   array = false,
 }: {
@@ -1122,6 +1129,7 @@ function ScopeField({
   value: string | string[] | undefined;
   onChange: (value: string | string[] | undefined) => void;
   error?: string | undefined;
+  note?: string | undefined;
   required?: boolean;
   array?: boolean;
 }) {
@@ -1150,6 +1158,7 @@ function ScopeField({
           value={Array.isArray(value) ? value.join("\n") : (value ?? "")}
           multiline={array}
           error={error}
+          note={note}
           onChange={(text) =>
             onChange(array ? (text === "" ? [] : text.split("\n")) : text)
           }

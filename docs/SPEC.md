@@ -2033,7 +2033,10 @@ Contract details:
   the lead would record a waiting recovery continuation. A follow-up never
   records a recovery continuation.
 - The operator task read adds optional `repositoryLinked`: true when the task's
-  project links at least one GitHub repository. It carries no names or paths. The
+  project links at least one GitHub repository. It carries no paths. It also adds
+  optional `repositoryNames`: `{repositoryId, name}` for each of the project's GitHub
+  links whose ID and verified `owner/name` are both disclosable under the task's
+  exclusions; the task workspace labels repositories by it, display only. The
   task page shows delivery status and refresh only for a task with a GitHub
   source, a linked repository or a bound pull request.
 - The task Reply composer (including contextual "Ask lead about …" drafts) and

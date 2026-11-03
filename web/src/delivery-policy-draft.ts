@@ -3,7 +3,7 @@ import type {
   deliveryConfigurationSchema,
   statusMappingViewSchema,
 } from "../../src/operator/contracts.js";
-import type { RepositoryNames } from "./presentation.js";
+import { type RepositoryNames, repositoryLabel } from "./presentation.js";
 import type { FieldsRead, projectChoices } from "./readiness-discovery.js";
 import type { Values } from "./settings-changes.js";
 import {
@@ -458,6 +458,7 @@ export function statusMappingCoverageLoss(
 export function deliveryPolicyChangeText(
   before: DeliveryPolicyValues,
   after: DeliveryPolicyValues,
+  links?: RepositoryNames,
 ): string[] {
   const changes: string[] = [];
   if (before.mode !== after.mode) changes.push("Delivery mode changed");
@@ -475,13 +476,15 @@ export function deliveryPolicyChangeText(
       (r) => r.repositoryId === next.repositoryId,
     );
     if ((prior?.mergeMethod ?? null) !== next.mergeMethod)
-      changes.push(`Merge method changed for ${next.repositoryId}`);
+      changes.push(
+        `Merge method changed for ${repositoryLabel(next.repositoryId, links)}`,
+      );
     if (
       JSON.stringify(prior?.additionalChecks ?? []) !==
       JSON.stringify(next.additionalChecks)
     )
       changes.push(
-        `Additional required checks changed for ${next.repositoryId}`,
+        `Additional required checks changed for ${repositoryLabel(next.repositoryId, links)}`,
       );
   }
   if (after.repositories?.length && before.requiredChecks.length)

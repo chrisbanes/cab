@@ -1004,6 +1004,12 @@ test("a legacy read becomes per-repository rows, and every save sends the reposi
   assert.deepEqual(deliveryPolicyChangeText(saved, squash).slice(0, 1), [
     "Merge method changed for R1",
   ]);
+  assert.deepEqual(
+    deliveryPolicyChangeText(saved, squash, [
+      { repositoryId: "R1", name: "acme/atlas" },
+    ]).slice(0, 1),
+    ["Merge method changed for acme/atlas"],
+  );
   assert.deepEqual(deliveryFieldErrors(squash), {});
   // The default branch's methods are guidance: a PR may target a branch with other rules.
   const rebase = {
