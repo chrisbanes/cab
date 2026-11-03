@@ -15,3 +15,10 @@ export async function until(
   }
   throw new Error(`Timed out waiting for ${description}`);
 }
+
+/**
+ * How long a test watches for a turn, confirmation or write that must NOT happen when no
+ * event marks the work as settled. Generous so a loaded runner cannot let a regression
+ * slip past a window that closed before it ran.
+ */
+export const QUIET_WINDOW_MS = 200;

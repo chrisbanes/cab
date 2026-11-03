@@ -278,7 +278,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // The same in the Inbox, where a refresh drops the request from the queue.
     const lostInbox = await refusedTask(f);
-    // The phone has no Refresh: a fake clock drives its 15s Inbox poll.
+    // The phone has no Refresh: a fake clock drives its Inbox poll (15s, web/src/inbox.tsx).
     if (viewport.width < 760) await page.clock.install();
     await page.goto(
       `${web.origin}/app/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(`intervention:${lostInbox.taskId}`)}`,
