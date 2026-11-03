@@ -126,7 +126,7 @@ export async function setupJourney(
         ...(options.gitlab ? { gitlab: options.gitlab } : {}),
       },
       undefined,
-      options.readiness ?? (async () => JSON.parse(readinessBody())),
+      options.readiness,
     ),
   );
   browser = await journey.start("browser.launch", () =>

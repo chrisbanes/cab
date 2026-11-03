@@ -153,7 +153,9 @@ export function ProjectSetup(
   const profileBox = useRef<HTMLFieldSetElement>(null);
   const csrf = p.session.csrfToken;
   const readiness = useOperatorResource(
-    `${csrf}:${p.workspace?.observedAt ?? "loading"}`,
+    p.workspace?.data.profiles.length === 0
+      ? `${csrf}:${p.workspace.observedAt}`
+      : null,
     useCallback(
       (signal: AbortSignal) =>
         p.client.read("/api/operator/readiness", readinessSchema, signal),
