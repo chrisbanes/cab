@@ -1,4 +1,7 @@
+import { readinessSchema } from "../../src/operator/readiness.js";
+import { useOperatorResource } from "./resource.js";
 import {
+  useCallback,
   type FocusEvent,
   type FormEvent,
   useEffect,
@@ -46,6 +49,8 @@ import {
   useDraft,
 } from "./settings.js";
 import {
+  starterReviewerHarness,
+  starterOptionCopy,
   blankRow,
   buildProjectCreate,
   createHold,
@@ -85,6 +90,12 @@ type Verification =
   | CheckoutVerification["data"]
   | { state: "failed" };
 
+const emptySetupProfile = (workspace: SettingsProps["workspace"]) => ({
+  ...emptyProfile(workspace),
+  starter: true,
+  implementerId: key(),
+  reviewerId: key(),
+});
 const blank = () => ({
   name: "",
   leadProfileId: "",
@@ -122,10 +133,10 @@ export function ProjectSetup(
     if (d.phase === "recorded") {
       earlier.current = false;
       d.startOperation(blank());
-      inline.startOperation(emptyProfile(p.workspace));
+      inline.startOperation(emptySetupProfile(p.workspace));
     } else {
       d.initialize(blank());
-      inline.initialize(emptyProfile(p.workspace));
+      inline.initialize(emptySetupProfile(p.workspace));
     }
   }, [d, inline]);
   // The browser's leave prompt, while anything entered would be lost.
@@ -141,6 +152,31 @@ export function ProjectSetup(
   }, [unsaved]);
   const profileBox = useRef<HTMLFieldSetElement>(null);
   const csrf = p.session.csrfToken;
+  const readiness = useOperatorResource(
+    `${csrf}:${p.workspace?.observedAt ?? "loading"}`,
+    useCallback(
+      (signal: AbortSignal) =>
+        p.client.read("/api/operator/readiness", readinessSchema, signal),
+      [p.client],
+    ),
+  );
+  const leadHarness =
+    inline.values.runtimeHarness === "claude" ? "claude" : "codex";
+  const reviewerHarness = starterReviewerHarness(
+    leadHarness,
+    p.workspace?.data ?? null,
+    readiness.state.error
+      ? { state: "unavailable" }
+      : readiness.state.data
+        ? { state: "ready", checks: readiness.state.data.data.checks }
+        : { state: "loading" },
+  );
+  const starterOffered = p.workspace?.data.profiles.length === 0;
+  const withStarter = starterOffered && inline.values.starter === true;
+  const starterLoading =
+    withStarter &&
+    (readiness.state.status === "empty" || readiness.state.pending);
+
   const rows = rowsFromDraft(d.values.rows);
   const setRows = (next: SetupRow[]) => d.set("rows", rowsToDraft(next));
   const gitlabRows = gitLabRowsFromDraft(d.values.gitlabRows);
@@ -397,6 +433,10 @@ export function ProjectSetup(
     name: String(d.values.name ?? ""),
     leadProfileId: String(d.values.leadProfileId ?? ""),
     instructions: String(d.values.instructions ?? ""),
+    ...(d.values.createdLeadId === d.values.leadProfileId &&
+    Array.isArray(d.values.candidateProfileIds)
+      ? { candidateProfileIds: d.values.candidateProfileIds }
+      : {}),
   };
   // A Project can only be linked alongside a discovered repository.
   // Submitting with Enter skips the field's blur, so listed typed rows are adopted here too.
@@ -447,25 +487,52 @@ export function ProjectSetup(
   // stays until the re-read lists it.
   const inlineProfile =
     Boolean(p.workspace) &&
-    profiles.length === 0 &&
-    (!values.leadProfileId || inline.phase === "recorded");
+    (inline.phase === "pending" ||
+      inline.phase === "unknown" ||
+      (profiles.length === 0 &&
+        (!values.leadProfileId || inline.phase === "recorded")));
   /** The created profile becomes the lead; every other setup value stays as entered. */
   const adoptProfile = () => {
-    if (inline.phase === "recorded")
-      d.set("leadProfileId", String(inline.values.profileId));
+    if (
+      inline.phase === "recorded" &&
+      inline.frozen?.type === "profile.create"
+    ) {
+      const created = inline.frozen;
+      d.set("leadProfileId", created.profileId);
+      d.set("createdLeadId", created.profileId);
+      d.set(
+        "candidateProfileIds",
+        created.starter
+          ? [created.starter.implementerId, created.starter.reviewerId]
+          : [],
+      );
+    }
     p.refresh();
   };
   // Not a nested form: Enter and the button create the profile and never the project.
-  const createProfile = () =>
-    sendDraft(
+  const createProfile = () => {
+    if (starterLoading) return;
+    return sendDraft(
       profileBox.current ?? document,
       inline,
       p.client,
       p.session,
-      profileCreateCommand(inline.values),
+      {
+        ...profileCreateCommand(inline.values),
+        ...(withStarter
+          ? {
+              starter: {
+                implementerId: inline.values.implementerId,
+                reviewerId: inline.values.reviewerId,
+                reviewerHarness,
+              },
+            }
+          : {}),
+      },
       adoptProfile,
       runtimeErrors(inline.values, harnessSettings(p.workspace, inline.values)),
     );
+  };
 
   // Create is always drawn: held, it stays focusable with its reason, and submitting is
   // guarded on the live draft state, so a repeated click or Enter sends nothing more.
@@ -650,6 +717,43 @@ export function ProjectSetup(
                   workspace={p.workspace}
                   codexSettings={false}
                 />
+                {(starterOffered ||
+                  (inline.frozen?.type === "profile.create" &&
+                    inline.frozen.starter)) && (
+                  <label className="metadata">
+                    <input
+                      type="checkbox"
+                      checked={inline.values.starter === true}
+                      disabled={locked(inline)}
+                      onChange={(e) => inline.set("starter", e.target.checked)}
+                    />
+                    {starterOptionCopy(
+                      leadHarness,
+                      inline.frozen?.type === "profile.create" &&
+                        inline.frozen.starter
+                        ? inline.frozen.starter.reviewerHarness
+                        : reviewerHarness,
+                    )}
+                  </label>
+                )}
+                {starterLoading && (
+                  <p className="metadata muted">Checking starter runtimes…</p>
+                )}
+                {inline.errors["starter.reviewerHarness"] && (
+                  <div className="metadata">
+                    Starter runtime readiness changed.{" "}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        p.refresh();
+                        void readiness.refresh();
+                      }}
+                    >
+                      Refresh starter runtimes
+                    </Button>
+                  </div>
+                )}
                 <p className="metadata muted">
                   Add a summary and instructions later in Settings → Profiles.
                 </p>
@@ -659,6 +763,7 @@ export function ProjectSetup(
                       type="button"
                       variant="secondary"
                       disabled={
+                        starterLoading ||
                         inline.phase === "pending" ||
                         inline.phase === "recorded"
                       }

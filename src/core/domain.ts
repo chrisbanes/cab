@@ -145,6 +145,14 @@ const commandSchema = z.discriminatedUnion("type", [
       name: label,
       leadProfileId: id.nullable(),
       // Guided setup: recorded with the project in one transaction, after verification.
+      candidateProfileIds: z
+        .array(id)
+        .max(128)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          "Duplicate candidate",
+        )
+        .optional(),
       instructions: prose.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
@@ -2802,6 +2810,8 @@ export class DomainStore {
       case "project.create": {
         this.operator(command);
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
+        for (const profileId of command.candidateProfileIds ?? [])
+          this.activeProfile(profileId);
         this.assertProjectNameAvailable(command.name);
         const repositories = verifiedRepositories ?? [];
         if ((command.repositories?.length ?? 0) !== repositories.length)
@@ -2823,9 +2833,12 @@ export class DomainStore {
           .run(command.projectId, command.instructions ?? "");
         this.db
           .prepare(
-            "INSERT INTO project_routing (projectId, version, enabled, guidance, credentialRef, candidateProfileIds) VALUES (?, 1, 0, '', NULL, '[]')",
+            "INSERT INTO project_routing (projectId, version, enabled, guidance, credentialRef, candidateProfileIds) VALUES (?, 1, 0, '', NULL, ?)",
           )
-          .run(command.projectId);
+          .run(
+            command.projectId,
+            JSON.stringify(command.candidateProfileIds ?? []),
+          );
         this.db
           .prepare(
             "INSERT INTO project_task_sources (projectId, provider, instance, version, credentialRef, selections, readiness) VALUES (?, ?, ?, 1, ?, ?, ?)",

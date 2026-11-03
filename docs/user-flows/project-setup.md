@@ -24,7 +24,17 @@ note, **Cancel** and then **Create paused project** at every width.
    profile form (name and runtime with Codex preselected) in place of the list, with
    the line "Add a summary and instructions later in Settings → Profiles." Creating
    it selects it and keeps every other setup value. The profile and the project are
-   two separate submissions.
+   two separate submissions. With zero profiles (including revoked ones), a prechecked
+   option names the resolved Implementer and Reviewer runtimes. Implementer uses the
+   lead runtime; Reviewer uses the other enabled, available and authenticated runtime,
+   including a readable Claude token, or falls back to the lead. Checked creation waits
+   for readiness to settle; a failed read falls back to the lead. The three ordinary
+   profiles and receipt commit together, with blank lead instructions, default models
+   and effort and no skills. The workers' copied instructions are editable; the Reviewer
+   file-change restriction is advisory. There is no prescribed execution order.
+   Unchecking preserves lead-only creation. The subsequent project receives the workers
+   as candidates only while the inline lead stays selected; routing remains disabled,
+   with blank guidance and no credential. Later projects choose candidates normally.
 2. **Instructions.** Unchanged.
 3. **Repositories.** Discovered repository and ref, folder picker, checkout
    verification, typed fallback. While discovery is unconfigured the step starts
@@ -87,7 +97,9 @@ note, **Cancel** and then **Create paused project** at every width.
 ## States
 
 - Profile create fails: the inline form keeps its input and shows the error; setup
-  values are untouched.
+  values are untouched. An unknown starter create keeps its stable IDs, key and frozen
+  command; Check re-reads the original operation and never sends another create. A
+  missing or unreadable receipt keeps the hold, including while a commit is in flight.
 - Resume outcome unknown: the ready check blocks a second Resume until its one
   action replays the exact request, matching other configuration saves. A project
   changed elsewhere asks for a review before Resume is sent again; the review

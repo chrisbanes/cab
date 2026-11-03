@@ -1,3 +1,4 @@
+import { waitUntil } from "../fixtures/refused-turn.js";
 import { DomainStore } from "../../src/core/domain.js";
 import {
   readinessCheckIds,
@@ -1780,4 +1781,131 @@ test("legacy profile creates retain their persisted payload hash and receipt sha
     ),
   );
   assert.deepEqual(await api.execute(c), receipt);
+});
+
+test("setup candidates are atomic, permitted with routing off, revocable and absent from later projects", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service);
+  const original = starterCommand();
+  const c = {
+    ...original,
+    starter: { ...original.starter, reviewerHarness: "codex" as const },
+  };
+  await api.execute(c);
+  const candidateProfileIds = [c.starter.implementerId, c.starter.reviewerId];
+  const project = {
+    type: "project.create" as const,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: "Starter project",
+    leadProfileId: c.profileId,
+    candidateProfileIds,
+  };
+  await api.execute(project);
+  const d = f.service.domain();
+  assert.deepEqual(
+    JSON.parse(String(d.routing(project.projectId).candidateProfileIds)),
+    candidateProfileIds,
+  );
+  assert.equal(d.routing(project.projectId).enabled, 0);
+  assert.equal(d.routing(project.projectId).guidance, "");
+  assert.equal(d.routingCredentialReference(project.projectId), null);
+  const options = await api.readComposerOptions(project.projectId);
+  assert.deepEqual(options.data.profiles.map((p) => p.name).sort(), [
+    "Implementer",
+    "Lead",
+    "Reviewer",
+  ]);
+  const taskId = randomUUID();
+  await api.execute({
+    type: "task.create",
+    key: randomUUID(),
+    projectId: project.projectId,
+    taskId,
+    title: "Coordinate starter workers",
+    outcome: "Use permitted profiles",
+    ready: true,
+  });
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId: project.projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  await f.service.provisionTask(taskId);
+  await waitUntil(
+    () => f.runtime.prompts.length > 0,
+    "starter lead coordination prompt",
+  );
+  const context = JSON.parse(
+    f.runtime.prompts[0]!.split(
+      "Current cab coordination context (JSON): ",
+    )[1]!.split("\n")[0]!,
+  );
+  assert.deepEqual(context.permittedProfiles, [
+    { id: c.profileId, name: "Lead", summary: "" },
+    {
+      id: c.starter.implementerId,
+      name: "Implementer",
+      summary: "Builds scoped changes",
+    },
+    {
+      id: c.starter.reviewerId,
+      name: "Reviewer",
+      summary: "Independent review",
+    },
+  ]);
+  const later = {
+    ...project,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: "Later project",
+  };
+  const { candidateProfileIds: _candidates, ...ordinary } = later;
+  await api.execute(ordinary);
+  assert.deepEqual(d.routingCandidates(ordinary.projectId), []);
+  await api.execute({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: c.starter.reviewerId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  assert.deepEqual(
+    d.routingCandidates(project.projectId).map((p) => p.profileId),
+    [c.starter.implementerId],
+  );
+  assert.deepEqual(
+    (await api.readComposerOptions(project.projectId)).data.profiles
+      .map((p) => p.name)
+      .sort(),
+    ["Implementer", "Lead"],
+  );
+  for (const ids of [
+    [c.starter.implementerId, c.starter.implementerId],
+    [c.starter.reviewerId],
+    [randomUUID()],
+  ]) {
+    const bad = {
+      ...later,
+      key: randomUUID(),
+      projectId: randomUUID(),
+      candidateProfileIds: ids,
+    };
+    await assert.rejects(api.execute(bad));
+    assert.equal(
+      d.projects().some((p) => p.id === bad.projectId),
+      false,
+    );
+    assert.equal(
+      d.recordedCommand({
+        ...bad,
+        actor: "operator",
+        candidateProfileIds: ids.length === 2 ? [] : ids,
+      }),
+      undefined,
+    );
+  }
 });

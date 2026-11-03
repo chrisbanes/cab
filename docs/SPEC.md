@@ -932,12 +932,28 @@ first eight characters of the project ID when the leads match or are missing
 (longer only when two IDs start alike); no two projects ever show the same label,
 and a unique name stays plain (except when it equals another project's full-ID label); IDs that differ only in letter
 case get " #1", " #2" after the full ID.
-When no profile exists, setup creates the lead profile inline, asking only for a name
-and runtime (summary and instructions are added later in Settings → Profiles),
-without losing other setup values. While discovery is unconfigured the repository step
-starts collapsed behind "Add a repository". The project is created paused; the ready
-check then replaces the setup form, and its primary action resumes the project and
-opens the composer, and its secondary action keeps it paused.
+When no profile exists, including revoked profiles, setup offers an inline lead
+profile form with a prechecked option to add Implementer and Reviewer. The option
+names their resolved runtimes: Implementer uses the lead runtime; Reviewer uses the
+other runtime only when enabled, available and its executable and authentication
+checks pass (including a readable Claude token), otherwise the lead runtime. A
+pending readiness read holds checked creation; an unreadable read uses the lead.
+The lead instructions remain blank; workers use ordinary editable/revocable profile
+revisions with default model and effort and no skills. Reviewer instructions to
+avoid file changes are advisory, not an enforced restriction. cab prescribes no
+worker order. Unchecking preserves ordinary lead creation.
+The three profiles and the original keyed receipt commit atomically. An unknown
+bundle outcome retains the frozen IDs and command and re-reads its operation;
+missing or unreadable receipts retain the hold without resending creation. Creating
+the lead selects it without losing other setup values. Profile and project creation
+remain separate submissions. Only the subsequent project using that inline lead
+receives both workers as candidates, with routing disabled, blank guidance and no
+routing credential; its coordination context permits them. Changing the selected
+lead adds no starter candidates. Later projects use ordinary candidate selection.
+While discovery is unconfigured the repository step starts collapsed behind "Add
+a repository". The project is created paused; the ready check replaces setup and
+its primary action resumes the project and opens the composer; its secondary keeps
+it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends, and which setup (step 3, opened or not), the Settings
 discovery credential row, the Readiness GitHub discovery row and the project-configuration

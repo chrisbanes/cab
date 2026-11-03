@@ -2858,6 +2858,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("project.create"),
       name: z.string().trim().min(1).max(512),
       leadProfileId: uuid.nullable(),
+      candidateProfileIds: z
+        .array(uuid)
+        .max(128)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          "Duplicate candidate",
+        )
+        .optional(),
       instructions: text.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z
