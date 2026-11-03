@@ -844,18 +844,24 @@ export class GitHubSourceStore {
   }
 
   /**
-   * The newest observed repository name (`owner/name`) of each given repository ID that this
+   * The most recently read repository name (`owner/name`) of each given repository ID that this
    * tracker has imported an issue from. Display only: IDs remain the identity.
    */
   repositoryNames(repositoryIds: readonly string[]): Map<string, string> {
     const names = new Map<string, string>();
     if (repositoryIds.length === 0) return names;
-    // Oldest first, so the newest observation overwrites.
+    // Every write of an item's name also upserts its membership's `readAt`, and an update keeps
+    // the item's rowid, so the last read orders the rows and the rowid breaks ties. Oldest first,
+    // so the newest observation overwrites.
     for (const row of this.db
       .prepare(
-        `SELECT containerId, containerName FROM external_items
-         WHERE provider = ? AND instance = ? AND containerId IN (${repositoryIds.map(() => "?").join(",")})
-         ORDER BY rowid`,
+        `SELECT i.containerId, i.containerName FROM external_items i
+         LEFT JOIN (
+           SELECT provider, instance, externalId, MAX(readAt) AS readAt
+           FROM source_memberships GROUP BY provider, instance, externalId
+         ) m USING (provider, instance, externalId)
+         WHERE i.provider = ? AND i.instance = ? AND i.containerId IN (${repositoryIds.map(() => "?").join(",")})
+         ORDER BY COALESCE(m.readAt, 0), i.rowid`,
       )
       .all(
         this.tracker.provider,
