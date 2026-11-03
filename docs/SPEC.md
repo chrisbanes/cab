@@ -1073,7 +1073,15 @@ verifies every checkout before anything is recorded. Settings, `project prepare-
 and the API each add GitHub and GitLab links, change a link's ref (and, in Settings, its
 local path) and remove links through that command; a saved link's code host, host, project
 path and project ID are its identity, so changing one means removing the link and adding
-another. A GitLab link must also have an
+another. A GitHub link's `repositoryId` is the repository's node ID; a new link with an
+`owner/name` ID is refused with the `gh api` command that prints the node ID, while a saved
+link keeps its ID (guided setup's provisional `github.com/owner/name` links re-save). The
+configuration read names each GitHub link with a verified `owner/name`, the newest one an imported
+issue of that repository observed, else the one guided setup verified, and withholds the name as it
+withholds the ID. Settings, Delivery, the task workspace and `project get` label a link by that name and fall back to
+its ID. A Delivery grant row keeps its IDs as values and names the repository, and the Project, field
+and options discovery lists, beside them. IDs remain the identity in stored links, commands, grants
+and requests. A GitLab link must also have an
 `origin` remote on its host whose full project path matches, case-insensitively, and
 a refusal names the link and reason without echoing a path or remote. Branch
 actions (`branch.push`, `branch.force-push`, `branch.adopt`) and merge request actions

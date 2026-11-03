@@ -16,6 +16,7 @@ import { Button, StatusBadge } from "./components.js";
 import { changeLineCounts } from "./file-change-markers.js";
 import { failureCause } from "./outcome-copy.js";
 import { codeSentence, shortId } from "./presentation.js";
+import { useRepositoryLabel } from "./repository-names.js";
 import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
@@ -249,6 +250,7 @@ export function TaskWorkspaceChanges({
   state: TaskChangesState;
   changed: () => void;
 }) {
+  const repositoryName = useRepositoryLabel();
   const repositoriesResource = useTaskRepositories(client, session, taskId);
   const directory = repositoriesResource.state.data?.data;
   const repositories = useMemo(
@@ -625,7 +627,7 @@ export function TaskWorkspaceChanges({
               <option value="">Select a repository</option>
               {repositories.map((repository) => (
                 <option key={repository} value={repository}>
-                  {repository}
+                  {repositoryName(repository)}
                 </option>
               ))}
             </NativeSelect>
@@ -830,7 +832,7 @@ export function TaskWorkspaceChanges({
                       className="changes-entry"
                       aria-label={`${entry.change} ${label}, ${entry.state}`}
                       aria-current={isSelected ? "true" : undefined}
-                      title={`${entry.repositoryId ?? "Task workspace"}/${label}`}
+                      title={`${entry.repositoryId ? repositoryName(entry.repositoryId) : "Task workspace"}/${label}`}
                       onClick={() => selectEntry(entry, index)}
                     >
                       <StatusBadge>{entry.change.toUpperCase()}</StatusBadge>
@@ -914,7 +916,7 @@ export function TaskWorkspaceChanges({
                 <p className="changes-provenance">
                   {snapshot.target === "turn"
                     ? `Last turn · work ${snapshot.workId} · assignment ${snapshot.assignmentId} · profile ${snapshot.profileId}`
-                    : `Current workspace · repository ${snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline ? shortId(snapshot.baseline.commit) : ""}`}
+                    : `Current workspace · repository ${snapshot.repositoryId ? repositoryName(snapshot.repositoryId) : snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline ? shortId(snapshot.baseline.commit) : ""}`}
                 </p>
                 {state.selection && (
                   <p role="status" className="changes-selection">

@@ -3,6 +3,8 @@ import type {
   deliveryConfigurationSchema,
   statusMappingViewSchema,
 } from "../../src/operator/contracts.js";
+import type { RepositoryNames } from "./presentation.js";
+import type { FieldsRead, projectChoices } from "./readiness-discovery.js";
 import type { Values } from "./settings-changes.js";
 import {
   repositoryDeliveryLevel,
@@ -708,4 +710,48 @@ export function deliveryMappingCoverageWarning(
   return reduced
     ? "Status-mapping details are unavailable. These changes may remove status-mapping authority. The saved mapping is unchanged."
     : null;
+}
+
+/**
+ * What a grant row's identity IDs refer to, for the names shown beside the inputs. Only what is
+ * known is named: a repository with a verified name, and a Project, field and options a listed
+ * discovery read supplies. The values stay IDs.
+ */
+export function grantIdentityNames(
+  row: {
+    repositoryId: string;
+    projectNodeId?: string | undefined;
+    fieldNodeId?: string | undefined;
+    optionNodeIds?: readonly string[] | undefined;
+  },
+  links: RepositoryNames,
+  discovery: {
+    choices: ReturnType<typeof projectChoices>;
+    fieldReads: Record<string, FieldsRead | undefined>;
+  },
+) {
+  const field =
+    row.projectNodeId && row.fieldNodeId
+      ? discovery.fieldReads[row.projectNodeId]
+      : undefined;
+  const listed =
+    field?.state === "ready"
+      ? field.fields.find((f) => f.fieldNodeId === row.fieldNodeId)
+      : undefined;
+  const options = (row.optionNodeIds ?? []).flatMap((id) => {
+    const name = listed?.options.find((o) => o.optionNodeId === id)?.name;
+    return name ? [name] : [];
+  });
+  return {
+    repository:
+      links.find((l) => l.repositoryId === row.repositoryId)?.name || undefined,
+    project:
+      discovery.choices.state === "ready"
+        ? discovery.choices.projects.find(
+            (p) => p.projectNodeId === row.projectNodeId,
+          )?.label
+        : undefined,
+    field: listed?.name,
+    options: options.length ? options : undefined,
+  };
 }

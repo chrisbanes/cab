@@ -635,7 +635,9 @@ export class ConfigurationDraft {
         c.type === "repositories.configure" &&
         result.code === "invalid-input" &&
         fieldPaths.length === 1 &&
-        /^repositories\.\d+\.(path|ref)$/.test(fieldPaths[0] ?? "") &&
+        /^repositories\.\d+\.(path|ref|repositoryId)$/.test(
+          fieldPaths[0] ?? "",
+        ) &&
         /^Repository \d+: /.test(result.message ?? "")
           ? result.message
           : undefined;

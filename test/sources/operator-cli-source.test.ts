@@ -19,6 +19,7 @@ import {
   sourceRowsFrom,
 } from "../../web/src/settings-changes.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
+import { insertExternalItem } from "../fixtures/source-rows.js";
 import { startCliOperator } from "../fixtures/operator-cli.js";
 import {
   createCheckout,
@@ -378,9 +379,9 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
   await reject(2, {
     addSelections: [{ id: "S-9", kind: "search", query: "q" }],
   });
-  await reject(2, { unlinkRepositories: ["acme/atlas"] });
+  await reject(2, { unlinkRepositories: ["R_atlas"] });
   await reject(2, {
-    linkRepositories: [{ repositoryId: "acme/atlas", path: "/x", ref: "main" }],
+    linkRepositories: [{ repositoryId: "R_atlas", path: "/x", ref: "main" }],
   });
   // The previous condition shapes are no longer accepted.
   await reject(2, {
@@ -605,9 +606,9 @@ test("prepare-repositories writes the exact UI command and project get lists the
   const checkout = await createCheckout(w.s.f.directory, "second");
   const edit = {
     linkRepositories: [
-      { repositoryId: "acme/second", path: checkout, ref: "main" },
+      { repositoryId: "R_second", path: checkout, ref: "main" },
     ],
-    setRefs: { "acme/atlas": "HEAD" },
+    setRefs: { R_atlas: "HEAD" },
   };
   const out = join(w.h.dir, "repositories.json");
   const before = databaseDigest(w.s.f);
@@ -632,21 +633,21 @@ test("prepare-repositories writes the exact UI command and project get lists the
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         ref: "HEAD",
       },
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/second",
+        repositoryId: "R_second",
         path: checkout,
         ref: "main",
       },
     ],
   });
   assert.deepEqual(document.preview.diff.lines, [
-    "+ Repository access: acme/second · main",
-    "Ref for acme/atlas: main → HEAD",
+    "+ Repository access: R_second · main",
+    "Ref for R_atlas: main → HEAD",
   ]);
   // No path appears in the preview or the output of the prepare command.
   const shown =
@@ -664,7 +665,7 @@ test("prepare-repositories writes the exact UI command and project get lists the
     expectedVersion: String(links.version),
     repositories: JSON.stringify([
       ...rows.repositories.map((r) => ({ ...r, ref: "HEAD" })),
-      { repositoryId: "acme/second", path: checkout, ref: "main" },
+      { repositoryId: "R_second", path: checkout, ref: "main" },
     ]),
   });
   assert.deepEqual(ui, document.command);
@@ -690,7 +691,40 @@ test("prepare-repositories writes the exact UI command and project get lists the
     "ro",
   ]);
   assert.match(human.out, /Repositories: +2 linked/);
-  assert.match(human.out, /acme\/second +github +github.com +main/);
+  assert.match(human.out, /R_second +none +github +github.com +main/);
+  // An observed issue of the repository names it; the ID stays the first column.
+  const importedId = randomUUID();
+  w.s.f.service.domain().execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.ids.atlas,
+    taskId: importedId,
+    title: "Imported",
+    outcome: "Work",
+    ready: false,
+  });
+  w.s.f.seedPersistedState((db) =>
+    insertExternalItem(db, {
+      externalId: "I_SECOND",
+      taskId: importedId,
+      containerId: "R_second",
+      containerName: "acme/second",
+      number: 1,
+      observedTitle: "Imported",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    }),
+  );
+  const named = await w.h.run([
+    "project",
+    "get",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(named.out, /R_second +acme\/second +github +github.com +main/);
   assert.ok(!human.out.includes(checkout));
   const sources = await w.h.run([
     "project",
@@ -699,7 +733,7 @@ test("prepare-repositories writes the exact UI command and project get lists the
     "--connection",
     "ro",
   ]);
-  assert.ok(!sources.out.includes("acme/second"));
+  assert.ok(!sources.out.includes("R_second"));
 });
 
 test("prepare-repositories links a GitLab checkout and project get shows its code host and host", async (t) => {
@@ -747,11 +781,11 @@ test("prepare-repositories links a GitLab checkout and project get shows its cod
     "--connection",
     "ro",
   ]);
-  assert.match(human.out, /4242 +gitlab +gitlab\.example\.com +main/);
+  assert.match(human.out, /4242 +none +gitlab +gitlab\.example\.com +main/);
 
   // A later edit keeps the GitLab link by its saved code host, without a path.
   const kept = await prepare("gitlab-kept", {
-    setRefs: { "acme/atlas": "HEAD" },
+    setRefs: { R_atlas: "HEAD" },
   });
   assert.deepEqual(kept.document.command.repositories[1], {
     codeHost: "gitlab",
@@ -804,14 +838,14 @@ test("prepare-repositories refuses bad edits and unlinking everything needs conf
   await reject(2, { unlinkRepositories: ["acme/none"] });
   await reject(2, { setRefs: { "acme/none": "HEAD" } });
   await reject(2, {
-    linkRepositories: [{ repositoryId: "acme/atlas", path: "/x", ref: "main" }],
+    linkRepositories: [{ repositoryId: "R_atlas", path: "/x", ref: "main" }],
   });
   await reject(2, { surprise: true });
-  await reject(4, { setRefs: { "acme/atlas": "HEAD" } }, [
+  await reject(4, { setRefs: { R_atlas: "HEAD" } }, [
     "--expected-version",
     "99",
   ]);
-  const everything = await reject(2, { unlinkRepositories: ["acme/atlas"] });
+  const everything = await reject(2, { unlinkRepositories: ["R_atlas"] });
   assert.match(everything.out, /confirmUnlinkAll/);
   const out = join(w.h.dir, "unlink.json");
   await w.ok("ro", [
@@ -824,7 +858,7 @@ test("prepare-repositories refuses bad edits and unlinking everything needs conf
     w.file(
       "unlink-edit.json",
       JSON.stringify({
-        unlinkRepositories: ["acme/atlas"],
+        unlinkRepositories: ["R_atlas"],
         confirmUnlinkAll: true,
       }),
     ),
@@ -837,8 +871,8 @@ test("prepare-source points repository link keys to prepare-repositories", async
   const w = await world(t);
   const target = join(w.h.dir, "refused.json");
   for (const edit of [
-    { unlinkRepositories: ["acme/atlas"] },
-    { setRefs: { "acme/atlas": "dev" } },
+    { unlinkRepositories: ["R_atlas"] },
+    { setRefs: { R_atlas: "dev" } },
     { confirmUnlinkAll: true },
     { linkRepositories: [{ repositoryId: "x", path: "/x", ref: "main" }] },
   ]) {
@@ -875,7 +909,7 @@ test("a github.configure change document that still carries links is refused and
     ...document,
     command: {
       ...document.command,
-      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+      repositories: [{ repositoryId: "R_atlas", ref: "main" }],
     },
   };
   const oldFile = w.file("old-document.json", JSON.stringify(old));

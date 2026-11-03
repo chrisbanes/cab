@@ -5,7 +5,7 @@ import {
 } from "../../src/operator/readiness-text.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import { sourceStateSentences } from "../../src/operator/github-reasons.js";
-import { clockLabel, codeSentence } from "./presentation.js";
+import { clockLabel, codeSentence, repositoryLabel } from "./presentation.js";
 import type { z } from "zod";
 import {
   Circle,
@@ -270,7 +270,7 @@ export function repositoryLines(c: ProjectConfigurationData) {
   return c.repositories.links.length
     ? c.repositories.links.map(
         (r) =>
-          `${r.repositoryId ?? "Repository unavailable"} · ${r.ref ?? "ref unavailable"} · checkout configured · ${r.codeHost === "gitlab" ? "GitLab" : "GitHub"} ${r.host}`,
+          `${r.repositoryId === null ? "Repository unavailable" : repositoryLabel(r.repositoryId, c.repositories.links)} · ${r.ref ?? "ref unavailable"} · checkout configured · ${r.codeHost === "gitlab" ? "GitLab" : "GitHub"} ${r.host}`,
       )
     : ["None · repository-free"];
 }
@@ -322,7 +322,11 @@ export function projectStateSummary(
     "Unconfigured";
   const access = c.repositories.links.length
     ? c.repositories.links
-        .map((r) => r.repositoryId ?? "unavailable")
+        .map((r) =>
+          r.repositoryId === null
+            ? "unavailable"
+            : repositoryLabel(r.repositoryId, c.repositories.links),
+        )
         .join(", ")
     : "none";
   const observed = observations?.projects.find(

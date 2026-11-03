@@ -14,7 +14,8 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
-import { checkout } from "../fixtures/setup-home.js";
+import { insertExternalItem } from "../fixtures/source-rows.js";
+import { checkout, createSetupHome } from "../fixtures/setup-home.js";
 import {
   createOperatorFixture,
   seedOperatorRecovery,
@@ -1078,6 +1079,220 @@ test("a GitLab link saves with a matching origin and a mismatch is refused with 
       ref: "main",
     },
   ]);
+});
+
+test("a GitHub link reads its observed or setup-verified name, withheld with its ID and excluded text", async (t) => {
+  const f = await createOperatorFixture(),
+    home = await createSetupHome();
+  t.after(async () => {
+    await f.close();
+    await home.close();
+  });
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+      home: home.home,
+    }),
+    d = f.service.domain(),
+    projectId = randomUUID(),
+    setupId = randomUUID(),
+    [oldTask, newTask, plainTask] = [randomUUID(), randomUUID(), randomUUID()],
+    named = join(f.directory, "named"),
+    plain = join(f.directory, "plain");
+  await checkout(named);
+  await checkout(plain);
+  const project = (id: string, name: string) => ({
+    type: "project.create" as const,
+    key: randomUUID(),
+    projectId: id,
+    name,
+    leadProfileId: null,
+  });
+  await api.execute(project(projectId, "Names"));
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R_named",
+        path: named,
+        ref: "main",
+      },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R_plain",
+        path: plain,
+        ref: "main",
+      },
+    ],
+  });
+  for (const [taskId, title] of [
+    [oldTask, "Old"],
+    [newTask, "New"],
+    [plainTask, "Local"],
+  ] as const)
+    d.execute({
+      type: "task.create",
+      key: randomUUID(),
+      actor: "operator",
+      projectId,
+      taskId,
+      title,
+      outcome: "Done",
+      ready: false,
+    });
+  // The newest observation of an ID names it.
+  f.seedPersistedState((db) => {
+    for (const [taskId, externalId, containerName] of [
+      [oldTask, "I1", "acme/old"],
+      [newTask, "I2", "acme/atlas"],
+    ] as const)
+      insertExternalItem(db, {
+        externalId,
+        taskId,
+        containerId: "R_named",
+        containerName,
+        number: 1,
+        observedTitle: "Issue",
+        observedBody: "Body",
+        observedState: "open",
+        labels: "[]",
+      });
+  });
+  // Guided setup's typed row stores the verified `github.com/owner/name` as its ID.
+  await api.execute({
+    ...project(setupId, "Relay"),
+    repositories: [
+      {
+        repositoryId: "github.com/acme/relay",
+        owner: "acme",
+        name: "relay",
+        path: "~/src/relay",
+        ref: "main",
+      },
+    ],
+  });
+  const names = async (id = projectId) =>
+    (await api.readProjectConfiguration(id)).data.repositories.links.map(
+      (link) => [link.repositoryId, "name" in link ? link.name : undefined],
+    );
+  assert.deepEqual(await names(), [
+    ["R_named", "acme/atlas"],
+    ["R_plain", null],
+  ]);
+  assert.deepEqual(await names(setupId), [
+    ["github.com/acme/relay", "acme/relay"],
+  ]);
+  assert.deepEqual((await api.readTask(plainTask)).data.repositoryNames, [
+    { repositoryId: "R_named", name: "acme/atlas" },
+  ]);
+  // Private text in the name withholds the name but not the ID the name is not part of.
+  const envKey = "NAMES_FAKE_PRIVATE_NAME",
+    hadKey = Object.hasOwn(process.env, envKey);
+  process.env[envKey] = "acme/atlas";
+  t.after(() => {
+    if (!hadKey) delete process.env[envKey];
+  });
+  d.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: `env:${envKey}`,
+    grants: [],
+    requiredChecks: [],
+  });
+  assert.deepEqual(await names(), [
+    ["R_named", null],
+    ["R_plain", null],
+  ]);
+  assert.deepEqual((await api.readTask(plainTask)).data.repositoryNames, []);
+});
+
+test("a new GitHub link needs a node ID, while a saved owner/name link keeps re-saving", async (t) => {
+  const f = await createOperatorFixture(),
+    home = await createSetupHome();
+  t.after(async () => {
+    await f.close();
+    await home.close();
+  });
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+      home: home.home,
+    }),
+    projectId = randomUUID(),
+    path = join(f.directory, "atlas");
+  await checkout(path);
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Setup",
+    leadProfileId: null,
+    repositories: [
+      {
+        repositoryId: "github.com/acme/relay",
+        owner: "acme",
+        name: "relay",
+        path: "~/src/relay",
+        ref: "main",
+      },
+    ],
+  });
+  const link = (repositoryId: string, extra: Record<string, unknown> = {}) => ({
+    codeHost: "github" as const,
+    host: "github.com" as const,
+    repositoryId,
+    ...extra,
+  });
+  const save = (expectedVersion: number, ...repositories: object[]) =>
+    api.execute({
+      type: "repositories.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion,
+      repositories,
+    } as Parameters<OperatorApi["execute"]>[0]);
+  const read = async () => api.readProjectConfiguration(projectId);
+  const before = (await read()).data.repositories,
+    relay = {
+      path: f.service.domain().repositoryLinks(projectId).links[0]!.path,
+      ref: "main",
+    };
+  const refusal = await save(
+    before.version,
+    link("github.com/acme/relay", relay),
+    link("acme/atlas", { path, ref: "main" }),
+  ).then(
+    () => assert.fail("expected rejection"),
+    (error: unknown) => error as OperatorApiError,
+  );
+  assert.equal(refusal.status, 400);
+  assert.equal(refusal.code, "invalid-input");
+  assert.deepEqual(refusal.fieldPaths, ["repositories.1.repositoryId"]);
+  assert.match(
+    refusal.publicMessage ?? "",
+    /^Repository 2: .*node ID.*gh api repos\/OWNER\/NAME/,
+  );
+  assert.deepEqual((await read()).data.repositories, before);
+  // The saved provisional link is kept (with a ref change) beside a node-ID link.
+  await save(
+    before.version,
+    link("github.com/acme/relay", { ...relay, ref: "HEAD" }),
+    link("R_atlas", { path, ref: "main" }),
+  );
+  const after = (await read()).data.repositories.links;
+  assert.deepEqual(
+    after.map((item) => [item.repositoryId, item.ref]),
+    [
+      ["github.com/acme/relay", "HEAD"],
+      ["R_atlas", "main"],
+    ],
+  );
 });
 
 test("GitHub keep markers and pathless links resolve from the saved configuration and replay across restart", async (t) => {

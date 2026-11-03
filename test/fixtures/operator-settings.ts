@@ -143,7 +143,7 @@ export async function seedSettingsWorld(f: Fixture) {
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         path: checkout,
         ref: "main",
       },
@@ -184,6 +184,31 @@ export async function seedSettingsWorld(f: Fixture) {
     requesterAssignmentId: null,
   });
   seedOperatorRecovery(f, { taskId, assignmentId, projectId: relay });
+  // An observed issue names Atlas's linked repository, as a sync does; the link's ID stays R_atlas.
+  const issueTaskId = randomUUID();
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: atlas,
+    taskId: issueTaskId,
+    title: "Observed issue",
+    outcome: "Work",
+    ready: false,
+  });
+  f.seedPersistedState((db) =>
+    insertExternalItem(db, {
+      externalId: "I_atlas_named",
+      taskId: issueTaskId,
+      containerId: "R_atlas",
+      containerName: "acme/atlas",
+      number: 1,
+      observedTitle: "Observed issue",
+      observedBody: "Body",
+      observedState: "closed",
+      labels: "[]",
+    }),
+  );
   return { profiles, atlas, relay, fieldnotes, checkout, taskId, assignmentId };
 }
 

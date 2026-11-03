@@ -5,6 +5,7 @@ import { ExecutionState } from "../../src/standalone/state.js";
 import type { ReviewMetadata } from "../../src/core/task-review.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
 import { uniqueProjectName } from "./project-names.js";
+import { insertExternalItem } from "./source-rows.js";
 import type { createOperatorFixture } from "./operator-web.js";
 /** Links (or unlinks) one GitHub repository on the project without running repository verification. */
 export function setLinkedRepository(
@@ -35,6 +36,57 @@ export function setLinkedRepository(
         projectId,
       ),
   );
+}
+/**
+ * Links `repositoryId` on the project (verification skipped) and names it as the first
+ * observed issue of that repository would: another task of the project carries the issue.
+ */
+export function nameLinkedRepository(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  projectId: string,
+  repositoryId: string,
+  name: string,
+) {
+  const taskId = randomUUID();
+  f.service.domain().execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: `Issue of ${name}`,
+    outcome: "Observed",
+    ready: false,
+  });
+  f.seedPersistedState((db) => {
+    const { links: saved } = db
+      .prepare("SELECT links FROM project_repository_links WHERE projectId=?")
+      .get(projectId) as { links: string };
+    const links = JSON.parse(saved) as { repositoryId: string }[];
+    if (!links.some((link) => link.repositoryId === repositoryId))
+      links.push({
+        codeHost: "github",
+        host: "github.com",
+        repositoryId,
+        path: `/fixture/${repositoryId}`,
+        ref: "main",
+        gitCommonDirectory: `/fixture/${repositoryId}/.git`,
+      } as never);
+    db.prepare(
+      "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
+    ).run(JSON.stringify(links), projectId);
+    insertExternalItem(db, {
+      externalId: `I_${taskId}`,
+      taskId,
+      containerId: repositoryId,
+      containerName: name,
+      number: 1,
+      observedTitle: "Observed",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
+  });
 }
 /**
  * Marks a seeded task Ready without waking the scheduler, so its ordinary lead reply is

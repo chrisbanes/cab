@@ -1221,7 +1221,7 @@ test("a path that another writer saved identically is dropped, and later reads a
         {
           codeHost: "github",
           host: "github.com",
-          repositoryId: "acme/atlas",
+          repositoryId: "R_atlas",
           ...(repositoryPath ? { path: repositoryPath } : {}),
           ref,
         },
@@ -2586,7 +2586,7 @@ test("repositories show local paths plainly and edit them in place", async (_t, 
     {
       codeHost: "github",
       host: "github.com",
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       ref: "main",
       path: checkout,
     },
@@ -2714,7 +2714,7 @@ test("repository private values unavailable keeps rows kept and saveable", async
     {
       codeHost: "github",
       host: "github.com",
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       ref: "HEAD",
     },
   ]);
@@ -2773,7 +2773,7 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
   await page.getByRole("button", { name: "Add repository" }).click();
   await page
     .getByLabel("Linked repository ID", { exact: true })
-    .fill("acme/extra");
+    .fill("R_extra");
   await page
     .getByLabel("New local repository path", { exact: true })
     .fill("relative/PRIVATE-PATH");
@@ -2802,6 +2802,15 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
     .getByLabel("Linked repository ref", { exact: true })
     .last()
     .fill("HEAD");
+  // An owner/name typed as the ID is refused with the fix, and the row keeps its path.
+  const id = page.getByLabel("Linked repository ID", { exact: true });
+  await id.fill("acme/extra");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page
+    .locator("#repository-error")
+    .getByText(/^Repository 2: a GitHub link needs the repository's node ID/)
+    .waitFor();
+  await id.fill("R_extra");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.equal(f.service.domain().repositoryLinks(ids.atlas).links.length, 2);
@@ -3906,7 +3915,7 @@ test("an edited path survives adopting newer repository links unless the link wa
   const path = page.getByLabel("Local repository path", { exact: true });
   const checkout = await createCheckout(f.directory, "adopted-checkout");
   await path.fill(checkout);
-  await writer([{ repositoryId: "acme/atlas", ref: "HEAD" }]);
+  await writer([{ repositoryId: "R_atlas", ref: "HEAD" }]);
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   await save.click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
@@ -3931,7 +3940,7 @@ test("an edited path survives adopting newer repository links unless the link wa
     .click();
   await page
     .getByText(
-      "Loaded the latest version. acme/atlas was removed or replaced elsewhere, so your edits to it were discarded.",
+      "Loaded the latest version. R_atlas was removed or replaced elsewhere, so your edits to it were discarded.",
     )
     .waitFor();
   assert.equal(await path.count(), 0);
@@ -4087,7 +4096,7 @@ test("a path edit says so when another writer replaced the path, and typing the 
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         path: theirsPath,
         ref: "main",
       },
@@ -4343,7 +4352,7 @@ test("Save waits for a local path to be read again", async (_t, journey) => {
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         path: theirs,
         ref: "main",
       },
@@ -4576,9 +4585,7 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
   const mine = await createCheckout(f.directory, "mine-checkout"),
     theirs = await createCheckout(f.directory, "theirs-checkout");
   await page.getByRole("button", { name: "Add repository" }).click();
-  await page
-    .getByLabel("Linked repository ID", { exact: true })
-    .fill("acme/new");
+  await page.getByLabel("Linked repository ID", { exact: true }).fill("R_new");
   await page
     .getByLabel("New local repository path", { exact: true })
     .fill(mine);
@@ -4591,13 +4598,13 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         ref: "main",
       },
       {
         codeHost: "github",
         host: "github.com",
-        repositoryId: "acme/new",
+        repositoryId: "R_new",
         path: theirs,
         ref: "main",
       },
@@ -4610,15 +4617,15 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
   await outcomeMessages(page)
     .getByRole("button", { name: "Review changes" })
     .click();
-  await page.getByText("acme/new is linked twice", { exact: false }).waitFor();
+  await page.getByText("R_new is linked twice", { exact: false }).waitFor();
   assert.equal(await save.isDisabled(), true);
   await page
-    .getByRole("button", { name: "Remove new repository acme/new" })
+    .getByRole("button", { name: "Remove new repository R_new" })
     .click();
   assert.equal(await save.isDisabled(), true, "nothing left to save");
   const saved = d.repositoryLinks(ids.atlas).links;
   assert.equal(
-    saved.find((r) => r.repositoryId === "acme/new")?.path,
+    saved.find((r) => r.repositoryId === "R_new")?.path,
     await realpath(theirs),
   );
   // The saved link shows the other writer's path plainly, and the removed new row left nothing.
@@ -4918,7 +4925,7 @@ const grantStatusOptions = (
     grants: [
       {
         action: "project.field",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         mode: "allow",
         projectNodeId: "PVT_atlas",
         fieldNodeId: statusField,

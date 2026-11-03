@@ -1971,6 +1971,11 @@ export const taskSchema = envelope(
       publication: publicationPolicySchema.optional(),
       /** True when the task's project links at least one GitHub repository; no names or paths. */
       repositoryLinked: z.boolean().optional(),
+      /** `owner/name` of the project's linked GitHub repositories whose ID and name are disclosable; display only. */
+      repositoryNames: z
+        .array(z.object({ repositoryId: text, name: text }).strict())
+        .max(20)
+        .optional(),
       contentUnavailable: z.boolean(),
     })
     .strict(),
@@ -3794,6 +3799,8 @@ export const projectConfigurationSchema = envelope(
                   codeHost: z.literal("github"),
                   host: z.literal("github.com").nullable(),
                   ref: safeText,
+                  /** The verified `owner/name`, display only; absent from older services, null when none is verified or disclosable. */
+                  name: safeText.optional(),
                   savedRow: savedConfigurationRowSchema.optional(),
                 })
                 .strict(),

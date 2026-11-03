@@ -15,6 +15,7 @@ import {
 } from "../fixtures/operator-web.js";
 import {
   seedReviewTask,
+  nameLinkedRepository,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { until } from "../fixtures/until.js";
@@ -147,6 +148,8 @@ async function startChangesJourney(
   );
   // Delivery lines belong to a task whose project links a repository.
   setLinkedRepository(fixture, task.projectId, true);
+  // An observed issue names repo-alpha; repo-beta stays unnamed.
+  nameLinkedRepository(fixture, task.projectId, "repo-alpha", "acme/alpha");
   // A recorded lead result settles the assignment, so admission starts no initial turn.
   const result = recordResult
     ? task.result("Recorded provider summary", {
@@ -367,6 +370,47 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   );
   await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
+});
+
+test("Changes labels repositories by verified name, selects by ID and falls back to the ID", async (_t, j) => {
+  const { changes, page, comparisonRequests } = await startChangesJourney(j, {
+    recordResult: false,
+    alphaRef: "main",
+    beforeOpen: (workspace) => {
+      writeFileSync(join(workspace, "named.md"), "named change\n");
+      git(workspace, "add", "named.md");
+      git(workspace, "commit", "--quiet", "-m", "named change");
+    },
+  });
+  const select = page.getByLabel("Repository", { exact: true });
+  await select
+    .locator("option", { hasText: "acme/alpha" })
+    .waitFor({ state: "attached" });
+  assert.deepEqual(
+    (await select.locator("option").allInnerTexts()).sort(),
+    ["Select a repository", "acme/alpha", "repo-beta"].sort(),
+  );
+  // The select keeps the ID as its value and the request keeps it as its parameter.
+  await select.selectOption("repo-alpha");
+  const entry = changes
+    .getByLabel("Workspace comparison files")
+    .getByRole("button", { name: /named\.md/ });
+  await entry.waitFor();
+  assert.equal(await entry.getAttribute("title"), "acme/alpha/named.md");
+  assert.ok(
+    comparisonRequests.some(
+      (url) => new URL(url).searchParams.get("repositoryId") === "repo-alpha",
+    ),
+  );
+  await entry.click();
+  const provenance = changes.locator(".changes-provenance");
+  await provenance.waitFor();
+  assert.match(
+    await provenance.innerText(),
+    /^Current workspace · repository acme\/alpha · /,
+  );
+  await select.selectOption("repo-beta");
+  assert.equal(await select.inputValue(), "repo-beta");
 });
 
 test("Changes names the configured default branch when it has no merge base", async (_t, j) => {

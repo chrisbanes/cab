@@ -685,6 +685,64 @@ test("a saved GitLab link keeps its code host through the form and is shown with
   ]);
 });
 
+test("a named saved repository link reads by its name in summaries and change lines, an unnamed one by its ID", () => {
+  const c = config(),
+    link = c.repositories.links[0]!,
+    named = {
+      ...c,
+      repositories: {
+        ...c.repositories,
+        links: [
+          { ...link, repositoryId: "R_atlas", name: "acme/atlas" },
+          { ...link, repositoryId: "R_plain", name: null },
+        ],
+      },
+    } as ProjectConfigurationData;
+  assert.deepEqual(repositoryLines(named), [
+    "acme/atlas · main · checkout configured · GitHub github.com",
+    "R_plain · main · checkout configured · GitHub github.com",
+  ]);
+  assert.equal(
+    projectStateSummary(named, null, []).state[0],
+    "Lead: Mira · repository access: acme/atlas, R_plain",
+  );
+  const rows = repositoryRowsFrom(named.repositories);
+  const draft = (
+    change: (r: (typeof rows.repositories)[number]) => object,
+  ) => ({
+    key: "k",
+    expectedVersion: "2",
+    repositories: JSON.stringify(
+      rows.repositories.map((r) => ({ ...r, ...change(r) })),
+    ),
+  });
+  assert.deepEqual(
+    repositoryChanges(
+      named.repositories,
+      draft((r) => ({ ref: "dev", removed: r.repositoryId === "R_plain" })),
+    ),
+    ["Ref for acme/atlas: main → dev", "− Repository access: R_plain"],
+  );
+  assert.deepEqual(
+    repositoryChanges(
+      named.repositories,
+      draft(() => ({ removed: true })),
+    ).concat(
+      repositoryChanges(named.repositories, {
+        key: "k",
+        expectedVersion: "2",
+        repositories: "[]",
+      }),
+    ),
+    [
+      "− Repository access: acme/atlas",
+      "− Repository access: R_plain",
+      "− Repository access: acme/atlas (saved since this form loaded)",
+      "− Repository access: R_plain (saved since this form loaded)",
+    ],
+  );
+});
+
 test("a new GitLab link names its project path and reads like the CLI preview; a kept one never sends it", () => {
   const c = config();
   const saved = {

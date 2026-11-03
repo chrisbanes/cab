@@ -13,7 +13,10 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  nameLinkedRepository,
+  seedReviewTask,
+} from "../fixtures/task-review.js";
 
 const test = browserSuite("operator-files-browser");
 
@@ -1296,8 +1299,11 @@ async function startMarkedFiles(
     path = "?section=files",
     locale,
     prepare,
+    named = {},
   }: {
     repositories: Array<{ id: string; ref?: string }>;
+    /** Verified names by repository ID, as observed issues give them. */
+    named?: Record<string, string>;
     viewport?: { width: number; height: number };
     path?: string;
     locale?: string;
@@ -1325,6 +1331,8 @@ async function startMarkedFiles(
       ...(ref ? { ref } : {}),
     })),
   );
+  for (const [id, name] of Object.entries(named))
+    nameLinkedRepository(fixture, task.projectId, id, name);
   const binding = await fixture.service.taskWorkspace(task.taskId);
   assert.ok(binding);
   const workspaces = Object.fromEntries(
@@ -1483,6 +1491,42 @@ test("Files first-open location yields to a link and does not repeat", async (_t
     1,
   );
   assert.equal(await focusedEntry(page), false);
+});
+
+test("Files names a repository by its verified name, keeps the ID in requests and falls back to the ID without one", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "beta" }, { id: "alpha", ref: "main" }],
+    named: { alpha: "acme/alpha" },
+    path: "?section=files&repository=alpha&path=docs",
+  });
+  const { page, files } = s;
+  // The location, its trail and the file path read by name.
+  await s.list("Repository acme/alpha").waitFor();
+  assert.equal(await s.list("Repository alpha").count(), 0);
+  await files
+    .getByRole("navigation")
+    .getByRole("button", { name: "Repository acme/alpha", exact: true })
+    .waitFor();
+  assert.ok(
+    s.directoryRequests.some((url) => url.includes("repositoryId=alpha")),
+  );
+  assert.equal(
+    s.directoryRequests.some((url) => url.includes("acme")),
+    false,
+  );
+  // The workspace row lists each repository: the named one by name, the other by its ID.
+  await workspaceRoot(page).click();
+  await files
+    .getByRole("button", {
+      name: /^acme\/alpha, repository, full path Repository acme\/alpha$/,
+    })
+    .waitFor();
+  await files
+    .getByRole("button", {
+      name: /^beta, repository, full path Repository beta$/,
+    })
+    .waitFor();
+  assert.deepEqual(s.consoleErrors, []);
 });
 
 test("Files markers follow the Changes tab's repository, base branch and refresh, never another repository", async (_t, j) => {

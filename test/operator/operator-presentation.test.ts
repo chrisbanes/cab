@@ -25,6 +25,7 @@ import {
   codeSentence,
   midSentence,
   outcomeLine,
+  repositoryLabel,
   shortId,
   updatedLabel,
 } from "../../web/src/presentation.js";
@@ -245,4 +246,17 @@ test("the server's feedback mode wins and an older read falls back to the lead's
     assert.equal(leadFeedbackMode({}, state), "receives", state);
   for (const state of ["completed", "held", undefined])
     assert.equal(leadFeedbackMode({}, state), "unavailable", String(state));
+});
+
+test("a repository is labelled by its verified name and falls back to its ID", () => {
+  const names = [
+    { repositoryId: "R_named", name: "acme/atlas" },
+    { repositoryId: "R_null", name: null },
+    { repositoryId: "R_absent" },
+    { repositoryId: null, name: "acme/hidden" },
+  ];
+  assert.equal(repositoryLabel("R_named", names), "acme/atlas");
+  for (const id of ["R_null", "R_absent", "R_unmatched"])
+    assert.equal(repositoryLabel(id, names), id);
+  assert.equal(repositoryLabel("R_named"), "R_named");
 });

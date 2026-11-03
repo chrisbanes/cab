@@ -843,6 +843,29 @@ export class GitHubSourceStore {
     );
   }
 
+  /**
+   * The newest observed repository name (`owner/name`) of each given repository ID that this
+   * tracker has imported an issue from. Display only: IDs remain the identity.
+   */
+  repositoryNames(repositoryIds: readonly string[]): Map<string, string> {
+    const names = new Map<string, string>();
+    if (repositoryIds.length === 0) return names;
+    // Oldest first, so the newest observation overwrites.
+    for (const row of this.db
+      .prepare(
+        `SELECT containerId, containerName FROM external_items
+         WHERE provider = ? AND instance = ? AND containerId IN (${repositoryIds.map(() => "?").join(",")})
+         ORDER BY rowid`,
+      )
+      .all(
+        this.tracker.provider,
+        this.tracker.instance,
+        ...repositoryIds,
+      ) as Row[])
+      names.set(String(row.containerId), String(row.containerName));
+    return names;
+  }
+
   /** The task's stored issue brief, or null when it has none. */
   issueBrief(taskId: string): { text: string; truncated: boolean } | null {
     const row = this.db

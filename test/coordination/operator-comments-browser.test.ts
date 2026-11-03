@@ -192,6 +192,26 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     expectedVersion: Number(d.project(projectId).version),
     paused: false,
   });
+  // The project links the issue's repository, which the imported issue already names.
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
+      )
+      .run(
+        JSON.stringify([
+          {
+            codeHost: "github",
+            host: "github.com",
+            repositoryId: "R1",
+            path: "/fixture/r1",
+            ref: "main",
+            gitCommonDirectory: "/fixture/r1/.git",
+          },
+        ]),
+        projectId,
+      ),
+  );
   phase = "viewing reference";
   // A viewing reference needs a result to view.
   seedTaskResult(f, taskId, String(lead?.id), "Recorded fixture result", {
@@ -461,6 +481,9 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
       exact: true,
     })
     .waitFor();
+  // The receipt names the repository, not its ID.
+  await page.getByText(/ · repository org\/repo$/).waitFor();
+  assert.equal(await page.getByText(/repository R1/).count(), 0);
   assert.equal(effects, 0);
   await captureBrowserEvidence(page, "1366-exact-comment-review");
   await page

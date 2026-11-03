@@ -7,6 +7,7 @@ import {
   deliveryPolicyDraft,
   deliveryPolicySubmission,
   addGrantRow,
+  grantIdentityNames,
   removeGrantRow,
   validateDeliveryPolicyDraft,
   statusMappingCoverageLoss,
@@ -1046,4 +1047,79 @@ test("a legacy read becomes per-repository rows, and every save sends the reposi
   assert.deepEqual(deliveryPolicySubmission(legacy).requiredChecks, [
     { name: "build" },
   ]);
+});
+
+test("a grant row's identity IDs are named only where a read supplies the name", () => {
+  const links = [
+    { repositoryId: "R_atlas", name: "acme/atlas" },
+    { repositoryId: "R_plain", name: null },
+  ];
+  const discovery = {
+    choices: {
+      state: "ready" as const,
+      projects: [{ projectNodeId: "PVT_atlas", label: "Atlas roadmap" }],
+    },
+    fieldReads: {
+      PVT_atlas: {
+        state: "ready" as const,
+        truncated: false,
+        fields: [
+          {
+            fieldNodeId: "PVTSSF_status",
+            name: "Status",
+            options: [
+              { optionNodeId: "PVTSSO_todo", name: "Todo" },
+              { optionNodeId: "PVTSSO_ready", name: "Ready" },
+            ],
+          },
+        ],
+      },
+    },
+  } as unknown as Parameters<typeof grantIdentityNames>[2];
+  assert.deepEqual(
+    grantIdentityNames(
+      {
+        repositoryId: "R_atlas",
+        projectNodeId: "PVT_atlas",
+        fieldNodeId: "PVTSSF_status",
+        optionNodeIds: ["PVTSSO_ready", "PVTSSO_unknown", "PVTSSO_todo"],
+      },
+      links,
+      discovery,
+    ),
+    {
+      repository: "acme/atlas",
+      project: "Atlas roadmap",
+      field: "Status",
+      options: ["Ready", "Todo"],
+    },
+  );
+  // Unknown IDs, an unnamed link and an unavailable discovery name nothing.
+  const none = {
+    repository: undefined,
+    project: undefined,
+    field: undefined,
+    options: undefined,
+  };
+  assert.deepEqual(
+    grantIdentityNames(
+      {
+        repositoryId: "R_plain",
+        projectNodeId: "PVT_other",
+        fieldNodeId: "PVTSSF_status",
+        optionNodeIds: ["PVTSSO_ready"],
+      },
+      links,
+      discovery,
+    ),
+    none,
+  );
+  assert.deepEqual(
+    grantIdentityNames(
+      { repositoryId: "tracker", projectNodeId: "PVT_atlas" },
+      links,
+      { choices: { state: "loading" }, fieldReads: {} },
+    ),
+    none,
+  );
 });
