@@ -207,10 +207,10 @@ test("delivery get lists thread reply and resolve actions with their outcomes", 
     "--connection",
     "ro",
   ]);
-  assert.match(human.out, /pr\.thread\.reply +confirmed-success/);
+  assert.match(human.out, /Reply to review threads +confirmed-success/);
   assert.match(
     human.out,
-    /pr\.thread\.resolve +confirmed-failure +provider-preflight-held/,
+    /Resolve review threads +confirmed-failure +provider-preflight-held/,
   );
 });
 

@@ -8921,7 +8921,39 @@ export class OperatorApi {
           ? domain.deliveryCredentialReference(c.projectId)
           : c.credentialRef,
     });
-    return receipt(await this.executeDomain(command(policy)));
+    try {
+      return receipt(await this.commands.execute(command(policy)));
+    } catch (error) {
+      // A field refusal keeps its fixed message for `refuseDeliveryField`; every other error maps as before.
+      if (error instanceof DomainPolicyError) throw error;
+      throw domainApiError(error) ?? error;
+    }
+  }
+
+  /** A field-specific refusal of `delivery.configure` carries its fixed sentence; nothing else gains a message. */
+  private async refuseDeliveryField(
+    c: Extract<
+      z.output<typeof operatorCommandSchema>,
+      { type: "delivery.configure" }
+    >,
+  ) {
+    try {
+      return await this.executeDeliveryConfiguration(c);
+    } catch (error) {
+      if (
+        error instanceof DomainPolicyError &&
+        error.code === "invalid-input" &&
+        error.fieldPaths?.length
+      )
+        throw new OperatorApiError(
+          400,
+          "invalid-input",
+          error.fieldPaths,
+          undefined,
+          error.message,
+        );
+      throw error;
+    }
   }
 
   async execute(input: unknown, reviewSession?: OperatorReviewSessionContext) {
@@ -9382,7 +9414,7 @@ export class OperatorApi {
       if ("projectId" in c) {
         this.requireProject(c.projectId);
         if (c.type === "delivery.configure")
-          return await this.executeDeliveryConfiguration(c);
+          return await this.refuseDeliveryField(c);
         const raw = await this.executeDomain({ ...c, actor: "operator" });
         return commandReceipt(
           parseDomainCommandOutcome(c.type, raw),

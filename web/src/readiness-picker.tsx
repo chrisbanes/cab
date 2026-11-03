@@ -270,6 +270,8 @@ export function ReadyLabelPicker(p: {
 /** Option node IDs typed as a list; the text is kept as typed, so a separator can be entered. */
 function OptionIdsInput(p: {
   id: string;
+  label: string;
+  errorId: string;
   value: readonly string[];
   invalid: boolean;
   onChange: (ids: string[]) => void;
@@ -277,13 +279,13 @@ function OptionIdsInput(p: {
   const [text, setText] = useState(p.value.join(", "));
   return (
     <label className="field body" htmlFor={p.id}>
-      Readiness option node IDs
+      {p.label}
       <Input
         className="control"
         id={p.id}
-        aria-label="Readiness option node IDs"
+        aria-label={p.label}
         aria-invalid={p.invalid}
-        aria-describedby={p.invalid ? "source-conditions-error" : undefined}
+        aria-describedby={p.invalid ? p.errorId : undefined}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -299,10 +301,23 @@ function OptionIdsInput(p: {
   );
 }
 
+/** The readiness editor's wording and ids; another editor passes its own. */
+export const readinessPickerWording = {
+  project: "Readiness Project",
+  field: "Readiness field",
+  options: "Readiness options",
+  projectTyped: "Readiness Project node ID",
+  fieldTyped: "Readiness field node ID",
+  optionsTyped: "Readiness option node IDs",
+  errorId: "source-conditions-error",
+};
+
 /**
  * Name selects for one Project-field condition: Project, field, operator, then a checkbox per
  * option. A row whose state falls back to typed node IDs stays typed while it is mounted, so
- * controls never swap under the cursor.
+ * controls never swap under the cursor. The defaults render the readiness editor; the grant
+ * editor passes its own ids and wording, drops the operator, and for an item-add grant keeps
+ * only the Project.
  */
 export function ProjectFieldPicker(p: {
   index: number;
@@ -312,7 +327,18 @@ export function ProjectFieldPicker(p: {
   input: (name: string, label: string) => ReactNode;
   invalid: (name: string) => boolean;
   onChange: (patch: Partial<ConditionIds> & { operator?: string }) => void;
+  /** Prefix of the control ids; defaults to the readiness condition's. */
+  idPrefix?: string;
+  wording?: typeof readinessPickerWording;
+  /** Whether the operator select shows. */
+  operator?: boolean;
+  /** Whether the field and option controls show; a Project alone otherwise. */
+  fieldControls?: boolean;
 }) {
+  const prefix = p.idPrefix ?? `source-conditions-${p.index}`;
+  const wording = p.wording ?? readinessPickerWording;
+  const showOperator = p.operator ?? true;
+  const fieldControls = p.fieldControls ?? true;
   const optionNodeIds = Array.isArray(p.row.optionNodeIds)
     ? p.row.optionNodeIds.map(String)
     : [];
@@ -321,7 +347,12 @@ export function ProjectFieldPicker(p: {
     fieldNodeId: String(p.row.fieldNodeId ?? ""),
     optionNodeIds,
   };
-  const state = rowState(ids, p.discovery.choices, p.discovery.fieldReads);
+  const state = rowState(
+    ids,
+    p.discovery.choices,
+    p.discovery.fieldReads,
+    !fieldControls,
+  );
   const sticky = useRef<string | null>(null);
   // Only a new round of reads (the credential changed) lets a typed row become a picker.
   const round = useRef(p.discovery.generation);
@@ -330,15 +361,12 @@ export function ProjectFieldPicker(p: {
     sticky.current = null;
   }
   if (state.state === "typed") sticky.current = state.note;
-  const operator = (
-    <label
-      className="field body"
-      htmlFor={`source-conditions-${p.index}-operator`}
-    >
+  const operator = showOperator && (
+    <label className="field body" htmlFor={`${prefix}-operator`}>
       Readiness operator
       <NativeSelect
         className="control"
-        id={`source-conditions-${p.index}-operator`}
+        id={`${prefix}-operator`}
         aria-label="Readiness operator"
         aria-invalid={p.invalid("operator")}
         value={String(p.row.operator ?? "in")}
@@ -352,15 +380,21 @@ export function ProjectFieldPicker(p: {
   if (sticky.current !== null)
     return (
       <>
-        {p.input("projectNodeId", "Readiness Project node ID")}
-        {p.input("fieldNodeId", "Readiness field node ID")}
-        {operator}
-        <OptionIdsInput
-          id={`source-conditions-${p.index}-optionNodeIds`}
-          value={optionNodeIds}
-          invalid={p.invalid("optionNodeIds")}
-          onChange={(next) => p.onChange({ optionNodeIds: next })}
-        />
+        {p.input("projectNodeId", wording.projectTyped)}
+        {fieldControls && (
+          <>
+            {p.input("fieldNodeId", wording.fieldTyped)}
+            {operator}
+            <OptionIdsInput
+              id={`${prefix}-optionNodeIds`}
+              label={wording.optionsTyped}
+              errorId={wording.errorId}
+              value={optionNodeIds}
+              invalid={p.invalid("optionNodeIds")}
+              onChange={(next) => p.onChange({ optionNodeIds: next })}
+            />
+          </>
+        )}
         <p className="metadata muted">{sticky.current}</p>
       </>
     );
@@ -377,19 +411,14 @@ export function ProjectFieldPicker(p: {
     onChange: (value: string) => void,
     disabled = loading,
   ) => (
-    <label
-      className="field body"
-      htmlFor={`source-conditions-${p.index}-${name}`}
-    >
+    <label className="field body" htmlFor={`${prefix}-${name}`}>
       {label}
       <NativeSelect
         className="control"
-        id={`source-conditions-${p.index}-${name}`}
+        id={`${prefix}-${name}`}
         aria-label={label}
         aria-invalid={p.invalid(name)}
-        aria-describedby={
-          p.invalid(name) ? "source-conditions-error" : undefined
-        }
+        aria-describedby={p.invalid(name) ? wording.errorId : undefined}
         disabled={disabled}
         value={ids[name]}
         onChange={(e) => onChange(e.target.value)}
@@ -407,24 +436,25 @@ export function ProjectFieldPicker(p: {
     <>
       {select(
         "projectNodeId",
-        "Readiness Project",
+        wording.project,
         "Choose a Project",
         projects.map((x) => ({ id: x.projectNodeId, name: x.label })),
         (v) => p.onChange(selectProject(v)),
         loading && !state.projects,
       )}
-      {select(
-        "fieldNodeId",
-        "Readiness field",
-        "Choose a field",
-        fields.map((f) => ({ id: f.fieldNodeId, name: f.name })),
-        (v) => p.onChange(selectField(ids, v)),
-        loading || !ids.projectNodeId,
-      )}
+      {fieldControls &&
+        select(
+          "fieldNodeId",
+          wording.field,
+          "Choose a field",
+          fields.map((f) => ({ id: f.fieldNodeId, name: f.name })),
+          (v) => p.onChange(selectField(ids, v)),
+          loading || !ids.projectNodeId,
+        )}
       {operator}
-      {field && (
+      {fieldControls && field && (
         <fieldset className="settings-rows">
-          <legend className="body">Readiness options</legend>
+          <legend className="body">{wording.options}</legend>
           {[
             ...(field.options ?? []),
             // A saved option the read does not list stays checked, shown by its node ID.
@@ -435,17 +465,17 @@ export function ProjectFieldPicker(p: {
             <label
               key={o.optionNodeId}
               className="body check-field"
-              htmlFor={`source-conditions-${p.index}-option-${n}`}
+              htmlFor={`${prefix}-option-${n}`}
             >
               <Input
-                id={`source-conditions-${p.index}-option-${n}`}
+                id={`${prefix}-option-${n}`}
                 type="checkbox"
                 className="native-check size-5 shrink-0 p-0 accent-foreground"
                 // A fieldset cannot take focus, so the first option carries the row's error.
                 aria-invalid={n === 0 && p.invalid("optionNodeIds")}
                 aria-describedby={
                   n === 0 && p.invalid("optionNodeIds")
-                    ? "source-conditions-error"
+                    ? wording.errorId
                     : undefined
                 }
                 checked={optionNodeIds.includes(o.optionNodeId)}

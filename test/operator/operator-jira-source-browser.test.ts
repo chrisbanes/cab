@@ -6,7 +6,10 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { fakeJira, jiraIssue, json } from "../fixtures/fake-jira.js";
-import { savedOutcome } from "../fixtures/operator-settings.js";
+import {
+  outcomeMessages,
+  savedOutcome,
+} from "../fixtures/operator-settings.js";
 import { commandRequest, setupJourney } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-jira-source-browser");
@@ -673,8 +676,10 @@ test("a Jira status mapping is typed on the Jira tab, marks an ungranted status,
   await panel
     .getByRole("button", { name: "Save status mapping", exact: true })
     .click();
-  await panel
-    .getByText(/First turn started → 10005: the readiness rule does not accept/)
+  await outcomeMessages(panel)
+    .filter({
+      hasText: /First turn started → 10005: the readiness rule does not accept/,
+    })
     .waitFor();
   assert.equal(domain.statusMapping(projectId).mapping, null);
 

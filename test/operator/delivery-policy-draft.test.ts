@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deliveryPolicySchema, actionKinds } from "../../src/core/delivery.js";
 import {
-  deliveryActionKinds,
   deliveryPolicyChangeText,
   deliveryPolicyDraft,
   deliveryPolicySubmission,
@@ -29,7 +28,6 @@ const seed = (
 });
 
 test("all domain actions round-trip public fields exactly and remain domain-schema valid", () => {
-  assert.deepEqual(deliveryActionKinds, actionKinds);
   for (const action of actionKinds) {
     const policy = deliveryPolicySchema.parse({
       mode: "through-merge",
@@ -253,7 +251,7 @@ test("indexed validation matches domain accepted policy requirements", () => {
     assert.ok(paths.includes(expected), expected);
   const valid = deliveryPolicyDraft(
     seed({
-      grants: deliveryActionKinds.map((action) => ({
+      grants: actionKinds.map((action) => ({
         action,
         repositoryId: "R",
         mode: action === "branch.adopt" ? "approval" : "allow",
@@ -1097,7 +1095,7 @@ test("a grant row's identity IDs are named only where a read supplies the name",
       repository: "acme/atlas",
       project: "Atlas roadmap",
       field: "Status",
-      options: ["Ready", "Todo"],
+      options: ["Ready", undefined, "Todo"],
     },
   );
   // Unknown IDs, an unnamed link and an unavailable discovery name nothing.

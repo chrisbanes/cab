@@ -13,6 +13,7 @@ import {
   startSettings,
   phone,
   noPageOverflow,
+  outcomeMessages,
   savedOutcome,
 } from "../fixtures/operator-settings.js";
 
@@ -73,19 +74,23 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
     17,
   );
   await grant(page)
-    .getByLabel("Repository or tracker container ID")
-    .fill("R_atlas");
+    .getByLabel("Repository", { exact: true })
+    .selectOption("R_atlas");
   await grant(page)
     .getByLabel("Action", { exact: true })
     .selectOption("project.field");
   await grant(page)
     .getByLabel("Authority", { exact: true })
     .selectOption("allow");
-  await grant(page).getByLabel("Project ID", { exact: true }).fill("PVT_atlas");
-  await grant(page).getByLabel("Field ID", { exact: true }).fill("Status");
   await grant(page)
-    .getByLabel("Option IDs (one per line)")
-    .fill("Ready\nReady");
+    .getByLabel("Project node ID (fallback)", { exact: true })
+    .fill("PVT_atlas");
+  await grant(page)
+    .getByLabel("Field node ID (fallback)", { exact: true })
+    .fill("Status");
+  await grant(page)
+    .getByLabel("Option node IDs (fallback)", { exact: true })
+    .fill("Ready, Ready");
   await addCheck(page).click();
   assert.equal(
     await check(page)
@@ -189,7 +194,7 @@ test("Delivery local errors focus the first field and branch adoption offers app
     if (r.method() === "POST" && r.url().endsWith("/commands")) posts++;
   });
   await save(page).click();
-  const invalid = grant(page).getByLabel("Repository or tracker container ID");
+  const invalid = grant(page).getByLabel("Repository", { exact: true });
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-invalid") === "true",
   );
@@ -198,7 +203,7 @@ test("Delivery local errors focus the first field and branch adoption offers app
     true,
   );
   assert.equal(posts, 0);
-  await invalid.fill("R_atlas");
+  await invalid.selectOption("R_atlas");
   await grant(page)
     .getByLabel("Action", { exact: true })
     .selectOption("branch.adopt");
@@ -315,8 +320,11 @@ test("Delivery rejection and conflict retain edits until deliberate review or di
     }),
   );
   await save(page).click();
-  // A rejected response keeps input regardless of the service's safe error wording.
+  // A rejected response keeps input; a refusal that names its field gives the service's sentence.
   await page.getByRole("button", { name: "Discard changes" }).waitFor();
+  await outcomeMessages(page)
+    .filter({ hasText: "Check delivery fields. Your changes are still here." })
+    .waitFor();
   assert.equal(
     await page.getByLabel("Completion mode").inputValue(),
     "through-merge",
@@ -353,6 +361,41 @@ test("Delivery rejection and conflict retain edits until deliberate review or di
   );
   await save(page).click();
   await savedOutcome(page);
+});
+
+test("a refused grant shows the service's sentence in the save outcome and Go to field reaches the grant", async (_t, journey) => {
+  const { page } = await startSettings(journey, path);
+  await page.getByRole("button", { name: "Add grant", exact: true }).click();
+  await grant(page)
+    .getByLabel("Repository", { exact: true })
+    .selectOption("R_atlas");
+  await page.route("**/api/operator/commands", (r) =>
+    r.fulfill({
+      status: 400,
+      json: {
+        error: {
+          code: "invalid-input",
+          message: "Grant text is unavailable",
+          fieldPaths: ["grants.0.repositoryId"],
+        },
+      },
+    }),
+  );
+  await save(page).click();
+  const outcome = outcomeMessages(page).filter({
+    hasText: "Grant text is unavailable. Your changes are still here.",
+  });
+  await outcome.waitFor();
+  await page.getByLabel("Completion mode").focus();
+  await outcome
+    .getByRole("button", { name: "Go to field", exact: true })
+    .click();
+  assert.equal(
+    await grant(page)
+      .getByLabel("Repository", { exact: true })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
 });
 
 test("Delivery lost response checks the original receipt before POST after a later credential change", async (_t, journey) => {
@@ -658,41 +701,134 @@ test("Delivery labels a repository by its name and falls back to its ID without 
   await page.getByLabel("Merge method for R_plain", { exact: true }).waitFor();
 });
 
-test("a grant row names what its IDs refer to and keeps the IDs as its values", async (_t, journey) => {
-  const { page, f } = await startSettings(journey, path, undefined, undefined, {
+/** Atlas with fake GitHub discovery configured, at the Delivery tab. */
+async function startDiscovery(journey: Parameters<typeof startSettings>[0]) {
+  const started = await startSettings(journey, path, undefined, undefined, {
     setup: { discovery: fakeDiscovery({}) },
   });
-  await new OperatorApi(f.service, [f.directory]).execute({
+  await new OperatorApi(started.f.service, [started.f.directory]).execute({
     type: "discovery.configure",
     key: randomUUID(),
     credentialRef: "env:FIXTURE_DISCOVERY",
   });
-  await page.reload();
+  await started.page.reload();
+  return started;
+}
+const sentence =
+  "Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas";
+
+test("a Project field grant is chosen by name without typing an ID, and reads as a sentence once saved", async (_t, journey) => {
+  const { page } = await startDiscovery(journey);
   await page.getByRole("button", { name: "Add grant", exact: true }).click();
   const row = grant(page);
   await row.getByLabel("Action", { exact: true }).selectOption("project.field");
-  await row.getByLabel("Repository or tracker container ID").fill("R_atlas");
-  await row.getByLabel("Project ID", { exact: true }).fill("PVT_atlas");
-  await row.getByLabel("Field ID", { exact: true }).fill("PVTSSF_status");
-  await row.getByLabel("Option IDs (one per line)").fill("PVTSSO_ready");
-  for (const text of [
-    "Repository: acme/atlas",
-    "Project: Atlas roadmap",
-    "Field: Status",
-    "Options: Ready",
-  ])
-    await row.getByText(text, { exact: true }).waitFor();
+  await row
+    .getByText("Set one GitHub Project field to one of the chosen options", {
+      exact: false,
+    })
+    .waitFor();
+  await row
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "acme/atlas" });
+  await row
+    .getByLabel("Project", { exact: true })
+    .selectOption({ label: "Atlas roadmap" });
+  await row
+    .getByLabel("Field", { exact: true })
+    .selectOption({ label: "Status" });
+  await row.getByLabel("Ready", { exact: true }).check();
+  await row.getByLabel("Authority", { exact: true }).selectOption("allow");
+  assert.equal(await row.getByText(/\(fallback\)/).count(), 0);
+  await row.getByText(sentence, { exact: true }).waitFor();
+  const sent = body(page);
+  await save(page).click();
+  const grants = (await sent).grants as unknown[];
+  assert.deepEqual(grants, [
+    {
+      action: "project.field",
+      repositoryId: "R_atlas",
+      mode: "allow",
+      projectNodeId: "PVT_atlas",
+      fieldNodeId: "PVTSSF_status",
+      optionNodeIds: ["PVTSSO_ready"],
+    },
+  ]);
+  await savedOutcome(page);
+  await grant(page).getByText(sentence, { exact: true }).waitFor();
+});
+
+test("without a discovery credential a grant offers typed IDs labelled as the fallback", async (_t, journey) => {
+  const { page } = await startSettings(journey, path);
+  await page.getByRole("button", { name: "Add grant", exact: true }).click();
+  const row = grant(page);
+  await row.getByLabel("Action", { exact: true }).selectOption("project.field");
+  await row
+    .getByText("no discovery credential is configured", { exact: false })
+    .waitFor();
+  await row
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "acme/atlas" });
+  await row
+    .getByLabel("Project node ID (fallback)", { exact: true })
+    .fill("PVT_atlas");
+  await row
+    .getByLabel("Field node ID (fallback)", { exact: true })
+    .fill("PVTSSF_status");
+  await row
+    .getByLabel("Option node IDs (fallback)", { exact: true })
+    .fill("PVTSSO_ready");
+  await row.getByLabel("Authority", { exact: true }).selectOption("allow");
+  const sent = body(page);
+  await save(page).click();
+  assert.deepEqual((await sent).grants, [
+    {
+      action: "project.field",
+      repositoryId: "R_atlas",
+      mode: "allow",
+      projectNodeId: "PVT_atlas",
+      fieldNodeId: "PVTSSF_status",
+      optionNodeIds: ["PVTSSO_ready"],
+    },
+  ]);
+});
+
+test("a saved grant whose Project discovery does not list shows its ID with a note and keeps the value", async (_t, journey) => {
+  const { page, f, ids } = await startDiscovery(journey);
+  f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [
+      {
+        action: "project.field",
+        repositoryId: "R_atlas",
+        mode: "allow",
+        projectNodeId: "PVT_gone",
+        fieldNodeId: "PVTSSF_status",
+        optionNodeIds: ["PVTSSO_ready"],
+      },
+    ],
+    requiredChecks: [],
+  });
+  await read(page);
+  const row = grant(page);
+  await row
+    .getByText(/for issues in acme\/atlas$/)
+    .filter({ hasText: "PVT_gone (name not found)" })
+    .waitFor();
+  await row
+    .getByText("not in the discovered lists", { exact: false })
+    .waitFor();
   assert.equal(
-    await row.getByLabel("Repository or tracker container ID").inputValue(),
-    "R_atlas",
+    await row
+      .getByLabel("Project node ID (fallback)", { exact: true })
+      .inputValue(),
+    "PVT_gone",
   );
-  assert.equal(
-    await row.getByLabel("Project ID", { exact: true }).inputValue(),
-    "PVT_atlas",
-  );
-  // An ID nothing names shows no name.
-  await row.getByLabel("Field ID", { exact: true }).fill("PVTSSF_unknown");
-  await row.getByText(/^Field: /).waitFor({ state: "detached" });
 });
 
 test("advanced edits use the same upward warning and refresh invalidates a pending proposal", async (_t, journey) => {

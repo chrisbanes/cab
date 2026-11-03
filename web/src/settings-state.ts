@@ -19,6 +19,7 @@ export const outcomeCopy = {
   tooLarge:
     "Couldn't save: the change is too large. Your changes are still here.",
   rejected: "Couldn't save. Your changes are still here.",
+  kept: "Your changes are still here.",
   conflict: "A newer version was saved elsewhere.",
   unknown: "We couldn't confirm the save.",
   adopted: "Loaded the latest version. Your changes are still here.",
@@ -229,6 +230,8 @@ export class ConfigurationDraft {
   details: ReceiptDetails = {};
   /** A source credential refusal is a failure to fix, not a newer version to review. */
   credentialRefusal = false;
+  /** The save was refused for named fields in the service's own words; the outcome offers to go to one. */
+  fieldRefusal = false;
   errors: Record<string, string> = {};
   private readonly lifecycle = new CommandLifecycle<OperatorCommand>();
   get frozen() {
@@ -372,6 +375,7 @@ export class ConfigurationDraft {
         this.notice = "";
         this.details = {};
         this.credentialRefusal = false;
+        this.fieldRefusal = false;
       }
       // The note that the latest version was loaded described input that is gone now.
       if (undone && this.notice === outcomeCopy.adopted) this.notice = "";
@@ -411,6 +415,7 @@ export class ConfigurationDraft {
     this.savedAt = null;
     this.details = {};
     this.credentialRefusal = false;
+    this.fieldRefusal = false;
     this.notice = outcomeCopy.adopted;
     this.values = {
       ...this.values,
@@ -454,6 +459,7 @@ export class ConfigurationDraft {
     this.savedAt = null;
     this.details = {};
     this.credentialRefusal = false;
+    this.fieldRefusal = false;
     this.changed();
   }
   /** Reject before sending: field errors keyed by command path, as after a rejected send. */
@@ -469,6 +475,7 @@ export class ConfigurationDraft {
     this.notice = outcomeCopy.fields(Object.keys(errors).length);
     this.details = { code: "invalid-input" };
     this.credentialRefusal = false;
+    this.fieldRefusal = false;
     this.changed();
   }
   async submit(client: OperatorClient, input: unknown, csrf: string) {
@@ -497,6 +504,7 @@ export class ConfigurationDraft {
       this.notice = outcomeCopy.fields(Object.keys(this.errors).length);
       this.details = { code: "invalid-input" };
       this.credentialRefusal = false;
+      this.fieldRefusal = false;
       this.changed();
       return;
     }
@@ -507,6 +515,7 @@ export class ConfigurationDraft {
       this.phase = "rejected";
       this.details = { code: "request-too-large" };
       this.credentialRefusal = false;
+      this.fieldRefusal = false;
       this.changed();
       return;
     }
@@ -577,6 +586,7 @@ export class ConfigurationDraft {
     const receipt =
       this.receipt?.kind === "configuration" ? this.receipt : null;
     this.credentialRefusal = false;
+    this.fieldRefusal = false;
     this.details = {
       command: c.type,
       requestKey: c.key,
@@ -641,16 +651,27 @@ export class ConfigurationDraft {
         /^Repository \d+: /.test(result.message ?? "")
           ? result.message
           : undefined;
+      // A refused policy names its fields and gives the reason; each message is a fixed sentence.
+      const deliveryRefusal =
+        result.state !== "recorded" &&
+        c.type === "delivery.configure" &&
+        result.code === "invalid-input" &&
+        fieldPaths.length > 0
+          ? result.message
+          : undefined;
       this.errors = Object.fromEntries(
         fieldPaths.map((p) => [
           p,
           nameTaken ??
             mappingRefusal ??
+            deliveryRefusal ??
             jqlRefusal ??
             repositoryRefusal ??
             "Check this field.",
         ]),
       );
+      const refusal = mappingRefusal ?? deliveryRefusal;
+      this.fieldRefusal = Boolean(refusal) && fieldPaths.length > 0;
       this.credentialRefusal =
         result.state !== "recorded" &&
         Boolean(result.credentialReason) &&
@@ -660,9 +681,11 @@ export class ConfigurationDraft {
           ? `${sourceCredentialCopy(result.credentialReason)} Your changes are still here.`
           : disposition === "conflict"
             ? outcomeCopy.conflict
-            : Object.keys(this.errors).length
-              ? outcomeCopy.fields(Object.keys(this.errors).length)
-              : outcomeCopy.rejected;
+            : this.fieldRefusal && refusal
+              ? `${refusal.replace(/\.?$/, ".")} ${outcomeCopy.kept}`
+              : Object.keys(this.errors).length
+                ? outcomeCopy.fields(Object.keys(this.errors).length)
+                : outcomeCopy.rejected;
     }
     this.changed();
   }

@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { actionKinds } from "../../src/core/delivery.js";
+import {
+  deliveryActionCopy,
+  deliveryActionKinds,
+  deliveryActionLabel,
+  grantSentence,
+} from "../../src/operator/delivery-action-copy.js";
 import {
   checkStatusWord,
   codeHostActionLabel,
@@ -117,7 +124,7 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
   } as const;
   assert.equal(
     deliveryActionLine(base),
-    "project.field: confirmed-success · receipt recorded · operation op-1",
+    "Set a Project field: confirmed-success · receipt recorded · operation op-1",
   );
   assert.equal(
     deliveryActionLine({
@@ -127,7 +134,7 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
       state: "confirmed-failure",
       reason: "provider-project-field-changed",
     }),
-    "Status mapping (PR handed back for review) · project.field: confirmed-failure · Skipped: Status changed on GitHub since cab last saw it. · operation op-1",
+    "Status mapping (PR handed back for review) · Set a Project field: confirmed-failure · Skipped: Status changed on GitHub since cab last saw it. · operation op-1",
   );
   // A GitLab merge train merge is described, not shown as a code.
   assert.equal(
@@ -137,7 +144,7 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
       state: "uncertain",
       reason: "provider-merge-train-pending",
     }),
-    "pr.merge: uncertain · On the GitLab merge train; waits until it merges or drops out. · operation op-1",
+    "Merge pull requests: uncertain · On the GitLab merge train; waits until it merges or drops out. · operation op-1",
   );
   assert.match(
     deliveryActionLine({
@@ -353,5 +360,95 @@ test("the default branch's merge methods are guidance, and a method it doesn't a
   assert.equal(
     mergeMethodNotAllowedWarning("merge"),
     "The default branch doesn't allow merge commit, so cab holds merges into it until the method or the branch's rules change.",
+  );
+});
+
+test("every action kind has a label and description, and an unknown kind reads as it is", () => {
+  assert.deepEqual(deliveryActionKinds, actionKinds);
+  for (const kind of actionKinds) {
+    assert.ok(deliveryActionCopy[kind].label, kind);
+    assert.ok(deliveryActionCopy[kind].description, kind);
+  }
+  assert.deepEqual(
+    [
+      "project.item.add",
+      "project.field",
+      "pr.create",
+      "pr.thread.reply",
+      "branch.push",
+    ].map(deliveryActionLabel),
+    [
+      "Add issues to a Project",
+      "Set a Project field",
+      "Open pull requests",
+      "Reply to review threads",
+      "Push branches",
+    ],
+  );
+  assert.equal(deliveryActionLabel("unknown.kind"), "unknown.kind");
+});
+
+test("a grant reads as a sentence of names, and an ID with no name says so", () => {
+  const names = {
+    repository: "acme/atlas",
+    project: "Atlas roadmap",
+    field: "Status",
+    options: ["Ready"],
+  };
+  const field = {
+    action: "project.field",
+    repositoryId: "R_atlas",
+    mode: "allow",
+    projectNodeId: "PVT_atlas",
+    fieldNodeId: "PVTSSF_status",
+    optionNodeIds: ["PVTSSO_ready"],
+  } as const;
+  assert.equal(
+    grantSentence(field, names),
+    "Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas",
+  );
+  assert.equal(
+    grantSentence(
+      {
+        action: "project.item.add",
+        repositoryId: "R_atlas",
+        mode: "approval",
+        projectNodeId: "PVT_atlas",
+      },
+      names,
+    ),
+    "Require approval: add issues in acme/atlas to Project Atlas roadmap",
+  );
+  assert.equal(
+    grantSentence(
+      { action: "branch.push", repositoryId: "R_atlas", mode: "approval" },
+      names,
+    ),
+    "Require approval: push branches to acme/atlas",
+  );
+  assert.equal(
+    grantSentence(
+      { action: "pr.create", repositoryId: "R_atlas", mode: "allow" },
+      names,
+    ),
+    "Allow: open pull requests in acme/atlas",
+  );
+  assert.equal(
+    grantSentence({
+      ...field,
+      repositoryId: "R_x",
+      projectNodeId: "PVT_x",
+      fieldNodeId: "PVTSSF_x",
+      optionNodeIds: ["PVTSSO_y"],
+    }),
+    "Allow: set PVTSSF_x (name not found) to PVTSSO_y (name not found) on Project PVT_x (name not found) for issues in R_x (name not found)",
+  );
+  // Names follow the option IDs, so one found among several stays with its own.
+  assert.match(
+    grantSentence(
+      { ...field, optionNodeIds: ["A", "B"] },
+      { ...names, options: [undefined, "Ready"] },
+    ),
+    /to A \(name not found\), Ready on/,
   );
 });
