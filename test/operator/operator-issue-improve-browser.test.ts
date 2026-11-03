@@ -476,8 +476,10 @@ test("Sent stays shown when the claimed run is read back as accepted before the 
   const readBack = page.waitForResponse(
     async (r) =>
       /\/drafting-runs\//.test(r.url()) &&
-      (await r.text().catch(() => "")).includes('"accepted"'),
+      (await r.text().catch(() => "")).includes('"state":"accepted"'),
   );
+  // Observed here so an earlier failure is reported instead of this wait's timeout.
+  readBack.catch(() => {});
   const runId = await draftAndLoad(ctx);
   await until(() => ctx.f.service.readDrafting(runId)?.state === "accepted");
   await readBack;
