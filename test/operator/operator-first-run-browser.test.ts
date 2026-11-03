@@ -9,6 +9,7 @@ import {
   outcomeMessages,
   phone,
 } from "../fixtures/operator-settings.js";
+import { refreshed } from "../fixtures/browser-waits.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import {
   atlasIssueReader,
@@ -133,7 +134,7 @@ async function firstRun(
   if (linked) {
     await firstScreen(page, "ready check", [ready, importNow]);
     await click(importNow);
-    await imported.waitFor();
+    await imported.waitFor(refreshed);
     for (const line of [/^Previewed/, /Read .* completely at/])
       assert.equal(
         await inFirstViewport(

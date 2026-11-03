@@ -15,6 +15,7 @@ import {
   setupJourney,
   stubReadiness,
 } from "../fixtures/setup-browser.js";
+import { refreshed } from "../fixtures/browser-waits.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import { until } from "../fixtures/until.js";
 import {
@@ -870,7 +871,7 @@ test("Setup's ready check imports the linked GitHub Project before Resume, then 
   const read = outcomeMessages(t.ready).filter({
     hasText: /Read .* completely at/,
   });
-  await read.waitFor();
+  await read.waitFor(refreshed);
   const view = t.ready.getByRole("link", { name: "View imported tasks" });
   assert.equal(
     await view.getAttribute("href"),
@@ -943,7 +944,9 @@ test("Setup's ready check resends an unknown preview with the same key, then ref
   await check.waitFor();
   assert.deepEqual(t.steps, ["preview"], "no refresh before it is confirmed");
   await check.click();
-  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await t.ready
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   const [one, two] = t.previews();
   assert.equal(t.previews().length, 2);
   assert.equal(one?.key, two?.key);
@@ -963,7 +966,9 @@ test("Setup's ready check offers Refresh again for an unconfirmed refresh withou
   await warning.waitFor();
   fail = false;
   await warning.getByRole("button", { name: "Refresh again" }).click();
-  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await t.ready
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   assert.deepEqual(t.steps, ["preview", "refresh", "refresh"]);
 });
 
@@ -1181,7 +1186,9 @@ test("Setup's ready check reviews a source saved elsewhere before importing agai
   await reread;
   await t.importButton.waitFor();
   await t.importButton.click();
-  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await t.ready
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   const [stale, fresh] = t.previews();
   assert.equal(fresh?.expectedVersion, 2);
   assert.notEqual(fresh?.key, stale?.key);
