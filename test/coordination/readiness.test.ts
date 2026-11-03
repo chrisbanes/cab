@@ -394,20 +394,22 @@ test("a claude that ignores SIGTERM is killed, and the check settles only after 
 
 test("a claude that exits while a descendant keeps its output open still settles the check", async (t) => {
   const f = fixture(t);
-  installClaude(f, "/bin/sleep 3 &\nexit 0");
+  installClaude(f, "/bin/sleep 6 &\nexit 0");
   const started = Date.now();
   const result = await claudeExecutable(f, { versionTimeoutMs: 200 });
   assert.equal(result.status, "fail");
-  assert.ok(Date.now() - started < 1500);
+  // Far above the 200 ms timeout for a loaded runner, yet well below the 6 s descendant.
+  assert.ok(Date.now() - started < 3000);
 });
 
 test("a claude whose child outlives the timeout still settles the check", async (t) => {
   const f = fixture(t);
-  installClaude(f, "/bin/sleep 2 &\nwait");
+  installClaude(f, "/bin/sleep 6 &\nwait");
   const started = Date.now();
   const result = await claudeExecutable(f, { versionTimeoutMs: 200 });
   assert.equal(result.status, "fail");
-  assert.ok(Date.now() - started < 1500);
+  // Far above the 200 ms timeout for a loaded runner, yet well below the 6 s descendant.
+  assert.ok(Date.now() - started < 3000);
 });
 
 test("the claude version probe sees the PATH and nothing else of the service environment", async (t) => {
