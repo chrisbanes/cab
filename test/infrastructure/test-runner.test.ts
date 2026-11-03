@@ -117,7 +117,7 @@ const runner = (await import(
 
 test("CI options reject ambiguous, empty and incompatible selections", () => {
   assert.deepEqual(runner.parseTestOptions([]), {
-    profile: "all",
+    profile: "chromium",
     suite: "all",
     shard: 1,
     shards: 1,

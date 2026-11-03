@@ -386,7 +386,7 @@ export const logicalSuites = [
 
 export function parseTestOptions(args) {
   const options = {
-    profile: "all",
+    profile: "chromium",
     suite: "all",
     shard: 1,
     shards: 1,

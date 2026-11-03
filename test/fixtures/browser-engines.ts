@@ -12,8 +12,8 @@ export function browserTestEngine(
   return options.browserEngine ?? "chromium";
 }
 
-/** Resolve and validate the runner's browser-engine selection. Local runs default to all. */
-export function selectedBrowserEngines(value = "all"): BrowserEngine[] {
+/** Resolve and validate the runner's browser-engine selection. WebKit runs only when selected. */
+export function selectedBrowserEngines(value = "chromium"): BrowserEngine[] {
   switch (value) {
     case "all":
       return ["chromium", "webkit"];
@@ -30,7 +30,7 @@ export function selectedBrowserEngines(value = "all"): BrowserEngine[] {
 
 export function browserEngineEnabled(
   engine: BrowserEngine,
-  value = process.env.CAB_TEST_BROWSER_ENGINE ?? "all",
+  value = process.env.CAB_TEST_BROWSER_ENGINE ?? "chromium",
 ): boolean {
   return selectedBrowserEngines(value).includes(engine);
 }
@@ -38,7 +38,7 @@ export function browserEngineEnabled(
 export function browserEngineTestOptions(
   engine: BrowserEngine,
   options: BrowserTestOptions = {},
-  value = process.env.CAB_TEST_BROWSER_ENGINE ?? "all",
+  value = process.env.CAB_TEST_BROWSER_ENGINE ?? "chromium",
 ): TestOptions {
   if (browserEngineEnabled(engine, value)) {
     const { browserEngine: _browserEngine, ...nodeOptions } = options;

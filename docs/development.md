@@ -94,17 +94,18 @@ Daily CI at 05:00 UTC skips the build and tests only when the previous scheduled
 run on the same branch completed successfully on the same commit. Changed commits,
 first nights and failed, cancelled or unfinished previous runs execute all checks;
 a history lookup failure fails CI. Manual workflow runs always
-run the complete checks. Nightly, manual and release-tag suite jobs add WebKit.
-These triggers become available when the
-workflow reaches the default branch. Local `npm run check` continues to run all
-tests and both browsers. For focused checks after building, use:
+run the complete checks. Nightly and release-tag suite jobs add WebKit; a manual
+run adds it when started with the `webkit` input. These triggers become available
+when the workflow reaches the default branch. Local `npm run check` runs all tests
+in Chromium. For focused checks after building, use:
 
 ```sh
-npm run test:built -- --suite=operator --profile=chromium --shard=1/2
+npm run test:built -- --suite=operator --shard=1/3
 npm run test:built -- --profile=service
+npm run test:built -- --profile=all   # adds WebKit
 ```
 
-`all` is the default profile; `chromium` excludes WebKit, and `service` excludes
+`chromium` is the default profile; `all` adds WebKit, and `service` excludes
 browser-dependent cases while retaining service assertions in mixed test files.
 Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards

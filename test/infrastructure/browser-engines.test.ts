@@ -6,8 +6,8 @@ import {
   selectedBrowserEngines,
 } from "../fixtures/browser-engines.js";
 
-test("browser engine selection defaults to all engines", () => {
-  assert.deepEqual(selectedBrowserEngines(undefined), ["chromium", "webkit"]);
+test("browser engine selection defaults to Chromium", () => {
+  assert.deepEqual(selectedBrowserEngines(undefined), ["chromium"]);
 });
 
 test("browser engine selection supports all, Chromium, and none", () => {
