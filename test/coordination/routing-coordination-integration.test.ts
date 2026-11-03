@@ -35,6 +35,13 @@ import type {
 import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
 
+/**
+ * How long a test watches for a turn, confirmation or write that must NOT happen when no
+ * event marks the work as settled. Generous so a loaded runner cannot let a regression
+ * slip past a window that closed before it ran.
+ */
+const QUIET_WINDOW_MS = 200;
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
@@ -1572,7 +1579,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
         service.list().find((intent) => intent.workId === childWorkId)
           ?.state === "completed",
     );
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 2);
     assert.equal(
       rowCount(
@@ -1654,7 +1661,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
             request.workId !== childWorkId,
         ),
     );
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 2);
     await service.stopTask(taskId);
     const pausedProject = service.domain().project(projectId);
@@ -1666,7 +1673,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
       expectedVersion: Number(pausedProject.version),
       paused: false,
     });
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 2);
     await service.resumeTask(taskId);
     await runtime.waitForTurnNumber(3);
@@ -2149,7 +2156,7 @@ test("restart leaves legacy inbox events for a completed recipient undelivered",
     runtime = new CoordinationRuntime();
     await service.start();
     running = true;
-    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 0);
     assert.equal(
       service
@@ -2849,7 +2856,7 @@ test("a result-free turn gets one durable reporting repair then holds", async ()
           .assignments(taskId)
           .find((item) => item.profileId === profileId)?.state === "held",
     );
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 2);
     const repairs = startedOf(service).coordination.reportingRepairs();
     assert.equal(repairs.length, 1);
@@ -2870,7 +2877,7 @@ test("a result-free turn gets one durable reporting repair then holds", async ()
     running = false;
     await service.start();
     running = true;
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(runtime.turns, 2);
     assert.equal(
       service

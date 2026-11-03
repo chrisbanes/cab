@@ -19,6 +19,7 @@ import {
   resolve,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
+import { refreshed } from "../fixtures/browser-waits.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-action-feedback-browser");
@@ -480,7 +481,9 @@ test("Sync & placement marks active selections and drops the marker when the sou
   const { page } = fixture;
   await observationRow(page, "S-1").getByText("Inactive").waitFor();
   await importButton(page).click();
-  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: "View imported tasks" })
+    .waitFor(refreshed);
   await observationRow(page, "S-1")
     .getByText("Active", { exact: true })
     .waitFor();

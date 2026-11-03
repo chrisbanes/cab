@@ -58,6 +58,8 @@ export class FakeGitHub {
   itemMode: "ok" | "rejected" | "uncertain" | "retry" = "ok";
   /** Read-backs wait on this, so a test can act while one is in flight. */
   inspectGate: Promise<void> | undefined;
+  /** Called as a read-back reaches `inspectGate`, so a test can wait for it to be in flight. */
+  onInspectGated: (() => void) | undefined;
   /** Runs when an item add arrives, before it takes effect. */
   beforeItemAdd: (() => Promise<void>) | undefined;
   fieldMode: "ok" | "rejected" | "uncertain" = "ok";
@@ -227,7 +229,10 @@ export class FakeGitHub {
         throw new Error(`unexpected ${a.kind}`);
       },
       async inspectAction(record): Promise<ProviderActionObservation> {
-        if (gh.inspectGate) await gh.inspectGate;
+        if (gh.inspectGate) {
+          gh.onInspectGated?.();
+          await gh.inspectGate;
+        }
         const a = record.request.action;
         const unproved: ProviderActionObservation = {
           state: "uncertain",

@@ -6,6 +6,7 @@ import type { Page } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { checkout } from "../fixtures/setup-home.js";
+import { until } from "../fixtures/until.js";
 import {
   captureSettingsEvidence as captureBrowserEvidence,
   createCheckout,
@@ -811,13 +812,23 @@ test("an older read is retried at most twice per version, and a failure waits fo
   const retry = page.getByRole("button", {
     name: /^Try again to load the search query/,
   });
+  // Try again is also rendered, aria-busy, while a read is out: wait for the reads
+  // to land and the button to come back before asserting no extra retry follows.
+  const quiet = async (reads: number) => {
+    await until(() => older.reads.count >= reads, `${reads} reads`);
+    await page
+      .locator(
+        'button[aria-label^="Try again to load the search query"]:not([aria-busy])',
+      )
+      .waitFor();
+    await settled(page);
+    assert.equal(older.reads.count, reads);
+  };
   await retry.waitFor();
-  await settled(page);
-  assert.equal(older.reads.count, 3);
+  await quiet(3);
   // Try again is the operator's, and asks once more.
   await retry.click();
-  await retry.waitFor();
-  assert.equal(older.reads.count, 4);
+  await quiet(4);
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
   // A failed read waits for the version to move before it is read again by itself.
@@ -1773,10 +1784,9 @@ test("a failed reveal keeps focus and explains without the text", async (_t, jou
   await instructionsField(page).waitFor();
   assert.equal(await instructionsField(page).inputValue(), SENTINEL);
   assert.equal(await failed.count(), 0);
-  assert.equal(
-    await instructionsField(page).evaluate((e) => e === document.activeElement),
-    true,
-  );
+  // Focus is applied in a passive effect after the fetch-driven render.
+  const field = await instructionsField(page).elementHandle();
+  await page.waitForFunction((e) => e === document.activeElement, field);
 });
 
 test("two tabs: a reveal never sends unedited text and a stale edit conflicts", async (_t, journey) => {

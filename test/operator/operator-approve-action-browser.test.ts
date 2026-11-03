@@ -249,8 +249,11 @@ test("a denial sent before leaving the task reads as a denial when its response 
   });
   await item.getByRole("button", { name: "Deny", exact: true }).click();
   const reopen = await leaveAndReopen(s);
+  const landed = s.page.waitForResponse((r) =>
+    r.url().endsWith("/api/operator/commands"),
+  );
   release();
-  await s.page.waitForTimeout(500);
+  await landed;
   await reopen();
   await s.page.getByText(denied).waitFor();
   assert.equal(await s.page.getByText(/^Approved\./).count(), 0);

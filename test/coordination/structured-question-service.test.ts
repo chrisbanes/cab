@@ -6,6 +6,13 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
 import { until } from "../fixtures/until.js";
+
+/**
+ * How long a test watches for a turn, confirmation or write that must NOT happen when no
+ * event marks the work as settled. Generous so a loaded runner cannot let a regression
+ * slip past a window that closed before it ran.
+ */
+const QUIET_WINDOW_MS = 200;
 for (const hold of ["none", "pause", "stop"] as const)
   test(`full own-tool question after successful terminal records exact >16k group behind ${hold} hold`, async () => {
     const f = await createOperatorFixture();
@@ -97,7 +104,7 @@ for (const hold of ["none", "pause", "stop"] as const)
         assert.ok(prompt.includes(work.workId));
         assert.equal(f.runtime.turns, 2);
       } else {
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await new Promise((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
         assert.equal(f.runtime.turns, 1);
       }
     } finally {

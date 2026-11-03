@@ -14,6 +14,13 @@ import type {
 } from "../../src/standalone/codex.js";
 import { startedOf } from "../fixtures/service-internals.js";
 
+/**
+ * How long a test watches for a turn, confirmation or write that must NOT happen when no
+ * event marks the work as settled. Generous so a loaded runner cannot let a regression
+ * slip past a window that closed before it ran.
+ */
+const QUIET_WINDOW_MS = 200;
+
 interface StopOutcome {
   workId: string;
   threadId: string | null;
@@ -406,7 +413,7 @@ test("Stop before capacity admission keeps queued work stopped until explicit re
 
     activeGate.resolve();
     assert.equal((await active).state, "completed");
-    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(
       f.runtime.prompts.some((prompt) => prompt.startsWith("Queued worker")),
       false,
@@ -543,7 +550,7 @@ test("an anomaly blocks a late Stop acknowledgement", async () => {
     internals(f.service).state.recordStopAnomaly("stoppable", reason);
     assert.deepEqual({ ...f.row() }, { interruptState: "failed", reason });
     f.interrupt.resolve();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.deepEqual({ ...f.row() }, { interruptState: "failed", reason });
     assert.equal((await f.observe())?.reason, reason);
   } finally {
@@ -716,7 +723,7 @@ test("legacy reason-text Stop targets migrate to typed interrupt state", async (
     assert.doesNotMatch(JSON.stringify(observation), /Codex/);
 
     await service.resumeTask(f.taskId);
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.equal(service.isTaskStopped(f.taskId), false);
     assert.equal(stopRow(service, "crash").interruptState, "uncertain");
     assert.equal(

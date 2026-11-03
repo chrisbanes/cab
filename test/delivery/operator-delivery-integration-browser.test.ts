@@ -349,6 +349,8 @@ async function sharedDestinations(
       .waitFor();
   }
   await page.goto(`${origin}/app/inbox`);
+  // Count only once the inbox has rendered its read: either an empty-state card or request groups.
+  await page.locator(".inbox-empty-card, .inbox-group").first().waitFor();
   // Routine delivery progress never invents an actionable request.
   assert.equal(
     await page.getByText("Repair literal feedback C1", { exact: true }).count(),

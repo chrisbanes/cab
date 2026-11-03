@@ -128,6 +128,8 @@ test("production retained result evidence keeps original bytes and opens current
   // Later workspace bytes must never replace the retained original.
   await writeFile(textPath, "later workspace bytes\n");
 
+  // The seeding above is test work, not startup: begin a fresh startup budget.
+  j.restart();
   const web = await j.start("fixture.web", () => fixture.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({

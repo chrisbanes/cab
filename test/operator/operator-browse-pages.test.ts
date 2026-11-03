@@ -134,8 +134,11 @@ test("browse pages filter, page and reject stale cursors without changing UI def
     threadId: work.workId,
     turnId: work.workId,
   };
+  // One commit: the seed blocks the in-process server, and 60 synchronous fsyncs on a slow
+  // CI disk outlast its 6s keep-alive window, so the next fetch reuses a socket it resets.
   s.f.seedPersistedState((db) => {
     const store = new ConversationHistoryStore(db);
+    db.exec("BEGIN");
     for (let i = 0; i < 60; i++)
       store.record(
         binding,
@@ -148,6 +151,7 @@ test("browse pages filter, page and reject stale cursors without changing UI def
         },
         [],
       );
+    db.exec("COMMIT");
   });
   const history = `/api/operator/assignments/${review.assignmentId}/history`;
   r = await get(`${history}?limit=50`);

@@ -18,6 +18,7 @@ import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { GitHubSynchronizer } from "../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { until } from "../fixtures/until.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -1002,8 +1003,7 @@ test("explicit and timer refresh converge, and stop settles an in-flight read be
     });
     await service.refreshGitHub();
     assert.equal(reads, 1);
-    await new Promise<void>((resolve) => setTimeout(resolve, 1150));
-    assert.ok(reads >= 2);
+    await until(() => reads >= 2, "timer pass read", 3000);
     stall = true;
     const first = service.refreshGitHub();
     const second = service.refreshGitHub();
@@ -1468,8 +1468,7 @@ test("timer refreshes also wait out a rate limit", async () => {
     await service.refreshGitHub();
     assert.equal(reads, 1);
     assert.equal(reconcile.mock.callCount(), 1);
-    await new Promise<void>((resolve) => setTimeout(resolve, 1150));
-    assert.ok(reconcile.mock.callCount() >= 2, "the timer pass ran");
+    await until(() => reconcile.mock.callCount() >= 2, "the timer pass", 3000);
     assert.equal(reads, 1);
     const sync = service.githubSources().syncState(projectId, "repo");
     assert.equal(sync?.complete, 0);

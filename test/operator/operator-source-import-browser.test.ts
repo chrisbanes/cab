@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Page, Route } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import { refreshed } from "../fixtures/browser-waits.js";
 import { atlasIssueReader } from "../fixtures/setup-browser.js";
 import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
@@ -89,12 +90,6 @@ function track(page: Page) {
   };
 }
 
-/**
- * A press waits for the installation-wide refresh, which answers only after the scheduler wake it
- * starts: each newly ready imported task gets a workspace (about ten git processes) first. That is
- * about a second here, but has exceeded the 5 s default on a contended CI runner.
- */
-const refreshed = { timeout: 15_000 };
 const importPanel = (page: Page) =>
   page.getByRole("region", { name: "Import issues" });
 const importButton = (page: Page) =>
