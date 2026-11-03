@@ -50,6 +50,7 @@ test("merge blockers without a check or a method read as sentences, and other co
     mergeBlockerText("merge-method-not-configured"),
     "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
   );
+  assert.match(mergeBlockerText("pr-base-change-held"), /^Base changed: /);
   for (const code of [
     "check-build-unproved",
     "merge-status-checking",

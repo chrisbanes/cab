@@ -449,12 +449,13 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       headRef: string;
       expectedHeadSha: string;
     },
+    baseRef = target.baseRef,
   ) {
     const mr = await this.boundMergeRequest(target);
     if (
       mr.sha !== target.expectedHeadSha ||
       mr.source_branch !== target.headRef ||
-      mr.target_branch !== target.baseRef
+      mr.target_branch !== baseRef
     )
       throw new Error("provider-head-changed");
     return mr;
@@ -757,7 +758,10 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         )
           receipt = { nodeId: String(mr.id), number: mr.iid, headSha: mr.sha };
       } else if (a.kind === "pr.edit" || a.kind === "pr.ready") {
-        const mr = await this.targetMergeRequest(a.target);
+        const mr = await this.targetMergeRequest(
+          a.target,
+          record.acceptedBaseRef ?? a.target.baseRef,
+        );
         const matches =
           a.kind === "pr.ready"
             ? !mr.draft
@@ -838,7 +842,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     const mr = await this.boundMergeRequest(a.target);
     if (
       mr.source_branch !== a.target.headRef ||
-      mr.target_branch !== a.target.baseRef
+      mr.target_branch !== (record.acceptedBaseRef ?? a.target.baseRef)
     )
       throw new Error("provider-head-changed");
     if (mr.state === "merged") {
@@ -973,6 +977,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       mergeBlockers.push(
         `merge-status-${mr.detailed_merge_status ?? "unproved"}`,
       );
+    const retarget =
+      identity.recordedBaseRef !== undefined &&
+      identity.recordedBaseRef !== mr.target_branch
+        ? {
+            fromRef: identity.recordedBaseRef,
+            priorMerged: await this.priorMerged(
+              id,
+              identity.recordedBaseRef,
+              mr.target_branch,
+            ),
+          }
+        : undefined;
     return prObservationSchema.parse({
       repositoryId: id,
       nodeId: String(mr.id),
@@ -997,7 +1013,48 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       requiredChecks: requiredCheckSources(hostChecks, cabChecks),
       closedIssueNodeIds: [],
       allowedMethods,
+      ...(retarget ? { retarget } : {}),
     });
+  }
+  /**
+   * Whether the merge request that was the base (those from source branch `ref` within this project)
+   * is merged into `into`, the new base: at least one is, and none is open. A read that fails reads as not merged.
+   */
+  private async priorMerged(
+    id: string,
+    ref: string,
+    into: string,
+  ): Promise<boolean> {
+    try {
+      const lower = (
+        await this.pages(
+          `/projects/${id}/merge_requests?state=all&source_branch=${encodeURIComponent(ref)}`,
+        )
+      )
+        .map((v) =>
+          z
+            .object({
+              state: z.string(),
+              source_branch: z.string(),
+              target_branch: z.string(),
+              source_project_id: z.number().int(),
+              target_project_id: z.number().int(),
+            })
+            .parse(v),
+        )
+        .filter(
+          (m) =>
+            m.source_branch === ref &&
+            String(m.source_project_id) === id &&
+            String(m.target_project_id) === id,
+        );
+      return (
+        lower.some((m) => m.state === "merged" && m.target_branch === into) &&
+        !lower.some((m) => m.state === "opened" || m.state === "locked")
+      );
+    } catch {
+      return false;
+    }
   }
 }
 

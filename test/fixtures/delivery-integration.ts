@@ -98,7 +98,35 @@ export function scriptedDeliveryProvider() {
     outage: false,
     lostResponse: false,
     unknownEffect: false,
+    /** `PUT .../merge-async` calls: the one merge write. */
     writes: 0,
+    /** Once a merge has been written, every later read is unavailable. */
+    failReadsAfterWrite: false,
+    /** The bound PR's base branch, and the pull request that used to be its base (null: none exists). */
+    baseRef: "main",
+    lower: null as null | {
+      merged: boolean;
+      open: boolean;
+      /** Where its head lives (a fork reads another repository), and the branch it merged into. */
+      headRepo?: string | null;
+      into?: string;
+    },
+    /** Bodies of the merge writes, and the request ids polled. */
+    mergeBodies: [] as unknown[],
+    polled: [] as string[],
+    /** How the code host answers a merge write, and then each poll of it (the last answer repeats). */
+    mergeAsync: {
+      put: {
+        http: 200,
+        status: "merged",
+        message: undefined as string | undefined,
+        /** A `merged` answer before the pull request itself shows the merge. */
+        lagging: false,
+      },
+      /** A 409 that names this pending request instead. */
+      conflict: undefined as string | undefined,
+      polls: [] as Array<{ status: string; message?: string } | "expired">,
+    },
     sourceBody: "Deliver O",
     sourceReads: 0,
     sourceWait: undefined as Promise<void> | undefined,
@@ -145,24 +173,89 @@ export function scriptedDeliveryProvider() {
     lostThreadReply: false,
     lostThreadResolve: false,
   };
+  /** The `details` GitHub documents for each status of a merge request. */
+  const mergeDetails = (status: string, uuid: string, message?: string) =>
+    status === "pending"
+      ? {
+          message: message ?? "Merge request accepted",
+          uuid,
+          merge_method: "squash",
+          merge_action: "merge",
+          expected_head_sha: state.head,
+          bypass_rules: false,
+        }
+      : status === "merged"
+        ? { message: message ?? "Pull request merged", sha: "9".repeat(40) }
+        : { message: message ?? `Merge ${status}` };
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     const route = `${method} ${url.pathname}`;
     state.requests.push(route);
     assert.equal(url.origin, "https://api.github.com");
-    if (state.outage) throw Error("scripted provider unavailable");
-    if (route === "PUT /repos/org/repo/pulls/7/merge") {
-      assert.deepEqual(JSON.parse(String(init?.body)), {
+    if (
+      state.outage ||
+      (state.failReadsAfterWrite && state.writes > 0 && method === "GET")
+    )
+      throw Error("scripted provider unavailable");
+    if (route === "PUT /repos/org/repo/pulls/7/merge-async") {
+      const body = JSON.parse(String(init?.body));
+      assert.deepEqual(body, {
         sha: state.head,
         merge_method: "squash",
+        bypass_rules: false,
       });
+      state.mergeBodies.push(body);
       state.writes++;
-      if (!state.unknownEffect) state.merged = true;
-      if (state.lostResponse || state.unknownEffect)
-        throw Error("scripted lost merge response");
-      return Response.json({ merged: true });
+      const { put, conflict } = state.mergeAsync;
+      if (conflict)
+        return Response.json(
+          { message: "Merge in progress", details: { uuid: conflict } },
+          { status: 409 },
+        );
+      if (state.unknownEffect) throw Error("scripted lost merge response");
+      if (put.status === "merged" && !put.lagging) state.merged = true;
+      if (state.lostResponse) throw Error("scripted lost merge response");
+      return Response.json(
+        {
+          status: put.status,
+          details: mergeDetails(put.status, "u-1", put.message),
+        },
+        { status: put.http },
+      );
     }
+    if (route.startsWith("GET /repos/org/repo/pulls/7/merge-async/")) {
+      const uuid = route.slice(route.lastIndexOf("/") + 1);
+      const { polls } = state.mergeAsync;
+      const next = polls[Math.min(state.polled.length, polls.length - 1)];
+      state.polled.push(uuid);
+      if (!next || next === "expired")
+        return Response.json({ message: "Not Found" }, { status: 404 });
+      if (next.status === "merged") state.merged = true;
+      return Response.json({
+        status: next.status,
+        details: mergeDetails(next.status, uuid, next.message),
+      });
+    }
+    if (
+      route === "GET /repos/org/repo/pulls" &&
+      state.lower &&
+      url.searchParams.get("head") === "org:stack-lower"
+    )
+      return Response.json([
+        {
+          state: state.lower.open ? "open" : "closed",
+          merged_at: state.lower.merged ? "2026-10-05T12:00:00Z" : null,
+          head: {
+            ref: "stack-lower",
+            repo:
+              state.lower.headRepo === null
+                ? null
+                : { node_id: state.lower.headRepo ?? "R1" },
+          },
+          base: { ref: state.lower.into ?? "main" },
+        },
+      ]);
     if (route === "POST /repos/org/repo/issues/1/comments") {
       state.commentWrites++;
       if (state.unknownComment) throw Error("scripted unknown comment effect");
@@ -277,7 +370,7 @@ export function scriptedDeliveryProvider() {
               id: "P7",
               number: 7,
               repository: { id: "R1", nameWithOwner: "org/repo" },
-              baseRefName: "main",
+              baseRefName: state.baseRef,
               headRefName: "cb/change",
               headRefOid: state.head,
               baseRefOid: state.base,
@@ -325,6 +418,11 @@ export function scriptedDeliveryProvider() {
       throw Error(`Unhandled scripted GraphQL document: ${query}`);
     }
     if (method !== "GET") throw Error(`Unhandled scripted write: ${route}`);
+    // Any base branch: no ruleset and no classic protection.
+    if (/^\/repos\/org\/repo\/rules\/branches\/[^/]+$/.test(url.pathname))
+      return Response.json([]);
+    if (/^\/repos\/org\/repo\/branches\/[^/]+\/protection$/.test(url.pathname))
+      return new Response("", { status: 404 });
     switch (url.pathname) {
       case "/user":
         return Response.json({ node_id: "U1" });
@@ -346,7 +444,12 @@ export function scriptedDeliveryProvider() {
           merged: state.merged,
           draft: false,
           head: { sha: state.head, ref: "cb/change", repo: { node_id: "R1" } },
-          base: { sha: state.base, ref: "main", repo: { node_id: "R1" } },
+          base: {
+            sha: state.base,
+            ref: state.baseRef,
+            repo: { node_id: "R1" },
+          },
+          state: state.merged || state.closed ? "closed" : "open",
         });
       case "/repos/org/repo/issues/1":
         return Response.json({
@@ -376,7 +479,6 @@ export function scriptedDeliveryProvider() {
       case `/repos/org/repo/commits/${state.head}/statuses`:
       case "/repos/org/repo/pulls/7/reviews":
       case "/repos/org/repo/pulls/7/comments":
-      case "/repos/org/repo/rules/branches/main":
       case "/repos/org/repo/deployments":
         return Response.json([]);
       case "/repos/org/repo/issues/1/comments":
@@ -394,8 +496,6 @@ export function scriptedDeliveryProvider() {
               ]
             : [],
         );
-      case "/repos/org/repo/branches/main/protection":
-        return new Response("", { status: 404 });
       default:
         throw Error(`Unhandled scripted endpoint: ${route}`);
     }
@@ -694,7 +794,29 @@ export async function createReleaseDeliveryFixture(
       assert.equal(r.success, true, r.text);
       return r;
     },
-    async merge(operationId = randomUUID()) {
+    /** Links R1 to its checkout at `ref`, as the project's repository link names the base branch. */
+    linkRepository(ref = "main") {
+      f.seedPersistedState((db) =>
+        db
+          .prepare(
+            "UPDATE project_repository_links SET links=? WHERE projectId=?",
+          )
+          .run(
+            JSON.stringify([
+              {
+                repositoryId: "R1",
+                path: "/tmp/R1",
+                ref,
+                gitCommonDirectory: "/tmp/R1/.git",
+                codeHost: "github",
+                host: "github.com",
+              },
+            ]),
+            projectId,
+          ),
+      );
+    },
+    async merge(operationId = randomUUID(), baseRef = "main") {
       return call("cab_external_action", {
         operationId,
         action: {
@@ -704,7 +826,7 @@ export async function createReleaseDeliveryFixture(
             nodeId: "P7",
             number: 7,
             headRef: "cb/change",
-            baseRef: "main",
+            baseRef,
             expectedHeadSha: scripted.state.head,
           },
           method: "squash",

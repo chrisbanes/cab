@@ -100,10 +100,14 @@ test("live guard rejects absent/changed grant and unexpected resources before pr
   const g = new FixtureGuard(f.raw, f.grant);
   assert.throws(() =>
     g.assertRequest(
-      "https://attacker.example/repos/chrisbanes/ensemble-s07a-fixture/pulls/4/merge",
+      "https://attacker.example/repos/chrisbanes/ensemble-s07a-fixture/pulls/4/merge-async",
       {
         method: "PUT",
-        body: JSON.stringify({ sha: "2".repeat(40), merge_method: "squash" }),
+        body: JSON.stringify({
+          sha: "2".repeat(40),
+          merge_method: "squash",
+          bypass_rules: false,
+        }),
       },
     ),
   );
@@ -115,10 +119,14 @@ test("live guard rejects absent/changed grant and unexpected resources before pr
   );
   assert.throws(() =>
     g.assertRequest(
-      "https://api.github.com/repos/chrisbanes/ensemble-s07a-fixture/pulls/3/merge",
+      "https://api.github.com/repos/chrisbanes/ensemble-s07a-fixture/pulls/3/merge-async",
       {
         method: "PUT",
-        body: JSON.stringify({ sha: "1".repeat(40), merge_method: "squash" }),
+        body: JSON.stringify({
+          sha: "1".repeat(40),
+          merge_method: "squash",
+          bypass_rules: false,
+        }),
       },
     ),
   );
@@ -161,6 +169,70 @@ test("live guard rejects absent/changed grant and unexpected resources before pr
       cleanup: "passed",
     }),
     "failed",
+  );
+});
+test("live guard permits one asynchronous squash merge of the through-merge journey and its poll, and nothing near it", () => {
+  const f = fixture();
+  const g = new FixtureGuard(f.raw, f.grant);
+  const root = "https://api.github.com/repos/chrisbanes/ensemble-s07a-fixture";
+  const merge = (path: string, body: Record<string, unknown>) =>
+    g.assertRequest(`${root}/pulls/${path}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  const body = {
+    sha: "2".repeat(40),
+    merge_method: "squash",
+    bypass_rules: false,
+  };
+  merge("4/merge-async", body);
+  g.assertRequest(
+    `${root}/pulls/4/merge-async/6f1d2c3e-aaaa-bbbb-cccc-0123456789ab`,
+    {
+      method: "GET",
+    },
+  );
+  // The synchronous merge is gone, and the poll belongs to the through-merge journey alone.
+  assert.throws(() =>
+    merge("4/merge", { sha: "2".repeat(40), merge_method: "squash" }),
+  );
+  assert.throws(
+    () => merge("4/merge-async", { ...body, bypass_rules: true }),
+    /Unexpected fixture merge/,
+  );
+  const { bypass_rules: _omitted, ...withoutBypass } = body;
+  assert.throws(
+    () => merge("4/merge-async", withoutBypass),
+    /Unexpected fixture merge/,
+  );
+  assert.throws(
+    () => merge("4/merge-async", { ...body, merge_action: "enqueue" }),
+    /Unexpected fixture merge/,
+  );
+  assert.throws(
+    () => merge("4/merge-async", { ...body, merge_method: "merge" }),
+    /Unexpected fixture merge/,
+  );
+  assert.throws(
+    () => merge("4/merge-async", { ...body, sha: "3".repeat(40) }),
+    /Unexpected fixture merge/,
+  );
+  assert.throws(() => merge("5/merge-async", body));
+  assert.throws(() =>
+    g.assertRequest(`${root}/pulls/3/merge-async/6f1d2c3e-aaaa`, {
+      method: "GET",
+    }),
+  );
+  assert.throws(() =>
+    g.assertRequest(`${root}/pulls/4/merge-async/..%2F..`, { method: "GET" }),
+  );
+  assert.throws(() =>
+    g.assertRequest(`${root}/pulls/4/merge-async/a/b`, { method: "GET" }),
+  );
+  assert.throws(() =>
+    g.assertRequest(`${root}/pulls/4/merge-async/6f1d2c3e-aaaa`, {
+      method: "DELETE",
+    }),
   );
 });
 test("fixture visibility must be explicitly granted before any effect", () => {
@@ -222,9 +294,13 @@ test("live guard permits only exact recorded progress, status, merge and separat
     method: "POST",
     body: JSON.stringify({ context: "s07a-ci", state: "failure" }),
   });
-  g.assertRequest(`${root}/pulls/4/merge`, {
+  g.assertRequest(`${root}/pulls/4/merge-async`, {
     method: "PUT",
-    body: JSON.stringify({ sha: "2".repeat(40), merge_method: "squash" }),
+    body: JSON.stringify({
+      sha: "2".repeat(40),
+      merge_method: "squash",
+      bypass_rules: false,
+    }),
   });
   assert.throws(() =>
     g.assertRequest(`${root}/git/refs/heads/merge`, { method: "DELETE" }),

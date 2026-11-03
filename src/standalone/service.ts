@@ -1334,7 +1334,9 @@ export class StandaloneService {
                 binding.observation.nodeId !== target.nodeId ||
                 binding.observation.repositoryId !== target.repositoryId ||
                 binding.observation.number !== target.number ||
-                binding.observation.headSha !== target.expectedHeadSha
+                binding.observation.headSha !== target.expectedHeadSha ||
+                binding.baseChange ||
+                binding.acceptedBaseRef !== target.baseRef
               )
                 reasons.push("merge-target-not-current-delivery");
               if (!String(domain.project(caller.projectId).instructions).trim())

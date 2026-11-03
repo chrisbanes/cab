@@ -1492,3 +1492,565 @@ test("a code-host requirements read that does not answer in time is unavailable 
     db.close();
   }
 });
+
+type ReleaseFixture = Awaited<ReturnType<typeof createReleaseDeliveryFixture>>;
+
+/** A through-merge delivery bound to pull request #7 while it targets `stack-lower`; the repository link's base is `main`. */
+async function stackedDelivery() {
+  const f = await createReleaseDeliveryFixture("through-merge");
+  f.linkRepository("main");
+  f.scripted.state.baseRef = "stack-lower";
+  await f.register();
+  return f;
+}
+const refreshDelivery = (f: ReleaseFixture) =>
+  f.service.coordinationView().refreshDelivery(f.taskId);
+/** A changed observation wakes the lead; its next turn takes the event, so a held action is held for its own reason. */
+async function takeWake(f: ReleaseFixture) {
+  const turn = f.runtime.turns;
+  await f.terminal(turn);
+  await f.waitTurn(turn + 1);
+}
+const boundDelivery = (f: ReleaseFixture) => {
+  const binding = f.service.delivery().delivery(f.taskId);
+  assert.ok(binding);
+  return binding;
+};
+
+test("a retarget to the repository base after the lower pull request merged is accepted and merges against the new base", async () => {
+  const f = await stackedDelivery();
+  try {
+    assert.equal(boundDelivery(f).acceptedBaseRef, "stack-lower");
+    f.scripted.state.baseRef = "main";
+    f.scripted.state.lower = { merged: true, open: false };
+    await refreshDelivery(f);
+    const binding = boundDelivery(f);
+    assert.equal(binding.acceptedBaseRef, "main");
+    assert.equal(binding.baseChange, null);
+    assert.equal(binding.observation.baseRef, "main");
+    // The next read finds nothing new, so it does not wake the lead again.
+    await refreshDelivery(f);
+    assert.equal(boundDelivery(f).revision, binding.revision);
+    await takeWake(f);
+    // The old base is no longer a base the lead may act on.
+    assert.equal((await f.merge(randomUUID(), "stack-lower")).success, false);
+    assert.equal(f.scripted.state.writes, 0);
+    const merged = await f.merge(randomUUID(), "main");
+    assert.equal(merged.success, true, merged.text);
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a retarget before the lower pull request merged is held, blocks every action, and is accepted once it merges", async () => {
+  const f = await stackedDelivery();
+  try {
+    f.scripted.state.baseRef = "main";
+    f.scripted.state.lower = { merged: false, open: true };
+    await refreshDelivery(f);
+    const held = boundDelivery(f);
+    assert.equal(held.acceptedBaseRef, "stack-lower");
+    assert.deepEqual(held.baseChange, {
+      observedRef: "main",
+      reason: "prior-change-request-not-merged",
+    });
+    await takeWake(f);
+    for (const base of ["main", "stack-lower"])
+      assert.equal((await f.merge(randomUUID(), base)).success, false, base);
+    assert.equal(f.scripted.state.writes, 0);
+    // The hold is visible where the operator reads the delivery.
+    const read = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery;
+    assert.ok(read?.binding?.mergeBlockers?.includes("pr-base-change-held"));
+
+    f.scripted.state.lower = { merged: true, open: false };
+    await refreshDelivery(f);
+    const accepted = boundDelivery(f);
+    assert.equal(accepted.acceptedBaseRef, "main");
+    assert.equal(accepted.baseChange, null);
+    // The observation did not change, but lifting the hold is a new revision, so the lead is told.
+    assert.ok(accepted.revision > held.revision);
+    assert.equal(f.scripted.state.writes, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a retarget to any other branch is held even when the lower pull request merged, and clears when the base returns", async () => {
+  const f = await stackedDelivery();
+  try {
+    f.scripted.state.baseRef = "release";
+    f.scripted.state.lower = { merged: true, open: false };
+    await refreshDelivery(f);
+    const held = boundDelivery(f);
+    assert.equal(held.acceptedBaseRef, "stack-lower");
+    assert.equal(held.baseChange?.reason, "base-not-repository-base");
+    await takeWake(f);
+    assert.equal((await f.merge(randomUUID(), "release")).success, false);
+    assert.equal(f.scripted.state.writes, 0);
+
+    f.scripted.state.baseRef = "stack-lower";
+    await refreshDelivery(f);
+    assert.equal(boundDelivery(f).baseChange, null);
+    assert.equal(boundDelivery(f).acceptedBaseRef, "stack-lower");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a lower pull request that is open, from a fork, or merged elsewhere is not a merged base", async () => {
+  for (const lower of [
+    { merged: true, open: true },
+    { merged: true, open: false, headRepo: "R-fork" },
+    { merged: true, open: false, headRepo: null },
+    { merged: true, open: false, into: "release" },
+  ]) {
+    const f = await stackedDelivery();
+    try {
+      f.scripted.state.baseRef = "main";
+      f.scripted.state.lower = lower;
+      await refreshDelivery(f);
+      assert.equal(boundDelivery(f).acceptedBaseRef, "stack-lower");
+      assert.ok(boundDelivery(f).baseChange, JSON.stringify(lower));
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("an accepted retarget moves the base of an unsettled pull request action so its read-back confirms", async () => {
+  const f = await stackedDelivery();
+  try {
+    f.scripted.state.unknownEffect = true;
+    const operationId = randomUUID();
+    assert.equal((await f.merge(operationId, "stack-lower")).success, false);
+    assert.equal(f.scripted.state.writes, 1);
+    const record = () => f.service.delivery().action(operationId);
+    assert.equal(record().state, "uncertain");
+    assert.equal(record().acceptedBaseRef, "stack-lower");
+
+    // The write had landed, and the lower pull request merged and retargeted this one.
+    f.scripted.state.unknownEffect = false;
+    f.scripted.state.merged = true;
+    f.scripted.state.baseRef = "main";
+    f.scripted.state.lower = { merged: true, open: false };
+    await refreshDelivery(f);
+    assert.equal(record().acceptedBaseRef, "main");
+    // The request, and with it its digest, never changes.
+    assert.deepEqual(
+      (record().request.action.target as { baseRef?: string }).baseRef,
+      "stack-lower",
+    );
+    await refreshDelivery(f);
+    assert.equal(record().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+/** A through-merge delivery whose merge write the scripted code host answers with `put`, then each poll in `polls`. */
+async function asyncMerge(
+  put: Partial<
+    ReturnType<typeof scriptedDeliveryProvider>["state"]["mergeAsync"]["put"]
+  >,
+  polls: ReturnType<
+    typeof scriptedDeliveryProvider
+  >["state"]["mergeAsync"]["polls"] = [],
+) {
+  const f = await createReleaseDeliveryFixture("through-merge");
+  await f.register();
+  Object.assign(f.scripted.state.mergeAsync.put, put);
+  f.scripted.state.mergeAsync.polls = polls;
+  const operationId = randomUUID();
+  const action = () => {
+    const record = f.service.delivery().action(operationId);
+    return {
+      state: record.state,
+      reason: record.observation?.reason ?? null,
+      mergeRequest: record.observation?.mergeRequest ?? null,
+      hostReason: record.observation?.hostReason ?? null,
+    };
+  };
+  return { f, operationId, action, merge: () => f.merge(operationId) };
+}
+const merge = {
+  body: { sha: "1".repeat(40), merge_method: "squash", bypass_rules: false },
+};
+
+test("a merge accepted as pending is polled to merged and the write is sent once", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "pending" },
+    { status: "merged" },
+  ]);
+  try {
+    assert.equal((await send()).success, false);
+    assert.deepEqual(f.scripted.state.mergeBodies, [merge.body]);
+    // The write's own read-back polled once and found it still pending.
+    assert.deepEqual(action(), {
+      state: "uncertain",
+      reason: "provider-merge-pending",
+      mergeRequest: { uuid: "u-1", status: "pending" },
+      hostReason: null,
+    });
+    await refreshDelivery(f);
+    // The poll said merged; only the pull request read proves it.
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+    assert.deepEqual(f.scripted.state.polled, ["u-1", "u-1"]);
+    assert.equal(f.service.domain().task(f.taskId).state, "open");
+  } finally {
+    await f.close();
+  }
+});
+
+test("an enqueued merge is settled by the pull request, and a dequeued one is a failure", async () => {
+  for (const outcome of ["merged", "dequeued"] as const) {
+    const {
+      f,
+      action,
+      merge: send,
+    } = await asyncMerge({ http: 202, status: "enqueued" }, []);
+    try {
+      assert.equal((await send()).success, false);
+      assert.deepEqual(action(), {
+        state: "uncertain",
+        reason: "provider-merge-enqueued",
+        mergeRequest: { status: "enqueued" },
+        hostReason: null,
+      });
+      await refreshDelivery(f);
+      assert.equal(action().state, "uncertain", "an open pull request waits");
+      if (outcome === "merged") f.scripted.state.merged = true;
+      else f.scripted.state.closed = true;
+      await refreshDelivery(f);
+      assert.equal(
+        action().reason,
+        outcome === "merged" ? null : "provider-merge-dequeued",
+      );
+      assert.equal(
+        action().state,
+        outcome === "merged" ? "confirmed-success" : "confirmed-failure",
+      );
+      // Enqueued is final: the request id is never polled.
+      assert.deepEqual(f.scripted.state.polled, []);
+      assert.equal(f.scripted.state.writes, 1);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("a failed merge records the code host's reason", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "failed", message: "Required status check is failing" },
+  ]);
+  try {
+    assert.equal((await send()).success, false);
+    assert.deepEqual(action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { uuid: "u-1", status: "failed" },
+      hostReason: "Required status check is failing",
+    });
+    assert.equal(f.scripted.state.writes, 1);
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-failure");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a code host reason is bounded", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "failed",
+    message: "x".repeat(900),
+  });
+  try {
+    await send();
+    assert.equal(action().hostReason?.length, 500);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an expired merge request is resolved by the merged pull request, or held as unknown and never sent again across a restart", async () => {
+  const merged = await asyncMerge({ http: 202, status: "pending" }, [
+    "expired",
+  ]);
+  try {
+    await merged.merge();
+    assert.equal(merged.action().reason, "provider-merge-outcome-unknown");
+    merged.f.scripted.state.merged = true;
+    await refreshDelivery(merged.f);
+    assert.equal(merged.action().state, "confirmed-success");
+    assert.equal(merged.f.scripted.state.writes, 1);
+  } finally {
+    await merged.f.close();
+  }
+  const unmerged = await asyncMerge({ http: 202, status: "pending" }, [
+    "expired",
+  ]);
+  try {
+    await unmerged.merge();
+    assert.deepEqual(unmerged.action(), {
+      state: "uncertain",
+      reason: "provider-merge-outcome-unknown",
+      mergeRequest: { uuid: "u-1", status: "pending" },
+      hostReason: null,
+    });
+    // Replaying the operation does not send it again either.
+    assert.equal((await unmerged.merge()).success, false);
+    assert.equal(unmerged.f.scripted.state.writes, 1);
+    await unmerged.f.service.stopTask(unmerged.f.taskId);
+    await until(
+      () => !unmerged.f.service.list().some((i) => i.state === "running"),
+      "uncertain Stop",
+    );
+    await unmerged.f.reopen();
+    await refreshDelivery(unmerged.f);
+    assert.equal(unmerged.action().reason, "provider-merge-outcome-unknown");
+    assert.equal(unmerged.f.scripted.state.writes, 1);
+    assert.equal(
+      unmerged.f.service.domain().task(unmerged.f.taskId).state,
+      "open",
+    );
+  } finally {
+    await unmerged.f.close();
+  }
+});
+
+test("a conflict naming a pending merge request resolves against that request", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({}, [{ status: "merged" }]);
+  try {
+    f.scripted.state.mergeAsync.conflict = "u-existing";
+    assert.equal((await send()).success, false);
+    assert.deepEqual(action().mergeRequest, {
+      uuid: "u-existing",
+      status: "merged",
+    });
+    assert.deepEqual(f.scripted.state.polled, ["u-existing"]);
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an unreadable poll keeps the merge request id for the next pass", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "pending" },
+  ]);
+  try {
+    await send();
+    f.scripted.state.outage = true;
+    await refreshDelivery(f).catch(() => {});
+    assert.equal(action().state, "uncertain");
+    assert.equal(action().mergeRequest?.uuid, "u-1");
+    f.scripted.state.outage = false;
+    f.scripted.state.mergeAsync.polls = [{ status: "merged" }];
+    f.scripted.state.polled.length = 0;
+    await refreshDelivery(f);
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a merge request id survives a failed read straight after the write, so a later failure is still recorded", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "failed", message: "Required status check is failing" },
+  ]);
+  try {
+    // Every read after the write fails: only the write's own answer holds the request id.
+    f.scripted.state.failReadsAfterWrite = true;
+    assert.equal((await send()).success, false);
+    assert.equal(action().state, "uncertain");
+    assert.equal(action().mergeRequest?.uuid, "u-1");
+    f.scripted.state.failReadsAfterWrite = false;
+    await refreshDelivery(f);
+    assert.deepEqual(action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { uuid: "u-1", status: "failed" },
+      hostReason: "Required status check is failing",
+    });
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an already merged answer carries a commit and no request id, and the pull request confirms it", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "merged",
+  });
+  try {
+    assert.equal((await send()).success, true);
+    assert.deepEqual(action(), {
+      state: "confirmed-success",
+      reason: null,
+      mergeRequest: null,
+      hostReason: null,
+    });
+    assert.equal(f.scripted.state.writes, 1);
+    assert.deepEqual(f.scripted.state.polled, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a merged answer the pull request does not show yet has no id to poll, so it waits for the pull request and never writes again", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "merged",
+    lagging: true,
+  });
+  try {
+    assert.equal((await send()).success, false);
+    assert.deepEqual(action(), {
+      state: "uncertain",
+      reason: "provider-merge-outcome-unknown",
+      mergeRequest: { status: "merged" },
+      hostReason: null,
+    });
+    await refreshDelivery(f);
+    assert.equal(action().state, "uncertain");
+    f.scripted.state.merged = true;
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+    assert.deepEqual(f.scripted.state.polled, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a poll that merged carries a commit and no id, and the recorded id is kept", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "pending" },
+    { status: "merged" },
+  ]);
+  try {
+    await send();
+    await refreshDelivery(f);
+    assert.deepEqual(action().mergeRequest, { uuid: "u-1", status: "merged" });
+    await refreshDelivery(f);
+    assert.equal(action().state, "confirmed-success");
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a failed answer with only a message is a confirmed failure that records it", async () => {
+  const {
+    f,
+    action,
+    merge: send,
+  } = await asyncMerge({
+    http: 200,
+    status: "failed",
+    message: "Merge conflict",
+  });
+  try {
+    await send();
+    assert.deepEqual(action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { status: "failed" },
+      hostReason: "Merge conflict",
+    });
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a pull request that moved off the merge target never confirms it, but its recorded merge request can still fail", async () => {
+  const failing = await asyncMerge({ http: 202, status: "pending" }, [
+    { status: "pending" },
+    { status: "failed", message: "Head branch was modified" },
+  ]);
+  try {
+    await failing.merge();
+    assert.equal(failing.action().state, "uncertain");
+    failing.f.scripted.state.head = "3".repeat(40);
+    await refreshDelivery(failing.f);
+    assert.deepEqual(failing.action(), {
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      mergeRequest: { uuid: "u-1", status: "failed" },
+      hostReason: "Head branch was modified",
+    });
+    assert.equal(failing.f.scripted.state.writes, 1);
+  } finally {
+    await failing.f.close();
+  }
+  for (const poll of [
+    { status: "pending" },
+    { status: "merged" },
+    "expired",
+  ] as const) {
+    const waiting = await asyncMerge({ http: 202, status: "pending" }, [
+      { status: "pending" },
+      poll,
+    ]);
+    try {
+      await waiting.merge();
+      waiting.f.scripted.state.head = "3".repeat(40);
+      await refreshDelivery(waiting.f);
+      // Merged by the poll, but at a head this action never named: not a confirmation.
+      assert.equal(waiting.action().state, "uncertain", JSON.stringify(poll));
+      assert.equal(waiting.action().mergeRequest?.uuid, "u-1");
+      assert.equal(waiting.f.scripted.state.writes, 1);
+    } finally {
+      await waiting.f.close();
+    }
+  }
+});

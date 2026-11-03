@@ -55,6 +55,8 @@ export interface PrIdentity {
   prNumber: number;
   expectedPrNodeId: string;
   expectedHeadSha: string;
+  /** The delivery's accepted base: a read that finds another base also reports whether the old base's change request merged. */
+  recordedBaseRef?: string;
 }
 /** Fresh provider facts about an issue cab's delivery closed; classification is the caller's. */
 export type ClosedIssueInspection =
@@ -149,11 +151,32 @@ const hasLabel = (labels: { name: string }[], name: string): boolean =>
     name,
   );
 
+const asyncMergeId = z.string().trim().min(1).max(512);
+/**
+ * `merge-async`'s answer to a merge request and to a poll of it. `details` is one of three shapes: the
+ * pending request's (`uuid` and its merge options), a bare `message`, or a `message` with the merge
+ * commit `sha`; so only a pending request carries a `uuid`.
+ */
+const asyncMergeSchema = z.object({
+  status: z.enum(["pending", "enqueued", "merged", "failed"]),
+  details: z.object({
+    uuid: asyncMergeId.optional(),
+    message: z.string().optional(),
+    sha: z.string().optional(),
+  }),
+});
+/** The body of a 409: the request that is already pending, which the API says it names. */
+const asyncMergeConflictSchema = z.object({
+  details: z.object({ uuid: asyncMergeId }),
+});
+
 class ProviderFailure extends Error {
   constructor(
     readonly status: number,
     /** Set when GitHub rate-limited the request: the epoch-ms time to resume. */
     readonly resumeAt?: number,
+    /** A 409's parsed JSON body (a merge-async conflict names the pending request); undefined otherwise. */
+    readonly body?: unknown,
   ) {
     super(`provider-http-${status}`);
   }
@@ -285,6 +308,9 @@ export class GitHubHttpDeliveryProvider
       throw new ProviderFailure(
         response.status,
         await githubRateLimitResumeAt(response),
+        response.status === 409
+          ? await response.json().catch(() => undefined)
+          : undefined,
       );
     return {
       json: response.status === 204 ? null : await response.json(),
@@ -1196,6 +1222,19 @@ export class GitHubHttpDeliveryProvider
       (a, b) =>
         a.kind.localeCompare(b.kind) || a.nodeId.localeCompare(b.nodeId),
     );
+    const retarget =
+      identity.recordedBaseRef !== undefined &&
+      identity.recordedBaseRef !== raw.base.ref
+        ? {
+            fromRef: identity.recordedBaseRef,
+            priorMerged: await this.priorMerged(
+              repo,
+              identity.repositoryId,
+              identity.recordedBaseRef,
+              raw.base.ref,
+            ),
+          }
+        : undefined;
     return prObservationSchema.parse({
       repositoryId: identity.repositoryId,
       nodeId: raw.node_id,
@@ -1223,7 +1262,48 @@ export class GitHubHttpDeliveryProvider
             )
             .map((i) => i.id),
       allowedMethods,
+      ...(retarget ? { retarget } : {}),
     });
+  }
+  /**
+   * Whether the change request that was the base (the pull requests of branch `ref` in this repository)
+   * is merged into `into`, the new base: at least one is, and none is open. A read that fails reads as not merged.
+   */
+  private async priorMerged(
+    repo: { path: string; owner: string },
+    repositoryId: string,
+    ref: string,
+    into: string,
+  ): Promise<boolean> {
+    try {
+      const lower = (
+        await this.pages(
+          `${repo.path}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${ref}`)}&per_page=100`,
+        )
+      )
+        .map((v) =>
+          z
+            .object({
+              state: name,
+              merged_at: name.nullable(),
+              head: z.object({
+                ref: name,
+                repo: z.object({ node_id: name }).nullable(),
+              }),
+              base: z.object({ ref: name }),
+            })
+            .parse(v),
+        )
+        .filter(
+          (p) => p.head.ref === ref && p.head.repo?.node_id === repositoryId,
+        );
+      return (
+        lower.some((p) => p.merged_at !== null && p.base.ref === into) &&
+        !lower.some((p) => p.state === "open")
+      );
+    } catch {
+      return false;
+    }
   }
   private assertThreadOn(
     thread: { prId: string; prNumber: number; repositoryId: string },
@@ -1387,6 +1467,7 @@ export class GitHubHttpDeliveryProvider
           .parse(record.beforeState?.repositoryPath),
       };
       const marker = `<!-- cab-operation:${record.operationId} -->`;
+      let readback = record;
       switch (a.kind) {
         case "issue.create":
           await this.request(`${repo.path}/issues`, "POST", {
@@ -1481,16 +1562,29 @@ export class GitHubHttpDeliveryProvider
             thread: a.target.threadNodeId,
           });
           break;
-        case "pr.merge":
-          await this.request(
-            `${repo.path}/pulls/${a.target.number}/merge`,
-            "PUT",
-            { sha: a.target.expectedHeadSha, merge_method: a.method },
-          );
+        case "pr.merge": {
+          // The one merge write: nothing after it sends the request again, only reads it.
+          const sent = await this.mergeAsync(repo.path, a);
+          readback = {
+            ...record,
+            observation: {
+              state: "uncertain",
+              reason: "provider-merge-pending",
+              receipt: null,
+              mergeRequest: {
+                ...(sent.uuid ? { uuid: sent.uuid } : {}),
+                status: sent.status,
+              },
+              ...(sent.status === "failed" && sent.message
+                ? { hostReason: sent.message }
+                : {}),
+            },
+          };
           break;
+        }
       }
       // The write response never establishes success.
-      return await this.inspectAction(record);
+      return await this.inspectAction(readback);
     } catch (error) {
       // Only a single-request rejection is definitive. Label removal is multi-effect.
       if (
@@ -1550,6 +1644,110 @@ export class GitHubHttpDeliveryProvider
     verified: async (repositoryId) =>
       this.remoteAt((await this.repository(repositoryId)).path),
   };
+  /** Sends the merge once, without a rule bypass; a 409 that names the pending request resolves to it. */
+  private async mergeAsync(
+    path: string,
+    a: Extract<ExternalAction, { kind: "pr.merge" }>,
+  ) {
+    const url = `${path}/pulls/${a.target.number}/merge-async`;
+    try {
+      const sent = asyncMergeSchema.parse(
+        (
+          await this.request(url, "PUT", {
+            sha: a.target.expectedHeadSha,
+            merge_method: a.method,
+            bypass_rules: false,
+          })
+        ).json,
+      );
+      return {
+        status: sent.status,
+        uuid: sent.details.uuid,
+        message: sent.details.message?.slice(0, 500),
+      };
+    } catch (error) {
+      const existing =
+        error instanceof ProviderFailure && error.status === 409
+          ? asyncMergeConflictSchema.safeParse(error.body)
+          : undefined;
+      if (!existing?.success) throw error;
+      return {
+        status: "pending" as const,
+        uuid: existing.data.details.uuid,
+        message: undefined,
+      };
+    }
+  }
+  /**
+   * A merge the pull request does not show yet. The recorded request is polled, never sent again;
+   * an `enqueued` request or an expired one is settled by the pull request itself.
+   */
+  private async mergeOutcome(
+    path: string,
+    a: Extract<ExternalAction, { kind: "pr.merge" }>,
+    record: DeliveryActionRecord,
+    prState: string,
+    moved = false,
+  ): Promise<ProviderActionObservation> {
+    const known = record.observation?.mergeRequest;
+    const uncertain = (
+      reason: string,
+      mergeRequest = known,
+    ): ProviderActionObservation => ({
+      state: "uncertain",
+      reason,
+      receipt: null,
+      ...(mergeRequest ? { mergeRequest } : {}),
+    });
+    const failed = (
+      mergeRequest: NonNullable<typeof known>,
+      hostReason: string | undefined,
+    ): ProviderActionObservation => ({
+      state: "confirmed-failure",
+      reason: "provider-merge-failed",
+      receipt: null,
+      mergeRequest,
+      ...(hostReason ? { hostReason } : {}),
+    });
+    if (!known) return uncertain("provider-merge-outcome-unknown");
+    if (known.status === "failed")
+      return failed(known, record.observation?.hostReason);
+    if (known.status === "enqueued")
+      return prState === "closed" && !moved
+        ? {
+            state: "confirmed-failure",
+            reason: "provider-merge-dequeued",
+            receipt: null,
+            mergeRequest: known,
+          }
+        : uncertain("provider-merge-enqueued");
+    // Only a pending request has an id to poll; without one the pull request alone settles it.
+    if (!known.uuid) return uncertain("provider-merge-outcome-unknown");
+    let polled: z.output<typeof asyncMergeSchema>;
+    try {
+      polled = asyncMergeSchema.parse(
+        (
+          await this.request(
+            `${path}/pulls/${a.target.number}/merge-async/${encodeURIComponent(known.uuid)}`,
+          )
+        ).json,
+      );
+    } catch (error) {
+      // The result expired: only the pull request can say more, and it did not show a merge.
+      if (error instanceof ProviderFailure && error.status === 404)
+        return uncertain("provider-merge-outcome-unknown");
+      throw error;
+    }
+    const mergeRequest = { uuid: known.uuid, status: polled.status };
+    if (polled.status === "failed")
+      return failed(mergeRequest, polled.details.message?.slice(0, 500));
+    return uncertain(
+      polled.status === "enqueued"
+        ? "provider-merge-enqueued"
+        : "provider-merge-pending",
+      mergeRequest,
+    );
+  }
   async inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation> {
@@ -1726,6 +1924,7 @@ export class GitHubHttpDeliveryProvider
               repo: z.object({ node_id: name }),
             }),
             base: z.object({ ref: name, repo: z.object({ node_id: name }) }),
+            state: name,
           })
           .parse(
             (await this.request(`${repo.path}/pulls/${a.target.number}`)).json,
@@ -1733,13 +1932,18 @@ export class GitHubHttpDeliveryProvider
         if (
           p.node_id !== a.target.nodeId ||
           p.number !== a.target.number ||
-          p.head.sha !== a.target.expectedHeadSha ||
-          p.head.ref !== a.target.headRef ||
-          p.base.ref !== a.target.baseRef ||
           p.head.repo.node_id !== a.target.repositoryId ||
           p.base.repo.node_id !== a.target.repositoryId
         )
           throw new Error("provider-pr-mismatch");
+        const moved =
+          p.head.sha !== a.target.expectedHeadSha ||
+          p.head.ref !== a.target.headRef ||
+          p.base.ref !== (record.acceptedBaseRef ?? a.target.baseRef);
+        // A pull request that moved off the merge target never confirms it, but its recorded merge request can still fail.
+        if (moved && a.kind === "pr.merge")
+          return await this.mergeOutcome(repo.path, a, record, p.state, true);
+        if (moved) throw new Error("provider-pr-mismatch");
         const matches =
           a.kind === "pr.ready"
             ? !p.draft
@@ -1757,6 +1961,8 @@ export class GitHubHttpDeliveryProvider
             headSha: p.head.sha,
             merged: p.merged,
           };
+        else if (a.kind === "pr.merge")
+          return await this.mergeOutcome(repo.path, a, record, p.state);
       } else if ("number" in a.target) {
         const issue = await this.issue(repo.path, a.target);
         let matches = false;
@@ -1788,7 +1994,13 @@ export class GitHubHttpDeliveryProvider
         state: "uncertain",
         reason: "provider-readback-unavailable",
         receipt: null,
-        // A readback failure never forgets that Git reported the push done.
+        // A readback failure never forgets the code host's merge request, nor that Git reported the push done.
+        ...(record.observation?.mergeRequest
+          ? { mergeRequest: record.observation.mergeRequest }
+          : {}),
+        ...(record.observation?.hostReason
+          ? { hostReason: record.observation.hostReason }
+          : {}),
         ...(record.observation?.pushed ? { pushed: true } : {}),
         ...(record.observation?.rejected ? { rejected: true } : {}),
         ...(record.observation?.ambiguous ? { ambiguous: true } : {}),
