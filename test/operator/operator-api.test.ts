@@ -1695,6 +1695,10 @@ test("source.review resumes a source hold through the command flow and refuses d
     reasonCode: "source-held",
     reason: "readiness-lost",
   });
+  await assert.rejects(
+    api.execute(resume((await read()).task.version)),
+    refused,
+  );
   // Closing replaces the hold; reopening does not release a closure hold.
   sync("open");
   sync("closed");
@@ -1758,6 +1762,14 @@ test("source.review resumes a source hold through the command flow and refuses d
     );
   });
   assert.equal((await read()).task.version, held.task.version);
+  await assert.rejects(
+    api.execute({
+      ...stale,
+      key: randomUUID(),
+      expectedHoldRevision: stale.expectedHoldRevision + 2,
+    }),
+    refused,
+  );
   const { expectedHoldRevision: _revision, ...legacyFresh } = resume(
     held.task.version,
   );
@@ -1799,6 +1811,8 @@ test("source.review resumes a source hold through the command flow and refuses d
     reasonCode: "source-held",
     reason: "closure-read-unavailable",
   });
+  assert.deepEqual(await api.execute(command), receipt);
+  assert.deepEqual((await read()).source?.hold, reheld.source?.hold);
   // Seed the legacy hash and receipt in the format stored before this field existed.
   const { expectedHoldRevision: _removed, ...legacy } = command;
   const legacyDomain = { ...legacy, actor: "operator" };
