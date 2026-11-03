@@ -23,8 +23,8 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
 | /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
 | Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
-| /task/:id | task.configure | local title; outcome; readiness | Task header Edit task… (`/app/tasks/:id`) and the retained task page until its removal | yes |
-| /task/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Task Overview decision card and inspector (`/app/tasks/:id`) and the retained task page until its removal | yes |
+| /app/tasks/:id | task.configure | local title; outcome; readiness | Task header Edit task… | yes |
+| /app/tasks/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Task Overview decision card and inspector | yes |
 | /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
 | /app/tasks/:id | dependency.add | local dependency add | Task Execution tab | yes |
 | /app/tasks/:id | dependency.remove | local dependency remove | Task Execution tab | yes |
@@ -39,7 +39,7 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /app/tasks/:id | approval.decide | retained exact material; approve; deny | Task request view | yes |
 | /login | /login | password sign-in | Sign-in | yes |
 | all authenticated views | /logout | sign-out | Account menu | yes |
-| all views | navigation | delivered overview/project List/Board/composer; retained task/profile/assignment/Runtime destinations | App shell and retained destinations | curated reads |
+| all views | navigation | delivered overview/project List/Board/composer; retained profile/assignment/Runtime destinations | App shell and retained destinations | curated reads |
 | /assignment/:id | read | captured instructions/profile revision and result destination | Retained assignment page | curated subset |
 
 The delivery rows describe the structured Delivery tab, with curated JSON reads, `delivery.configure` and minimal receipts. All 17 action kinds, optional scopes, required-check app bindings and absent versus empty prefixes retain their existing meanings. Unavailable saved rows and prefix are preserved without revealing them. The task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
@@ -82,4 +82,4 @@ Provider timestamps are stored observations; unavailable successful sync/history
 
 ## Client
 
-The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, whose Execution tab (`?section=execution`) holds execution status, holds, recovery evidence and local dependencies, whose header offers Edit task… for a local task and whose Overview decision card offers Resume source hold for an active source hold; its inspector still links the retained task page (`/task/:id`, Edit task and review source) until that page's removal. First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.
+The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, whose Execution tab (`?section=execution`) holds execution status, holds, recovery evidence and local dependencies, whose header offers Edit task… for a local task and whose Overview decision card offers Resume source hold for an active source hold. There is no server-rendered task page. First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.

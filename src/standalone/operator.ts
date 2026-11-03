@@ -31,8 +31,6 @@ import type { OperatorPush } from "./operator-push.js";
 import { PushError } from "./web-push.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { Readiness } from "../core/github-source-contracts.js";
-import { unmetText } from "../operator/readiness-text.js";
 import {
   createServer,
   type IncomingMessage,
@@ -75,23 +73,6 @@ function textarea(name: string, value = ""): string {
   return `<label>${escapeHtml(name)} <textarea name="${escapeHtml(name)}">${escapeHtml(value)}</textarea></label>`;
 }
 
-/** The stored rule as the shared readiness text reads it; this page shows the whole rule. */
-const ruleView = (rule: Readiness | null, sources?: GitHubSourceStore) =>
-  rule
-    ? {
-        kind: "rule" as const,
-        ...rule,
-        conditions: sources?.withFieldNames(rule.conditions) ?? rule.conditions,
-      }
-    : { kind: "none" as const };
-
-const closureDetail = {
-  held: "Held · closed on GitHub. Resolve the source hold after the issue reopens.",
-  completed: "Done · closed on GitHub, not delivered by cab.",
-  unattributed:
-    "Held · closed on GitHub; cab could not prove its delivery closed it. Reopen the issue on GitHub, then resolve the source hold.",
-};
-
 function selectField(
   name: string,
   options: { value: string; label: string; disabled?: boolean }[],
@@ -132,7 +113,7 @@ export class LocalOperatorUi {
     _githubPreviewReader?: (
       credentialRef: string,
     ) => Pick<GitHubSourceReader, "readSelection">,
-    private readonly githubSources?: GitHubSourceStore,
+    _githubSources?: GitHubSourceStore,
     _githubRefresh?: () => Promise<void>,
     _credentialStatus?: (
       projectId: string,
@@ -164,62 +145,6 @@ export class LocalOperatorUi {
         label: String(profile.name),
       }));
     return `<main><h1>cab</h1><h2>Projects</h2><ul>${projects}</ul>${form("project.create", field("name") + selectField("leadProfileId", [{ value: "", label: "Unconfigured" }, ...leadProfiles], ""), "projectId", csrfToken)}<h2>Profiles</h2><ul>${profiles}</ul>${form("profile.create", field("name") + textarea("instructions") + textarea("capabilities"), "profileId", csrfToken)}</main>`;
-  }
-
-  task(taskId: string, csrfToken = ""): string {
-    const task = this.store.task(taskId);
-    const admission = this.store.admission(taskId);
-    const imported = this.store.importedTask(taskId);
-    const external = imported
-      ? this.githubSources?.issue(String(imported.nodeId))
-      : undefined;
-    const memberships = imported
-      ? (this.githubSources?.memberships(String(imported.nodeId)) ?? [])
-      : [];
-    const blockers = imported
-      ? (this.githubSources?.nativeBlockers(String(imported.nodeId)) ?? [])
-      : [];
-    const readiness = imported
-      ? this.githubSources?.readinessByTask([taskId]).get(taskId)
-      : undefined;
-    const unmet =
-      readiness &&
-      unmetText({
-        rule: ruleView(readiness.rule, this.githubSources),
-        outcome: readiness.outcome,
-        unmet:
-          this.githubSources?.withFieldNames(readiness.unmet) ??
-          readiness.unmet,
-      });
-    const hold = imported
-      ? this.githubSources?.hold(String(imported.nodeId))
-      : undefined;
-    const closure = this.store.providerClosure(taskId);
-    const provenance = external
-      ? `<h2>GitHub source</h2>${closure ? `<p>${closureDetail[closure]}</p>` : ""}<p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
-          hold?.active
-            ? form(
-                "source.review",
-                field("projectId", String(task.projectId), "hidden") +
-                  field("taskId", taskId, "hidden") +
-                  field("expectedVersion", String(task.version), "hidden") +
-                  selectField(
-                    "decision",
-                    [
-                      {
-                        value: "resume-source-hold",
-                        label: "Resume source hold",
-                      },
-                    ],
-                    "resume-source-hold",
-                  ),
-                undefined,
-                csrfToken,
-              )
-            : ""
-        }`
-      : "";
-    return `<main><h1>${escapeHtml(task.title)}</h1><p>Outcome: ${escapeHtml(task.outcome)}</p><p>${task.ready ? "Ready" : `Not ready${unmet ? ` (${escapeHtml(unmet)})` : ""}`}; ${escapeHtml(task.state)}.</p><p>Configuration eligibility only: ${admission.eligible ? "eligible for future admission" : `held: ${escapeHtml(admission.reasons.join(", "))}`}.</p><p>Readiness and configuration eligibility do not confirm runtime admission or execution.</p>${provenance}<p><a href="/app/tasks/${escapeHtml(taskId)}?section=execution">Runtime status, controls and recovery evidence</a></p>${imported ? "" : form("task.configure", field("projectId", String(task.projectId), "hidden") + field("taskId", taskId, "hidden") + field("expectedVersion", String(task.version), "hidden") + field("title", String(task.title)) + textarea("outcome", String(task.outcome)) + field("ready", "1", "checkbox", Boolean(task.ready)), undefined, csrfToken)}</main>`;
   }
 
   profile(profileId: string, csrfToken = ""): string {
@@ -271,18 +196,6 @@ export class LocalOperatorUi {
           ready: fields.ready === "1",
         };
         break;
-      case "task.configure":
-        command = {
-          ...common,
-          type: "task.configure",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          expectedVersion: version(),
-          title: required("title"),
-          outcome: required("outcome"),
-          ready: fields.ready === "1",
-        };
-        break;
       case "profile.create":
         command = {
           ...common,
@@ -303,16 +216,6 @@ export class LocalOperatorUi {
           instructions: fields.instructions ?? "",
           capabilities: fields.capabilities ?? "",
           revoked: fields.revoked === "1",
-        };
-        break;
-      case "source.review":
-        command = {
-          ...common,
-          type: "source.review",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          expectedVersion: version(),
-          decision: z.literal("resume-source-hold").parse(required("decision")),
         };
         break;
       case "assignment.create":
@@ -395,9 +298,7 @@ const COMMANDS = new Set([
   "project.create",
   "profile.create",
   "profile.configure",
-  "source.review",
   "task.create",
-  "task.configure",
 ]);
 const RESPONSE_HEADERS = {
   "cache-control": "no-store",
@@ -757,7 +658,7 @@ function isSafeRedirect(location: string): boolean {
 }
 
 // Pages of the server-rendered operator UI; only these may start a pre-login session.
-const LEGACY_PAGE = /^\/(?:$|runtime(?:\/|$)|(?:task|profile|assignment)\/)/;
+const LEGACY_PAGE = /^\/(?:$|runtime(?:\/|$)|(?:profile|assignment)\/)/;
 
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
@@ -995,9 +896,7 @@ export class LocalOperatorHttp {
             return;
           }
           let html: string | undefined;
-          if (kind === "task" && value)
-            html = this.ui.task(value, authorized.csrfToken);
-          else if (kind === "profile" && value)
+          if (kind === "profile" && value)
             html = this.ui.profile(value, authorized.csrfToken);
           else if (kind === "assignment" && value)
             html = this.ui.assignment(value);

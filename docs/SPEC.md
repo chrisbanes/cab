@@ -777,8 +777,9 @@ is resumed from the decision card in its Overview, through the receipted `task.c
 `source.review` JSON commands. Edit task… is offered only for a local task whose title and outcome
 the task read discloses exactly (`task.textExact`); text the service redacts or withholds is never
 offered for editing or written back, and the dialog sends only the fields the operator changed. A
-task with redacted text changes Ready through `cab task configure TASK_ID --ready true|false`. The retained server-rendered `/task/:id` page offers the same two
-controls until its removal; it is reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
+task with redacted text changes Ready through `cab task configure TASK_ID --ready true|false`.
+There is no server-rendered task page: `/task/:id` is not found, and `/command` rejects
+`task.configure` and `source.review`. A task's Execution tab (`/app/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions

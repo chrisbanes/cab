@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitHubHttpSourceReader } from "../../../dist/src/standalone/github-source.js";
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
-import { LocalOperatorUi } from "../../../dist/src/standalone/operator.js";
 
 const manifestPath = process.env.CAB_S06_FIXTURE_MANIFEST;
 if (!manifestPath)
@@ -177,7 +176,6 @@ try {
       expectedVersion: 2,
     });
   await service.refreshGitHub();
-  const ui = new LocalOperatorUi(domain, undefined, service.githubSources());
   for (const selection of selections)
     assert.equal(
       Boolean(
@@ -199,14 +197,8 @@ try {
       admission.reasons.includes("imported-blockers-blocked"),
       (expected.blockers ?? []).some((item) => item.state === "open"),
     );
-    const taskHtml = ui.task(String(imported.taskId));
-    assert.ok(
-      taskHtml.includes(expected.nodeId) &&
-        taskHtml.includes(String(expected.number)),
-    );
-    assert.match(taskHtml, /GitHub source|Native blockers/);
-    if ((expected.blockers ?? []).some((item) => item.state === "open"))
-      assert.match(taskHtml, /imported-blockers-blocked/);
+    // The task page is gone; the imported issue's identity is read from the source store.
+    assert.equal(Number(imported.issueNumber), expected.number);
     if (expected.expectedAdmission === "blocked")
       assert.equal(admission.eligible, false);
   }
@@ -225,13 +217,6 @@ try {
       admission.eligible,
       expected.expectedAdmission === "eligible",
       `Admission mismatch for ${expected.nodeId}: ${admission.reasons.join(",")}`,
-    );
-    const taskHtml = ui.task(String(imported.taskId));
-    assert.match(
-      taskHtml,
-      expected.expectedAdmission === "eligible"
-        ? /eligible for future admission/
-        : /held:/,
     );
   }
   assert.equal(providerWrites, 0);

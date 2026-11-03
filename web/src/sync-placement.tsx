@@ -324,7 +324,6 @@ function PlacementConfiguration(
           review={() => d.adoptVersion(c.version)}
           success={placedLine(d)}
         />
-        <a href={`/task/${c.taskId}`}>Advanced source review controls</a>
       </form>
       <p className="metadata muted">
         Recording a placement does not start work or grant repository access;

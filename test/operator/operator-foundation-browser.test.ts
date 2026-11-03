@@ -111,7 +111,6 @@ test("retained HTML routes share the production foundation and native interactio
   const destinations = [
     "/",
     `/profile/${profileId}`,
-    `/task/${taskId}`,
     `/assignment/${assignmentId}`,
     "/runtime",
     `/runtime/assignment/${assignmentId}`,

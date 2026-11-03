@@ -262,7 +262,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
 
     const privatePaths = [
       "/",
-      `/task/${task.id}`,
       `/profile/${profile.id}`,
       "/assignment/not-a-public-run",
       "/runtime",
@@ -635,6 +634,51 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     }
     assert.equal(domain.assignments(task.id).length, 0);
     assert.deepEqual(domain.dependencies(task.id), []);
+
+    // The task page and its two forms are removed: not found without a redirect or a login form,
+    // and `/command` rejects both of its commands with the domain state unchanged.
+    const taskVersion = Number(domain.task(task.id).version);
+    const authenticatedTask = await fetch(`${origin}/task/${task.id}`, {
+      headers: { cookie: sessionCookie },
+      redirect: "manual",
+    });
+    assert.equal(authenticatedTask.status, 404);
+    assert.equal(authenticatedTask.headers.get("location"), null);
+    assert.match(await authenticatedTask.text(), /Not found/);
+    const anonymousTask = await fetch(`${origin}/task/${task.id}`, {
+      redirect: "manual",
+    });
+    assert.equal(anonymousTask.status, 404);
+    assert.equal(anonymousTask.headers.get("set-cookie"), null);
+    assert.doesNotMatch(await anonymousTask.text(), /Sign in/);
+    for (const type of ["task.configure", "source.review"]) {
+      const response = await fetch(`${origin}/command`, {
+        method: "POST",
+        headers: {
+          origin,
+          cookie: sessionCookie,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: commandForm(
+          {
+            type,
+            key: randomUUID(),
+            projectId: project.id,
+            taskId: task.id,
+            expectedVersion: String(taskVersion),
+            title: "Must not apply",
+            outcome: "Must not apply",
+            decision: "resume-source-hold",
+          },
+          protectedCsrf,
+        ),
+        redirect: "manual",
+      });
+      assert.equal(response.status, 400, `${type} is not a web command`);
+      assert.match(await response.text(), /Command rejected/);
+    }
+    assert.equal(Number(domain.task(task.id).version), taskVersion);
+    assert.notEqual(domain.task(task.id).title, "Must not apply");
 
     const versionConflict = await fetch(`${origin}/command`, {
       method: "POST",

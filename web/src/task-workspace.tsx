@@ -2687,12 +2687,6 @@ export function TaskWorkspace({
                   ))}
                 </details>
               </section>
-              <p className="metadata">
-                {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
-                <a href={`/task/${encodeURIComponent(taskId)}`}>
-                  Edit task and review source
-                </a>
-              </p>
             </TaskInspector>
           </div>
         </TabPanel>

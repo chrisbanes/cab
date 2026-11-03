@@ -861,35 +861,35 @@ async function createTask(
   );
   required(!savedTask.task.ready, "new-task-unready");
 
-  await page.goto(`${origin}/task/${taskId}`);
-  let edit = page.locator('form[data-command="task.configure"]');
-  await edit.locator('input[name="title"]').fill(title);
-  await edit.locator('textarea[name="outcome"]').fill(outcome);
-  required(
-    !(await edit.locator('input[name="ready"]').isChecked()),
-    "edited-task-still-unready",
-  );
-  await saveForm(page, edit);
+  await configureTask(page, origin, taskId, { title, outcome });
   await service.provisionTask(taskId, repositories);
 
-  if (ready) {
-    await page.goto(`${origin}/task/${taskId}`);
-    edit = page.locator('form[data-command="task.configure"]');
-    await edit.locator('input[name="ready"]').check();
-    await saveForm(page, edit);
-  }
+  if (ready) await configureTask(page, origin, taskId, { ready: true });
   return taskId;
 }
 
+/** A local task's edit through the JSON `task.configure` command the task workspace sends. */
+async function configureTask(page, origin, taskId, fields) {
+  const current = { origin, browserContext: page.context() };
+  const { task } = await readOperatorTask(current, taskId);
+  const result = await postOperatorCommand(current, {
+    type: "task.configure",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId,
+    expectedVersion: task.version,
+    ...fields,
+  });
+  required(result.status === 200, "task-configured");
+}
+
 async function setTaskReady(page, origin, taskId, ready) {
-  await page.goto(`${origin}/task/${taskId}`);
-  const form = page.locator('form[data-command="task.configure"]');
-  const checkbox = form.locator('input[name="ready"]');
-  if ((await checkbox.isChecked()) !== ready) {
-    if (ready) await checkbox.check();
-    else await checkbox.uncheck();
-    await saveForm(page, form);
-  }
+  const { task } = await readOperatorTask(
+    { origin, browserContext: page.context() },
+    taskId,
+  );
+  if (task.ready !== ready)
+    await configureTask(page, origin, taskId, { ready });
 }
 
 function setTaskStateViaFixtureApi(service, taskId, state) {
@@ -3752,7 +3752,7 @@ export async function runLiveJourney(mode) {
       await startOperator(current, evidence, (owner) => {
         operatorOwners.push(owner);
       });
-      await page.goto(`${current.origin}/task/${repoFree.projects[0].taskId}`);
+      await page.goto(`${current.origin}/runtime`);
       required(
         /Sign in/.test(await page.locator("body").innerText()),
         "restart-invalidates-old-session",
