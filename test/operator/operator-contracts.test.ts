@@ -933,6 +933,19 @@ test("delivery policy read and keep-row contracts never accept partial unavailab
     preserveBranchPrefix: true,
   };
   assert.deepEqual(operatorCommandSchema.parse(command), command);
+  const current = { ...savedRow, format: "post-status-strip-v1" };
+  const currentCommand = {
+    ...command,
+    grants: [{ savedRow: current, keep: true }],
+  };
+  assert.deepEqual(operatorCommandSchema.parse(currentCommand), currentCommand);
+  assert.equal(
+    operatorCommandSchema.safeParse({
+      ...command,
+      grants: [{ savedRow: { ...savedRow, format: "unknown" }, keep: true }],
+    }).success,
+    false,
+  );
   for (const row of [
     hidden,
     { savedRow },
