@@ -1830,7 +1830,7 @@ test("Setup waits for a pending readiness read only while the starter option is 
     profiles: false,
     readiness: () => read,
   });
-  journey.cleanup(() => {
+  journey.cleanup(async () => {
     settle(JSON.parse(readinessBody()));
   }, "readiness.settle");
   const inline = profileGroup(page);
