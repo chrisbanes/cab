@@ -26,6 +26,13 @@ import {
   runtimeSafetyFixture,
 } from "../fixtures/runtime-safety.js";
 
+/**
+ * How long a test watches for a turn, confirmation or write that must NOT happen when no
+ * event marks the work as settled. Generous so a loaded runner cannot let a regression
+ * slip past a window that closed before it ran.
+ */
+const QUIET_WINDOW_MS = 200;
+
 type TestRuntimeOptions = Omit<
   NonNullable<ConstructorParameters<typeof CodexRuntime>[1]>,
   "safety"
@@ -2548,7 +2555,7 @@ test("native exact replay without resolution never confirms delivery", async () 
   const f = await nativeTransport("reply-replay-no-resolution");
   try {
     await f.reply();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     assert.deepEqual(
       f.outcomes.map((o) => o.outcome),
       ["sent-unconfirmed"],
