@@ -172,6 +172,9 @@ test("controlled Git cleanup does not signal an unrelated process from a stale i
   }
 });
 
+// Time the controlled Git gets to record SIGTERM before SIGKILL; a loaded runner can take
+// longer than 20 ms to run its handler, which lost the "term" evidence.
+const termGraceMs = 250;
 const approvedCleanup: WorkspaceCleanupEvidence = {
   deliveryConfirmed: true,
   writerOwnershipResolved: true,
@@ -531,7 +534,7 @@ test("a completed worktree add followed by a bounded stall is retained without r
   const f = fixture({
     gitExecutable: controlled.executable,
     gitTimeoutMs: { "worktree-add": 1000 },
-    gitTerminationGraceMs: 20,
+    gitTerminationGraceMs: termGraceMs,
     gitTerminationObservationMs: 40,
     gitFailureObserver: (failure) => {
       failureObservations.push(failure);
@@ -569,7 +572,7 @@ test("a completed worktree add followed by a bounded stall is retained without r
         failureObservedToSettledMs:
           observedAt === undefined ? null : settledAt - observedAt,
         configuredTimeoutMs: 1000,
-        termGraceMs: 20,
+        termGraceMs,
         observationMs: 40,
         childExitObserved: failureObservations.at(-1)?.childExitObserved,
         childExitSignal: failureObservations.at(-1)?.childExitSignal,
@@ -579,7 +582,8 @@ test("a completed worktree add followed by a bounded stall is retained without r
     // The strict bound protects the timeout and cancellation; the settle work after it only
     // has to finish well before a hang would.
     assert.ok(
-      observedAt !== undefined && observedAt - readyAt < 1000 + 20 + 40 + 500,
+      observedAt !== undefined &&
+        observedAt - readyAt < 1000 + termGraceMs + 40 + 500,
       `Git timeout observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
     );
     assert.ok(elapsedMs < 5_000, `provision settled in ${elapsedMs}ms`);
@@ -708,7 +712,7 @@ test("validation, archive status, and removal uncertainty preserve the binding",
         });
         const manager = f.reopen({
           gitExecutable: controlled.executable,
-          gitTerminationGraceMs: 20,
+          gitTerminationGraceMs: termGraceMs,
           gitTerminationObservationMs: 40,
           gitFailureObserver: (failure) => {
             failureObservations.push(failure);
@@ -741,7 +745,7 @@ test("validation, archive status, and removal uncertainty preserve the binding",
               observedAt === undefined ? null : observedAt - readyAt,
             failureObservedToSettledMs:
               observedAt === undefined ? null : settledAt - observedAt,
-            termGraceMs: 20,
+            termGraceMs,
             observationMs: 40,
             childExitObserved: failureObservations.at(-1)?.childExitObserved,
             childExitSignal: failureObservations.at(-1)?.childExitSignal,
@@ -750,7 +754,8 @@ test("validation, archive status, and removal uncertainty preserve the binding",
         // The strict bound protects cancellation; the settle work after it only has to
         // finish well before a hang would.
         assert.ok(
-          observedAt !== undefined && observedAt - readyAt < 20 + 40 + 500,
+          observedAt !== undefined &&
+            observedAt - readyAt < termGraceMs + 40 + 500,
           `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
         );
         assert.ok(
@@ -818,7 +823,7 @@ test("output overflow and sticky cancellation settle safely and retain uncertain
     >[0][] = [];
     const f = fixture({
       gitExecutable: controlled.executable,
-      gitTerminationGraceMs: 20,
+      gitTerminationGraceMs: termGraceMs,
       gitTerminationObservationMs: 40,
       gitFailureObserver: (failure) => failureObservations.push(failure),
     });
@@ -885,7 +890,7 @@ test("output overflow and sticky cancellation settle safely and retain uncertain
       const f = fixture({
         gitExecutable: controlled.executable,
         gitTimeoutMs: { "repository-identity": 30_000 },
-        gitTerminationGraceMs: 20,
+        gitTerminationGraceMs: termGraceMs,
         gitTerminationObservationMs: 40,
         gitFailureObserver: (failure) => {
           failureObservations.push(failure);
@@ -926,7 +931,7 @@ test("output overflow and sticky cancellation settle safely and retain uncertain
               observedAt === undefined ? null : observedAt - readyAt,
             failureObservedToSettledMs:
               observedAt === undefined ? null : settledAt - observedAt,
-            termGraceMs: 20,
+            termGraceMs,
             observationMs: 40,
             childExitObserved: failureObservations.at(-1)?.childExitObserved,
             childExitSignal: failureObservations.at(-1)?.childExitSignal,
@@ -935,7 +940,8 @@ test("output overflow and sticky cancellation settle safely and retain uncertain
         // The strict bound protects cancellation; the settle work after it only has to finish
         // well before a hang would.
         assert.ok(
-          observedAt !== undefined && observedAt - readyAt < 20 + 40 + 500,
+          observedAt !== undefined &&
+            observedAt - readyAt < termGraceMs + 40 + 500,
           `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
         );
         assert.ok(
