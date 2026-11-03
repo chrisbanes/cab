@@ -2844,6 +2844,36 @@ test("a task read reports a source hold and unknown source as source-held", asyn
   assert.ok(read.includes("source-held"), read.join());
   assert.ok(!read.includes("admission-blocked"), read.join());
 });
+test("profile configuration reports instruction presence for the current revision", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const profileId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Profile",
+    instructions: "Private instructions",
+    capabilities: "",
+  });
+  const initial = (await api.readProfileConfiguration(profileId)).data;
+  assert.equal(initial.instructionPresent, true);
+  assert.equal(JSON.stringify(initial).includes("Private instructions"), false);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    expectedVersion: 1,
+    instructions: "",
+  });
+  const updated = (await api.readProfileConfiguration(profileId)).data;
+  assert.equal(updated.instructionPresent, false);
+  assert.equal(updated.instructionRevision, 2);
+});
 test("profile configuration reads and writes a validated execution runtime", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
