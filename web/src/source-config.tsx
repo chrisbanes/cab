@@ -41,6 +41,7 @@ import {
   sourceStatusLine,
 } from "./settings-view.js";
 import { OutcomeDetails } from "./action-feedback.js";
+import { discoveredProjectTitle } from "./readiness-discovery.js";
 import { credentialReasonId, ImportPanel } from "./source-import.js";
 import {
   hasProjectSource,
@@ -793,6 +794,9 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         <StatusMappingPanel
           {...p}
           view={data.statusMapping}
+          projectTitle={(projectNodeId) =>
+            discoveredProjectTitle(readinessDiscovery.choices, projectNodeId)
+          }
           selectionName={(s) =>
             naming({
               id: s.id,

@@ -1,5 +1,8 @@
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
-import type { projectChoices } from "./readiness-discovery.js";
+import {
+  discoveredProjectTitle,
+  type projectChoices,
+} from "./readiness-discovery.js";
 import { useReadinessDiscovery } from "./readiness-picker.js";
 import type { SourcePrivate } from "./settings-changes.js";
 import type { TabProps } from "./project-config.js";
@@ -37,10 +40,7 @@ export function savedSourceName(
 ): SourceNaming {
   return sourceName(s, {
     query: known?.searches.find((x) => x.id === s.id)?.query,
-    projectTitle:
-      choices.state === "ready"
-        ? choices.projects.find((x) => x.projectNodeId === s.descriptor)?.label
-        : undefined,
+    projectTitle: discoveredProjectTitle(choices, s.descriptor),
   });
 }
 

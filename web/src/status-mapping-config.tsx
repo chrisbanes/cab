@@ -4,6 +4,7 @@ import type { ProjectConfigurationData } from "./settings-changes.js";
 import {
   statusEventHints,
   statusMappingBoundary,
+  statusMappingSaveStatement,
   statusEventLabels,
   statusMappingCaveat,
   jiraStatusMappingBoundary,
@@ -14,6 +15,7 @@ import {
   type StatusMappingEvent,
 } from "../../src/core/status-mapping-contracts.js";
 import {
+  draftTargets,
   type FieldRead,
   type JiraStatusView,
   jiraStatusMappingPlan,
@@ -40,6 +42,14 @@ type StatusView = Exclude<
   NonNullable<ProjectConfigurationData["statusMapping"]>,
   { tracker: "jira" }
 >;
+/** The anchor Delivery settings link to. */
+const statusMappingAnchor = "status-mapping";
+/** A link from another tab lands here after the panel renders, so the browser cannot scroll to it. */
+const useFragmentFocus = () =>
+  useEffect(() => {
+    if (location.hash === `#${statusMappingAnchor}`)
+      document.getElementById(statusMappingAnchor)?.focus();
+  }, []);
 const fieldErrorPath = (event: StatusMappingEvent) => `mapping.events.${event}`;
 
 export function StatusMappingPanel(
@@ -47,8 +57,11 @@ export function StatusMappingPanel(
     view: StatusView;
     /** A Project selection's name: the title discovery lists for it, else its source id. */
     selectionName: (selection: StatusView["selections"][number]) => string;
+    /** The title discovery lists for a Project, if it lists it. */
+    projectTitle: (projectNodeId: string) => string | undefined;
   },
 ) {
+  useFragmentFocus();
   const { view, projectId } = p,
     d = useDraft(p.drafts, `status-mapping.configure:${projectId}`),
     saved = view.mapping,
@@ -112,11 +125,7 @@ export function StatusMappingPanel(
       read && read.project === project ? read.read : { state: "loading" },
     status = fieldRead.state === "ready" ? fieldRead.status : null,
     fieldNodeId = statusFieldNodeId(fieldRead);
-  const granted = new Set(
-    view.granted
-      .filter((g) => g.projectNodeId === project)
-      .flatMap((g) => (g.fieldNodeId === fieldNodeId ? g.optionNodeIds : [])),
-  );
+  const targets = draftTargets(d.values);
   const optionName = (id: string) =>
     status?.options.find((o) => o.optionNodeId === id)?.name ?? id;
   const selectionName = (id: string) => {
@@ -154,7 +163,8 @@ export function StatusMappingPanel(
   return (
     <>
       <Panel
-        id="status-mapping"
+        id={statusMappingAnchor}
+        tabIndex={-1}
         title="Status mapping"
         description={
           unavailable
@@ -241,7 +251,6 @@ export function StatusMappingPanel(
                         {(status?.options ?? []).map((o) => (
                           <option key={o.optionNodeId} value={o.optionNodeId}>
                             {o.name}
-                            {granted.has(o.optionNodeId) ? "" : " (no grant)"}
                           </option>
                         ))}
                       </DraftField>
@@ -252,6 +261,23 @@ export function StatusMappingPanel(
                   );
                 })}
               </fieldset>
+            )}
+            {!clearing && project && targets.length > 0 && (
+              <p className="body">
+                {statusMappingSaveStatement(
+                  {
+                    tracker: "github",
+                    projectNodeId: project,
+                    statuses: targets.map((id) => ({
+                      id,
+                      name:
+                        status?.options.find((o) => o.optionNodeId === id)
+                          ?.name ?? null,
+                    })),
+                  },
+                  p.projectTitle(project),
+                )}
+              </p>
             )}
             {errorPaths.length > 0 && (
               <ul className="body error-text" role="alert">
@@ -300,6 +326,7 @@ export function StatusMappingPanel(
 
 /** The Jira status mapping: four typed status IDs, as in the readiness editor. */
 export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
+  useFragmentFocus();
   const { view, projectId } = p,
     d = useDraft(p.drafts, `status-mapping.configure:${projectId}`),
     saved = view.mapping,
@@ -310,9 +337,9 @@ export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
       ),
     };
   useLoadedDraft(d, initial, p.loadedAt, view);
-  const granted = new Set(view.granted),
-    plan = jiraStatusMappingPlan({ saved, values: d.values }),
-    lines = plan.lines;
+  const plan = jiraStatusMappingPlan({ saved, values: d.values }),
+    lines = plan.lines,
+    targets = draftTargets(d.values);
   const command = {
     type: "status-mapping.configure",
     key: d.values.key,
@@ -326,7 +353,8 @@ export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
   return (
     <>
       <Panel
-        id="status-mapping"
+        id={statusMappingAnchor}
+        tabIndex={-1}
         title="Status mapping"
         description={
           saved
@@ -350,14 +378,13 @@ export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
           <fieldset className="settings-rows" disabled={locked(d)}>
             <legend className="sr-only">Jira status ID for each event</legend>
             {statusMappingEvents.map((event) => {
-              const chosen = String(d.values[event] ?? "").trim();
               return (
                 <div className="settings-row" key={event}>
                   <DraftField
                     draft={d}
                     field={event}
                     errorField={fieldErrorPath(event)}
-                    label={`${statusEventLabels[event]}${chosen && !granted.has(chosen) ? " (no grant)" : ""}`}
+                    label={statusEventLabels[event]}
                   />
                   <p className="metadata muted">{statusEventHints[event]}</p>
                 </div>
@@ -368,6 +395,17 @@ export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
               empty to write nothing for it.
             </p>
           </fieldset>
+          {targets.length > 0 && (
+            <p className="body">
+              {statusMappingSaveStatement({
+                tracker: "jira",
+                statuses: targets.map((id) => ({
+                  id,
+                  name: view.statusNames[id] ?? null,
+                })),
+              })}
+            </p>
+          )}
           {errorPaths.length > 0 && (
             <ul className="body error-text" role="alert">
               {errorPaths.map((k) => (

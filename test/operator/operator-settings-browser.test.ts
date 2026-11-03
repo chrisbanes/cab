@@ -1612,9 +1612,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
       ? { projectNodeId: "P1", fieldNodeId: "F1", optionNodeIds: ["O1"] }
       : action === "project.item.add"
         ? { projectNodeId: "P1" }
-        : action === "issue.status"
-          ? { statusIds: ["S1"] }
-          : {}),
+        : {}),
   }));
   d.execute({
     type: "delivery.configure",

@@ -61,6 +61,58 @@ test("delivery get shows the PR, actions and comment policy without provider acc
   assert.equal(w.scripted.requests.length, requests);
 });
 
+test("delivery get prints the status-mapping authority line, naming the Project by ID", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
+  const human = () =>
+    w.h.run(["delivery", "get", w.f.taskId, "--connection", "ro"]);
+  assert.match((await human()).out, /Status mapping: +not set/);
+
+  const domain = w.f.service.domain();
+  const source = domain.githubConfiguration(w.f.projectId);
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.f.projectId,
+    expectedVersion: source.version,
+    selections: [
+      ...source.selections.map((s) => ({ id: s.id, keep: true as const })),
+      { id: "project", kind: "project", projectNodeId: "PVT_1", filter: "" },
+    ],
+    readiness: null,
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.f.projectId,
+    expectedVersion: domain.statusMapping(w.f.projectId).version,
+    mapping: {
+      selectionId: "project",
+      projectNodeId: "PVT_1",
+      fieldNodeId: "F_status",
+      events: {
+        turnStarted: null,
+        handedBack: null,
+        held: null,
+        done: "O_done",
+      },
+    },
+  });
+  assert.match(
+    (await human()).out,
+    /Status mapping: +cab may set Status to O_done on Project PVT_1/,
+  );
+  const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
+  assert.deepEqual(json.data.delivery.statusMappingAuthority, {
+    tracker: "github",
+    selectionId: "project",
+    projectNodeId: "PVT_1",
+    statuses: [{ id: "O_done", name: null }],
+  });
+});
+
 test("delivery get shows what holds the merge, including no required checks", async (t) => {
   const w = await deliveryWorld(t);
   const delivery = w.f.service.delivery();

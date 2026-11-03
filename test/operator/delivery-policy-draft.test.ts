@@ -9,8 +9,6 @@ import {
   grantIdentityNames,
   removeGrantRow,
   validateDeliveryPolicyDraft,
-  statusMappingCoverageLoss,
-  deliveryMappingCoverageWarning,
   type DeliveryPolicySeed,
   type RepositoryDeliveryRead,
 } from "../../web/src/delivery-policy-draft.js";
@@ -42,7 +40,6 @@ test("all domain actions round-trip public fields exactly and remain domain-sche
           ...(action === "project.field"
             ? { fieldNodeId: "F", optionNodeIds: [] }
             : {}),
-          ...(action === "issue.status" ? { statusIds: ["S", "S"] } : {}),
         },
         {
           action,
@@ -56,7 +53,6 @@ test("all domain actions round-trip public fields exactly and remain domain-sche
               }
             : {}),
           ...(action === "project.item.add" ? { projectNodeId: "P" } : {}),
-          ...(action === "issue.status" ? { statusIds: [] } : {}),
         },
       ],
       requiredChecks: [
@@ -222,18 +218,6 @@ test("indexed validation matches domain accepted policy requirements", () => {
           optionNodeIds: [],
         },
         { action: "project.item.add", repositoryId: "R", mode: "allow" },
-        {
-          action: "issue.comment",
-          repositoryId: "R",
-          mode: "allow",
-          statusIds: ["S"],
-        },
-        {
-          action: "issue.status",
-          repositoryId: "R",
-          mode: "allow",
-          statusIds: [],
-        },
       ],
       requiredChecks: [{ name: "Build", appId: 0 }],
     }),
@@ -244,8 +228,6 @@ test("indexed validation matches domain accepted policy requirements", () => {
     "grants.grant-0.mode",
     "grants.grant-1.optionNodeIds",
     "grants.grant-2.projectNodeId",
-    "grants.grant-3.statusIds",
-    "grants.grant-4.statusIds",
     "requiredChecks.check-0.appId",
   ])
     assert.ok(paths.includes(expected), expected);
@@ -259,170 +241,10 @@ test("indexed validation matches domain accepted policy requirements", () => {
           ? { projectNodeId: "P", fieldNodeId: "F", optionNodeIds: ["O"] }
           : {}),
         ...(action === "project.item.add" ? { projectNodeId: "P" } : {}),
-        ...(action === "issue.status" ? { statusIds: ["S"] } : {}),
       })),
     }),
   );
   assert.deepEqual(validateDeliveryPolicyDraft(valid), []);
-});
-
-test("Jira and GitHub mapping losses use their own action and exact scope", () => {
-  const jira = {
-    tracker: "jira" as const,
-    repositoryId: "tracker",
-    granted: ["S1", "S2"],
-  };
-  const gitHub = {
-    tracker: "github" as const,
-    repositoryId: "code",
-    granted: [
-      { projectNodeId: "P", fieldNodeId: "F", optionNodeIds: ["O1", "O2"] },
-    ],
-  };
-  const saved = seed({
-    grants: [
-      {
-        action: "issue.status",
-        repositoryId: "tracker",
-        mode: "allow",
-        statusIds: ["S1"],
-      },
-      {
-        action: "issue.status",
-        repositoryId: "tracker",
-        mode: "allow",
-        statusIds: ["S2"],
-      },
-      {
-        action: "project.field",
-        repositoryId: "code",
-        mode: "allow",
-        projectNodeId: "P",
-        fieldNodeId: "F",
-        optionNodeIds: ["O1"],
-      },
-      {
-        action: "project.field",
-        repositoryId: "code",
-        mode: "allow",
-        projectNodeId: "P",
-        fieldNodeId: "F",
-        optionNodeIds: ["O2"],
-      },
-    ],
-  });
-  const proposed = seed({
-    grants: [
-      {
-        action: "issue.status",
-        repositoryId: "tracker",
-        mode: "allow",
-        statusIds: ["S1", "S2"],
-      },
-      {
-        action: "project.field",
-        repositoryId: "code",
-        mode: "allow",
-        projectNodeId: "P",
-        fieldNodeId: "F",
-        optionNodeIds: ["O1", "O2"],
-      },
-    ],
-  });
-  assert.deepEqual(statusMappingCoverageLoss(saved, proposed, jira), []);
-  assert.deepEqual(statusMappingCoverageLoss(saved, proposed, gitHub), []);
-  assert.deepEqual(
-    statusMappingCoverageLoss(
-      saved,
-      seed({
-        grants: [
-          {
-            action: "issue.status",
-            repositoryId: "tracker",
-            mode: "allow",
-            statusIds: ["S1"],
-          },
-        ],
-      }),
-      jira,
-    ),
-    ["S2"],
-  );
-  assert.deepEqual(
-    statusMappingCoverageLoss(
-      saved,
-      seed({
-        grants: [
-          {
-            action: "project.field",
-            repositoryId: "code",
-            mode: "allow",
-            projectNodeId: "P",
-            fieldNodeId: "F",
-            optionNodeIds: ["O1"],
-          },
-        ],
-      }),
-      gitHub,
-    ),
-    ["P\0F\0O2"],
-  );
-  assert.deepEqual(
-    statusMappingCoverageLoss(
-      saved,
-      seed({
-        grants: [
-          {
-            action: "issue.status",
-            repositoryId: "tracker",
-            mode: "approval",
-            statusIds: ["S1", "S2"],
-          },
-        ],
-      }),
-      jira,
-    ),
-    ["S1", "S2"],
-  );
-  assert.deepEqual(
-    statusMappingCoverageLoss(
-      saved,
-      seed({
-        grants: [
-          {
-            action: "project.field",
-            repositoryId: "code",
-            mode: "approval",
-            projectNodeId: "P",
-            fieldNodeId: "F",
-            optionNodeIds: ["O1", "O2"],
-          },
-        ],
-      }),
-      gitHub,
-    ),
-    ["P\0F\0O1", "P\0F\0O2"],
-  );
-  assert.deepEqual(
-    statusMappingCoverageLoss(
-      saved,
-      seed({
-        grants: [
-          {
-            action: "project.field",
-            repositoryId: "other",
-            mode: "allow",
-            projectNodeId: "P",
-            fieldNodeId: "F",
-            optionNodeIds: ["O1", "O2"],
-          },
-        ],
-      }),
-      gitHub,
-    ),
-    ["P\0F\0O1", "P\0F\0O2"],
-  );
-  assert.deepEqual(statusMappingCoverageLoss(seed(), proposed, jira), []);
 });
 
 test("change text excludes credential input and reports policy changes only", () => {
@@ -546,113 +368,6 @@ test("editor preserves missing versus empty prefix and optional lists, and maps 
   ]);
 });
 
-test("configured mapping warning compares exact scopes and target options, not unrelated grants", async () => {
-  const { deliveryMappingCoverageLoss } = await import(
-    "../../web/src/delivery-policy-draft.js"
-  );
-  const saved = seed({
-    grants: [
-      {
-        action: "project.field",
-        mode: "allow",
-        repositoryId: "r",
-        projectNodeId: "P",
-        fieldNodeId: "F",
-        optionNodeIds: ["O", "other"],
-      },
-    ],
-  });
-  const view = {
-    version: 1,
-    availability: "available" as const,
-    mapping: {
-      selectionId: "s",
-      projectNodeId: "P",
-      fieldNodeId: "F",
-      events: { turnStarted: "O", handedBack: null, held: null, done: null },
-    },
-    selections: [],
-    granted: [
-      { projectNodeId: "P", fieldNodeId: "F", optionNodeIds: ["O", "other"] },
-    ],
-  };
-  assert.equal(deliveryMappingCoverageLoss(saved, seed(), view), true);
-  assert.equal(
-    deliveryMappingCoverageLoss(
-      saved,
-      {
-        ...saved,
-        grants: [
-          {
-            action: "project.field",
-            mode: "allow",
-            repositoryId: "r",
-            projectNodeId: "P",
-            fieldNodeId: "F",
-            optionNodeIds: ["O"],
-          },
-        ],
-      },
-      view,
-    ),
-    false,
-  );
-  assert.equal(
-    deliveryMappingCoverageLoss(saved, seed(), { ...view, mapping: null }),
-    false,
-  );
-  assert.equal(
-    deliveryMappingCoverageLoss(saved, seed(), {
-      ...view,
-      mapping: { ...view.mapping, fieldNodeId: "different" },
-    }),
-    false,
-  );
-  const jiraSaved = seed({
-    grants: [
-      {
-        action: "issue.status",
-        mode: "allow",
-        repositoryId: "jira-container",
-        statusIds: ["O"],
-      },
-    ],
-  });
-  const jiraView = {
-    tracker: "jira" as const,
-    version: 1,
-    availability: "available" as const,
-    mapping: { tracker: "jira" as const, events: view.mapping.events },
-    granted: ["O"],
-  };
-  assert.equal(
-    deliveryMappingCoverageLoss(
-      jiraSaved,
-      {
-        ...jiraSaved,
-        grants: [
-          {
-            action: "issue.status",
-            mode: "allow",
-            repositoryId: "other-container",
-            statusIds: ["O"],
-          },
-        ],
-      },
-      jiraView,
-    ),
-    true,
-  );
-  assert.equal(
-    deliveryMappingCoverageLoss(
-      jiraSaved,
-      { ...jiraSaved, grants: [...jiraSaved.grants, ...jiraSaved.grants] },
-      jiraView,
-    ),
-    false,
-  );
-});
-
 test("all actions keep every accepted supplemental scope and duplicate check through the editor adapter", async () => {
   const { deliveryEditorValues, deliveryEditorDraft, deliveryFieldErrors } =
     await import("../../web/src/delivery-policy-draft.js");
@@ -666,7 +381,6 @@ test("all actions keep every accepted supplemental scope and duplicate check thr
           projectNodeId: "P",
           fieldNodeId: "F",
           optionNodeIds: action === "project.field" ? ["O", "O"] : [],
-          ...(action === "issue.status" ? { statusIds: ["S", "S"] } : {}),
         },
       ],
       requiredChecks: [
@@ -718,72 +432,6 @@ test("reviewing a newer policy cannot rebind an old unavailable ordinal", async 
   const row = deliveryPolicySubmission(deliveryEditorDraft(values)).grants[0];
   assert.ok(row && "savedRow" in row);
   assert.equal(row.savedRow.version, 7);
-});
-
-test("withheld mapping warns conservatively when public status authority is reduced", () => {
-  const grant = {
-    action: "project.field" as const,
-    repositoryId: "r",
-    mode: "allow" as const,
-    projectNodeId: "P",
-    fieldNodeId: "F",
-    optionNodeIds: ["O", "other"],
-  };
-  const saved = seed({ grants: [grant] });
-  const warning = (next: DeliveryPolicySeed) =>
-    deliveryMappingCoverageWarning(saved, next, undefined);
-  for (const next of [
-    seed(),
-    seed({ grants: [{ ...grant, mode: "approval" }] }),
-    seed({ grants: [{ ...grant, optionNodeIds: ["O"] }] }),
-    seed({ grants: [{ ...grant, repositoryId: "other" }] }),
-    seed({ grants: [{ ...grant, fieldNodeId: "other" }] }),
-  ])
-    assert.match(warning(next) ?? "", /may remove status-mapping authority/);
-  assert.equal(warning(saved), null);
-  assert.equal(warning(seed({ grants: [grant, grant] })), null);
-  assert.equal(
-    deliveryMappingCoverageWarning(
-      seed({ grants: [grant, grant] }),
-      saved,
-      undefined,
-    ),
-    null,
-  );
-  const jira = {
-    action: "issue.status" as const,
-    repositoryId: "jira-container",
-    mode: "allow" as const,
-    statusIds: ["open", "done"],
-  };
-  assert.match(
-    deliveryMappingCoverageWarning(
-      seed({ grants: [jira] }),
-      seed({ grants: [{ ...jira, statusIds: ["open"] }] }),
-      undefined,
-    ) ?? "",
-    /may remove status-mapping authority/,
-  );
-  assert.equal(
-    deliveryMappingCoverageWarning(
-      seed({
-        grants: [{ action: "branch.push", repositoryId: "r", mode: "allow" }],
-      }),
-      seed(),
-      undefined,
-    ),
-    null,
-  );
-  assert.equal(
-    deliveryMappingCoverageWarning(saved, seed(), {
-      version: 1,
-      availability: "available",
-      mapping: null,
-      selections: [],
-      granted: [],
-    }),
-    null,
-  );
 });
 
 import {

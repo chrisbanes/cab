@@ -17,7 +17,6 @@ import {
   deliveryFieldErrors,
   deliveryRows,
   grantIdentityNames,
-  deliveryMappingCoverageWarning,
   type GrantRow,
   type CheckRow,
   type RepositoryRow,
@@ -69,6 +68,8 @@ import {
   deliveryActionKinds,
   grantSentence,
 } from "../../src/operator/delivery-action-copy.js";
+import { statusMappingAuthorityLine } from "../../src/operator/status-mapping-copy.js";
+import { discoveredProjectTitle } from "./readiness-discovery.js";
 import { ListedChoice } from "./settings-rows.js";
 import {
   Dialog,
@@ -200,6 +201,7 @@ function DeliveryPolicyForm(p: TabProps) {
   }, [p.session, p.projectId]);
   const initial = saved ? deliveryEditorValues(saved) : null;
   useLoadedDraft(d, initial, p.loadedAt, saved);
+  const authority = saved?.statusMappingAuthority;
   // Names for the grant pickers: the repositories and, for a Project grant, what discovery lists.
   const editableGrants = deliveryRows<GrantRow>(d.values.grants).filter(
     (row): row is VisibleGrant => !("savedRow" in row),
@@ -211,7 +213,8 @@ function DeliveryPolicyForm(p: TabProps) {
   const discovery = useReadinessDiscovery({
     client: p.client,
     csrfToken: p.session.csrfToken,
-    enabled: projectGrants.length > 0,
+    // The mapping's Project title is what the authority line names it by.
+    enabled: projectGrants.length > 0 || authority?.tracker === "github",
     labels: false,
     ownedProjects: true,
     repositories: editableGrants.length > 0,
@@ -343,17 +346,6 @@ function DeliveryPolicyForm(p: TabProps) {
     Object.entries(d.errors).find(([field]) =>
       field.startsWith(`${path}.`),
     )?.[1];
-  const mapping = p.data.statusMapping;
-  const coverageWarning = deliveryMappingCoverageWarning(saved, draft, mapping);
-  const removedUnavailable = saved.grants.some(
-    (g) =>
-      "savedRow" in g &&
-      !draft.grants.some(
-        (row) =>
-          "savedRow" in row &&
-          JSON.stringify(row.savedRow) === JSON.stringify(g.savedRow),
-      ),
-  );
   const label = (id: string | null) =>
     id === null ? null : repositoryLabel(id, links);
   // Derived from the draft, so a project the migration skipped offers it and a set-up one does not.
@@ -501,8 +493,26 @@ function DeliveryPolicyForm(p: TabProps) {
         <div className="settings-column">
           <Panel
             title="Delivery"
-            description="Choose completion mode and scoped write authority. Missing grants deny writes. Saving does not start work or change status mappings."
+            description="Choose completion mode and scoped write authority. Missing grants deny agent and operator writes; the status mapping is its own authority. Saving does not start work or change the status mapping."
           >
+            {authority !== undefined && (
+              <p className="body">
+                {statusMappingAuthorityLine(
+                  authority,
+                  authority?.tracker === "github"
+                    ? discoveredProjectTitle(
+                        discovery.choices,
+                        authority.projectNodeId,
+                      )
+                    : undefined,
+                )}{" "}
+                <a
+                  href={`/app/projects/${p.projectId}/settings?tab=github#status-mapping`}
+                >
+                  Edit status mapping
+                </a>
+              </p>
+            )}
             <DraftField draft={d} field="mode" label="Completion mode">
               <option value="reviewable-pr">Reviewable PR</option>
               <option value="through-merge">Through merge</option>
@@ -804,26 +814,19 @@ function DeliveryPolicyForm(p: TabProps) {
                           ["projectNodeId", "Project ID"],
                           ["fieldNodeId", "Field ID"],
                           ["optionNodeIds", "Option IDs"],
-                          ["statusIds", "Status IDs"],
                         ] as const
                       ).flatMap(([field, label]) => {
                         const project =
                           row.action === "project.field" ||
                           row.action === "project.item.add";
-                        // The pickers above carry a Project grant's scope; the rest is optional or Jira's.
-                        if (field !== "statusIds" && project) return [];
+                        // The pickers above carry a Project grant's scope.
+                        if (project) return [];
                         return [
                           <ScopeField
                             key={field}
                             label={label}
-                            required={
-                              field === "statusIds" &&
-                              row.action === "issue.status"
-                            }
                             value={row[field]}
-                            array={
-                              field === "optionNodeIds" || field === "statusIds"
-                            }
+                            array={field === "optionNodeIds"}
                             error={error(`grants.${index}.${field}`)}
                             onChange={(value) =>
                               setRow("grants", index, field, value)
@@ -869,13 +872,6 @@ function DeliveryPolicyForm(p: TabProps) {
         </div>
         <aside className="settings-column">
           <ChangeList lines={lines} />
-          {coverageWarning && <Alert role="alert">{coverageWarning}</Alert>}
-          {removedUnavailable && (
-            <Alert role="alert">
-              Removing an unavailable grant may remove status-mapping authority.
-              Its scope cannot be shown.
-            </Alert>
-          )}
           <DraftOutcome
             draft={d}
             client={p.client}
@@ -1335,14 +1331,12 @@ function ScopeField({
   value,
   onChange,
   error,
-  required = false,
   array = false,
 }: {
   label: string;
   value: string | string[] | undefined;
   onChange: (value: string | string[] | undefined) => void;
   error?: string | undefined;
-  required?: boolean;
   array?: boolean;
 }) {
   const included = value !== undefined;
@@ -1355,16 +1349,14 @@ function ScopeField({
           data-slot="checkbox-input"
           className="native-check size-5 shrink-0 p-0 accent-foreground"
           type="checkbox"
-          checked={included || required}
-          disabled={required}
+          checked={included}
           onChange={(event) =>
             onChange(event.target.checked ? (array ? [] : "") : undefined)
           }
         />
         Include {label}
-        {required ? " (required)" : ""}
       </label>
-      {(included || required) && (
+      {included && (
         <Field
           label={array ? `${label} (one per line)` : label}
           value={Array.isArray(value) ? value.join("\n") : (value ?? "")}

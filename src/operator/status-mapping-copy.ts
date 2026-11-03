@@ -21,7 +21,7 @@ export const statusEventHints: Record<StatusMappingEvent, string> = {
 
 /** Why a mapped option cannot be saved, naming the event and the option. */
 export const statusMappingRefusalSentence = (
-  reason: "no-selection" | "ungranted" | "approval-only" | "readiness",
+  reason: "no-selection" | "readiness",
   event: StatusMappingEvent | null,
   option: string,
   tracker: "github" | "jira" = "github",
@@ -33,20 +33,51 @@ export const statusMappingRefusalSentence = (
       return jira
         ? "The mapping needs a Jira source of this project. Add one first."
         : "The mapping needs a GitHub Project source of this project. Add one first.";
-    case "ungranted":
-      return jira
-        ? `${named}: no issue status grant covers this status. Allow it in the delivery policy first.`
-        : `${named}: no project field grant covers this option. Allow it in the delivery policy first.`;
-    case "approval-only":
-      return `${named}: the grant for this ${jira ? "status" : "option"} needs approval, and cab cannot ask for one. Change it to Allow.`;
     case "readiness":
       return `${named}: the readiness rule does not accept this ${jira ? "status" : "option"}, so cab's own write would make the task not Ready.`;
   }
 };
 
+/** What a saved mapping lets cab write, as the delivery reads report it. Names fall back to IDs. */
+export type StatusMappingAuthority = {
+  tracker: "github" | "jira";
+  statuses: readonly { id: string; name: string | null }[];
+  /** GitHub only: the Project the Status belongs to. */
+  projectNodeId?: string;
+};
+
+/** `title` is the Project's title where a read supplied one; the node ID otherwise. */
+const statusMappingAuthorityPhrase = (
+  a: StatusMappingAuthority,
+  title?: string,
+) => {
+  const names = a.statuses.map((s) => s.name ?? s.id).join(", ");
+  return a.tracker === "jira"
+    ? `move issues to ${names}`
+    : `set Status to ${names} on Project ${title ?? a.projectNodeId}`;
+};
+
+/** What saving the mapping allows, beside its editor. */
+export const statusMappingSaveStatement = (
+  a: StatusMappingAuthority,
+  title?: string,
+) => `Saving allows cab to ${statusMappingAuthorityPhrase(a, title)}`;
+
+/** What the saved mapping lets cab do, or that none is set. */
+export const statusMappingAuthorityText = (
+  a: StatusMappingAuthority | null,
+  title?: string,
+) => (a ? `cab may ${statusMappingAuthorityPhrase(a, title)}` : "not set");
+
+/** The read-only line of the delivery reads; `null` is no mapping. */
+export const statusMappingAuthorityLine = (
+  a: StatusMappingAuthority | null,
+  title?: string,
+) => `Status mapping: ${statusMappingAuthorityText(a, title)}`;
+
 /** What the mapping does and does not do, beside its editor. */
 export const statusMappingBoundary = [
-  "cab writes the Status, not an agent. Each mapped option needs an Allow grant for that Project field; options without one are marked (no grant).",
+  "cab writes the Status, not an agent. Saving the mapping is the authority for these writes; no delivery grant is needed.",
   "It writes only for tasks that are already Ready, or Done once the task is done and its issue is closed, and never makes a task Ready. In-flight events must name an option the readiness rule accepts.",
   "Immediately before writing it reads the Status again. If the card moved on GitHub since cab last saw it, the write is skipped and the task says so.",
   "A write whose result is not proved shows on the task but does not hold it or block the next write.",
@@ -54,7 +85,7 @@ export const statusMappingBoundary = [
 
 /** The Jira variant of the boundary. */
 export const jiraStatusMappingBoundary = [
-  "cab moves the issue, not an agent. Each mapped status ID needs an Allow issue status grant; IDs without one are marked (no grant).",
+  "cab moves the issue, not an agent. Saving the mapping is the authority for these writes; no delivery grant is needed.",
   "It writes only for tasks that are already Ready, or Done once the task is done and its issue is closed, and never makes a task Ready. In-flight events must name a status the readiness rule accepts.",
   "Immediately before writing it reads the issue and its transitions. The write is skipped, and the task says so, if the status changed in Jira since cab last saw it, the issue is already there, or not exactly one transition reaches the status.",
   "A write whose result is not proved shows on the task but does not hold it or block the next write.",

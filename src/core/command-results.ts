@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   canonicalMaterial,
   deliveryPolicySchema,
+  policyGrantSchema,
   repositorySettingsSchema,
+  retiredIssueStatusGrantSchema,
 } from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
 import { executionHarnessSchema } from "./execution-runtime.js";
@@ -127,6 +129,9 @@ export const routingCommandResultSchema = z
 export const deliveryCommandResultSchema = deliveryPolicySchema
   .omit({ credentialRef: true })
   .extend({
+    grants: z
+      .array(z.union([policyGrantSchema, retiredIssueStatusGrantSchema]))
+      .max(256),
     // Results recorded before per-repository settings have none.
     repositories: repositorySettingsSchema.optional(),
     /** The digest of the operator request a per-repository save recorded; never part of a receipt. */

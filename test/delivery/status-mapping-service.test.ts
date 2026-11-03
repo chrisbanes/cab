@@ -325,33 +325,103 @@ test("a task that is not Ready, or has no Project item, gets no write", async ()
   }
 });
 
-test("a grant revoked after the save records the denial on the task", async () => {
-  const f = await started();
+const configureGrants = (
+  f: Fixture,
+  grants: { action: "issue.comment"; repositoryId: string; mode: "allow" }[],
+) =>
+  f.domain.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: f.service.delivery().configuration(f.projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants,
+    requiredChecks: [],
+  });
+
+test("a GitHub mapping saves and writes with an empty delivery policy", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
   try {
-    f.domain.execute({
-      type: "delivery.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId: f.projectId,
-      expectedVersion: f.service.delivery().configuration(f.projectId).version,
-      mode: "reviewable-pr",
-      credentialRef: null,
-      grants: [{ action: "issue.comment", repositoryId: "R1", mode: "allow" }],
-      requiredChecks: [],
-    });
-    await registerPr(f);
+    configureGrants(f, []);
+    assert.equal(save(f, mapping()).version, 2);
     await f.service.runStatusMapping();
-    const denied = writes(f)[1];
-    assert.equal(denied?.state, "denied");
-    assert.equal(denied?.observation?.reason, "delivery-authority-denied");
+    assert.equal(writes(f)[0]?.state, "confirmed-success");
     assert.deepEqual(optionsWritten(f), [inProgress]);
-    // The transition is spent: another pass does not mint a second operation.
-    await f.service.runStatusMapping();
-    assert.equal(writes(f).length, 2);
   } finally {
     await f.close();
   }
 });
+
+test("removing every project.field grant leaves mapping writes working", async () => {
+  const f = await mapped();
+  try {
+    await f.service.runStatusMapping();
+    configureGrants(f, [
+      { action: "issue.comment", repositoryId: "R1", mode: "allow" },
+    ]);
+    await registerPr(f);
+    await f.service.runStatusMapping();
+    assert.equal(writes(f)[1]?.state, "confirmed-success");
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const [name, change] of [
+  ["changes", mapping({ turnStarted: inReview })],
+  ["is cleared", null],
+] as const)
+  test(`a write prepared under mapping version N is refused after the mapping ${name}`, async () => {
+    const { f } = await mappedManually();
+    try {
+      const { deliveryStore, deliveryCoordinator } = startedOf(f.service);
+      const operationId = randomUUID();
+      const prepared = deliveryStore.prepareAction(
+        {
+          operationId,
+          action: {
+            kind: "project.field",
+            target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+            projectNodeId,
+            itemNodeId: fixtureProject.itemNodeId,
+            fieldNodeId,
+            optionNodeId: inProgress,
+            expected: { optionNodeId: todo },
+          },
+        },
+        {
+          actor: "service",
+          purpose: "status-mapping",
+          projectId: f.projectId,
+          taskId: f.taskId,
+          mappingVersion: f.domain.statusMapping(f.projectId).version,
+          event: "turnStarted",
+        },
+        false,
+      );
+      assert.equal(prepared.state, "prepared");
+      save(f, change);
+      await deliveryCoordinator.reconcile();
+      const record = deliveryStore.action(operationId);
+      assert.equal(record.state, "confirmed-failure");
+      assert.equal(
+        record.observation?.reason,
+        "delivery-authority-stale-or-held",
+      );
+      assert.deepEqual(optionsWritten(f), []);
+      assert.ok(
+        f.service
+          .delivery()
+          .publicTask(f.taskId)
+          .actions.some((a) => a.operationId === operationId),
+      );
+    } finally {
+      await f.close();
+    }
+  });
 
 test("a write minted for an event the task has left is refused before it is sent", async () => {
   const f = await started();

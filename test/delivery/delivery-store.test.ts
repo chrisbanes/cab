@@ -1130,3 +1130,98 @@ test("a policy stored with a project-wide check list reads with no repository en
     db.close();
   }
 });
+
+test("the store migration removes issue.status grants and keeps every other grant and the policy version", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const delivery = new DeliveryStore(db);
+    const withStatus = randomUUID(),
+      without = randomUUID(),
+      broken = randomUUID();
+    for (const projectId of [withStatus, without, broken])
+      domain.execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        name: `P-${projectId}`,
+        leadProfileId: null,
+      });
+    const comment = {
+      action: "issue.comment",
+      repositoryId: "R1",
+      mode: "allow",
+    };
+    const field = {
+      action: "project.field",
+      repositoryId: "R1",
+      mode: "allow",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: ["O"],
+    };
+    const policy = (grants: unknown[]) => ({
+      mode: "through-merge",
+      credentialRef: "env:FIXTURE_DELIVERY",
+      branchPrefix: "cab/",
+      grants,
+      requiredChecks: [],
+      repositories: [],
+    });
+    const seed = (projectId: string, version: number, json: string) =>
+      db
+        .prepare(
+          "INSERT INTO delivery_policies VALUES (?, ?, ?) ON CONFLICT(projectId) DO UPDATE SET version=excluded.version, policyJson=excluded.policyJson",
+        )
+        .run(projectId, version, json);
+    seed(
+      withStatus,
+      4,
+      JSON.stringify(
+        policy([
+          comment,
+          {
+            action: "issue.status",
+            repositoryId: "J1",
+            mode: "allow",
+            statusIds: ["10003"],
+          },
+          field,
+          {
+            action: "issue.status",
+            repositoryId: "J2",
+            mode: "approval",
+            statusIds: ["10004"],
+          },
+        ]),
+      ),
+    );
+    seed(without, 2, JSON.stringify(policy([comment, field])));
+    seed(broken, 3, "{not json");
+    const raw = (projectId: string) =>
+      db
+        .prepare(
+          "SELECT version, policyJson FROM delivery_policies WHERE projectId=?",
+        )
+        .get(projectId) as { version: number; policyJson: string };
+    const untouched = [raw(without), raw(broken)];
+
+    delivery.migrate();
+    const stripped = delivery.configuration(withStatus);
+    assert.equal(stripped.version, 4);
+    assert.deepEqual(stripped.grants, [comment, field]);
+    assert.equal(stripped.credentialRef, "env:FIXTURE_DELIVERY");
+    assert.equal(stripped.branchPrefix, "cab/");
+    assert.deepEqual([raw(without), raw(broken)], untouched);
+
+    // Idempotent: a second run changes nothing.
+    const once = raw(withStatus);
+    delivery.migrate();
+    assert.deepEqual(raw(withStatus), once);
+  } finally {
+    db.close();
+  }
+});

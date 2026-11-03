@@ -591,7 +591,7 @@ test("a Jira readiness rule is edited in settings, explains a Draft task, and a 
   assert.equal(await link.getAttribute("href"), `https://${site}/browse/ABC-3`);
 });
 
-test("a Jira status mapping is typed on the Jira tab, marks an ungranted status, and is refused or saved in the service's words", async (_t, journey) => {
+test("a Jira status mapping is typed on the Jira tab with no grant, states what saving allows, and is refused or saved in the service's words", async (_t, journey) => {
   for (const [name, value] of Object.entries(variables)) {
     const previous = process.env[name];
     journey.cleanup(async () => {
@@ -633,24 +633,6 @@ test("a Jira status mapping is typed on the Jira tab, marks an ungranted status,
       conditions: [{ kind: "status", operator: "in", statusIds: ["1", "3"] }],
     },
   });
-  domain.execute({
-    type: "delivery.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: f.service.delivery().configuration(projectId).version,
-    mode: "reviewable-pr",
-    credentialRef: null,
-    grants: [
-      {
-        action: "issue.status",
-        repositoryId: "10000",
-        mode: "allow",
-        statusIds: ["3", "10005"],
-      },
-    ],
-    requiredChecks: [],
-  });
   await page.goto(
     `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
   );
@@ -666,11 +648,10 @@ test("a Jira status mapping is typed on the Jira tab, marks an ungranted status,
   ])
     await panel.getByLabel(label, { exact: false }).first().waitFor();
 
-  // An ungranted status is marked where it is typed.
+  // Typing a status needs no grant, and the editor states what saving allows.
   await panel.getByLabel("First turn started", { exact: true }).fill("1");
-  await panel
-    .getByLabel("First turn started (no grant)", { exact: true })
-    .waitFor();
+  await panel.getByText("Saving allows cab to move issues to 1").waitFor();
+  assert.equal(await panel.getByText("(no grant)").count(), 0);
   // A status the readiness rule does not accept is refused in the service's words, and the draft stays.
   await panel.getByLabel("First turn started", { exact: false }).fill("10005");
   await panel
@@ -683,7 +664,7 @@ test("a Jira status mapping is typed on the Jira tab, marks an ungranted status,
     .waitFor();
   assert.equal(domain.statusMapping(projectId).mapping, null);
 
-  // A granted, accepted status saves.
+  // An accepted status saves.
   await panel.getByLabel("First turn started", { exact: false }).fill("3");
   await panel.getByLabel("Done", { exact: false }).fill("10005");
   await panel

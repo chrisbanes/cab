@@ -1541,6 +1541,28 @@ export const publicationPolicySchema = z
       .nullable(),
   })
   .strict();
+const statusMappingAuthorityEntries = z
+  .array(z.object({ id: text, name: text.nullable() }).strict())
+  .max(4);
+/** What the saved status mapping lets cab write; null is no mapping. Absent when the exclusions withhold it. */
+export const statusMappingAuthoritySchema = z
+  .union([
+    z
+      .object({
+        tracker: z.literal("github"),
+        selectionId: text,
+        projectNodeId: text,
+        statuses: statusMappingAuthorityEntries,
+      })
+      .strict(),
+    z
+      .object({
+        tracker: z.literal("jira"),
+        statuses: statusMappingAuthorityEntries,
+      })
+      .strict(),
+  ])
+  .nullable();
 export const deliveryReadSchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
@@ -1548,6 +1570,8 @@ export const deliveryReadSchema = z
     blockers: z.array(text).max(128),
     omittedBlockerCount: z.number().int().nonnegative(),
     omittedActionCount: z.number().int().nonnegative(),
+    /** Absent from older servers, and when the exclusions withhold the mapping. */
+    statusMappingAuthority: statusMappingAuthoritySchema.optional(),
     /** The task's assigned branches; a name the exclusions withhold reads as null. */
     branches: z
       .array(
@@ -2265,7 +2289,6 @@ const deliveryGrantSchema = z
       "issue.create",
       "project.item.add",
       "project.field",
-      "issue.status",
       "pr.create",
       "pr.edit",
       "pr.ready",
@@ -2282,7 +2305,6 @@ const deliveryGrantSchema = z
     projectNodeId: deliveryIdentity.optional(),
     fieldNodeId: deliveryIdentity.optional(),
     optionNodeIds: z.array(deliveryIdentity).optional(),
-    statusIds: z.array(deliveryIdentity).max(256).optional(),
   })
   .strict()
   .refine(
@@ -2383,6 +2405,8 @@ export const deliveryConfigurationSchema = z
     credential: sourceCredentialStatusSchema.optional(),
     branchPrefix: z.string().max(64).nullable().optional(),
     branchPrefixUnavailable: z.literal(true).optional(),
+    /** Absent from older servers, and when the exclusions withhold the mapping. */
+    statusMappingAuthority: statusMappingAuthoritySchema.optional(),
     grants: z
       .array(z.union([deliveryGrantSchema, unavailableDeliveryRowSchema]))
       .max(256),
@@ -3773,7 +3797,7 @@ export const profileConfigurationSchema = envelope(
     })
     .strict(),
 );
-/** The GitHub status mapping with what its editor needs: the Project selections and the granted options. */
+/** The GitHub status mapping with what its editor needs: the Project selections. */
 const githubStatusMappingViewSchema = z
   .object({
     version: revision,
@@ -3786,28 +3810,16 @@ const githubStatusMappingViewSchema = z
           .strict(),
       )
       .max(30),
-    /** Options an `allow` project field grant covers, per Project field. */
-    granted: z
-      .array(
-        z
-          .object({
-            projectNodeId: text,
-            fieldNodeId: text,
-            optionNodeIds: z.array(text),
-          })
-          .strict(),
-      )
-      .max(256),
   })
   .strict();
-/** The Jira status mapping: bound to the Jira source, with the statuses an `allow` `issue.status` grant covers. */
+/** The Jira status mapping: bound to the Jira source, with the names last observed for its statuses. */
 const jiraStatusMappingViewSchema = z
   .object({
     tracker: z.literal("jira"),
     version: revision,
     availability: z.enum(["available", "unavailable"]),
     mapping: jiraStatusMappingSchema.nullable(),
-    granted: z.array(text).max(256 * 256),
+    statusNames: z.record(text, text),
   })
   .strict();
 export const statusMappingViewSchema = z.union([

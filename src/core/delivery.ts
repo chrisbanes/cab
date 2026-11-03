@@ -39,7 +39,6 @@ export const actionKinds = [
   "issue.create",
   "project.item.add",
   "project.field",
-  "issue.status",
   "pr.create",
   "pr.edit",
   "pr.ready",
@@ -52,7 +51,7 @@ export const actionKinds = [
   "branch.adopt",
 ] as const;
 /** Whether an action writes to the project's issue tracker; every other kind writes to its code host. */
-export const isIssueTrackerAction = (kind: (typeof actionKinds)[number]) =>
+export const isIssueTrackerAction = (kind: ExternalAction["kind"]) =>
   kind.startsWith("issue.") || kind.startsWith("project.");
 export const defaultBranchPrefix = "cab/";
 /** Git's all-zero id, recorded as the outside head when the remote branch is absent. */
@@ -127,33 +126,44 @@ export const repositorySettingsSchema = z
       new Set(entries.map((e) => e.repositoryId)).size === entries.length,
     "Each repository appears once",
   );
+export const policyGrantSchema = z
+  .object({
+    action: z.enum(actionKinds),
+    // The issue-tracker container for an issue-tracker action (a GitHub repository node ID), else the repository.
+    repositoryId: identity,
+    mode: z.enum(["allow", "approval"]),
+    projectNodeId: identity.optional(),
+    fieldNodeId: identity.optional(),
+    optionNodeIds: z.array(identity).optional(),
+  })
+  .strict()
+  .refine(
+    (g) => g.action !== "branch.adopt" || g.mode === "approval",
+    "branch.adopt is only grantable with approval",
+  );
+/**
+ * The `issue.status` grant as the schema accepted it before the status mapping became its own
+ * authority. New policies refuse it; receipts recorded earlier still carry one, with whichever
+ * optional fields it was saved with.
+ */
+export const retiredIssueStatusGrantSchema = z
+  .object({
+    action: z.literal("issue.status"),
+    repositoryId: identity,
+    mode: z.enum(["allow", "approval"]),
+    projectNodeId: identity.optional(),
+    fieldNodeId: identity.optional(),
+    optionNodeIds: z.array(identity).optional(),
+    statusIds: z.array(identity).max(256).optional(),
+  })
+  .strict();
 export const deliveryPolicySchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
     credentialRef: sourceCredentialReference.nullable(),
     /** Absent on policies persisted before publication existed; `defaultBranchPrefix` then applies. */
     branchPrefix: z.string().refine(validBranchPrefix).optional(),
-    grants: z
-      .array(
-        z
-          .object({
-            action: z.enum(actionKinds),
-            // The issue-tracker container for an issue-tracker action (a GitHub repository node ID), else the repository.
-            repositoryId: identity,
-            mode: z.enum(["allow", "approval"]),
-            projectNodeId: identity.optional(),
-            fieldNodeId: identity.optional(),
-            optionNodeIds: z.array(identity).optional(),
-            /** The Jira statuses an `issue.status` grant covers. */
-            statusIds: z.array(identity).max(256).optional(),
-          })
-          .strict()
-          .refine(
-            (g) => g.action !== "branch.adopt" || g.mode === "approval",
-            "branch.adopt is only grantable with approval",
-          ),
-      )
-      .max(256),
+    grants: z.array(policyGrantSchema).max(256),
     /** Project-wide checks from before per-repository settings: they apply to every repository until the next save. */
     requiredChecks: z.array(requiredCheckSchema).max(100).default([]),
     repositories: repositorySettingsSchema.default([]),
@@ -863,6 +873,45 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_readiness_coverage (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), unreadSelectFields TEXT NOT NULL);
     `);
+    // Before anything parses a policy, including applyOpenPrsDefault.
+    this.stripIssueStatusGrants();
+  }
+  /**
+   * The status mapping is its own authority, so `issue.status` grants are retired. Data-only: every
+   * other grant and field stays, and the policy version does not change, so no settlement or
+   * approval bound to it is invalidated. Only the pre-migration startup snapshot restores them.
+   */
+  private stripIssueStatusGrants(): void {
+    const rows = this.db
+      .prepare("SELECT projectId, policyJson FROM delivery_policies")
+      .all() as { projectId: string; policyJson: string }[];
+    this.transaction(() => {
+      for (const { projectId, policyJson } of rows) {
+        let policy: unknown;
+        try {
+          policy = JSON.parse(policyJson);
+        } catch {
+          // Left as it is; `configuration` keeps reporting it invalid.
+          continue;
+        }
+        if (
+          typeof policy !== "object" ||
+          policy === null ||
+          !("grants" in policy) ||
+          !Array.isArray(policy.grants)
+        )
+          continue;
+        const grants = policy.grants.filter(
+          (grant) => grant?.action !== "issue.status",
+        );
+        if (grants.length === policy.grants.length) continue;
+        this.db
+          .prepare(
+            "UPDATE delivery_policies SET policyJson=? WHERE projectId=?",
+          )
+          .run(canonicalMaterial({ ...policy, grants }), projectId);
+      }
+    });
   }
   transaction<T>(run: () => T): T {
     return transaction(this.db, run);
@@ -1037,7 +1086,7 @@ export class DeliveryStore {
       );
     if (isServiceDeliveryCaller(binding)) {
       this.validateServiceCaller(request, binding);
-      // The service cannot obtain an approval, so an approval-mode grant fails closed.
+      // The service has no approval to give.
       approved = false;
     }
     if (isOperatorPublicationCaller(binding))
@@ -1051,29 +1100,28 @@ export class DeliveryStore {
     if (policyVersion !== undefined && policy.version !== policyVersion)
       throw new Error("Delivery policy changed");
     const action = request.action;
-    const grant = policy.grants.find(
-      (g) =>
-        // The service cannot obtain an approval, so only an `allow` grant can cover it.
-        (!isServiceDeliveryCaller(binding) || g.mode === "allow") &&
-        g.action === action.kind &&
-        g.repositoryId === action.target.repositoryId &&
-        (action.kind === "project.item.add"
-          ? g.projectNodeId === action.projectNodeId
-          : action.kind === "issue.status"
-            ? g.statusIds?.includes(action.statusId)
-            : action.kind !== "project.field" ||
-              (g.projectNodeId === action.projectNodeId &&
-                g.fieldNodeId === action.fieldNodeId &&
-                g.optionNodeIds?.includes(action.optionNodeId))),
-    );
-    if (!grant)
+    // The saved status mapping, checked above, is the service's authority; no grant is consulted for it.
+    const grant = isServiceDeliveryCaller(binding)
+      ? undefined
+      : policy.grants.find(
+          (g) =>
+            g.action === action.kind &&
+            g.repositoryId === action.target.repositoryId &&
+            (action.kind === "project.item.add"
+              ? g.projectNodeId === action.projectNodeId
+              : action.kind !== "project.field" ||
+                (g.projectNodeId === action.projectNodeId &&
+                  g.fieldNodeId === action.fieldNodeId &&
+                  g.optionNodeIds?.includes(action.optionNodeId))),
+        );
+    if (!grant && !isServiceDeliveryCaller(binding))
       throw new DomainPolicyError(
         "forbidden",
         "External action denied by project policy",
       );
     this.assertJiraChangeRequestText(action, binding);
     if (
-      (grant.mode === "approval" ||
+      (grant?.mode === "approval" ||
         action.kind === "issue.edit" ||
         action.kind === "pr.edit" ||
         // The confirmed publication review is the approval in either grant mode.
@@ -3007,16 +3055,6 @@ export class DeliveryStore {
           "invalid-input",
           "Project item grant requires an exact Project",
           [`grants.${index}.projectNodeId`],
-        );
-      if (
-        grant.action === "issue.status"
-          ? !grant.statusIds?.length
-          : grant.statusIds
-      )
-        throw new DomainPolicyError(
-          "invalid-input",
-          "Only an issue.status grant takes statusIds, and it requires some",
-          [`grants.${index}.statusIds`],
         );
     }
     this.db

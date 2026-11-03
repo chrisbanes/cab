@@ -7,6 +7,8 @@ import { DatabaseSync } from "node:sqlite";
 import { type TestContext, test } from "node:test";
 import { promisify } from "node:util";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
+import { replaceProjectFieldNames } from "../../src/core/project-field-names.js";
+import { databaseOf } from "../fixtures/service-internals.js";
 import { githubConfigurationCommandSchema } from "../../src/core/github-source-contracts.js";
 import { repositoriesConfigurationCommandSchema } from "../../src/core/repository-links.js";
 import { readinessRuleViewSchema } from "../../src/operator/contracts.js";
@@ -1919,7 +1921,6 @@ test("delivery JSON preserves every accepted action, supplemental scope and opti
       projectNodeId: "P",
       fieldNodeId: "F",
       optionNodeIds: action === "project.field" ? ["O", "O"] : [],
-      ...(action === "issue.status" ? { statusIds: ["S", "S"] } : {}),
     };
     return [grant, grant];
   });
@@ -1946,6 +1947,7 @@ test("delivery JSON preserves every accepted action, supplemental scope and opti
     version: 2,
     mode: "through-merge",
     credentialConfigured: false,
+    statusMappingAuthority: null,
     grants,
     requiredChecks,
     repositories: [],
@@ -2263,6 +2265,73 @@ test("delivery missing exclusion evidence withholds policy text and refuses norm
   }
 });
 
+test("an issue.status grant, or a grant with statusIds, is refused as invalid input and writes nothing", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  for (const grant of [
+    {
+      action: "issue.status",
+      repositoryId: "J1",
+      mode: "allow",
+      statusIds: ["10003"],
+    },
+    {
+      action: "issue.comment",
+      repositoryId: "J1",
+      mode: "allow",
+      statusIds: [],
+    },
+  ])
+    await assert.rejects(
+      api.execute(deliveryInput(projectId, { grants: [grant] })),
+      (error: unknown) =>
+        error instanceof OperatorApiError &&
+        error.status === 400 &&
+        error.code === "invalid-input",
+    );
+  assert.equal(f.service.delivery().configuration(projectId).version, 1);
+});
+
+test("a receipt recorded with a retired issue.status grant carrying Project scope still answers its operation lookup", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const key = randomUUID();
+  const result = {
+    mode: "reviewable-pr",
+    grants: [
+      {
+        action: "issue.status",
+        repositoryId: "J1",
+        mode: "allow",
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: ["O"],
+        statusIds: ["10003"],
+      },
+    ],
+    requiredChecks: [],
+    version: 2,
+    credentialConfigured: false,
+  };
+  databaseOf(f.service)
+    .prepare("INSERT INTO command_receipts VALUES (?, ?, ?, ?)")
+    .run(projectId, key, "0".repeat(64), JSON.stringify(result));
+  const lookup = await api.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key,
+    }),
+  );
+  assert.equal(lookup.data.state, "recorded");
+  // New saves still refuse the retired action.
+  await assert.rejects(
+    api.execute(
+      deliveryInput(projectId, { grants: [result.grants[0] as never] }),
+    ),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 400,
+  );
+});
+
 test("delivery semantic refusals report indexed fields and do not write or leave receipts", async (t) => {
   const { f, api, projectId } = await deliveryFixture(t);
   const base = { repositoryId: "R", mode: "allow" };
@@ -2276,14 +2345,6 @@ test("delivery semantic refusals report indexed fields and do not write or leave
       ],
     ],
     [{ ...base, action: "project.item.add" }, ["grants.0.projectNodeId"]],
-    [
-      { ...base, action: "issue.status", statusIds: [] },
-      ["grants.0.statusIds"],
-    ],
-    [
-      { ...base, action: "issue.comment", statusIds: [] },
-      ["grants.0.statusIds"],
-    ],
   ] as const) {
     const input = deliveryInput(projectId, { grants: [grant] });
     await assert.rejects(api.execute(input), (error: unknown) => {
@@ -2494,14 +2555,6 @@ test("delivery accepts policy row limits and rejects malformed shapes without wr
     [{ preserveBranchPrefix: true, branchPrefix: "" }, "branchPrefix"],
     [{ grants: [{ ...grant, action: "branch.adopt" }] }, "grants.0.mode"],
     [{ grants: [{ ...grant, repositoryId: "" }] }, "grants.0.repositoryId"],
-    [
-      {
-        grants: [
-          { ...grant, statusIds: Array.from({ length: 257 }, () => "S") },
-        ],
-      },
-      "grants.0.statusIds",
-    ],
     [
       { requiredChecks: [{ name: "build", appId: 0 }] },
       "requiredChecks.0.appId",
@@ -3698,32 +3751,32 @@ test("credential exclusions protect the entire configuration including status ma
           readiness: null,
         });
       }
-      const grant =
+      // A Jira mapping needs no grant; a GitHub one keeps its Project grant row withheld too.
+      const grants =
         tracker === "github"
-          ? {
-              action: "project.field" as const,
-              repositoryId: "R",
-              mode: "allow" as const,
-              projectNodeId: privateValue,
-              fieldNodeId: envKey,
-              optionNodeIds: [envKey, privateValue],
-            }
-          : {
-              action: "issue.status" as const,
-              repositoryId: "R",
-              mode: "allow" as const,
-              statusIds: [envKey, privateValue],
-            };
+          ? [
+              {
+                action: "project.field" as const,
+                repositoryId: "R",
+                mode: "allow" as const,
+                projectNodeId: privateValue,
+                fieldNodeId: envKey,
+                optionNodeIds: [envKey, privateValue],
+              },
+            ]
+          : [];
       domain.execute({
         ...deliveryInput(projectId),
         actor: "operator",
         credentialRef: `env:${envKey}`,
-        grants: [grant],
+        grants,
       });
       const withoutMapping = await api.readProjectConfiguration(projectId);
       for (const secret of [envKey, `env:${envKey}`, privateValue])
         assert.equal(JSON.stringify(withoutMapping).includes(secret), false);
-      assert.equal(withoutMapping.data.statusMapping, undefined);
+      // A Jira project's view holds nothing private until a mapping names a status.
+      if (tracker === "github")
+        assert.equal(withoutMapping.data.statusMapping, undefined);
       const mapping =
         tracker === "github"
           ? {
@@ -3771,7 +3824,12 @@ test("credential exclusions protect the entire configuration including status ma
           undefined,
           "a withheld mapping must not become an editable empty mapping",
         );
-        if (!removeGrant)
+        assert.equal(
+          read.data.delivery!.statusMappingAuthority,
+          undefined,
+          "a withheld mapping must not leave its authority summary",
+        );
+        if (!removeGrant && grants.length)
           assert.equal("savedRow" in read.data.delivery!.grants[0]!, true);
         assert.deepEqual(
           domain.statusMapping(projectId).mapping,
@@ -3802,15 +3860,6 @@ test("delivery policies with 257 Project options save and preserve the full conf
       await api.execute(input);
       const read = await api.readProjectConfiguration(projectId);
       assert.deepEqual(read.data.delivery!.grants, [grant]);
-      const mapping = read.data.statusMapping;
-      assert.ok(mapping && !("tracker" in mapping));
-      assert.deepEqual(mapping.granted, [
-        {
-          projectNodeId: "P",
-          fieldNodeId: "F",
-          optionNodeIds: grant.optionNodeIds,
-        },
-      ]);
       assert.deepEqual(f.service.delivery().configuration(projectId).grants, [
         grant,
       ]);
@@ -3818,7 +3867,7 @@ test("delivery policies with 257 Project options save and preserve the full conf
     });
 });
 
-test("a withheld Project selection leaves public grant reductions warnable without disclosing its id", async (t) => {
+test("a withheld Project selection withholds the mapping view and its authority summary without disclosing its id", async (t) => {
   const { f, api, projectId } = await deliveryFixture(t);
   const domain = f.service.domain();
   const envKey = "PRIVATE_MAPPING_SELECTION";
@@ -3863,21 +3912,91 @@ test("a withheld Project selection leaves public grant reductions warnable witho
   const read = await api.readProjectConfiguration(projectId);
   assert.equal(JSON.stringify(read).includes(envKey), false);
   assert.equal(read.data.statusMapping, undefined);
-  const saved = read.data.delivery!;
-  assert.deepEqual(saved.grants, [grant]);
-  const { deliveryMappingCoverageWarning } = await import(
-    "../../web/src/delivery-policy-draft.js"
-  );
-  for (const grants of [[], [{ ...grant, mode: "approval" as const }]])
-    assert.match(
-      deliveryMappingCoverageWarning(
-        saved,
-        { ...saved, grants },
-        read.data.statusMapping,
-      ) ?? "",
-      /may remove status-mapping authority/,
-    );
+  assert.deepEqual(read.data.delivery!.grants, [grant]);
+  assert.equal(read.data.delivery!.statusMappingAuthority, undefined);
   assert.equal(f.runtime.turns, 0);
+});
+
+test("an excluded sibling selection withholds the authority summary, and an excluded name reads as null, on both delivery reads", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const envKey = "PRIVATE_AUTHORITY_NAME";
+  const taskId = randomUUID();
+  domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "T",
+    outcome: "O",
+    ready: true,
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: "visible", kind: "project", projectNodeId: "P", filter: "" },
+      { id: envKey, kind: "project", projectNodeId: "Q", filter: "" },
+    ],
+    readiness: null,
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${envKey}`,
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mapping: {
+      selectionId: "visible",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      events: { turnStarted: null, handedBack: null, held: null, done: "O" },
+    },
+  });
+  const authorities = async () => [
+    (await api.readProjectConfiguration(projectId)).data.delivery!
+      .statusMappingAuthority,
+    (await api.readTask(taskId)).data.delivery?.statusMappingAuthority,
+  ];
+  // The view is withheld by the excluded sibling selection, so the summary is too.
+  assert.deepEqual(await authorities(), [undefined, undefined]);
+
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: domain.githubConfiguration(projectId).version,
+    selections: [
+      { id: "visible", kind: "project", projectNodeId: "P", filter: "" },
+    ],
+    readiness: null,
+  });
+  replaceProjectFieldNames(databaseOf(f.service), "P", [
+    {
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      name: "Status",
+      options: [{ optionNodeId: "O", name: envKey }],
+    },
+  ]);
+  const shown = {
+    tracker: "github",
+    selectionId: "visible",
+    projectNodeId: "P",
+    statuses: [{ id: "O", name: null }],
+  };
+  assert.deepEqual(await authorities(), [shown, shown]);
+  assert.equal(JSON.stringify(await authorities()).includes(envKey), false);
 });
 
 test("routing Settings partial edits preserve an existing 129-candidate domain configuration", async (t) => {

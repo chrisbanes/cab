@@ -16,14 +16,9 @@ import {
   statusMappingSchema,
 } from "./status-mapping-contracts.js";
 import type { Database } from "./store.js";
-import type { DeliveryPolicy } from "./delivery.js";
 
 /** Why a mapped option cannot be saved. */
-export type StatusMappingRefusalReason =
-  | "no-selection"
-  | "ungranted"
-  | "approval-only"
-  | "readiness";
+export type StatusMappingRefusalReason = "no-selection" | "readiness";
 export class StatusMappingRefusal extends DomainPolicyError {
   constructor(
     readonly reason: StatusMappingRefusalReason,
@@ -127,18 +122,17 @@ export class StatusMappingStore {
         ? "available"
         : "unavailable";
   }
-  /** Saves (or clears) the mapping after checking its selection, grants and in-flight readiness. */
+  /** Saves (or clears) the mapping after checking its selection and in-flight readiness. */
   configureWithinTransaction(
     projectId: string,
     expectedVersion: number,
     input: unknown,
-    policy: DeliveryPolicy,
   ) {
     const current = this.current(projectId);
     if (current.version !== expectedVersion)
       throw new DomainConflictError("Version conflict");
     const mapping = statusMappingSchema.nullable().parse(input);
-    if (mapping) this.validate(projectId, mapping, policy);
+    if (mapping) this.validate(projectId, mapping);
     // A task seen under one mapping was not worked on under another: clearing or rebinding starts afresh.
     const before = current.mapping;
     if (
@@ -159,11 +153,7 @@ export class StatusMappingStore {
       .run(projectId, current.version + 1, JSON.stringify(mapping));
     return this.current(projectId);
   }
-  private validate(
-    projectId: string,
-    mapping: StatusMapping,
-    policy: DeliveryPolicy,
-  ): void {
+  private validate(projectId: string, mapping: StatusMapping): void {
     if (
       isJiraMapping(mapping)
         ? !this.isJiraProject(projectId)
@@ -182,19 +172,6 @@ export class StatusMappingStore {
     for (const event of statusMappingEvents) {
       const option = mapping.events[event];
       if (option === null) continue;
-      const covering = policy.grants.filter((g) =>
-        isJiraMapping(mapping)
-          ? g.action === "issue.status" && g.statusIds?.includes(option)
-          : g.action === "project.field" &&
-            g.projectNodeId === mapping.projectNodeId &&
-            g.fieldNodeId === mapping.fieldNodeId &&
-            g.optionNodeIds?.includes(option),
-      );
-      if (!covering.length)
-        throw new StatusMappingRefusal("ungranted", event, option);
-      // The service cannot obtain an approval.
-      if (!covering.some((g) => g.mode === "allow"))
-        throw new StatusMappingRefusal("approval-only", event, option);
       if (
         isInFlightEvent(event) &&
         !(isJiraMapping(mapping)

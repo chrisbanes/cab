@@ -4906,41 +4906,15 @@ test("an unreported diagnostic capture is shown as not reported, selects no mode
   assert.equal(f.service.domain().diagnosticCaptureMode(ids.atlas), "enhanced");
 });
 
-type SettingsFixture = Awaited<ReturnType<typeof startDiscovery>>["f"];
 const statusField = "PVTSSF_status";
-/** An `allow` project field grant for Atlas's Project Status, covering the named options. */
-const grantStatusOptions = (
-  f: SettingsFixture,
-  projectId: string,
-  options: string[],
-) =>
-  f.service.domain().execute({
-    type: "delivery.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: f.service.delivery().configuration(projectId).version,
-    mode: "reviewable-pr",
-    credentialRef: null,
-    grants: [
-      {
-        action: "project.field",
-        repositoryId: "R_atlas",
-        mode: "allow",
-        projectNodeId: "PVT_atlas",
-        fieldNodeId: statusField,
-        optionNodeIds: options,
-      },
-    ],
-    requiredChecks: [],
-  });
 const statusPanel = (page: Page) => page.locator("#status-mapping");
 
-test("Status mapping saves each event's Status option, naming options and marking ungranted ones", async (_t, journey) => {
+test("from an empty delivery policy, the operator saves a GitHub status mapping in the editor without typing an ID", async (_t, journey) => {
   const { f, ids, page } = await startDiscovery(journey, {});
   const d = f.service.domain();
-  grantStatusOptions(f, ids.atlas, ["PVTSSO_ready"]);
+  assert.deepEqual(f.service.delivery().configuration(ids.atlas).grants, []);
   await page.reload();
+  const url = page.url();
   const panel = statusPanel(page);
   await panel
     .getByRole("heading", { name: "Status mapping", exact: true })
@@ -4949,12 +4923,18 @@ test("Status mapping saves each event's Status option, naming options and markin
   await turn.selectOption({ label: "Ready" });
   assert.deepEqual(await optionNames(panel, "First turn started"), [
     "Nothing",
-    "Todo (no grant)",
+    "Todo",
     "Ready",
   ]);
   await panel
     .getByLabel("Stopped, uncertain or blocked", { exact: true })
     .selectOption({ label: "Ready" });
+  await panel
+    .getByText(
+      "Saving allows cab to set Status to Ready on Project Atlas roadmap",
+      { exact: true },
+    )
+    .waitFor();
   await panel
     .getByRole("region", { name: "Status mapping changes" })
     .getByText("First turn started: sets Status to Ready.")
@@ -4980,12 +4960,13 @@ test("Status mapping saves each event's Status option, naming options and markin
   assert.deepEqual(command.mapping, mapping);
   assert.deepEqual(d.statusMapping(ids.atlas).mapping, mapping);
   assert.equal(d.statusMapping(ids.atlas).version, 2);
+  assert.equal(page.url(), url);
+  assert.deepEqual(f.service.delivery().configuration(ids.atlas).grants, []);
 });
 
 test("an in-flight Status the readiness rule does not accept is refused naming the option, and the draft stays", async (_t, journey) => {
   const { f, ids, page } = await startDiscovery(journey, {});
   const d = f.service.domain();
-  grantStatusOptions(f, ids.atlas, ["PVTSSO_todo", "PVTSSO_ready"]);
   // Only Ready tasks are Ready: an in-flight write of Todo would remove readiness.
   d.execute({
     type: "github.configure",
@@ -5073,7 +5054,6 @@ test("an in-flight Status the readiness rule does not accept is refused naming t
 test("choosing another Project starts from Nothing, cannot be saved until its Status field is listed, and is never a clear", async (_t, journey) => {
   const { f, ids, page } = await startDiscovery(journey, {});
   const d = f.service.domain();
-  grantStatusOptions(f, ids.atlas, ["PVTSSO_ready"]);
   d.execute({
     type: "status-mapping.configure",
     actor: "operator",
@@ -5181,7 +5161,6 @@ test("Status mapping is keyboard operable at phone width", async (_t, journey) =
     key: randomUUID(),
     credentialRef: "env:FIXTURE_DISCOVERY",
   });
-  grantStatusOptions(f, ids.atlas, ["PVTSSO_todo", "PVTSSO_ready"]);
   await page.reload();
   const panel = statusPanel(page);
   const done = panel.getByLabel("Done", { exact: true });

@@ -228,6 +228,68 @@ test("a database from before shared task comments is snapshotted without their t
   }
 });
 
+test("the snapshot taken before the issue.status strip keeps the grants the migration deletes", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, MIGRATION_LEVEL - 1);
+    const policy = (grants: unknown[]) =>
+      JSON.stringify({
+        mode: "reviewable-pr",
+        credentialRef: null,
+        grants,
+        requiredChecks: [],
+        repositories: [],
+      });
+    const comment = {
+      action: "issue.comment",
+      repositoryId: "J1",
+      mode: "allow",
+    };
+    const status = {
+      action: "issue.status",
+      repositoryId: "J1",
+      mode: "allow",
+      statusIds: ["10003"],
+    };
+    const seeded = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    seeded.exec("PRAGMA foreign_keys = OFF");
+    seeded
+      .prepare("INSERT INTO delivery_policies VALUES (?, ?, ?)")
+      .run("project-1", 5, policy([comment, status]));
+    seeded.close();
+    await run(dirs.data);
+
+    const [name, ...others] = startupSnapshots(dirs.snapshots);
+    assert.equal(others.length, 0);
+    const path = join(dirs.snapshots, name as string);
+    await verifySnapshot(path);
+    const grants = (file: string) => {
+      const database = new DatabaseSync(file, { readOnly: true });
+      try {
+        const row = database
+          .prepare("SELECT version, policyJson FROM delivery_policies")
+          .get() as { version: number; policyJson: string };
+        return {
+          version: row.version,
+          grants: JSON.parse(row.policyJson).grants,
+        };
+      } finally {
+        database.close();
+      }
+    };
+    assert.deepEqual(grants(join(path, "standalone.sqlite")), {
+      version: 5,
+      grants: [comment, status],
+    });
+    assert.deepEqual(grants(join(dirs.data, "standalone.sqlite")), {
+      version: 5,
+      grants: [comment],
+    });
+  } finally {
+    dirs.cleanup();
+  }
+});
+
 test("a start with no pending migrations takes no snapshot and keeps the recorded one", async () => {
   const dirs = layout();
   try {
@@ -662,6 +724,8 @@ const SCHEMA_PINS: Record<number, string> = {
   8: "f3dcc59069f5df2e6d18b39c7a48aa3c80dd4b8bff05c119c4ee6739bbb453ee",
   9: "d9f5956ac94f581bb96dbe9b64834101e1205da1153d4357352c4bf758d6ad91",
   10: "166659f79dd8253d641808c6b0ac6f0915fdb5a7fb038701734b32151dd53c47",
+  // Data only: the delivery policies lose their retired issue.status grants.
+  11: "166659f79dd8253d641808c6b0ac6f0915fdb5a7fb038701734b32151dd53c47",
 };
 
 test("the migration level matches the schema this build creates", async () => {

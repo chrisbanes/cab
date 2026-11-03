@@ -74,6 +74,15 @@ export function linkedRepositoryNames(
   return [...names];
 }
 
+/** The title discovery lists for a Project, else undefined: unread, unlisted, or not listing Projects at all. */
+export const discoveredProjectTitle = (
+  choices: ReturnType<typeof projectChoices>,
+  projectNodeId: string | null,
+) =>
+  choices.state === "ready"
+    ? choices.projects.find((x) => x.projectNodeId === projectNodeId)?.label
+    : undefined;
+
 /** The linked Projects, or why the picker cannot list them. */
 export function projectChoices(
   repositories: RepositoriesRead | undefined,

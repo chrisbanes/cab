@@ -1,8 +1,5 @@
 import type { z } from "zod";
-import type {
-  deliveryConfigurationSchema,
-  statusMappingViewSchema,
-} from "../../src/operator/contracts.js";
+import type { deliveryConfigurationSchema } from "../../src/operator/contracts.js";
 import { type RepositoryNames, repositoryLabel } from "./presentation.js";
 import type { FieldsRead, projectChoices } from "./readiness-discovery.js";
 import type { Values } from "./settings-changes.js";
@@ -26,7 +23,11 @@ export type RepositorySetting = Pick<
 >;
 export type DeliveryPolicyValues = Omit<
   DeliveryConfiguration,
-  "version" | "credentialConfigured" | "credential" | "repositories"
+  | "version"
+  | "credentialConfigured"
+  | "credential"
+  | "repositories"
+  | "statusMappingAuthority"
 > & { repositories?: RepositorySetting[] | undefined };
 const repositorySetting = ({
   repositoryId,
@@ -41,6 +42,7 @@ export type DeliveryPolicySeed = DeliveryPolicyValues & {
   version: number;
   credentialConfigured: boolean;
   credential?: unknown;
+  statusMappingAuthority?: unknown;
 };
 export type DeliveryPolicyDraft = DeliveryPolicyValues & {
   version: number;
@@ -138,6 +140,8 @@ export function deliveryPolicyDraft(
   const {
     credentialConfigured: _configured,
     credential: _credential,
+    // A read-only summary of the status mapping; never part of the policy.
+    statusMappingAuthority: _authority,
     repositories,
     ...values
   } = seed;
@@ -301,24 +305,13 @@ export function validateDeliveryPolicyDraft(
       (!grant.projectNodeId || !identityValid(grant.projectNodeId))
     )
       add(`${at}.projectNodeId`, "Choose a Project.");
-    if (grant.action === "issue.status") {
-      if (!grant.statusIds?.length)
-        add(`${at}.statusIds`, "Choose at least one status.");
-      if ((grant.statusIds?.length ?? 0) > 256)
-        add(`${at}.statusIds`, "At most 256 statuses are allowed.");
-    } else if (grant.statusIds !== undefined)
-      add(`${at}.statusIds`, "Only issue status grants can include statuses.");
     for (const field of ["projectNodeId", "fieldNodeId"] as const)
       if (grant[field] !== undefined && !identityValid(grant[field]))
         add(`${at}.${field}`, "Enter a valid ID.");
-    for (const [field, ids] of [
-      ["optionNodeIds", grant.optionNodeIds],
-      ["statusIds", grant.statusIds],
-    ] as const)
-      ids?.forEach((id, optionIndex) => {
-        if (!identityValid(id))
-          add(`${at}.${field}.${optionIndex}`, "Enter a valid ID.");
-      });
+    grant.optionNodeIds?.forEach((id, optionIndex) => {
+      if (!identityValid(id))
+        add(`${at}.optionNodeIds.${optionIndex}`, "Enter a valid ID.");
+    });
   });
   draft.requiredChecks.forEach((check, index) => {
     if ("savedRow" in check) {
@@ -377,63 +370,6 @@ export function validateDeliveryPolicyDraft(
   if (new Set(draft.requiredCheckKeys).size !== draft.requiredCheckKeys.length)
     add("requiredChecks", "Required check row keys must be unique.");
   return errors;
-}
-
-export type StatusMappingCoverage =
-  | { tracker: "jira"; repositoryId: string; granted: string[] }
-  | {
-      tracker: "github";
-      repositoryId: string;
-      granted: {
-        projectNodeId: string;
-        fieldNodeId: string;
-        optionNodeIds: string[];
-      }[];
-    };
-
-function coveredStatusOptions(
-  values: DeliveryPolicyValues,
-  coverage: StatusMappingCoverage,
-): Set<string> {
-  return new Set(
-    values.grants.flatMap((grant) => {
-      if (
-        "savedRow" in grant ||
-        grant.mode !== "allow" ||
-        grant.repositoryId !== coverage.repositoryId
-      )
-        return [];
-      if (coverage.tracker === "jira")
-        return grant.action === "issue.status" ? (grant.statusIds ?? []) : [];
-      if (grant.action !== "project.field") return [];
-      return (grant.optionNodeIds ?? []).map(
-        (option) => `${grant.projectNodeId}\0${grant.fieldNodeId}\0${option}`,
-      );
-    }),
-  );
-}
-
-function mappingKeys(coverage: StatusMappingCoverage): string[] {
-  return coverage.tracker === "jira"
-    ? coverage.granted
-    : coverage.granted.flatMap((field) =>
-        field.optionNodeIds.map(
-          (option) => `${field.projectNodeId}\0${field.fieldNodeId}\0${option}`,
-        ),
-      );
-}
-
-/** Reports loss of previously covered mapping options only; newly uncovered options are not removals. */
-export function statusMappingCoverageLoss(
-  saved: DeliveryPolicyValues,
-  proposed: DeliveryPolicyValues,
-  coverage: StatusMappingCoverage,
-): string[] {
-  const savedGrants = coveredStatusOptions(saved, coverage);
-  const proposedGrants = coveredStatusOptions(proposed, coverage);
-  return mappingKeys(coverage).filter(
-    (key) => savedGrants.has(key) && !proposedGrants.has(key),
-  );
 }
 
 export function deliveryPolicyChangeText(
@@ -613,87 +549,6 @@ export function deliveryEditorDraft(values: Values): DeliveryPolicyDraft {
           ),
         }),
   };
-}
-
-/** Compare only configured mapping targets, independently in each exact tracker container scope. */
-export function deliveryMappingCoverageLoss(
-  saved: DeliveryPolicyValues,
-  proposed: DeliveryPolicyValues,
-  view: z.infer<typeof statusMappingViewSchema> | undefined,
-): boolean {
-  if (view?.availability !== "available" || !view.mapping) return false;
-  const mapping = view.mapping;
-  const options = Object.values(mapping.events).filter(
-    (id): id is string => id !== null,
-  );
-  return [
-    ...new Set(
-      saved.grants.flatMap((grant) =>
-        "savedRow" in grant ? [] : [grant.repositoryId],
-      ),
-    ),
-  ].some(
-    (repositoryId) =>
-      statusMappingCoverageLoss(
-        saved,
-        proposed,
-        "tracker" in mapping
-          ? { tracker: "jira", repositoryId, granted: options }
-          : {
-              tracker: "github",
-              repositoryId,
-              granted: [
-                {
-                  projectNodeId: mapping.projectNodeId,
-                  fieldNodeId: mapping.fieldNodeId,
-                  optionNodeIds: options,
-                },
-              ],
-            },
-      ).length > 0,
-  );
-}
-
-/** Distinguish confirmed mapped-target loss from a conservative warning when that view is withheld. */
-export function deliveryMappingCoverageWarning(
-  saved: DeliveryPolicyValues,
-  proposed: DeliveryPolicyValues,
-  view: z.infer<typeof statusMappingViewSchema> | undefined,
-): string | null {
-  if (deliveryMappingCoverageLoss(saved, proposed, view))
-    return "Previously allowed mapped status changes lose authority in a saved tracker scope. The status mapping is unchanged.";
-  if (view !== undefined) return null;
-  const reduced = saved.grants.some((grant) => {
-    if ("savedRow" in grant || grant.mode !== "allow") return false;
-    let coverage: StatusMappingCoverage;
-    if (grant.action === "issue.status")
-      coverage = {
-        tracker: "jira",
-        repositoryId: grant.repositoryId,
-        granted: grant.statusIds ?? [],
-      };
-    else if (
-      grant.action === "project.field" &&
-      grant.projectNodeId &&
-      grant.fieldNodeId
-    )
-      coverage = {
-        tracker: "github",
-        repositoryId: grant.repositoryId,
-        granted: [
-          {
-            projectNodeId: grant.projectNodeId,
-            fieldNodeId: grant.fieldNodeId,
-            optionNodeIds: grant.optionNodeIds ?? [],
-          },
-        ],
-      };
-    else return false;
-    return statusMappingCoverageLoss(saved, proposed, coverage).length > 0;
-  });
-  return reduced
-    ? "Status-mapping details are unavailable. These changes may remove status-mapping authority. The saved mapping is unchanged."
-    : null;
 }
 
 /**
