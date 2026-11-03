@@ -385,6 +385,11 @@ export function ProjectFieldPicker(p: {
   }
   if (state.state === "typed") sticky.current = state.note;
   else if (other) sticky.current = otherProjectNote;
+  // The select the operator used is gone, so focus moves to the typed Project field that replaces it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the choice of Other… moves focus.
+  useEffect(() => {
+    if (other) document.getElementById(`${prefix}-projectNodeId`)?.focus();
+  }, [other]);
   const operator = showOperator && (
     <label className="field body" htmlFor={`${prefix}-operator`}>
       Readiness operator

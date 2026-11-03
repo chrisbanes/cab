@@ -1214,6 +1214,11 @@ function GrantProject({
         }
         input={(name, label) => (
           <TypedId
+            id={
+              name === "projectNodeId"
+                ? `${row.rowKey}-scope-projectNodeId`
+                : undefined
+            }
             label={label}
             value={String(row[name as "projectNodeId" | "fieldNodeId"] ?? "")}
             invalid={Boolean(error(`grants.${index}.${name}`))}
@@ -1234,19 +1239,22 @@ function GrantProject({
 }
 
 function TypedId({
+  id: suppliedId,
   label,
   value,
   invalid,
   errorId,
   onChange,
 }: {
+  id?: string | undefined;
   label: string;
   value: string;
   invalid: boolean;
   errorId: string;
   onChange: (value: string) => void;
 }) {
-  const id = useId();
+  const generated = useId(),
+    id = suppliedId ?? generated;
   return (
     <label className="field body" htmlFor={id}>
       {label}

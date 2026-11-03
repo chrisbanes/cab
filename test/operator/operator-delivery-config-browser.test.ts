@@ -853,16 +853,62 @@ test("a grant can name an owner Project no repository links, or type a Project I
   await grant(page, 2)
     .getByLabel("Project", { exact: true })
     .selectOption({ label: "Other…" });
-  await grant(page, 2)
-    .getByLabel("Project node ID (fallback)", { exact: true })
-    .fill("PVT_typed");
+  const typed = grant(page, 2).getByLabel("Project node ID (fallback)", {
+    exact: true,
+  });
+  // The select is gone, so keyboard focus moves to the field that replaces it.
+  assert.equal(
+    await typed.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await typed.fill("PVT_typed");
+  // A field grant typed after Other… carries its Project, field and options.
+  await add.click();
+  const field = grant(page, 3);
+  await field
+    .getByLabel("Action", { exact: true })
+    .selectOption("project.field");
+  await field
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "acme/atlas" });
+  await field.getByLabel("Authority", { exact: true }).selectOption("allow");
+  await field
+    .getByLabel("Project", { exact: true })
+    .selectOption({ label: "Other…" });
+  const typedField = field.getByLabel("Project node ID (fallback)", {
+    exact: true,
+  });
+  assert.equal(
+    await typedField.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await typedField.fill("PVT_other");
+  await field
+    .getByLabel("Field node ID (fallback)", { exact: true })
+    .fill("PVTSSF_other");
+  await field
+    .getByLabel("Option node IDs (fallback)", { exact: true })
+    .fill("PVTSSO_a, PVTSSO_b");
   const sent = body(page);
   await save(page).click();
   assert.deepEqual(
-    ((await sent).grants as { projectNodeId: string }[]).map(
-      (g) => g.projectNodeId,
+    ((await sent).grants as Record<string, unknown>[]).map((g) =>
+      Object.fromEntries(
+        ["action", "projectNodeId", "fieldNodeId", "optionNodeIds"]
+          .filter((k) => g[k] !== undefined)
+          .map((k) => [k, g[k]]),
+      ),
     ),
-    ["PVT_web", "PVT_typed"],
+    [
+      { action: "project.item.add", projectNodeId: "PVT_web" },
+      { action: "project.item.add", projectNodeId: "PVT_typed" },
+      {
+        action: "project.field",
+        projectNodeId: "PVT_other",
+        fieldNodeId: "PVTSSF_other",
+        optionNodeIds: ["PVTSSO_a", "PVTSSO_b"],
+      },
+    ],
   );
   await savedOutcome(page);
 });
