@@ -25,6 +25,11 @@ import {
   type LeadFeedbackMode,
 } from "./lead-feedback.js";
 import { useOperatorResource } from "./resource.js";
+import {
+  RepositoryNamesContext,
+  useRepositoryLabel,
+} from "./repository-names.js";
+import type { RepositoryNames } from "./presentation.js";
 import type {
   DraftWrite,
   LocalReviewSend,
@@ -797,9 +802,12 @@ export const useLocalReview = () => useContext(LocalReviewContext);
 export function LocalReviewProvider({
   children,
   reveal,
+  repositoryNames,
   ...props
 }: Parameters<typeof useLocalReviewController>[0] & {
   children: React.ReactNode;
+  /** The task's linked repositories and their names, for every repository label beneath it. */
+  repositoryNames?: RepositoryNames | undefined;
   /** Opens the page's Local review panel, so the check it holds can take focus. */
   reveal?: () => void;
 }) {
@@ -822,7 +830,9 @@ export function LocalReviewProvider({
         taskId: props.taskId,
       }}
     >
-      {children}
+      <RepositoryNamesContext.Provider value={repositoryNames}>
+        {children}
+      </RepositoryNamesContext.Provider>
     </LocalReviewContext.Provider>
   );
 }
@@ -874,6 +884,7 @@ export function CommentAction({
 }
 
 export function ReviewComposer({ originKey }: { originKey: string }) {
+  const repositoryName = useRepositoryLabel();
   const review = useLocalReview();
   const composer = review?.state.composer;
   const shown = Boolean(review && composer?.originKey === originKey);
@@ -913,8 +924,11 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
       }}
     >
       <p className="file-observation">
-        Comment on {composer.label} · {anchor.repositoryId ?? "task workspace"}/
-        {anchor.path} · lines {anchor.startLine}–{anchor.endLine}
+        Comment on {composer.label} ·{" "}
+        {anchor.repositoryId
+          ? repositoryName(anchor.repositoryId)
+          : "task workspace"}
+        /{anchor.path} · lines {anchor.startLine}–{anchor.endLine}
         {anchor.side !== "file"
           ? ` · ${anchor.side === "left" ? "Before" : "After"}`
           : ""}
@@ -1009,6 +1023,7 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
 }
 
 function AnchorContext({ anchorId }: { anchorId: string }) {
+  const repositoryName = useRepositoryLabel();
   const review = useLocalReview();
   const path = review
     ? `/api/operator/tasks/${review.taskId}/review-anchors/${anchorId}`
@@ -1048,8 +1063,8 @@ function AnchorContext({ anchorId }: { anchorId: string }) {
   return (
     <div className="review-anchor-context">
       <p className="file-observation">
-        {a.repositoryId ?? "task workspace"}/{a.path} · lines {a.startLine}–
-        {a.endLine} · {a.context}
+        {a.repositoryId ? repositoryName(a.repositoryId) : "task workspace"}/
+        {a.path} · lines {a.startLine}–{a.endLine} · {a.context}
         {a.side !== "file"
           ? ` · ${a.side === "left" ? "Before" : "After"}`
           : ""}{" "}

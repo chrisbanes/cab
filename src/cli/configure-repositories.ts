@@ -129,7 +129,7 @@ function repositoriesEditCommand(
     repositories,
   };
 
-  // Preview lines follow the operator UI and never carry a path.
+  // Preview lines name links by the IDs this command takes, and never carry a path.
   const diff: string[] = [];
   for (const id of unlink) diff.push(`− Repository access: ${id}`);
   for (const l of links)

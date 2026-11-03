@@ -57,6 +57,7 @@ import {
   DomainOperationError,
   DomainPolicyError,
   type DomainStore,
+  GitHubRepositoryIdRefusedError,
   ProjectNameTakenError,
   RepositoryVerificationRefusedError,
   TaskNotOpenError,
@@ -494,7 +495,10 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
         : "Another project has this name. Choose a different name.",
     );
   }
-  if (error instanceof RepositoryVerificationRefusedError)
+  if (
+    error instanceof RepositoryVerificationRefusedError ||
+    error instanceof GitHubRepositoryIdRefusedError
+  )
     return new OperatorApiError(
       400,
       "invalid-input",
@@ -2901,6 +2905,31 @@ export class OperatorApi {
       ? String(value)
       : null;
   }
+  /**
+   * Display names of a project's GitHub links, by repository ID: the newest observed
+   * `owner/name`, else the `github.com/owner/name` identity guided setup verified. A name
+   * is disclosed only with its ID; IDs stay the identity everywhere.
+   */
+  private linkNames(
+    links: readonly { repositoryId: string; codeHost: string }[],
+    excluded: readonly string[] | undefined,
+  ) {
+    const names = new Map<string, string>();
+    if (excluded === undefined) return names;
+    const ids = links
+        .filter((link) => link.codeHost === "github")
+        .map((link) => link.repositoryId),
+      observed = this.service.githubSources().repositoryNames(ids);
+    for (const id of ids) {
+      const name = this.repositoryName(
+        observed.get(id) ??
+          /^github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/.exec(id)?.[1],
+        excluded,
+      );
+      if (name && this.disclosable(id, excluded)) names.set(id, name);
+    }
+    return names;
+  }
   /** A blocker's label and link in its tracker's own terms: `owner/name#n`, or a Jira `KEY-n` on the site. */
   private blockerName(
     identity: { provider: string; tracker?: "jira" },
@@ -3893,7 +3922,8 @@ export class OperatorApi {
       this.domain()
         .leadBindings()
         .find((b) => String(b.taskId) === taskId)?.assignmentId ?? null;
-    const issueBrief = this.service.githubSources().issueBrief(taskId);
+    const issueBrief = this.service.githubSources().issueBrief(taskId),
+      repositoryLinks = d.repositoryLinks(projectId).links;
     const data = {
       task: {
         id: taskId,
@@ -4083,8 +4113,10 @@ export class OperatorApi {
       commentPolicy: this.commentPolicy(taskId),
       issueEdit: this.issueEditPolicy(taskId, excluded),
       publication: this.publicationPolicy(taskId, excluded),
-      repositoryLinked:
-        this.domain().repositoryLinks(String(t.projectId)).links.length > 0,
+      repositoryLinked: repositoryLinks.length > 0,
+      repositoryNames: [...this.linkNames(repositoryLinks, excluded)].map(
+        ([repositoryId, name]) => ({ repositoryId, name }),
+      ),
       contentUnavailable:
         excluded === undefined ||
         [
@@ -6483,7 +6515,8 @@ export class OperatorApi {
         : await this.service.gitHubSourceCredentialStatus(projectId, scope),
       excluded = withhold ? undefined : await this.exclusions(projectId),
       r = d.routing(projectId),
-      active = d.githubActiveSelectionIds(projectId);
+      active = d.githubActiveSelectionIds(projectId),
+      names = this.linkNames(links.links, excluded);
     return projectConfigurationSchema.parse({
       data: {
         project: {
@@ -6550,6 +6583,9 @@ export class OperatorApi {
               codeHost: r.codeHost,
               host: available ? r.host : null,
               ref: available ? r.ref : null,
+              ...(r.codeHost === "github"
+                ? { name: (available && names.get(r.repositoryId)) || null }
+                : {}),
               ...(!available
                 ? {
                     savedRow: {

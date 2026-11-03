@@ -70,6 +70,7 @@ import {
 } from "./delivery-presentation.js";
 import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { clockLabel } from "./presentation.js";
+import { useRepositoryLabel } from "./repository-names.js";
 import { failureCause } from "./outcome-copy.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
@@ -1923,6 +1924,7 @@ export function TaskWorkspace({
       taskId={taskId}
       state={state.review}
       changed={changed}
+      repositoryNames={data.repositoryNames}
       reveal={() => selectTab("review")}
       lead={
         lead
@@ -2759,13 +2761,14 @@ function CommentReview({
   confirm: (d: "approved" | "denied") => void;
   disabled: boolean;
 }) {
+  const repositoryName = useRepositoryLabel();
   return (
     <div className="workspace-attention">
       <h4>Exact operator comment review</h4>
       <Literal text={record.body} />
       <p>
         Issue {record.target.nodeId} #{record.target.number} · repository{" "}
-        {record.target.repositoryId}
+        {repositoryName(record.target.repositoryId)}
       </p>
       <p>
         Task revision {record.taskVersion}; source {record.sourceId} revision{" "}

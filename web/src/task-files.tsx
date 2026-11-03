@@ -31,6 +31,7 @@ import {
 } from "./task-workspace-state.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { clockLabel } from "./presentation.js";
+import { useRepositoryLabel } from "./repository-names.js";
 import { RangeControls } from "./range-controls.js";
 import { useOperatorResource } from "./resource.js";
 import { workspaceFileAnchor } from "./review-anchor.js";
@@ -55,23 +56,31 @@ function requestUrl(
   return `/api/operator/tasks/${taskId}/${kind}?${query}${pathQuery}`;
 }
 
-function pathLabel(scope: TaskFilesState["scope"], path: readonly string[]) {
+function pathLabel(
+  scope: TaskFilesState["scope"],
+  path: readonly string[],
+  label: (repositoryId: string) => string,
+) {
   return [
     scope.kind === "workspace"
       ? "Workspace"
-      : `Repository ${scope.repositoryId}`,
+      : `Repository ${label(scope.repositoryId)}`,
     ...path,
   ].join("/");
 }
 
 /** Workspace › repository › folders: the trail to a location, one crumb per level. */
-function crumbsFor(scope: TaskFilesState["scope"], path: readonly string[]) {
+function crumbsFor(
+  scope: TaskFilesState["scope"],
+  path: readonly string[],
+  label: (repositoryId: string) => string,
+) {
   return [
     { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
     ...(scope.kind === "repository"
       ? [
           {
-            label: `Repository ${scope.repositoryId}`,
+            label: `Repository ${label(scope.repositoryId)}`,
             scope,
             path: [] as string[],
           },
@@ -579,6 +588,7 @@ function RasterDocumentView({
   tab: TaskFileTabState;
   changed: () => void;
 }) {
+  const repositoryName = useRepositoryLabel();
   const viewport = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -667,7 +677,7 @@ function RasterDocumentView({
             height: `${Math.max(1, Math.round(height * scale))}px`,
           }}
           src={`data:${preview.mime};base64,${preview.data}`}
-          alt={`Raster preview of ${pathLabel(tab.scope, tab.path)}`}
+          alt={`Raster preview of ${pathLabel(tab.scope, tab.path, repositoryName)}`}
         />
       </div>
       <p className="muted">
@@ -1154,14 +1164,15 @@ export function TaskFiles({
   const refreshing =
     directoryResource.state.pending ||
     Boolean(activeTab && previewResource.state.pending);
-  const currentPath = pathLabel(state.scope, state.path);
-  const locationCrumbs = crumbsFor(state.scope, state.path);
+  const repositoryName = useRepositoryLabel();
+  const currentPath = pathLabel(state.scope, state.path, repositoryName);
+  const locationCrumbs = crumbsFor(state.scope, state.path, repositoryName);
   const selectedLabel = activeTab
-    ? pathLabel(activeTab.scope, activeTab.path)
+    ? pathLabel(activeTab.scope, activeTab.path, repositoryName)
     : null;
   const crumbScope = activeTab?.scope ?? state.scope;
   const crumbPath = activeTab ? activeTab.path.slice(0, -1) : state.path;
-  const crumbs = crumbsFor(crumbScope, crumbPath);
+  const crumbs = crumbsFor(crumbScope, crumbPath, repositoryName);
   // biome-ignore lint/correctness/useExhaustiveDependencies: restore reading position only when switching tabs.
   useLayoutEffect(() => {
     if (activeTab) readingArea.current?.scrollTo(0, activeTab.readingScrollTop);
@@ -1244,11 +1255,19 @@ export function TaskFiles({
               {directory.entries.map((entry, index) => {
                 const name =
                   entry.kind === "repository" ? entry.repositoryId : entry.name;
+                const shown =
+                  entry.kind === "repository"
+                    ? repositoryName(entry.repositoryId)
+                    : entry.name;
                 const entryKey = fileEntryKey(entry);
                 const fullPath =
                   entry.kind === "repository"
-                    ? `Repository ${entry.repositoryId}`
-                    : pathLabel(state.scope, [...state.path, entry.name]);
+                    ? `Repository ${shown}`
+                    : pathLabel(
+                        state.scope,
+                        [...state.path, entry.name],
+                        repositoryName,
+                      );
                 const size =
                   entry.kind === "repository"
                     ? "repository"
@@ -1273,7 +1292,7 @@ export function TaskFiles({
                       type="button"
                       className="file-entry"
                       title={fullPath}
-                      aria-label={`${name}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}${changeNote}`}
+                      aria-label={`${shown}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}${changeNote}`}
                       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Space"
                       tabIndex={
                         state.explorerFocusKey === entryKey ||
@@ -1360,7 +1379,7 @@ export function TaskFiles({
                     >
                       <span className="file-entry-name">
                         {entry.kind === "directory" ? "▸ " : ""}
-                        {name}
+                        {shown}
                       </span>
                       <span className="file-entry-metadata">
                         {size}
@@ -1490,7 +1509,11 @@ export function TaskFiles({
               >
                 {state.tabs.map((tab) => {
                   const name = tab.path.at(-1) ?? "File";
-                  const fullPath = pathLabel(tab.scope, tab.path);
+                  const fullPath = pathLabel(
+                    tab.scope,
+                    tab.path,
+                    repositoryName,
+                  );
                   return (
                     <div className="file-tab" key={tab.key}>
                       <button

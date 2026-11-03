@@ -6,7 +6,10 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
+import { fakeDiscovery } from "../fixtures/setup-home.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
+  createCheckout,
   startSettings,
   phone,
   noPageOverflow,
@@ -71,7 +74,7 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
   );
   await grant(page)
     .getByLabel("Repository or tracker container ID")
-    .fill("acme/atlas");
+    .fill("R_atlas");
   await grant(page)
     .getByLabel("Action", { exact: true })
     .selectOption("project.field");
@@ -102,7 +105,7 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
   assert.deepEqual(sent.grants, [
     {
       action: "project.field",
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       mode: "allow",
       projectNodeId: "PVT_atlas",
       fieldNodeId: "Status",
@@ -112,7 +115,7 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
   assert.deepEqual(sent.requiredChecks, []);
   assert.deepEqual(sent.repositories, [
     {
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       requiredChecks: [{ name: "Build", appId: 42 }],
     },
   ]);
@@ -120,7 +123,7 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
   await savedOutcome(page);
   assert.deepEqual(f.service.delivery().configuration(ids.atlas).repositories, [
     {
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       requiredChecks: [{ name: "Build", appId: 42 }],
     },
   ]);
@@ -195,7 +198,7 @@ test("Delivery local errors focus the first field and branch adoption offers app
     true,
   );
   assert.equal(posts, 0);
-  await invalid.fill("acme/atlas");
+  await invalid.fill("R_atlas");
   await grant(page)
     .getByLabel("Action", { exact: true })
     .selectOption("branch.adopt");
@@ -226,7 +229,7 @@ test("Delivery opaque rows and prefix are kept by default, removable and restore
       { action: "issue.comment", repositoryId: hidden, mode: "approval" },
       {
         action: "issue.labels",
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         mode: "allow",
         optionNodeIds: [],
       },
@@ -606,6 +609,92 @@ test("shepherd levels share the advanced draft and confirm upward changes with k
     .waitFor();
 });
 
+test("Delivery labels a repository by its name and falls back to its ID without one", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  const d = f.service.domain(),
+    link = (repositoryId: string, rest: object) => ({
+      codeHost: "github" as const,
+      host: "github.com" as const,
+      repositoryId,
+      ref: "main",
+      ...rest,
+    });
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.repositoryLinks(ids.atlas).version,
+    repositories: [
+      link("R_atlas", {}),
+      link("R_plain", { path: await createCheckout(f.directory, "plain") }),
+    ],
+  });
+  await page.reload();
+  const named = page.getByRole("region", {
+    name: "Repository acme/atlas",
+    exact: true,
+  });
+  await named.waitFor();
+  await named
+    .getByRole("heading", { name: "acme/atlas", exact: true })
+    .waitFor();
+  for (const label of [
+    "Shepherd level for acme/atlas",
+    "Merge method for acme/atlas",
+  ])
+    await page.getByLabel(label, { exact: true }).first().waitFor();
+  await addCheck(page).waitFor();
+  // The name replaces the ID in every label.
+  assert.equal(await page.getByText("R_atlas").count(), 0);
+  assert.equal(await page.locator('[aria-label*="R_atlas"]').count(), 0);
+  // A link no issue has named keeps its ID.
+  await page
+    .getByRole("region", { name: "Repository R_plain", exact: true })
+    .getByRole("heading", { name: "R_plain", exact: true })
+    .waitFor();
+  await page
+    .getByLabel("Shepherd level for R_plain", { exact: true })
+    .waitFor();
+  await page.getByLabel("Merge method for R_plain", { exact: true }).waitFor();
+});
+
+test("a grant row names what its IDs refer to and keeps the IDs as its values", async (_t, journey) => {
+  const { page, f } = await startSettings(journey, path, undefined, undefined, {
+    setup: { discovery: fakeDiscovery({}) },
+  });
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "discovery.configure",
+    key: randomUUID(),
+    credentialRef: "env:FIXTURE_DISCOVERY",
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Add grant", exact: true }).click();
+  const row = grant(page);
+  await row.getByLabel("Action", { exact: true }).selectOption("project.field");
+  await row.getByLabel("Repository or tracker container ID").fill("R_atlas");
+  await row.getByLabel("Project ID", { exact: true }).fill("PVT_atlas");
+  await row.getByLabel("Field ID", { exact: true }).fill("PVTSSF_status");
+  await row.getByLabel("Option IDs (one per line)").fill("PVTSSO_ready");
+  for (const text of [
+    "Repository: acme/atlas",
+    "Project: Atlas roadmap",
+    "Field: Status",
+    "Options: Ready",
+  ])
+    await row.getByText(text, { exact: true }).waitFor();
+  assert.equal(
+    await row.getByLabel("Repository or tracker container ID").inputValue(),
+    "R_atlas",
+  );
+  assert.equal(
+    await row.getByLabel("Project ID", { exact: true }).inputValue(),
+    "PVT_atlas",
+  );
+  // An ID nothing names shows no name.
+  await row.getByLabel("Field ID", { exact: true }).fill("PVTSSF_unknown");
+  await row.getByText(/^Field: /).waitFor({ state: "detached" });
+});
+
 test("advanced edits use the same upward warning and refresh invalidates a pending proposal", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path);
   await levelControl(page).selectOption("merge-with-approval");
@@ -879,7 +968,7 @@ test("each repository edits its merge method and additional checks, with suggest
       taskId,
       "d".repeat(64),
       JSON.stringify({
-        repositoryId: "acme/atlas",
+        repositoryId: "R_atlas",
         checks: [{ name: "lint" }, { name: "build" }],
       }),
       1,
@@ -935,7 +1024,7 @@ test("each repository edits its merge method and additional checks, with suggest
   const sent = await command;
   assert.deepEqual(sent.repositories, [
     {
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       mergeMethod: "rebase",
       requiredChecks: [{ name: "lint" }],
     },
@@ -945,7 +1034,7 @@ test("each repository edits its merge method and additional checks, with suggest
   assert.deepEqual(saved.requiredChecks, []);
   assert.deepEqual(saved.repositories, [
     {
-      repositoryId: "acme/atlas",
+      repositoryId: "R_atlas",
       mergeMethod: "rebase",
       requiredChecks: [{ name: "lint" }],
     },

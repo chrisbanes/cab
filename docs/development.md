@@ -637,7 +637,8 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      [--expected-version N]` writes a `repositories.configure` change document for
      the project's repository links (`repositories.version` in `project get`); apply
      it with `project apply --file FILE`. The edit file is strict JSON with any of
-     `linkRepositories` (`{"repositoryId","path","ref"}`, GitHub on `github.com`; a
+     `linkRepositories` (`{"repositoryId","path","ref"}`, GitHub on `github.com` with the
+     repository's node ID, as `gh api repos/OWNER/NAME --jq .node_id` prints it; a
      GitLab link adds `"codeHost":"gitlab"`, its `"host"` and `"projectPath"`, with
      the numeric project ID as `repositoryId`), `unlinkRepositories`
      (ids), `setRefs` (`{"REPOSITORY_ID":"REF"}`) and `confirmUnlinkAll`. A kept link

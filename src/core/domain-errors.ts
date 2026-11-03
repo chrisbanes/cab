@@ -78,6 +78,18 @@ export class RepositoryVerificationRefusedError extends DomainPolicyError {
   }
 }
 
+/** A new GitHub link was given an `owner/name` where the repository's node ID belongs. */
+export class GitHubRepositoryIdRefusedError extends DomainPolicyError {
+  constructor(index: number) {
+    super(
+      "invalid-input",
+      `Repository ${index + 1}: a GitHub link needs the repository's node ID (such as R_kgDO…), not owner/name. \`gh api repos/OWNER/NAME --jq .node_id\` prints it.`,
+      [`repositories.${index}.repositoryId`],
+    );
+    this.name = "GitHubRepositoryIdRefusedError";
+  }
+}
+
 /** A command may have committed even though its completion could not be observed. */
 export class DomainOperationError extends Error {
   constructor(message = "Command outcome is unknown", options?: ErrorOptions) {

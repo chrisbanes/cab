@@ -13,6 +13,7 @@ import {
   type DiffHunkData,
 } from "./diff-view.js";
 import { codeSentence } from "./presentation.js";
+import { useRepositoryLabel } from "./repository-names.js";
 import { useOperatorResource } from "./resource.js";
 import { resultEvidenceAnchor } from "./review-anchor.js";
 import { FileHeader, FilePreviewBody } from "./task-files.js";
@@ -225,6 +226,7 @@ export function RetainedResultEvidence({
   changed: () => void;
   openCurrent: (scope: TaskFilesState["scope"], path: string[]) => void;
 }) {
+  const repositoryName = useRepositoryLabel();
   const base = `/api/operator/tasks/${taskId}/results/${resultId}/evidence`;
   const evidenceLoader = useCallback(
     (signal: AbortSignal) =>
@@ -340,7 +342,7 @@ export function RetainedResultEvidence({
                         entry.itemId === itemId ? "primary" : "secondary"
                       }
                       aria-pressed={entry.itemId === itemId}
-                      title={`${entry.repositoryId ?? "Task workspace"}/${entry.path}`}
+                      title={`${entry.repositoryId ? repositoryName(entry.repositoryId) : "Task workspace"}/${entry.path}`}
                       onClick={() => {
                         state.selectedItemId = entry.itemId;
                         changed();
@@ -377,8 +379,10 @@ export function RetainedResultEvidence({
             <div className="retained-preview">
               <p className="file-observation">
                 Original {content.item.kind} ·{" "}
-                {content.item.repositoryId ?? "task workspace"}/
-                {content.item.path} · captured {time(content.item.capturedAt)}
+                {content.item.repositoryId
+                  ? repositoryName(content.item.repositoryId)
+                  : "task workspace"}
+                /{content.item.path} · captured {time(content.item.capturedAt)}
               </p>
               {content.item.kind === "diff" ? (
                 content.preview.kind === "text" ? (

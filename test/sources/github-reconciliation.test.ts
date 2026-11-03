@@ -37,6 +37,72 @@ const issue: IssueSnapshot = {
   ],
 };
 
+test("a repository's name is the one its most recently read issue reported, not the last inserted", () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-github-names-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const sources = new GitHubSourceStore(db);
+    sources.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R_1",
+          owner: "org",
+          name: "repo",
+        },
+      ],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
+      },
+    });
+    domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId: "repo",
+      expectedVersion: 2,
+    });
+    const read = (issues: IssueSnapshot[]) =>
+      sources.reconcileSelection(projectId, "repo", {
+        complete: false,
+        issues,
+        reason: "rate-limited",
+      });
+    const first = { ...issue, projectFields: [], projectReadAt: 1000 },
+      second = { ...first, nodeId: "I_2", number: 2 };
+    read([first, second]);
+    assert.equal(sources.repositoryNames(["R_1"]).get("R_1"), "org/repo");
+    // Only the earlier-inserted issue is read again, after a rename: its row keeps its rowid.
+    read([{ ...first, repositoryName: "org/renamed", projectReadAt: 2000 }]);
+    assert.equal(sources.repositoryNames(["R_1"]).get("R_1"), "org/renamed");
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("overlapping complete selections converge on one imported task; partial reads retain memberships", () => {
   const root = mkdtempSync(join(tmpdir(), "cab-github-reconcile-"));
   const file = join(root, "db.sqlite");

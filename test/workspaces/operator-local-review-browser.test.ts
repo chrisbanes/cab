@@ -23,7 +23,10 @@ import {
   leadAwaitingRecoveryNotice,
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  nameLinkedRepository,
+  seedReviewTask,
+} from "../fixtures/task-review.js";
 import { until } from "../fixtures/until.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
@@ -103,6 +106,8 @@ async function startReview(
       },
     ],
   });
+  // An observed issue names the linked repository; anchors and requests keep its ID.
+  nameLinkedRepository(fixture, task.projectId, "repo-alpha", "acme/alpha");
   domain.execute({
     type: "github.configure",
     actor: "operator",
@@ -212,7 +217,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   const fileComposer = files.getByRole("form", { name: "Review comment" });
   assert.match(
     await fileComposer.innerText(),
-    /Comment on current file · repo-alpha\/review\.txt · lines 2–3/,
+    /Comment on current file · acme\/alpha\/review\.txt · lines 2–3/,
   );
   await page.keyboard.type("Current file comment");
   await fileComposer
@@ -256,7 +261,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   const changesComposer = changes.getByRole("form", { name: "Review comment" });
   assert.match(
     await changesComposer.innerText(),
-    /Comment on uncommitted comparison · repo-alpha\/diff\.txt · lines 2–3 · Before/,
+    /Comment on uncommitted comparison · acme\/alpha\/diff\.txt · lines 2–3 · Before/,
   );
   await page.keyboard.type("Deleted lines comment");
   await changesComposer
@@ -272,11 +277,11 @@ test("production local review composes exact multi-origin anchors and sends one 
   await comments.getByText(/diff\.txt · lines 2–3/).waitFor();
   await comments.getByText(/review\.txt · lines 2–3/).waitFor();
   const draftText = await comments.innerText();
-  assert.match(draftText, /repo-alpha\/review\.txt · lines 2–3 · workspace/);
+  assert.match(draftText, /acme\/alpha\/review\.txt · lines 2–3 · workspace/);
   assert.match(draftText, /second\nthird/);
   assert.match(
     draftText,
-    /repo-alpha\/diff\.txt · lines 2–3 · uncommitted · Before/,
+    /acme\/alpha\/diff\.txt · lines 2–3 · uncommitted · Before/,
   );
   assert.match(draftText, /drop one\ndrop two/);
   assert.equal(

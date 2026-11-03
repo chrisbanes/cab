@@ -1,4 +1,5 @@
 import { useId, useState, useRef, useEffect, type ReactNode } from "react";
+import { useReadinessDiscovery } from "./readiness-picker.js";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -13,6 +14,7 @@ import {
   deliveryPolicyChangeText,
   deliveryFieldErrors,
   deliveryRows,
+  grantIdentityNames,
   deliveryMappingCoverageWarning,
   type GrantRow,
   type CheckRow,
@@ -59,6 +61,7 @@ import {
   unconfirmedChecksNote,
   type CodeHost,
 } from "./delivery-presentation.js";
+import { repositoryLabel } from "./presentation.js";
 import {
   Dialog,
   DialogContent,
@@ -187,6 +190,22 @@ function DeliveryPolicyForm(p: TabProps) {
   }, [p.session, p.projectId]);
   const initial = saved ? deliveryEditorValues(saved) : null;
   useLoadedDraft(d, initial, p.loadedAt, saved);
+  // Names beside the grant ID inputs: the repository's name and, for a Project grant, what discovery lists.
+  const projectGrants = deliveryRows<GrantRow>(d.values.grants).filter(
+    (row) => !("savedRow" in row) && row.projectNodeId,
+  );
+  const discovery = useReadinessDiscovery({
+    client: p.client,
+    csrfToken: p.session.csrfToken,
+    enabled: projectGrants.length > 0,
+    labels: false,
+    saved: p.data.repositories.links.map((link) => ({
+      repositoryId: link.repositoryId ?? "",
+    })),
+    projectIds: projectGrants.flatMap((row) =>
+      "savedRow" in row || !row.projectNodeId ? [] : [row.projectNodeId],
+    ),
+  });
   if (!saved || !initial)
     return (
       <Panel
@@ -197,9 +216,18 @@ function DeliveryPolicyForm(p: TabProps) {
   const v = d.values;
   const draft = deliveryEditorDraft(v);
   const grants = deliveryRows<GrantRow>(v.grants);
+  const grantNames = grants.map((row) =>
+    "savedRow" in row
+      ? undefined
+      : grantIdentityNames(row, p.data.repositories.links, discovery),
+  );
   const repositoryRows = deliveryRows<RepositoryRow>(v.repositories);
   const requirements = saved.repositories ?? [];
-  const lines = deliveryPolicyChangeText(saved, draft);
+  const lines = deliveryPolicyChangeText(
+    saved,
+    draft,
+    p.data.repositories.links,
+  );
   if (draft.credentialIntent !== "preserve")
     lines.push(
       draft.credentialIntent === "set"
@@ -275,6 +303,8 @@ function DeliveryPolicyForm(p: TabProps) {
       ),
   );
   const links = p.data.repositories.links;
+  const label = (id: string | null) =>
+    id === null ? null : repositoryLabel(id, links);
   // Derived from the draft, so a project the migration skipped offers it and a set-up one does not.
   const unset = links.flatMap((link) =>
     link.repositoryId !== null &&
@@ -382,7 +412,9 @@ function DeliveryPolicyForm(p: TabProps) {
         >
           <DialogTitle>Allow merging without asking?</DialogTitle>
           <DialogDescription>{deliveryMergeWarning}</DialogDescription>
-          <p>{pending?.ids.join(", ")}</p>
+          <p>
+            {pending?.ids.map((id) => repositoryLabel(id, links)).join(", ")}
+          </p>
           <Button
             type="button"
             variant="secondary"
@@ -505,10 +537,10 @@ function DeliveryPolicyForm(p: TabProps) {
                   <section
                     key={link.repositoryId ?? i}
                     className="settings-row"
-                    aria-label={`Repository ${link.repositoryId ?? "unavailable"}`}
+                    aria-label={`Repository ${label(link.repositoryId) ?? "unavailable"}`}
                   >
                     <h3 className="small-heading">
-                      {link.repositoryId ?? "Unavailable repository"}
+                      {label(link.repositoryId) ?? "Unavailable repository"}
                     </h3>
                     <p>{deliveryLevelLabels[level]}</p>
                     {level === "merge-when-ready" &&
@@ -530,7 +562,7 @@ function DeliveryPolicyForm(p: TabProps) {
                     <Field
                       id={`shepherd-level-${i}`}
                       disabled={level === "unavailable"}
-                      label={`Shepherd level for ${link.repositoryId ?? "unavailable"}`}
+                      label={`Shepherd level for ${label(link.repositoryId) ?? "unavailable"}`}
                       value={presets.includes(level as Preset) ? level : ""}
                       onChange={(value) =>
                         choose(
@@ -567,6 +599,7 @@ function DeliveryPolicyForm(p: TabProps) {
                           row={row}
                           read={read}
                           codeHost={link.codeHost}
+                          label={label(link.repositoryId) ?? row.repositoryId}
                           error={error}
                           onChange={(change) => setRepository(r, change)}
                           focus={focus}
@@ -584,8 +617,11 @@ function DeliveryPolicyForm(p: TabProps) {
                 >
                   <h3 className="small-heading">Repositories not set up</h3>
                   <p>
-                    {notSetUp.join(", ")} can't push branches or open pull
-                    requests yet. Apply Open PRs, then save.
+                    {notSetUp
+                      .map((id) => repositoryLabel(id, links))
+                      .join(", ")}{" "}
+                    can't push branches or open pull requests yet. Apply Open
+                    PRs, then save.
                   </p>
                   <Button
                     id="apply-open-prs"
@@ -680,6 +716,11 @@ function DeliveryPolicyForm(p: TabProps) {
                       <Field
                         label="Repository or tracker container ID"
                         error={error(`grants.${index}.repositoryId`)}
+                        note={
+                          grantNames[index]?.repository
+                            ? `Repository: ${grantNames[index]?.repository}`
+                            : undefined
+                        }
                         value={row.repositoryId}
                         onChange={(value) =>
                           setRow("grants", index, "repositoryId", value)
@@ -722,21 +763,42 @@ function DeliveryPolicyForm(p: TabProps) {
                             row.action === "issue.status",
                           ],
                         ] as const
-                      ).map(([field, label, required]) => (
-                        <ScopeField
-                          key={field}
-                          label={label}
-                          required={required}
-                          value={row[field]}
-                          array={
-                            field === "optionNodeIds" || field === "statusIds"
-                          }
-                          error={error(`grants.${index}.${field}`)}
-                          onChange={(value) =>
-                            setRow("grants", index, field, value)
-                          }
-                        />
-                      ))}
+                      ).map(([field, label, required]) => {
+                        const named =
+                          field === "projectNodeId"
+                            ? grantNames[index]?.project
+                            : field === "fieldNodeId"
+                              ? grantNames[index]?.field
+                              : field === "optionNodeIds"
+                                ? grantNames[index]?.options?.join(", ")
+                                : undefined;
+                        return (
+                          <ScopeField
+                            key={field}
+                            label={label}
+                            required={required}
+                            value={row[field]}
+                            array={
+                              field === "optionNodeIds" || field === "statusIds"
+                            }
+                            error={error(`grants.${index}.${field}`)}
+                            note={
+                              named
+                                ? `${
+                                    field === "projectNodeId"
+                                      ? "Project"
+                                      : field === "fieldNodeId"
+                                        ? "Field"
+                                        : "Options"
+                                  }: ${named}`
+                                : undefined
+                            }
+                            onChange={(value) =>
+                              setRow("grants", index, field, value)
+                            }
+                          />
+                        );
+                      })}
                     </>
                   )}
                   {error(`grants.${index}.savedRow`) && (
@@ -808,6 +870,7 @@ function RepositoryMergeSettings({
   row,
   read,
   codeHost,
+  label,
   error,
   onChange,
   focus,
@@ -816,11 +879,12 @@ function RepositoryMergeSettings({
   row: RepositoryRow;
   read: RepositoryDeliveryRead;
   codeHost: CodeHost;
+  /** The repository's name for headings and accessible names; the row keeps its ID. */
+  label: string;
   error: (path: string) => string | undefined;
   onChange: (change: (row: RepositoryRow) => RepositoryRow) => void;
   focus: (id: string) => void;
 }) {
-  const id = row.repositoryId;
   const at = `repositories.${index}`;
   const live = read.codeHost.status === "live" ? read.codeHost : null;
   // Any method the host supports: a PR may target a branch whose rules differ from the default's.
@@ -839,10 +903,10 @@ function RepositoryMergeSettings({
   );
   return (
     <fieldset className="settings-rows">
-      <legend className="sr-only">Merge settings for {id}</legend>
+      <legend className="sr-only">Merge settings for {label}</legend>
       <Field
         id={`merge-method-${index}`}
-        label={`Merge method for ${id}`}
+        label={`Merge method for ${label}`}
         value={row.mergeMethod ?? ""}
         error={error(`${at}.mergeMethod`)}
         onChange={(value) =>
@@ -871,7 +935,7 @@ function RepositoryMergeSettings({
         )}
       <p>{codeHostChecksSummary(codeHost, read.codeHost)}</p>
       {live && live.checks.length > 0 && (
-        <ul aria-label={`Checks required by the code host for ${id}`}>
+        <ul aria-label={`Checks required by the code host for ${label}`}>
           {live.checks.map((check, i) => (
             <li
               key={"name" in check ? `${check.name}:${check.appId ?? ""}` : i}
@@ -897,7 +961,7 @@ function RepositoryMergeSettings({
         <section
           className="settings-row"
           key={check.rowKey}
-          aria-label={`Additional check ${i + 1} for ${id}`}
+          aria-label={`Additional check ${i + 1} for ${label}`}
         >
           {"savedRow" in check ? (
             <p>Unavailable saved row · kept until removed</p>
@@ -966,12 +1030,12 @@ function RepositoryMergeSettings({
         disabled={checks.length >= 100}
         onClick={() => addCheck("")}
       >
-        Add additional check for {id}
+        Add additional check for {label}
       </Button>
       {read.suggestions.some((name) => !named.has(name)) && (
         <fieldset>
           <legend className="metadata muted">
-            Suggested checks for {id}, seen on its PRs:
+            Suggested checks for {label}, seen on its PRs:
           </legend>
           {read.suggestions
             .filter((name) => !named.has(name))
@@ -998,6 +1062,7 @@ function Field({
   value,
   onChange,
   error,
+  note,
   children,
   multiline = false,
   disabled = false,
@@ -1007,6 +1072,8 @@ function Field({
   value: string;
   onChange: (value: string) => void;
   error?: string | undefined;
+  /** What the ID refers to, read with the input and never part of its value. */
+  note?: string | undefined;
   children?: ReactNode;
   multiline?: boolean;
   disabled?: boolean;
@@ -1019,7 +1086,10 @@ function Field({
     value,
     disabled,
     "aria-invalid": Boolean(error),
-    "aria-describedby": error ? `${id}-error` : undefined,
+    "aria-describedby":
+      [error && `${id}-error`, note && `${id}-note`]
+        .filter(Boolean)
+        .join(" ") || undefined,
     onChange: (event: { target: { value: string } }) =>
       onChange(event.target.value),
   };
@@ -1032,6 +1102,11 @@ function Field({
         <Textarea {...props} rows={3} />
       ) : (
         <Input {...props} />
+      )}
+      {note && (
+        <span id={`${id}-note`} className="metadata muted">
+          {note}
+        </span>
       )}
       {error && (
         <span id={`${id}-error`} className="error-text" role="alert">
@@ -1046,6 +1121,7 @@ function ScopeField({
   value,
   onChange,
   error,
+  note,
   required = false,
   array = false,
 }: {
@@ -1053,6 +1129,7 @@ function ScopeField({
   value: string | string[] | undefined;
   onChange: (value: string | string[] | undefined) => void;
   error?: string | undefined;
+  note?: string | undefined;
   required?: boolean;
   array?: boolean;
 }) {
@@ -1081,6 +1158,7 @@ function ScopeField({
           value={Array.isArray(value) ? value.join("\n") : (value ?? "")}
           multiline={array}
           error={error}
+          note={note}
           onChange={(text) =>
             onChange(array ? (text === "" ? [] : text.split("\n")) : text)
           }

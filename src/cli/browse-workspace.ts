@@ -193,9 +193,10 @@ const projectGet: BrowseCommand = {
           ? [
               "",
               table(
-                ["Repository", "Code host", "Host", "Ref"],
+                ["Repository", "Name", "Code host", "Host", "Ref"],
                 d.repositories.links.map((r) => [
                   unavailable(r.repositoryId),
+                  ("name" in r && r.name) || "none",
                   r.codeHost,
                   unavailable(r.host),
                   unavailable(r.ref),

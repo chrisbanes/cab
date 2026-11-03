@@ -19,6 +19,18 @@ export const midSentence = (label: string) =>
     ? label
     : label.charAt(0).toLowerCase() + label.slice(1);
 
+/** Links or task-read entries that may carry a repository's verified `owner/name`. */
+export type RepositoryNames = readonly {
+  repositoryId: string | null;
+  name?: string | null | undefined;
+}[];
+
+/** A repository's verified `owner/name` when a read named it, else its ID. Display only: the ID stays the identity. */
+export const repositoryLabel = (
+  repositoryId: string,
+  names?: RepositoryNames,
+) => names?.find((n) => n.repositoryId === repositoryId)?.name || repositoryId;
+
 /** A short identifier for mono metadata; the caller carries the full value on hover or in Details. */
 export const shortId = (value: string, length = 8) => value.slice(0, length);
 

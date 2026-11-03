@@ -19,6 +19,7 @@ import {
 } from "../../src/operator/contracts.js";
 import { parseSkills, skillsSummary } from "./skill-plugins.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
+import { repositoryLabel } from "./presentation.js";
 import { diagnosticCaptureLabels, plural } from "./settings-view.js";
 
 export type Values = Record<string, string | boolean | string[]>;
@@ -405,7 +406,9 @@ export function repositoryChanges(
     if (r.unavailable) {
       if (r.removed) lines.push("− Unavailable saved repository link");
     } else if (r.keep && r.removed)
-      lines.push(`− Repository access: ${r.repositoryId}`);
+      lines.push(
+        `− Repository access: ${repositoryLabel(String(r.repositoryId), saved.links)}`,
+      );
     else if (!r.keep && !r.removed)
       lines.push(
         `+ Repository access: ${r.repositoryId} · ${r.ref}${r.codeHost === "gitlab" ? ` · GitLab ${r.host}` : ""}`,
@@ -415,9 +418,13 @@ export function repositoryChanges(
         (s) => s.repositoryId === r.repositoryId,
       );
       if (current && current.ref !== r.ref)
-        lines.push(`Ref for ${r.repositoryId}: ${current.ref} → ${r.ref}`);
+        lines.push(
+          `Ref for ${repositoryLabel(String(r.repositoryId), saved.links)}: ${current.ref} → ${r.ref}`,
+        );
       if (pathEdited(r, known))
-        lines.push(`Local path changed for ${r.repositoryId}`);
+        lines.push(
+          `Local path changed for ${repositoryLabel(String(r.repositoryId), saved.links)}`,
+        );
     }
   }
   for (const s of saved.links)
@@ -426,7 +433,7 @@ export function repositoryChanges(
       !repositories.some((r) => r.repositoryId === s.repositoryId)
     )
       lines.push(
-        `− Repository access: ${s.repositoryId} (saved since this form loaded)`,
+        `− Repository access: ${repositoryLabel(s.repositoryId, saved.links)} (saved since this form loaded)`,
       );
   for (const row of saved.links)
     if (

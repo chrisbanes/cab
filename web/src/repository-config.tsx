@@ -45,6 +45,7 @@ import { discoveryReasonCopy } from "./setup-model.js";
 import { Alert } from "./ui/alert.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { codeHostName, type CodeHost } from "./delivery-presentation.js";
+import { repositoryLabel } from "./presentation.js";
 import { FolderPicker } from "./folder-picker.js";
 import { useOperatorResource } from "./resource.js";
 
@@ -260,7 +261,12 @@ export function RepositoryTab(p: TabProps) {
               {repositories.map((r, i) => {
                 const name = r.unavailable
                   ? `Unavailable saved repository link ${i + 1}`
-                  : String(r.repositoryId || `row ${i + 1}`);
+                  : r.keep
+                    ? repositoryLabel(
+                        String(r.repositoryId),
+                        data.repositories.links,
+                      )
+                    : String(r.repositoryId || `row ${i + 1}`);
                 const chosen = chosenOf(r);
                 // Branches are listed for a new row's chosen GitHub repository, as in setup.
                 const branches =

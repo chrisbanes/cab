@@ -15,7 +15,10 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  nameLinkedRepository,
+  seedReviewTask,
+} from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 import { until } from "../fixtures/until.js";
 
@@ -326,11 +329,12 @@ test("production retained diff evidence renders its original Before and After re
     threadId: result.workId,
     turnId: result.workId,
   };
+  nameLinkedRepository(fixture, seeded.projectId, "R_alpha", "acme/alpha");
   const comparisonId = randomUUID();
   const payload = Buffer.from(
     JSON.stringify({
       version: 1,
-      repositoryId: null,
+      repositoryId: "R_alpha",
       path: "notes.txt",
       left: { state: "text", text: "line one\nline two\nline three\n" },
       right: {
@@ -359,7 +363,7 @@ test("production retained diff evidence renders its original Before and After re
         state: "available",
         source: "observed-diff",
         sourceIndex: 0,
-        repositoryId: null,
+        repositoryId: "R_alpha",
         path: "notes.txt",
         originRoot: workspace.path,
         mime: "application/vnd.cab.workspace-diff+json",
@@ -447,6 +451,13 @@ test("production retained diff evidence renders its original Before and After re
   );
   const text = await retained.innerText();
   assert.match(text, /notes\.txt · Before 3 lines · After 4 lines/);
+  // The original's repository reads by its verified name, never its ID.
+  assert.match(text, /Original diff · acme\/alpha\/notes\.txt/);
+  assert.doesNotMatch(text, /R_alpha/);
+  assert.equal(
+    await retained.locator('button[title="acme/alpha/notes.txt"]').count(),
+    1,
+  );
   assert.match(text, new RegExp(digest(payload)));
 
   // Comments are not offered for diffs; the limitation is stated instead.

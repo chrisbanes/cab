@@ -25,6 +25,7 @@ import {
   DomainOperationError,
   DomainPolicyError,
   DomainStaleDispositionError,
+  GitHubRepositoryIdRefusedError,
   ProjectNameTakenError,
   RepositoryVerificationRefusedError,
 } from "./domain-errors.js";
@@ -96,6 +97,7 @@ export {
   DomainOperationError,
   DomainPolicyError,
   DomainStaleDispositionError,
+  GitHubRepositoryIdRefusedError,
   ProjectNameTakenError,
   RepositoryVerificationRefusedError,
   TaskNotOpenError,
@@ -992,6 +994,13 @@ export class DomainStore {
     }));
     const seen = new Set<string>();
     for (const { link, index, projectPath } of rows) {
+      // A saved ID is kept: guided setup's provisional `github.com/owner/name` links re-save.
+      if (
+        link.codeHost === "github" &&
+        link.repositoryId.includes("/") &&
+        !saved.some((item) => item.repositoryId === link.repositoryId)
+      )
+        throw new GitHubRepositoryIdRefusedError(index);
       if (link.codeHost !== "gitlab" || projectPath === undefined) continue;
       const key = `${link.host}/${projectPath.toLowerCase()}`;
       if (seen.has(key))
