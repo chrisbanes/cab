@@ -267,6 +267,12 @@ export function ReadyLabelPicker(p: {
   );
 }
 
+const parseIds = (text: string) =>
+  text
+    .split(/[,\n]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
 /** Option node IDs typed as a list; the text is kept as typed, so a separator can be entered. */
 function OptionIdsInput(p: {
   id: string;
@@ -277,6 +283,9 @@ function OptionIdsInput(p: {
   onChange: (ids: string[]) => void;
 }) {
   const [text, setText] = useState(p.value.join(", "));
+  // An external change (Discard, a reread) replaces the text; what parses to the value is kept as typed.
+  if (parseIds(text).join("\0") !== p.value.join("\0"))
+    setText(p.value.join(", "));
   return (
     <label className="field body" htmlFor={p.id}>
       {p.label}
@@ -289,12 +298,7 @@ function OptionIdsInput(p: {
         value={text}
         onChange={(e) => {
           setText(e.target.value);
-          p.onChange(
-            e.target.value
-              .split(/[,\n]/)
-              .map((x) => x.trim())
-              .filter(Boolean),
-          );
+          p.onChange(parseIds(e.target.value));
         }}
       />
     </label>

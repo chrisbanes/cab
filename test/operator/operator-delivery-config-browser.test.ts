@@ -829,6 +829,50 @@ test("without a discovery credential a grant offers typed IDs labelled as the fa
   ]);
 });
 
+test("typed option IDs follow a Discard back to the saved IDs and the next save sends what they show", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [
+      {
+        action: "project.field",
+        repositoryId: "R_atlas",
+        mode: "allow",
+        projectNodeId: "PVT_atlas",
+        fieldNodeId: "PVTSSF_status",
+        optionNodeIds: ["PVTSSO_ready"],
+      },
+    ],
+    requiredChecks: [],
+  });
+  await read(page);
+  const options = grant(page).getByLabel("Option node IDs (fallback)", {
+    exact: true,
+  });
+  await options.fill("PVTSSO_ready, PVTSSO_todo");
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await page.waitForFunction(
+    () => !document.body.innerText.includes("PVTSSO_todo"),
+  );
+  assert.equal(await options.inputValue(), "PVTSSO_ready");
+  await grant(page)
+    .getByLabel("Authority", { exact: true })
+    .selectOption("approval");
+  const sent = body(page);
+  await save(page).click();
+  assert.deepEqual(
+    ((await sent).grants as { optionNodeIds: string[] }[])[0]?.optionNodeIds,
+    ["PVTSSO_ready"],
+  );
+  await savedOutcome(page);
+});
+
 test("a saved grant whose Project discovery does not list shows its ID with a note and keeps the value", async (_t, journey) => {
   const { page, f, ids } = await startDiscovery(journey);
   f.service.domain().execute({
