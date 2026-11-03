@@ -2491,9 +2491,14 @@ export class DeliveryStore {
       (binding.observation.draft || binding.observation.state === "CLOSED")
     )
       throw new HandbackSettlementRefusedError("PR is not reviewable");
-    // Frozen before the binding changes: unobserved inputs refuse the settlement whole.
+    // Frozen before the binding changes: unobserved inputs refuse an acceptance whole. Closing
+    // the outcome stays possible and, without a record, holds until settled again.
     if (
-      !new DeliveryReadinessStore(this.db).capture(command.key, command.taskId)
+      !new DeliveryReadinessStore(this.db).capture(
+        command.key,
+        command.taskId,
+        command.decision === "accepted",
+      )
     )
       throw new HandbackSettlementRefusedError(
         "Readiness inputs are not fully observed",

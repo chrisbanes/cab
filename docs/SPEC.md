@@ -2582,10 +2582,12 @@ are frozen with the settlement and compared on every committed source update, wh
 not it moves Ready or the task version, so a change between two values that both satisfy
 the rule ends the settlement. An observed change stays recorded: reading the old values
 again does not restore it, and only a new settlement, which freezes the values then
-observed, does. A settlement made without frozen values, or whose values the source cannot
-currently vouch for (an input not returned by the last read, an item outside the Project,
-a selection without a complete read, a changed rule), holds until a complete read or a new
-settlement; a new settlement is refused while the values are not observed.
+observed, does. A changed rule is such a change. A settlement made without frozen values,
+or whose values the source cannot currently vouch for (an input not returned by the last
+read, an item with no Project membership, a selection without a complete read), holds until
+a complete read or a new settlement; a closed issue a filtered listing no longer returns
+keeps the values it was settled with. Accepting a handback is refused while the values are
+not observed; closing the outcome is not.
 
 It stays valid across a task-version change made only by cab's own confirmed
 `issue.close`: the closure and the readiness it removes, while the issue is observed

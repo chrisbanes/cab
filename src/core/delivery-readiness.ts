@@ -40,10 +40,11 @@ const unique = (values: Iterable<string>) => [...new Set(values)].sort();
 export function readinessInputs(
   db: Database,
   taskId: string,
+  frozen?: ReadinessInputs,
 ): { inputs: ReadinessInputs; complete: boolean } | null {
   const item = db
     .prepare(
-      `SELECT e.provider, e.instance, e.externalId, e.labels, e.observedStatus, e.observedFields, t.projectId
+      `SELECT e.provider, e.instance, e.externalId, e.observedState, e.labels, e.observedStatus, e.observedFields, t.projectId
        FROM external_items e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?`,
     )
     .get(taskId) as Row | undefined;
@@ -102,9 +103,16 @@ export function readinessInputs(
     else
       components.set(
         `project-field:${c.projectNodeId}:${c.fieldNodeId}`,
-        // An item outside the Project has no field page to have read.
+        // An item outside the Project has no field page to have read. A closed one that a
+        // filtered listing dropped after the close is not an observation of its fields either:
+        // keep what the settlement froze, as no read can ever show more.
         memberships.length === 0
-          ? null
+          ? item.observedState === "closed"
+            ? (frozen?.components.find(
+                (f) =>
+                  f.id === `project-field:${c.projectNodeId}:${c.fieldNodeId}`,
+              )?.value ?? null)
+            : null
           : unique(
               fields
                 .filter(
@@ -175,11 +183,11 @@ export class DeliveryReadinessStore {
   constructor(private readonly db: Database) {}
 
   /** Freezes the task's current inputs under the settlement; `false` when they are not fully observed. */
-  capture(commandKey: string, taskId: string): boolean {
+  capture(commandKey: string, taskId: string, required: boolean): boolean {
     const now = readinessInputs(this.db, taskId);
     if (!now) return true;
     if (!now.complete || now.inputs.components.some((c) => c.value === null))
-      return false;
+      return !required;
     // Only the current settlement is consulted; a replayed key returns its receipt without one.
     this.db
       .prepare("DELETE FROM delivery_settlement_readiness WHERE taskId = ?")
@@ -207,28 +215,21 @@ export class DeliveryReadinessStore {
       )
       .all(taskId) as { commandKey: string; inputsJson: string }[];
     if (!rows.length) return;
-    const now = readinessInputs(this.db, taskId);
-    if (!now) return;
     const exempt = exemptStatus();
-    for (const row of rows)
-      if (
-        compareInputs(
-          inputsSchema.parse(JSON.parse(row.inputsJson)),
-          now.inputs,
-          exempt,
-        ) === "changed"
-      )
+    for (const row of rows) {
+      const frozen = inputsSchema.parse(JSON.parse(row.inputsJson));
+      const now = readinessInputs(this.db, taskId, frozen);
+      if (now && compareInputs(frozen, now.inputs, exempt) === "changed")
         this.db
           .prepare(
             "UPDATE delivery_settlement_readiness SET invalidated = 1 WHERE commandKey = ?",
           )
           .run(row.commandKey);
+    }
   }
 
   /** Whether the settlement no longer vouches for the task's current inputs. A settlement made before this record held none. */
   holds(taskId: string, commandKey: string, exemptStatus?: string): boolean {
-    const now = readinessInputs(this.db, taskId);
-    if (!now) return false;
     const row = this.db
       .prepare(
         "SELECT inputsJson, invalidated FROM delivery_settlement_readiness WHERE commandKey = ? AND taskId = ?",
@@ -236,15 +237,14 @@ export class DeliveryReadinessStore {
       .get(commandKey, taskId) as
       | { inputsJson: string; invalidated: number }
       | undefined;
+    const frozen = row && inputsSchema.parse(JSON.parse(row.inputsJson));
+    const now = readinessInputs(this.db, taskId, frozen);
+    if (!now) return false;
     return (
-      !row ||
+      !frozen ||
       row.invalidated === 1 ||
       !now.complete ||
-      compareInputs(
-        inputsSchema.parse(JSON.parse(row.inputsJson)),
-        now.inputs,
-        exemptStatus,
-      ) !== "same"
+      compareInputs(frozen, now.inputs, exemptStatus) !== "same"
     );
   }
 

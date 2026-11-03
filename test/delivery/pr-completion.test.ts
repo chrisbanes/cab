@@ -1354,6 +1354,7 @@ test("a replacement settlement after another change survives a later lagging clo
 async function settleAgain(
   f: Fixture,
   key: ReturnType<typeof randomUUID> = randomUUID(),
+  decision: "accepted" | "closed" = "accepted",
 ) {
   const delivery = f.service.delivery();
   return f.service.settleHandback({
@@ -1367,7 +1368,7 @@ async function settleAgain(
     prNumber: 7,
     expectedPrNodeId: "P7",
     expectedHeadSha: f.getPr().headSha,
-    decision: "accepted",
+    decision,
   });
 }
 const receipts = (f: Fixture) =>
@@ -1402,9 +1403,11 @@ test("a Project field moved between two Ready options ends the settlement withou
       .prepare("SELECT commandKey AS key FROM delivery_settlement_readiness")
       .get() as { key: string } | undefined;
     assert.ok(old);
-    await settleAgain(f, old.key as ReturnType<typeof randomUUID>).catch(
-      () => undefined,
+    await assert.rejects(
+      () => settleAgain(f, old.key as ReturnType<typeof randomUUID>),
+      /different material/,
     );
+    assert.equal(receipts(f), 1);
     assert.ok(blockers(f).includes(awaitingSettlement));
     // A fresh settlement captures what is observed now.
     await settleAgain(f);
@@ -1439,6 +1442,32 @@ test("a close with no other change needs exactly one settlement for a Project fi
     assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
     assert.equal((await requestCompletionAfterClose(f)).success, true);
     await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a closed issue a filtered listing drops keeps the settlement's Project field values", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    databaseOf(f.service).exec("DELETE FROM source_memberships");
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("accepting a handback needs observed inputs, and closing the outcome does not", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await registerFixturePr(f);
+    f.turns[0]?.release();
+    databaseOf(f.service).exec("DELETE FROM source_memberships");
+    await assert.rejects(() => settleAgain(f), /not fully observed/);
+    await settleAgain(f, randomUUID(), "closed");
+    assert.ok(blockers(f).includes(awaitingSettlement));
   } finally {
     await f.close();
   }
