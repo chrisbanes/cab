@@ -12,7 +12,6 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { NoTurnRecoveryCommand } from "../../src/standalone/pre-turn-recovery.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
@@ -778,20 +777,15 @@ test("R4 late callback and known survivor retract successors and persist hold af
     });
 });
 
-test("authenticated no-turn routes retain bounded witnesses in the curated API", async () => {
+test("JSON no-turn commands retain bounded witnesses in the curated API", async () => {
   const f = await fixture();
   try {
-    const routes = runtimeOperatorRoutes(f.service);
-    const route = required(
-      routes.find((r) => r.path === "/runtime/control/no-turn/adopt"),
-    );
-    assert.deepEqual(
-      await route.handler({
-        fields: { payload: JSON.stringify(f.adoption) },
-        csrfToken: "fixture",
-      } as never),
-      { kind: "redirect", location: "/runtime" },
-    );
+    const api = new OperatorApi(f.service, [f.directory]);
+    await api.execute({
+      type: "recovery.no-turn.adopt",
+      assignmentId: f.assignmentId,
+      ...f.adoption,
+    });
     const witness = required(
       f.service.recoveryView().find((r) => r.workId === f.old.workId)
         ?.noTurnSubmission,
@@ -805,17 +799,12 @@ test("authenticated no-turn routes retain bounded witnesses in the curated API",
         f.adoption.evidence.invocationLedgerSha256,
       ),
     );
-    const recoverRoute = required(
-      routes.find((r) => r.path === "/runtime/control/no-turn/recover"),
-    );
     const input = recovery(f, witness.id);
-    assert.deepEqual(
-      await recoverRoute.handler({
-        fields: { payload: JSON.stringify(input) },
-        csrfToken: "fixture",
-      } as never),
-      { kind: "redirect", location: "/runtime" },
-    );
+    await api.execute({
+      type: "recovery.no-turn.recover",
+      assignmentId: f.assignmentId,
+      ...input,
+    });
   } finally {
     await close(f);
   }

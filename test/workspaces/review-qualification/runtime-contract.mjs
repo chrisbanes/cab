@@ -22,10 +22,7 @@ import {
 } from "../../../dist/src/standalone/index.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import {
   OperatorWebBundle,
@@ -647,7 +644,7 @@ export async function runQualification(options = {}) {
       () => OperatorWebBundle.open(join(rootDir, "dist/operator")),
       "bundle-open",
     );
-    http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
+    http = new LocalOperatorHttp(auth, {
       web: new OperatorWebBoundary(bundle, api),
     });
     await step(

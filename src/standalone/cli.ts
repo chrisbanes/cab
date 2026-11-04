@@ -10,12 +10,10 @@ import {
   StandaloneService,
   type BackgroundFailureDiagnostic,
 } from "./service.js";
-import { LocalOperatorHttp, LocalOperatorUi } from "./operator.js";
+import { LocalOperatorHttp } from "./operator.js";
 import { OperatorAuth } from "./operator-auth.js";
 import { OperatorPush } from "./operator-push.js";
 import { dirname, join } from "node:path";
-import { OperatorRouteRegistry } from "./operator-routes.js";
-import { runtimeOperatorRoutes } from "./operator-runtime.js";
 
 export type ServiceExitReason = "signal" | "background-failure";
 
@@ -210,7 +208,6 @@ export async function main(
     } else if (command === "operator") {
       if (!operatorAuth)
         throw new Error("Operator authentication is unavailable");
-      const routes = new OperatorRouteRegistry();
       if (!bundle) throw new Error("Operator web UI not built");
       if (await consumeFatalFailure()) return;
       const authFile = process.env.CAB_OPERATOR_AUTH_FILE ?? "";
@@ -222,7 +219,6 @@ export async function main(
         undefined,
         () => readiness.read(),
       );
-      routes.registerSlot("runtime", runtimeOperatorRoutes(service, api));
       const readiness = serviceReadiness(service, api, { dataDir, authFile });
       // The VAPID key sits beside the operator auth file; an unusable one only turns push off.
       const push = await OperatorPush.open({
@@ -232,23 +228,12 @@ export async function main(
       });
       // A failure while push loaded has already cleared the domain the UI needs.
       if (await consumeFatalFailure()) return;
-      const ui = new LocalOperatorHttp(
-        new LocalOperatorUi(
-          service.domain(),
-          (reference) => service.gitHubSourceReader(reference),
-          service.githubSources(),
-          () => service.refreshGitHub(),
-          (projectId) => service.gitHubSourceCredentialStatus(projectId),
-        ),
-        operatorAuth,
-        {
-          routes,
-          credentials: service.operatorCredentials(),
-          localAccess: service.localAccess(),
-          push,
-          web: new OperatorWebBoundary(bundle, api, readiness),
-        },
-      );
+      const ui = new LocalOperatorHttp(operatorAuth, {
+        credentials: service.operatorCredentials(),
+        localAccess: service.localAccess(),
+        push,
+        web: new OperatorWebBoundary(bundle, api, readiness),
+      });
       const port = await ui.start(args[0] ? Number(args[0]) : 8787);
       process.stdout.write(`${operatorAuth.origin}/app\n`);
       try {

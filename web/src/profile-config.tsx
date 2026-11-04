@@ -566,14 +566,6 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                 ]}
               />
               <PolicyAside draft={d} workspace={p.workspace} />
-              <Aside
-                title="Related"
-                items={[
-                  <a key="advanced" href={`/profile/${profileId}`}>
-                    Open advanced profile editor
-                  </a>,
-                ]}
-              />
             </div>
           </div>
         </>

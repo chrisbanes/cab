@@ -17,7 +17,6 @@ import type {
   RuntimeProcessIdentity,
 } from "../../src/standalone/recovery-types.js";
 import { DatabaseSync } from "node:sqlite";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import {
   type HistoricalPreTurnAdoption,
   type PreTurnRecoveryCommand,
@@ -1410,16 +1409,15 @@ test("historical pre-turn proof requires explicit exact operator adoption and im
       expectedAssignmentVersion: Number(f.old.assignmentVersion),
       expectedConversationRevision: 1,
     };
-    const route = required(
-      runtimeOperatorRoutes(service).find(
-        (r) => r.path === "/runtime/control/conversation-replace",
-      ),
+    const api = new OperatorApi(service, [f.directory]);
+    const receipt = await api.execute({
+      type: "recovery.conversation.replace",
+      ...replace,
+    });
+    assert.deepEqual(
+      await api.execute({ type: "recovery.conversation.replace", ...replace }),
+      receipt,
     );
-    const fields = Object.fromEntries(
-      Object.entries(replace).map(([k, v]) => [k, String(v)]),
-    );
-    await route.handler({ params: {}, fields, csrfToken: "fixture" });
-    await route.handler({ params: {}, fields, csrfToken: "fixture" });
     assert.deepEqual(service.replaceConversationCommand(replace), {
       revision: 2,
     });
@@ -1729,17 +1727,8 @@ test("pre-turn witness is exposed safely through operator API", async () => {
       ).data.records.find((r) => r.workId === f.old.workId)?.preTurnRejection,
       witness,
     );
-    const adoptRoute = required(
-      runtimeOperatorRoutes(f.service).find(
-        (r) => r.path === "/runtime/control/pre-turn/adopt",
-      ),
-    );
-    assert.throws(() =>
-      adoptRoute.handler({
-        params: {},
-        fields: { payload: "{}" },
-        csrfToken: "fixture",
-      }),
+    await assert.rejects(() =>
+      api.execute({ type: "recovery.pre-turn.adopt", key: randomUUID() }),
     );
   } finally {
     await close(f);

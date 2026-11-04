@@ -1,9 +1,8 @@
 import type { LocalAccess } from "../operator/local-access.js";
-import { cabFaviconSvg, cabMarkSvg } from "../operator/brand.js";
+import { cabFaviconSvg } from "../operator/brand.js";
 import {
   genericInvalidInputMessage,
   questionCommandRawLimit,
-  runtimeSummary,
 } from "../operator/contracts.js";
 import type { OperatorWebBoundary } from "./operator-web.js";
 import {
@@ -30,7 +29,6 @@ import {
 } from "./operator-credentials.js";
 import type { OperatorPush } from "./operator-push.js";
 import { PushError } from "./web-push.js";
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   createServer,
@@ -38,262 +36,23 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import {
-  DomainCommands,
-  DomainConflictError,
-  type DomainCommand,
-  type DomainStore,
-} from "../core/domain.js";
 import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
-import type { GitHubSourceReader } from "./github-source.js";
-import {
-  type gitHubSourceCredentialStatus,
-  sourceCredentialExplanation,
-  type SourceCredentialReason,
-} from "./github-source-credential.js";
-import type { GitHubSourceStore } from "../core/github-source.js";
-import {
-  containsControlCharacters,
-  decodeSegment,
-  OperatorRouteRegistry,
-  type OperatorRouteResult,
-} from "./operator-routes.js";
-import { escapeHtml, hidden } from "./operator-html.js";
-
-function field(
-  name: string,
-  value = "",
-  kind = "text",
-  checked = false,
-  label = name,
-): string {
-  return `<label>${escapeHtml(label)} <input name="${escapeHtml(name)}" type="${kind}" value="${escapeHtml(value)}"${checked ? " checked" : ""}></label>`;
-}
-
-function textarea(name: string, value = ""): string {
-  return `<label>${escapeHtml(name)} <textarea name="${escapeHtml(name)}">${escapeHtml(value)}</textarea></label>`;
-}
-
-function selectField(
-  name: string,
-  options: { value: string; label: string; disabled?: boolean }[],
-  selected: string,
-): string {
-  return `<label>${escapeHtml(name)} <select name="${escapeHtml(name)}">${options
-    .map(
-      (option) =>
-        `<option value="${escapeHtml(option.value)}"${option.value === selected ? " selected" : ""}${option.disabled ? " disabled" : ""}>${escapeHtml(option.label)}</option>`,
-    )
-    .join("")}</select></label>`;
-}
-
-function form(
-  type: string,
-  fields: string,
-  createId?: string,
-  csrfToken = "",
-): string {
-  return `<form method="post" action="/command" data-command="${escapeHtml(type)}">${hidden("type", type)}${hidden("key", randomUUID())}${createId ? hidden(createId, randomUUID()) : ""}${csrfToken ? hidden("csrfToken", csrfToken) : ""}${fields}<button type="submit">Save</button></form>`;
-}
-
-/** Local operator surface for the authenticated UI foundation to mount. */
-class SourceCredentialConflictError extends DomainConflictError {
-  constructor(
-    readonly reason: SourceCredentialReason,
-    readonly projectId: string,
-  ) {
-    super(sourceCredentialExplanation(reason));
-  }
-}
-
-export class LocalOperatorUi {
-  private readonly commands: DomainCommands;
-
-  constructor(
-    private readonly store: DomainStore,
-    _githubPreviewReader?: (
-      credentialRef: string,
-    ) => Pick<GitHubSourceReader, "readSelection">,
-    _githubSources?: GitHubSourceStore,
-    _githubRefresh?: () => Promise<void>,
-    _credentialStatus?: (
-      projectId: string,
-    ) => ReturnType<typeof gitHubSourceCredentialStatus>,
-  ) {
-    this.commands = new DomainCommands(store);
-  }
-
-  home(csrfToken = ""): string {
-    const projects = this.store
-      .projects()
-      .map(
-        (project) =>
-          `<li><a href="/app/projects/${escapeHtml(project.id)}/settings">${escapeHtml(project.name)}</a> (${project.paused ? "paused" : "active"})</li>`,
-      )
-      .join("");
-    const profiles = this.store
-      .profiles()
-      .map(
-        (profile) =>
-          `<li><a href="/profile/${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</a> (${profile.revoked ? "revoked" : "active"})</li>`,
-      )
-      .join("");
-    const leadProfiles = this.store
-      .profiles()
-      .filter((profile) => !profile.revoked)
-      .map((profile) => ({
-        value: String(profile.id),
-        label: String(profile.name),
-      }));
-    return `<main><h1>cab</h1><h2>Projects</h2><ul>${projects}</ul>${form("project.create", field("name") + selectField("leadProfileId", [{ value: "", label: "Unconfigured" }, ...leadProfiles], ""), "projectId", csrfToken)}<h2>Profiles</h2><ul>${profiles}</ul>${form("profile.create", field("name") + textarea("instructions") + textarea("capabilities"), "profileId", csrfToken)}</main>`;
-  }
-
-  profile(profileId: string, csrfToken = ""): string {
-    const profile = this.store.profile(profileId);
-    return `<main><h1>${escapeHtml(profile.name)}</h1><p>Revision ${escapeHtml(profile.version)}; ${profile.revoked ? "revoked" : "active"}</p><p>Execution runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(profileId)))}. Change it in profile Settings; saving here keeps it.</p>${form("profile.configure", field("profileId", profileId, "hidden") + field("expectedVersion", String(profile.version), "hidden") + field("name", String(profile.name)) + textarea("instructions", String(profile.instructions)) + textarea("capabilities", String(profile.capabilities)) + field("revoked", "1", "checkbox", Boolean(profile.revoked)), undefined, csrfToken)}</main>`;
-  }
-
-  runtime(): string {
-    return "<main><h1>Runtime</h1><p>Unavailable. This operator surface does not start or control execution.</p></main>";
-  }
-
-  async submit(fields: Record<string, string>): Promise<unknown> {
-    const common = {
-      key: fields.key || randomUUID(),
-      actor: "operator" as const,
-    };
-    const required = (name: string) => {
-      const value = fields[name];
-      if (!value) throw new Error(`Missing ${name}`);
-      return value;
-    };
-    const version = () => Number(required("expectedVersion"));
-    let command: DomainCommand;
-    switch (fields.type) {
-      case "project.create":
-        command = {
-          ...common,
-          type: "project.create",
-          projectId: fields.projectId || randomUUID(),
-          name: required("name"),
-          leadProfileId: fields.leadProfileId || null,
-        };
-        break;
-      case "task.create":
-        command = {
-          ...common,
-          type: "task.create",
-          projectId: required("projectId"),
-          taskId: fields.taskId || randomUUID(),
-          title: required("title"),
-          outcome: required("outcome"),
-          ready: fields.ready === "1",
-        };
-        break;
-      case "profile.create":
-        command = {
-          ...common,
-          type: "profile.create",
-          profileId: fields.profileId || randomUUID(),
-          name: required("name"),
-          instructions: fields.instructions ?? "",
-          capabilities: fields.capabilities ?? "",
-        };
-        break;
-      case "profile.configure":
-        command = {
-          ...common,
-          type: "profile.configure",
-          profileId: required("profileId"),
-          expectedVersion: version(),
-          name: required("name"),
-          instructions: fields.instructions ?? "",
-          capabilities: fields.capabilities ?? "",
-          revoked: fields.revoked === "1",
-        };
-        break;
-      case "assignment.create":
-        command = {
-          ...common,
-          type: "assignment.create",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          assignmentId: fields.assignmentId || randomUUID(),
-          profileId: required("profileId"),
-          brief: required("brief"),
-          resultDestination: required("resultDestination"),
-          requesterAssignmentId: null,
-        };
-        break;
-      case "assignment.apply":
-        command = {
-          ...common,
-          type: "assignment.apply",
-          projectId: required("projectId"),
-          assignmentId: required("assignmentId"),
-          expectedVersion: version(),
-        };
-        break;
-      case "dependency.add":
-        command = {
-          ...common,
-          type: "dependency.add",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          blockerTaskId: required("blockerTaskId"),
-          expectedVersion: version(),
-        };
-        break;
-      case "dependency.remove":
-        command = {
-          ...common,
-          type: "dependency.remove",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          blockerTaskId: required("blockerTaskId"),
-          expectedVersion: version(),
-        };
-        break;
-      case "imported-blockers.set":
-        command = {
-          ...common,
-          type: "imported-blockers.set",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          expectedVersion: version(),
-          state: required("state") as "clear" | "blocked" | "unknown",
-        };
-        break;
-      default:
-        throw new Error("Unknown form command");
-    }
-    return this.commands.execute(command);
-  }
-}
+import { sourceCredentialExplanation } from "./github-source-credential.js";
+import { containsControlCharacters, decodeSegment } from "./operator-routes.js";
 
 type OperatorHttpOptions = {
-  routes?: OperatorRouteRegistry;
-  web?: OperatorWebBoundary;
+  web: OperatorWebBoundary;
   credentials?: OperatorCredentialStore;
   localAccess?: LocalAccess | undefined;
-  /** Opt-in browser push; absent, the notification routes answer 404. */
+  /** Opt-in browser push; absent, notification routes answer 404. */
   push?: OperatorPush;
 };
-
 const SESSION_COOKIE = "cab_operator_session";
 const CREDENTIAL_ACTION =
   /^\/api\/operator\/credentials\/([^/]+)\/(rotate|revoke)$/;
 const PUSH_ACTION =
   /^\/api\/operator\/notifications\/subscriptions\/([^/]+)\/(revoke|test)$/;
-const MAX_FORM_BYTES = 64 * 1024;
-const MAX_FORM_FIELDS = 128;
-const MAX_FORM_VALUE_LENGTH = 8 * 1024;
-const COMMANDS = new Set([
-  "project.create",
-  "profile.create",
-  "profile.configure",
-  "task.create",
-]);
+const MAX_JSON_BYTES = 64 * 1024;
 const RESPONSE_HEADERS = {
   "cache-control": "no-store",
   "content-security-policy":
@@ -302,7 +61,6 @@ const RESPONSE_HEADERS = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
 };
-
 class OperatorHttpError extends Error {
   constructor(readonly status: number) {
     super();
@@ -484,7 +242,7 @@ async function readJson(
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > (commands ? questionCommandRawLimit : MAX_FORM_BYTES)) {
+    if (size > (commands ? questionCommandRawLimit : MAX_JSON_BYTES)) {
       oversized = true;
       break;
     }
@@ -507,7 +265,7 @@ async function readJson(
         : null;
     if (
       commands &&
-      size > MAX_FORM_BYTES &&
+      size > MAX_JSON_BYTES &&
       type !== "question.form.answer" &&
       type !== "question.native.answer" &&
       // An issue body may be up to 64,000 characters, which a 64 KiB command cannot carry.
@@ -521,90 +279,7 @@ async function readJson(
   }
 }
 
-async function readForm(
-  request: IncomingMessage,
-): Promise<Record<string, string>> {
-  if (request.headers["content-type"] !== "application/x-www-form-urlencoded") {
-    request.resume();
-    throw new OperatorHttpError(415);
-  }
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_FORM_BYTES) {
-      request.resume();
-      throw new OperatorHttpError(413);
-    }
-    chunks.push(buffer);
-  }
-  let encoded: string;
-  try {
-    encoded = new TextDecoder("utf-8", { fatal: true }).decode(
-      Buffer.concat(chunks),
-    );
-  } catch {
-    throw new OperatorHttpError(400);
-  }
-  const fields: Record<string, string> = Object.create(null) as Record<
-    string,
-    string
-  >;
-  let count = 0;
-  for (const pair of encoded.split("&")) {
-    if (!pair) continue;
-    const separator = pair.indexOf("=");
-    const key = decodeFormComponent(
-      separator < 0 ? pair : pair.slice(0, separator),
-    );
-    const value = decodeFormComponent(
-      separator < 0 ? "" : pair.slice(separator + 1),
-    );
-    count += 1;
-    if (
-      count > MAX_FORM_FIELDS ||
-      !key ||
-      key.length > 128 ||
-      value.length > MAX_FORM_VALUE_LENGTH ||
-      Object.hasOwn(fields, key)
-    )
-      throw new OperatorHttpError(400);
-    fields[key] = value;
-  }
-  return fields;
-}
-
-function decodeFormComponent(value: string): string {
-  try {
-    return decodeURIComponent(value.replace(/\+/g, " "));
-  } catch {
-    throw new OperatorHttpError(400);
-  }
-}
-
-function cleanQuery(searchParams: URLSearchParams): Record<string, string> {
-  const fields: Record<string, string> = Object.create(null) as Record<
-    string,
-    string
-  >;
-  let count = 0;
-  for (const [key, value] of searchParams) {
-    count += 1;
-    if (
-      count > MAX_FORM_FIELDS ||
-      !key ||
-      key.length > 128 ||
-      value.length > MAX_FORM_VALUE_LENGTH ||
-      Object.hasOwn(fields, key)
-    )
-      throw new OperatorHttpError(400);
-    fields[key] = value;
-  }
-  return fields;
-}
-
-function writeHtml(
+function writeText(
   response: ServerResponse,
   status: number,
   body: string,
@@ -612,74 +287,36 @@ function writeHtml(
 ): void {
   response.writeHead(status, {
     ...RESPONSE_HEADERS,
-    "content-type": "text/html; charset=utf-8",
+    "content-type": "text/plain; charset=utf-8",
     ...headers,
   });
   response.end(body);
 }
 
-function document(
-  body: string,
-  session: OperatorSession,
-  webEnabled = false,
-  stylesheets: readonly string[] = [],
-): string {
-  const logout = session.authenticated
-    ? `<form method="post" action="/logout">${hidden("csrfToken", session.csrfToken)}<button type="submit">Log out</button></form>`
-    : "";
-  const navigation = session.authenticated
-    ? `<nav><span class="brand-lockup">${cabMarkSvg.replace("<svg ", '<svg aria-hidden="true" ')}<span>cab</span></span> ${webEnabled ? '<a href="/app">New interface</a> ' : ""}<a href="/">Existing operator controls</a> <a href="/runtime">Runtime</a></nav>${logout}`
-    : "";
-  const styles = webEnabled
-    ? stylesheets
-        .map((href) => `<link rel="stylesheet" href="${href}">`)
-        .join("")
-    : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>cab</title><link rel="icon" type="image/svg+xml" href="/favicon.svg">${styles}</head><body${webEnabled ? ' class="legacy-operator"' : ""}>${navigation}${body}</body></html>`;
-}
-
-function loginContent(session: OperatorSession, message = "Sign in"): string {
-  return `<main><h1 class="brand-lockup">${cabMarkSvg.replace("<svg ", '<svg aria-hidden="true" ')}cab</h1><p>${escapeHtml(message)}</p><form method="post" action="/login">${hidden("csrfToken", session.csrfToken)}${field("password", "", "password")}<button type="submit">Sign in</button></form></main>`;
-}
-
-function isSafeRedirect(location: string): boolean {
-  return (
-    location.startsWith("/") &&
-    !location.startsWith("//") &&
-    !location.includes("\\") &&
-    !containsControlCharacters(location)
-  );
-}
-
-// Pages of the server-rendered operator UI; only these may start a pre-login session.
-const LEGACY_PAGE = /^\/(?:$|runtime(?:\/|$)|(?:profile|assignment)\/)/;
-
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
   private server: Server | undefined;
-  private readonly routes: OperatorRouteRegistry;
   private readonly secureCookie: boolean;
-  private readonly web: OperatorWebBoundary | undefined;
+  private readonly web: OperatorWebBoundary;
   private readonly credentials: OperatorCredentialStore | undefined;
   private readonly localAccess: LocalAccess | undefined;
   private readonly push: OperatorPush | undefined;
 
   constructor(
-    private readonly ui: LocalOperatorUi,
     private readonly auth: OperatorAuth,
-    options: OperatorHttpOptions = {},
+    options: OperatorHttpOptions,
   ) {
+    if (!options?.web)
+      throw new Error("operator web UI not built; run npm run build:web");
     this.web = options.web;
     this.localAccess = options.localAccess;
     this.credentials = options.credentials;
     this.push = options.push;
-    this.routes = options.routes ?? new OperatorRouteRegistry();
     this.secureCookie = new URL(auth.origin).protocol === "https:";
   }
 
   async start(port = 0): Promise<number> {
     if (this.server) throw new Error("Operator UI already started");
-    this.routes.mount();
     const server = createServer(async (request, response) => {
       let session: OperatorSession | undefined;
       try {
@@ -695,7 +332,7 @@ export class LocalOperatorHttp {
           request.headers.host !== loopbackHost
         ) {
           request.resume();
-          writeHtml(response, 403, "<main><h1>Request denied</h1></main>");
+          writeText(response, 403, "Request denied");
           return;
         }
         const requestTarget = request.url ?? "/";
@@ -707,7 +344,7 @@ export class LocalOperatorHttp {
           requestTarget.includes("#")
         ) {
           request.resume();
-          writeHtml(response, 400, "<main><h1>Request rejected</h1></main>");
+          writeText(response, 400, "Request rejected");
           return;
         }
         const url = new URL(requestTarget, localOrigin || "http://127.0.0.1");
@@ -717,7 +354,18 @@ export class LocalOperatorHttp {
             .slice(1)
             .some((part) => part && decodeSegment(part) === undefined)
         ) {
-          writeHtml(response, 404, "<main><h1>Not found</h1></main>");
+          writeText(response, 404, "Not found");
+          return;
+        }
+        // Retired and unknown paths are rejected before looking up or creating a session.
+        if (
+          (!this.web.owns(url.pathname) && url.pathname !== "/favicon.svg") ||
+          (url.pathname === "/login" &&
+            request.method !== "GET" &&
+            request.method !== "HEAD")
+        ) {
+          request.resume();
+          writeText(response, 404, "Not found");
           return;
         }
         // Bearer requests never read or upgrade a cookie session.
@@ -742,234 +390,16 @@ export class LocalOperatorHttp {
         session = id ? this.auth.getSession(id) : undefined;
         this.purgeExpiredReviewOwners();
 
-        if (this.web && (await this.handleWeb(request, response, url, session)))
-          return;
-
-        if (url.pathname === "/login" && request.method === "GET") {
-          if (session?.authenticated) {
-            response
-              .writeHead(303, {
-                ...RESPONSE_HEADERS,
-                location: "/",
-              })
-              .end();
-            return;
-          }
-          session ??= this.auth.createAnonymousSession();
-          writeHtml(
-            response,
-            200,
-            document(
-              loginContent(session),
-              session,
-              Boolean(this.web),
-              this.web?.bundle.stylesheets,
-            ),
-            {
-              "set-cookie": cookieHeader(session.id, this.secureCookie),
-            },
-          );
-          return;
-        }
-
-        if (url.pathname === "/login" && request.method === "POST") {
-          if (
-            !id ||
-            !session ||
-            session.authenticated ||
-            request.headers.origin !== this.auth.origin
-          ) {
-            request.resume();
-            writeHtml(response, 403, "<main><h1>Request denied</h1></main>");
-            return;
-          }
-          const fields = await readForm(request);
-          const csrfToken = fields.csrfToken ?? "";
-          delete fields.csrfToken;
-          if (!this.auth.validateCsrf(id, csrfToken)) {
-            writeHtml(response, 403, "<main><h1>Request denied</h1></main>");
-            return;
-          }
-          const authenticated = await this.auth.authenticate(
-            id,
-            fields.password ?? "",
-          );
-          if (!authenticated) {
-            writeHtml(
-              response,
-              401,
-              document(
-                loginContent(session, "Sign in failed"),
-                session,
-                Boolean(this.web),
-                this.web?.bundle.stylesheets,
-              ),
-            );
-            return;
-          }
-          response
-            .writeHead(303, {
-              ...RESPONSE_HEADERS,
-              location: "/",
-              "set-cookie": cookieHeader(authenticated.id, this.secureCookie),
-            })
-            .end();
-          return;
-        }
-
-        if (url.pathname === "/login") {
-          writeHtml(response, 404, "<main><h1>Not found</h1></main>");
-          return;
-        }
-
-        if (url.pathname === "/logout" && request.method === "POST") {
-          const authorized = await this.authorizeWrite(
-            request,
-            response,
-            session,
-          );
-          if (!authorized) return;
-          const fields = await readForm(request);
-          if (!this.auth.validateCsrf(authorized.id, fields.csrfToken ?? "")) {
-            writeHtml(response, 403, "<main><h1>Request denied</h1></main>");
-            return;
-          }
-          const ownerKey = this.auth.logout(authorized.id);
-          if (ownerKey) this.web?.api.purgeLocalReviewDrafts(ownerKey);
-          response
-            .writeHead(303, {
-              ...RESPONSE_HEADERS,
-              location: "/login",
-              "set-cookie": clearedCookie(this.secureCookie),
-            })
-            .end();
-          return;
-        }
-
-        if (url.pathname === "/logout") {
-          const authorized = await this.authorizeRead(
-            request,
-            response,
-            session,
-            url.pathname,
-          );
-          if (!authorized) return;
-          writeHtml(response, 405, "<main><h1>Method not allowed</h1></main>");
-          return;
-        }
-
-        if (request.method === "GET") {
-          const authorized = await this.authorizeRead(
-            request,
-            response,
-            session,
-            url.pathname,
-          );
-          if (!authorized || !this.requireCurrentSession(response, authorized))
-            return;
-          const parts =
-            url.pathname === "/" ? [] : url.pathname.slice(1).split("/");
-          const kind = parts[0] ?? "";
-          const slot = kind === "runtime" ? kind : undefined;
-          const slotRoute = slot
-            ? this.routes.matchSlot(slot, "GET", url.pathname)
-            : undefined;
-          if (slotRoute) {
-            const result = await slotRoute.handler({
-              params: slotRoute.params,
-              fields: cleanQuery(url.searchParams),
-              csrfToken: authorized.csrfToken,
-              webEnabled: Boolean(this.web),
-            });
-            this.writeRouteResult(response, result, authorized);
-            return;
-          }
-          const value = parts[1] ? decodeSegment(parts[1]) : undefined;
-          if (parts.length > 2 || (parts.length === 2 && value === undefined)) {
-            writeHtml(response, 404, "<main><h1>Not found</h1></main>");
-            return;
-          }
-          let html: string | undefined;
-          if (kind === "profile" && value)
-            html = this.ui.profile(value, authorized.csrfToken);
-          else if (kind === "runtime" && parts.length === 1)
-            html = this.ui.runtime();
-          else if (url.pathname === "/")
-            html = this.ui.home(authorized.csrfToken);
-          if (html !== undefined) {
-            writeHtml(
-              response,
-              200,
-              document(
-                html,
-                authorized,
-                Boolean(this.web),
-                this.web?.bundle.stylesheets,
-              ),
-            );
-            return;
-          }
-          writeHtml(response, 404, "<main><h1>Not found</h1></main>");
-          return;
-        }
-
-        if (request.method !== "POST") {
-          writeHtml(response, 404, "<main><h1>Not found</h1></main>");
-          return;
-        }
-        const authorized = await this.authorizeWrite(
-          request,
-          response,
-          session,
-        );
-        if (!authorized) return;
-        const fields = await readForm(request);
-        const csrfToken = fields.csrfToken ?? "";
-        delete fields.csrfToken;
-        if (!this.auth.validateCsrf(authorized.id, csrfToken)) {
-          writeHtml(response, 403, "<main><h1>Request denied</h1></main>");
-          return;
-        }
-        if (url.pathname === "/command") {
-          if (!COMMANDS.has(fields.type ?? "")) {
-            writeHtml(response, 400, "<main><h1>Command rejected</h1></main>");
-            return;
-          }
-          await this.ui.submit(fields);
-          if (!this.requireCurrentSession(response, authorized)) return;
-          response.writeHead(303, { ...RESPONSE_HEADERS, location: "/" }).end();
-          return;
-        }
-        const firstSegment = url.pathname.slice(1).split("/", 1)[0];
-        const slot = firstSegment === "runtime" ? firstSegment : undefined;
-        const extension =
-          slot && this.routes.matchSlot(slot, "POST", url.pathname);
-        if (!extension) {
-          writeHtml(response, 404, "<main><h1>Not found</h1></main>");
-          return;
-        }
-        const result = await extension.handler({
-          params: extension.params,
-          fields,
-          csrfToken: authorized.csrfToken,
-          webEnabled: Boolean(this.web),
-        });
-        this.writeRouteResult(response, result, authorized);
+        if (await this.handleWeb(request, response, url, session)) return;
+        request.resume();
+        writeText(response, 404, "Not found");
       } catch (error) {
         if (!response.headersSent) {
-          const status =
-            error instanceof OperatorHttpError
-              ? error.status
-              : error instanceof DomainConflictError
-                ? 409
-                : 400;
-          const body =
-            error instanceof SourceCredentialConflictError
-              ? `<main><h1>GitHub source credential unavailable</h1><p>${escapeHtml(sourceCredentialExplanation(error.reason))}</p><a href="/app/projects/${encodeURIComponent(error.projectId)}/settings?tab=github">Set or change source credential</a></main>`
-              : error instanceof DomainConflictError
-                ? "<main><h1>Change conflict</h1><p>Saved state or a prior command conflicts with this request. Reload the page and review before retrying.</p></main>"
-                : "<main><h1>Request rejected</h1></main>";
-          writeHtml(response, status, body);
+          writeText(
+            response,
+            error instanceof OperatorHttpError ? error.status : 400,
+            "Request rejected",
+          );
         } else if (!response.writableEnded) response.end();
       }
     });
@@ -1027,48 +457,9 @@ export class LocalOperatorHttp {
   }
   private purgeExpiredReviewOwners(): void {
     const owners = this.auth.takeInvalidatedReviewOwnerKeys();
-    if (!this.web) return;
     for (const ownerKey of owners)
       this.web.api.purgeLocalReviewDrafts(ownerKey);
   }
-  private requireCurrentSession(
-    response: ServerResponse,
-    session: OperatorSession,
-  ): boolean {
-    if (this.currentSession(session)) return true;
-    writeHtml(response, 401, "<main><h1>Sign in required</h1></main>");
-    return false;
-  }
-  private writeRouteResult(
-    response: ServerResponse,
-    result: OperatorRouteResult,
-    session: OperatorSession,
-  ): void {
-    if (!this.requireCurrentSession(response, session)) return;
-    if (result.kind === "redirect") {
-      if (!isSafeRedirect(result.location)) throw new Error();
-      response
-        .writeHead(303, {
-          ...RESPONSE_HEADERS,
-          location: result.location,
-        })
-        .end();
-    } else if (result.kind === "html" && result.body.length <= 1_000_000) {
-      writeHtml(
-        response,
-        200,
-        document(
-          result.body,
-          session,
-          Boolean(this.web),
-          this.web?.bundle.stylesheets,
-        ),
-      );
-    } else {
-      throw new Error();
-    }
-  }
-
   private async handleWeb(
     request: IncomingMessage,
     response: ServerResponse,
@@ -1076,7 +467,7 @@ export class LocalOperatorHttp {
     session: OperatorSession | undefined,
   ): Promise<boolean> {
     const web = this.web;
-    if (!web?.owns(url.pathname)) return false;
+    if (!web.owns(url.pathname)) return false;
     const path = url.pathname,
       method = request.method;
     const headers = API_HEADERS;
@@ -1487,54 +878,5 @@ export class LocalOperatorHttp {
       const failure = apiFailure(error, method);
       writeJson(response, failure.status, failure.body);
     }
-  }
-
-  private async authorizeRead(
-    request: IncomingMessage,
-    response: ServerResponse,
-    session: OperatorSession | undefined,
-    pathname: string,
-  ): Promise<OperatorSession | undefined> {
-    if (session?.authenticated) return session;
-    request.resume();
-    // Only sign-in surfaces mint a session: a browser's own /favicon.ico or any unknown path
-    // must not replace the cookie the page just obtained from /api/operator/session.
-    if (!LEGACY_PAGE.test(pathname)) {
-      writeHtml(response, 404, "<main><h1>Not found</h1></main>");
-      return undefined;
-    }
-    const preLogin = session ?? this.auth.createAnonymousSession();
-    writeHtml(
-      response,
-      200,
-      document(
-        loginContent(preLogin),
-        preLogin,
-        Boolean(this.web),
-        this.web?.bundle.stylesheets,
-      ),
-      {
-        "set-cookie": cookieHeader(preLogin.id, this.secureCookie),
-      },
-    );
-    return undefined;
-  }
-
-  private async authorizeWrite(
-    request: IncomingMessage,
-    response: ServerResponse,
-    session: OperatorSession | undefined,
-  ): Promise<OperatorSession | undefined> {
-    if (!session?.authenticated) {
-      request.resume();
-      writeHtml(response, 401, "<main><h1>Sign in required</h1></main>");
-      return undefined;
-    }
-    if (request.headers.origin !== this.auth.origin) {
-      request.resume();
-      writeHtml(response, 403, "<main><h1>Request denied</h1></main>");
-      return undefined;
-    }
-    return session;
   }
 }

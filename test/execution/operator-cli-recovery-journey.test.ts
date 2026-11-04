@@ -160,12 +160,12 @@ test("concurrent, stale and read-only submissions apply at most once", async (t)
   assert.equal(r.code, 3);
   assert.equal(databaseDigest(w.s.f), before);
 
-  // A document prepared before the retained session form acted is refused.
-  const { key: _key, ...inner } = w.g.adoption();
-  const form = await w.s.sessionForm("/runtime/control/no-turn/adopt", {
-    payload: JSON.stringify({ ...inner, key: randomUUID() }),
+  // A document prepared before a separate JSON command acted is refused.
+  await w.s.sessionPost("/api/operator/commands", {
+    type: "recovery.no-turn.adopt",
+    assignmentId: w.g.assignmentId,
+    ...w.g.adoption(),
   });
-  assert.equal(form.status, 303);
   const witness = w.g.witnessId();
   r = await submit(w, adopt);
   assert.equal(r.code, 4);

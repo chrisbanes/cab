@@ -6,16 +6,16 @@ const test = browserSuite("private-access");
 import { chromium, type Browser } from "playwright";
 import { postWithoutFollowingRedirects } from "./private-access-qualification/private-access-requests.js";
 
-test("private proof observes the capacity redirect without following it", async (_t, journey) => {
+test("private proof transport observes a redirect without following it", async (_t, journey) => {
   let capacityPosts = 0;
   let runtimeReads = 0;
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/capacity") {
       capacityPosts += 1;
-      response.writeHead(303, { location: "/runtime" }).end();
+      response.writeHead(303, { location: "/destination" }).end();
       return;
     }
-    if (request.method === "GET" && request.url === "/runtime") {
+    if (request.method === "GET" && request.url === "/destination") {
       runtimeReads += 1;
       response.writeHead(200).end("runtime");
       return;
@@ -60,7 +60,7 @@ test("private proof observes the capacity redirect without following it", async 
   );
 
   assert.equal(response.status(), 303);
-  assert.equal(response.headers().location, "/runtime");
+  assert.equal(response.headers().location, "/destination");
   assert.equal(capacityPosts, 1);
   assert.equal(runtimeReads, 0);
 });

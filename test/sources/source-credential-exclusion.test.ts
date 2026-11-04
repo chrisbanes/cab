@@ -17,7 +17,6 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import type {
   GitHubSourceReader,
   SelectionSnapshot,
@@ -122,13 +121,6 @@ async function fixture(t: TestContext) {
       readiness,
     });
   const api = new OperatorApi(service);
-  const ui = new LocalOperatorUi(
-    service.domain(),
-    (ref) => service.gitHubSourceReader(ref),
-    service.githubSources(),
-    () => service.refreshGitHub(),
-    (id) => service.gitHubSourceCredentialStatus(id),
-  );
   return {
     gh,
     root,
@@ -136,7 +128,6 @@ async function fixture(t: TestContext) {
     execute,
     configure,
     api,
-    ui,
     projectId,
     contexts,
     spawns,

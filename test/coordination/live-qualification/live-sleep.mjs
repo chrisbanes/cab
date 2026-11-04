@@ -804,38 +804,21 @@ function parseEventTimestamp(cursor) {
   return match ? Number(match[1]) : undefined;
 }
 
-function operatorRoutes(currentService, routeTypes) {
-  const routes = new routeTypes.OperatorRouteRegistry();
-  routes.registerSlot(
-    "runtime",
-    routeTypes.runtimeOperatorRoutes(currentService),
-  );
-  return routes;
-}
-
 // The live harness and its offline regression use the same production listener.
 export async function createSleepOperatorHttp(service, auth, dataDir) {
-  const [operatorTypes, routeTypes, runtimeTypes, webTypes, apiTypes] =
-    await Promise.all([
-      import("../../../dist/src/standalone/operator.js"),
-      import("../../../dist/src/standalone/operator-routes.js"),
-      import("../../../dist/src/standalone/operator-runtime.js"),
-      import("../../../dist/src/standalone/operator-web.js"),
-      import("../../../dist/src/standalone/operator-api.js"),
-    ]);
-  return new operatorTypes.LocalOperatorHttp(
-    new operatorTypes.LocalOperatorUi(service.domain()),
-    auth,
-    {
-      routes: operatorRoutes(service, { ...routeTypes, ...runtimeTypes }),
-      web: new webTypes.OperatorWebBoundary(
-        await webTypes.OperatorWebBundle.open(
-          fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
-        ),
-        new apiTypes.OperatorApi(service, [dirname(dataDir)]),
+  const [operatorTypes, webTypes, apiTypes] = await Promise.all([
+    import("../../../dist/src/standalone/operator.js"),
+    import("../../../dist/src/standalone/operator-web.js"),
+    import("../../../dist/src/standalone/operator-api.js"),
+  ]);
+  return new operatorTypes.LocalOperatorHttp(auth, {
+    web: new webTypes.OperatorWebBoundary(
+      await webTypes.OperatorWebBundle.open(
+        fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
       ),
-    },
-  );
+      new apiTypes.OperatorApi(service, [dirname(dataDir)]),
+    ),
+  });
 }
 
 export async function readSleepExecution(request, origin, taskId) {
@@ -1305,17 +1288,18 @@ async function runLiveJourney(approval) {
     page = await context.newPage();
     page.setDefaultTimeout(20_000);
     page.setDefaultNavigationTimeout(20_000);
-    await page.goto(`${origin}/`);
+    await page.goto(`${origin}/app`);
     assert.match(await page.locator("body").innerText(), /Sign in/);
-    await page.locator('input[name="password"]').fill(password);
+    await page.getByLabel("Password", { exact: true }).fill(password);
     const loginResponse = page.waitForResponse(
       (response) =>
-        new URL(response.url()).pathname === "/login" &&
+        new URL(response.url()).pathname === "/api/operator/login" &&
         response.request().method() === "POST",
     );
     await page.getByRole("button", { name: "Sign in" }).click();
     const login = await loginResponse;
-    assert.equal(login.status(), 303);
+    assert.equal(login.status(), 200);
+    await page.locator("main.page h1").waitFor();
     evidence.operator.authenticated = true;
     // The operator task read (the view behind GET /api/operator/tasks/:id).
     assert.ok(

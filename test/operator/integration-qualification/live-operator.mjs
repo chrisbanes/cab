@@ -1,3 +1,4 @@
+import { signOutOperator } from "../../fixtures/operator-session.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -11,14 +12,9 @@ import {
   CodexRuntime,
   StandaloneService,
 } from "../../../dist/src/standalone/index.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
@@ -169,12 +165,6 @@ class ObservedCodexRuntime extends CodexRuntime {
   }
 }
 
-function operatorRoutes(currentService) {
-  const routes = new OperatorRouteRegistry();
-  routes.registerSlot("runtime", runtimeOperatorRoutes(currentService));
-  return routes;
-}
-
 async function unusedPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -194,8 +184,7 @@ async function unusedPort() {
 
 async function startOperator(port, origin) {
   auth = await OperatorAuth.open({ authFile, origin });
-  http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
-    routes: operatorRoutes(service),
+  http = new LocalOperatorHttp(auth, {
     // The React task workspace and its JSON API: the Execution tab and header Stop.
     web: new OperatorWebBoundary(
       await OperatorWebBundle.open(
@@ -209,16 +198,16 @@ async function startOperator(port, origin) {
 
 async function signIn() {
   assert.match(await page.locator("body").innerText(), /Sign in/);
-  await page.locator('input[name="password"]').fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   const response = page.waitForResponse(
     (candidate) =>
-      new URL(candidate.url()).pathname === "/login" &&
+      new URL(candidate.url()).pathname === "/api/operator/login" &&
       candidate.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Sign in" }).click();
   const login = await response;
-  assert.equal(login.status(), 303);
-  assert.equal(login.headers().location, "/");
+  assert.equal(login.status(), 200);
+  await page.locator("main.page h1").waitFor();
 }
 
 async function run() {
@@ -455,7 +444,7 @@ async function run() {
   await startOperator(port, origin);
 
   progress("restart-invalidates-session-and-retains-history-holds");
-  await page.goto(`${origin}/runtime`);
+  await page.goto(`${origin}/app/settings/runtime`);
   const afterRestartLogin = await page.locator("body").innerText();
   assert.match(afterRestartLogin, /Sign in/);
   evidence.operator.restartInvalidatedSession = true;
@@ -485,14 +474,8 @@ async function run() {
   assert.equal(runtime.callbacks.length, 0);
 
   progress("browser-logout");
-  await page.goto(`${origin}/`);
-  const logoutResponse = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === "/logout" &&
-      candidate.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Log out" }).click();
-  assert.equal((await logoutResponse).status(), 303);
+  await page.goto(`${origin}/app`);
+  await signOutOperator(page, origin);
 }
 
 try {

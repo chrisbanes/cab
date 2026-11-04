@@ -95,12 +95,6 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
   await page
     .getByRole("complementary", { name: "Effect of revocation" })
     .waitFor();
-  assert.equal(
-    await page
-      .getByRole("link", { name: "Open advanced profile editor" })
-      .getAttribute("href"),
-    `/profile/${reviewer}`,
-  );
   const read = await page.request.get(
     `${web.origin}/api/operator/profiles/${reviewer}/configuration`,
   );

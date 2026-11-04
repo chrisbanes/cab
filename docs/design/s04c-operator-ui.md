@@ -1,15 +1,13 @@
 # S04c authenticated operator foundation
 
-This document covers the operator login, session and request boundary and the
-shared server-rendered shell with the project/profile/routing/local-task forms.
-The runtime and coordination pages registered on the same listener are described
-in [`s04d-operator-integration.md`](s04d-operator-integration.md); the React
-operator served at `/app` is described in [`ui02-foundation.md`](ui02-foundation.md).
-This is the authentication and request contract, not the complete first-release
-operator UI in [`SPEC.md`](../SPEC.md) or [`acceptance.md`](../acceptance.md).
-Task forms configure readiness and project pause, while the scheduler continues to
-enforce those settings; configuration eligibility does not prove runtime
-admission or execution.
+This document covers the operator login, session and request boundary. The React
+operator is served at `/app` with a public shell at `/login` and same-origin JSON
+APIs. The validated web bundle is mandatory: operator startup checks it before
+service construction/start and reports `operator web UI not built; run npm run build:web`
+on missing or invalid input. Other service commands are unchanged. There is no
+server-rendered fallback. This is the authentication contract, not release or
+private-access acceptance; see [`SPEC.md`](../SPEC.md),
+[`acceptance.md`](../acceptance.md) and [`ui02-foundation.md`](ui02-foundation.md).
 
 ## Login and session lifecycle
 
@@ -36,59 +34,42 @@ the configured origin. It does not trust `X-Forwarded-Host`, `X-Forwarded-Proto`
 or other forwarded headers. Remote TLS termination and private routing are
 provided by a separately managed transport such as a narrowly configured
 Tailscale Serve route; this UI neither configures nor exposes a public listener.
-The `Origin` on every POST, including login, must exactly equal the configured
-origin. `/login` also requires the pre-login session's CSRF token. Every other
-POST requires an authenticated session, the exact origin and that session's CSRF
-token. Forms use URL-encoded bodies only; body, field count, key and value sizes
-are bounded, duplicate fields are rejected, and malformed or unexpected input
-gets a generic response.
+Session-authenticated API POSTs, including `/api/operator/login`, require the exact
+configured Origin and that session's CSRF token. Login uses the pre-login session;
+other writes require authentication. JSON bodies and command-specific envelopes
+are bounded and runtime validated. Bearer access retains its explicit route and
+scope policy; it neither reads nor upgrades cookie sessions.
 
-All responses use `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
-frame/CSP restrictions, and `Referrer-Policy: same-origin`. The latter is
-intentional: the Chromium native-form regression confirmed that
-`no-referrer` makes Chromium submit same-origin POSTs with `Origin: null`, which
-the exact-origin policy must reject. `same-origin` retains the browser's exact
-Origin on native forms while suppressing referrers for cross-origin requests;
-the implementation does not relax or special-case Origin validation.
-
-The host-only session cookie is `HttpOnly`, `SameSite=Strict`, and `Secure` when
-the configured origin is HTTPS. Anonymous protected GETs render only the common
-pre-login shell at the requested URL and set an anonymous session cookie. This
-avoids a redirect-derived opaque origin on the subsequent native login POST.
-After successful login the browser is redirected to `/`; no return path from
-untrusted input is retained. Failed login and request errors contain no
-exception, password, credential reference, session ID or submitted value, and
-the adapter does not log request or form data.
+Responses use `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, frame/CSP
+restrictions and `Referrer-Policy: same-origin`. The host-only session cookie is
+`HttpOnly`, `SameSite=Strict` and `Secure` with HTTPS. The public shell loads no
+private data. `/api/operator/session` creates the pre-login session; shell GETs and
+unknown/retired paths do not mint cookies. Login rotates both ID and CSRF token;
+logout and expiry purge private state. Failures disclose no exception, password,
+credential reference or submitted value, and the adapter logs no request data.
 
 ## Routes and command ownership
 
-Every built-in private view, `/command`, and registered extension route uses the
-same HTTP guard. Extension routes are registered before the server starts and
-cannot replace reserved login, command, project, task, profile, assignment,
-runtime or coordination paths. Route handlers receive only decoded path
-parameters, bounded form/query fields, and the CSRF token. They do not receive a
-raw HTTP request/response object. Results are typed HTML or a same-origin local
-redirect and receive the shared response headers and shell.
+`/`, `/runtime`, `/profile/:id`, legacy POST `/login` and `/logout`, `/command`,
+capacity forms and all recovery form POSTs return ordinary not-found without
+redirects or session creation. The app remains at `/app`; moving it is separate
+scope. No route registry, server HTML wrapper or form allowlist remains. Shared URL
+decoding still rejects separators, dot segments and control characters.
 
-The HTTP `/command` allowlist is deliberately limited to
-`project.create/configure`, `profile.create/configure`, `routing.configure`, and
-`task.create/configure`. Assignment, dependency, imported-blocker, execution and
-recovery controls are not `/command` commands; runtime and coordination controls
-use their own guarded extension routes. The underlying domain service retains its
-own command contract; this allowlist is the boundary for the operator web
-surface, not a duplicate domain or command implementation.
-
-The built-in views support project/profile setup, routing configuration, and
-local-task create/edit/read. Credential references are never rendered back.
+React settings and task views submit the existing domain and coordination commands
+through `/api/operator/commands`; CLI recovery remains supported. Original keys and
+payloads recorded through retired forms still replay their immutable receipts
+through JSON with no additional effect. Bound-turn Recovery retains review,
+confirmation, cancellation, original-receipt GET readback and independent holds;
+archived projects permit evidence/receipt GETs while disabling new sends/retries.
 
 ## Verification boundary
 
 Service/auth and route tests use the real SQLite domain store and an ephemeral
-loopback listener. Chromium exercises the protected-URL pre-login form, exact
-Origin, CSRF rejection, cookie attributes, session rotation/logout/restart/
-expiry, and the project/profile/routing/task create/edit/read forms. Chromium is
-a test-only development dependency; CI installs its pinned engine before the
-repository check.
+loopback listener. Chromium and the applicable WebKit journeys exercise shell/API sign-in, exact
+Origin, CSRF, cookie attributes, rotation/logout/restart/expiry and React controls.
+Browser engines are test-only dependencies. Full discovery excludes stale compiled
+tests and runs each remaining source test exactly once.
 
 Automated loopback tests do not prove private remote access. A separate bounded
 Serve proof must record the installed Tailscale version, exact disposable node

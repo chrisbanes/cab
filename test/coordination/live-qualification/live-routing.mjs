@@ -1,3 +1,13 @@
+import { fileURLToPath } from "node:url";
+import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
+import {
+  OperatorWebBoundary,
+  OperatorWebBundle,
+} from "../../../dist/src/standalone/operator-web.js";
+import {
+  sessionCommand,
+  signOutOperator,
+} from "../../fixtures/operator-session.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -17,13 +27,8 @@ import {
   CodexRuntime,
   StandaloneService,
 } from "../../../dist/src/standalone/index.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import { TypeSafeRoutingChoiceClient } from "../../../dist/src/standalone/routing.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 import {
@@ -208,16 +213,15 @@ async function unusedPort() {
   return port;
 }
 
-function operatorRoutes(currentService) {
-  const routes = new OperatorRouteRegistry();
-  routes.registerSlot("runtime", runtimeOperatorRoutes(currentService));
-  return routes;
-}
-
 async function startOperator(port) {
   auth = await OperatorAuth.open({ authFile, origin });
-  http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
-    routes: operatorRoutes(service),
+  http = new LocalOperatorHttp(auth, {
+    web: new OperatorWebBoundary(
+      await OperatorWebBundle.open(
+        fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
+      ),
+      new OperatorApi(service, [root]),
+    ),
   });
   await http.start(port);
 }
@@ -225,51 +229,40 @@ async function startOperator(port) {
 async function signIn() {
   await page.goto(`${origin}/login`);
   assert.match(await page.locator("body").innerText(), /Sign in/);
-  await page.locator('input[name="password"]').fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   const response = page.waitForResponse(
     (candidate) =>
-      new URL(candidate.url()).pathname === "/login" &&
+      new URL(candidate.url()).pathname === "/api/operator/login" &&
       candidate.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Sign in" }).click();
   const login = await response;
-  assert.equal(login.status(), 303);
-  assert.equal(login.headers().location, "/");
+  assert.equal(login.status(), 200);
+  await page.locator("main.page h1").waitFor();
   evidence.operator.authenticated = true;
 }
 
-async function submitCommand(form) {
-  const response = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === "/command" &&
-      candidate.request().method() === "POST",
-  );
-  await form.locator('button[type="submit"]').click();
-  const result = await response;
-  assert.equal(result.status(), 303);
-  await page.waitForURL(`${origin}/`);
-}
-
 async function createProfile(name, instructions, capabilities) {
-  await page.goto(`${origin}/`);
-  const form = page.locator('form[data-command="profile.create"]');
-  const profileId = await form.locator('input[name="profileId"]').inputValue();
-  await form.locator('input[name="name"]').fill(name);
-  await form.locator('textarea[name="instructions"]').fill(instructions);
-  await form.locator('textarea[name="capabilities"]').fill(capabilities);
-  await submitCommand(form);
+  const profileId = randomUUID();
+  await sessionCommand(page, origin, {
+    type: "profile.create",
+    key: randomUUID(),
+    profileId,
+    name,
+    instructions,
+    capabilities,
+  });
   return profileId;
 }
-
 async function createProject(name, leadProfileId) {
-  await page.goto(`${origin}/`);
-  const form = page.locator('form[data-command="project.create"]');
-  const projectId = await form.locator('input[name="projectId"]').inputValue();
-  await form.locator('input[name="name"]').fill(name);
-  await form
-    .locator('select[name="leadProfileId"]')
-    .selectOption(leadProfileId);
-  await submitCommand(form);
+  const projectId = randomUUID();
+  await sessionCommand(page, origin, {
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name,
+    leadProfileId,
+  });
   return projectId;
 }
 
@@ -1013,14 +1006,8 @@ async function run() {
   if (evidence.failure) process.exitCode = 1;
 
   progress("operator-logout");
-  await page.goto(`${origin}/`);
-  const logoutResponse = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === "/logout" &&
-      candidate.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Log out" }).click();
-  assert.equal((await logoutResponse).status(), 303);
+  await page.goto(`${origin}/app`);
+  await signOutOperator(page, origin);
 }
 
 try {

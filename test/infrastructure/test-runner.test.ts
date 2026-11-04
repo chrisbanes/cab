@@ -237,16 +237,22 @@ test("test discovery includes nested suites once and ignores stale compiled test
   try {
     for (const file of [
       "test/coordination/task.test.ts",
+      "test/coordination/operator-project-instructions.test.ts",
       "test/execution/runtime.test.ts",
       "test/execution/fixtures/helper.ts",
       "dist/test/coordination/task.test.js",
+      "dist/test/coordination/operator-project-instructions.test.js",
+      "dist/test/operator/operator-browser.test.js",
       "dist/test/execution/runtime.test.js",
       "dist/test/old-milestone.test.js",
     ]) {
       await mkdir(join(directory, file, ".."), { recursive: true });
       await writeFile(join(directory, file), "");
     }
-    assert.deepEqual(runner.discoverTestFiles(directory), [
+    const discovered = runner.discoverTestFiles(directory);
+    assert.equal(new Set(discovered).size, discovered.length);
+    assert.deepEqual(discovered, [
+      "dist/test/coordination/operator-project-instructions.test.js",
       "dist/test/coordination/task.test.js",
       "dist/test/execution/runtime.test.js",
     ]);

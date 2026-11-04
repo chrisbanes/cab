@@ -220,8 +220,7 @@ CI context remains a merge gate even when local checks pass.
 Bound-turn recovery requires offline coverage of both runtime identities, exact
 work revision/request/thread/turn/process binding, live/unknown/conflicting proof
 refusals, pending effects/callbacks, keyed replay and independent hold preservation.
-Both SPA assignment recovery (reachable from task detail and Runtime settings) and
-retained runtime controls must qualify review/cancel/confirm, frozen unknown outcome,
+SPA assignment recovery (reachable from task detail and Runtime settings) must qualify review/cancel/confirm, frozen unknown outcome,
 original operation readback before retry, keyboard focus, and 1366px/390px layouts.
 Reconciliation is irreversible, releases only the verified execution, and dispatches
 nothing. Planned shutdown instead trusts its exact acknowledged failed terminal

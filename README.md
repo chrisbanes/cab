@@ -75,8 +75,8 @@ owns delivery scope and status.
   questions, approvals, lead-gated completion and assignment routing.
 - **Operator UI.** An authenticated React interface at `/app` with an attention
   overview, cross-project and per-project List and Board views, a local task
-  composer, the Inbox, retained search and Settings. The original HTML forms remain
-  reachable at `/`.
+  composer, the Inbox, retained search and Settings. The operator listener requires
+  the built web bundle; legacy HTML pages/forms and `/` return not-found.
 - **Draft with lead.** In the task composer, a rough idea goes to the project lead,
   who reads the project's linked repositories in a throwaway copy with network off
   and proposes a title and outcome. Empty fields are filled; typed text keeps its
