@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DeliveryStore } from "../../src/core/delivery.js";
@@ -7,9 +10,10 @@ import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 import { scriptedStackDeliveryProvider } from "../fixtures/delivery-integration.js";
+import { stackedDeliveryFixture } from "../fixtures/stacked-delivery.js";
 
-function fixture() {
-  const db = new DatabaseSync(":memory:");
+function fixture(databasePath = ":memory:") {
+  const db = new DatabaseSync(databasePath);
   new Store(db).ensureHost("test");
   const domain = new DomainStore(db);
   domain.migrate();
@@ -1046,6 +1050,389 @@ test("GitLab stacked dependents retain plain chained MR creation and offline bas
     assert.equal(created.stackLink, undefined);
     assert.equal(selected, 1);
     assert.equal(creates, 1);
+  } finally {
+    await coordinator.stop();
+    f.db.close();
+  }
+});
+
+for (const phase of ["prepared", "retry-due"] as const) {
+  for (const stale of [
+    "policy",
+    "assignment",
+    "branch",
+    "pr",
+    "absent",
+    "unread",
+  ] as const) {
+    test(`${phase} stacked create with stale ${stale} survives SQLite reopen and does not abort refresh`, async () => {
+      const directory = mkdtempSync(join(tmpdir(), "cab-stack-preparation-"));
+      const path = join(directory, "store.sqlite");
+      const f = fixture(path);
+      const identity = {
+        blockerTaskId: randomUUID(),
+        repositoryId: "R1",
+        blockerBranch: "cab/blocker",
+        blockerPrNodeId: "P1",
+        blockerPrNumber: 1,
+        blockerHeadSha: "b".repeat(40),
+      };
+      f.store.prepareAction(f.request, f.caller, false);
+      f.store.prepareStackCreate(f.request.operationId, identity, () => {});
+      if (phase === "retry-due") {
+        f.store.beginAttempt(f.request.operationId, {});
+        f.store.recordObservation(f.request.operationId, {
+          state: "confirmed-failure",
+          reason: "provider-http-429",
+          receipt: null,
+          retryable: true,
+          resumeAt: 1,
+        });
+      }
+      if (stale === "policy")
+        f.domain.execute({
+          type: "delivery.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId: f.caller.projectId,
+          expectedVersion: 2,
+          mode: "reviewable-pr",
+          credentialRef: null,
+          grants: [{ action: "pr.create", repositoryId: "R1", mode: "allow" }],
+          requiredChecks: [],
+        });
+      const otherId = randomUUID();
+      f.domain.execute({
+        type: "task.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: f.caller.projectId,
+        taskId: otherId,
+        title: "Unrelated",
+        outcome: "O",
+      });
+      const branch = f.store.assignTaskBranchWithinTransaction(otherId, "R1");
+      f.db
+        .prepare(
+          "UPDATE delivery_task_branches SET lastPushedSha=? WHERE taskId=?",
+        )
+        .run(f.headSha, otherId);
+      const other = {
+        ...f.request,
+        operationId: randomUUID(),
+        action: {
+          ...f.request.action,
+          target: {
+            ...f.request.action.target,
+            headRef: branch.branch,
+            baseRef: "main",
+          },
+        },
+      };
+      f.store.prepareAction(other, { ...f.caller, taskId: otherId }, false);
+      f.db.close();
+      const db = new DatabaseSync(path),
+        store = new DeliveryStore(db);
+      const sends: string[] = [],
+        selections: string[] = [];
+      const coordinator = new DeliveryCoordinator(store, {
+        approved: () => false,
+        authorize: (caller) => {
+          if (caller.taskId === f.caller.taskId && stale === "assignment")
+            throw Error("Assignment expired");
+        },
+        stackedPrBase: (taskId) => {
+          if (taskId !== f.caller.taskId || stale === "absent") return null;
+          if (stale === "unread") throw Error("Current blocker unavailable");
+          return {
+            blockerTaskId: identity.blockerTaskId,
+            repositoryId: "R1",
+            branch: stale === "branch" ? "cab/moved" : identity.blockerBranch,
+            blockerPrNodeId: stale === "pr" ? "P99" : identity.blockerPrNodeId,
+            blockerPrNumber: identity.blockerPrNumber,
+            blockerHeadSha: identity.blockerHeadSha,
+          };
+        },
+        providerFactories: {
+          github: () => {
+            selections.push("selected");
+            return {
+              async preflight() {
+                return {};
+              },
+              async performAction(record) {
+                sends.push(record.operationId);
+                return {
+                  state: "confirmed-success" as const,
+                  reason: null,
+                  receipt: { nodeId: "Other", number: 8, headSha: f.headSha },
+                };
+              },
+              async inspectAction() {
+                throw Error(
+                  "No recovery read expected for a proved unsent failure",
+                );
+              },
+              async inspectPr() {
+                throw Error("No binding expected");
+              },
+            };
+          },
+        },
+      });
+      try {
+        await coordinator.refresh();
+        const held = store.action(f.request.operationId);
+        assert.equal(held.state, "confirmed-failure");
+        assert.equal(
+          held.observation?.reason,
+          "delivery-authority-stale-or-held",
+        );
+        assert.equal(held.observation?.receipt, null);
+        assert.equal(held.attempts, phase === "prepared" ? 0 : 1);
+        assert.deepEqual(held.stackCreate, identity);
+        assert.equal(
+          store.action(other.operationId).state,
+          "confirmed-success",
+        );
+        assert.deepEqual(sends, [other.operationId]);
+        assert.equal(selections.length, 1);
+        await coordinator.refresh();
+        assert.deepEqual(
+          sends,
+          [other.operationId],
+          "settled stale intent never retries or starves other actions",
+        );
+      } finally {
+        await coordinator.stop();
+        db.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+for (const origin of ["authority-read", "journal-write"] as const) {
+  test(`stack preparation does not conceal a ${origin} database fault`, async () => {
+    const f = fixture();
+    const error = Object.assign(Error("SQLite unavailable"), {
+      code: "ERR_SQLITE_ERROR",
+    });
+    const identity = {
+      blockerTaskId: randomUUID(),
+      repositoryId: "R1",
+      branch: "cab/blocker",
+      blockerPrNodeId: "P1",
+      blockerPrNumber: 1,
+      blockerHeadSha: "b".repeat(40),
+    };
+    f.store.prepareAction(f.request, f.caller, false);
+    if (origin === "journal-write")
+      f.store.prepareStackCreate = () => {
+        throw error;
+      };
+    const coordinator = new DeliveryCoordinator(f.store, {
+      authorize: () => {},
+      approved: () => false,
+      stackedPrBase: () => {
+        if (origin === "authority-read") throw error;
+        return identity;
+      },
+      providerFactories: {
+        github: () => {
+          throw Error("No provider selection permitted");
+        },
+      },
+    });
+    try {
+      await assert.rejects(coordinator.refresh(), (caught) => caught === error);
+      assert.equal(f.store.action(f.request.operationId).state, "prepared");
+      assert.equal(f.store.action(f.request.operationId).attempts, 0);
+    } finally {
+      await coordinator.stop();
+      f.db.close();
+    }
+  });
+}
+
+test("a possibly sent retry retains unknown evidence and recovers its PR only by readback under stale authority", async () => {
+  const w = stackWorld();
+  try {
+    w.scripted.state.losePrResponse = true;
+    assert.equal((await w.submit()).state, "uncertain");
+    w.store.recordObservation(w.request.operationId, {
+      state: "confirmed-failure",
+      reason: "provider-effect-unproved",
+      receipt: null,
+      retryable: true,
+      ambiguous: true,
+      hostReason: "Retained uncertain evidence",
+    });
+    w.revoke();
+    const held = await w.restart();
+    assert.equal(held.state, "uncertain");
+    assert.equal(held.observation?.ambiguous, true);
+    assert.equal(held.observation?.hostReason, "Retained uncertain evidence");
+    assert.equal(w.scripted.state.prWrites, 1);
+    assert.equal(w.scripted.state.stackWrites, 0);
+    const readback = await w.restart();
+    assert.equal(readback.state, "uncertain");
+    assert.equal(readback.observation?.receipt?.nodeId, "P2");
+    assert.equal(w.scripted.state.prWrites, 1);
+    assert.equal(w.scripted.state.stackWrites, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test("assembled service startup settles a prepared stacked create whose assignment authority expired", async (t) => {
+  const f = await stackedDeliveryFixture(t);
+  const [blocker, dependent] = f.tasks as [string, string];
+  await f.waitTurn(blocker);
+  const parent = await f.commit(blocker, "parent-before-recovery");
+  await f.push(blocker, parent);
+  await f.showPr(blocker);
+  await f.service.refreshGitHub();
+  await f.waitTurn(dependent);
+  const head = await f.commit(dependent, "dependent-before-recovery");
+  await f.push(dependent, head);
+  const policy = f.service.delivery().configuration(f.projectId);
+  f.run({
+    type: "delivery.configure",
+    projectId: f.projectId,
+    expectedVersion: policy.version,
+    mode: policy.mode,
+    credentialRef: policy.credentialRef,
+    grants: [
+      ...policy.grants,
+      { action: "pr.create", repositoryId: "R1", mode: "allow" },
+    ],
+    requiredChecks: policy.requiredChecks,
+  });
+  const own = f.branchOf(dependent),
+    lower = f.branchOf(blocker);
+  assert.ok(own && lower);
+  const operationId = randomUUID();
+  const assignment = f.service
+    .domain()
+    .leadBindings()
+    .find((b) => b.taskId === dependent);
+  assert.ok(assignment);
+  const caller = {
+    projectId: f.projectId,
+    taskId: dependent,
+    taskVersion: Number(f.service.domain().task(dependent).version),
+    assignmentId: String(assignment.assignmentId),
+    assignmentVersion: 1,
+    workId: "expired-work-before-restart",
+    workRevision: 1,
+    conversationRevision: 1,
+  };
+  f.readDb((db) => {
+    const store = new DeliveryStore(db);
+    const prepared = store.prepareAction(
+      {
+        operationId,
+        action: {
+          kind: "pr.create",
+          target: {
+            repositoryId: "R1",
+            baseRef: lower.branch,
+            headRef: own.branch,
+            expectedHeadSha: head,
+          },
+          title: "Prepared before restart",
+          body: "",
+          draft: true,
+        },
+      },
+      caller,
+      false,
+    );
+    assert.equal(prepared.state, "prepared");
+    store.prepareStackCreate(
+      operationId,
+      {
+        blockerTaskId: blocker,
+        repositoryId: "R1",
+        blockerBranch: lower.branch,
+        blockerPrNodeId: `PR-${blocker}`,
+        blockerPrNumber: 1,
+        blockerHeadSha: parent,
+      },
+      () => {},
+    );
+  });
+  await f.restart();
+  const recovered = f.service.delivery().action(operationId);
+  assert.equal(recovered.state, "confirmed-failure");
+  assert.equal(
+    recovered.observation?.reason,
+    "delivery-authority-stale-or-held",
+  );
+  assert.equal(recovered.attempts, 0);
+  assert.equal(recovered.observation?.receipt, null);
+  assert.equal(recovered.stackCreate?.blockerPrNodeId, `PR-${blocker}`);
+});
+
+test("stale authority after link intent still permits readback without repeating either effect", async () => {
+  const w = stackWorld();
+  try {
+    w.scripted.state.afterStackWrite = () => {
+      w.scripted.state.failStackReads = true;
+    };
+    const attempted = await w.submit();
+    assert.equal(attempted.state, "uncertain");
+    assert.equal(attempted.stackLink?.phase, "link-attempting");
+    assert.equal(attempted.observation?.receipt?.nodeId, "P2");
+    w.revoke();
+    w.scripted.state.failStackReads = false;
+    const recovered = await w.restart();
+    assert.equal(recovered.state, "confirmed-success");
+    assert.equal(recovered.observation?.receipt?.nodeId, "P2");
+    assert.equal(w.scripted.state.prWrites, 1);
+    assert.equal(w.scripted.state.stackWrites, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+test("a journal failure replacing a validation rejection still propagates", async () => {
+  const f = fixture();
+  const storage = Object.assign(Error("Transaction unwind failed"), {
+    code: "ERR_SQLITE_ERROR",
+  });
+  f.store.prepareAction(f.request, f.caller, false);
+  f.store.prepareStackCreate = (_operationId, _identity, validate) => {
+    try {
+      validate();
+    } catch {
+      throw storage;
+    }
+    throw Error("Expected stale authority rejection");
+  };
+  const coordinator = new DeliveryCoordinator(f.store, {
+    approved: () => false,
+    authorize: () => {
+      throw Error("Assignment expired");
+    },
+    stackedPrBase: () => ({
+      blockerTaskId: randomUUID(),
+      repositoryId: "R1",
+      branch: "cab/blocker",
+      blockerPrNodeId: "P1",
+      blockerPrNumber: 1,
+      blockerHeadSha: "b".repeat(40),
+    }),
+    providerFactories: {
+      github: () => {
+        throw Error("No provider call permitted");
+      },
+    },
+  });
+  try {
+    await assert.rejects(coordinator.refresh(), (error) => error === storage);
+    assert.equal(f.store.action(f.request.operationId).state, "prepared");
   } finally {
     await coordinator.stop();
     f.db.close();

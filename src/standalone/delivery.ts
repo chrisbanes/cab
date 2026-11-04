@@ -460,50 +460,100 @@ export class DeliveryCoordinator {
       });
     const stackedPrBase = () =>
       this.options.stackedPrBase?.(caller.taskId, target) ?? null;
-    const createBase = action.kind === "pr.create" ? stackedPrBase() : null;
+    // Only provably unsent/rejected creates may enter preparation again. Recovery with
+    // a receipt or any possibly sent attempt belongs to reconcile's readback path.
     if (
       action.kind === "pr.create" &&
-      createBase &&
-      (createBase.repositoryId !== target ||
-        createBase.branch === null ||
-        action.target.baseRef !== createBase.branch)
+      (record.stackLink ||
+        record.observation?.receipt ||
+        this.store.mayHaveLanded(record.operationId))
     )
       return this.store.recordObservation(record.operationId, {
-        state: "confirmed-failure",
-        reason: "stacked-pr-base-must-match-blocker-branch",
-        receipt: null,
+        ...record.observation,
+        state: "uncertain",
+        reason: "provider-effect-unproved",
+        receipt: record.observation?.receipt ?? null,
       });
-    if (
-      action.kind === "pr.create" &&
-      createBase &&
-      this.codeHost(caller.projectId, target).codeHost === "github"
-    ) {
+    let validationRefused: { error: unknown } | undefined;
+    const validatePreparation = <T>(validate: () => T): T => {
+      try {
+        return validate();
+      } catch (error) {
+        // Storage faults remain errors, including faults raised by authority reads.
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          /^(?:ERR_SQLITE|SQLITE_)/.test(String(error.code))
+        )
+          throw error;
+        validationRefused = { error };
+        throw error;
+      }
+    };
+    let createBase: ReturnType<typeof stackedPrBase> = null;
+    try {
+      createBase =
+        action.kind === "pr.create" ? validatePreparation(stackedPrBase) : null;
+      if (record.stackCreate)
+        validatePreparation(() =>
+          this.validateStackAuthority(record, record.stackCreate!),
+        );
       if (
-        !createBase.branch ||
-        !createBase.blockerPrNodeId ||
-        !createBase.blockerPrNumber ||
-        !createBase.blockerHeadSha
+        action.kind === "pr.create" &&
+        createBase &&
+        (createBase.repositoryId !== target ||
+          createBase.branch === null ||
+          action.target.baseRef !== createBase.branch)
       )
         return this.store.recordObservation(record.operationId, {
           state: "confirmed-failure",
-          reason: "stacked-blocker-identity-unproved",
+          reason: "stacked-pr-base-must-match-blocker-branch",
           receipt: null,
         });
-      const identity: StackCreateIdentity = {
-        blockerTaskId: createBase.blockerTaskId,
-        repositoryId: createBase.repositoryId,
-        blockerBranch: createBase.branch,
-        blockerPrNodeId: createBase.blockerPrNodeId,
-        blockerPrNumber: createBase.blockerPrNumber,
-        blockerHeadSha: createBase.blockerHeadSha,
-      };
-      record = this.store.prepareStackCreate(
-        record.operationId,
-        identity,
-        () => {
-          this.validateStackAuthority(record, identity);
-        },
-      );
+      if (
+        action.kind === "pr.create" &&
+        createBase &&
+        this.codeHost(caller.projectId, target).codeHost === "github"
+      ) {
+        if (
+          !createBase.branch ||
+          !createBase.blockerPrNodeId ||
+          !createBase.blockerPrNumber ||
+          !createBase.blockerHeadSha
+        )
+          return this.store.recordObservation(record.operationId, {
+            state: "confirmed-failure",
+            reason: "stacked-blocker-identity-unproved",
+            receipt: null,
+          });
+        const identity: StackCreateIdentity = {
+          blockerTaskId: createBase.blockerTaskId,
+          repositoryId: createBase.repositoryId,
+          blockerBranch: createBase.branch,
+          blockerPrNodeId: createBase.blockerPrNodeId,
+          blockerPrNumber: createBase.blockerPrNumber,
+          blockerHeadSha: createBase.blockerHeadSha,
+        };
+        record = this.store.prepareStackCreate(
+          record.operationId,
+          identity,
+          () => {
+            validatePreparation(() =>
+              this.validateStackAuthority(record, identity),
+            );
+          },
+        );
+      }
+    } catch (error) {
+      // Catch only the side-effect-free authority callbacks above, never a failed
+      // journal read/write or an unexpected prepareStackCreate persistence error.
+      if (!validationRefused || error !== validationRefused.error) throw error;
+      return this.store.recordObservation(record.operationId, {
+        state: "confirmed-failure",
+        reason: "delivery-authority-stale-or-held",
+        receipt: null,
+      });
     }
     // Refused before any provider, preflight or Git transport runs for the target.
     // GitHub has a built-in provider; any other host or tracker needs an injected factory.
