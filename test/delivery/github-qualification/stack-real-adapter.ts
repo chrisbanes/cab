@@ -1,17 +1,18 @@
-import {
-  CodexRuntime,
-  type Runtime,
-  type RuntimeTurnSettings,
-  type RuntimeTurnPolicy,
-  type RuntimeToolDefinition,
-} from "../../../src/standalone/codex.js";
+import { auditPreparedStack } from "./stack-audit.js";
+import { bindStackRuntime } from "./stack-runtime.js";
+import { verifyPreparedStackResources } from "./stack-resource-preflight.js";
+import { CodexRuntime, type Runtime } from "../../../src/standalone/codex.js";
 import {
   StandaloneService,
   type RuntimeSpawnContext,
 } from "../../../src/standalone/service.js";
 import { OperatorApi } from "../../../src/standalone/operator-api.js";
 import { GitHubHttpDeliveryProvider } from "../../../src/standalone/github-delivery.js";
-import { operatorCommandSchema } from "../../../src/operator/contracts.js";
+import { unstackReceiptSchema } from "../../../src/operator/unstack-contracts.js";
+import {
+  operationReadSchema,
+  operatorCommandSchema,
+} from "../../../src/operator/contracts.js";
 import { type StackV2Authority, materialHash } from "./stack-authority.js";
 
 /** Real constructors are reached only after independently supplied v2 scope and host pins pass. */
@@ -21,165 +22,42 @@ export async function createRealStackAdapter(
   transport: typeof fetch = fetch,
 ) {
   await authority.open();
+  try {
+    await verifyPreparedStackResources(authority);
+  } catch (error) {
+    await authority.close();
+    throw error;
+  }
   const m = authority.manifest;
   let service: StandaloneService;
   let runtime: Runtime | undefined;
-  const scopeFor = (workspace: string) => {
-    const scopes = m.authority.runtime.filter((v) => v.workspace === workspace);
-    if (scopes.length !== 1) throw Error("v2-runtime-workspace");
-    return scopes[0]!;
-  };
-  const settingsFor = (workspace: string, settings?: RuntimeTurnSettings) => {
-    const scope = scopeFor(workspace);
-    if (materialHash(settings ?? null) !== scope.settingsSha256)
-      throw Error("v2-runtime-settings");
-    return scope;
-  };
-  class BoundRuntime extends CodexRuntime {
-    private readonly threadScopes = new Map<string, string>();
-    override async start() {
-      const material = {
-        executable: m.authority.host.runtimeExecutable,
-        version: m.authority.host.runtimeVersion,
-      };
-      await authority.reserve("runtime.start", material, "runtime:start");
-      authority.current();
-      await super.start();
-      authority.current();
-      const identity = this.processIdentity();
-      if (!identity) throw Error("v2-runtime-process-unproved");
-      await authority.confirm("runtime:start", materialHash(identity));
-    }
-    override async startThread(
-      workspace: string,
-      tools: readonly RuntimeToolDefinition[] = [],
-      settings?: RuntimeTurnSettings,
-    ) {
-      const scope = settingsFor(workspace, settings);
-      const key = `runtime:thread:${scope.assignmentId}`;
-      await authority.reserve(
-        "runtime.thread.start",
-        { ...scope, toolsSha256: materialHash(tools) },
-        key,
-      );
-      authority.current();
-      const threadId = await super.startThread(workspace, tools, settings);
-      authority.current();
-      if (!threadId || this.threadScopes.has(threadId))
-        throw Error("v2-thread-binding");
-      this.threadScopes.set(threadId, workspace);
-      await authority.confirm(key, threadId);
-      return threadId;
-    }
-    override async resumeThread(
-      threadId: string,
-      tools?: readonly RuntimeToolDefinition[],
-      settings?: RuntimeTurnSettings,
-      workspace?: string,
-    ) {
-      // A resume may only follow this run's own successful thread creation.
-      if (!workspace || this.threadScopes.get(threadId) !== workspace)
-        throw Error("v2-historical-thread-refused");
-      const scope = settingsFor(workspace, settings);
-      const key = `runtime:resume:${scope.assignmentId}`;
-      await authority.reserve(
-        "runtime.thread.resume",
-        { ...scope, threadId, toolsSha256: materialHash(tools ?? []) },
-        key,
-      );
-      authority.current();
-      await super.resumeThread(threadId, tools, settings, workspace);
-      authority.current();
-      await authority.confirm(key, threadId);
-    }
-    override async startTurn(
-      threadId: string,
-      workspace: string,
-      prompt: string,
-      settings?: RuntimeTurnSettings,
-      policy?: RuntimeTurnPolicy,
-    ) {
-      const scope = settingsFor(workspace, settings);
-      if (this.threadScopes.get(threadId) !== workspace)
-        throw Error("v2-turn-thread-binding");
-      const intents = service
-        .list()
-        .filter(
-          (v) =>
-            v.state === "submitting" &&
-            v.threadId === threadId &&
-            v.workspace === workspace &&
-            v.prompt === prompt,
-        );
-      if (intents.length !== 1) throw Error("v2-turn-intent-ambiguous");
-      const intent = intents[0]!;
-      const request = service.turnRequest(intent.workId);
-      if (
-        !request ||
-        request.taskId !== scope.taskId ||
-        request.assignmentId !== scope.assignmentId ||
-        request.projectId !== m.resource.projectId ||
-        request.workspace !== workspace ||
-        request.prompt !== prompt
-      )
-        throw Error("v2-turn-request-binding");
-      const material = {
-        taskId: scope.taskId,
-        assignmentId: scope.assignmentId,
-        workspace,
-        promptSha256: materialHash(prompt),
-        settingsSha256: materialHash(settings ?? null),
-        policySha256: materialHash(policy ?? null),
-        taskVersion: request.taskVersion,
-        assignmentVersion: request.assignmentVersion,
-        instructionsRevision: request.instructionsRevision,
-        profileRevision: request.profileRevision,
-      };
-      const key = `runtime:turn:${intent.workId}`;
-      await authority.reserve("runtime.turn", material, key);
-      authority.current();
-      const current = service
-        .list()
-        .filter(
-          (v) =>
-            v.workId === intent.workId &&
-            v.state === "submitting" &&
-            v.threadId === threadId &&
-            v.workspace === workspace &&
-            v.prompt === prompt,
-        );
-      if (
-        current.length !== 1 ||
-        materialHash(service.turnRequest(intent.workId)) !==
-          materialHash(request)
-      )
-        throw Error("v2-turn-intent-changed");
-      const turnId = await super.startTurn(
-        threadId,
-        workspace,
-        prompt,
-        settings,
-        policy,
-      );
-      authority.current();
-      if (!turnId) throw Error("v2-turn-result-unproved");
-      await authority.confirm(
-        key,
-        materialHash({ threadId, turnId, process: this.processIdentity() }),
-      );
-      return turnId;
-    }
-    override async stop() {
-      const process = this.processIdentity();
-      const key = "runtime:stop";
-      await authority.reserve("runtime.stop", { process }, key, true);
-      authority.current(true);
-      await super.stop();
-      authority.current(true);
-      // The service's supervisor and termination verifier remain responsible for exact exit proof.
-    }
-  }
-  const provider = () =>
+  const boundaryFor = (role: "script" | "service") =>
+    new Proxy(authority, {
+      get(target, property) {
+        if (property === "fixtureRole") return role;
+        if (property === "beforeCredential" || property === "beforeDispatch")
+          return async (
+            request: Parameters<StackV2Authority["beforeCredential"]>[0],
+          ) => {
+            const write = m.authority.writes.some(
+              (rule) =>
+                rule.request.url === request.url &&
+                rule.request.method === request.method,
+            );
+            if (
+              write &&
+              (role === "service"
+                ? request.method === "PUT"
+                : request.method !== "PUT")
+            )
+              throw Error("v2-provider-effect-owner");
+            return target[property](request);
+          };
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  const provider = (role: "script" | "service" = "service") =>
     new GitHubHttpDeliveryProvider(
       () => credential(m.credentialRef),
       transport,
@@ -188,17 +66,27 @@ export async function createRealStackAdapter(
       },
       undefined,
       "github.com",
-      authority,
+      boundaryFor(role),
     );
+  // Identity bootstrap uses the exact same HTTP/credential boundaries as later calls,
+  // and completes before constructing a service that can migrate or schedule work.
+  const fixtureProvider = provider("script");
+  try {
+    await fixtureProvider.readFixtureIdentity(m.resource.repositoryNodeId);
+  } catch (error) {
+    await authority.close();
+    throw error;
+  }
   service = new StandaloneService(
     m.authority.host.dataDirectory,
     (context: RuntimeSpawnContext, harness) => {
       authority.current();
       if (harness !== "codex" || runtime)
         throw Error("v2-runtime-factory-refused");
-      runtime = new BoundRuntime(
-        m.authority.host.runtimeExecutable.path,
-        context,
+      runtime = bindStackRuntime(
+        new CodexRuntime(m.authority.host.runtimeExecutable.path, context),
+        authority,
+        () => service,
       );
       return runtime;
     },
@@ -207,11 +95,27 @@ export async function createRealStackAdapter(
       runtimeHarnesses: ["codex"],
       routingClient: null,
       power: { enabled: false },
+      workspaceManager: { gitExecutable: m.authority.host.gitExecutable.path },
       resolveExecutable: async () => {
         authority.current();
         return true;
       },
       delivery: {
+        issueTrackerFactories: {
+          github: (projectId, policy, host) => {
+            authority.current();
+            if (
+              projectId !== m.resource.projectId ||
+              policy.credentialRef !== m.credentialRef ||
+              host !== "github.com"
+            )
+              throw Error("v2-issue-tracker-binding");
+            return provider();
+          },
+          jira: () => {
+            throw Error("v2-jira-not-granted");
+          },
+        },
         providerFactories: {
           github: (projectId, policy, host) => {
             authority.current();
@@ -226,7 +130,11 @@ export async function createRealStackAdapter(
         },
       },
       issueTrackers: {
+        intervalMs: 3_600_000,
         readerFactories: {
+          jira: () => {
+            throw Error("v2-jira-not-granted");
+          },
           github: () => {
             throw Error("v2-source-discovery-denied");
           },
@@ -234,7 +142,25 @@ export async function createRealStackAdapter(
       },
     },
   );
-  const api = new OperatorApi(service);
+  const invoke = async <T>(
+    key: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    let pending: Promise<T>;
+    try {
+      pending = operation();
+      void pending.catch(() => {});
+    } finally {
+      await authority.invoked(key);
+    }
+    return pending;
+  };
+  let api: OperatorApi | undefined;
+  const operator = () => {
+    authority.current();
+    if (!api) throw Error("v2-service-not-started");
+    return api;
+  };
   const task = m.resource.upperTask;
   const scoped = (taskId: string) => {
     authority.current();
@@ -242,8 +168,113 @@ export async function createRealStackAdapter(
   };
   let refreshes = 0;
   let reconciles = 0;
+  let observations = 0;
+  let polls = 0;
+  let audits = 0;
   return {
     authority,
+    image: () => authority.workspaceImage(),
+    async observeProvider() {
+      const material = {
+        repositoryId: m.resource.repositoryNodeId,
+        lowerPr: m.resource.lowerPr,
+        upperPr: m.resource.upperPr,
+      };
+      const key = `fixture:observe:${++observations}`;
+      await authority.reserve("fixture.observe", material, key);
+      const observed = await invoke(key, async () => {
+        const lower = await fixtureProvider.observeFixturePr(
+          m.resource.repositoryNodeId,
+          m.resource.lowerPr,
+          m.resource.lowerPrId,
+        );
+        const upper = await fixtureProvider.observeFixturePr(
+          m.resource.repositoryNodeId,
+          m.resource.upperPr,
+          m.resource.upperPrId,
+        );
+        return { lower, upper };
+      });
+      authority.current();
+      await authority.confirm(key, materialHash(observed));
+      return observed;
+    },
+    async mergeLower() {
+      if (m.scenario !== "merge-adoption") throw Error("v2-merge-scenario");
+      const rule = m.authority.writes.find(
+        (value) => value.id === m.authority.captures.mergeRuleId,
+      );
+      if (!rule) throw Error("v2-merge-not-granted");
+      const method = JSON.parse(rule.request.body).merge_method as
+        | "merge"
+        | "squash"
+        | "rebase";
+      const action = {
+        kind: "pr.merge" as const,
+        method,
+        reviewedResultIds: [],
+        target: {
+          repositoryId: m.resource.repositoryNodeId,
+          number: m.resource.lowerPr,
+          nodeId: m.resource.lowerPrId,
+          headRef: m.resource.lowerRef,
+          baseRef: m.resource.base,
+          expectedHeadSha: m.resource.lowerHead,
+        },
+      };
+      await authority.reserve("fixture.merge", action, "fixture:merge");
+      const result = await invoke("fixture:merge", () =>
+        fixtureProvider.mergeFixtureLower(
+          action,
+          service.delivery().configuration(m.resource.projectId),
+        ),
+      );
+      authority.current();
+      if (
+        !result.uuid ||
+        result.uuid !== authority.snapshot().captures.mergeRequest
+      )
+        throw Error("v2-merge-receipt-unproved");
+      await authority.confirm(
+        "fixture:merge",
+        materialHash({ uuid: result.uuid, status: result.status }),
+      );
+      return { uuid: result.uuid, status: result.status };
+    },
+    async pollMerge() {
+      const uuid = authority.snapshot().captures.mergeRequest;
+      if (m.scenario !== "merge-adoption" || !uuid)
+        throw Error("v2-original-merge-required");
+      const material = {
+        repositoryId: m.resource.repositoryNodeId,
+        number: m.resource.lowerPr,
+        operationKey: m.resource.operationKey,
+      };
+      const key = `fixture:poll:${++polls}`;
+      await authority.reserve("fixture.poll", material, key);
+      const result = await invoke(key, () =>
+        fixtureProvider.pollFixtureMerge(
+          m.resource.repositoryNodeId,
+          m.resource.lowerPr,
+          uuid,
+        ),
+      );
+      authority.current();
+      await authority.confirm(
+        key,
+        materialHash({ uuid, status: result.status }),
+      );
+      return result.status;
+    },
+    executions() {
+      authority.current();
+      return service.list().map((intent) => ({
+        workId: intent.workId,
+        state: intent.state,
+        threadId: intent.threadId,
+        turnId: intent.turnId,
+      }));
+    },
     async refresh() {
       const key = `service:refresh:${++refreshes}`;
       await authority.reserve(
@@ -251,7 +282,7 @@ export async function createRealStackAdapter(
         { projectId: m.resource.projectId },
         key,
       );
-      await service.refreshGitHub();
+      await invoke(key, () => service.refreshGitHub());
       authority.current();
       await authority.confirm(key, m.resource.projectId);
     },
@@ -259,7 +290,7 @@ export async function createRealStackAdapter(
       scoped(taskId);
       const key = "service:unstack:preview";
       await authority.reserve("service.unstack.preview", { taskId }, key);
-      const result = await api.readUnstack(taskId);
+      const result = await invoke(key, () => operator().readUnstack(taskId));
       authority.current();
       await authority.confirm(key, materialHash(result));
       return result;
@@ -269,15 +300,20 @@ export async function createRealStackAdapter(
       if (
         parsed.type !== "task.unstack" ||
         parsed.taskId !== task ||
+        parsed.key !== m.resource.operationKey ||
         materialHash(command) !== m.resource.unstackCommandSha256
       )
         throw Error("v2-unstack-command");
+      if (service.taskUnstackOperation(task, m.resource.operationKey))
+        throw Error("v2-original-unstack-readback-only");
       await authority.reserve(
         "service.unstack.execute",
         command,
         "service:unstack:execute",
       );
-      const result = await api.execute(parsed);
+      const result = await invoke("service:unstack:execute", () =>
+        operator().execute(parsed),
+      );
       authority.current();
       await authority.confirm("service:unstack:execute", materialHash(result));
       return result;
@@ -292,7 +328,9 @@ export async function createRealStackAdapter(
         { operationKey },
         key,
       );
-      const result = await service.reconcileTaskUnstack(operationKey);
+      const result = await invoke(key, () =>
+        service.reconcileTaskUnstack(operationKey),
+      );
       authority.current();
       await authority.confirm(key, materialHash(result ?? null));
       return result;
@@ -305,18 +343,34 @@ export async function createRealStackAdapter(
       };
       const key = "service:operation:read";
       await authority.reserve("service.operation.read", material, key);
-      const result = await api.readOperation(new URLSearchParams(material));
+      const result = operationReadSchema.parse(
+        await invoke(key, () =>
+          operator().readOperation(new URLSearchParams(material)),
+        ),
+      );
+      if (result.data.state === "recorded") {
+        const receipt = unstackReceiptSchema.parse(result.data.receipt);
+        if (receipt.key !== m.resource.operationKey || receipt.taskId !== task)
+          throw Error("v2-original-receipt-binding");
+      }
       authority.current();
       await authority.confirm(key, materialHash(result));
       return result;
     },
-    audit() {
+    async audit() {
       scoped(task);
-      return {
-        delivery: service.delivery().delivery(task),
-        edge: service.domain().activeStackedDependency(task),
-        journal: service.taskUnstackOperation(task, m.resource.operationKey),
-      };
+      const key = `service:observe:${++audits}`;
+      await authority.reserve(
+        "service.observe",
+        { taskId: task, operationKey: m.resource.operationKey },
+        key,
+      );
+      const result = await invoke(key, async () =>
+        auditPreparedStack(authority),
+      );
+      authority.current();
+      await authority.confirm(key, materialHash(result));
+      return result;
     },
     async stop() {
       const key = "service:stop";
@@ -327,8 +381,16 @@ export async function createRealStackAdapter(
         true,
       );
       authority.current(true);
-      await service.stop();
+      await invoke(key, () => service.stop());
       authority.current(true);
+      await authority.confirm(
+        key,
+        materialHash({
+          stopped: true,
+          processExit: authority.snapshot().processExit,
+        }),
+        true,
+      );
     },
     async start() {
       await authority.reserve(
@@ -340,8 +402,9 @@ export async function createRealStackAdapter(
         "service:start",
       );
       authority.current();
-      await service.start();
+      await invoke("service:start", () => service.start());
       authority.current();
+      api = new OperatorApi(service);
       await authority.confirm("service:start", m.resource.projectId);
     },
   };

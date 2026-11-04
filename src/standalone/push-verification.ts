@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { runGit } from "./git-process.js";
+import type { GitChildObserver } from "./git-process.js";
 import type { PushVerification } from "./github-delivery.js";
 import { parseFilterDriverNames } from "./workspace-comparison.js";
 
@@ -100,12 +101,18 @@ export async function provedAncestor(
 }
 
 /** Git for the verifier: object reads hardened against everything the agent can write in the repository. */
-export function verifierGit(workspacePath: string, signal?: AbortSignal): Git {
+export function verifierGit(
+  workspacePath: string,
+  signal?: AbortSignal,
+  executable?: string,
+  observer?: GitChildObserver,
+): Git {
   // Replace refs, grafts and the commit-graph live in the agent-writable repository and could fake
   // ancestry that the push (which reads none of them) would not send; these overrides only harden
   // object reads, never allow a transport.
-  return (args, options) =>
+  const execute: Git = (args, options) =>
     runGit({
+      ...(observer ? { observeSettlement: true } : {}),
       args: [
         "--no-replace-objects",
         "-c",
@@ -115,6 +122,7 @@ export function verifierGit(workspacePath: string, signal?: AbortSignal): Git {
         ...args,
       ],
       cwd: workspacePath,
+      ...(executable ? { executable } : {}),
       ...bounds,
       ...(options?.maxOutputBytes
         ? { maxOutputBytes: options.maxOutputBytes }
@@ -129,6 +137,13 @@ export function verifierGit(workspacePath: string, signal?: AbortSignal): Git {
       },
       ...(signal ? { signal } : {}),
     });
+  if (!observer) return execute;
+  return async (args, options) => {
+    const sequence = await observer.beforeChild();
+    const result = await execute(args, options);
+    await observer.afterChild(sequence, result);
+    return result;
+  };
 }
 
 /**

@@ -94,3 +94,81 @@ test("cached credential does not bypass a newly closed request boundary", async 
   await assert.rejects(f.provider.readRebaseHead("R1", "upper"), /closed/);
   assert.deepEqual(f.counts(), { lookups: 1, dispatches: 1 });
 });
+
+test("fixture redirects cannot trigger a second transport or credential lookup", async () => {
+  let lookups = 0,
+    dispatches = 0;
+  const provider = new GitHubHttpDeliveryProvider(
+    async () => {
+      lookups++;
+      return "offline-marker";
+    },
+    async () => {
+      dispatches++;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://api.github.com/unlisted" },
+      });
+    },
+    undefined,
+    undefined,
+    "github.com",
+    {
+      beforeCredential: allowed,
+      beforeCredentialLookup: allowed,
+      beforeDispatch: allowed,
+    },
+  );
+  await assert.rejects(
+    provider.readFixtureIdentity("OFFLINE_REPOSITORY"),
+    /fixture-provider-redirect/,
+  );
+  assert.equal(lookups, 1);
+  assert.equal(dispatches, 1);
+});
+
+test("closure after dispatch records the invoked transport and releases no later provider read", async () => {
+  let lookups = 0,
+    dispatches = 0,
+    closed = false;
+  let release!: (response: Response) => void, entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const response = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  const provider = new GitHubHttpDeliveryProvider(
+    async () => {
+      lookups++;
+      return "offline-marker";
+    },
+    async () => {
+      dispatches++;
+      entered();
+      return response;
+    },
+    undefined,
+    undefined,
+    "github.com",
+    {
+      assertCurrent: () => {
+        if (closed) throw Error("offline-closed");
+      },
+      beforeCredential: allowed,
+      beforeCredentialLookup: allowed,
+      beforeDispatch: allowed,
+      afterResponse: async () => {
+        if (closed) throw Error("offline-closed");
+      },
+    },
+  );
+  const pending = provider.readFixtureIdentity("OFFLINE_REPOSITORY");
+  void pending.catch(() => {});
+  await started;
+  closed = true;
+  release(Response.json({ node_id: "OFFLINE_ACTOR", login: "offline" }));
+  await assert.rejects(pending, /offline-closed/);
+  assert.equal(lookups, 1);
+  assert.equal(dispatches, 1);
+});

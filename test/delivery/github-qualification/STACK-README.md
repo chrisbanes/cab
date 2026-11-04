@@ -1,114 +1,137 @@
-# Stack journey source composition
+# Finite stack journeys
 
-**SOURCE ONLY / UNQUALIFIED / NOT GRANTABLE AS A LIVE RUN.**
+The v1 provider guard and injected composition remain in `stack-guard.ts` and
+`stack-journey.ts`. Version 2 adds a concrete in-process `OperatorApi` /
+`StandaloneService` / `CodexRuntime` adapter. It uses the real GitHub provider and
+Git rebase-proof code. `live-stack.mjs` selects the version from the bounded
+manifest input. Importing it or invoking it without the complete explicit
+arguments performs no provider, credential, service or runtime operation.
 
-`stack-guard.ts` is the previously qualified finite provider guard/runner. Its
-bytes and old journeys are unchanged. `stack-journey.ts` adds an independently
-runnable, dependency-injected offline composition; `live-stack.mjs` parses the
-entrypoint. There is no default real host/service/runtime adapter. Neither this
-README, the source, test fixtures, readiness format nor a historical grant
-confers authority. No current fixture manifest, live operation grant or accepted
-host/credential readiness receipt exists for this journey.
+The v2 source is under offline qualification. It is not live acceptance evidence.
+No checked-in example supplies usable fixture authority. Local qualification
+leases do not authorize credentials, GitHub requests, native processes or fixtures.
+Actual T6 runs require independently supplied manifest, readiness and grant files.
 
-Importing the entrypoint does no work. A default invocation refuses before
-input reads. An explicit invocation requires distinct absolute `--manifest`,
-`--grant`, `--readiness` and `--result` paths plus `--live`. Input files are
-bounded regular files. All authority checks precede port binding, credential
-lookup, network, runtime or checkpoint effects. Even well-formed inputs refuse
-real execution because the real adapter contract below is unresolved. Tests
-inject synthetic ports; their result is always `mode: offline-injected`, never
-live acceptance. Do not execute the entrypoint to inspect credential availability.
+## Inputs and default refusal
 
-The proposed readiness/journey receipt is separate from the existing provider
-manifest and grant. Its exact bytes must match `resource.materialSha256` in
-both independently supplied documents. Its observed resource omits only that
-self-referential digest; account/node/repository/visibility/base/refs/PRs/full
-ordered membership must match. It also pins run, host/runtime descriptor,
-credential reference, fresh observation/expiry, scenario, exact original
-Unstack command or merge operation, optional fixture-equivalent operation,
-cleanup ids and elapsed budget. This is a proposed composition format requiring
-root review, not a claim that a host or credential has been accepted.
+An invocation requires `--live --manifest ABS --grant ABS --readiness ABS --result ABS`.
+Paths must be absolute and distinct, including checkpoint lock/temp paths. Inputs
+are bounded regular files. Every schema is strict. Missing scope, unsupported
+credential references or a mismatched digest refuses before credential resolution
+or service construction. V1 has no default real adapter and retains its previous
+refusal and offline injection behavior.
 
-The orchestrator supports two separate prepared-resource scenarios:
+`stack-builders.ts` exposes machine-readable JSON Schemas and
+`prepareStackV2Manifest`. The builder computes capture bindings; it does not issue
+a grant, supply identities, choose budgets or discover a credential. Generated
+JSON Schemas describe input shapes; runtime validation additionally checks path,
+digest, relational, ownership and expiry constraints. Root must
+independently review and supply grant issue/expiry/teardown times and the exact
+manifest/readiness/authority/resource digests.
 
-- `merge-adoption`: two bounded runtime intents, exact lower async merge with
-  `bypass_rules:false`, identity-bound PR readback, actual
-  `StandaloneService.refreshGitHub`, then the service's verified-object proof
-  and accepted base/head plus unchanged workspace HEAD/index/file digests.
-  It records the observed async request id, rather than inventing one. If that
-  response is lost, PR readback may prove a merge but cannot invent the missing
-  async observation, so the journey stays held. If no platform head rebase is
-  observed, it reports that fact. Only a separately listed and pinned exact
-  non-force fixture ref update can exercise equivalent adoption; replay never
-  relabels it as platform behavior. Without such authority, adoption stays
-  unproved and no equivalent update is attempted.
-- `unstack`: the existing filtered `OperatorApi.readUnstack`, exact frozen
-  `task.unstack` command, and typed original operation lookup. Explicit
-  `StandaloneService.reconcileTaskUnstack` is a separate coordinator continuation;
-  it is not the pure status GET. Any partial HTTP200 with a captured unmerged
-  member remaining stays original/readback-only. No repeated command, new key,
-  Unstack send, queue cancellation, retarget, retirement or restack follows
-  while unproved. A later confirmed full removal plus exact retarget must also
-  show only the selected edge retired and exactly one matching restack, with
-  the workspace image preserved. The real T3 coordinator owns these checks.
+Root must capture these actual inputs for each independent pair:
 
-Every composed intent/send/readback and runtime reservation is durably recorded
-before its callback, using an exclusive lock, atomic rename and file/directory
-sync. The original baseline, deadline, identities and counters survive restart.
-Each awaited port continuation is bounded by the remaining deadline and a 20-second
-ceiling; a timeout retains its original unknown intent rather than repeating it.
-Provider JSON is bounded to 64 KiB and checkpoints to 1 MiB.
-The qualified provider runner independently checkpoints exact method/path/body
-before credential access. No response body, commit text, prompt, credential or
-arbitrary error text enters the composition result; private object evidence is
-IDs/digests only. Unknown effects are never resent. Malformed/count/material
-mismatches, stale locks, storage faults, expiry and exhausted budgets refuse;
-no automatic lock removal, expiry extension or counter reset exists. All late
-callbacks refuse after the composition closes. Cleanup is limited to explicit
-captured-ref DELETE/readback operations and only follows a proved scenario;
-unknown effects do not trigger opportunistic cleanup.
+- Exact actor/node, repository/node/visibility/default branch/merge capabilities,
+  two task/assignment bindings, PR nodes/numbers/refs/heads, base SHA and ordered
+  stack identity. No new resource is discovered into authority.
+- Canonical disposable run root, prepared marked data directory, both task roots,
+  repository worktrees, common object store, scratch parent and checkpoint path;
+  filesystem device/inode identities and explicit necessary write paths.
+- Source root/branch/commit/tree, HEAD/ref metadata and exact loaded module hashes,
+  pinned Git/Node/Codex executable hashes, `.nvmrc`, package/lock hashes, versions,
+  and the required package manager. Source HEAD/tree are checked with pinned
+  offline Git before service construction.
+- Checkpointed SQLite bytes, migration level 14 and schema fingerprint, exact
+  project/task/lead/assignment configuration and immutable profile settings.
+  `capturePreparedStackDatabase` computes the same readonly material. Unrelated
+  projects, sources, workspaces, pending delivery/publication work or ownership
+  holds refuse. Only the selected original Unstack journal may already exist.
+- Fresh host-specific readiness and exact model/effort/settings/policy/revision
+  bounds. The preprepared Codex home/login link and auth target metadata must
+  match the accepted runtime credential reference. Preflight never opens its
+  contents. The login target's necessary runtime write scope must be explicit.
+- Exact `env:NAME` GitHub reference, literal per-request bodies/API versions,
+  independently enumerated request/call rules and caps, root-supplied Unstack
+  command, bounded observation timing, and separate main/teardown deadlines.
 
-## Concrete real-adapter blockers
+## Effect boundaries
 
-The real entrypoint deliberately refuses instead of guessing these contracts:
+`stack-authority.ts` reserves requests before credential callbacks and dispatch,
+counts reservations and actual resolver/transport/runtime/service/callback
+invocations separately, and persists intent before
+effects. Already-queued completion evidence finishes before the serialized close;
+no later effect is released. Token caching never bypasses validity. Source/binary/input pins are
+checked before effects, using a bounded initial hash and metadata revalidation.
+Changed pins hold the run; they do not grant a retry or replacement identity.
+The original teardown horizon permits only owned stop/interrupt calls after a
+main authority fault. It continues to verify canonical ownership.
 
-1. `StackFixtureGuard` permits only `/repos/<exact repository>/...` requests;
-   it has no standalone observational GET authority, including `/user` for
-   credential/account binding, `POST /graphql` for the exact `CabDeliveryPr`
-   document/variables and fresh `baseRefOid`, or the repository/PR/stack reads performed before
-   the real delivery provider sends. A provider grant is not service/bootstrap
-   permission. Approve an additive exact read/bootstrap contract and a reviewed
-   adapter that passes every provider request through it, without changing old
-   guard behavior. `GitHubHttpDeliveryProvider.mergeOutcome` may also poll a
-   newly observed merge-request UUID: that needs a bounded capture/read rule,
-   not a guessed static id or an extra unlisted URL. Do not manufacture request
-   ids or broaden an existing grant.
-2. There is no installed-service construction/provisioning/cleanup authority.
-   The adapter must bind only a captured disposable project/workspace/service,
-   apply the durable turn gate to **every** actual Codex turn, bind task/work/
-   thread/turn and process exit identity, and prove quiescence. The typed ports
-   consume actual T1–T5 API method names; they do not create a new production
-   endpoint or supply a stub lifecycle policy. Workspace-image and restack-count
-   observers must read the captured fixture ownership, not infer success from
-   a receipt. A reviewed concrete adapter/readiness contract is still required.
-3. Actual `TaskUnstack.local` requires the selected PR's observed and accepted
-   base to remain the selected lower branch. Completed merge/retarget/adoption
-   moves that base to trunk, so the same edge cannot then exercise normal
-   Unstack. Use **separate explicitly granted finite prepared task/PR pairs**
-   for merge/adoption and healthy/failed Unstack scenarios. Do not recreate a
-   retired edge, reset accepted metadata or expand the two-task resource set
-   implicitly. Root should approve that fixture split before any live grant.
+Only exact `https://api.github.com` requests are permitted. REST reads and the two
+literal read-only GraphQL documents have explicit per-rule versions. Captured PR
+reads use 2026-03-10; repository, refs, checks, protection, GraphQL, merge polls and
+feedback use 2022-11-28. Feedback consists of three independently listed GETs per
+captured PR: issue comments, reviews and review comments, each with exactly
+`?per_page=100`. Extra identities/query keys/pages/body/version, redirects, oversized
+responses and next-page links refuse. Feedback remains data; evidence contains
+hashes and counters, never raw feedback text.
 
-No fixture creation is implemented or implied. Pre-existing exact refs/PRs must
-come from the future accepted manifest/readiness. Dynamic resource allocation,
-installation, credential discovery and broad disposal are unsupported. The
-historical public S07a fixture and its spent grants are not reused.
+Only one lower async merge is owned by the fixture script. It preserves actual
+provider merge gates and stack qualification. The selected explicit 2026 merge
+rule includes `merge_action:direct_merge` and `bypass_rules:false`; ordinary
+production behavior retains its 2022 default. One actual 202/409 UUID is captured
+with producing request/response hashes and time before exact polling. A durable
+original-operation marker prevents another result filename from resending an
+unknown merge. The service cannot also send that merge.
 
-After root supplies a fresh exclusive local qualification lease, proposed
-checks are pinned setup/static/format/build, the focused synthetic
-`stack-entrypoint.test.ts` cases and unchanged `stack-live-harness.test.ts`,
-then the complete delivery SERVICE suite. No executable checks have run on
-this source composition. Parent integration, full coherent offline/browser
-qualification, integrated independent review, final-head CI and separately
-authorized complete T6 live acceptance remain required. Neither a partial
-Unstack nor an offline injected result satisfies that live gate.
+Fresh upper/base SHAs require agreement among actual REST, GraphQL and ref reads,
+with at most one fresh value each. Stack base, ordered members, refs and heads
+must remain in the captured tuple; any pagination Link header refuses. HTTP read permission is not adoption permission:
+T1 raw commit-message/ordered-patch proof and T2's current transaction still decide
+adoption. Direct Git proof/adoption has a separate precredential scope for the
+exact repository, executable, worktree/common store, scratch parent, commits,
+bytes/time/fetch/child counts. The Git call grant hashes the captured repository ID,
+repository URL, workspace path, common directory, branch and initial commit list;
+the exact response-derived request has its own durable intent digest before
+credentials or fetch. Unknown children retain their scratch and ownership.
+
+The runtime boundary applies to every scheduler turn and continuation. It checks
+one current submitting work/request, assignment/task revisions, cwd, prompt digest,
+settings and effective policy before reservation and after awaits, then binds the returned
+thread/turn/process. The actual assembled prompt and original request have separate
+digests; the service's omitted policy means network off. Early callbacks wait for
+the exact returned turn to be persisted and handed back to the service. Optional
+native archival/input-reply capabilities are absent; captured existing threads
+must be unarchived. Only bound prepared PR registration and bounded result
+callbacks reach cab. Resume grants hash the captured runtime scope and tools digest, while the actual
+same-run-created or captured thread is checked and journaled separately before
+resume. Future thread IDs need not be guessed in a grant. Historical thread
+resume/read is not current execution proof.
+This is a fixture authority boundary, not an independent model-tool or host sandbox;
+normal deployment/runtime trust limits still apply.
+
+## Scenarios and recovery
+
+`stack-real-journey.ts` drives separate `merge-adoption`, `unstack-healthy` and
+`unstack-failed` prepared pairs. It never reuses an adopted edge for Unstack.
+Merge/adoption compares retained HEAD/index/file digests and checks the stored raw
+proof, accepted base/head and branch metadata. An absent platform rebase remains
+unproved. Equivalent publication, pushes, fixture creation and provider cleanup
+are unsupported and denied; there is no fallback.
+
+Unstack uses the actual preview, exact supplied command, separately budgeted
+original-key reconciliation and typed original receipt lookup. An existing journal
+is never executed again. Partial selected-member removal with a remaining sibling
+stays unfinished across service restarts. No rekey, queue cancellation, forced
+phase, early retarget or edge recreation is performed. `stack-audit.ts` reads a
+consistent SQLite snapshot and requires the original journal, exact selected
+edge generation, accepted base, one restack sequence increment and one exact
+`unstack-restack:<originalKey>` notice joined to its actual inbox event and
+captured recipient. Receipt phase alone cannot prove completion. The original typed receipt must
+match the supplied key/task and confirmed phase. Retained workspace hashes and
+writer/unfinished-execution audits also fence the final result.
+
+All journeys stop only their owned service/process under the original teardown
+scope. Exact process-exit verification, ended callbacks and no unknown Git child
+are required. Checkpoints and exclusive locks remain for original-identity recovery;
+never delete a lock or choose a new key merely to retry. An injected factory or transport is
+always labelled `offline-injected`; it cannot supply live acceptance evidence.

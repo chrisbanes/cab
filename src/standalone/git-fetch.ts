@@ -18,7 +18,12 @@ import {
   pushCredentialHelper,
   transportUsername,
 } from "./git-push.js";
-import { runGit } from "./git-process.js";
+import {
+  runGit,
+  gitChildExited,
+  type GitChildObserver,
+  type GitRunOptions,
+} from "./git-process.js";
 import { proveUnchangedRebase } from "./rebase-proof.js";
 import type { RebaseProof } from "../core/rebase-proof.js";
 import { type Git, provedAncestor } from "./push-verification.js";
@@ -37,7 +42,7 @@ export type AdoptOutcome =
   /** Git could not prove the head's ancestry, or could not import it. */
   | "unproved";
 
-export interface FixtureGitFetchBoundary {
+export interface FixtureGitFetchBoundary extends GitChildObserver {
   scratchParent: string;
   commonDirectory: string;
   beforeEffect(
@@ -145,7 +150,17 @@ export async function proveOutsideRebase(
         request.baseCommit!,
         request.commitSha,
         request.signal,
-        request.fixtureBoundary?.scratchParent,
+        request.fixtureBoundary && request.executable
+          ? {
+              scratchParent: request.fixtureBoundary.scratchParent,
+              executable: request.executable,
+              beforeEffect: (teardown) =>
+                request.fixtureBoundary!.beforeEffect(
+                  teardown ? "teardown" : "proof",
+                ),
+              children: request.fixtureBoundary,
+            }
+          : undefined,
       );
       return proof !== null;
     },
@@ -179,12 +194,37 @@ async function fetchAndProveOutsideHead(
     !safeBranchName(branch)
   )
     return "not-attempted";
+  let unsettledChild = false;
+  const observer = request.fixtureBoundary
+    ? {
+        beforeChild: () => request.fixtureBoundary!.beforeChild(),
+        afterChild: async (
+          sequence: number,
+          result: Awaited<ReturnType<typeof runGit>>,
+        ) => {
+          if (!gitChildExited(result)) unsettledChild = true;
+          await request.fixtureBoundary!.afterChild(sequence, result);
+        },
+      }
+    : undefined;
+  const gitRun = observer
+    ? async (options: GitRunOptions) => {
+        const sequence = observer ? await observer.beforeChild() : undefined;
+        const result = await runGit({
+          ...options,
+          ...(observer ? { observeSettlement: true } : {}),
+        });
+        if (observer) await observer.afterChild(sequence!, result);
+        return result;
+      }
+    : runGit;
   const common = {
     ...(request.executable ? { executable: request.executable } : {}),
     ...(request.signal ? { signal: request.signal } : {}),
   };
-  await request.fixtureBoundary?.beforeEffect("locate");
-  const located = await runGit({
+  if (request.fixtureBoundary)
+    await request.fixtureBoundary.beforeEffect("locate");
+  const located = await gitRun({
     ...common,
     ...bounds,
     args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -202,7 +242,8 @@ async function fetchAndProveOutsideHead(
   const objects = join(commonDir, "objects");
   let scratch: string | undefined;
   try {
-    await request.fixtureBoundary?.beforeEffect("scratch");
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("scratch");
     scratch = await mkdtemp(
       join(request.fixtureBoundary?.scratchParent ?? tmpdir(), "cab-adopt-"),
     );
@@ -242,8 +283,9 @@ async function fetchAndProveOutsideHead(
           measuring = false;
         });
     }, sizeCheckMs);
-    await request.fixtureBoundary?.beforeEffect("fetch");
-    const fetched = await runGit({
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("fetch");
+    const fetched = await gitRun({
       ...common,
       ...bounds,
       signal: request.signal
@@ -307,8 +349,9 @@ async function fetchAndProveOutsideHead(
     // The proof reads only the scratch (with the worktree's objects as an alternate), with no
     // transport and no credential; every commit on the walk is rehashed.
     const scratchGit: Git = async (args, options) => {
-      await request.fixtureBoundary?.beforeEffect("proof");
-      return runGit({
+      if (request.fixtureBoundary)
+        await request.fixtureBoundary.beforeEffect("proof");
+      return gitRun({
         ...common,
         ...proofBounds,
         args: ["-c", "core.commitGraph=false", ...args],
@@ -320,7 +363,8 @@ async function fetchAndProveOutsideHead(
         environmentOverrides: scratchEnvironment,
       });
     };
-    await request.fixtureBoundary?.beforeEffect("proof");
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("proof");
     const onBase = await provedAncestor(scratchGit, baseCommit, commitSha);
     if (onBase === false) return "not-on-base";
     if (onBase !== true) return "unproved";
@@ -333,13 +377,15 @@ async function fetchAndProveOutsideHead(
     const names = (await readdir(packs).catch(() => [])).filter(
       (n) => n.endsWith(".pack") || n.endsWith(".idx"),
     );
-    await request.fixtureBoundary?.beforeEffect("import");
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("import");
     const target = join(objects, "pack");
     await mkdir(target, { recursive: true });
     for (const extension of [".pack", ".idx"])
       for (const name of names.filter((n) => n.endsWith(extension))) {
         // A unique aside name: a leftover read-only file or a concurrent import never collides.
-        await request.fixtureBoundary?.beforeEffect("import");
+        if (request.fixtureBoundary)
+          await request.fixtureBoundary.beforeEffect("import");
         const aside = join(target, `tmp_cab_${randomUUID()}_${name}`);
         try {
           await copyFile(join(packs, name), aside);
@@ -351,8 +397,9 @@ async function fetchAndProveOutsideHead(
       }
     // A ref keeps the imported objects from being pruned. Git runs without the worktree's hooks and
     // without a credential.
-    await request.fixtureBoundary?.beforeEffect("retain");
-    const kept = await runGit({
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("retain");
+    const kept = await gitRun({
       ...common,
       ...proofBounds,
       args: [
@@ -369,8 +416,9 @@ async function fetchAndProveOutsideHead(
   } catch {
     return "unproved";
   } finally {
-    if (scratch) {
-      await request.fixtureBoundary?.beforeEffect("teardown");
+    if (scratch && !unsettledChild) {
+      if (request.fixtureBoundary)
+        await request.fixtureBoundary.beforeEffect("teardown");
       await rm(scratch, { recursive: true, force: true });
     }
   }

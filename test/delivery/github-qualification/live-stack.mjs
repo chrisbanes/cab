@@ -1,11 +1,11 @@
 // Source composition only. Import and an invocation without --live are inert.
-// No real host/service/runtime adapter is installed by this entrypoint.
+// Version 2 requires independent bounded authority and captured prepared resources.
 import { open, lstat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const refusal =
-  "Refusing execution: require --live --manifest ABS --grant ABS --readiness ABS --result ABS; no real adapter is installed";
+  "Refusing execution: require --live --manifest ABS --grant ABS --readiness ABS --result ABS";
 export function stackArguments(args) {
   if (args.length !== 9 || args[0] !== "--live") throw Error(refusal);
   const values = {};
@@ -69,8 +69,58 @@ async function readInput(path) {
 export async function main(args, injected) {
   const paths = stackArguments(args);
   const manifest = await readInput(paths["--manifest"]);
-  const grant = JSON.parse(await readInput(paths["--grant"]));
+  const grantRaw = await readInput(paths["--grant"]);
+  const grant = JSON.parse(grantRaw);
   const readiness = await readInput(paths["--readiness"]);
+  if (JSON.parse(manifest).version === 2) {
+    if (injected && typeof injected.realFactory !== "function")
+      throw Error("Explicit offline real-adapter factory required");
+    const { StackV2Authority } = await import(
+      "../../../dist/test/delivery/github-qualification/stack-authority.js"
+    );
+    const { runRealStackJourney } = await import(
+      "../../../dist/test/delivery/github-qualification/stack-real-journey.js"
+    );
+    const authority = new StackV2Authority(
+      manifest,
+      grantRaw,
+      readiness,
+      paths["--result"],
+      injected?.now,
+      {
+        manifest: paths["--manifest"],
+        grant: paths["--grant"],
+        readiness: paths["--readiness"],
+      },
+    );
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    process.once("SIGINT", abort);
+    process.once("SIGTERM", abort);
+    try {
+      return await runRealStackJourney({
+        authority,
+        signal: controller.signal,
+        credential: async (reference) => {
+          authority.current();
+          if (
+            !/^env:[A-Z_][A-Z0-9_]*$/.test(reference) ||
+            reference !== authority.manifest.credentialRef
+          )
+            throw Error("Unsupported fixture credential reference");
+          // This resolver is reached only after durable exact-request and lookup reservations.
+          return injected?.credential
+            ? injected.credential(reference)
+            : process.env[reference.slice(4)];
+        },
+        ...(injected?.transport ? { transport: injected.transport } : {}),
+        ...(injected?.realFactory ? { factory: injected.realFactory } : {}),
+      });
+    } finally {
+      process.removeListener("SIGINT", abort);
+      process.removeListener("SIGTERM", abort);
+    }
+  }
   const module = await import(
     "../../../dist/test/delivery/github-qualification/stack-journey.js"
   );
@@ -113,7 +163,9 @@ if (
     process.exitCode = result.disposition === "recorded" ? 0 : 1;
   } catch {
     // No arbitrary provider/credential error text is printed.
-    process.stderr.write(`${refusal}\n`);
+    process.stderr.write(
+      `${refusal}; any original checkpoint remains authoritative for unfinished effects\n`,
+    );
     process.exitCode = 1;
   }
 }

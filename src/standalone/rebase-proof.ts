@@ -1,3 +1,4 @@
+import { gitChildExited, type GitChildObserver } from "./git-process.js";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,13 +32,32 @@ export async function proveUnchangedRebase(
   newBase: string,
   newHead: string,
   signal?: AbortSignal,
-  scratchParent?: string,
+  fixture?: {
+    scratchParent: string;
+    executable: string;
+    beforeEffect(teardown: boolean): Promise<void>;
+    children?: GitChildObserver;
+  },
 ): Promise<RebaseProof | null> {
   if (![oldBase, oldHead, newBase, newHead].every((id) => oid.test(id)))
     return null;
+  if (fixture) await fixture.beforeEffect(false);
   const scratch = await mkdtemp(
-    join(scratchParent ?? tmpdir(), "cab-rebase-proof-"),
+    join(fixture?.scratchParent ?? tmpdir(), "cab-rebase-proof-"),
   );
+  let unsettledChild = false;
+  const children = fixture?.children
+    ? {
+        beforeChild: () => fixture.children!.beforeChild(),
+        afterChild: async (
+          sequence: number,
+          result: Awaited<ReturnType<Git>>,
+        ) => {
+          if (!gitChildExited(result)) unsettledChild = true;
+          await fixture.children!.afterChild(sequence, result);
+        },
+      }
+    : undefined;
   const deadline = Date.now() + 30_000;
   const objects = new Map<string, { type: string; body: Buffer }>();
   let bytes = 0;
@@ -46,6 +66,7 @@ export async function proveUnchangedRebase(
       throw new Error("Proof interrupted");
   };
   try {
+    if (fixture) await fixture.beforeEffect(false);
     await mkdir(join(scratch, "objects"));
     await mkdir(join(scratch, "refs"));
     await writeFile(join(scratch, "HEAD"), "ref: refs/heads/proof\n");
@@ -87,12 +108,14 @@ export async function proveUnchangedRebase(
         throw new Error("Forged object");
       bytes += size;
       objects.set(id, { type, body });
+      const compressed = await compress(raw);
+      if (fixture) await fixture.beforeEffect(false);
       await mkdir(join(scratch, "objects", id.slice(0, 2)), {
         recursive: true,
       });
       await writeFile(
         join(scratch, "objects", id.slice(0, 2), id.slice(2)),
-        await compress(raw),
+        compressed,
       );
       return body;
     };
@@ -161,7 +184,16 @@ export async function proveUnchangedRebase(
       next = await range(newBase, newHead);
     if (!old.commits.length || old.commits.length !== next.commits.length)
       return null;
-    const git = verifierGit(scratch, signal);
+    const underlying = verifierGit(
+      scratch,
+      signal,
+      fixture?.executable,
+      children,
+    );
+    const git: Git = async (args, options) => {
+      if (fixture) await fixture.beforeEffect(false);
+      return underlying(args, options);
+    };
     const patches = async (r: typeof old) => {
       let parent = r.anchor;
       const result = [];
@@ -227,6 +259,9 @@ export async function proveUnchangedRebase(
   } catch {
     return null;
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    if (!unsettledChild) {
+      if (fixture) await fixture.beforeEffect(true);
+      await rm(scratch, { recursive: true, force: true });
+    }
   }
 }
