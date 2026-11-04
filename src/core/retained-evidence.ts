@@ -1,3 +1,4 @@
+import { assertOwnedTaskWritable } from "./project-lifecycle.js";
 import { DomainConflictError } from "./domain.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -699,6 +700,7 @@ export class RetainedEvidenceStore {
     currentIdentity: RetainedEvidenceIdentity,
     input: RetainedEvidenceCandidate,
   ): RetainedEvidenceManifest {
+    assertOwnedTaskWritable(this.db, owner.taskId);
     if (this.db.isTransaction === false)
       throw new Error(
         "Retained result evidence requires the result transaction",
@@ -1011,6 +1013,7 @@ export class RetainedEvidenceStore {
       )
         throw new DomainConflictError("Review anchor count quota exceeded");
 
+      assertOwnedTaskWritable(this.db, taskId);
       const draftId = randomUUID();
       const now = Date.now();
       this.db
@@ -1125,6 +1128,7 @@ export class RetainedEvidenceStore {
         materialHash,
       );
       if (prior) return retainedReviewAnchorSealResponseSchema.parse(prior);
+      assertOwnedTaskWritable(this.db, taskId);
       const draft = this.db
         .prepare(`SELECT draftId,taskId,state,submittedContextId,createdAt,updatedAt
         FROM retained_review_anchor_drafts WHERE draftId=?`)
@@ -1244,6 +1248,7 @@ export class RetainedEvidenceStore {
         materialHash,
       );
       if (prior) return retainedReviewAnchorDiscardResponseSchema.parse(prior);
+      assertOwnedTaskWritable(this.db, taskId);
       const draft = this.db
         .prepare(`SELECT draftId,taskId,state,submittedContextId
         FROM retained_review_anchor_drafts WHERE draftId=?`)
@@ -1461,6 +1466,7 @@ export class RetainedEvidenceStore {
   private insertReviewAnchor(
     candidate: z.infer<typeof reviewAnchorCandidateSchema>,
   ): void {
+    assertOwnedTaskWritable(this.db, candidate.taskId);
     const { bytes: _bytes, ...record } = candidate;
     this.db
       .prepare(`INSERT INTO retained_review_anchor_contexts
@@ -1510,6 +1516,7 @@ export class RetainedEvidenceStore {
     materialHash: string,
     response: unknown,
   ): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(`INSERT INTO retained_review_anchor_operations
       (operationId,taskId,kind,materialHash,responseJson) VALUES (?,?,?,?,?)`)

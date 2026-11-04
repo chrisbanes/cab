@@ -1,3 +1,4 @@
+import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
 import type { Database } from "./store.js";
 
 /**
@@ -144,7 +145,9 @@ const columnsOf = (db: Database, table: string) =>
  */
 export function extractLegacyRepositoryLinks(
   db: Database,
-  toLinks: (repositories: unknown) => unknown[],
+  toLinks: (
+    repositories: unknown,
+  ) => { path: string; gitCommonDirectory: string }[],
 ): void {
   if (!columnsOf(db, "project_github_sources").includes("repositories")) return;
   const insert = db.prepare(
@@ -152,11 +155,19 @@ export function extractLegacyRepositoryLinks(
   );
   for (const row of db
     .prepare("SELECT projectId, repositories FROM project_github_sources")
-    .all() as { projectId: string; repositories: string }[])
-    insert.run(
-      row.projectId,
-      JSON.stringify(toLinks(JSON.parse(row.repositories))),
-    );
+    .all() as { projectId: string; repositories: string }[]) {
+    const links = toLinks(JSON.parse(row.repositories));
+    if (
+      !db
+        .prepare("SELECT 1 FROM project_repository_links WHERE projectId=?")
+        .get(row.projectId)
+    )
+      assertCleanupOwnershipAvailableWithinTransaction(
+        db,
+        links.flatMap((link) => [link.path, link.gitCommonDirectory]),
+      );
+    insert.run(row.projectId, JSON.stringify(links));
+  }
   db.exec("ALTER TABLE project_github_sources DROP COLUMN repositories");
 }
 

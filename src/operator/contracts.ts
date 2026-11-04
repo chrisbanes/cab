@@ -1,3 +1,7 @@
+import {
+  projectLifecycleReadSchema,
+  projectTombstoneSchema,
+} from "./project-lifecycle-contracts.js";
 import { z } from "zod";
 import {
   issueBodyLimit,
@@ -190,6 +194,7 @@ export const projectSummarySchema = z
     name: safeText,
     version: revision,
     paused: z.boolean(),
+    archived: z.boolean(),
     leadProfileId: uuid.nullable(),
   })
   .strict();
@@ -911,13 +916,23 @@ const taskSummary = z
   })
   .strict();
 export const projectSchema = envelope(
-  z
-    .object({
-      project: projectSummarySchema,
-      profiles: z.array(profileSummarySchema),
-      tasks: z.array(taskSummary),
-    })
-    .strict(),
+  z.discriminatedUnion("state", [
+    z
+      .object({
+        state: z.literal("live"),
+        project: projectSummarySchema,
+        profiles: z.array(profileSummarySchema),
+        tasks: z.array(taskSummary),
+        lifecycle: projectLifecycleReadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        state: z.literal("deleted"),
+        tombstone: projectTombstoneSchema,
+      })
+      .strict(),
+  ]),
 );
 export const admissionSchema = taskSchemaAdmission();
 function taskSchemaAdmission() {
@@ -1281,6 +1296,7 @@ const generation = z
 export const assignmentSchema = z
   .object({
     assignmentId: uuid,
+    readOnly: z.boolean().optional(),
     profileId: uuid,
     name: safeText,
     brief: safeText.optional(),
@@ -1819,6 +1835,7 @@ const assignmentRecoveryRecordSchema = z
 export const taskSchema = envelope(
   z
     .object({
+      project: projectSummarySchema.optional(),
       task: z
         .object({
           id: uuid,
@@ -3484,6 +3501,29 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       disposition: z.enum(["accept", "discard"]),
     })
     .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("project.archive"),
+      expectedVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("project.restore"),
+      expectedVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("project.delete"),
+      expectedVersion: revision,
+      confirmationName: z.string().min(1).max(512),
+      previewDigest: hash,
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -3491,6 +3531,22 @@ export const configurationReceiptSchema = z
     key: uuid,
     recorded: z.literal(true),
     result: z.discriminatedUnion("commandType", [
+      z
+        .object({
+          commandType: z.enum(["project.archive", "project.restore"]),
+          resourceId: uuid,
+          version: revision,
+          archived: z.boolean(),
+          paused: z.literal(true),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("project.delete"),
+          resourceId: uuid,
+          deletedAt: z.string().datetime(),
+        })
+        .strict(),
       z
         .object({
           commandType: z.enum(["project.create", "project.configure"]),
@@ -4982,6 +5038,7 @@ export const cliCapabilities = [
   "delivery.write",
   "recovery.read",
   "recovery.write",
+  "project.lifecycle",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(
@@ -5031,6 +5088,9 @@ export const operationTypeSchema = z.enum([
   "profile.configure",
   "project.create",
   "project.configure",
+  "project.archive",
+  "project.restore",
+  "project.delete",
   "routing.configure",
   "delivery.configure",
   "capacity.configure",

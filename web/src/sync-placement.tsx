@@ -1,3 +1,4 @@
+import { visibleProjects } from "./project-lifecycle-model.js";
 import type { OperatorCommand } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import type { sourceObservationSchema } from "../../src/operator/contracts.js";
@@ -194,8 +195,9 @@ function SourceObservations(
       <Button
         type="button"
         variant="secondary"
-        disabled={pending}
+        disabled={p.readOnly || pending}
         onClick={async () => {
+          if (p.readOnly) return;
           setPending(true);
           setNotice("Refresh requested.");
           try {
@@ -228,7 +230,7 @@ function UnsettledPlacement(
     refreshConfiguration: () => void;
   },
 ) {
-  const d = useDraft(p.drafts, `github.place:${p.command.taskId}`);
+  const d = useDraft(p.drafts, `github.place:${p.command.taskId}`, p.readOnly);
   return (
     <Panel title="Placement outcome">
       <p className="body">
@@ -256,7 +258,11 @@ function PlacementConfiguration(
   },
 ) {
   const c = p.placement,
-    d = useDraft(p.drafts, `github.place:${c.taskId}`),
+    d = useDraft(p.drafts, `github.place:${c.taskId}`, p.readOnly),
+    choices = visibleProjects(c.choices, p.readOnly === true),
+    selectedActive = c.choices.some(
+      (row) => row.id === d.values.chosenProjectId && row.archived === false,
+    ),
     labels = workspaceLabels(p.workspace),
     choiceText = (r: (typeof c.choices)[number]) =>
       projectLabel(labels, r.id, r.name).text;
@@ -281,6 +287,10 @@ function PlacementConfiguration(
       </p>
       <form
         onSubmit={(e) => {
+          if (!selectedActive) {
+            e.preventDefault();
+            return;
+          }
           d.set("placementOriginProjectId", p.projectId);
           // The conflict row is gone once this is recorded, so keep the words for the saved line.
           d.set("placementTitle", c.title ?? "");
@@ -309,7 +319,7 @@ function PlacementConfiguration(
       >
         <DraftField draft={d} field="chosenProjectId" label="Placement project">
           <option value="">Choose actual membership</option>
-          {c.choices.map((r) => (
+          {choices.map((r) => (
             <option key={r.id} value={r.id}>
               {choiceText(r)}
             </option>
@@ -320,6 +330,7 @@ function PlacementConfiguration(
           client={p.client}
           session={p.session}
           label="Record placement"
+          saveDisabled={!selectedActive}
           refresh={p.refreshConfiguration}
           review={() => d.adoptVersion(c.version)}
           success={placedLine(d)}

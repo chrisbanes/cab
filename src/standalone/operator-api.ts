@@ -1,3 +1,9 @@
+import { projectDeletePreviewSchema } from "../operator/project-lifecycle-contracts.js";
+import {
+  ProjectArchiveBlockedError,
+  ProjectArchivedError,
+} from "../core/project-lifecycle.js";
+import { ProjectDeletionUnavailableError } from "./project-deletion.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -41,6 +47,7 @@ import {
   repositoryDeliverySettings,
 } from "../core/delivery.js";
 import {
+  RedactionLimitError,
   redactionExclusionLimits,
   withinRedactionLimits,
 } from "../core/redaction-limits.js";
@@ -715,6 +722,9 @@ export class OperatorApi {
             /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key),
           ),
           references: this.referenceFence(),
+          privateRedaction: createHash("sha256")
+            .update(JSON.stringify(this.service.redactionExclusions([]).sort()))
+            .digest("hex"),
         }),
       )
       .digest("hex");
@@ -872,9 +882,23 @@ export class OperatorApi {
         if (links.length > 128) return null;
         for (const repo of links) add(repo.path, repo.gitCommonDirectory);
       }
+      const live = values.map(([, value]) => value);
+      // Existing live inputs past the per-value bound withhold text rather than fail the read.
+      if (
+        live.some(
+          (value) =>
+            Buffer.byteLength(value) > redactionExclusionLimits.valueBytes,
+        )
+      )
+        return null;
+      this.service.redactionExclusions(live);
+      for (const value of this.service.redactionExclusions([]))
+        values.push([null, value]);
       return { values, covered };
     } catch (error) {
       if (error instanceof OperatorApiError) throw error;
+      if (error instanceof RedactionLimitError)
+        throw new OperatorApiError(503, "redaction-limit");
       return null;
     }
   }
@@ -2261,6 +2285,7 @@ export class OperatorApi {
       name: this.safe(row.name, excluded),
       version: Number(row.version),
       paused: Boolean(row.paused),
+      archived: Boolean(row.archived),
       leadProfileId:
         row.leadProfileId === null ? null : String(row.leadProfileId),
     };
@@ -2276,25 +2301,28 @@ export class OperatorApi {
         revoked: Boolean(p.revoked),
       }));
   }
-  async readWorkspace() {
-    const excluded = await this.exclusions();
-    return workspaceSchema.parse({
-      data: {
-        projects: this.domain()
-          .projects()
-          .map((p) => this.project(p, excluded)),
-        profiles: this.profiles(excluded).map((p) => ({
-          ...p,
-          runtime: this.domain().profileRuntime(p.id),
-        })),
-        runtime: this.service.runtimeStatus(),
-        harnesses: this.service.harnessStatuses(),
-        gettingStarted: {
-          turnStarted: this.service.taskTurnStarted(),
-          dismissed: this.domain().gettingStartedDismissed(),
+  async readWorkspace(includeArchived = false) {
+    return this.readWithExclusionFence(async () => {
+      const excluded = await this.exclusions();
+      return workspaceSchema.parse({
+        data: {
+          projects: this.domain()
+            .projects()
+            .filter((p) => includeArchived || !p.archived)
+            .map((p) => this.project(p, excluded)),
+          profiles: this.profiles(excluded).map((p) => ({
+            ...p,
+            runtime: this.domain().profileRuntime(p.id),
+          })),
+          runtime: this.service.runtimeStatus(),
+          harnesses: this.service.harnessStatuses(),
+          gettingStarted: {
+            turnStarted: this.service.taskTurnStarted(),
+            dismissed: this.domain().gettingStartedDismissed(),
+          },
         },
-      },
-      observedAt: Date.now(),
+        observedAt: Date.now(),
+      });
     });
   }
   /** Only a held Claude execution's failure is reported; Codex presentation is unchanged. */
@@ -2510,15 +2538,29 @@ export class OperatorApi {
       },
     };
   }
+  private exclusionFingerprint() {
+    const base = this.exclusionBase();
+    if (!base) throw new OperatorApiError(503, "unavailable");
+    return createHash("sha256")
+      .update(
+        JSON.stringify(
+          [...new Set(base.values.map(([, value]) => value))].sort(),
+        ),
+      )
+      .digest("hex");
+  }
   /** Instruction revisions and linked repositories: the exclusion base inputs no other fence covers. */
   private exclusionFence() {
     const d = this.domain();
     return JSON.stringify({
+      exclusions: this.exclusionFingerprint(),
       profiles: d.profiles().map((p) => [p.id, p.version]),
       projects: d
         .projects()
         .map((p) => [
           p.id,
+          p.version,
+          p.archived,
           p.instructionsRevision,
           d.githubConfiguration(String(p.id)).version,
           d.repositoryLinks(String(p.id)).version,
@@ -2527,12 +2569,18 @@ export class OperatorApi {
   }
   /** Rebuild projections once if their instruction or repository exclusions changed across an await. */
   private async readWithExclusionFence<T>(read: () => Promise<T>): Promise<T> {
+    const references = this.referenceFence();
     for (let attempt = 0; attempt < 2; attempt++) {
       const fence = this.exclusionFence();
       try {
         const response = await read();
+        if (references !== this.referenceFence())
+          throw new OperatorApiError(503, "unavailable");
         if (fence === this.exclusionFence()) return response;
       } catch (error) {
+        // Credential rotation retains its refusal boundary, rather than retrying under new authority.
+        if (references !== this.referenceFence())
+          throw new OperatorApiError(503, "unavailable");
         // Nested reads can reject the same instruction or repository race before we reach the fence.
         if (
           !(error instanceof OperatorApiError) ||
@@ -2602,6 +2650,45 @@ export class OperatorApi {
     return this.readWithExclusionFence(() => this.readProjectOnce(projectId));
   }
   private async readProjectOnce(projectId: string) {
+    uuid.parse(projectId);
+    const deleted = this.service.deletedProject(projectId);
+    if (deleted) {
+      const excluded = await this.exclusions();
+      return projectSchema.parse({
+        data: {
+          state: "deleted",
+          tombstone: {
+            projectId: deleted.projectId,
+            name: this.safe(deleted.name, excluded),
+            deletedAt: deleted.deletedAt,
+            counts: deleted.counts,
+            externalRemnants: this.safeProjectRemnants(
+              deleted.externalRemnants,
+              excluded,
+            ),
+            cleanup: {
+              state: deleted.cleanup.some((item) => item.state === "pending")
+                ? "pending"
+                : "complete",
+              pending: deleted.cleanup.filter(
+                (item) => item.state === "pending",
+              ).length,
+              complete: deleted.cleanup.filter(
+                (item) => item.state === "complete",
+              ).length,
+              reasons: [
+                ...new Set(
+                  deleted.cleanup.flatMap((item) =>
+                    item.state === "pending" ? [item.reason] : [],
+                  ),
+                ),
+              ],
+            },
+          },
+        },
+        observedAt: Date.now(),
+      });
+    }
     const p = this.requireProject(projectId),
       rows = this.domain().tasks(projectId),
       snapshot = this.workspaceSnapshot(rows.map((t) => String(t.id))),
@@ -2633,14 +2720,83 @@ export class OperatorApi {
     }
     const response = {
       data: {
+        state: "live" as const,
         project: this.project(p, excluded),
         profiles: this.profiles(excluded),
         tasks,
+        lifecycle: this.publicProjectLifecycle(p, excluded),
       },
       observedAt: Date.now(),
     };
     this.requireWorkspaceSnapshot(snapshot);
     return projectSchema.parse(response);
+  }
+  private publicProjectLifecycle(
+    project: Row,
+    excluded: readonly string[] | undefined,
+  ) {
+    const blockers = project.archived
+      ? []
+      : this.service.projectLifecycleStatus(String(project.id));
+    return {
+      archiveEligible:
+        !project.archived && Boolean(project.paused) && blockers.length === 0,
+      blockers: blockers.map((blocker) => ({
+        kind: blocker.kind,
+        reason: this.safe(blocker.reason, excluded),
+      })),
+    };
+  }
+  private safeProjectRemnants(
+    rows: readonly {
+      codeHost: "github" | "gitlab";
+      host: string;
+      repositoryId: string;
+      branch: string | null;
+      changeRequestId: string | null;
+    }[],
+    excluded: readonly string[] | undefined,
+  ) {
+    return rows.map((row) => ({
+      codeHost: row.codeHost,
+      host: this.safe(row.host, excluded),
+      repositoryId: this.safe(row.repositoryId, excluded),
+      branch: this.safe(row.branch, excluded),
+      changeRequestId: this.safe(row.changeRequestId, excluded),
+    }));
+  }
+  async readProjectDeletePreview(projectId: string) {
+    return this.readWithExclusionFence(async () => {
+      try {
+        const preview = await this.service.projectDeletionPreview(projectId),
+          excluded = await this.exclusions();
+        return projectDeletePreviewSchema.parse({
+          data: {
+            ...preview,
+            name: this.safe(preview.name, excluded),
+            worktrees: preview.worktrees.map(
+              ({ kind, dirty, unpushed, inspection }) => ({
+                kind,
+                dirty,
+                unpushed,
+                inspection,
+              }),
+            ),
+            affectedProjects: preview.affectedProjects.map((row) => ({
+              projectId: row.projectId,
+              name: this.safe(row.name, excluded),
+            })),
+            externalRemnants: this.safeProjectRemnants(
+              preview.externalRemnants,
+              excluded,
+            ),
+          },
+          observedAt: Date.now(),
+        });
+      } catch (error) {
+        throw domainApiError(error) ?? new OperatorApiError(503, "unavailable");
+      }
+    });
   }
   private capacity(projectId: string) {
     const c = this.domain().capacityLimits([projectId]);
@@ -3296,7 +3452,9 @@ export class OperatorApi {
     if (query.projectId) this.requireProject(query.projectId);
     const catalog = this.catalog().filter(
       (t) =>
-        (!query.projectId || t.projectId === query.projectId) &&
+        (query.projectId
+          ? t.projectId === query.projectId
+          : !this.requireProject(String(t.projectId)).archived) &&
         (!query.state || t.state === query.state),
     );
     const catalogFingerprint = createHash("sha256")
@@ -3636,6 +3794,9 @@ export class OperatorApi {
     );
   }
   async readInbox(params = new URLSearchParams()) {
+    return this.readWithExclusionFence(() => this.readInboxOnce(params));
+  }
+  private async readInboxOnce(params: URLSearchParams) {
     const allowed = ["cursor", "limit", "kind", "project"];
     if (
       [...params.keys()].some((k) => !allowed.includes(k)) ||
@@ -3664,7 +3825,11 @@ export class OperatorApi {
     const { limit = 100, kind, project } = filter.data;
     const visibility = this.visibilityToken(),
       items: TaskInboxItem[] = [];
-    const catalog = this.catalog();
+    const catalog = this.catalog().filter((t) =>
+      project
+        ? t.projectId === project
+        : !this.requireProject(String(t.projectId)).archived,
+    );
     const tasks = catalog.map((t) => this.requireTask(t.id)),
       snapshot = this.workspaceSnapshot(catalog.map((t) => t.id)),
       exclusionBase = this.exclusionBase(),
@@ -4008,6 +4173,7 @@ export class OperatorApi {
     const issueBrief = this.service.githubSources().issueBrief(taskId),
       repositoryLinks = d.repositoryLinks(projectId).links;
     const data = {
+      project: this.project(p, excluded),
       task: {
         id: taskId,
         projectId,
@@ -4100,6 +4266,7 @@ export class OperatorApi {
             d.profile(String(a.profileId)).version,
           ),
           currentInstructionsRevision: Number(p.instructionsRevision),
+          readOnly: Boolean(p.archived),
           started: this.service.assignmentHasStartedExecution(String(a.id)),
           runtime: d.profileRuntime(
             String(a.profileId),
@@ -6467,6 +6634,23 @@ export class OperatorApi {
     if (!scope.success || !type.success || !key.success)
       throw new OperatorApiError(400, "invalid-input");
     const [kind, id = ""] = scope.data.split(":");
+    if (type.data === "project.delete") {
+      if (kind !== "project") throw new OperatorApiError(400, "invalid-input");
+      const raw = this.service.recordedProjectDeletion(id, key.data);
+      return operationReadSchema.parse({
+        data: raw
+          ? {
+              state: "recorded",
+              receipt: commandReceipt(
+                parseDomainCommandOutcome("project.delete", raw),
+                key.data,
+                id,
+              ),
+            }
+          : { state: "not-recorded" },
+        observedAt: Date.now(),
+      });
+    }
     if (type.data === "task.comment.send") {
       if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
       return this.readWithExclusionFence(async () => {
@@ -9229,6 +9413,23 @@ export class OperatorApi {
         inputCommand.type === "repositories.configure"
           ? await this.normalizeConfigurationRows(inputCommand)
           : inputCommand;
+      if (c.type === "project.delete")
+        return commandReceipt(
+          parseDomainCommandOutcome(
+            "project.delete",
+            await this.service.deleteProject({ ...c, actor: "operator" }),
+          ),
+          c.key,
+          c.projectId,
+        );
+      if (c.type === "project.archive" || c.type === "project.restore") {
+        const raw = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome(c.type, raw),
+          c.key,
+          c.projectId,
+        );
+      }
       if (
         c.type === "drafting.start" ||
         c.type === "drafting.stop" ||
@@ -9851,6 +10052,26 @@ export class OperatorApi {
         throw new OperatorApiError(400, "local-review-batch-too-large");
       if (error instanceof LocalReviewRecipientUnavailableError)
         throw new OperatorApiError(409, "local-review-recipient-unavailable");
+      if (error instanceof ProjectArchiveBlockedError)
+        throw new OperatorApiError(
+          409,
+          "conflict",
+          undefined,
+          undefined,
+          "Pause the project and resolve active work before archiving. Refresh project status for details.",
+        );
+      if (error instanceof ProjectArchivedError)
+        throw new OperatorApiError(
+          409,
+          "conflict",
+          undefined,
+          undefined,
+          "Archived projects are read-only. Rename, restore or delete the project from its settings.",
+        );
+      if (error instanceof ProjectDeletionUnavailableError)
+        throw new OperatorApiError(503, "unavailable");
+      if (error instanceof RedactionLimitError)
+        throw new OperatorApiError(503, "redaction-limit");
       const mapped = domainApiError(error);
       if (mapped) throw mapped;
       throw new OperatorApiError(503, "command-outcome-unknown");

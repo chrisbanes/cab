@@ -90,6 +90,10 @@ export class StatusMappingWriter {
     private readonly mappings: StatusMappingStore,
     private readonly sources: GitHubSourceStore,
     private readonly coordinator: DeliveryCoordinator,
+    private readonly projectWrite?: (
+      projectId: string,
+      run: () => Promise<void>,
+    ) => Promise<void>,
   ) {}
 
   /** One pass at a time; a request that arrives during a pass runs one more pass after it. */
@@ -121,6 +125,7 @@ export class StatusMappingWriter {
   private async pass(): Promise<void> {
     const { domain } = this.facts;
     for (const project of domain.projects()) {
+      if (project.archived) continue;
       const projectId = String(project.id);
       const { version, mapping } = this.mappings.current(projectId);
       if (!mapping || this.mappings.availability(projectId) !== "available") {
@@ -140,17 +145,20 @@ export class StatusMappingWriter {
         const imported = domain.importedTask(taskId);
         if (!imported) continue;
         try {
-          await this.task(
-            projectId,
-            version,
-            mapping,
-            taskId,
-            String(imported.nodeId),
-            this.sources.forTracker({
-              provider: String(imported.provider),
-              instance: String(imported.instance),
-            }),
-          );
+          const write = () =>
+            this.task(
+              projectId,
+              version,
+              mapping,
+              taskId,
+              String(imported.nodeId),
+              this.sources.forTracker({
+                provider: String(imported.provider),
+                instance: String(imported.instance),
+              }),
+            );
+          if (this.projectWrite) await this.projectWrite(projectId, write);
+          else await write();
         } catch {
           // One task's failure leaves it to the next pass and does not stop the others.
         }
@@ -179,7 +187,11 @@ export class StatusMappingWriter {
   ): Promise<void> {
     const { domain, deliveryStore, state: execution } = this.facts;
     // The mapping changed while this pass waited: its tasks are left to the next pass, under the new one.
-    if (this.mappings.current(projectId).version !== version) return;
+    if (
+      domain.project(projectId).archived ||
+      this.mappings.current(projectId).version !== version
+    )
+      return;
     // Read now, with the item below: the pass may have waited on the network since it listed tasks.
     const fresh = domain.task(taskId);
     if (fresh.state === "cancelled") return;

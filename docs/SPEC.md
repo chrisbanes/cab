@@ -202,6 +202,86 @@ work or task completion; the service enforces completion conditions and permissi
 See the [routing design](design/assignment-routing.md) for revision and failure
 boundaries. Typed judgments and confidence are not proof of correctness or authority.
 
+## Project archive and deletion
+
+Archive freezes a paused, drained project without cancelling work or removing its
+open tasks, configuration, source memberships or history. Refuse while assignments,
+executions, ownership/recovery holds, pending effects, reservations, drafting/routing,
+agent requests or provider writes remain unresolved. Unknown inspection is a refusal.
+Check durable and in-flight service facts again inside the archive transaction; do
+not hold that transaction across network or filesystem operations.
+
+Archived projects reserve their case-folded names and admit only name-only rename,
+restore and deletion. Restore increments the version and leaves the project paused.
+Internal ownership and privacy enumeration includes archived projects; public lists
+and pickers hide them by default and offer explicit archived-history access. Late
+source reads cannot commit after archive, or after archive followed by restore under
+a different project version. An active project's selection of a shared item may
+record its own membership without rewriting the archived owner's task or brief.
+
+Deletion is archived-only, irreversible and addressed by project ID. It requires the
+exact current display name and a version/digest-bound ownership and cleanup preview.
+Remove all owned records atomically while preserving shared profiles, installation
+and authentication state, provider identity exceptions and private redaction values.
+Capture minimal worktree, Claude temporary-directory and qualified cab-home Codex
+thread cleanup identities before removing their source rows. Postcommit cleanup is
+retryable from tombstones; failure never restores the project. Completed cleanup
+drops captured path/binding payload. No code-host branch/PR or tracker item is removed.
+
+Core archive/restore commands, durable lifecycle migration, service effect registration,
+store admission and retention-sweep guards, and versioned source-read fences are authored.
+Stack drain validates the persisted create/link journal and its confirmed outcome;
+unknown or pending nested phases refuse archive. The archived-only service deletion
+preview and atomic explicit ownership traversal are implemented.
+The traversal checks every table and column against a fixed inventory, captures detached
+receipt keys before removing parents, and retains validated private exclusion strings
+with the tombstone in the same transaction. An unprovable ownership identity refuses
+deletion. Immediate, startup and periodic cleanup passes use durable captured identities,
+with bounded admission and shared
+workspace/thread locks. Force-discard is confined to the captured managed worktree;
+source checkouts, branches, PRs and retained Codex archive files remain intact. Missing
+resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pending;
+older descriptors without sufficient Git proof never authorize a guessed removal.
+Surviving ownership anywhere beneath the removal root, including a repository's
+source subdirectory or Git common directory, prevents removal. Repository setup,
+repository configuration and workspace binding also check those pending captured roots
+inside the transaction that acquires checkout or common-directory ownership. A checkout
+outside the removal root is still refused if its separate Git directory lies inside it;
+checking ownership only after an already-dispatched child exits cannot protect that owner.
+Destructive Git is
+preceded by a private item reservation bound to its captured identity. A bounded
+result without observed child exit retains that reservation and task lock until the
+exact child positively exits; shutdown does not wait indefinitely for that proof.
+A restarted process cannot recover the old process-local exit notification, so an
+unsettled reservation (including legacy unknown workspace outcomes) stays pending
+without another removal, even when paths are absent. Late exit alone cannot clear a
+reservation after ownership changes or shutdown; fenced identity readback is required.
+Successful item checkpoints prune private payloads, while stable opaque thread identities
+continue to refuse restoration of deleted conversations. Private exclusions persist
+independently of cleanup progress.
+
+The operator API exposes versioned `project.archive`, `project.restore` and
+`project.delete` commands. `GET /api/operator/projects/:id` distinguishes live projects
+from deleted tombstones; `GET /api/operator/projects/:id/delete-preview` exposes counts,
+worktree dirty/unpushed/unknown status, affected projects and retained external state.
+These public reads omit captured cleanup identities and private redaction values.
+The original deletion receipt stays unchanged as cleanup progresses; read the tombstone
+for current cleanup status. Deleted IDs never resolve to a later project with the same name.
+
+Project lists hide archived projects by default. `includeArchived=true`,
+`cab project list --archived` and Settings' Show archived include both active and archived
+projects. Direct archived task and assignment reads retain their history, inspector links
+and original-operation receipt checks. New mutations and retry sends are disabled;
+service guards enforce the same freeze. An absent project in a filtered picker does not
+establish its lifecycle. The retired `/project/:id` editor remains an authenticated 404.
+
+The project settings Danger zone offers archive after pause/drain, restore into a paused
+state, and deletion only after an inspected preview and an exact typed name. Rename,
+restore or a stale preview requires a new inspection. A conflict keeps the typed name;
+an unknown outcome keeps the original body and request key for receipt lookup. Successful
+deletion shows a tombstone and its separate cleanup progress.
+The service refuses archive when authoritative in-flight facts are unavailable.
+
 ## Admission, project placement and task dependencies
 
 The operator admits local work or configures the source's optional readiness rule.
@@ -2200,7 +2280,14 @@ source and delivery credential references, their environment key names and value
 environment values whose names match `TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL`,
 and workspace/control paths are excluded before storage; current exclusions are
 also applied when reading history. If safe redaction is unavailable, text is
-omitted. Diagnostic capture failures and missing history cannot establish
+omitted. A private redaction-only ledger retains exact removed project instruction
+and exclusion values indefinitely, without project ownership or restoration metadata.
+Only sanitization consumes these values; they are never instructions, model context,
+public projections or ordinary exports. Existing database backups include the ledger.
+The union of live and retained inputs fails closed above 4096 distinct nonempty values,
+16 MiB UTF-8 total or 64 KiB per value, or when inputs are unavailable. Transactional
+capture is implemented; project deletion and lifecycle controls remain planned.
+Diagnostic capture failures and missing history cannot establish
 completion, release ownership or bypass an execution hold.
 
 ### Human requests and execution controls

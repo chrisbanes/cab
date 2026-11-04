@@ -1,3 +1,5 @@
+import { projectSchema } from "../../src/operator/contracts.js";
+import { ProjectLifecyclePanel, DeletedProject } from "./project-lifecycle.js";
 import { sourceCredentialSummary } from "./settings-view.js";
 import { Circle, CircleCheck, CirclePause } from "lucide-react";
 import { useCallback } from "react";
@@ -73,8 +75,24 @@ export interface TabProps extends SettingsProps {
 export function ProjectConfiguration(
   p: SettingsProps & { projectId: string; query: string },
 ) {
-  const { projectId } = p,
-    tab = projectTab(p.query),
+  const { projectId } = p;
+  const lifecycleLoader = useCallback(
+    (signal: AbortSignal) =>
+      p.client.read(
+        `/api/operator/projects/${projectId}`,
+        projectSchema,
+        signal,
+      ),
+    [p.client, projectId],
+  );
+  const lifecycle = useOperatorResource(
+    `${p.session.csrfToken}:${projectId}:lifecycle`,
+    lifecycleLoader,
+  );
+  useHeaderRefresh(p.refreshNonce, () => {
+    void lifecycle.refresh();
+  });
+  const tab = projectTab(p.query),
     loader = useCallback(
       (signal: AbortSignal) =>
         p.client.read(
@@ -107,10 +125,26 @@ export function ProjectConfiguration(
   const refreshConfiguration = () => {
     p.refresh();
     resource.refresh();
+    lifecycle.refresh();
   };
+  const readOnly =
+    lifecycle.state.data?.data.state !== "live" ||
+    lifecycle.state.data.data.project.archived;
+  const tabProps = { ...p, readOnly };
   const unsettled = p.drafts
     .unsettledPlacements(projectId)
     .filter((c) => !data?.placements.some((row) => row.taskId === c.taskId));
+  if (lifecycle.state.data?.data.state === "deleted")
+    return (
+      <DeletedProject
+        {...p}
+        tombstone={lifecycle.state.data.data.tombstone}
+        reload={() => {
+          void lifecycle.refresh();
+          p.refresh();
+        }}
+      />
+    );
   return (
     <div className="settings-page">
       <ResourceStatus
@@ -120,6 +154,15 @@ export function ProjectConfiguration(
       />
       {data && (
         <>
+          {lifecycle.state.data?.data.state === "live" && (
+            <ProjectLifecyclePanel
+              {...p}
+              data={lifecycle.state.data.data}
+              loadedAt={lifecycle.state.fetchedAt}
+              reload={refreshConfiguration}
+            />
+          )}
+
           <p className="settings-status body muted">
             <StatusBadge
               tone="idle"
@@ -155,21 +198,21 @@ export function ProjectConfiguration(
           </nav>
           {tab === "routing" ? (
             <RoutingTab
-              {...p}
+              {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
           ) : tab === "repositories" ? (
             <RepositoryTab
-              {...p}
+              {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
           ) : tab === "github" && jiraSource(data, p.query) ? (
             <JiraSourceTab
-              {...p}
+              {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
@@ -187,7 +230,7 @@ export function ProjectConfiguration(
                 </p>
               )}
               <SourceTab
-                {...p}
+                {...tabProps}
                 data={data}
                 loadedAt={resource.state.fetchedAt}
                 refreshConfiguration={refreshConfiguration}
@@ -196,14 +239,14 @@ export function ProjectConfiguration(
             </>
           ) : tab === "delivery" ? (
             <DeliveryTab
-              {...p}
+              {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
           ) : tab === "sync" ? (
             <SyncTab
-              {...p}
+              {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
@@ -211,7 +254,7 @@ export function ProjectConfiguration(
             />
           ) : (
             <GeneralTab
-              {...p}
+              {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
@@ -321,7 +364,7 @@ function ProjectStateCards({
 function GeneralTab(p: TabProps) {
   const { data, projectId } = p,
     draftKey = `project.configure:${projectId}`,
-    d = useDraft(p.drafts, draftKey);
+    d = useDraft(p.drafts, draftKey, p.readOnly);
   const initial: Values = {
     name: data.project.name ?? "",
     leadProfileId: data.project.leadProfileId ?? "",

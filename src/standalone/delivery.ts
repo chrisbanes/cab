@@ -180,6 +180,10 @@ export class DeliveryCoordinator {
   constructor(
     private readonly store: DeliveryStore,
     private readonly options: DeliveryCoordinatorOptions,
+    private readonly projectWrite?: <T>(
+      taskId: string,
+      run: () => Promise<T>,
+    ) => Promise<T>,
   ) {}
   private codeHost(
     projectId: string,
@@ -295,7 +299,12 @@ export class DeliveryCoordinator {
           .filter((p): p is Promise<unknown> => p !== undefined),
       ),
     ];
-    const promise = Promise.allSettled(prior).then(run);
+    const taskKey = keys.find((key) => /^(?:task|status):[^:]+$/.test(key));
+    const invoke = () =>
+      this.projectWrite && taskKey
+        ? this.projectWrite(taskKey.slice(taskKey.indexOf(":") + 1), run)
+        : run();
+    const promise = Promise.allSettled(prior).then(invoke);
     for (const key of keys) this.tails.set(key, promise);
     void promise
       .finally(() => {
@@ -1106,7 +1115,9 @@ export class DeliveryCoordinator {
   }
   async refresh(): Promise<void> {
     await this.reconcile();
-    for (const binding of this.store.deliveries())
+    for (const binding of this.store
+      .deliveries()
+      .filter((binding) => this.store.isTaskWritable(binding.taskId)))
       await this.serialize([`task:${binding.taskId}`], async () => {
         if (this.stopped) return;
         try {
@@ -1114,6 +1125,8 @@ export class DeliveryCoordinator {
         } catch (error) {
           if (!(error instanceof DeliveryReadUnavailable)) throw error;
         }
+      }).catch((error) => {
+        if (this.store.isTaskWritable(binding.taskId)) throw error;
       });
   }
   private async inspectBinding(taskId: string) {
@@ -1266,6 +1279,7 @@ export class DeliveryCoordinator {
   async reconcile(): Promise<void> {
     if (this.stopped) return;
     for (const record of this.store.actions()) {
+      if (!this.store.isTaskWritable(record.binding.taskId)) continue;
       if (
         !["prepared", "attempting", "uncertain"].includes(record.state) &&
         !retryDue(record)
@@ -1322,6 +1336,8 @@ export class DeliveryCoordinator {
           };
         }
         this.recordPublicationAware(current, observation);
+      }).catch((error) => {
+        if (this.store.isTaskWritable(record.binding.taskId)) throw error;
       });
     }
   }

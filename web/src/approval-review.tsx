@@ -37,6 +37,7 @@ const copy = {
  * the revision and material shown; a changed request is a new review.
  */
 export function ApprovalReview({
+  readOnly = false,
   client,
   session,
   taskId,
@@ -44,6 +45,7 @@ export function ApprovalReview({
   requesterName,
   onChanged,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   taskId: string;
@@ -64,6 +66,7 @@ export function ApprovalReview({
     (kind) => {
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
+    readOnly,
   );
   const compareUrl = safeCompareUrl(
       approval.compareUrl,
@@ -186,14 +189,14 @@ export function ApprovalReview({
           <div className="question-actions">
             <Button
               variant="secondary"
-              disabled={Boolean(sending)}
+              disabled={readOnly || Boolean(sending)}
               onClick={() => void decide("denied")}
             >
               {decided(sending) === "denied" ? "Sending…" : "Deny"}
             </Button>
             {approval.approvable && (
               <Button
-                disabled={Boolean(sending)}
+                disabled={readOnly || Boolean(sending)}
                 onClick={() => void decide("approved")}
               >
                 {decided(sending) === "approved"

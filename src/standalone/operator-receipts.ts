@@ -52,6 +52,31 @@ export function commandReceipt(
             instructionsRevision: outcome.result.instructionsRevision,
           },
         };
+      case "project.archive":
+      case "project.restore":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: outcome.result.id,
+            version: outcome.result.version,
+            archived: outcome.result.archived === 1,
+            paused: outcome.result.paused === 1,
+          },
+        };
+      case "project.delete":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: outcome.result.projectId,
+            deletedAt: outcome.result.deletedAt,
+          },
+        };
       case "profile.create":
       case "profile.configure":
         return {
@@ -266,6 +291,7 @@ export function commandReceipt(
           },
         };
       case "assignment.create":
+        // These domain commands have no public operator receipt contract here yet.
         throw new ReceiptShapeError();
       default: {
         const exhaustive: never = outcome;

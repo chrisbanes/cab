@@ -1,3 +1,8 @@
+import {
+  assertOwnedWorkWritable,
+  assertProjectWritable,
+  assertTaskProjectWritable,
+} from "../core/project-lifecycle.js";
 import { z } from "zod";
 import { type Database, transaction } from "../core/store.js";
 
@@ -192,6 +197,9 @@ export class SchedulerStore {
         );
       return current;
     }
+    if (value.projectId) assertProjectWritable(this.db, value.projectId);
+    if (value.taskId && value.kind !== "drafting")
+      assertTaskProjectWritable(this.db, value.taskId);
     this.db
       .prepare(`INSERT INTO turn_requests
         (requestKey, workId, kind, taskId, projectId, assignmentId, taskVersion,
@@ -395,6 +403,7 @@ export class SchedulerStore {
   }
 
   setWorkspace(workId: string, workspace: string): void {
+    assertOwnedWorkWritable(this.db, workId);
     const current = this.byWorkId(workId);
     if (current.workspace !== null && current.workspace !== workspace)
       throw new Error("Turn request workspace identity changed");
@@ -414,6 +423,7 @@ export class SchedulerStore {
       | "profileRevision"
     >,
   ): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(`UPDATE turn_requests SET taskVersion = ?, assignmentVersion = ?,
         instructionsRevision = ?, profileRevision = ?, reason = NULL
@@ -428,6 +438,7 @@ export class SchedulerStore {
   }
 
   wait(workId: string, reason: string): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(
         "UPDATE turn_requests SET reason = ? WHERE workId = ? AND state = 'queued'",
@@ -436,6 +447,7 @@ export class SchedulerStore {
   }
 
   hold(workId: string, reason: string): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(
         "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = ?",

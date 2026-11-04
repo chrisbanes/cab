@@ -171,6 +171,7 @@ export class ExecutionSupervisor {
 
   async reconcileOnStart(): Promise<void> {
     for (const workId of this.state.admittedWorkIds()) {
+      if (!this.state.projectWorkWritable(workId)) continue;
       const stored = this.state.recoveryIdentity(workId);
       if (!stored) {
         this.recordObservation(workId, "no-proof");
@@ -371,6 +372,8 @@ export class ExecutionSupervisor {
     command?: { key: string; receipt: RecoveryReceipt; assignmentId?: string },
   ) {
     const value = recoveryReceiptSchema.parse(receipt);
+    if (!this.state.projectWorkWritable(value.workId))
+      throw new RecoveryRejectedError("Archived projects are read-only");
     const stored = this.state.recoveryIdentity(value.workId);
     if (
       !stored?.processIdentity ||

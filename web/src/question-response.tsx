@@ -40,6 +40,7 @@ import {
 import type { HoldNotice } from "./inbox-presentation.js";
 import { clockLabel } from "./presentation.js";
 export function QuestionResponse({
+  readOnly = false,
   client,
   session,
   taskId,
@@ -52,6 +53,7 @@ export function QuestionResponse({
   holds = [],
   observedAt,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   taskId: string;
@@ -170,7 +172,8 @@ export function QuestionResponse({
     state?.sending || state?.lifecycle.uncertain || state?.lifecycle.receipt,
   );
   const canEdit = Boolean(
-    state &&
+    !readOnly &&
+      state &&
       data?.status === "pending" &&
       sameForm &&
       state.revision === data.revision &&
@@ -178,7 +181,7 @@ export function QuestionResponse({
       resource.state.status === "fresh",
   );
   const submit = async () => {
-    if (!state || !data) return;
+    if (readOnly || !state || !data) return;
     // Undefined resends the frozen answer: the check after an unconfirmed send.
     let fresh: OperatorCommand | undefined;
     if (!state.lifecycle.uncertain) {

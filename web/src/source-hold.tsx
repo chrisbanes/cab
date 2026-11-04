@@ -22,6 +22,7 @@ const unavailable = "Unavailable or redacted";
  * is open and ready, and that refusal is shown here rather than guessed from the read.
  */
 export function SourceHoldCard({
+  readOnly = false,
   client,
   session,
   task,
@@ -29,6 +30,7 @@ export function SourceHoldCard({
   onSend,
   answered,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   task: Task;
@@ -54,6 +56,7 @@ export function SourceHoldCard({
     (kind) => {
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
+    readOnly,
   );
   // A recorded resume answers only the hold it cleared: a hold reactivated later has a higher revision.
   const resolve =
@@ -81,7 +84,7 @@ export function SourceHoldCard({
           {!uncertain && (
             <Button
               variant="secondary"
-              disabled={Boolean(sending)}
+              disabled={readOnly || Boolean(sending)}
               onClick={() => {
                 onSend?.(hold.revision);
                 void send(

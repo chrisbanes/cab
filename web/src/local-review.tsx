@@ -177,7 +177,9 @@ function useLocalReviewController({
   state,
   changed,
   lead,
+  readOnly = false,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   taskId: string;
@@ -232,8 +234,12 @@ function useLocalReviewController({
     if (restored) state.send = restored;
   }
 
-  const execute = async (input: Parameters<OperatorClient["command"]>[0]) =>
-    client.command(input, session.csrfToken);
+  const execute = async (
+    input: Parameters<OperatorClient["command"]>[0],
+  ): Promise<CommandState> =>
+    readOnly
+      ? { state: "unknown", command: input, code: "unavailable" }
+      : client.command(input, session.csrfToken);
   /**
    * One alert naming the cause and saying the input is kept, or, when the response was lost,
    * one warning whose check replays the exact request. The code sits in Details.
@@ -587,6 +593,7 @@ function useLocalReviewController({
   };
 
   return {
+    readOnly,
     draft,
     resource,
     sentList,
@@ -601,6 +608,7 @@ function useLocalReviewController({
         ?.focus();
     },
     open(originKey: string, label: string, anchor: ReviewAnchorCandidate) {
+      if (readOnly) return;
       // The composer this replaces takes its refusal with it.
       if (
         state.notice?.tone === "success" ||
@@ -628,6 +636,7 @@ function useLocalReviewController({
       const composer = state.composer;
       // Another write in flight or awaiting its check keeps its request: no new one starts.
       if (
+        readOnly ||
         !composer ||
         !draft ||
         composer.saving ||
@@ -652,6 +661,10 @@ function useLocalReviewController({
     },
     /** Replays the exact request of an unconfirmed draft write, never a new one. */
     async check() {
+      if (readOnly) {
+        await resource.refresh();
+        return;
+      }
       const unconfirmed = state.unconfirmed;
       if (!unconfirmed) return;
       state.unconfirmed = null;
@@ -661,7 +674,7 @@ function useLocalReviewController({
     },
     /** Drafts saved before the anchor rule can only be sent once these are gone. */
     async removeUnanchoredComments() {
-      if (!draft || state.pending) return;
+      if (readOnly || !draft || state.pending) return;
       const unanchored = draft.draft.comments.filter(
         (comment) => comment.anchorGroupIds.length === 0,
       );
@@ -679,7 +692,7 @@ function useLocalReviewController({
       );
     },
     async updateComment(commentId: string, body: string | null) {
-      if (!draft || state.pending) return;
+      if (readOnly || !draft || state.pending) return;
       const comments = draft.draft.comments;
       const index = comments.findIndex((c) => c.commentId === commentId);
       const neighbour = comments[index + 1] ?? comments[index - 1];
@@ -711,7 +724,7 @@ function useLocalReviewController({
       focusLater(`[data-review-edit="${CSS.escape(commentId)}"]`);
     },
     async saveSummary() {
-      if (!draft || state.summary === null || state.pending) return;
+      if (readOnly || !draft || state.summary === null || state.pending) return;
       await write(
         saveCommand(
           { summary: state.summary.trim(), comments: draft.draft.comments },
@@ -721,7 +734,14 @@ function useLocalReviewController({
       );
     },
     async send() {
-      if (!draft || !lead || !leadAccepts(lead) || state.send || state.pending)
+      if (
+        readOnly ||
+        !draft ||
+        !lead ||
+        !leadAccepts(lead) ||
+        state.send ||
+        state.pending
+      )
         return;
       state.notice = null;
       const send: LocalReviewSend = {
@@ -751,6 +771,12 @@ function useLocalReviewController({
     },
     async reconcile() {
       const send = state.send;
+      if (readOnly) {
+        if (send) state.inspectKey = send.key;
+        await sentList.refresh();
+        state.notify();
+        return;
+      }
       if (send?.status !== "unknown") return;
       send.status = "sending";
       state.notify();
@@ -769,7 +795,7 @@ function useLocalReviewController({
       state.notify();
     },
     async startNew() {
-      if (!draft || state.pending) return;
+      if (readOnly || !draft || state.pending) return;
       await write(
         {
           type: "review.draft.discard",
@@ -866,6 +892,7 @@ export function CommentAction({
     <Button
       variant={anchor ? "primary" : "secondary"}
       disabled={
+        review.readOnly ||
         !anchor ||
         !review.draft ||
         review.draft.state !== "editable" ||
@@ -969,7 +996,7 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
         autoGrow
         maxLength={4000}
         value={composer.body}
-        disabled={composer.saving}
+        disabled={review.readOnly || composer.saving}
         onChange={(event) => {
           composer.body = event.target.value;
           review.changed();
@@ -1002,7 +1029,10 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
         <Button
           type="submit"
           disabled={
-            composer.saving || review.state.pending || !composer.body.trim()
+            review.readOnly ||
+            composer.saving ||
+            review.state.pending ||
+            !composer.body.trim()
           }
         >
           {composer.saving && !review.state.unconfirmed
@@ -1216,7 +1246,8 @@ export function LocalReviewPanel() {
   });
   if (!review || !state) return null;
   const send = state.send;
-  const locked = frozen(review) || draft?.state !== "editable";
+  const locked =
+    review.readOnly || frozen(review) || draft?.state !== "editable";
   const groupAnchors = new Map(
     (draft?.groups ?? []).map((group) => [group.groupId, group.anchorIds]),
   );
@@ -1502,7 +1533,7 @@ export function LocalReviewPanel() {
       {draft?.state === "sent" && (
         <Button
           variant="secondary"
-          disabled={state.pending}
+          disabled={review.readOnly || state.pending}
           onClick={() => void review.startNew()}
         >
           Start a new review

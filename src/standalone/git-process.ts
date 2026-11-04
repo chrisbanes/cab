@@ -22,6 +22,8 @@ export interface GitRunOptions {
   /** Stdout plus stderr bytes; the child is stopped when exceeded. */
   maxOutputBytes: number;
   signal?: AbortSignal;
+  /** Captured destructive cleanup alone retains exact-child exit notification after a bounded result. */
+  observeSettlement?: boolean;
   /**
    * Applied over the offline `gitEnvironment()`. Only `git-push.ts` and `git-fetch.ts` (which enable the one HTTPS
    * transport) and `push-verification.ts` (which only hardens object reads) pass this, as a
@@ -48,7 +50,29 @@ export type GitRunResult =
       spawned: boolean;
       childExitObserved: boolean;
       childExitSignal: NodeJS.Signals | null;
+      /** Present only for an opted-in, spawned child whose exit was not yet observed. Never rejects. */
+      settlement?: Promise<void>;
     };
+
+/** Kept separate so the late listener retains no command, environment or output buffers. */
+function observeSettlement(child: ChildProcess) {
+  let done!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    done = resolve;
+  });
+  const ignoreError = () => {};
+  const forget = () => {
+    child.removeListener("exit", exited);
+    child.removeListener("error", ignoreError);
+  };
+  const exited = () => {
+    forget();
+    done();
+  };
+  child.once("exit", exited);
+  child.on("error", ignoreError);
+  return { promise, forget };
+}
 
 /**
  * Run one Git child with the hardened environment and bounded time and output. Only the
@@ -91,6 +115,11 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
       return;
     }
 
+    // Installed synchronously before yielding, so an exit cannot fall between the bounded
+    // result and registration of the caller's settlement continuation.
+    const observation = options.observeSettlement
+      ? observeSettlement(child)
+      : undefined;
     let settled = false;
     let spawned = false;
     let closeObserved = false;
@@ -131,12 +160,15 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
       if (settled || failureKind === undefined) return;
       settled = true;
       cleanup(!closeObserved);
+      const retain = spawned && !childExitObserved && observation;
+      if (!retain) observation?.forget();
       resolvePromise({
         status: "interrupted",
         kind: failureKind,
         spawned,
         childExitObserved,
         childExitSignal,
+        ...(retain ? { settlement: retain.promise } : {}),
       });
     };
 
@@ -147,6 +179,7 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
       if (settled) return;
       settled = true;
       cleanup(false);
+      observation?.forget();
       const output = Buffer.concat(stdout);
       if (code !== 0 || closeSignal !== null) {
         resolvePromise({
