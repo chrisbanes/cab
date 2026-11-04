@@ -723,17 +723,6 @@ async function headerHoldCommand(page, kind) {
   return result;
 }
 
-async function submitForm(page, form, path, buttonName) {
-  const response = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === path &&
-      candidate.request().method() === "POST",
-    { timeout: 10_000 },
-  );
-  await form.getByRole("button", { name: buttonName }).click();
-  required((await response).status() === 303, `operator-${path}-redirect`);
-}
-
 async function login(page, origin, password) {
   // With the web boundary on, /login is the React shell; a legacy page renders the sign-in form.
   await page.goto(`${origin}/`);
