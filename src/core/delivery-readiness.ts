@@ -206,6 +206,31 @@ function acceptsProjectField(
   );
 }
 
+/** Frozen Project values that alone explain the observed change, if every input is known. */
+export function closureProjectFields(
+  frozen: ReadinessInputs,
+  current: ReadinessInputs,
+): ReadinessInputs["components"] | null {
+  if (frozen.item !== current.item || frozen.rule !== current.rule) return null;
+  const now = new Map(current.components.map((c) => [c.id, c.value]));
+  if (now.size !== frozen.components.length) return null;
+  const fields: ReadinessInputs["components"] = [];
+  for (const { id, value } of frozen.components) {
+    const seen = now.get(id);
+    if (value == null || seen == null) return null;
+    if (seen.join() === value.join()) continue;
+    if (
+      !id.startsWith("project-field:") ||
+      seen.length === 0 ||
+      !acceptsProjectField(frozen.rule, id, value) ||
+      acceptsProjectField(current.rule, id, seen)
+    )
+      return null;
+    fields.push({ id, value });
+  }
+  return fields.length ? fields : null;
+}
+
 /**
  * `changed` is an observed difference; `unknown` is an input the current read does not carry.
  * An own issue close exempts what the close itself causes: a Jira status moving to its recorded
@@ -239,6 +264,22 @@ export function compareInputs(
 
 export class DeliveryReadinessStore {
   constructor(private readonly db: Database) {}
+
+  /** Read the current settlement's complete, unlatched evidence without modifying it. */
+  closureProjectFields(taskId: string, commandKey: string) {
+    const row = this.db
+      .prepare(
+        "SELECT inputsJson, invalidated FROM delivery_settlement_readiness WHERE commandKey = ? AND taskId = ?",
+      )
+      .get(commandKey, taskId) as
+      | { inputsJson: string; invalidated: number }
+      | undefined;
+    if (row?.invalidated !== 0) return null;
+    const frozen = inputsSchema.parse(JSON.parse(row.inputsJson));
+    const now = readinessInputs(this.db, taskId, frozen);
+    if (!now?.complete) return null;
+    return closureProjectFields(frozen, now.inputs);
+  }
 
   /** Freezes the task's current inputs under the settlement; `false` when they are not fully observed. */
   capture(commandKey: string, taskId: string, required: boolean): boolean {
