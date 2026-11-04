@@ -566,6 +566,19 @@ test("lower durable membership removal during unknown retarget survives restart 
   );
 });
 
+async function preparedHandback(t: TestContext) {
+  const f = await prepared(t),
+    pr = f.prs.get(`PR-${f.dependent}`)!;
+  // A draft would refuse for an unrelated reason and never exercise settlement.
+  f.prs.set(pr.nodeId, { ...pr, draft: false });
+  await f.current().refreshGitHub();
+  assert.equal(
+    f.current().delivery().delivery(f.dependent)?.observation.draft,
+    false,
+  );
+  return f;
+}
+
 function handbackCommand(f: Awaited<ReturnType<typeof prepared>>) {
   const binding = f.current().delivery().delivery(f.dependent)!;
   return {
@@ -574,7 +587,10 @@ function handbackCommand(f: Awaited<ReturnType<typeof prepared>>) {
     taskId: f.dependent,
     expectedTaskVersion: Number(f.current().domain().task(f.dependent).version),
     expectedDeliveryRevision: binding.revision,
-    expectedPolicyVersion: f.current().delivery().configuration(binding.projectId).version,
+    expectedPolicyVersion: f
+      .current()
+      .delivery()
+      .configuration(binding.projectId).version,
     repositoryId: binding.observation.repositoryId,
     prNumber: binding.observation.number,
     expectedPrNodeId: binding.observation.nodeId,
@@ -584,90 +600,95 @@ function handbackCommand(f: Awaited<ReturnType<typeof prepared>>) {
 }
 
 for (const caller of ["refresh", "handback"] as const) {
-for (const outcome of ["success", "failure"] as const) {
-  test(`${caller} inspection begun before Unstack cannot commit a late ${outcome} over its original journal authority`, async (t) => {
-    const f = await prepared(t),
-      i = await f.current().previewTaskUnstack(f.dependent),
-      command = f.command(i),
-      handback = handbackCommand(f);
-    let entered!: () => void, release!: () => void;
-    const started = new Promise<void>((resolve) => {
-        entered = resolve;
-      }),
-      barrier = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-    const inspect = f.provider.inspectPr.bind(f.provider);
-    let paused = false;
-    t.mock.method(
-      f.provider,
-      "inspectPr",
-      async (...args: Parameters<typeof inspect>) => {
-        const observation = await inspect(...args);
-        if (!paused && observation.nodeId === i.pr.nodeId) {
-          paused = true;
-          entered();
-          await barrier;
-          if (outcome === "failure")
-            throw Error("synthetic late inspection rejection");
-          return { ...observation, stack: null };
-        }
-        return observation;
-      },
-    );
-    t.after(() => release());
-    const inspection = caller === "refresh"
-      ? f.current().refreshGitHub()
-      : f.current().settleHandback(handback);
-    const finished = caller === "handback"
-      ? assert.rejects(inspection, /Unstack is pending/)
-      : inspection;
-    await started;
-    f.lost("retarget");
-    assert.equal(
-      (await f.current().unstackTask(command)).phase,
-      "retarget-attempting",
-    );
-    const binding = f.current().delivery().delivery(f.dependent),
-      original = f.journal()[0]!;
-    release();
-    await finished;
-    if (caller === "handback")
-      assert.equal(f.current().delivery().settlementReceipt(handback), null);
-    assert.deepEqual(f.current().delivery().delivery(f.dependent), binding);
-    const continued = f.journal()[0]!;
-    // refreshGitHub wakes the real scheduler, which may append a readback
-    // checkpoint. Only its revision/time may move; authority and effect state cannot.
-    assert.ok(continued.revision >= original.revision);
-    assert.deepEqual(
-      {
-        ...continued,
-        revision: original.revision,
-        updatedAt: original.updatedAt,
-      },
-      original,
-    );
-    assert.equal(f.journal().length, 1);
-    assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
-    f.readAs({ state: "removed", baseRef: "main", baseSha: f.base });
-    assert.equal(
-      (await f.current().reconcileTaskUnstack(command.key)).phase,
-      "confirmed",
-    );
-    assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
-    assert.deepEqual(f.journal()[0]?.identity, original.identity);
-  });
-}
+  for (const outcome of ["success", "failure"] as const) {
+    test(`${caller} inspection begun before Unstack cannot commit a late ${outcome} over its original journal authority`, async (t) => {
+      const f = await preparedHandback(t),
+        i = await f.current().previewTaskUnstack(f.dependent),
+        command = f.command(i),
+        handback = handbackCommand(f);
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>((resolve) => {
+          entered = resolve;
+        }),
+        barrier = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      const inspect = f.provider.inspectPr.bind(f.provider);
+      let paused = false;
+      t.mock.method(
+        f.provider,
+        "inspectPr",
+        async (...args: Parameters<typeof inspect>) => {
+          const observation = await inspect(...args);
+          if (!paused && observation.nodeId === i.pr.nodeId) {
+            paused = true;
+            entered();
+            await barrier;
+            if (outcome === "failure")
+              throw Error("synthetic late inspection rejection");
+            return { ...observation, stack: null };
+          }
+          return observation;
+        },
+      );
+      t.after(() => release());
+      const inspection =
+        caller === "refresh"
+          ? f.current().refreshGitHub()
+          : f.current().settleHandback(handback);
+      const finished =
+        caller === "handback"
+          ? assert.rejects(inspection, /Unstack is pending/)
+          : inspection;
+      await started;
+      f.lost("retarget");
+      assert.equal(
+        (await f.current().unstackTask(command)).phase,
+        "retarget-attempting",
+      );
+      const binding = f.current().delivery().delivery(f.dependent),
+        original = f.journal()[0]!;
+      release();
+      await finished;
+      if (caller === "handback")
+        assert.equal(f.current().delivery().settlementReceipt(handback), null);
+      assert.deepEqual(f.current().delivery().delivery(f.dependent), binding);
+      const continued = f.journal()[0]!;
+      // refreshGitHub wakes the real scheduler, which may append a readback
+      // checkpoint. Only its revision/time may move; authority and effect state cannot.
+      assert.ok(continued.revision >= original.revision);
+      assert.deepEqual(
+        {
+          ...continued,
+          revision: original.revision,
+          updatedAt: original.updatedAt,
+        },
+        original,
+      );
+      assert.equal(f.journal().length, 1);
+      assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+      f.readAs({ state: "removed", baseRef: "main", baseSha: f.base });
+      assert.equal(
+        (await f.current().reconcileTaskUnstack(command.key)).phase,
+        "confirmed",
+      );
+      assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+      assert.deepEqual(f.journal()[0]?.identity, original.identity);
+    });
+  }
 }
 
 test("a recorded handback receipt replays while a later Unstack is pending", async (t) => {
-  const f = await prepared(t),
+  const f = await preparedHandback(t),
     handback = handbackCommand(f),
     receipt = await f.current().settleHandback(handback),
     i = await f.current().previewTaskUnstack(f.dependent),
     command = f.command(i);
   f.lost("retarget");
-  assert.equal((await f.current().unstackTask(command)).phase, "retarget-attempting");
+  assert.equal(
+    (await f.current().unstackTask(command)).phase,
+    "retarget-attempting",
+  );
   const binding = f.current().delivery().delivery(f.dependent);
   assert.deepEqual(await f.current().settleHandback(handback), receipt);
   assert.deepEqual(f.current().delivery().delivery(f.dependent), binding);
