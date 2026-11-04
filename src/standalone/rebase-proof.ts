@@ -31,10 +31,13 @@ export async function proveUnchangedRebase(
   newBase: string,
   newHead: string,
   signal?: AbortSignal,
+  scratchParent?: string,
 ): Promise<RebaseProof | null> {
   if (![oldBase, oldHead, newBase, newHead].every((id) => oid.test(id)))
     return null;
-  const scratch = await mkdtemp(join(tmpdir(), "cab-rebase-proof-"));
+  const scratch = await mkdtemp(
+    join(scratchParent ?? tmpdir(), "cab-rebase-proof-"),
+  );
   const deadline = Date.now() + 30_000;
   const objects = new Map<string, { type: string; body: Buffer }>();
   let bytes = 0;

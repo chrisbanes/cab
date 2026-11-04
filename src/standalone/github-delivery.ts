@@ -278,6 +278,33 @@ export function requiredCheckSources(
   ];
 }
 
+export interface GitHubDeliveryRequest {
+  readonly url: string;
+  readonly method: string;
+  readonly body: string;
+  readonly version: string;
+}
+
+/** Qualification hooks run before secrets and again at each actual dispatch. */
+export interface GitHubDeliveryRequestBoundary {
+  beforeGit?(
+    operation: "prove" | "adopt",
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<{
+    executable: string;
+    maxFetchBytes: number;
+    signal: AbortSignal;
+    fixtureBoundary: import("./git-fetch.js").FixtureGitFetchBoundary;
+  }>;
+  afterResponse?(
+    request: GitHubDeliveryRequest,
+    response: Response,
+  ): Promise<void>;
+  beforeCredential(request: GitHubDeliveryRequest): Promise<void>;
+  beforeCredentialLookup(): Promise<void>;
+  beforeDispatch(request: GitHubDeliveryRequest): Promise<void>;
+}
+
 /** Narrow GitHub.com transport; every effect is settled by an independent read. */
 export class GitHubHttpDeliveryProvider
   implements CodeHostDeliveryProvider, IssueTrackerWriter
@@ -288,6 +315,7 @@ export class GitHubHttpDeliveryProvider
     private readonly push: PushFunction = pushTaskCommit,
     private readonly adopt: AdoptFunction = adoptOutsideHead,
     private readonly host = "github.com",
+    private readonly requestBoundary?: GitHubDeliveryRequestBoundary,
   ) {
     this.resolveCredential =
       typeof credential === "string" ? async () => credential : credential;
@@ -296,7 +324,10 @@ export class GitHubHttpDeliveryProvider
   private resolved?: Promise<string | undefined>;
   /** Resolved on first use and kept for this instance only; every delivery action builds its own provider. */
   private credential(): Promise<string | undefined> {
-    this.resolved ??= this.resolveCredential().catch(() => undefined);
+    this.resolved ??= (async () => {
+      await this.requestBoundary?.beforeCredentialLookup();
+      return this.resolveCredential();
+    })().catch(() => undefined);
     return this.resolved;
   }
   private async request(
@@ -308,11 +339,29 @@ export class GitHubHttpDeliveryProvider
   ): Promise<{ json: unknown; response: Response }> {
     const url = new URL(path, api);
     if (url.origin !== api) throw new Error("provider-origin-mismatch");
+    const request = Object.freeze({
+      url: url.href,
+      method,
+      body: body === undefined ? "" : JSON.stringify(body),
+      version,
+    });
+    await this.requestBoundary?.beforeCredential(request);
     const credential = await this.credential();
     if (!credential) throw new Error("provider-credential-unavailable");
     beforeSend?.();
     const response = await githubFetch(
-      this.fetcher,
+      this.requestBoundary
+        ? async (target, init) => {
+            await this.requestBoundary!.beforeDispatch(
+              Object.freeze({
+                ...request,
+                url: String(target),
+              }),
+            );
+            beforeSend?.();
+            return this.fetcher(target, init);
+          }
+        : this.fetcher,
       url.href,
       {
         method,
@@ -323,10 +372,11 @@ export class GitHubHttpDeliveryProvider
           "X-GitHub-Api-Version": version,
           "Content-Type": "application/json",
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined ? {} : { body: request.body }),
       },
       () => new Error("provider-origin-mismatch"),
     );
+    await this.requestBoundary?.afterResponse?.(request, response.clone());
     if (!response.ok)
       throw new ProviderFailure(
         response.status,
@@ -932,7 +982,23 @@ export class GitHubHttpDeliveryProvider
     const repo = await this.repository(input.repositoryId);
     if ((await this.optionalRef(repo.path, input.branch)) !== input.newHead)
       return null;
+    const gitMaterial = Object.freeze({
+      ...input,
+      host: this.host,
+      nameWithOwner: repo.path
+        .slice("/repos/".length)
+        .split("/")
+        .map(decodeURIComponent)
+        .join("/"),
+    });
+    if (this.requestBoundary && !this.requestBoundary.beforeGit)
+      throw Error("fixture-git-scope-missing");
+    const gitScope = await this.requestBoundary?.beforeGit?.(
+      "prove",
+      gitMaterial,
+    );
     const proof = await proveOutsideRebase({
+      ...gitScope,
       workspacePath: input.workspacePath,
       baseCommit: input.newBase,
       oldBase: input.oldBase,
@@ -2168,20 +2234,30 @@ export class GitHubHttpDeliveryProvider
       .join("/");
     return {
       readRef: (branch) => this.optionalRef(path, branch),
-      push: async (request) =>
-        this.push({
+      push: async (request) => {
+        if (this.requestBoundary) throw Error("fixture-git-publication-denied");
+        return this.push({
           ...request,
           host: this.host,
           nameWithOwner,
           token: (await this.credential()) ?? "",
-        }),
-      adopt: async (request) =>
-        this.adopt({
+        });
+      },
+      adopt: async (request) => {
+        if (this.requestBoundary && !this.requestBoundary.beforeGit)
+          throw Error("fixture-git-scope-missing");
+        const scope = await this.requestBoundary?.beforeGit?.(
+          "adopt",
+          Object.freeze({ ...request, host: this.host, nameWithOwner }),
+        );
+        return this.adopt({
+          ...scope,
           ...request,
           host: this.host,
           nameWithOwner,
           token: (await this.credential()) ?? "",
-        }),
+        });
+      },
     };
   }
   private readonly branchRemotes: BranchRemotes = {
