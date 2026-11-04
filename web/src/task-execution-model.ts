@@ -35,7 +35,10 @@ const settled = new Set<Execution["state"]>([
 ]);
 
 /** The holds `execution` reports or any task record keeps, an omitted one included. */
-export function taskHolds(execution: Execution, recovery?: RecoveryHolds): Holds {
+export function taskHolds(
+  execution: Execution,
+  recovery?: RecoveryHolds,
+): Holds {
   const recorded = recovery?.holds;
   return {
     stop: execution.holds.stop || Boolean(recorded?.stop),
@@ -55,7 +58,10 @@ export const holdsUnreadable =
  * A hold the status does not show is named, so a held execution never reads as idle or queued;
  * without the task-wide recovery read the status is never presented as safe either.
  */
-export function executionStatus(execution: Execution, recovery?: RecoveryHolds) {
+export function executionStatus(
+  execution: Execution,
+  recovery?: RecoveryHolds,
+) {
   const holds = taskHolds(execution, recovery);
   const label =
     execution.state === "uncertain" &&
@@ -165,9 +171,14 @@ export function recoveryAssignmentFacts(a: Data["assignments"][number]) {
   };
 }
 
-export function recoveryTaskFacts(lead: Data["lead"], taskHold: Data["taskHold"]) {
+export function recoveryTaskFacts(
+  lead: Data["lead"],
+  taskHold: Data["taskHold"],
+) {
   return {
-    lead: lead ? (lead.name ?? "Name unavailable") : "No project lead is configured",
+    lead: lead
+      ? (lead.name ?? "Name unavailable")
+      : "No project lead is configured",
     taskHold: taskHold ? (taskHold.reason ?? "Reason unavailable") : null,
   };
 }

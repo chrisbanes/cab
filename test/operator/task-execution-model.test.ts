@@ -252,7 +252,10 @@ test("recovery distinguishes absent and withheld lead and task hold facts", () =
     { lead: "Name unavailable", taskHold: "Reason unavailable" },
   );
   assert.deepEqual(
-    recoveryTaskFacts({ profileId: "lead", name: "Lead" }, { reason: "Review" }),
+    recoveryTaskFacts(
+      { profileId: "lead", name: "Lead" },
+      { reason: "Review" },
+    ),
     { lead: "Lead", taskHold: "Review" },
   );
 });

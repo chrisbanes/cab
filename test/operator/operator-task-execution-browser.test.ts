@@ -443,7 +443,9 @@ for (const engine of [
       assert.equal(await facts.getAttribute("open"), "");
       assert.equal(
         await page
-          .locator(`[data-record-id="assignment:${sibling}"] details.assignment-facts`)
+          .locator(
+            `[data-record-id="assignment:${sibling}"] details.assignment-facts`,
+          )
           .getAttribute("open"),
         null,
       );
@@ -472,13 +474,20 @@ for (const engine of [
       assert.equal(await facts.getAttribute("open"), null);
       assert.deepEqual(commands, []);
 
-      await page.goto(`${web.origin}/app/tasks/${a.taskId}?section=assignments`);
+      await page.goto(
+        `${web.origin}/app/tasks/${a.taskId}?section=assignments`,
+      );
       await page.locator("#assignments").waitFor();
       assert.equal(
-        await page.getByText("The linked assignment is unavailable in this task.").count(),
+        await page
+          .getByText("The linked assignment is unavailable in this task.")
+          .count(),
         0,
       );
-      assert.equal(await page.locator("details.assignment-facts[open]").count(), 0);
+      assert.equal(
+        await page.locator("details.assignment-facts[open]").count(),
+        0,
+      );
       for (const id of ["", foreignAssignment]) {
         await page.goto(
           `${web.origin}/app/tasks/${a.taskId}?section=assignments&inspectAssignment=${id}`,
@@ -506,7 +515,9 @@ for (const engine of [
       await page
         .getByRole("link", { name: "View task-wide execution evidence" })
         .click();
-      await page.getByRole("tab", { name: "Execution", selected: true }).waitFor();
+      await page
+        .getByRole("tab", { name: "Execution", selected: true })
+        .waitFor();
       assert.deepEqual(commands, []);
     },
   );

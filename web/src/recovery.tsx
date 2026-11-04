@@ -1037,7 +1037,9 @@ export function AssignmentRecovery(
                   <p className="body">Task hold: {taskFacts.taskHold}.</p>
                 )}
                 <p className="body">{facts?.lifecycle}</p>
-                <p className="body">Result destination: {facts?.destination}.</p>
+                <p className="body">
+                  Result destination: {facts?.destination}.
+                </p>
                 <p className="body">{facts?.revisions}</p>
                 {facts?.canInspectApply && (
                   <ActionLink href={assignmentInspector}>
@@ -1046,7 +1048,9 @@ export function AssignmentRecovery(
                 )}
                 <p className="body">{resumeWarning}</p>
                 <p className="body">{evidenceWarning}</p>
-                <ActionLink href={`/app/tasks/${data.taskId}?section=execution`}>
+                <ActionLink
+                  href={`/app/tasks/${data.taskId}?section=execution`}
+                >
                   View task-wide execution evidence
                 </ActionLink>
                 <p className="metadata muted">
