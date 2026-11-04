@@ -65,7 +65,9 @@ browserTest(
 );
 
 test("timed-out service startup keeps its late service-stop owner without racing runtime shutdown", async () => {
-  const totalMs = 4500;
+  // Setup must reach the delayed runtime start before the deadline; otherwise the
+  // rest of setup has only the cleanup window to settle.
+  const totalMs = deadlineTotalMs;
   const serviceStartDeadline = Date.now() + totalMs - harnessCleanupMs;
   const r = await harness.runQualification({
     fixture: {
