@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   compareInputs,
+  closureProjectFields,
   type ReadinessInputs,
 } from "../../src/core/delivery-readiness.js";
 
@@ -13,6 +14,83 @@ const inputs = (
   rule: '{"mode":"any"}',
   components,
   ...over,
+});
+
+test("closure proof requires every input and only accepted to unaccepted Project changes", () => {
+  for (const mode of ["all", "any"]) {
+    for (const operator of ["in", "not-in"]) {
+      const rule = JSON.stringify({
+        mode,
+        conditions: [
+          {
+            kind: "project-field",
+            projectNodeId: "P",
+            fieldNodeId: "F",
+            operator,
+            optionNodeIds: operator === "in" ? ["todo", "review"] : ["done"],
+          },
+          {
+            kind: "project-field",
+            projectNodeId: "P",
+            fieldNodeId: "F",
+            operator: "in",
+            optionNodeIds: ["alternate"],
+          },
+          { kind: "label", name: "ready", operator: "has" },
+        ],
+      });
+      const field = (value: string[] | null, id = "project-field:P:F") => ({
+        id,
+        value,
+      });
+      const at = (value: string[] | null, extra = label(true)) =>
+        inputs([field(value), extra], { rule });
+      const frozen = at(["todo"]);
+      assert.deepEqual(closureProjectFields(frozen, at(["done"])), [
+        field(["todo"]),
+      ]);
+      assert.equal(closureProjectFields(frozen, at(["review"])), null);
+      assert.equal(closureProjectFields(frozen, at(["alternate"])), null);
+      assert.equal(closureProjectFields(frozen, at([])), null);
+      assert.equal(closureProjectFields(frozen, at(null)), null);
+      assert.equal(closureProjectFields(at(null), at(["done"])), null);
+      assert.equal(closureProjectFields(at([]), at(["done"])), null);
+      assert.equal(
+        closureProjectFields(frozen, at(["done"], label(false))),
+        null,
+      );
+      assert.equal(
+        closureProjectFields(frozen, { ...at(["done"]), item: "other" }),
+        null,
+      );
+      assert.equal(
+        closureProjectFields(frozen, { ...at(["done"]), rule: null }),
+        null,
+      );
+      assert.equal(
+        closureProjectFields(
+          frozen,
+          inputs([field(["done"], "project-field:Q:F"), label(true)], { rule }),
+        ),
+        null,
+      );
+      assert.equal(closureProjectFields(frozen, frozen), null);
+      const other = { id: "project-field:P:G", value: ["one"] };
+      assert.equal(
+        closureProjectFields(
+          { ...frozen, components: [...frozen.components, other] },
+          {
+            ...at(["done"]),
+            components: [
+              ...at(["done"]).components,
+              { ...other, value: ["two"] },
+            ],
+          },
+        ),
+        null,
+      );
+    }
+  }
 });
 const label = (present: boolean) => ({
   id: "label:ready",

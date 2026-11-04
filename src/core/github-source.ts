@@ -1,4 +1,5 @@
 import { DeliveryStore } from "./delivery.js";
+import type { ReadinessInputs } from "./delivery-readiness.js";
 import { composeIssueBrief, type IssueCommentsRead } from "./issue-brief.js";
 import { LeadTextStore } from "./lead-text.js";
 import { TaskReviewStore } from "./task-review.js";
@@ -281,8 +282,34 @@ function closureReadinessProof(
   rule: Readiness | null,
   facts: Parameters<typeof evaluateReadiness>[1],
   hasStatus: boolean,
+  frozenFields: ReadinessInputs["components"] | null = null,
 ): boolean {
   const readiness = evaluateReadiness(rule, facts);
+  if (frozenFields && rule) {
+    const replacements = new Map(
+      frozenFields.map((c) => [c.id, c.value ?? []]),
+    );
+    const referenced = rule.conditions.filter(
+      (c) => c.kind === "project-field",
+    );
+    const fields = facts.fields.filter(
+      (f) =>
+        !replacements.has(`project-field:${f.projectNodeId}:${f.fieldNodeId}`),
+    );
+    for (const c of referenced) {
+      const options = replacements.get(
+        `project-field:${c.projectNodeId}:${c.fieldNodeId}`,
+      );
+      if (options)
+        for (const optionNodeId of options)
+          fields.push({
+            projectNodeId: c.projectNodeId,
+            fieldNodeId: c.fieldNodeId,
+            optionNodeId,
+          });
+    }
+    if (evaluateReadiness(rule, { ...facts, fields }).satisfied) return true;
+  }
   return (
     readiness.satisfied ||
     (hasStatus && readiness.unmet.every((c) => c.kind === "status"))
@@ -1427,6 +1454,10 @@ export class GitHubSourceStore {
         rule,
         { ...facts, labels: snapshot.labels },
         snapshot.status !== undefined,
+        new DeliveryStore(this.db).closureProjectFields(
+          String(issue.taskId),
+          operationId,
+        ),
       );
       const hold = priorHold;
       if (
@@ -1639,6 +1670,7 @@ export class GitHubSourceStore {
           parseRule(config.readiness),
           facts,
           external.observedStatus != null,
+          new DeliveryStore(this.db).closureProjectFields(taskId),
         )
           ? "closed"
           : !closed && ready
