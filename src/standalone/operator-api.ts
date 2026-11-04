@@ -7102,6 +7102,9 @@ export class OperatorApi {
       data: {
         assignment,
         taskId,
+        execution: task.data.execution,
+        lead: task.data.lead,
+        taskHold: task.data.taskHold,
         project:
           task.data.task.projectId === projectId
             ? this.project(d.project(projectId), excluded)

@@ -114,8 +114,99 @@ async function seed() {
     }
     binding.run("foreign-record", foreignTaskId, leadAssignment);
   });
-  return { f, api, taskId, blockerId, candidateId, projectId };
+  return {
+    f,
+    api,
+    taskId,
+    blockerId,
+    candidateId,
+    projectId,
+    leadAssignment,
+    workerAssignment,
+  };
 }
+
+test("assignment recovery projects the fenced task facts while keeping records assignment-scoped", async (t) => {
+  const { f, api, taskId, leadAssignment, workerAssignment } = await seed();
+  t.after(() => f.close());
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)",
+    ).run(taskId, "Held for private review");
+  });
+  const task = (await api.readTask(taskId)).data;
+  const lead = (await api.readAssignmentRecovery(leadAssignment)).data;
+  const worker = (await api.readAssignmentRecovery(workerAssignment)).data;
+  for (const recovery of [lead, worker]) {
+    assert.deepEqual(recovery.execution, task.execution);
+    assert.deepEqual(recovery.lead, task.lead);
+    assert.deepEqual(recovery.taskHold, task.taskHold);
+    assert.deepEqual(
+      recovery.assignment,
+      task.assignments.find(
+        (a) => a.assignmentId === recovery.assignment.assignmentId,
+      ),
+    );
+    assert.equal(recovery.holds.writer, true);
+    assert.equal(recovery.holds.capacity, true);
+    assert.equal(recovery.holds.uncertainty, true);
+    assert.equal(
+      JSON.stringify({
+        execution: recovery.execution,
+        lead: recovery.lead,
+        taskHold: recovery.taskHold,
+      }).includes("PRIVATE"),
+      false,
+    );
+  }
+  assert.equal(lead.omittedCount, 1);
+  assert.equal(lead.records.length, 20);
+  assert.equal(worker.omittedCount, 0);
+  assert.deepEqual(worker.records.map((r) => r.workId), [
+    "worker-record-1",
+    "worker-record-2",
+    "worker-record-3",
+  ]);
+  assert.equal(worker.assignment.resultDestination, "operator");
+  assert.equal(worker.execution.state, "stopping");
+  assert.equal(lead.taskHold?.reason, "Held for [redacted] review");
+});
+
+test("assignment recovery retains null and withheld task facts from the task read", async (t) => {
+  const { f, api, taskId, projectId, workerAssignment } = await seed();
+  t.after(() => f.close());
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE domain_projects SET leadProfileId = NULL WHERE id = ?",
+    ).run(projectId);
+    db.prepare(
+      "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)",
+    ).run(taskId, "Private hold");
+  });
+  assert.equal(
+    (await api.readAssignmentRecovery(workerAssignment)).data.lead,
+    null,
+  );
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed',NULL,NULL,NULL,'chatgpt','workspaceWrite','never')",
+    ).run(randomUUID(), "unknown-assignment-record");
+    db.prepare(
+      "INSERT INTO execution_recovery_identities (workId,workRevision,requestSequence) VALUES (?,1,999)",
+    ).run("unknown-assignment-record");
+    db.prepare(
+      "INSERT INTO task_execution_bindings (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision) VALUES (?,?,?,1,1,1,1)",
+    ).run("unknown-assignment-record", taskId, randomUUID());
+  });
+  const task = (await api.readTask(taskId)).data;
+  const recovery = (await api.readAssignmentRecovery(workerAssignment)).data;
+  assert.equal(recovery.lead, null);
+  assert.deepEqual(recovery.taskHold, task.taskHold);
+  assert.equal(recovery.taskHold?.reason, null);
+  assert.equal(recovery.assignment.resultDestination, null);
+  assert.deepEqual(recovery.execution, task.execution);
+  assert.equal(JSON.stringify(recovery).includes("Private hold"), false);
+});
 
 test("the task read carries task-wide recovery evidence, newest 20 after scoping, with every recorded hold", async (t) => {
   const { f, api, taskId } = await seed();
