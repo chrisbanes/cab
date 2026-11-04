@@ -440,6 +440,7 @@ for (const engine of [
       await facts
         .getByRole("button", { name: /Apply current instructions/ })
         .waitFor();
+      assert.ok((await facts.boundingBox())!.width >= 200);
       assert.equal(await facts.getAttribute("open"), "");
       assert.equal(
         await page
