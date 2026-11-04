@@ -1004,6 +1004,87 @@ export class ExecutionState {
     });
   }
 
+  /** Operator cancellation is terminal task state, not an operator Stop hold. */
+  cancelTask(
+    command: { key: string; taskId: string; expectedVersion: number },
+    validate: () => void,
+  ) {
+    const result = this.recordReceipted(
+      {
+        type: "task.cancel",
+        taskId: command.taskId,
+        expectedVersion: command.expectedVersion,
+      },
+      command.key,
+      (base) => {
+        validate();
+        const task = this.db
+          .prepare("SELECT state FROM domain_tasks WHERE id=?")
+          .get(command.taskId) as { state: string } | undefined;
+        if (task?.state !== "open")
+          throw new DomainConflictError("Only an open task can be cancelled");
+        const active = this.db
+          .prepare(`SELECT e.workId,e.threadId,e.turnId FROM execution_intents e
+        JOIN task_execution_bindings b ON b.workId=e.workId WHERE b.taskId=? AND
+        (e.state IN ('submitting','running') OR (e.state='held' AND EXISTS
+          (SELECT 1 FROM execution_capacity_reservations r WHERE r.workId=e.workId)))`)
+          .all(command.taskId) as Array<{
+          workId: string;
+          threadId: string | null;
+          turnId: string | null;
+        }>;
+        for (const item of active)
+          this.db
+            .prepare(`INSERT OR IGNORE INTO execution_stop_targets
+        (taskId,workId,threadId,turnId,interruptState,terminalState,reason,requestedAt,origin)
+        VALUES (?,?,?,?,?,'unknown',NULL,?,'operator')`)
+            .run(
+              command.taskId,
+              item.workId!,
+              item.threadId!,
+              item.turnId!,
+              item.threadId && item.turnId ? "pending" : "unbound",
+              Date.now(),
+            );
+        // Existing held ownership evidence and reservations are retained unchanged.
+        this.db
+          .prepare(
+            "UPDATE execution_intents SET state='held', reason='Task cancelled', holdKind=NULL WHERE state IN ('submitting','running') AND workId IN (SELECT workId FROM task_execution_bindings WHERE taskId=?)",
+          )
+          .run(command.taskId);
+        if (this.hasTurnRequests)
+          this.db
+            .prepare(
+              "UPDATE turn_requests SET state='held', reason='Task cancelled', holdKind=NULL WHERE state='active' AND workId IN (SELECT workId FROM execution_stop_targets WHERE taskId=?)",
+            )
+            .run(command.taskId);
+        this.db
+          .prepare(
+            "UPDATE domain_tasks SET state='cancelled', version=version+1 WHERE id=?",
+          )
+          .run(command.taskId);
+        return {
+          ...base,
+          kind: "task-cancel" as const,
+          cancellationRequested: active.length,
+        };
+      },
+    );
+    const receipt = z
+      .object({
+        kind: z.literal("task-cancel"),
+        key: z.string().uuid(),
+        recorded: z.literal(true),
+        taskId: z.string().uuid(),
+        cancellationRequested: z.number().int().nonnegative().safe(),
+      })
+      .strict()
+      .parse(result.receipt);
+    if (receipt.taskId !== command.taskId || receipt.key !== command.key)
+      throw new DomainConflictError("Cancel receipt identity changed");
+    return { ...result, receipt };
+  }
+
   /**
    * Runs `record` and stores its receipt in one transaction, so a refusal or failure leaves
    * nothing behind. Same key and content replays the receipt; other content under the key,

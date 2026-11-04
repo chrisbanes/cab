@@ -19,6 +19,8 @@ import {
   transportUsername,
 } from "./git-push.js";
 import { runGit } from "./git-process.js";
+import { proveUnchangedRebase } from "./rebase-proof.js";
+import type { RebaseProof } from "../core/rebase-proof.js";
 import { type Git, provedAncestor } from "./push-verification.js";
 
 export type AdoptOutcome =
@@ -109,6 +111,37 @@ async function storedBytes(dir: string): Promise<number> {
 export async function adoptOutsideHead(
   request: AdoptRequest,
 ): Promise<AdoptOutcome> {
+  return fetchAndProveOutsideHead(request);
+}
+
+export async function proveOutsideRebase(
+  request: AdoptRequest & { oldBase: string; oldHead: string },
+): Promise<RebaseProof | null> {
+  if (!oid.test(request.oldBase) || !oid.test(request.oldHead)) return null;
+  let proof: RebaseProof | null = null;
+  const outcome = await fetchAndProveOutsideHead(
+    request,
+    async (git) => {
+      proof = await proveUnchangedRebase(
+        git,
+        request.oldBase,
+        request.oldHead,
+        request.baseCommit!,
+        request.commitSha,
+        request.signal,
+      );
+      return proof !== null;
+    },
+    request.oldBase,
+  );
+  return outcome === "adopted" ? proof : null;
+}
+
+async function fetchAndProveOutsideHead(
+  request: AdoptRequest,
+  prove?: (git: Git) => Promise<boolean>,
+  negotiationBase = request.baseCommit,
+): Promise<AdoptOutcome> {
   const {
     workspacePath,
     baseCommit,
@@ -153,7 +186,7 @@ export async function adoptOutsideHead(
     await writeFile(join(dir, "HEAD"), "ref: refs/heads/main\n");
     await writeFile(join(dir, "config"), "");
     // The base is a negotiation "have", so only what the worktree lacks is sent.
-    await writeFile(join(dir, "refs", "cab", "base"), `${baseCommit}\n`);
+    await writeFile(join(dir, "refs", "cab", "base"), `${negotiationBase}\n`);
     const scratchEnvironment = {
       GIT_DIR: dir,
       // Quoted as in git-push.ts: Git splits an unquoted value on `:`.
@@ -261,6 +294,7 @@ export async function adoptOutsideHead(
     const onBase = await provedAncestor(scratchGit, baseCommit, commitSha);
     if (onBase === false) return "not-on-base";
     if (onBase !== true) return "unproved";
+    if (prove && !(await prove(scratchGit))) return "unproved";
 
     // Packs go in whole and atomically (copied aside, then renamed), `.pack` before the `.idx` that
     // makes Git find it, so a crash or a concurrent Git never sees half a file. Same name, same content.

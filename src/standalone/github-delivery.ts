@@ -19,6 +19,7 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import { proveOutsideRebase } from "./git-fetch.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import type {
@@ -905,6 +906,43 @@ export class GitHubHttpDeliveryProvider
       strict,
       environments,
     };
+  }
+  async readRebaseHead(repositoryId: string, branch: string) {
+    return this.optionalRef((await this.repository(repositoryId)).path, branch);
+  }
+  async proveRebase(input: {
+    repositoryId: string;
+    branch: string;
+    workspacePath: string;
+    oldBase: string;
+    oldHead: string;
+    newBase: string;
+    newHead: string;
+  }) {
+    const repo = await this.repository(input.repositoryId);
+    if ((await this.optionalRef(repo.path, input.branch)) !== input.newHead)
+      return null;
+    const proof = await proveOutsideRebase({
+      workspacePath: input.workspacePath,
+      baseCommit: input.newBase,
+      oldBase: input.oldBase,
+      oldHead: input.oldHead,
+      commitSha: input.newHead,
+      branch: input.branch,
+      host: this.host,
+      nameWithOwner: repo.path
+        .slice("/repos/".length)
+        .split("/")
+        .map(decodeURIComponent)
+        .join("/"),
+      token: (await this.credential()) ?? "",
+    });
+    if (
+      !proof ||
+      (await this.optionalRef(repo.path, input.branch)) !== input.newHead
+    )
+      return null;
+    return proof;
   }
   async repositoryRequirements(
     repositoryId: string,

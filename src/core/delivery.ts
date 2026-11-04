@@ -1,3 +1,4 @@
+import { rebaseProofSchema, type RebaseProof } from "./rebase-proof.js";
 import {
   type ArchiveBlocker,
   assertOwnedTaskWritable,
@@ -782,6 +783,11 @@ export const prBindingSchema = z
     revision: z.number().int().positive(),
     mode: z.enum(["reviewable-pr", "through-merge"]),
     observation: prObservationSchema,
+    rebaseProofs: z.array(rebaseProofSchema).max(256).optional(),
+    acceptedRetarget: z
+      .object({ fromRef: identity, toRef: identity })
+      .strict()
+      .optional(),
     /** The base the delivery's actions are authorised against. Absent before it was recorded: the stored observation's base. */
     acceptedBaseRef: identity.optional(),
     /** A base change the delivery holds on: the observed base is not an accepted retarget. */
@@ -2588,8 +2594,14 @@ export class DeliveryStore {
    * behind the recovery, not an outside change.
    */
   private pushedShas(taskId: string, repositoryId: string): Set<string> {
-    return new Set(
-      this.actions(taskId).flatMap((a) => {
+    const binding = this.delivery(taskId);
+    const adopted =
+      binding?.observation.repositoryId === repositoryId
+        ? (binding.rebaseProofs ?? []).map((proof) => proof.newHead)
+        : [];
+    return new Set([
+      ...adopted,
+      ...this.actions(taskId).flatMap((a) => {
         const action = a.request.action;
         if (
           !action.kind.startsWith("branch.") ||
@@ -2607,7 +2619,7 @@ export class DeliveryStore {
             : []),
         ];
       }),
-    );
+    ]);
   }
   delivery(taskId: string): PrDeliveryBinding | null {
     const row = this.db
@@ -2742,6 +2754,10 @@ export class DeliveryStore {
       retarget?.priorMerged &&
       retarget.fromRef === binding.acceptedBaseRef
     ) {
+      binding.acceptedRetarget = {
+        fromRef: binding.acceptedBaseRef,
+        toRef: observation.baseRef,
+      };
       binding.acceptedBaseRef = observation.baseRef;
       binding.baseChange = null;
       for (const record of this.actions(taskId)) {
@@ -2813,6 +2829,39 @@ export class DeliveryStore {
       )
       .run(observation.headSha, taskId, observation.repositoryId);
     return true;
+  }
+  /** Caller owns the encompassing lifecycle/edge/workspace compare-and-set transaction. */
+  recordRebaseWithinTransaction(taskId: string, proof: RebaseProof): void {
+    if (!this.db.isTransaction)
+      throw new Error("Rebase proof requires the metadata transaction");
+    assertOwnedTaskWritable(this.db, taskId);
+    const parsed = rebaseProofSchema.parse(proof);
+    const binding = this.delivery(taskId);
+    if (
+      !binding ||
+      (binding.rebaseProofs?.length ?? 0) >= 256 ||
+      binding.baseChange ||
+      binding.observation.headSha !== parsed.newHead ||
+      binding.observation.baseSha !== parsed.newBase
+    )
+      throw new Error("Rebase binding changed");
+    const branch = this.taskBranch(taskId, binding.observation.repositoryId);
+    if (
+      !branch ||
+      branch.branch !== binding.observation.headRef ||
+      branch.lastPushedSha !== parsed.oldHead ||
+      branch.outsideHeadSha !== parsed.newHead
+    )
+      throw new Error("Rebase branch changed");
+    this.db
+      .prepare(
+        "UPDATE delivery_task_branches SET lastPushedSha=?, outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
+      )
+      .run(parsed.newHead, taskId, binding.observation.repositoryId);
+    binding.rebaseProofs = [...(binding.rebaseProofs ?? []), parsed];
+    binding.settlement = null;
+    binding.revision++;
+    this.saveDelivery(binding);
   }
   /** The remote branch was read back at the commit cab last pushed: any outside record is obsolete. */
   clearOutsideHead(taskId: string, repositoryId: string): void {

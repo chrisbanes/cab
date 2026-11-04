@@ -1,3 +1,5 @@
+import { proveUnchangedRebase } from "../../src/standalone/rebase-proof.js";
+import { verifierGit } from "../../src/standalone/push-verification.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -98,8 +100,27 @@ export async function stackedDeliveryFixture(
   /** The next branch push fails with a retryable no-effect failure. */
   let failNext = false;
   const prs = new Map<string, PrDeliveryObservation>();
+  let afterRebaseProof: (() => void | Promise<void>) | undefined;
+  let rebaseProofs = 0;
   const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
     ...unusedIssueInspection,
+    async readRebaseHead(_repositoryId, branch) {
+      return remote[branch] ?? null;
+    },
+    async proveRebase(input) {
+      rebaseProofs++;
+      const proof = await proveUnchangedRebase(
+        verifierGit(input.workspacePath),
+        input.oldBase,
+        input.oldHead,
+        input.newBase,
+        input.newHead,
+      );
+      const hook = afterRebaseProof;
+      afterRebaseProof = undefined;
+      await hook?.();
+      return proof;
+    },
     async preflight(action, _policy, publication) {
       if (publication && nextPreflight) {
         const hook = nextPreflight;
@@ -343,7 +364,10 @@ export async function stackedDeliveryFixture(
   const branchOf = (taskId: string) =>
     service.delivery().taskBranch(taskId, repositoryId);
   /** The task's PR at its branch's last push, as GitHub shows it; registered on first use. */
-  const showPr = async (taskId: string) => {
+  const showPr = async (
+    taskId: string,
+    overrides: Partial<PrDeliveryObservation> = {},
+  ) => {
     const branch = branchOf(taskId);
     assert.ok(branch?.lastPushedSha);
     const nodeId = `PR-${taskId}`;
@@ -363,6 +387,7 @@ export async function stackedDeliveryFixture(
       closedIssueNodeIds: [],
       mergeBlockers: [],
       allowedMethods: ["squash"],
+      ...overrides,
     });
     if (service.delivery().delivery(taskId)) await service.refreshGitHub();
     else {
@@ -438,6 +463,11 @@ export async function stackedDeliveryFixture(
     return turn;
   };
   return {
+    prs,
+    onRebaseProof: (hook: () => void | Promise<void>) => {
+      afterRebaseProof = hook;
+    },
+    rebaseProofCount: () => rebaseProofs,
     onNextPreflight: (hook: () => void) => {
       nextPreflight = hook;
     },

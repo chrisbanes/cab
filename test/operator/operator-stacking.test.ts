@@ -227,6 +227,9 @@ test("recorded stack PR facts agree in API detail/list and CLI, including unknow
   const row = list.tasks.find((task: Json) => task.id === s.taskId);
   assert.deepEqual(detail.stackDelivery, row.stackDelivery);
   assert.deepEqual(detail.stackDelivery, {
+    rebaseProofs: [],
+    rebaseProofState: "none",
+    failedBlocker: false,
     blockerPr: { repositoryId: "R1", nodeId: "P1", number: 1 },
     membership: { id: 42, number: 9, position: 2, size: 2 },
     membershipKnown: true,

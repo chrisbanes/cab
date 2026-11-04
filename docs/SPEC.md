@@ -326,6 +326,31 @@ absence on a later read does not prove that a possibly sent request cannot land.
 
 Task detail, list and the operator API expose the same recorded blocker PR identity, nullable
 observed stack id/number/position/size, membership-known flag and bounded link reason.
+
+For a bound GitHub stacked dependent, a refresh can adopt an outside head after the
+exact lower PR is freshly proven merged and the dependent's retarget to the linked base
+is accepted. Cab fetches that head under the existing bounded isolated fetch, proves
+ancestry from the provider's fresh base object, and compares the ordered commit ranges:
+equal nonzero counts, equal stable patch IDs and exact raw commit-message bytes.
+Rehashed commit/tree/blob objects feed deterministic isolated diffs. The durable proof
+contains only object IDs, patch IDs and message digests. Missing, changed, unsupported,
+oversized or stale evidence leaves the outside-change hold and approval-only adoption.
+After fresh PR/ref readback, one lifecycle- and identity-fenced transaction records the
+proof, advances last-pushed and matching edge/workspace base metadata, and queues a
+notice. The workspace HEAD, index and files stay where they are; the lead integrates
+those commits before publishing. The task API's filtered stack facts and CLI task read
+show the accepted proof. This path has offline qualification requirements; the real
+platform journey remains a separate live acceptance gate.
+
+A recorded stacked blocker whose PR is known closed without merging, or whose task is
+cancelled, holds admission and delivery as `stacked-blocker-failed`. A merged PR is not a
+failed blocker; a failed read remains unknown. The operator's `task.cancel` command is
+available for the failed-blocker hold: it records a terminal cancelled task and a
+replayable receipt, requests best-effort interruption through the existing cancellation
+targets, retains unresolved execution ownership and workspace/history, and closes no
+provider issue or PR. Cancel adds no Stop hold. Unstack's provider effects and its API,
+CLI and web confirmation flow remain the next delivery slice.
+
 Unknown membership is distinct from a proved plain chain. The CLI and task detail show the
 blocker and observed position; list rows and cards use `stacked on #N` only for a known
 bound blocker PR. Exclusion handling applies to these facts and host reasons too.

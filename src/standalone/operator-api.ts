@@ -3273,7 +3273,18 @@ export class OperatorApi {
       own && own.observation.stack !== undefined
         ? own.observation.stack
         : (create?.observation?.stack ?? null);
+    const proofText = this.exact(
+      JSON.stringify(own?.rebaseProofs ?? []),
+      excluded,
+    );
     return {
+      rebaseProofs: proofText ? JSON.parse(proofText) : null,
+      rebaseProofState: (own?.rebaseProofs?.length
+        ? proofText
+          ? "adopted"
+          : "withheld"
+        : "none") as "none" | "adopted" | "withheld",
+      failedBlocker: d.failedStackedBlocker(taskId),
       blockerPr,
       membership,
       membershipKnown: own
@@ -9677,6 +9688,12 @@ export class OperatorApi {
             throw new OperatorApiError(409, "conflict");
           throw error;
         }
+      }
+      if (c.type === "task.cancel") {
+        this.requireTask(c.taskId);
+        return commandReceiptSchema.parse(
+          await this.service.cancelStackedTask(c),
+        );
       }
       if (c.type === "task.stop" || c.type === "task.resume") {
         this.requireTask(c.taskId);

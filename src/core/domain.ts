@@ -2262,6 +2262,11 @@ export class DomainStore {
       if (gate !== "ok") reasons.push(`stacked-blocker-${gate}`);
     } else if (this.blockingDependencies(taskId).length)
       reasons.push("local-dependency");
+    if (
+      this.failedStackedBlocker(taskId) &&
+      !reasons.includes("stacked-blocker-failed")
+    )
+      reasons.push("stacked-blocker-failed");
     return { eligible: reasons.length === 0, reasons };
   }
 
@@ -2294,6 +2299,15 @@ export class DomainStore {
           restack: row.restack === "pending" ? "pending" : "current",
         }
       : null;
+  }
+
+  /** The selected failed edge remains actionable even while independent dependencies also hold. */
+  failedStackedBlocker(taskId: string): boolean {
+    const edge = this.stackedDependency(taskId);
+    return (
+      !!edge &&
+      this.blockerGate(edge.blockerTaskId, edge.repositoryId, true) === "failed"
+    );
   }
 
   /** Whether the task stacks or waits on a single blocker, and why; null when that does not apply. */
@@ -2385,9 +2399,13 @@ export class DomainStore {
       // head moves, and one that lands while pending settles it first.
       const settled = landed ? parentHead : row.settledHead;
       const blocker = String(row.blockerTaskId);
-      const head = this.blocksDependents(blocker)
-        ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
-        : null;
+      const lowerPr = delivery.delivery(blocker);
+      // A merged/closed layer no longer publishes a parent head, even while its task remains open.
+      const head =
+        this.blocksDependents(blocker) &&
+        (!lowerPr || lowerPr.observation.state === "OPEN")
+          ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
+          : null;
       // A push prepared, in flight or unresolved was proved against the current parent head;
       // the head moves only once it settles, so a landed push is never mistaken for the restack.
       const moved =
@@ -2456,7 +2474,32 @@ export class DomainStore {
   private blockerGate(
     blockerTaskId: string,
     repositoryId: string | null,
-  ): "ok" | "unpublished" | "unknown" {
+    recorded = false,
+  ): "ok" | "unpublished" | "unknown" | "failed" {
+    const known = new DeliveryStore(this.db).delivery(blockerTaskId);
+    if (known?.readError) return "unknown";
+    if (
+      known &&
+      repositoryId !== null &&
+      known.observation.repositoryId !== repositoryId
+    )
+      return "unknown";
+    if (
+      known &&
+      !known.readError &&
+      known.observation.state === "MERGED" &&
+      known.observation.merged
+    )
+      return recorded ? "ok" : "unpublished";
+    if (this.task(blockerTaskId).state === "cancelled")
+      return recorded ? "failed" : "unpublished";
+    if (
+      known &&
+      !known.readError &&
+      known.observation.state === "CLOSED" &&
+      !known.observation.merged
+    )
+      return recorded ? "failed" : "unpublished";
     const imported = this.importedTask(blockerTaskId);
     if (
       imported &&
@@ -2498,7 +2541,7 @@ export class DomainStore {
     siblings = true,
   ): {
     facts: StackFacts | null;
-    gate: "ok" | "unpublished" | "unknown" | null;
+    gate: "ok" | "unpublished" | "unknown" | "failed" | null;
   } {
     const recorded = this.stackedDependency(taskId);
     if (recorded) {
@@ -2517,10 +2560,9 @@ export class DomainStore {
           taskId,
           recorded.blockerTaskId,
         );
-      const gate =
-        !others && this.blocksDependents(recorded.blockerTaskId)
-          ? this.blockerGate(recorded.blockerTaskId, recorded.repositoryId)
-          : null;
+      const gate = !others
+        ? this.blockerGate(recorded.blockerTaskId, recorded.repositoryId, true)
+        : null;
       return {
         facts: {
           state: "stacked",

@@ -893,6 +893,17 @@ async function run(
               `Stack:   ${stackSummary(read.data.stack, read.data.stackDelivery)}`,
             ]
           : []),
+        ...(read.data.stackDelivery?.rebaseProofs?.length
+          ? [
+              `Provider rebase: adopted ${read.data.stackDelivery.rebaseProofs.at(-1)!.newHead}`,
+            ]
+          : []),
+        ...(read.data.stackDelivery?.rebaseProofState === "withheld"
+          ? ["Provider rebase: proof unavailable"]
+          : []),
+        ...(read.data.stackDelivery?.failedBlocker
+          ? ["Stacked blocker failed: Unstack or Cancel this task"]
+          : []),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
             ? `Undelivered result ${r.resultId}: cab result deliver ${task.id} ${r.resultId}`

@@ -1,9 +1,12 @@
+import { adoptMergedStackRebase } from "./stack-rebase.js";
 import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
 import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
 import type { ProjectDeleteCommand } from "../core/project-lifecycle.js";
 import { ProjectWrites } from "./project-writes.js";
 import {
   assertOwnedWorkWritable,
+  assertTaskProjectWritable,
+  projectLifecycleMatches,
   projectAcceptsWrites,
   taskAcceptsWrites,
   workAcceptsWrites,
@@ -1415,6 +1418,31 @@ export class StandaloneService {
               identity,
             ),
           taskWorkspace,
+          projectWrite: (taskId, run) =>
+            this.withProjectWrite(
+              taskProjectId(db, taskId),
+              "provider-write",
+              async () => {
+                const lifecycle = assertTaskProjectWritable(db, taskId);
+                return run(() => projectLifecycleMatches(db, lifecycle));
+              },
+            ),
+          postMergeRebase: async (taskId, provider) => {
+            await adoptMergedStackRebase({
+              db,
+              domain,
+              delivery: deliveryStore,
+              workspaces: workspaceBindings,
+              taskId,
+              provider,
+              notify: () =>
+                coordination.ensureDeliveryEventWithinTransaction(
+                  taskId,
+                  "The provider rebased the dependent without changing its patches or messages. The outside head was adopted; integrate it in the retained workspace before publishing.",
+                  `stack-rebase:${deliveryStore.delivery(taskId)?.observation.headSha}`,
+                ),
+            });
+          },
           stackedPrBase: (taskId) => {
             const stacked = domain.stackedDependency(taskId);
             if (!stacked) return null;
@@ -3934,6 +3962,13 @@ export class StandaloneService {
     exceptOperationId?: string,
     kind?: ExternalAction["kind"],
   ): void {
+    if (
+      !isServiceDeliveryCaller(caller) &&
+      domain.failedStackedBlocker(caller.taskId)
+    )
+      throw new DomainConflictError(
+        "Stacked blocker failed; Unstack or Cancel the dependent",
+      );
     if (domain.project(caller.projectId).archived)
       throw new DomainConflictError("Archived projects are read-only");
     if (isOperatorDeliveryCaller(caller)) {
@@ -5110,6 +5145,33 @@ export class StandaloneService {
     );
   }
 
+  cancelStackedTask(command: {
+    key: string;
+    taskId: string;
+    expectedVersion: number;
+  }) {
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "callback",
+      async () => {
+        const state = this.started().state;
+        const { receipt, replayed } = state.cancelTask(command, () => {
+          if (!this.domain().failedStackedBlocker(command.taskId))
+            throw new DomainConflictError(
+              "Cancel requires a failed stacked blocker",
+            );
+        });
+        if (!replayed)
+          await this.afterStop(
+            command.taskId,
+            state.stopTargets(command.taskId),
+            "Task cancelled before native receipt",
+          );
+        return receipt;
+      },
+    );
+  }
+
   /** Receipted Stop or Resume; a replayed receipt repeats no post-commit work. */
   async controlTask(command: {
     type: "task.stop" | "task.resume";
@@ -5500,6 +5562,7 @@ export class StandaloneService {
   private afterStop(
     taskId: string,
     targets: StopTarget[],
+    inputCancellationReason = "Task stopped before native receipt",
   ): Promise<StopObservation> {
     const { state, coordination, supervisor } = this.started();
     for (const target of targets) {
@@ -5511,10 +5574,7 @@ export class StandaloneService {
         true,
         runtimeGeneration,
       ))
-        runtime?.cancelUserInput?.(
-          question.identity,
-          "Task stopped before native receipt",
-        );
+        runtime?.cancelUserInput?.(question.identity, inputCancellationReason);
     }
     return supervisor.observeStop(taskId, targets);
   }

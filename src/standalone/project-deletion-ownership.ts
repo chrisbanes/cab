@@ -345,6 +345,31 @@ function readReceipts(db: Database, owner: OwnershipParameters) {
     taskOwner(db, result.taskId);
     if (tasks.has(result.taskId)) deliveryConfirmKeys.push(uuid.parse(row.key));
   }
+  // New structured records keep their existing task ownership; validate identity, never infer it from arbitrary JSON.
+  for (const row of all(db, "SELECT * FROM delivery_pr_bindings")) {
+    const value = json(row.recordJson) as Record<string, unknown>;
+    if (
+      value.rebaseProofs === undefined &&
+      value.acceptedRetarget === undefined
+    )
+      continue;
+    const binding = prBindingSchema.parse(value);
+    if (binding.taskId !== row.taskId)
+      throw new Error("Rebase proof owner mismatch");
+    taskOwner(db, binding.taskId);
+  }
+  for (const row of all(db, "SELECT * FROM task_control_receipts")) {
+    const value = json(row.receiptJson) as Record<string, unknown>;
+    if (value.kind !== "task-cancel") continue;
+    const receipt = commandReceiptSchema.parse(value);
+    if (
+      receipt.kind !== "task-cancel" ||
+      receipt.taskId !== row.taskId ||
+      receipt.key !== row.key
+    )
+      throw new Error("Cancel receipt owner mismatch");
+    taskOwner(db, receipt.taskId);
+  }
   for (const row of all(db, "SELECT * FROM delivery_settlement_receipts")) {
     const result = prBindingSchema.parse(json(row.recordJson));
     taskOwner(db, result.taskId);

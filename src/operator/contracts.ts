@@ -1,3 +1,4 @@
+import { rebaseProofSchema } from "../core/rebase-proof.js";
 import { z } from "zod";
 import {
   issueBodyLimit,
@@ -1110,6 +1111,9 @@ export const taskSourceSummarySchema = z
 /** Recorded identities only; absence of a membership observation is distinct from no stack. */
 export const stackDeliveryFactsSchema = z
   .object({
+    rebaseProofs: z.array(rebaseProofSchema).max(256).nullable().optional(),
+    rebaseProofState: z.enum(["none", "adopted", "withheld"]).optional(),
+    failedBlocker: z.boolean().optional(),
     blockerPr: z
       .object({
         repositoryId: z.string().min(1).max(512),
@@ -3401,6 +3405,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision,
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.cancel"),
+      taskId: uuid,
+      expectedVersion: revision,
+    })
+    .strict(),
   // Optional fence: Stop and Resume act on a hold, so an unrelated edit must not block them.
   z
     .object({
@@ -4388,6 +4400,15 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       conversations: z.array(
         z.object({ assignmentId: uuid, revision }).strict(),
       ),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("task-cancel"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      cancellationRequested: z.number().int().nonnegative().safe(),
     })
     .strict(),
   z

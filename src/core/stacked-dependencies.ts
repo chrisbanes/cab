@@ -10,6 +10,7 @@ export const stackReasons = [
   "dependent-started",
   "blocker-unpublished",
   "blocker-unknown",
+  "blocker-failed",
 ] as const;
 export type StackReason = (typeof stackReasons)[number];
 

@@ -62,6 +62,19 @@ export function receiptMaterials(i: DeletionSeedIdentity) {
     revision: 1,
     mode: "reviewable-pr",
     acceptedBaseRef: "main",
+    acceptedRetarget: { fromRef: "cab/lower", toRef: "main" },
+    rebaseProofs: [
+      {
+        version: 1,
+        oldBase: sha,
+        oldHead: sha,
+        newBase: sha,
+        newHead: sha,
+        pairs: [
+          { oldCommit: sha, newCommit: sha, patchId: sha, messageSha256: hash },
+        ],
+      },
+    ],
     baseChange: null,
     observation: {
       repositoryId: "R_shared",

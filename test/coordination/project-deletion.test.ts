@@ -1044,11 +1044,21 @@ test("a retiring unresolved credential refuses deletion without retaining config
   assert.equal(f.fixture.runtime.turns, 0);
 });
 
-test("each explicit traversal phase restores the full populated ownership graph on failure", async (t) => {
+test("each explicit traversal phase restores the full populated ownership graph including rebase proofs and Cancel receipts on failure", async (t) => {
   const { f, db, a } = await exhaustiveStorageFixture(t);
   try {
     const owner = capture(db, a.projectId),
       before = databaseSnapshot(db);
+    assert.ok(
+      JSON.stringify(
+        db.prepare("SELECT recordJson FROM delivery_pr_bindings").all(),
+      ).includes("rebaseProofs"),
+    );
+    assert.ok(
+      JSON.stringify(
+        db.prepare("SELECT receiptJson FROM task_control_receipts").all(),
+      ).includes("task-cancel"),
+    );
     for (const phase of projectDeletionFaultPhases.filter(
       (at) =>
         at === "diagnostic-accounting" ||

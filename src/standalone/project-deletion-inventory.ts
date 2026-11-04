@@ -449,7 +449,8 @@ export const projectDeletionInventory = {
   },
   delivery_pr_bindings: {
     columns: ["taskId", "recordJson"],
-    ownership: "taskId in T",
+    ownership:
+      "taskId in T; recordJson.acceptedRetarget binds prior/accepted refs; recordJson.rebaseProofs contains only validated object/patch/message digests, removed with this task row",
   },
   delivery_readiness_coverage: {
     columns: ["taskId", "unreadSelectFields"],
@@ -1397,7 +1398,8 @@ export const projectDeletionInventory = {
   },
   task_control_receipts: {
     columns: ["taskId", "key", "payloadHash", "receiptJson", "createdAt"],
-    ownership: "taskId in T",
+    ownership:
+      "taskId in T; task-cancel receipt binds taskId/key and cancellation count, no external ownership",
   },
   task_dependency_records: {
     columns: ["seq", "taskId", "blockerTaskId"],
