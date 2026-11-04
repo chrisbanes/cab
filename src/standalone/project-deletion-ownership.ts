@@ -1,3 +1,4 @@
+import { UnstackStore } from "../core/unstack.js";
 import { createHash } from "node:crypto";
 import { nativeInputEndpointIdentitySchema } from "../core/structured-questions.js";
 import { z } from "zod";
@@ -345,6 +346,15 @@ function readReceipts(db: Database, owner: OwnershipParameters) {
     taskOwner(db, result.taskId);
     if (tasks.has(result.taskId)) deliveryConfirmKeys.push(uuid.parse(row.key));
   }
+  for (const row of all(db, "SELECT * FROM delivery_unstack_operations")) {
+    const record = new UnstackStore(db).parse(row),
+      i = record.identity;
+    if (
+      taskOwner(db, i.taskId) !== i.projectId ||
+      taskOwner(db, i.edge.blockerTaskId) !== i.projectId
+    )
+      throw new Error("Unstack captured task/project ownership mismatch");
+  }
   // New structured records keep their existing task ownership; validate identity, never infer it from arbitrary JSON.
   for (const row of all(db, "SELECT * FROM delivery_pr_bindings")) {
     const value = json(row.recordJson) as Record<string, unknown>;
@@ -638,6 +648,7 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
     batches: ids("coordination_delivery_batches", "batchId"),
     comments: ids("coordination_task_comments", "commentId"),
     deliveryOperations: ids("delivery_actions", "operationId"),
+    unstackOperations: ids("delivery_unstack_operations", "operationId"),
     routingOperations: ids(
       "routing_attempt_operations",
       "operationId",

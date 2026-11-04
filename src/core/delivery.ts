@@ -1,3 +1,4 @@
+import { UnstackStore, type UnstackRecord } from "./unstack.js";
 import { rebaseProofSchema, type RebaseProof } from "./rebase-proof.js";
 import {
   type ArchiveBlocker,
@@ -944,6 +945,7 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_readiness_coverage (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), unreadSelectFields TEXT NOT NULL);
     `);
+    new UnstackStore(this.db).migrate();
     // Before anything parses a policy, including applyOpenPrsDefault.
     this.stripIssueStatusGrants();
   }
@@ -1103,12 +1105,24 @@ export class DeliveryStore {
    * reflects the board and is independent of the work, so it never holds admission, completion,
    * edits or agent actions; `serviceActionBlockers` serializes it against itself.
    */
-  actionBlockers(taskId: string, exceptOperationId?: string): string[] {
-    return this.unresolvedReasons(
-      taskId,
-      (record) => !isServiceDeliveryCaller(record.binding),
-      exceptOperationId,
-    );
+  unstackPending(taskId: string): boolean {
+    return new UnstackStore(this.db).pending(taskId).length > 0;
+  }
+  actionBlockers(
+    taskId: string,
+    exceptOperationId?: string,
+    exceptUnstackId?: string,
+  ): string[] {
+    return [
+      ...(new UnstackStore(this.db).pending(taskId, exceptUnstackId).length
+        ? ["unstack-pending"]
+        : []),
+      ...this.unresolvedReasons(
+        taskId,
+        (record) => !isServiceDeliveryCaller(record.binding),
+        exceptOperationId,
+      ),
+    ];
   }
   /**
    * Status-mapping writes still in flight: they serialize the task's next status write. An
@@ -2137,6 +2151,7 @@ export class DeliveryStore {
         .object({ blockerTaskId: identity, repositoryId: identity })
         .parse(row);
       const blocker = String(edge.blockerTaskId);
+      if (new UnstackStore(this.db).retiredSelected(current, blocker)) break;
       if (
         seen.has(blocker) ||
         edge.repositoryId !== repositoryId ||
@@ -2700,6 +2715,55 @@ export class DeliveryStore {
         Date.now(),
       );
     return binding;
+  }
+  /** Operator Unstack's exact readback and selected-edge retirement share the caller's transaction. */
+  acceptUnstackWithinTransaction(record: UnstackRecord): void {
+    if (
+      !this.db.isTransaction ||
+      record.phase !== "retarget-confirmed" ||
+      !record.newBaseSha
+    )
+      throw new Error(
+        "Unstack acceptance requires its confirmed retarget transaction",
+      );
+    const i = record.identity,
+      binding = this.delivery(i.taskId);
+    if (
+      !binding ||
+      binding.observation.nodeId !== i.pr.nodeId ||
+      binding.observation.repositoryId !== i.repositoryId ||
+      binding.observation.headRef !== i.pr.headRef ||
+      binding.observation.headSha !== i.pr.headSha
+    )
+      throw new DomainConflictError("Unstack delivery identity changed");
+    const observation = prObservationSchema.parse({
+      ...binding.observation,
+      baseRef: i.targetBaseRef,
+      baseSha: record.newBaseSha,
+      stack: null,
+    });
+    const next = {
+      ...binding,
+      observation,
+      acceptedBaseRef: i.targetBaseRef,
+      baseChange: null,
+      settlement: null,
+      revision: binding.revision + 1,
+      observationDigest: materialDigest(observation),
+      observedAt: Date.now(),
+      readError: null,
+    };
+    // Unstack is not lower-merge provenance and must not manufacture automatic adoption authority.
+    delete next.acceptedRetarget;
+    this.saveDelivery(next);
+    this.db
+      .prepare("INSERT OR IGNORE INTO delivery_observations VALUES (?,?,?,?)")
+      .run(
+        i.taskId,
+        next.observationDigest,
+        canonicalMaterial(observation),
+        next.observedAt,
+      );
   }
   /**
    * `linkRef` is the repository link's base. A base other than the accepted one is accepted only when it is

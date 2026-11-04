@@ -705,3 +705,119 @@ test("a parent head that returns to the dependent's starting point settles the r
   assert.equal(f.domain.stackFacts(D)?.restack, "pending");
   assert.match(queued[2] ?? "", /^restack:R1:3:c{40} .*Rebase/);
 });
+
+import {
+  unstackFixtureRecord,
+  unstackFixtureRow,
+} from "../fixtures/unstack-journal.js";
+import { UnstackStore } from "../../src/core/unstack.js";
+import { materialDigest } from "../../src/core/delivery.js";
+
+function retireSelected(f: ReturnType<typeof fixture>) {
+  const seq = Number(
+    f.db
+      .prepare(
+        "SELECT seq FROM task_dependency_records WHERE taskId=? AND blockerTaskId=?",
+      )
+      .get(D, B)?.seq,
+  );
+  const record = unstackFixtureRecord({
+    projectId: p,
+    taskId: D,
+    blockerTaskId: B,
+    operationId: randomUUID(),
+    seq,
+  });
+  record.identity.repositoryId = record.identity.edge.repositoryId = "R1";
+  record.command.materialHash = materialDigest(record.identity);
+  f.db
+    .prepare(
+      "INSERT INTO delivery_unstack_operations VALUES (?,?,?,?,?,?,?,?,?)",
+    )
+    .run(...Object.values(unstackFixtureRow(record)));
+  return seq;
+}
+
+test("retiring one selected local edge preserves independent edges and a deliberate remove/add creates ordinary new blocking work", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  const original = retireSelected(f);
+  assert.equal(f.domain.activeStackedDependency(D), null);
+  assert.equal(f.reasons(D).includes("local-dependency"), false);
+  f.depend(D, C);
+  assert.ok(f.reasons(D).includes("local-dependency"));
+  f.run({
+    type: "dependency.remove",
+    actor: "operator",
+    projectId: p,
+    taskId: D,
+    blockerTaskId: B,
+    expectedVersion: f.version(D),
+  });
+  assert.ok(f.domain.stackedDependency(D), "Former edge remains audit history");
+  f.depend(D, B);
+  assert.notEqual(
+    f.db
+      .prepare(
+        "SELECT seq FROM task_dependency_records WHERE taskId=? AND blockerTaskId=?",
+      )
+      .get(D, B)?.seq,
+    original,
+  );
+  assert.ok(
+    f.domain.blockingDependencies(D).includes(B),
+    "A deliberate new dependency is independent",
+  );
+  assert.equal(
+    f.domain.activeStackedDependency(D),
+    null,
+    "New dependency does not silently re-stack an existing workspace",
+  );
+});
+
+test("native refresh cannot recreate retired admission; independent and unknown native blockers still hold", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  const item = importedSiblings(f, true);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  const seq = retireSelected(f),
+    journal = new UnstackStore(f.db);
+  assert.equal(f.reasons(D).includes("imported-blockers-blocked"), false);
+  f.db
+    .prepare("DELETE FROM source_native_blockers WHERE externalId='I_D'")
+    .run();
+  syncDependencyRecords(f.db, D);
+  f.db
+    .prepare(
+      "INSERT INTO source_native_blockers VALUES ('github','github.com','I_D','I_B','R1','o/r',2,'open')",
+    )
+    .run();
+  syncDependencyRecords(f.db, D);
+  assert.equal(
+    f.db
+      .prepare(
+        "SELECT seq FROM task_dependency_records WHERE taskId=? AND blockerTaskId=?",
+      )
+      .get(D, B)?.seq,
+    seq,
+  );
+  assert.equal(journal.retired(D, B), true);
+  assert.equal(f.domain.activeStackedDependency(D), null);
+  assert.equal(f.reasons(D).includes("imported-blockers-blocked"), false);
+  item(C, "I_C");
+  f.db
+    .prepare(
+      "INSERT INTO source_native_blockers VALUES ('github','github.com','I_D','I_C','R1','o/r',3,'open')",
+    )
+    .run();
+  syncDependencyRecords(f.db, D);
+  assert.ok(f.reasons(D).includes("imported-blockers-blocked"));
+  f.db
+    .prepare("UPDATE domain_tasks SET importedBlockers='unknown' WHERE id=?")
+    .run(D);
+  assert.ok(f.reasons(D).includes("imported-blockers-unknown"));
+});

@@ -1,3 +1,4 @@
+import { unstackFixtureRecord, unstackFixtureRow } from "./unstack-journal.js";
 import type { DatabaseSync } from "node:sqlite";
 import { fixtureUuid } from "./project-deletion.js";
 import {
@@ -1784,6 +1785,19 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
       shared: false,
       table: "delivery_readiness_coverage",
       values: { taskId: i.taskId, unreadSelectFields: "[]" },
+    },
+    {
+      shared: false,
+      table: "delivery_unstack_operations",
+      values: unstackFixtureRow(
+        unstackFixtureRecord({
+          projectId: i.projectId,
+          taskId: i.taskId,
+          blockerTaskId: i.blockerTaskId,
+          operationId: i.uuid("unstack-operation"),
+          seq: i.n,
+        }),
+      ),
     },
     {
       shared: false,

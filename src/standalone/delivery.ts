@@ -235,6 +235,12 @@ export class DeliveryCoordinator {
       host,
     );
   }
+  /** Internal service wiring; the operator journal owns Unstack authority and every send. */
+  unstackProviderFor(taskId: string): CodeHostDeliveryProvider {
+    const binding = this.store.delivery(taskId);
+    if (!binding) throw new DomainConflictError("Unstack delivery unavailable");
+    return this.provider(binding.projectId, binding.observation.repositoryId);
+  }
   private issueTrackerFor(projectId: string): {
     issueTracker: IssueTracker;
     instance: string;
@@ -1170,6 +1176,7 @@ export class DeliveryCoordinator {
   ) {
     const binding = this.store.delivery(taskId);
     if (!binding) throw new Error("Unknown PR delivery");
+    if (this.store.unstackPending(taskId)) return binding;
     const policy = this.store.configuration(binding.projectId),
       p = binding.observation,
       provider = this.provider(binding.projectId, p.repositoryId, policy);

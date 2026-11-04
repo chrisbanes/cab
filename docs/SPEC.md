@@ -348,8 +348,32 @@ failed blocker; a failed read remains unknown. The operator's `task.cancel` comm
 available for the failed-blocker hold: it records a terminal cancelled task and a
 replayable receipt, requests best-effort interruption through the existing cancellation
 targets, retains unresolved execution ownership and workspace/history, and closes no
-provider issue or PR. Cancel adds no Stop hold. Unstack's provider effects and its API,
-CLI and web confirmation flow remain the next delivery slice.
+provider issue or PR. Cancel adds no Stop hold.
+
+The service's operator Unstack continuation freezes the selected task, linked repository,
+PR/head/base and full ordered provider stack into one durable command. GitHub's Unstack
+endpoint removes all removable unmerged members of that provider stack, not just the
+selected PR; merged layers remain unaffected. The local recovery retargets only the
+selected PR to its repository link's base. An HTTP 200 can leave members in the stack.
+If any captured unmerged member remains, even after the selected PR was removed, the
+original operation stays unfinished and readback-only: no repeat Unstack, replacement
+operation key, queue cancellation, retarget, accepted-base advancement, edge retirement
+or restack follows. Cab does not infer a queue/lock reason from that partial result.
+Only later validated complete-removal readback under the original identity fences can
+continue. This partial outcome is not successful live acceptance. Both effects have separate intent and fresh
+identity-bound readback phases. Unknown sends are read back after restart and never
+resent. Every unfinished or unproved phase holds work, archive and deletion, including
+an observed removal whose retarget is still unknown or refused. A definite no-effect
+failure retains a terminal receipt; partial success cannot become failed to release drain.
+Only confirmed removal and exact target base/SHA permit one transaction to accept the
+base, retire the selected former dependency generation and queue one restack notice.
+The retained workspace HEAD, index and files are not changed. Independent native/local
+blockers, Ready, pause, capacity, ownership and delivery holds remain. Ordinary source
+refresh cannot recreate the retired generation; a deliberate new dependency is separate.
+The journal is explicitly task/project owned, included in private-material traversal and
+captured-task deletion, and retained as audit history until deletion. Terminal receipt
+replay after archive makes no provider request. Operator API/CLI/web confirmation controls
+remain the next delivery slice; the live acceptance journey remains separately gated.
 
 Unknown membership is distinct from a proved plain chain. The CLI and task detail show the
 blocker and observed position; list rows and cards use `stacked on #N` only for a known

@@ -30,7 +30,7 @@ export async function adoptMergedStackRebase(input: {
   const lifecycle = projectLifecycle(db, projectId);
   if (lifecycle.archived || lifecycle.paused || task.state !== "open")
     return false;
-  const edge = domain.stackedDependency(taskId),
+  const edge = domain.activeStackedDependency(taskId),
     bound = delivery.delivery(taskId);
   if (
     !edge ||

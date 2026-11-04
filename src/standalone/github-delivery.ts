@@ -10,6 +10,7 @@ import {
 import { hasLabelName } from "../core/github-source-contracts.js";
 import { publicationMarker } from "../core/task-publication-contracts.js";
 import { DomainPolicyError } from "../core/domain.js";
+import { DomainConflictError } from "../core/domain-errors.js";
 import { z } from "zod";
 import {
   githubApi as api,
@@ -19,6 +20,13 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import type { UnstackIdentity, UnstackRecord } from "../core/unstack.js";
+import {
+  type UnstackProvider,
+  type UnstackReadback,
+  UnstackDispatchFailure,
+  unstackDispatchGuard,
+} from "./unstack.js";
 import { proveOutsideRebase } from "./git-fetch.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
@@ -296,11 +304,13 @@ export class GitHubHttpDeliveryProvider
     method = "GET",
     body?: unknown,
     version = "2022-11-28",
+    beforeSend?: () => void,
   ): Promise<{ json: unknown; response: Response }> {
     const url = new URL(path, api);
     if (url.origin !== api) throw new Error("provider-origin-mismatch");
     const credential = await this.credential();
     if (!credential) throw new Error("provider-credential-unavailable");
+    beforeSend?.();
     const response = await githubFetch(
       this.fetcher,
       url.href,
@@ -1116,6 +1126,178 @@ export class GitHubHttpDeliveryProvider
         pr.state !== "closed"
       )
         throw new Error("provider-stack-lower-pr-unproved");
+    }
+  }
+  /** Fresh material for an operator preview; this does not confer send authority. */
+  async prepareUnstack(repositoryId: string, prNumber: number) {
+    const repo = await this.repository(repositoryId);
+    const own = await this.stackPr(repo.path, prNumber);
+    if (
+      own.head.repo.node_id !== repositoryId ||
+      own.base.repo.node_id !== repositoryId ||
+      own.state !== "open" ||
+      own.merged ||
+      !own.stack
+    )
+      throw new Error("Unstack PR membership unproved");
+    const stack = await this.orderedStack(repo.path, own.stack);
+    const entry = stack.pull_requests[own.stack.position - 1];
+    if (
+      !entry ||
+      entry.node_id !== own.node_id ||
+      entry.number !== own.number ||
+      entry.head.sha !== own.head.sha ||
+      entry.head.ref !== own.head.ref
+    )
+      throw new Error("Unstack ordered membership unproved");
+    return {
+      repositoryPath: repo.path,
+      pr: {
+        nodeId: own.node_id,
+        number: own.number,
+        headRef: own.head.ref,
+        headSha: own.head.sha,
+        baseRef: own.base.ref,
+      },
+      stack: {
+        id: stack.id,
+        number: stack.number,
+        baseRef: stack.base.ref,
+        members: stack.pull_requests.map((p) => ({
+          nodeId: p.node_id,
+          number: p.number,
+          headRef: p.head.ref,
+          headSha: p.head.sha,
+          state:
+            p.merged_at !== null
+              ? ("MERGED" as const)
+              : p.state === "open"
+                ? ("OPEN" as const)
+                : ("CLOSED" as const),
+        })),
+      },
+    };
+  }
+  /** An identity-bound read never treats missing membership as null. */
+  async readUnstack(
+    identity: UnstackIdentity,
+    policy: DeliveryPolicy,
+  ): Promise<UnstackReadback> {
+    const repo = await this.repository(identity.repositoryId);
+    if (repo.path !== identity.repositoryPath)
+      throw new Error("Unstack repository moved");
+    const own = await this.stackPr(repo.path, identity.pr.number);
+    if (
+      own.node_id !== identity.pr.nodeId ||
+      own.number !== identity.pr.number ||
+      own.head.repo.node_id !== identity.repositoryId ||
+      own.base.repo.node_id !== identity.repositoryId ||
+      own.head.sha !== identity.pr.headSha ||
+      own.head.ref !== identity.pr.headRef ||
+      own.state !== "open" ||
+      own.merged
+    )
+      return { state: "changed" };
+    if (own.stack !== null) {
+      const prepared = await this.prepareUnstack(
+        identity.repositoryId,
+        identity.pr.number,
+      );
+      return { state: "member", material: prepared };
+    }
+    // Unstack acts on the full frozen membership, including closed unmerged layers.
+    for (const member of identity.stack.members) {
+      if (member.nodeId === identity.pr.nodeId || member.state === "MERGED")
+        continue;
+      const current = await this.stackPr(repo.path, member.number);
+      if (
+        current.node_id !== member.nodeId ||
+        current.number !== member.number ||
+        current.head.repo.node_id !== identity.repositoryId ||
+        current.base.repo.node_id !== identity.repositoryId ||
+        current.head.ref !== member.headRef ||
+        current.head.sha !== member.headSha ||
+        current.merged ||
+        (current.state === "open" ? "OPEN" : "CLOSED") !== member.state ||
+        current.stack !== null
+      )
+        return { state: "changed" };
+    }
+    // REST base.sha and GraphQL baseRefOid are checked together by inspectPr.
+    const observed = await this.inspectPr(
+      {
+        repositoryId: identity.repositoryId,
+        prNumber: identity.pr.number,
+        expectedPrNodeId: identity.pr.nodeId,
+        expectedHeadSha: identity.pr.headSha,
+      },
+      policy,
+    );
+    if (
+      observed.headSha !== identity.pr.headSha ||
+      observed.headRef !== identity.pr.headRef ||
+      observed.state !== "OPEN" ||
+      observed.merged ||
+      observed.stack !== null
+    )
+      return { state: "changed" };
+    return {
+      state: "removed",
+      baseRef: observed.baseRef,
+      baseSha: observed.baseSha,
+    };
+  }
+  unstackProvider(policy: DeliveryPolicy): UnstackProvider {
+    return {
+      read: (i) => this.readUnstack(i, policy),
+      sendUnstack: (r, guard) => this.sendUnstack(r, guard),
+      sendRetarget: (r, guard) => this.sendUnstackRetarget(r, guard),
+    };
+  }
+  private async sendUnstack(record: UnstackRecord, guard: () => void) {
+    if (record.phase !== "unstack-attempting")
+      throw new Error("Unstack send intent missing");
+    try {
+      await this.request(
+        `${record.identity.repositoryPath}/stacks/${record.identity.stack.number}/unstack`,
+        "POST",
+        undefined,
+        "2026-03-10",
+        unstackDispatchGuard(guard),
+      );
+      return "unknown" as const;
+    } catch (error) {
+      if (
+        error instanceof UnstackDispatchFailure &&
+        !(error.failure instanceof DomainConflictError)
+      )
+        throw error;
+      return error instanceof ProviderFailure && error.status === 422
+        ? ("refused" as const)
+        : ("unknown" as const);
+    }
+  }
+  private async sendUnstackRetarget(record: UnstackRecord, guard: () => void) {
+    if (record.phase !== "retarget-attempting" || !record.removed)
+      throw new Error("Retarget send intent missing");
+    try {
+      await this.request(
+        `${record.identity.repositoryPath}/pulls/${record.identity.pr.number}`,
+        "PATCH",
+        { base: record.identity.targetBaseRef },
+        "2026-03-10",
+        unstackDispatchGuard(guard),
+      );
+      return "unknown" as const;
+    } catch (error) {
+      if (
+        error instanceof UnstackDispatchFailure &&
+        !(error.failure instanceof DomainConflictError)
+      )
+        throw error;
+      return error instanceof ProviderFailure && error.status === 422
+        ? ("refused" as const)
+        : ("unknown" as const);
     }
   }
   async prepareStackLink(

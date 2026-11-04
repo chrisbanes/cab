@@ -476,6 +476,21 @@ export const projectDeletionInventory = {
     ],
     ownership: "taskId in T",
   },
+  delivery_unstack_operations: {
+    columns: [
+      "operationId",
+      "taskId",
+      "projectId",
+      "blockerTaskId",
+      "edgeSequence",
+      "payloadHash",
+      "phase",
+      "revision",
+      "recordJson",
+    ],
+    ownership:
+      "taskId in T; projectId and selected blockerTaskId must agree with captured task ownership; immutable command/PR/full ordered stack/base/head/edge generation in strict recordJson; every identity/ref/object traversed explicitly into private ledger; phase/revision duplicated and checked; all unfinished or unproved states block drain",
+  },
   delivery_waiting_work: {
     columns: ["workId", "taskId", "assignmentId"],
     ownership: "taskId in T OR workId in W OR assignmentId in A",

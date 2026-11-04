@@ -1,3 +1,9 @@
+import { TaskUnstack } from "./task-unstack.js";
+import {
+  type UnstackCommand,
+  UnstackStore,
+  unstackPrivateValues,
+} from "../core/unstack.js";
 import { adoptMergedStackRebase } from "./stack-rebase.js";
 import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
 import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
@@ -673,6 +679,7 @@ interface Started {
   coordination: CoordinationStore;
   deliveryStore: DeliveryStore;
   deliveryCoordinator: DeliveryCoordinator;
+  taskUnstack: TaskUnstack;
   statusMappingWriter: StatusMappingWriter;
   statusMappings: StatusMappingStore;
   taskPublications: TaskPublicationStore;
@@ -1444,7 +1451,7 @@ export class StandaloneService {
             });
           },
           stackedPrBase: (taskId) => {
-            const stacked = domain.stackedDependency(taskId);
+            const stacked = domain.activeStackedDependency(taskId);
             if (!stacked) return null;
             const blocker = domain.task(stacked.blockerTaskId);
             if (blocker.projectId !== domain.task(taskId).projectId)
@@ -1547,6 +1554,23 @@ export class StandaloneService {
           ),
       );
       acquire("deliveryCoordinator", deliveryCoordinator);
+      const taskUnstack = acquire(
+        "taskUnstack",
+        new TaskUnstack({
+          db,
+          domain,
+          delivery: deliveryStore,
+          coordination,
+          workspaces: workspaceBindings,
+          provider: (taskId) => deliveryCoordinator.unstackProviderFor(taskId),
+          projectWrite: (taskId, run) =>
+            this.withProjectWrite(
+              taskProjectId(db, taskId),
+              "provider-write",
+              run,
+            ),
+        }),
+      );
       const publicationDriver = new TaskPublicationDriver(
         taskPublications,
         deliveryStore,
@@ -1798,6 +1822,7 @@ export class StandaloneService {
         state,
         supervisor,
       });
+      await taskUnstack.reconcileAll();
       await deliveryCoordinator.refresh();
       await publicationDriver.advanceAll();
       await this.reconcileOwnDeliveryClosures({
@@ -1886,6 +1911,7 @@ export class StandaloneService {
         coordination,
         deliveryStore,
         deliveryCoordinator,
+        taskUnstack,
         statusMappingWriter,
         statusMappings,
         taskPublications,
@@ -1973,6 +1999,7 @@ export class StandaloneService {
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
           await this.acquired?.jiraSynchronizer?.stop().catch(() => {});
           await this.acquired?.statusMappingWriter?.stop().catch(() => {});
+          await this.acquired?.taskUnstack?.stop().catch(() => {});
           await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
           // An attempt may be mid-start: let it land in `runtimes` so it is stopped below.
           await Promise.all([...this.runtimeToggles.values()]);
@@ -2670,6 +2697,9 @@ export class StandaloneService {
         ...providerCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...this.claudeTokensHandedOut,
+        ...new UnstackStore(this.cache!)
+          .records()
+          .flatMap(unstackPrivateValues),
         // Copies still in use keep their grant's paths private even once it is unlinked.
         ...(this.current?.draftingBindings
           .unarchived()
@@ -2781,6 +2811,7 @@ export class StandaloneService {
       supervisor,
       githubSynchronizer: synchronizer,
       jiraSynchronizer: jiraSynchronizerStop,
+      taskUnstack,
       deliveryCoordinator: delivery,
       statusMappingWriter: statusMapping,
       power,
@@ -2829,6 +2860,7 @@ export class StandaloneService {
       jiraSynchronizerStop?.stop(),
     );
     await attempt("status mapping stop", () => statusMapping?.stop());
+    await attempt("Unstack stop", () => taskUnstack?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
       if (this.db?.isOpen && this.cache?.isOpen)
@@ -4544,8 +4576,22 @@ export class StandaloneService {
     if (record.observation?.reason === issueChangedReason)
       await this.refreshGitHub().catch(() => {});
   }
+  previewTaskUnstack(taskId: string) {
+    return this.started().taskUnstack.preview(taskId);
+  }
+  unstackTask(command: UnstackCommand) {
+    return this.started().taskUnstack.execute(command);
+  }
+  reconcileTaskUnstack(operationId: string) {
+    return this.started().taskUnstack.reconcile(operationId);
+  }
+  taskUnstackReceipt(command: UnstackCommand) {
+    return new UnstackStore(this.cache!).replay(command);
+  }
+
   async refreshGitHub(): Promise<void> {
     const started = this.started();
+    await started.taskUnstack.reconcileAll();
     await started.deliveryCoordinator.refresh();
     // A create the refresh just proved converts its task before the sync, which then matches it.
     await started.publicationDriver.advanceAll();
@@ -7162,6 +7208,8 @@ export class StandaloneService {
       inboxStartup,
       workspaceBindings,
     } = this.current;
+    if (this.current.taskUnstack.hasPending())
+      await this.current.taskUnstack.reconcileAll();
     this.flushRuntimeAnswers();
     // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
     // fails is reported and retried on the next wake; the others and the wake go on.

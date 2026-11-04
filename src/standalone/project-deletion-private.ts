@@ -1,3 +1,4 @@
+import { unstackPrivateValues, unstackRecordSchema } from "../core/unstack.js";
 import { materialDigest } from "../core/delivery.js";
 import {
   RedactionLimitError,
@@ -89,6 +90,15 @@ function rowsPrivate(rows: Record<string, readonly Row[]>): string[] {
         values.push(row.workspace);
       }
     }
+  for (const row of rows.delivery_unstack_operations ?? []) {
+    if (typeof row.recordJson !== "string")
+      throw new Error("Private Unstack material unavailable");
+    values.push(
+      ...unstackPrivateValues(
+        unstackRecordSchema.parse(JSON.parse(row.recordJson)),
+      ),
+    );
+  }
   return values;
 }
 function retiringReferences(rows: Record<string, readonly Row[]>): string[] {
@@ -139,6 +149,10 @@ export async function prepareDeletionPrivateInputs(
       return r.instructions;
     });
     const liveRows: Record<string, Row[]> = {
+      delivery_unstack_operations: read(
+        db,
+        "SELECT recordJson FROM delivery_unstack_operations",
+      ),
       project_repository_links: read(
         db,
         "SELECT links FROM project_repository_links",

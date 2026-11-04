@@ -19,6 +19,14 @@ export type CodeHost = StoredRepositoryLink["codeHost"];
 
 /** What cab asks of a code host for one project. */
 export interface CodeHostDeliveryProvider {
+  /** Operator Unstack freezes full provider membership; durable orchestration owns every send. */
+  prepareUnstack?(
+    repositoryId: string,
+    prNumber: number,
+  ): Promise<import("./unstack.js").UnstackMaterial>;
+  unstackProvider?(
+    policy: DeliveryPolicy,
+  ): import("./unstack.js").UnstackProvider;
   /** Optional GitHub-only unchanged-rebase proof; verifies the exact remote ref before and after fetch. */
   readRebaseHead?(repositoryId: string, branch: string): Promise<string | null>;
   proveRebase?(input: {

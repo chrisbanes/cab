@@ -1,3 +1,7 @@
+import type {
+  UnstackMaterial,
+  UnstackProvider,
+} from "../../src/standalone/unstack.js";
 import { proveUnchangedRebase } from "../../src/standalone/rebase-proof.js";
 import { verifierGit } from "../../src/standalone/push-verification.js";
 import assert from "node:assert/strict";
@@ -40,6 +44,13 @@ export async function stackedDeliveryFixture(
     forcePush?: "allow" | "approval";
     stacking?: boolean;
     backgroundDiagnosticSink?: StandaloneServiceOptions["backgroundDiagnosticSink"];
+    unstack?: {
+      prepare: (
+        repositoryId: string,
+        number: number,
+      ) => Promise<UnstackMaterial>;
+      provider: UnstackProvider;
+    };
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-stacked-")));
@@ -104,6 +115,12 @@ export async function stackedDeliveryFixture(
   let rebaseProofs = 0;
   const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
     ...unusedIssueInspection,
+    ...(options.unstack
+      ? {
+          prepareUnstack: options.unstack.prepare,
+          unstackProvider: () => options.unstack!.provider,
+        }
+      : {}),
     async readRebaseHead(_repositoryId, branch) {
       return remote[branch] ?? null;
     },

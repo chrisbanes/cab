@@ -1,3 +1,4 @@
+import { prepareDeletionPrivateInputs } from "../../src/standalone/project-deletion-private.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -490,7 +491,7 @@ for (const phase of projectDeletionFaultPhases)
 
 test("the inventory classifies every fresh table and column and refuses new unclassified schema", async (t) => {
   const f = await projectDeletionFixture(t);
-  assert.equal(Object.keys(projectDeletionInventory).length, 177);
+  assert.equal(Object.keys(projectDeletionInventory).length, 178);
   assertProjectDeletionInventory(f.db);
   f.db.exec("ALTER TABLE tasks ADD COLUMN unclassifiedOwner TEXT");
   assert.throws(() => assertProjectDeletionInventory(f.db), /column inventory/);
@@ -1044,7 +1045,7 @@ test("a retiring unresolved credential refuses deletion without retaining config
   assert.equal(f.fixture.runtime.turns, 0);
 });
 
-test("each explicit traversal phase restores the full populated ownership graph including rebase proofs and Cancel receipts on failure", async (t) => {
+test("each explicit traversal phase restores the full populated ownership graph including rebase proofs, Cancel receipts and Unstack journals on failure", async (t) => {
   const { f, db, a } = await exhaustiveStorageFixture(t);
   try {
     const owner = capture(db, a.projectId),
@@ -1059,6 +1060,7 @@ test("each explicit traversal phase restores the full populated ownership graph 
         db.prepare("SELECT receiptJson FROM task_control_receipts").all(),
       ).includes("task-cancel"),
     );
+    assert.ok((owner.rows.delivery_unstack_operations ?? []).length > 0);
     for (const phase of projectDeletionFaultPhases.filter(
       (at) =>
         at === "diagnostic-accounting" ||
@@ -1151,4 +1153,133 @@ test("preview reports exact owned counts and retains recorded branch/PR identiti
     f.service.projectDeletionPreview(f.projectId),
     /unavailable/,
   );
+});
+
+import {
+  UnstackStore,
+  unstackPhases,
+  unstackPrivateValues,
+} from "../../src/core/unstack.js";
+import {
+  unstackFixtureRecord,
+  unstackFixtureRow,
+} from "../fixtures/unstack-journal.js";
+
+test("every unfinished Unstack phase and malformed/no-effect claim blocks the actual archive drain", async (t) => {
+  const f = await projectDeletionFixture(t, false);
+  f.domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: Number(f.domain.project(f.projectId).version),
+    paused: true,
+  });
+  for (const phase of unstackPhases) {
+    f.db.prepare("DELETE FROM delivery_unstack_operations").run();
+    const r = unstackFixtureRecord(
+        {
+          projectId: f.projectId,
+          taskId: f.taskId,
+          blockerTaskId: f.blockerTaskId,
+          operationId: randomUUID(),
+          seq: 1,
+        },
+        phase,
+      ),
+      row = unstackFixtureRow(r);
+    f.db
+      .prepare(
+        "INSERT INTO delivery_unstack_operations VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .run(...Object.values(row));
+    const blockers = transaction(f.db, () =>
+      f.domain.projectArchiveBlockersWithinTransaction(f.projectId),
+    );
+    if (["confirmed", "failed"].includes(phase)) {
+      assert.deepEqual(new UnstackStore(f.db).projectBlockers(f.projectId), []);
+    } else {
+      assert.ok(
+        blockers.some((b) => b.kind === "delivery-action"),
+        phase,
+      );
+      assert.throws(
+        () =>
+          f.domain.execute({
+            type: "project.archive",
+            actor: "operator",
+            key: randomUUID(),
+            projectId: f.projectId,
+            expectedVersion: Number(f.domain.project(f.projectId).version),
+          }),
+        /drained/,
+      );
+    }
+    const forged = {
+      ...r,
+      phase: "failed",
+      reason: "unstack-refused",
+      noEffect: null,
+    };
+    f.db
+      .prepare(
+        "UPDATE delivery_unstack_operations SET phase='failed',recordJson=?",
+      )
+      .run(JSON.stringify(forged));
+    assert.equal(
+      new UnstackStore(f.db).projectBlockers(f.projectId)[0]?.kind,
+      "unavailable",
+    );
+  }
+});
+
+test("captured Unstack private material traverses the ledger inputs and project B remains byte-for-byte isolated", async (t) => {
+  const { db, a, b } = await exhaustiveStorageFixture(t);
+  try {
+    const ownerA = capture(db, a.projectId),
+      ownerB = capture(db, b.projectId);
+    const record = new UnstackStore(db).records(a.taskId)[0]!;
+    const inputs = await prepareDeletionPrivateInputs(db, ownerA, [], {
+      extra: () => [],
+      resolveReference: async () => {
+        throw new Error("No credential resolution in this fixture");
+      },
+    });
+    for (const value of unstackPrivateValues(record))
+      assert.ok(inputs.retiring.includes(value), value);
+    const beforeB = JSON.stringify(ownerB.rows.delivery_unstack_operations);
+    transaction(db, () =>
+      deleteCapturedProjectRowsWithinTransaction(db, ownerA),
+    );
+    assert.equal(
+      JSON.stringify(capture(db, b.projectId).rows.delivery_unstack_operations),
+      beforeB,
+    );
+    assert.equal(new UnstackStore(db).records(a.taskId).length, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test("an archived project with an injected unfinished Unstack cannot delete owned rows or release unknown effects", async (t) => {
+  const f = await projectDeletionFixture(t);
+  const record = unstackFixtureRecord(
+    {
+      projectId: f.projectId,
+      taskId: f.taskId,
+      blockerTaskId: f.blockerTaskId,
+      operationId: randomUUID(),
+      seq: 1,
+    },
+    "unstack-attempting",
+  );
+  f.db
+    .prepare(
+      "INSERT INTO delivery_unstack_operations VALUES (?,?,?,?,?,?,?,?,?)",
+    )
+    .run(...Object.values(unstackFixtureRow(record)));
+  const command = await f.command(),
+    before = databaseSnapshot(f.db);
+  await assert.rejects(f.deletion().delete(command), /drained/);
+  assert.equal(databaseSnapshot(f.db), before);
 });

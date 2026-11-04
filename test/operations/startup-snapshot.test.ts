@@ -270,8 +270,8 @@ test("the deletion migration snapshots level 12 without tombstones and preserves
     assert.deepEqual(before.values, ["retained-migration-private-value"]);
     assert.deepEqual(after.values, before.values);
     assert.equal(readStartupState(dirs.data)?.snapshot?.from, 12);
-    assert.equal(readStartupState(dirs.data)?.snapshot?.to, 13);
-    assert.equal(recordedLevel(dirs.data), 13);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, MIGRATION_LEVEL);
+    assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
   } finally {
     dirs.cleanup();
   }
@@ -763,6 +763,7 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  14: "f0cc50cf3e479a85922ecfe951a4337fafbfd8af243328b38f2838e2ac328117",
   1: "70a7b6cd96317bf46d0857b2816ad74bf84046906c740923689c885c68d31d4f",
   2: "ee099e33a7150ba0bd23bdd3f46636e8847878b6c436b0919b6292d14dbc6476",
   3: "27824170c346f251b4e2c42b751994100e0e51d4b0089a8885259155acdb38b4",
@@ -824,6 +825,59 @@ test("the service entry reports a refused startup in its log with nothing listen
     // The log carries only the stable name and code before the database is open.
     assert.equal(records[0].error.name, "StartupRefusedError");
     assert.equal(records[0].error.code, "startup-schema-newer");
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("Unstack journal migration snapshots level 13 before creating task-owned rows and preserves retained private values", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 13);
+    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    before.exec("DROP TABLE delivery_unstack_operations");
+    before
+      .prepare("INSERT INTO deleted_project_redaction_values VALUES (?)")
+      .run("retained-unstack-migration-private");
+    before.close();
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    const prior = new DatabaseSync(join(snapshot, "standalone.sqlite"), {
+      readOnly: true,
+    });
+    const current = new DatabaseSync(join(dirs.data, "standalone.sqlite"), {
+      readOnly: true,
+    });
+    try {
+      assert.equal(
+        prior
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE name='delivery_unstack_operations'",
+          )
+          .get(),
+        undefined,
+      );
+      assert.equal(
+        current
+          .prepare("SELECT COUNT(*) AS n FROM delivery_unstack_operations")
+          .get()?.n,
+        0,
+      );
+      assert.deepEqual(
+        current.prepare("SELECT * FROM deleted_project_redaction_values").all(),
+        prior.prepare("SELECT * FROM deleted_project_redaction_values").all(),
+      );
+      assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      prior.close();
+      current.close();
+    }
+    assert.equal(readStartupState(dirs.data)?.snapshot?.from, 13);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, 14);
+    assert.equal(recordedLevel(dirs.data), 14);
   } finally {
     dirs.cleanup();
   }

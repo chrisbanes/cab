@@ -173,6 +173,11 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM delivery_policies WHERE projectId = :projectId",
   },
   {
+    table: "delivery_unstack_operations",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM delivery_unstack_operations WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
     table: "delivery_pr_bindings",
     where: "taskId IN (SELECT value FROM json_each(:tasks))",
     sql: "DELETE FROM delivery_pr_bindings WHERE taskId IN (SELECT value FROM json_each(:tasks))",
