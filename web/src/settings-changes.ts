@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 /**
  * Pure change lists and command builders for the settings forms. Each form edits current
  * values in place; these functions compare the draft with the loaded read and name every
@@ -306,7 +307,7 @@ export function repositoryRowsFrom(saved: Repositories) {
 
 /** Hidden saved IDs require independent allocation; otherwise keep sequential IDs above removed rows. */
 export function nextSelectionId(saved: (string | null)[], drafted: string[]) {
-  if (saved.includes(null)) return crypto.randomUUID();
+  if (saved.includes(null)) return randomUUID();
   const highest = Math.max(
     0,
     ...[...saved, ...drafted].map((id) =>
@@ -500,7 +501,7 @@ const mergeRows = (
   }),
   ...saved
     .filter((s) => !draft.some((r) => r.keep && id(r) === id(s)))
-    .map((s) => ({ ...s, rowKey: crypto.randomUUID() })),
+    .map((s) => ({ ...s, rowKey: randomUUID() })),
 ];
 
 /**
@@ -540,10 +541,10 @@ export function adoptSourceRows(source: Source, v: Values) {
     selections: JSON.stringify(
       mergeRows(selections, loaded.selections, sourceIdentity, (r, latest) =>
         latest.kind !== r.kind || latest.descriptor !== r.descriptor
-          ? { ...latest, rowKey: r.rowKey ?? crypto.randomUUID() }
+          ? { ...latest, rowKey: r.rowKey ?? randomUUID() }
           : {
               ...latest,
-              rowKey: r.rowKey ?? crypto.randomUUID(),
+              rowKey: r.rowKey ?? randomUUID(),
               ...(r.removed ? { removed: true } : {}),
               // An edited query stays until the operator saves or discards it, with its baseline.
               ...(typeof r.query === "string"
@@ -590,7 +591,7 @@ export function adoptRepositoryRows(saved: Repositories, v: Values) {
           latest.unavailable
             ? {
                 ...latest,
-                rowKey: r.rowKey ?? crypto.randomUUID(),
+                rowKey: r.rowKey ?? randomUUID(),
                 ...(r.removed ? { removed: true } : {}),
               }
             : {

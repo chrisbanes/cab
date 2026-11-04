@@ -1,3 +1,4 @@
+import { sha256Hex } from "./browser-crypto.js";
 import type { PushSubscriptionRecord } from "../../src/operator/contracts.js";
 
 /** What this browser can do about push, read once from the page. */
@@ -135,13 +136,7 @@ export function bytesToBase64Url(bytes: ArrayBuffer | Uint8Array): string {
 
 /** SHA-256 hex of the endpoint as the service stores it (the URL's normalised form). */
 export async function endpointDigestOf(endpoint: string): Promise<string> {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(new URL(endpoint).href),
-  );
-  return [...new Uint8Array(hash)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256Hex(new URL(endpoint).href);
 }
 
 /** The state of a revoked row, as the operator reads it. */

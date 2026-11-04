@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useEffect, useId, useState } from "react";
 import {
   operatorCommandSchema,
@@ -118,7 +119,7 @@ export function EditTask({
             void send(
               operatorCommandSchema.parse({
                 type: "task.configure",
-                key: crypto.randomUUID(),
+                key: randomUUID(),
                 projectId: edit.projectId,
                 taskId,
                 // The version the draft was filled from, not a later read that arrived while editing.

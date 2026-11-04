@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { z } from "zod";
 import {
@@ -22,7 +23,7 @@ export interface GitLabRow {
   path: string;
 }
 const emptyGitLabRow = (host: string): GitLabRow => ({
-  id: crypto.randomUUID(),
+  id: randomUUID(),
   host,
   repositoryId: "",
   projectPath: "",

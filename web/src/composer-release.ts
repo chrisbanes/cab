@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { z } from "zod";
 import { uuid } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
@@ -76,8 +77,8 @@ export class PendingReleases {
     if (existing) return existing;
     const release: DraftRelease = {
       runId,
-      stopKey: crypto.randomUUID(),
-      discardKey: crypto.randomUUID(),
+      stopKey: randomUUID(),
+      discardKey: randomUUID(),
       ...(start ? { start } : {}),
     };
     // Never evicted: only a confirmed (or unknown-to-the-service) run leaves the list.
@@ -88,7 +89,7 @@ export class PendingReleases {
   /** A fresh Stop key, so a later attempt reaches the service instead of a stored receipt. */
   restop(runId: string) {
     this.items = this.items.map((item) =>
-      item.runId === runId ? { ...item, stopKey: crypto.randomUUID() } : item,
+      item.runId === runId ? { ...item, stopKey: randomUUID() } : item,
     );
     this.write();
   }

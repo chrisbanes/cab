@@ -157,7 +157,12 @@ export interface OperatorFixture<R extends Runtime> {
     setup?: OperatorSetupSeams,
     push?: FixturePushOptions,
     readReadiness?: () => Promise<ReadinessResult>,
-    lan?: { address: string; origin?: string },
+    lan?: {
+      address: string;
+      origin?: string;
+      port?: number;
+      authOrigin?: string;
+    },
   ): Promise<{
     origin: string;
     lanOrigin?: string;
@@ -426,7 +431,12 @@ export async function createOperatorFixture<
       setup?: OperatorSetupSeams,
       pushOptions?: FixturePushOptions,
       readReadiness?: () => Promise<ReadinessResult>,
-      lan?: { address: string; origin?: string },
+      lan?: {
+        address: string;
+        origin?: string;
+        port?: number;
+        authOrigin?: string;
+      },
     ) {
       const id = ++listenerSequence;
       const owned: OwnedWeb = {
@@ -453,7 +463,7 @@ export async function createOperatorFixture<
           () =>
             new Promise<void>((resolve, reject) => {
               probe.once("error", reject);
-              probe.listen(0, "127.0.0.1", resolve);
+              probe.listen(lan?.port ?? 0, "127.0.0.1", resolve);
             }),
         );
         const address = probe.address();
@@ -480,7 +490,7 @@ export async function createOperatorFixture<
         await start(`auth-${id}.open`, async () => {
           owned.auth = await OperatorAuth.open({
             authFile,
-            origin,
+            origin: lan?.authOrigin ?? origin,
             now: () => now,
             idleTimeoutMs: 1000 * 60,
             absoluteTimeoutMs: 1000 * 60 * 5,
@@ -522,7 +532,14 @@ export async function createOperatorFixture<
           keyFile: join(directory, "operator-push-vapid.json"),
         });
         const http = new LocalOperatorHttp(auth, {
-          ...(lan ? { lan } : {}),
+          ...(lan
+            ? {
+                lan: {
+                  address: lan.address,
+                  ...(lan.origin === undefined ? {} : { origin: lan.origin }),
+                },
+              }
+            : {}),
           credentials: service.operatorCredentials(),
           push,
           web: new OperatorWebBoundary(bundle, api, {

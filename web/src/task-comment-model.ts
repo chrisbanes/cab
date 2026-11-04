@@ -1,3 +1,4 @@
+import { sha256Hex } from "./browser-crypto.js";
 /**
  * Recipient selection and effect wording for a shared task comment. The service decides what a
  * send does for each assignment; this only presents that decision and tracks the operator's
@@ -211,13 +212,7 @@ export async function commentPayloadHash(
         `{"assignmentId":${JSON.stringify(r.assignmentId)},"expectedAssignmentVersion":${r.expectedAssignmentVersion}}`,
     );
   const material = `{"body":${JSON.stringify(command.body)},"recipients":[${recipients.join(",")}],"taskId":${JSON.stringify(command.taskId)}}`;
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(material),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256Hex(material);
 }
 
 /**

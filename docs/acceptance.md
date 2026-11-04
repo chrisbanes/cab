@@ -193,8 +193,11 @@ A disposable service with an explicitly configured non-loopback IPv4 address
 binds it and numeric loopback on one port. Browser sessions are origin-bound;
 scoped tokens retain their permissions and the local OS-account capability is
 rejected on LAN. A failed second bind releases the loopback listener and publishes
-no ready endpoint. Same-host socket evidence does not establish second-device
-routing; browser qualification and offline host configuration remain separate.
+no ready endpoint. Chromium and WebKit journeys exercise LAN sign-in, a comment,
+keyboard interaction, notification availability, independent sessions and restart;
+a same-host TLS proxy checks the shared-host cookie boundary. Offline host
+configuration has separate lifecycle coverage. These tests do not establish
+second-device routing.
 
 ### Local operator access acceptance
 

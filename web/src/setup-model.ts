@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 /** Pure model for guided project setup: rows, the create command and fixed copy. */
 import {
   type CheckoutVerification,
@@ -31,7 +32,7 @@ export interface SetupRow {
   path: string;
 }
 export const emptyRow = (source: SetupRow["source"]): SetupRow => ({
-  id: crypto.randomUUID(),
+  id: randomUUID(),
   source,
   text: "",
   repositoryId: "",

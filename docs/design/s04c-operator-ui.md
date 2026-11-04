@@ -74,13 +74,15 @@ archived projects permit evidence/receipt GETs while disabling new sends/retries
 
 ## Verification boundary
 
-Service/auth and route tests use the real SQLite domain store and an ephemeral
-loopback listener. Chromium and the applicable WebKit journeys exercise shell/API sign-in, exact
-Origin, CSRF, cookie attributes, rotation/logout/restart/expiry and React controls.
-Browser engines are test-only dependencies. Full discovery excludes stale compiled
-tests and runs each remaining source test exactly once.
+Service/auth and route tests use the real SQLite domain store and ephemeral
+loopback and explicit non-loopback listeners. Chromium and WebKit exercise the LAN
+login, comment, keyboard, notification and session-restart paths on the fixture
+host; a disposable HTTPS proxy checks independent cookies on the same hostname.
+Other journeys cover exact Origin, CSRF, cookie attributes, rotation/logout/expiry
+and React controls. Browser engines are test-only dependencies. Full discovery
+excludes stale compiled tests and runs each remaining source test exactly once.
 
-Automated loopback tests do not prove private remote access. A separate bounded
+Same-host LAN and loopback tests do not prove private remote access from another device. A separate bounded
 Serve proof must record the installed Tailscale version, exact disposable node
 and peer identities, actual `Host` behavior, private reachability, absence of
 public exposure and exact cleanup. Do not claim Serve access as live-verified if

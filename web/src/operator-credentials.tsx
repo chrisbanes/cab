@@ -70,12 +70,14 @@ function Reveal({
           <Button
             type="button"
             variant="secondary"
-            onClick={() =>
-              navigator.clipboard.writeText(token).then(
-                () => setCopy("copied"),
-                () => setCopy("failed"),
-              )
-            }
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(token);
+                setCopy("copied");
+              } catch {
+                setCopy("failed");
+              }
+            }}
           >
             Copy
           </Button>
