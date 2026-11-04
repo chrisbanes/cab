@@ -1,4 +1,5 @@
 import {
+  type ArchiveBlocker,
   assertOwnedTaskWritable,
   assertProjectWritable,
   taskAcceptsWrites,
@@ -772,7 +773,7 @@ export const handbackSettlementSchema = registerPrArgumentsSchema
 export type HandbackSettlement = z.output<typeof handbackSettlementSchema>;
 /** A settlement refused because its target or material is no longer current. */
 export class HandbackSettlementRefusedError extends DomainConflictError {}
-const prBindingSchema = z
+export const prBindingSchema = z
   .object({
     taskId: z.string().uuid(),
     projectId: z.string().uuid(),
@@ -1004,6 +1005,79 @@ export class DeliveryStore {
       throw new Error("Invalid persisted delivery action");
     }
   }
+  /** Nested stack sends can remain unfinished after a PR receipt was persisted. */
+  projectStackArchiveBlockers(projectId: string): ArchiveBlocker[] {
+    const rows = this.db
+      .prepare(`SELECT a.operationId,a.taskId,a.recordJson FROM delivery_actions a
+      WHERE a.taskId IN (SELECT id FROM domain_tasks WHERE projectId=? UNION SELECT id FROM tasks WHERE projectId=?)
+      AND (json_type(a.recordJson,'$.stackCreate') IS NOT NULL OR json_type(a.recordJson,'$.stackLink') IS NOT NULL)
+      LIMIT 129`)
+      .all(projectId, projectId) as {
+      operationId: string;
+      taskId: string;
+      recordJson: string;
+    }[];
+    if (rows.length > 128)
+      return [
+        {
+          kind: "unavailable",
+          reason: "Stack delivery drain exceeds its inspection bound",
+        },
+      ];
+    return rows.flatMap((row): ArchiveBlocker[] => {
+      try {
+        const record = actionRecordSchema.parse(JSON.parse(row.recordJson));
+        if (
+          record.operationId !== row.operationId ||
+          record.binding.taskId !== row.taskId ||
+          record.binding.projectId !== projectId
+        )
+          throw new Error("Stack action ownership mismatch");
+        const { stackCreate: create, stackLink: link, observation } = record;
+        // A proved refusal before creating a PR has no nested provider effect to drain.
+        const noEffect =
+          !link &&
+          !observation?.receipt &&
+          !observation?.ambiguous &&
+          ((record.state === "denied" && record.attempts === 0) ||
+            (record.state === "confirmed-failure" &&
+              observation?.state === "confirmed-failure"));
+        const receipt = observation?.receipt;
+        const settled =
+          record.state === "confirmed-success" &&
+          observation?.state === "confirmed-success" &&
+          create &&
+          link?.phase === "link-attempting" &&
+          link.target !== undefined &&
+          record.request.action.kind === "pr.create" &&
+          create.repositoryId === record.request.action.target.repositoryId &&
+          create.blockerBranch === record.request.action.target.baseRef &&
+          create.blockerTaskId === link.identity.blockerTaskId &&
+          create.repositoryId === link.identity.repositoryId &&
+          create.blockerBranch === link.identity.blockerBranch &&
+          create.blockerPrNodeId === link.identity.blockerPrNodeId &&
+          create.blockerPrNumber === link.identity.blockerPrNumber &&
+          receipt?.nodeId === link.identity.dependentPrNodeId &&
+          receipt?.number === link.identity.dependentPrNumber &&
+          receipt?.headSha === record.request.action.target.expectedHeadSha &&
+          observation.stack !== undefined &&
+          (observation.stack !== null || observation.stackLinkRefused === true);
+        if (noEffect || settled) return [];
+      } catch {
+        // Unknown phases, malformed saved values and mismatched identities cannot prove drain.
+      }
+      return [
+        {
+          kind: "delivery-action",
+          taskId: row.taskId,
+          operationId: row.operationId,
+          reason:
+            "A stack delivery remains pending or its nested outcome is unproved",
+        },
+      ];
+    });
+  }
+
   actions(taskId?: string): DeliveryActionRecord[] {
     const rows = (
       taskId
@@ -2099,6 +2173,7 @@ export class DeliveryStore {
   ): DeliveryActionRecord {
     const identity = stackCreateSchema.parse(input);
     return this.transaction(() => {
+      assertOwnedTaskWritable(this.db, this.action(operationId).binding.taskId);
       validate();
       const record = this.action(operationId);
       if (
@@ -2131,6 +2206,7 @@ export class DeliveryStore {
   ): DeliveryActionRecord {
     const identity = stackLinkIdentitySchema.parse(input);
     return this.transaction(() => {
+      assertOwnedTaskWritable(this.db, this.action(operationId).binding.taskId);
       validate();
       const record = this.action(operationId);
       if (
@@ -2174,6 +2250,7 @@ export class DeliveryStore {
     target: StackLinkTarget,
   ): DeliveryActionRecord {
     return this.transaction(() => {
+      assertOwnedTaskWritable(this.db, this.action(operationId).binding.taskId);
       validate();
       const record = this.action(operationId);
       if (

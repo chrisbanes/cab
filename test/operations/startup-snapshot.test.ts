@@ -228,6 +228,55 @@ test("a database from before shared task comments is snapshotted without their t
   }
 });
 
+test("the deletion migration snapshots level 12 without tombstones and preserves private exclusions", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 12);
+    const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    db.exec("DROP TABLE project_tombstones");
+    db.prepare(
+      "INSERT INTO deleted_project_redaction_values (value) VALUES (?)",
+    ).run("retained-migration-private-value");
+    db.close();
+    await run(dirs.data);
+    const names = startupSnapshots(dirs.snapshots);
+    assert.equal(names.length, 1);
+    const snapshot = join(dirs.snapshots, names[0]!);
+    await verifySnapshot(snapshot);
+    const inspect = (file: string) => {
+      const database = new DatabaseSync(file, { readOnly: true });
+      try {
+        return {
+          tombstone: database
+            .prepare(
+              "SELECT name FROM sqlite_schema WHERE type='table' AND name='project_tombstones'",
+            )
+            .get()?.name,
+          values: database
+            .prepare(
+              "SELECT value FROM deleted_project_redaction_values ORDER BY value",
+            )
+            .all()
+            .map((row) => row.value),
+        };
+      } finally {
+        database.close();
+      }
+    };
+    const before = inspect(join(snapshot, "standalone.sqlite")),
+      after = inspect(join(dirs.data, "standalone.sqlite"));
+    assert.equal(before.tombstone, undefined);
+    assert.equal(after.tombstone, "project_tombstones");
+    assert.deepEqual(before.values, ["retained-migration-private-value"]);
+    assert.deepEqual(after.values, before.values);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.from, 12);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, 13);
+    assert.equal(recordedLevel(dirs.data), 13);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
 test("the snapshot taken before the issue.status strip keeps the grants the migration deletes", async () => {
   const dirs = layout();
   try {
@@ -727,6 +776,7 @@ const SCHEMA_PINS: Record<number, string> = {
   // Data only: the delivery policies lose their retired issue.status grants.
   11: "166659f79dd8253d641808c6b0ac6f0915fdb5a7fb038701734b32151dd53c47",
   12: "2f824de0d7791f4d7dcf8d040eccfc0a7fcd7712cffe96007feedb084fc5d10a",
+  13: "b7c29027a2536017cc045f1b1bb78dd1a60621b069057b3ed900d505533470ea",
 };
 
 test("the migration level matches the schema this build creates", async () => {

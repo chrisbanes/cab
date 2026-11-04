@@ -288,7 +288,7 @@ export const runtimeQuestionAnswerCommandSchema = z
     answers: z.unknown(),
   })
   .strict();
-const runtimeAnswerReceiptSchema = z
+export const runtimeAnswerReceiptSchema = z
   .object({
     interactionId: uuid,
     revision: z.number().int().positive(),

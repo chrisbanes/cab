@@ -23,7 +23,7 @@ const issue: IssueSnapshot = {
   projectFields: [],
 };
 
-function world(t: TestContext) {
+function world(t: TestContext, withGitHub = true, ready = false) {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
   t.after(() => db.close());
@@ -41,6 +41,7 @@ function world(t: TestContext) {
       name,
       leadProfileId: null,
     });
+    if (!withGitHub) return projectId;
     domain.execute({
       type: "github.configure",
       actor: "operator",
@@ -57,7 +58,12 @@ function world(t: TestContext) {
           name: "shared",
         },
       ],
-      readiness: null,
+      readiness: ready
+        ? {
+            mode: "all",
+            conditions: [{ kind: "label", operator: "has", name: "ready" }],
+          }
+        : null,
     });
     domain.execute({
       type: "github.activate",
@@ -280,7 +286,7 @@ for (const stage of ["selection", "brief"] as const)
     const { JiraSourceReader } = await import(
       "../../src/standalone/jira-source.js"
     );
-    const w = world(t),
+    const w = world(t, false),
       instance = "archive-fixture.atlassian.net";
     w.db
       .prepare("UPDATE domain_projects SET archived=1 WHERE id=?")
@@ -302,18 +308,10 @@ for (const stage of ["selection", "brief"] as const)
       actor: "operator",
       key: randomUUID(),
       projectId: w.projectId,
-      expectedVersion: 2,
+      expectedVersion: 1,
       instance,
       selections: [{ id: "jql", kind: "jql", jql: "project = ARCH" }],
       readiness: null,
-    });
-    w.domain.execute({
-      type: "github.activate",
-      actor: "operator",
-      key: randomUUID(),
-      projectId: w.projectId,
-      selectionId: "jql",
-      expectedVersion: 3,
     });
     let release!: () => void, entered!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -386,21 +384,13 @@ for (const stage of ["selection", "brief"] as const)
 
 for (const stage of ["blockers", "brief"] as const)
   test(`a delayed GitHub ${stage} read cannot rewrite frozen history after archive and restore`, async (t) => {
-    const w = world(t);
+    const w = world(t, true, true);
+    const readyIssue = { ...issue, labels: ["ready"] };
     w.db
       .prepare("UPDATE domain_projects SET archived=1 WHERE id=?")
       .run(w.other);
-    w.read();
+    w.read(w.projectId, readyIssue);
     const taskId = String(w.sources.issue(issue.nodeId)!.taskId);
-    w.domain.execute({
-      type: "task.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId: w.projectId,
-      taskId,
-      expectedVersion: Number(w.domain.task(taskId).version),
-      ready: true,
-    });
     let release!: () => void, enter!: () => void;
     const entered = new Promise<void>((resolve) => {
       enter = resolve;
@@ -414,7 +404,7 @@ for (const stage of ["blockers", "brief"] as const)
     const synchronizer = new GitHubSynchronizer(w.domain, w.sources, () => ({
       readSelection: async () => ({
         complete: true,
-        issues: [issue],
+        issues: [readyIssue],
         reason: null,
       }),
       readBlockers: async () => {

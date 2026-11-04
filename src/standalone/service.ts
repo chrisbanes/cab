@@ -1,3 +1,6 @@
+import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
+import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
+import type { ProjectDeleteCommand } from "../core/project-lifecycle.js";
 import { ProjectWrites } from "./project-writes.js";
 import {
   assertOwnedWorkWritable,
@@ -1019,6 +1022,7 @@ export class StandaloneService {
       );
       new Store(db).ensureHost("standalone-codex");
       this.deletedProjectRedaction = new DeletedProjectRedactionStore(db);
+      new ProjectTombstones(db);
       const workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
       const operatorCredentials = new OperatorCredentialStore(db);
       this.localAccessState = await LocalAccess.create(
@@ -3679,6 +3683,71 @@ export class StandaloneService {
 
   private writableWork(workId: string): boolean {
     return !!this.cache && workAcceptsWrites(this.cache, workId);
+  }
+
+  private projectDeletion() {
+    const domain = this.domain(),
+      db = this.cache!;
+    if (!this.owner) throw new Error("Service project deletion is unavailable");
+    return new ProjectDeletion(db, {
+      roots: {
+        task: this.owner.workspacePath,
+        drafting: this.owner.draftingWorkspacePath,
+      },
+      gitExecutable: this.options.workspaceManager?.gitExecutable,
+      signal: this.retryWaits?.signal,
+      drain: (projectId) =>
+        domain.projectArchiveBlockersWithinTransaction(projectId),
+      privateInputs: (owner, paths) =>
+        prepareDeletionPrivateInputs(db, owner, paths, {
+          extra: () => [
+            this.dataDir,
+            ...this.localAccessExclusions(),
+            ...secretEnvironmentValues(),
+            ...this.providerCredentialExclusions().redactions,
+            ...(domain.claudeTokenReference()
+              ? claudeTokenExclusions(domain.claudeTokenReference()!).redactions
+              : []),
+            ...(this.options.conversationHistoryExclusions?.() ?? []),
+          ],
+          resolveReference: async (reference) => {
+            const resolved = reference.startsWith("glab:")
+              ? await glabToken(reference.slice(5), {
+                  executable: this.options.glabExecutable,
+                  environment: glabEnvironment(domain),
+                })
+              : await ghToken({
+                  executable: this.options.ghExecutable,
+                  environment: ghEnvironment(domain, { reference }),
+                });
+            if (!("token" in resolved))
+              throw new Error(
+                "Project deletion credential resolution unavailable",
+              );
+            return resolved.token;
+          },
+        }),
+    });
+  }
+
+  private trackProjectDeletion<T>(operation: Promise<T>): Promise<T> {
+    const observed = operation.then(
+      () => {},
+      () => {},
+    );
+    this.backgroundRuns.add(observed);
+    void observed.then(() => this.backgroundRuns.delete(observed));
+    return operation;
+  }
+  projectDeletionPreview(projectId: string) {
+    return this.trackProjectDeletion(this.projectDeletion().preview(projectId));
+  }
+  deleteProject(command: ProjectDeleteCommand) {
+    return this.trackProjectDeletion(this.projectDeletion().delete(command));
+  }
+  deletedProject(projectId: string) {
+    this.started();
+    return new ProjectTombstones(this.cache!, false).status(projectId);
   }
 
   domain(): DomainStore {

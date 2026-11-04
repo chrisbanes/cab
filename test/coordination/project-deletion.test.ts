@@ -293,3 +293,852 @@ test("ownership captures tasks, assignments, task and drafting-only work without
   assert.deepEqual(domain.profile(profileId), profile);
   assert.throws(() => captureProjectOwnership(db, a.projectId), /transaction/);
 });
+
+// Atomic service deletion is exercised independently of the cleanup runner (T4).
+import {
+  projectDeletionFaultPhases,
+  deleteCapturedProjectRowsWithinTransaction,
+} from "../../src/standalone/project-deletion.js";
+import {
+  assertProjectRowsRemoved,
+  deletionQuery,
+} from "../../src/standalone/project-deletion-ownership.js";
+import {
+  assertProjectDeletionInventory,
+  projectDeletionInventory,
+} from "../../src/standalone/project-deletion-inventory.js";
+import { projectDeletionStatements } from "../../src/standalone/project-deletion-sql.js";
+import {
+  projectDeletionFixture,
+  databaseSnapshot,
+  capture,
+  preservedSnapshot,
+  assertNoDeletedReferences,
+  deletionCanary,
+} from "../fixtures/project-deletion.js";
+import { DeletedProjectRedactionStore } from "../../src/core/deleted-project-redaction.js";
+import { materialDigest } from "../../src/core/delivery.js";
+import { databaseOf } from "../fixtures/service-internals.js";
+
+test("archived exact-name deletion returns only a stable tombstone and permits fresh-ID name reuse", async (t) => {
+  const f = await projectDeletionFixture(t),
+    command = await f.command();
+  const owner = capture(f.db, f.projectId),
+    beforeB = preservedSnapshot(f.db, capture(f.db, f.projectB));
+  const result = await f.service.deleteProject(command);
+  assert.equal(result.kind, "project-deleted");
+  assert.equal(
+    f.db.prepare("SELECT 1 FROM domain_projects WHERE id=?").get(f.projectId),
+    undefined,
+  );
+  assert.equal(
+    f.db.prepare("SELECT 1 FROM projects WHERE id=?").get(f.projectId),
+    undefined,
+  );
+  assertProjectRowsRemoved(f.db, owner);
+  assertNoDeletedReferences(f.db, owner);
+  assert.equal(preservedSnapshot(f.db, capture(f.db, f.projectB)), beforeB);
+  assert.ok(
+    new DeletedProjectRedactionStore(f.db, false)
+      .exclusions([])
+      .includes(deletionCanary),
+  );
+  assert.equal(
+    JSON.stringify(f.service.deletedProject(f.projectId)).includes(
+      deletionCanary,
+    ),
+    false,
+  );
+  assert.deepEqual(await f.service.deleteProject(command), result);
+  await assert.rejects(
+    f.service.deleteProject({ ...command, key: randomUUID() }),
+    /conflict/,
+  );
+  await assert.rejects(
+    f.service.deleteProject({
+      ...command,
+      confirmationName: command.confirmationName.toUpperCase(),
+    }),
+    /conflict/,
+  );
+  f.domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: command.confirmationName,
+    leadProfileId: null,
+  });
+  assert.throws(
+    () =>
+      f.domain.execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: f.projectId,
+        name: "Different name",
+        leadProfileId: null,
+      }),
+    /Deleted project IDs/,
+  );
+  await f.service.stop();
+  await f.service.start();
+  assert.deepEqual(await f.service.deleteProject(command), result);
+  assert.equal(f.fixture.runtime.turns, 0);
+});
+
+test("preview and confirmation reject active projects, case changes and stale version/digest without mutation", async (t) => {
+  const f = await projectDeletionFixture(t, false);
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /Archive/,
+  );
+  f.freeze();
+  const command = await f.command(),
+    before = databaseSnapshot(f.db);
+  for (const changed of [
+    { confirmationName: command.confirmationName.toUpperCase() },
+    { expectedVersion: command.expectedVersion + 1 },
+    { previewDigest: "f".repeat(64) },
+  ])
+    await assert.rejects(f.service.deleteProject({ ...command, ...changed }));
+  assert.equal(databaseSnapshot(f.db), before);
+  f.domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: command.expectedVersion,
+    name: "Renamed",
+  });
+  await assert.rejects(f.service.deleteProject(command), /stale/);
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM project_tombstones").get()?.n,
+    0,
+  );
+});
+
+test("a new owned row or receipt invalidates preview even without a project version change", async (t) => {
+  const f = await projectDeletionFixture(t),
+    command = await f.command();
+  f.db
+    .prepare(
+      "INSERT INTO task_review_view_receipts (key,material) VALUES (?,?)",
+    )
+    .run(
+      randomUUID(),
+      JSON.stringify({ taskId: f.taskId, sourceId: null, resultIds: [] }),
+    );
+  await assert.rejects(f.service.deleteProject(command), /preview changed/);
+  assert.equal(f.domain.project(f.projectId).archived, 1);
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM project_tombstones").get()?.n,
+    0,
+  );
+});
+
+test("private input rotation and an ownership/lifecycle race are rechecked inside the transaction", async (t) => {
+  const f = await projectDeletionFixture(t),
+    command = await f.command();
+  let revision = 1;
+  const value = { live: ["original"], retiring: [deletionCanary] };
+  const deletion = f.deletion({
+    privateInputs: async () => ({
+      ...value,
+      fingerprint: materialDigest({ revision }),
+      fence: () => materialDigest({ revision }),
+    }),
+    beforeCommit: async () => {
+      revision++;
+    },
+  });
+  const before = databaseSnapshot(f.db);
+  await assert.rejects(deletion.delete(command), /private inputs changed/);
+  assert.equal(databaseSnapshot(f.db), before);
+  const restore = f.deletion({
+    beforeCommit: async () => {
+      f.restore();
+    },
+  });
+  await assert.rejects(restore.delete(command), /Archive|stale/);
+  assert.equal(f.domain.project(f.projectId).archived, 0);
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM project_tombstones").get()?.n,
+    0,
+  );
+});
+
+for (const phase of projectDeletionFaultPhases)
+  test(`delete fault at ${phase} rolls back ledger/accounting/tombstone and all owned rows`, async (t) => {
+    const f = await projectDeletionFixture(t),
+      command = await f.command(),
+      before = databaseSnapshot(f.db);
+    let faults = 0;
+    const deletion = f.deletion({
+      phase: (at) => {
+        if (at === phase) {
+          faults++;
+          throw new Error("Injected delete phase failure");
+        }
+      },
+    });
+    await assert.rejects(deletion.delete(command), /Injected/);
+    assert.equal(faults, 1);
+    assert.equal(databaseSnapshot(f.db), before);
+    assert.equal(f.fixture.runtime.turns, 0);
+  });
+
+test("the inventory classifies every fresh table and column and refuses new unclassified schema", async (t) => {
+  const f = await projectDeletionFixture(t);
+  assert.equal(Object.keys(projectDeletionInventory).length, 177);
+  assertProjectDeletionInventory(f.db);
+  f.db.exec("ALTER TABLE tasks ADD COLUMN unclassifiedOwner TEXT");
+  assert.throws(() => assertProjectDeletionInventory(f.db), /column inventory/);
+  await assert.rejects(f.service.projectDeletionPreview(f.projectId));
+  f.db.exec("ALTER TABLE tasks DROP COLUMN unclassifiedOwner");
+  f.db.exec("CREATE TABLE unclassified_project_data (owner TEXT)");
+  assert.throws(() => assertProjectDeletionInventory(f.db), /schema inventory/);
+});
+
+test("shared thread or cross-project execution lineage refuses instead of expanding ownership", async (t) => {
+  const f = await projectDeletionFixture(t);
+  f.db
+    .prepare(
+      "UPDATE execution_intents SET threadId='shared-thread' WHERE workId IN (?,?)",
+    )
+    .run(f.workId, f.workB);
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /unavailable/,
+  );
+  f.db
+    .prepare("UPDATE execution_intents SET threadId=NULL WHERE workId IN (?,?)")
+    .run(f.workId, f.workB);
+  f.db
+    .prepare(
+      "INSERT OR REPLACE INTO execution_request_predecessors (workId,previousWorkId,predecessorKnown) VALUES (?,?,1)",
+    )
+    .run(f.workId, f.workB);
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /unavailable/,
+  );
+  assert.ok(
+    f.db.prepare("SELECT 1 FROM domain_projects WHERE id=?").get(f.projectB),
+  );
+});
+
+test("drain is checked again after preparation and no unknown effect is resolved to permit deletion", async (t) => {
+  const f = await projectDeletionFixture(t),
+    command = await f.command();
+  const deletion = f.deletion({
+    beforeCommit: async () => {
+      f.db
+        .prepare(
+          "INSERT INTO execution_pending_effects (workId,effectKey,state) VALUES (?,'late-effect','pending')",
+        )
+        .run(f.workId);
+    },
+  });
+  await assert.rejects(deletion.delete(command), /stale|not drained/);
+  assert.ok(
+    f.db
+      .prepare("SELECT 1 FROM execution_pending_effects WHERE workId=?")
+      .get(f.workId),
+  );
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM project_tombstones").get()?.n,
+    0,
+  );
+});
+
+test("omitted child and detached receipt calibrations make the independent reference walk fail", async (t) => {
+  for (const omitted of [
+    "conversation_history_turn_omissions",
+    "task_review_view_receipts",
+  ] as const) {
+    const f = await projectDeletionFixture(t),
+      key = randomUUID();
+    if (omitted === "task_review_view_receipts")
+      f.db
+        .prepare("INSERT INTO task_review_view_receipts VALUES (?,?)")
+        .run(
+          key,
+          JSON.stringify({ taskId: f.taskId, sourceId: null, resultIds: [] }),
+        );
+    else
+      f.db
+        .prepare(`INSERT INTO conversation_history_turn_omissions
+      (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,workRevision,threadId,turnId,reason,createdAt)
+      VALUES (?,?,?,1,1,1,1,1,'owned-thread','owned-turn','early-buffer-limit',1)`)
+        .run(f.workId, f.taskId, f.assignmentId);
+    const owner = capture(f.db, f.projectId);
+    assert.throws(
+      () =>
+        transaction(f.db, () => {
+          for (const statement of projectDeletionStatements)
+            if (statement.table !== omitted) {
+              const query = deletionQuery(statement.sql, owner.parameters);
+              f.db.prepare(query.sql).run(...query.parameters);
+            }
+          assert.throws(
+            () => assertProjectRowsRemoved(f.db, owner),
+            /retained owned rows/,
+          );
+          assert.throws(() => assertNoDeletedReferences(f.db, owner));
+          // Abort calibration so fixture teardown sees its original intact state.
+          throw new Error("Calibration rollback");
+        }),
+      /Calibration rollback/,
+    );
+  }
+});
+
+import {
+  deletionSeedIdentity,
+  seedAllDeletionOwnedRows,
+} from "../fixtures/project-deletion-rows.js";
+import {
+  deletionOperatorReceiptScopes,
+  deletionPreTurnScopes,
+} from "../fixtures/project-deletion-receipts.js";
+
+async function exhaustiveStorageFixture(t: import("node:test").TestContext) {
+  const f = await projectDeletionFixture(t),
+    seqA = f.components.schedulerStore.sequence(f.workId),
+    seqB = f.components.schedulerStore.sequence(f.workB);
+  await f.service.stop();
+  const db = new DatabaseSync(
+    join(f.fixture.directory, "data", "standalone.sqlite"),
+  );
+  db.exec("PRAGMA foreign_keys=ON");
+  const a = deletionSeedIdentity({
+    projectId: f.projectId,
+    taskId: f.taskId,
+    blockerTaskId: f.blockerTaskId,
+    assignmentId: f.assignmentId,
+    profileId: f.profileId,
+    workId: f.workId,
+    intentId: f.intent.id,
+    requestSequence: seqA,
+    n: 100001,
+    workspacePath: join(f.fixture.directory, "storage-a"),
+  });
+  const b = deletionSeedIdentity({
+    projectId: f.projectB,
+    taskId: f.taskB,
+    blockerTaskId: f.blockerB,
+    assignmentId: f.assignmentB,
+    profileId: f.profileId,
+    workId: f.workB,
+    intentId: f.intentB.id,
+    requestSequence: seqB,
+    n: 100002,
+    workspacePath: join(f.fixture.directory, "storage-b"),
+  });
+  try {
+    seedAllDeletionOwnedRows(db, a);
+    seedAllDeletionOwnedRows(db, b);
+    // Both endpoints are independently exercised; B's task and provider blocker remain.
+    db.prepare(
+      "INSERT INTO local_dependencies (taskId,blockerTaskId) VALUES (?,?)",
+    ).run(b.taskId, a.taskId);
+    db.prepare(
+      "INSERT INTO local_dependencies (taskId,blockerTaskId) VALUES (?,?)",
+    ).run(a.taskId, b.taskId);
+    db.prepare(
+      "UPDATE source_native_blockers SET blockerExternalId=? WHERE externalId=?",
+    ).run(a.externalId, b.externalId);
+    // Terminal evidence may retain only its owned thread after workId was lost.
+    db.prepare(
+      "INSERT INTO runtime_terminal_evidence (threadId,turnId,firstStatus,conflicted,workId,firstRuntimeGeneration,lastRuntimeGeneration,firstObservedAt,lastObservedAt,failureEvidence,harness) VALUES (?,?,'completed',0,NULL,1,1,1,1,NULL,'codex')",
+    ).run(a.threadId, a.uuid("terminal-null-work"));
+    return { f, db, a, b };
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+test("explicit traversal removes distinguishing A rows in every owned table with FKs ON and preserves B/shared bytes", async (t) => {
+  const { f, db, a, b } = await exhaustiveStorageFixture(t);
+  try {
+    assertProjectDeletionInventory(db);
+    const ownerA = capture(db, a.projectId),
+      ownerB = capture(db, b.projectId);
+    assert.deepEqual(
+      projectDeletionStatements
+        .filter((statement) => !ownerA.rows[statement.table]!.length)
+        .map((statement) => statement.table),
+      [],
+      "Every owned table requires a distinguishing A seed",
+    );
+    for (const [table] of Object.entries(projectDeletionInventory))
+      assert.ok(
+        db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get(),
+        `missing shared/owned inventory row for ${table}`,
+      );
+    assert.deepEqual(
+      new Set(
+        (
+          ownerA.parameters.operatorReceipts as { scope: string; key: string }[]
+        ).map((r) => r.scope),
+      ),
+      new Set(deletionOperatorReceiptScopes),
+    );
+    assert.equal(
+      (ownerA.parameters.preTurnKeys as string[]).length,
+      deletionPreTurnScopes.length,
+    );
+    assert.ok(
+      (ownerA.parameters.work as string[]).includes(`drafting:${a.draftId}`),
+    );
+    assert.ok((ownerA.parameters.threads as string[]).includes(a.threadId));
+    assert.ok(
+      (ownerA.rows.runtime_terminal_evidence ?? []).some(
+        (row) => row.workId === null,
+      ),
+    );
+    const normalizedB = () => {
+      const rows = capture(db, b.projectId).rows;
+      return {
+        ...rows,
+        local_dependencies: rows.local_dependencies!.filter(
+          (row) => row.taskId !== a.taskId && row.blockerTaskId !== a.taskId,
+        ),
+      };
+    };
+    const before = preservedSnapshot(db, { ...ownerB, rows: normalizedB() }),
+      bytes = (ownerA.rows.diagnostic_items ?? []).reduce(
+        (n, row) => n + Number(row.payloadBytes),
+        0,
+      ),
+      usage = Number(
+        db.prepare("SELECT totalBytes FROM diagnostic_usage WHERE id=1").get()!
+          .totalBytes,
+      );
+    assert.ok(bytes > 0);
+    transaction(db, () =>
+      deleteCapturedProjectRowsWithinTransaction(db, ownerA),
+    );
+    assertProjectRowsRemoved(db, ownerA);
+    assertNoDeletedReferences(db, ownerA);
+    assert.equal(
+      preservedSnapshot(db, { ...ownerB, rows: normalizedB() }),
+      before,
+    );
+    assert.equal(
+      db.prepare("SELECT totalBytes FROM diagnostic_usage WHERE id=1").get()
+        ?.totalBytes,
+      usage - bytes,
+    );
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.ok(
+      db
+        .prepare(
+          "SELECT 1 FROM source_native_blockers WHERE externalId=? AND blockerExternalId=?",
+        )
+        .get(b.externalId, a.externalId),
+      "the unrelated blocker owner remains, despite a retained external identity match",
+    );
+    assert.equal(f.fixture.runtime.turns, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test("captured receipt keys remain available after parents vanish; a deliberately omitted old receipt fails the audit", async (t) => {
+  const { db, a } = await exhaustiveStorageFixture(t);
+  try {
+    const owner = capture(db, a.projectId);
+    assert.throws(
+      () =>
+        transaction(db, () => {
+          for (const statement of projectDeletionStatements)
+            if (statement.table !== "execution_pre_turn_commands") {
+              const query = deletionQuery(statement.sql, owner.parameters);
+              db.prepare(query.sql).run(...query.parameters);
+            }
+          assert.throws(
+            () => assertNoDeletedReferences(db, owner),
+            /unapproved JSON owner/,
+          );
+          assert.throws(
+            () => assertProjectRowsRemoved(db, owner),
+            /execution_pre_turn_commands/,
+          );
+          throw new Error("Calibration rollback");
+        }),
+      /Calibration rollback/,
+    );
+    assert.ok(
+      db.prepare("SELECT 1 FROM domain_projects WHERE id=?").get(a.projectId),
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("delete retains historical global exclusions as sanitization-only strings across restart", async (t) => {
+  const f = await projectDeletionFixture(t),
+    command = await f.command(),
+    oldResolved = "old-resolved-disposable-token";
+  const value = { live: [oldResolved], retiring: [deletionCanary] };
+  const deletion = f.deletion({
+    privateInputs: async () => ({
+      ...value,
+      fingerprint: materialDigest(value),
+      fence: () => materialDigest(value),
+    }),
+  });
+  await deletion.delete(command);
+  await f.service.stop();
+  await f.service.start();
+  const restarted = databaseOf(f.service),
+    ledger = new DeletedProjectRedactionStore(restarted, false);
+  assert.ok(ledger.exclusions([]).includes(oldResolved));
+  assert.ok(ledger.exclusions([]).includes(deletionCanary));
+  assert.equal(
+    JSON.stringify(f.service.deletedProject(f.projectId)).includes(oldResolved),
+    false,
+  );
+  assert.deepEqual(
+    restarted
+      .prepare("PRAGMA table_info(deleted_project_redaction_values)")
+      .all()
+      .map((row) => row.name),
+    ["value"],
+  );
+});
+
+test("missing ledger and private overflow refuse atomically before any deletion or cleanup", async (t) => {
+  const f = await projectDeletionFixture(t),
+    command = await f.command();
+  const before = databaseSnapshot(f.db),
+    value = { live: [], retiring: ["x".repeat(64 * 1024 + 1)] };
+  await assert.rejects(
+    f
+      .deletion({
+        privateInputs: async () => ({
+          ...value,
+          fingerprint: materialDigest(value),
+          fence: () => materialDigest(value),
+        }),
+      })
+      .delete(command),
+    /redaction/i,
+  );
+  assert.equal(databaseSnapshot(f.db), before);
+  f.db.exec("DROP TABLE deleted_project_redaction_values");
+  const missing = databaseSnapshot(f.db);
+  await assert.rejects(f.service.deleteProject(command), /unavailable/);
+  assert.equal(databaseSnapshot(f.db), missing);
+  assert.equal(f.fixture.runtime.turns, 0);
+});
+
+test("unknown detached receipt scopes and contradictory receipt parents fail closed", async (t) => {
+  const f = await projectDeletionFixture(t),
+    before = databaseSnapshot(f.db);
+  f.db
+    .prepare(
+      "INSERT INTO coordination_operator_receipts (scope,commandKey,payloadHash,result) VALUES (?,?,?,?)",
+    )
+    .run(
+      "unclassified",
+      randomUUID(),
+      "a".repeat(64),
+      JSON.stringify({ eventId: randomUUID() }),
+    );
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /unavailable/,
+  );
+  f.db
+    .prepare(
+      "DELETE FROM coordination_operator_receipts WHERE scope='unclassified'",
+    )
+    .run();
+  assert.equal(databaseSnapshot(f.db), before);
+  f.db
+    .prepare(
+      "INSERT INTO task_review_view_receipts (key,material) VALUES (?,?)",
+    )
+    .run(
+      randomUUID(),
+      JSON.stringify({
+        taskId: f.taskId,
+        sourceId: randomUUID(),
+        resultIds: [],
+      }),
+    );
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /unavailable/,
+  );
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM project_tombstones").get()?.n,
+    0,
+  );
+});
+
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { claudeTemporaryBase } from "../../src/standalone/claude.js";
+const deletionFixtureExec = promisify(execFile);
+
+test("preview observes dirty/unknown Git state and captures identities without removing worktrees", async (t) => {
+  const f = await projectDeletionFixture(t),
+    workspaceId = randomUUID(),
+    path = join(f.roots.task, workspaceId),
+    repo = join(path, "repo"),
+    file = join(repo, "untracked.txt");
+  await mkdir(repo, { recursive: true });
+  await deletionFixtureExec("git", ["init", "--initial-branch=main", repo]);
+  await writeFile(file, "Disposable unsaved work");
+  const stamp = new Date().toISOString();
+  f.db
+    .prepare(
+      "INSERT INTO task_workspace_bindings (taskId,workspaceId,path,repositories,state,reason,gitUncertain,createdAt,updatedAt) VALUES (?,?,?,?,'ready',NULL,0,?,?)",
+    )
+    .run(
+      f.taskId,
+      workspaceId,
+      path,
+      JSON.stringify([
+        {
+          repositoryId: "R_disposable",
+          sourcePath: f.fixture.directory,
+          workspacePath: repo,
+          ref: "main",
+          gitCommonDir: join(repo, ".git"),
+          commit: null,
+        },
+      ]),
+      stamp,
+      stamp,
+    );
+  const deletion = f.deletion(),
+    preview = await deletion.preview(f.projectId);
+  assert.deepEqual(preview.worktrees, [
+    {
+      workspaceId,
+      kind: "task",
+      dirty: "yes",
+      unpushed: "unknown",
+      inspection: "available",
+    },
+  ]);
+  assert.equal(preview.forceDiscard, true);
+  assert.equal(preview.outsideDiscovery, "recorded-identities-only");
+  for (const args of [
+    [
+      "-c",
+      "user.name=Disposable fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Baseline",
+    ],
+    ["branch", "baseline"],
+    ["branch", "--set-upstream-to=baseline", "main"],
+    [
+      "-c",
+      "user.name=Disposable fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Unpushed local work",
+    ],
+  ])
+    await deletionFixtureExec("git", ["-C", repo, ...args]);
+  const ahead = await deletion.preview(f.projectId);
+  assert.equal(ahead.worktrees[0]?.unpushed, "yes");
+  assert.equal(ahead.worktrees[0]?.dirty, "yes");
+  assert.equal(
+    ahead.previewDigest,
+    preview.previewDigest,
+    "confirmation accepts current discard, without reserving Git contents",
+  );
+  const unavailable = await f
+    .deletion({ gitExecutable: join(f.fixture.directory, "missing-git") })
+    .preview(f.projectId);
+  assert.equal(unavailable.worktrees[0]?.dirty, "unknown");
+  assert.equal(unavailable.worktrees[0]?.unpushed, "unknown");
+  await deletion.delete({
+    type: "project.delete",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: preview.version,
+    confirmationName: preview.name,
+    previewDigest: preview.previewDigest,
+  });
+  assert.equal(await readFile(file, "utf8"), "Disposable unsaved work");
+  const stored = JSON.parse(
+    String(
+      f.db
+        .prepare("SELECT cleanupJson FROM project_tombstones WHERE projectId=?")
+        .get(f.projectId)?.cleanupJson,
+    ),
+  ) as {
+    items: {
+      kind: string;
+      state: string;
+      captured?: { binding?: { workspaceId: string } };
+    }[];
+  };
+  assert.ok(
+    stored.items.some(
+      (item) =>
+        item.kind === "workspace" &&
+        item.state === "pending" &&
+        item.captured?.binding?.workspaceId === workspaceId,
+    ),
+  );
+  assert.equal(
+    f.db
+      .prepare("SELECT 1 FROM task_workspace_bindings WHERE taskId=?")
+      .get(f.taskId),
+    undefined,
+  );
+  assert.equal(f.fixture.runtime.turns, 0);
+});
+
+test("an extant historical Claude directory without a binding refuses unprovable cleanup ownership", async (t) => {
+  const f = await projectDeletionFixture(t),
+    temp = claudeTemporaryBase(f.fixture.directory);
+  // The fixture directory is unique; no installed runtime or provider identity is touched.
+  await mkdir(temp, { mode: 0o700 });
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const file = join(temp, "disposable"),
+    before = databaseSnapshot(f.db);
+  await writeFile(file, "Keep until ownership is known");
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /unavailable/,
+  );
+  assert.equal(databaseSnapshot(f.db), before);
+  assert.equal(await readFile(file, "utf8"), "Keep until ownership is known");
+});
+
+test("a retiring unresolved credential refuses deletion without retaining configuration or removing rows", async (t) => {
+  const f = await projectDeletionFixture(t);
+  f.db
+    .prepare(
+      "INSERT OR REPLACE INTO project_routing (projectId,version,enabled,guidance,credentialRef,candidateProfileIds) VALUES (?,1,0,'','gh:github.com','[]')",
+    )
+    .run(f.projectId);
+  const command = await f.command(),
+    before = databaseSnapshot(f.db);
+  await assert.rejects(f.deletion().delete(command), /unavailable/);
+  assert.equal(databaseSnapshot(f.db), before);
+  assert.equal(
+    f.db.prepare("SELECT COUNT(*) AS n FROM project_tombstones").get()?.n,
+    0,
+  );
+  assert.equal(f.fixture.runtime.turns, 0);
+});
+
+test("each explicit traversal phase restores the full populated ownership graph on failure", async (t) => {
+  const { f, db, a } = await exhaustiveStorageFixture(t);
+  try {
+    const owner = capture(db, a.projectId),
+      before = databaseSnapshot(db);
+    for (const phase of projectDeletionFaultPhases.filter(
+      (at) =>
+        at === "diagnostic-accounting" ||
+        at.startsWith("delete:") ||
+        at === "postcondition",
+    )) {
+      let injected = 0;
+      assert.throws(
+        () =>
+          transaction(db, () =>
+            deleteCapturedProjectRowsWithinTransaction(db, owner, (at) => {
+              if (at === phase) {
+                injected++;
+                throw new Error("Populated graph fault");
+              }
+            }),
+          ),
+        /Populated graph fault/,
+      );
+      assert.equal(injected, 1, phase);
+      assert.equal(databaseSnapshot(db), before, phase);
+    }
+    assert.equal(f.fixture.runtime.turns, 0);
+  } finally {
+    db.close();
+  }
+});
+
+import { receiptMaterials } from "../fixtures/project-deletion-receipts.js";
+
+test("preview reports exact owned counts and retains recorded branch/PR identities without guessing a host", async (t) => {
+  const f = await projectDeletionFixture(t);
+  const i = deletionSeedIdentity({
+    projectId: f.projectId,
+    taskId: f.taskId,
+    blockerTaskId: f.blockerTaskId,
+    assignmentId: f.assignmentId,
+    profileId: f.profileId,
+    workId: f.workId,
+    intentId: f.intent.id,
+    requestSequence: f.components.schedulerStore.sequence(f.workId),
+    n: 100001,
+    workspacePath: f.fixture.directory,
+  });
+  const { pr } = receiptMaterials(i),
+    branch = pr.observation.headRef;
+  f.db
+    .prepare(
+      "INSERT OR REPLACE INTO project_repository_links (projectId,version,links) VALUES (?,1,?)",
+    )
+    .run(
+      f.projectId,
+      JSON.stringify([
+        {
+          repositoryId: "R_shared",
+          path: f.fixture.directory,
+          ref: "main",
+          gitCommonDirectory: join(f.fixture.directory, ".git"),
+          codeHost: "github",
+          host: "github.com",
+        },
+      ]),
+    );
+  f.db
+    .prepare(
+      "INSERT INTO delivery_task_branches (taskId,repositoryId,branch,lastPushedSha,outsideHeadSha,assignedAt) VALUES (?,'R_shared',?,NULL,NULL,1)",
+    )
+    .run(f.taskId, branch);
+  f.db
+    .prepare(
+      "INSERT INTO delivery_pr_bindings (taskId,recordJson) VALUES (?,?)",
+    )
+    .run(f.taskId, JSON.stringify(pr));
+  const preview = await f.service.projectDeletionPreview(f.projectId);
+  assert.deepEqual(preview.counts, { tasks: 2, assignments: 1, worktrees: 0 });
+  assert.deepEqual(preview.externalRemnants, [
+    {
+      codeHost: "github",
+      host: "github.com",
+      repositoryId: "R_shared",
+      branch,
+      changeRequestId: pr.observation.nodeId,
+    },
+  ]);
+  assert.equal(f.fixture.runtime.turns, 0);
+  f.db
+    .prepare("UPDATE project_repository_links SET links='[]' WHERE projectId=?")
+    .run(f.projectId);
+  await assert.rejects(
+    f.service.projectDeletionPreview(f.projectId),
+    /unavailable/,
+  );
+});

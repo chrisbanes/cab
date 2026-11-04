@@ -289,19 +289,34 @@ export class ExecutionDiagnosticsStore {
     INSERT OR IGNORE INTO diagnostic_usage(id, totalBytes) VALUES (1, 0)`);
   }
 
+  private acceptsWrite(workId: string, projectId?: string): boolean {
+    try {
+      if (!workAcceptsWrites(this.db, workId)) return false;
+      projectId ??= (
+        this.db
+          .prepare("SELECT projectId FROM diagnostic_executions WHERE workId=?")
+          .get(workId) as { projectId: string } | undefined
+      )?.projectId;
+      return (
+        projectId === undefined ||
+        !this.db
+          .prepare(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='domain_projects'",
+          )
+          .get() ||
+        !this.db
+          .prepare("SELECT 1 FROM domain_projects WHERE id=? AND archived=1")
+          .get(projectId)
+      );
+    } catch {
+      // Diagnostic storage and lifecycle reads are both best effort; neither may escape.
+      this.unrecorded += 1;
+      return false;
+    }
+  }
+
   begin(identity: DiagnosticExecutionIdentity): void {
-    if (!workAcceptsWrites(this.db, identity.workId)) return;
-    if (
-      this.db
-        .prepare(
-          "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='domain_projects'",
-        )
-        .get() &&
-      this.db
-        .prepare("SELECT 1 FROM domain_projects WHERE id=? AND archived=1")
-        .get(identity.projectId)
-    )
-      return;
+    if (!this.acceptsWrite(identity.workId, identity.projectId)) return;
     this.guard(() =>
       this.db
         .prepare(`INSERT OR IGNORE INTO diagnostic_executions
@@ -327,7 +342,7 @@ export class ExecutionDiagnosticsStore {
   }
 
   bindThread(workId: string, threadId: string): void {
-    if (!workAcceptsWrites(this.db, workId)) return;
+    if (!this.acceptsWrite(workId)) return;
     this.guard(() =>
       this.db
         .prepare(
@@ -338,7 +353,7 @@ export class ExecutionDiagnosticsStore {
   }
 
   bindTurn(workId: string, turnId: string): void {
-    if (!workAcceptsWrites(this.db, workId)) return;
+    if (!this.acceptsWrite(workId)) return;
     this.guard(() =>
       this.db
         .prepare("UPDATE diagnostic_executions SET turnId = ? WHERE workId = ?")
@@ -359,7 +374,7 @@ export class ExecutionDiagnosticsStore {
     payload: unknown,
     exclusions: readonly string[] | undefined,
   ): void {
-    if (!workAcceptsWrites(this.db, workId)) return;
+    if (!this.acceptsWrite(workId)) return;
     this.guard(() => {
       let state: "available" | "omitted" = "available";
       let reason: DiagnosticGapCode | null = null;
@@ -446,12 +461,12 @@ export class ExecutionDiagnosticsStore {
 
   /** Adds `count` to a coalesced gap; never throws. */
   gap(workId: string, code: DiagnosticGapCode, bytes = 0, count = 1): void {
-    if (!workAcceptsWrites(this.db, workId)) return;
+    if (!this.acceptsWrite(workId)) return;
     this.guard(() => this.upsertGap(workId, code, count, bytes, 0));
   }
 
   finish(workId: string): void {
-    if (!workAcceptsWrites(this.db, workId)) return;
+    if (!this.acceptsWrite(workId)) return;
     this.guard(() =>
       this.db
         .prepare(
@@ -471,7 +486,7 @@ export class ExecutionDiagnosticsStore {
           )
           .all() as { workId: string }[];
         for (const { workId } of open) {
-          if (!workAcceptsWrites(this.db, workId)) continue;
+          if (!this.acceptsWrite(workId)) continue;
           this.upsertGap(workId, "capture-interrupted", 1, 0, 0);
           this.db
             .prepare(
@@ -676,7 +691,7 @@ export class ExecutionDiagnosticsStore {
     bytes: number,
     maxPrunedSequence: number,
   ): void {
-    if (!workAcceptsWrites(this.db, workId)) return;
+    if (!this.acceptsWrite(workId)) return;
     const now = this.now();
     this.db
       .prepare(`INSERT INTO diagnostic_gaps

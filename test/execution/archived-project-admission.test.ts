@@ -171,3 +171,27 @@ for (const kind of [
     );
     assert.equal(f.snapshot(), before);
   });
+
+test("an assignment-owned historical request remains frozen without redundant project/task fields", async (t) => {
+  const f = await archivedProjectFixture(t, false);
+  f.db
+    .prepare(
+      "UPDATE turn_requests SET projectId=NULL,taskId=NULL,assignmentId=? WHERE workId=?",
+    )
+    .run(f.assignmentId, f.workId);
+  f.freeze();
+  const before = f.snapshot();
+  assert.throws(
+    () => f.components.state.recordResult(f.workId, "Late result"),
+    ProjectArchivedError,
+  );
+  assert.throws(
+    () => f.components.schedulerStore.hold(f.workId, "Late hold"),
+    ProjectArchivedError,
+  );
+  assert.throws(
+    () => f.service.registerExecutionCallback(f.workId, Promise.resolve()),
+    ProjectArchivedError,
+  );
+  assert.equal(f.snapshot(), before);
+});

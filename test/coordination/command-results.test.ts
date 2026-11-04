@@ -99,6 +99,11 @@ const cases = {
   "project.configure": project,
   "project.archive": { ...project, archived: 1, paused: 1 },
   "project.restore": { ...project, archived: 0, paused: 1 },
+  "project.delete": {
+    kind: "project-deleted",
+    projectId: project.id,
+    deletedAt: "2026-11-04T00:00:00.000Z",
+  },
   "task.create": task,
   "task.configure": task,
   "profile.create": profile,

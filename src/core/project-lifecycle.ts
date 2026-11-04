@@ -13,6 +13,19 @@ const lifecycleSchema = z
   .strict();
 export type ProjectLifecycleSnapshot = z.output<typeof lifecycleSchema>;
 
+export const projectDeleteCommandSchema = z
+  .object({
+    type: z.literal("project.delete"),
+    actor: z.literal("operator"),
+    key: z.string().uuid(),
+    projectId: z.string().uuid(),
+    expectedVersion: z.number().int().positive(),
+    confirmationName: z.string().min(1).max(512),
+    previewDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+export type ProjectDeleteCommand = z.output<typeof projectDeleteCommandSchema>;
+
 export class ProjectArchivedError extends DomainConflictError {
   constructor() {
     super("Archived projects are read-only");
@@ -100,12 +113,31 @@ export function workProjectId(
       .get()
   ) {
     const request = db
-      .prepare("SELECT projectId, taskId FROM turn_requests WHERE workId = ?")
+      .prepare(
+        "SELECT projectId, taskId, assignmentId FROM turn_requests WHERE workId = ?",
+      )
       .get(workId) as
-      | { projectId: string | null; taskId: string | null }
+      | {
+          projectId: string | null;
+          taskId: string | null;
+          assignmentId: string | null;
+        }
       | undefined;
     if (request?.projectId) return request.projectId;
     if (request?.taskId) return taskProjectId(db, request.taskId);
+    if (
+      request?.assignmentId &&
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='domain_assignments'",
+        )
+        .get()
+    ) {
+      const assignment = db
+        .prepare("SELECT projectId FROM domain_assignments WHERE id=?")
+        .get(request.assignmentId) as { projectId: string } | undefined;
+      if (assignment) return assignment.projectId;
+    }
   }
   if (
     db

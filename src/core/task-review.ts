@@ -1,3 +1,4 @@
+import { DeletedProjectRedactionStore } from "./deleted-project-redaction.js";
 import {
   assertOwnedTaskWritable,
   taskAcceptsWrites,
@@ -38,6 +39,7 @@ type Row = Record<string, string | number | null>;
 export class TaskReviewStore {
   constructor(private readonly db: Database) {}
   migrate() {
+    new DeletedProjectRedactionStore(this.db);
     this.db.exec(`CREATE TABLE IF NOT EXISTS task_review_sources(sourceId TEXT PRIMARY KEY,taskId TEXT NOT NULL REFERENCES domain_tasks(id),projectId TEXT NOT NULL,revision INTEGER NOT NULL,recordJson TEXT NOT NULL,UNIQUE(taskId,revision));
  CREATE TABLE IF NOT EXISTS task_review_contexts(captureId TEXT PRIMARY KEY,taskId TEXT NOT NULL REFERENCES domain_tasks(id),assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),assignmentVersion INTEGER NOT NULL,workId TEXT,recordJson TEXT NOT NULL,UNIQUE(assignmentId,assignmentVersion,workId));
  CREATE TABLE IF NOT EXISTS task_review_results(resultId TEXT PRIMARY KEY REFERENCES coordination_results(resultId),taskId TEXT NOT NULL REFERENCES domain_tasks(id),recordJson TEXT NOT NULL);
@@ -350,7 +352,9 @@ export class TaskReviewStore {
         excluded.push(v);
     excluded.push(...childCredentialExclusions().values);
     if (!withinRedactionLimits(excluded)) throw new RedactionLimitError();
-    return excluded;
+    return new DeletedProjectRedactionStore(this.db, false).exclusions(
+      excluded,
+    );
   }
   /** Capture and indexing withhold the value when the bound is hit; only a result report fails on it. */
   private snapshot(): { excluded: readonly string[] | undefined } {

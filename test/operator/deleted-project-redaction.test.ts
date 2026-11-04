@@ -272,7 +272,12 @@ test("private ledger has no public projection or model-context consumers", () =>
         "deleted-project-redaction.js",
       ),
     );
-  assert.deepEqual(consumers, ["standalone/service.ts"]);
+  // The deletion transaction retains values; the two read-side consumers only sanitize.
+  assert.deepEqual(consumers.sort(), [
+    "core/task-review.ts",
+    "standalone/project-deletion.ts",
+    "standalone/service.ts",
+  ]);
 });
 
 test("surviving task comment stays redacted after retiring another project's instruction rows and restarting the service", async (t) => {

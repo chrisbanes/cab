@@ -299,9 +299,7 @@ export class DeliveryCoordinator {
           .filter((p): p is Promise<unknown> => p !== undefined),
       ),
     ];
-    const taskKey = keys.find(
-      (key) => key.startsWith("task:") || key.startsWith("status:"),
-    );
+    const taskKey = keys.find((key) => /^(?:task|status):[^:]+$/.test(key));
     const invoke = () =>
       this.projectWrite && taskKey
         ? this.projectWrite(taskKey.slice(taskKey.indexOf(":") + 1), run)

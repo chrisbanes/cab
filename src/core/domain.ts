@@ -1,3 +1,4 @@
+import { projectDeleteCommandSchema } from "./project-lifecycle.js";
 import {
   archiveBlockers,
   assertProjectWritable,
@@ -180,6 +181,7 @@ const commandSchema = z.discriminatedUnion("type", [
         message: "A delivery default needs repositories",
       },
     ),
+  projectDeleteCommandSchema,
   z
     .object({
       ...commandBase,
@@ -2841,6 +2843,21 @@ export class DomainStore {
     );
   }
 
+  projectArchiveBlockersWithinTransaction(projectId: string) {
+    const blockers = archiveBlockers(this.db, projectId, this.lifecycleFacts);
+    try {
+      blockers.push(
+        ...new DeliveryStore(this.db).projectStackArchiveBlockers(projectId),
+      );
+    } catch {
+      blockers.push({
+        kind: "unavailable",
+        reason: "Stack delivery drain could not be established",
+      });
+    }
+    return blockers;
+  }
+
   private assertCommandProjectWritable(command: ParsedCommand): void {
     if (command.type === "capacity.configure")
       for (const projectId of Object.keys(command.projectOverrides))
@@ -2849,7 +2866,8 @@ export class DomainStore {
       !("projectId" in command) ||
       command.type === "project.create" ||
       command.type === "project.archive" ||
-      command.type === "project.restore"
+      command.type === "project.restore" ||
+      command.type === "project.delete"
     )
       return;
     const project = this.project(command.projectId);
@@ -2888,6 +2906,17 @@ export class DomainStore {
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
         for (const profileId of command.candidateProfileIds ?? [])
           this.activeProfile(profileId);
+        if (
+          this.db
+            .prepare(
+              "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='project_tombstones'",
+            )
+            .get() &&
+          this.db
+            .prepare("SELECT 1 FROM project_tombstones WHERE projectId=?")
+            .get(command.projectId)
+        )
+          throw new DomainConflictError("Deleted project IDs cannot be reused");
         this.assertProjectNameAvailable(command.name);
         const repositories = verifiedRepositories ?? [];
         if ((command.repositories?.length ?? 0) !== repositories.length)
@@ -2968,16 +2997,18 @@ export class DomainStore {
           );
         return this.project(command.projectId);
       }
+      case "project.delete":
+        throw new DomainConflictError(
+          "Project deletion requires service preparation",
+        );
       case "project.archive": {
         this.operator(command);
         const current = this.project(command.projectId);
         this.version(current, command.expectedVersion);
         if (current.archived)
           throw new DomainConflictError("Project is already archived");
-        const blockers = archiveBlockers(
-          this.db,
+        const blockers = this.projectArchiveBlockersWithinTransaction(
           command.projectId,
-          this.lifecycleFacts,
         );
         if (blockers.length) throw new ProjectArchiveBlockedError(blockers);
         this.db

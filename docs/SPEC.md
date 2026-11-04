@@ -230,10 +230,14 @@ drops captured path/binding payload. No code-host branch/PR or tracker item is r
 
 Core archive/restore commands, durable lifecycle migration, service effect registration,
 store admission and retention-sweep guards, and versioned source-read fences are authored.
-The final stack journal drain adapter awaits the stack implementation. Archive/freeze
-coverage, lifecycle API/CLI/UI, exhaustive deletion and physical cleanup remain
-unqualified. The service refuses archive when authoritative in-flight facts are
-unavailable. Tombstone and ownership helpers alone do not implement deletion.
+Stack drain validates the persisted create/link journal and its confirmed outcome;
+unknown or pending nested phases refuse archive. The archived-only service deletion
+preview and atomic explicit ownership traversal are implemented.
+The traversal checks every table and column against a fixed inventory, captures detached
+receipt keys before removing parents, and retains validated private exclusion strings
+with the tombstone in the same transaction. An unprovable ownership identity refuses
+deletion. Lifecycle API/CLI/UI and postcommit physical cleanup remain unimplemented.
+The service refuses archive when authoritative in-flight facts are unavailable.
 
 ## Admission, project placement and task dependencies
 

@@ -8,8 +8,12 @@ import type { Database } from "./store.js";
 
 /** Private sanitization inputs only: never project state or restorable configuration. */
 export class DeletedProjectRedactionStore {
-  constructor(private readonly db: Database) {
-    db.exec(`CREATE TABLE IF NOT EXISTS deleted_project_redaction_values (
+  constructor(
+    private readonly db: Database,
+    initialize = true,
+  ) {
+    if (initialize)
+      db.exec(`CREATE TABLE IF NOT EXISTS deleted_project_redaction_values (
       value TEXT PRIMARY KEY NOT NULL CHECK (length(value) > 0)
     )`);
   }

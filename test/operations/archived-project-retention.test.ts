@@ -103,3 +103,39 @@ test("age pruning and global diagnostic admission preserve archived rows without
   store.gap(f.workId, "capture-interrupted");
   assert.equal(snapshot(), before);
 });
+
+test("diagnostics retain frozen project ownership independently of scheduler request rows", async (t) => {
+  const f = await archivedProjectFixture(t, false),
+    workId = randomUUID();
+  const store = new ExecutionDiagnosticsStore(f.db);
+  store.begin({
+    workId,
+    taskId: f.taskId,
+    projectId: f.projectId,
+    assignmentId: f.assignmentId,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    harness: "codex",
+    mode: "enhanced",
+    eventSource: "supported",
+  });
+  store.record(workId, "runtime", "before", "info", undefined, "Retained", []);
+  store.finish(workId);
+  f.freeze();
+  const snapshot = () =>
+    JSON.stringify([
+      f.db
+        .prepare("SELECT * FROM diagnostic_executions WHERE workId=?")
+        .all(workId),
+      f.db.prepare("SELECT * FROM diagnostic_items WHERE workId=?").all(workId),
+      f.db.prepare("SELECT * FROM diagnostic_gaps WHERE workId=?").all(workId),
+    ]);
+  const before = snapshot();
+  store.record(workId, "runtime", "late", "info", undefined, "Late event", []);
+  store.gap(workId, "late-event");
+  store.bindThread(workId, "late-thread");
+  store.bindTurn(workId, "late-turn");
+  assert.equal(snapshot(), before);
+});
