@@ -236,7 +236,15 @@ preview and atomic explicit ownership traversal are implemented.
 The traversal checks every table and column against a fixed inventory, captures detached
 receipt keys before removing parents, and retains validated private exclusion strings
 with the tombstone in the same transaction. An unprovable ownership identity refuses
-deletion. Lifecycle API/CLI/UI and postcommit physical cleanup remain unimplemented.
+deletion. Immediate, startup and periodic cleanup passes use durable captured identities,
+with bounded admission and shared
+workspace/thread locks. Force-discard is confined to the captured managed worktree;
+source checkouts, branches, PRs and retained Codex archive files remain intact. Missing
+resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pending;
+older descriptors without sufficient Git proof never authorize a guessed removal.
+Successful item checkpoints prune private payloads, while stable opaque thread identities
+continue to refuse restoration of deleted conversations. Private exclusions persist
+independently of cleanup progress. Lifecycle API/CLI/UI remain unimplemented.
 The service refuses archive when authoritative in-flight facts are unavailable.
 
 ## Admission, project placement and task dependencies

@@ -1,10 +1,25 @@
+import { assertCapturedWorkspaceAvailable } from "./project-cleanup-reservations.js";
+import {
+  capturedFilesystemState,
+  observeFilesystem,
+  type CapturedRepositoryIdentity,
+  type FilesystemIdentity,
+  type CleanupOutcome,
+} from "./project-cleanup-identities.js";
 import {
   assertOwnedTaskWritable,
   taskAcceptsWrites,
   ProjectArchivedError,
 } from "../core/project-lifecycle.js";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+} from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import { z } from "zod";
@@ -94,6 +109,13 @@ export type TaskWorkspaceRepositoryInput = z.infer<
 export type TaskWorkspaceRepository = z.infer<typeof repositoryBindingSchema>;
 
 export type TaskWorkspaceBinding = z.infer<typeof taskWorkspaceSchema>;
+
+export interface CapturedWorkspaceDiscard {
+  binding: TaskWorkspaceBinding;
+  managedRoot: string;
+  filesystem: FilesystemIdentity | { unavailable: true };
+  gitIdentities?: CapturedRepositoryIdentity[] | undefined;
+}
 
 export interface WorkspaceCleanupEvidence {
   deliveryConfirmed: boolean;
@@ -238,6 +260,12 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     repositories: TaskWorkspaceRepository[],
   ): TaskWorkspaceBinding {
     assertOwnedTaskWritable(this.db, taskId);
+    assertCapturedWorkspaceAvailable(this.db, {
+      taskId,
+      workspaceId,
+      path,
+      repositories,
+    });
     const now = new Date().toISOString();
     this.db
       .prepare(
@@ -642,6 +670,263 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           : this.store.update(id, "held", reason);
       }
     });
+  }
+
+  /** Deleted-domain cleanup: shared task lock, captured proof, no live binding lookup/update. */
+  discardCaptured(
+    captured: CapturedWorkspaceDiscard,
+    allowed: () => boolean,
+  ): Promise<CleanupOutcome> {
+    return this.withTaskIdentityLock(
+      captured.binding.taskId,
+      async (): Promise<CleanupOutcome> => {
+        const pending = (
+          reason: "unsafe" | "unavailable" | "failed" | "unknown",
+        ): CleanupOutcome => ({ outcome: "pending", reason });
+        const { binding } = captured;
+        try {
+          if (
+            !allowed() ||
+            captured.managedRoot !== this.workspaceRoot ||
+            binding.path !== join(this.workspaceRoot, binding.workspaceId)
+          )
+            return pending("unsafe");
+          const managed = await observeFilesystem(this.workspaceRoot);
+          if (managed.state === "absent") {
+            return (await realpath(dirname(this.workspaceRoot))) ===
+              dirname(this.workspaceRoot) && allowed()
+              ? { outcome: "complete" }
+              : pending("unsafe");
+          }
+          if (managed.state !== "observed") return pending("unavailable");
+          if (
+            !managed.stat.isDirectory() ||
+            managed.stat.isSymbolicLink() ||
+            (await realpath(this.workspaceRoot)) !== this.workspaceRoot
+          )
+            return pending("unsafe");
+          const root = await observeFilesystem(binding.path);
+          if (root.state === "absent")
+            return allowed() ? { outcome: "complete" } : pending("unsafe");
+          if ("unavailable" in captured.filesystem)
+            return pending("unavailable");
+          const rootState = await capturedFilesystemState(
+            binding.path,
+            captured.filesystem,
+          );
+          if (rootState !== "same")
+            return pending(rootState === "unsafe" ? "unsafe" : "unavailable");
+          await this.assertManagedRoot(binding);
+          const identities = captured.gitIdentities ?? [];
+          if (
+            identities.length !== binding.repositories.length ||
+            new Set(identities.map((identity) => identity.repositoryId))
+              .size !== identities.length
+          )
+            return pending("unavailable");
+          for (const repository of binding.repositories) {
+            if (!allowed()) return pending("unavailable");
+            const proof = identities.find(
+              (item) => item.repositoryId === repository.repositoryId,
+            );
+            const current = await observeFilesystem(repository.workspacePath);
+            if (!proof) return pending("unavailable");
+            if (proof.state !== "observed") {
+              if (current.state === "absent") continue;
+              return pending(
+                proof.state === "absent" ? "unsafe" : "unavailable",
+              );
+            }
+            if (
+              proof.commonDirectory.path !== repository.gitCommonDir ||
+              dirname(proof.gitDirectory.path) !==
+                join(proof.commonDirectory.path, "worktrees")
+            )
+              return pending("unsafe");
+            for (const [path, identity] of [
+              [repository.sourcePath, proof.source],
+              [proof.commonDirectory.path, proof.commonDirectory.filesystem],
+            ] as const) {
+              const state = await capturedFilesystemState(path, identity);
+              if (state !== "same")
+                return pending(state === "unsafe" ? "unsafe" : "unavailable");
+            }
+            const admin = await capturedFilesystemState(
+              proof.gitDirectory.path,
+              proof.gitDirectory.filesystem,
+            );
+            if (current.state === "absent" && admin === "absent") continue;
+            if (admin !== "same")
+              return pending(
+                admin === "unsafe" || admin === "absent"
+                  ? "unsafe"
+                  : "unavailable",
+              );
+            const backPointer = await observeFilesystem(
+              join(proof.gitDirectory.path, "gitdir"),
+            );
+            if (
+              backPointer.state !== "observed" ||
+              !backPointer.stat.isFile() ||
+              backPointer.stat.isSymbolicLink() ||
+              (
+                await readFile(join(proof.gitDirectory.path, "gitdir"), "utf8")
+              ).trim() !== join(repository.workspacePath, ".git")
+            )
+              return pending("unsafe");
+            if (current.state !== "absent") {
+              for (const [path, identity, kind] of [
+                [repository.workspacePath, proof.root, "directory"],
+                [
+                  join(repository.workspacePath, ".git"),
+                  proof.gitEntry,
+                  "file",
+                ],
+              ] as const) {
+                const state = await capturedFilesystemState(
+                  path,
+                  identity,
+                  kind,
+                );
+                if (state !== "same")
+                  return pending(
+                    state === "unsafe" || state === "absent"
+                      ? "unsafe"
+                      : "unavailable",
+                  );
+              }
+              if (
+                (await this.capturedGit(repository.workspacePath, [
+                  "rev-parse",
+                  "--absolute-git-dir",
+                ])) !== proof.gitDirectory.path ||
+                (await this.capturedGit(repository.workspacePath, [
+                  "rev-parse",
+                  "--path-format=absolute",
+                  "--git-common-dir",
+                ])) !== proof.commonDirectory.path ||
+                (await this.capturedGit(repository.workspacePath, [
+                  "rev-parse",
+                  "--show-toplevel",
+                ])) !== repository.workspacePath
+              )
+                return pending("unsafe");
+            }
+            this.options.beforePathAccess?.(repository.workspacePath);
+            // Every await above permits another cab request; fence and compare immediately before mutation.
+            for (const [path, identity] of [
+              [repository.sourcePath, proof.source],
+              [proof.commonDirectory.path, proof.commonDirectory.filesystem],
+              [proof.gitDirectory.path, proof.gitDirectory.filesystem],
+            ] as const) {
+              if ((await capturedFilesystemState(path, identity)) !== "same")
+                return pending("unsafe");
+            }
+            if (
+              current.state === "observed" &&
+              (await capturedFilesystemState(
+                join(repository.workspacePath, ".git"),
+                proof.gitEntry,
+                "file",
+              )) !== "same"
+            )
+              return pending("unsafe");
+            const finalPointer = await observeFilesystem(
+              join(proof.gitDirectory.path, "gitdir"),
+            );
+            if (
+              finalPointer.state !== "observed" ||
+              finalPointer.stat.isSymbolicLink() ||
+              !finalPointer.stat.isFile() ||
+              finalPointer.stat.dev !== backPointer.stat.dev ||
+              finalPointer.stat.ino !== backPointer.stat.ino ||
+              (
+                await readFile(join(proof.gitDirectory.path, "gitdir"), "utf8")
+              ).trim() !== join(repository.workspacePath, ".git")
+            )
+              return pending("unsafe");
+            const finalRoot = await capturedFilesystemState(
+              binding.path,
+              captured.filesystem,
+            );
+            const finalRepo = await observeFilesystem(repository.workspacePath);
+            if (finalRoot !== "same" || !allowed()) return pending("unsafe");
+            if (
+              finalRepo.state !== current.state ||
+              (finalRepo.state === "observed" &&
+                (String(finalRepo.stat.dev) !== proof.root.device ||
+                  String(finalRepo.stat.ino) !== proof.root.inode ||
+                  finalRepo.stat.isSymbolicLink()))
+            )
+              return pending("unsafe");
+            await this.capturedGit(repository.sourcePath, [
+              "worktree",
+              "remove",
+              "--force",
+              repository.workspacePath,
+            ]);
+            if (
+              (await observeFilesystem(repository.workspacePath)).state !==
+              "absent"
+            )
+              return pending("unknown");
+          }
+          this.options.beforePathAccess?.(binding.path);
+          if (
+            (await capturedFilesystemState(
+              binding.path,
+              captured.filesystem,
+            )) !== "same" ||
+            !allowed()
+          )
+            return pending("unsafe");
+          await rm(binding.path, { recursive: true, force: true });
+          return (await observeFilesystem(binding.path)).state === "absent"
+            ? { outcome: "complete" }
+            : pending("unknown");
+        } catch (error) {
+          return pending(
+            isUncertainGitError(error) && error.uncertain
+              ? "unknown"
+              : "failed",
+          );
+        }
+      },
+    ).catch(
+      (): CleanupOutcome => ({ outcome: "pending", reason: "unavailable" }),
+    );
+  }
+
+  private async capturedGit(cwd: string, args: string[]): Promise<string> {
+    this.assertNotCancelled();
+    const result = await runGit({
+      executable: this.gitExecutable,
+      cwd,
+      args: ["--no-optional-locks", "-C", cwd, ...args],
+      timeoutMs: 10_000,
+      terminationGraceMs: this.gitTerminationGraceMs,
+      observationMs: this.gitTerminationObservationMs,
+      maxOutputBytes: maxGitOutputBytes,
+      signal: this.gitCancellation.signal,
+    });
+    if (result.status === "ok") return result.stdout.toString("utf8").trim();
+    if (result.status === "exit")
+      throw reportGitFailure(
+        this.options.gitFailureObserver,
+        "worktree-remove",
+        "failed",
+        result.childExitObserved,
+        result.signal,
+        true,
+      );
+    throw reportGitFailure(
+      this.options.gitFailureObserver,
+      "worktree-remove",
+      result.kind,
+      result.childExitObserved,
+      result.childExitSignal,
+      result.spawned,
+    );
   }
 
   private async provisionBinding(
@@ -1094,16 +1379,25 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     taskId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
+    return this.withTaskIdentityLock(taskId, () => {
+      if (this.store.writable?.(taskId) === false)
+        throw new ProjectArchivedError();
+      return this.store.projectWrite
+        ? this.store.projectWrite(taskId, operation)
+        : operation();
+    });
+  }
+
+  private withTaskIdentityLock<T>(
+    taskId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     const previous = this.inFlight.get(taskId) ?? Promise.resolve();
     const current = previous
       .catch(() => {})
       .then(() => {
         this.assertNotCancelled();
-        if (this.store.writable?.(taskId) === false)
-          throw new ProjectArchivedError();
-        return this.store.projectWrite
-          ? this.store.projectWrite(taskId, operation)
-          : operation();
+        return operation();
       });
     this.inFlight.set(taskId, current);
     return current.finally(() => {

@@ -1,3 +1,7 @@
+import {
+  capturedRepositoryIdentitySchema,
+  projectCleanupId,
+} from "./project-cleanup-identities.js";
 import { repositoryLinkListSchema } from "../core/repository-links.js";
 import { RedactionLimitError } from "../core/redaction-limits.js";
 import { z } from "zod";
@@ -56,12 +60,15 @@ export const capturedProjectCleanupSchema = z.discriminatedUnion("kind", [
         .strict(),
       managedRoot: absolutePath,
       filesystem: filesystemIdentity,
+      gitIdentities: z.array(capturedRepositoryIdentitySchema).optional(),
     })
     .strict(),
   z
     .object({
       kind: z.literal("claude-temp"),
       path: absolutePath,
+      workspacePath: absolutePath.optional(),
+      canonicalPath: absolutePath.optional(),
       taskId: identity,
       workspaceId: id,
       filesystem: filesystemIdentity,
@@ -113,6 +120,17 @@ export const projectCleanupSchema = z
         code: "custom",
         message: "Duplicate project cleanup identity",
       });
+    for (const item of value.items) {
+      if (
+        item.state === "pending" &&
+        item.captured.kind === "codex-thread" &&
+        item.id !== projectCleanupId("codex-thread", item.captured.threadId)
+      )
+        context.addIssue({
+          code: "custom",
+          message: "Invalid captured thread cleanup identity",
+        });
+    }
     for (const item of value.items)
       if (item.state === "pending" && item.kind !== item.captured.kind)
         context.addIssue({
@@ -273,6 +291,64 @@ export class ProjectTombstones {
           cleanup: projectCleanupSchema.parse(JSON.parse(row.cleanupJson)),
         };
       });
+  }
+
+  pendingCleanupProject(
+    projectId: string,
+  ): { projectId: string; cleanup: ProjectCleanup } | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT cleanupJson FROM project_tombstones WHERE projectId=? AND cleanupState='pending'",
+      )
+      .get(projectId) as { cleanupJson: string } | undefined;
+    return row
+      ? {
+          projectId: id.parse(projectId),
+          cleanup: projectCleanupSchema.parse(JSON.parse(row.cleanupJson)),
+        }
+      : undefined;
+  }
+
+  pendingCleanupPage(
+    afterProjectId?: string,
+  ): { projectId: string; cleanup: ProjectCleanup }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT projectId,cleanupJson FROM project_tombstones WHERE cleanupState='pending' AND projectId>? ORDER BY projectId LIMIT 16",
+        )
+        .all(afterProjectId ?? "") as {
+        projectId: string;
+        cleanupJson: string;
+      }[]
+    ).map((row) => ({
+      projectId: id.parse(row.projectId),
+      cleanup: projectCleanupSchema.parse(JSON.parse(row.cleanupJson)),
+    }));
+  }
+
+  retainCleanupWithinTransaction(
+    projectId: string,
+    itemId: string,
+    reason: "unsafe" | "unavailable" | "failed" | "unknown",
+  ): void {
+    if (!this.db.isTransaction)
+      throw new Error("Project cleanup checkpoint requires a transaction");
+    const row = this.db
+      .prepare("SELECT cleanupJson FROM project_tombstones WHERE projectId=?")
+      .get(projectId) as { cleanupJson: string } | undefined;
+    if (!row) throw new Error("Unknown project tombstone");
+    const cleanup = projectCleanupSchema.parse(JSON.parse(row.cleanupJson));
+    const item = cleanup.items.find((value) => value.id === itemId);
+    if (item?.state !== "pending") return;
+    // Rotate failed work durably, so one unsafe item cannot starve later identities on restart.
+    cleanup.items = [
+      ...cleanup.items.filter((value) => value.id !== itemId),
+      { ...item, reason },
+    ];
+    this.db
+      .prepare("UPDATE project_tombstones SET cleanupJson=? WHERE projectId=?")
+      .run(JSON.stringify(cleanup), projectId);
   }
 
   completeCleanupWithinTransaction(projectId: string, itemId: string): void {

@@ -1,3 +1,4 @@
+import { ProjectDeletionCleanup } from "./project-deletion-cleanup.js";
 import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
 import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
 import type { ProjectDeleteCommand } from "../core/project-lifecycle.js";
@@ -662,6 +663,7 @@ interface ServiceGeneration {
 /** Every component operations use; published whole once start-up can admit work. */
 interface Started {
   conversationArchival: ConversationArchival;
+  projectDeletionCleanup: ProjectDeletionCleanup;
   state: ExecutionState;
   domain: DomainStore;
   githubSources: GitHubSourceStore;
@@ -1841,15 +1843,24 @@ export class StandaloneService {
             this.handleBackgroundFailure(generation, "scheduler-drain", error),
         ),
       );
+      const conversationArchival = new ConversationArchival(
+        db,
+        state,
+        (workId) => this.activeByWorkId.has(workId),
+        () => this.generation === generation && generation.accepting,
+        (threadId, run) => this.withThreadProjectWrite(threadId, run),
+      );
+      const projectDeletionCleanup = new ProjectDeletionCleanup(db, {
+        roots: { task: workspacePath, drafting: draftingWorkspacePath },
+        workspaces: { task: workspaces, drafting: draftingWorkspaces },
+        archival: conversationArchival,
+        runtime: () => this.runtimes.get("codex"),
+        accepting: () => this.generation === generation && generation.accepting,
+      });
       // Admission begins here: scheduler drains and wakes need the whole record.
       this.current = {
-        conversationArchival: new ConversationArchival(
-          db,
-          state,
-          (workId) => this.activeByWorkId.has(workId),
-          () => this.generation === generation && generation.accepting,
-          (threadId, run) => this.withThreadProjectWrite(threadId, run),
-        ),
+        conversationArchival,
+        projectDeletionCleanup,
         state,
         domain,
         githubSources,
@@ -2836,6 +2847,9 @@ export class StandaloneService {
     await attempt("background callback settlement", async () => {
       await Promise.all([...this.backgroundRuns]);
     });
+    await attempt("deleted-project cleanup settlement", () =>
+      this.current?.projectDeletionCleanup.settle(),
+    );
     await attempt("supervisor settlement", () => supervisor?.settle());
 
     if (db?.isOpen)
@@ -3743,7 +3757,17 @@ export class StandaloneService {
     return this.trackProjectDeletion(this.projectDeletion().preview(projectId));
   }
   deleteProject(command: ProjectDeleteCommand) {
-    return this.trackProjectDeletion(this.projectDeletion().delete(command));
+    return this.trackProjectDeletion(
+      this.projectDeletion()
+        .delete(command)
+        .then(async (result) => {
+          // Failure after commit is pending cleanup, never a failed deletion receipt.
+          try {
+            await this.current?.projectDeletionCleanup.sweep(command.projectId);
+          } catch {}
+          return result;
+        }),
+    );
   }
   deletedProject(projectId: string) {
     this.started();
@@ -7071,12 +7095,18 @@ export class StandaloneService {
       !this.current
     )
       return;
-    const operation = this.current.conversationArchival
-      .sweep(this.runtimes.get("codex"))
-      ?.catch(() => {});
-    if (!operation) return;
-    this.backgroundRuns.add(operation);
-    void operation.finally(() => this.backgroundRuns.delete(operation));
+    const archival = this.current.conversationArchival.sweep(
+      this.runtimes.get("codex"),
+    );
+    const cleanup = this.current.projectDeletionCleanup.hasPending()
+      ? this.current.projectDeletionCleanup.sweep()
+      : undefined;
+    for (const pending of [archival, cleanup]) {
+      if (!pending) continue;
+      const operation = pending.catch(() => {});
+      this.backgroundRuns.add(operation);
+      void operation.finally(() => this.backgroundRuns.delete(operation));
+    }
   }
 
   private async wakeScheduler(
