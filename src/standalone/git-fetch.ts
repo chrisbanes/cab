@@ -283,59 +283,64 @@ async function fetchAndProveOutsideHead(
           measuring = false;
         });
     }, sizeCheckMs);
-    if (request.fixtureBoundary)
-      await request.fixtureBoundary.beforeEffect("fetch");
-    const fetched = await gitRun({
-      ...common,
-      ...bounds,
-      signal: request.signal
-        ? AbortSignal.any([request.signal, stop.signal])
-        : stop.signal,
-      args: [
-        "-c",
-        "credential.helper=",
-        "-c",
-        `credential.helper=${pushCredentialHelper}`,
-        "-c",
-        "credential.useHttpPath=true",
-        "-c",
-        "protocol.allow=never",
-        "-c",
-        "protocol.https.allow=always",
-        "-c",
-        "http.followRedirects=false",
-        "-c",
-        "http.proxy=",
-        // Git never spawns a command in the agent-writable alternate to list its refs.
-        "-c",
-        "core.alternateRefsCommand=true",
-        "-c",
-        "transfer.fsckObjects=true",
-        // Keep the objects as one pack, which is what is imported.
-        "-c",
-        "fetch.unpackLimit=1",
-        "-c",
-        "gc.auto=0",
-        "-c",
-        "maintenance.auto=false",
-        "fetch",
-        "--quiet",
-        "--no-tags",
-        "--no-write-fetch-head",
-        "--no-recurse-submodules",
-        `https://${host}/${nameWithOwner}.git`,
-        `+${commitSha}:refs/cab/adopt`,
-      ],
-      cwd: dir,
-      environmentOverrides: {
-        ...scratchEnvironment,
-        GIT_ALLOW_PROTOCOL: "https",
-        CAB_PUSH_HOST: host,
-        CAB_PUSH_PATH: `${nameWithOwner}.git`,
-        CAB_PUSH_USERNAME: username,
-        CAB_PUSH_TOKEN: token,
-      },
-    }).finally(() => clearInterval(watcher));
+    let fetched: Awaited<ReturnType<typeof gitRun>>;
+    try {
+      if (request.fixtureBoundary)
+        await request.fixtureBoundary.beforeEffect("fetch");
+      fetched = await gitRun({
+        ...common,
+        ...bounds,
+        signal: request.signal
+          ? AbortSignal.any([request.signal, stop.signal])
+          : stop.signal,
+        args: [
+          "-c",
+          "credential.helper=",
+          "-c",
+          `credential.helper=${pushCredentialHelper}`,
+          "-c",
+          "credential.useHttpPath=true",
+          "-c",
+          "protocol.allow=never",
+          "-c",
+          "protocol.https.allow=always",
+          "-c",
+          "http.followRedirects=false",
+          "-c",
+          "http.proxy=",
+          // Git never spawns a command in the agent-writable alternate to list its refs.
+          "-c",
+          "core.alternateRefsCommand=true",
+          "-c",
+          "transfer.fsckObjects=true",
+          // Keep the objects as one pack, which is what is imported.
+          "-c",
+          "fetch.unpackLimit=1",
+          "-c",
+          "gc.auto=0",
+          "-c",
+          "maintenance.auto=false",
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "--no-write-fetch-head",
+          "--no-recurse-submodules",
+          `https://${host}/${nameWithOwner}.git`,
+          `+${commitSha}:refs/cab/adopt`,
+        ],
+        cwd: dir,
+        environmentOverrides: {
+          ...scratchEnvironment,
+          GIT_ALLOW_PROTOCOL: "https",
+          CAB_PUSH_HOST: host,
+          CAB_PUSH_PATH: `${nameWithOwner}.git`,
+          CAB_PUSH_USERNAME: username,
+          CAB_PUSH_TOKEN: token,
+        },
+      });
+    } finally {
+      clearInterval(watcher);
+    }
     // A fetch that finished between polls is measured once more; nothing is proved or imported.
     if (
       oversize ||

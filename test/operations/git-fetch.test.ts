@@ -195,6 +195,49 @@ const adoptedRef = (repo: ReturnType<typeof repository>) => {
   return read.status === 0 ? read.stdout.trim() : null;
 };
 
+test("a rejected pre-fetch guard clears its size watcher without dispatching fetch", async (t) => {
+  const repo = repository(t);
+  const outside = repo.commitOutside();
+  const fake = shim(t, repo.remote);
+  const intervals = t.mock.method(globalThis, "setInterval");
+  const cleared = t.mock.method(globalThis, "clearInterval");
+  t.after(() => {
+    for (const call of intervals.mock.calls) clearInterval(call.result);
+  });
+  const phases: string[] = [];
+  const result = await adoptOutsideHead({
+    ...request(repo, fake.executable, outside),
+    fixtureBoundary: {
+      scratchParent: repo.root,
+      commonDirectory: git(
+        repo.workspace,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ),
+      async beforeEffect(phase) {
+        phases.push(phase);
+        if (phase === "fetch") throw new Error("fixture authority expired");
+      },
+      async beforeChild() {
+        return 1;
+      },
+      async afterChild() {},
+    },
+  });
+  assert.equal(result, "unproved");
+  assert.equal(existsSync(fake.started), false);
+  assert.equal(intervals.mock.callCount(), 1);
+  const watcher = intervals.mock.calls[0]!.result;
+  assert.ok(cleared.mock.calls.some((call) => call.arguments[0] === watcher));
+  assert.deepEqual(phases, ["locate", "scratch", "fetch", "teardown"]);
+  assert.equal(
+    readdirSync(repo.root).some((name) => name.startsWith("cab-adopt-")),
+    false,
+  );
+  assert.equal(adoptedRef(repo), null);
+});
+
 test("a checkout path containing a colon still adopts through quoted alternates", async (t) => {
   const repo = repository(t, "cab-git-fetch-a:b-");
   const outside = repo.commitOutside();

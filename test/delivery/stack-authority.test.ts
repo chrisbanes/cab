@@ -528,6 +528,7 @@ async function runtimeFixture(
     deferStart?: boolean;
     startFailure?: boolean;
     exitProof?: boolean;
+    nullIdentity?: boolean;
   } = {},
 ) {
   const f = await fixture(false, true),
@@ -582,7 +583,7 @@ async function runtimeFixture(
     },
     processIdentity: () => {
       identityHook?.();
-      return identity;
+      return options.nullIdentity ? null : identity;
     },
     startThread: async () => "offline-thread",
     resumeThread: async () => {},
@@ -813,6 +814,29 @@ test("an unknown start retains its original attempt and permits only owned-proce
   assert.equal(f.calls.stops, 1);
   assert.equal(f.guard.snapshot().processExit, true);
 });
+
+for (const startFailure of [false, true])
+  test(`null startup identity permits exact runtime-owned cleanup without exit proof (start failure: ${startFailure})`, async () => {
+    const f = await runtimeFixture({
+      deferStart: true,
+      nullIdentity: true,
+      startFailure,
+    });
+    await assert.rejects(
+      f.runtime.start(),
+      startFailure ? /offline-unknown-start/ : /v2-runtime-process-unproved/,
+    );
+    assert.equal(f.calls.starts, 1);
+    await assert.rejects(f.runtime.stop(), /v2-stop-process-unproved/);
+    assert.equal(f.calls.stops, 1);
+    assert.equal(f.guard.snapshot().effects["runtime:stop"]?.invoked, true);
+    assert.equal(f.guard.snapshot().effects["runtime:stop"]?.state, "reserved");
+    assert.equal(f.guard.snapshot().processExit, false);
+    assert.equal(f.guard.snapshot().process, null);
+    assert.throws(() => f.guard.current(), /v2-authority-closed/);
+    await assert.rejects(f.runtime.stop(), /v2-call-unlisted-or-spent/);
+    assert.equal(f.calls.stops, 1);
+  });
 
 test("unproved process exit never becomes a receipt or a repeated stop", async () => {
   const f = await runtimeFixture({ exitProof: false });

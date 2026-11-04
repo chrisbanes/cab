@@ -24,6 +24,7 @@ export async function createRealStackAdapter(
   await authority.open();
   try {
     await verifyPreparedStackResources(authority);
+    authority.current();
   } catch (error) {
     await authority.close();
     throw error;
@@ -73,6 +74,7 @@ export async function createRealStackAdapter(
   const fixtureProvider = provider("script");
   try {
     await fixtureProvider.readFixtureIdentity(m.resource.repositoryNodeId);
+    authority.current();
   } catch (error) {
     await authority.close();
     throw error;

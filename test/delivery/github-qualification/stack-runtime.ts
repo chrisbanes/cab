@@ -212,7 +212,10 @@ export function bindStackRuntime(
     authority.current();
     const identity = await runtime.processIdentity!();
     authority.current();
-    if (!identity) throw Error("v2-runtime-process-unproved");
+    if (!identity) {
+      authority.hold();
+      throw Error("v2-runtime-process-unproved");
+    }
     await authority.captureProcess(identity);
     await authority.confirm("runtime:start", materialHash(identity));
   };
@@ -435,18 +438,29 @@ export function bindStackRuntime(
   runtime.stop = async () => {
     authority.current(true);
     if (!startInvoked) return;
-    const identity = await runtime.processIdentity!();
+    let identity: Awaited<ReturnType<NonNullable<Runtime["processIdentity"]>>> =
+      null;
+    try {
+      identity = await runtime.processIdentity!();
+    } catch {
+      // Failed metadata capture cannot revoke cleanup of the runtime-owned handle.
+      authority.hold();
+    }
     authority.current(true);
-    if (!identity) throw Error("v2-stop-process-unproved");
-    if (!authority.snapshot().process)
+    // The bound runtime owns its exact child handle even when startup identity
+    // capture failed. Cleanup is permitted; successful termination proof is not.
+    if (identity && !authority.snapshot().process)
       await authority.captureProcess(identity, true);
-    if (materialHash(identity) !== materialHash(authority.snapshot().process))
-      throw Error("v2-stop-process-binding");
+    const boundIdentity =
+      identity &&
+      materialHash(identity) === materialHash(authority.snapshot().process);
+    if (!boundIdentity) authority.hold();
     const key = "runtime:stop";
     await authority.reserve("runtime.stop", lifecycle, key, true);
     authority.current(true);
     await invoke(key, () => original.stop());
     authority.current(true);
+    if (!identity || !boundIdentity) throw Error("v2-stop-process-unproved");
     const verification = await verifier.verify(identity);
     authority.current(true);
     if (

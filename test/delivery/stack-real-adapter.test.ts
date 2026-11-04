@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { offlineStackResources } from "./github-qualification/stack-offline-resources.js";
 import { createRealStackAdapter } from "./github-qualification/stack-real-adapter.js";
+import { runRealStackJourney } from "./github-qualification/stack-real-journey.js";
 import { unstackReadSchema } from "../../src/operator/unstack-contracts.js";
 
 // Native runtime startup is disabled in the prepared DB and has no granted call.
@@ -99,3 +100,140 @@ test("concrete stack adapter constructs the actual service and previews through 
   assert.equal(f.guard.snapshot().closed, true);
   assert.equal(f.guard.snapshot().processExit, false); // An offline adapter prefix cannot establish T6.
 });
+
+test("preaborted concrete journey never invokes factory, credential or provider", async (t) => {
+  const f = await offlineStackResources(t);
+  const controller = new AbortController();
+  controller.abort(new Error("offline-preabort"));
+  let factories = 0,
+    credentials = 0,
+    providers = 0;
+  await assert.rejects(
+    runRealStackJourney({
+      authority: f.guard,
+      signal: controller.signal,
+      factory: async (...args) => {
+        factories++;
+        return createRealStackAdapter(...args);
+      },
+      credential: async () => {
+        credentials++;
+        return "offline-injected-marker";
+      },
+      transport: async (...args) => {
+        providers++;
+        return f.transport(...args);
+      },
+    }),
+    /offline-preabort/,
+  );
+  assert.deepEqual(
+    { factories, credentials, providers },
+    { factories: 0, credentials: 0, providers: 0 },
+  );
+  assert.throws(() => f.guard.current(), /v2-authority-closed/);
+});
+
+for (const phase of ["credential", "provider", "constructed"] as const)
+  test(`abort during deferred concrete ${phase} bootstrap holds before service construction and further effects`, async (t) => {
+    const f = await offlineStackResources(t);
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = f.fakeLogin;
+    const envName = f.credentialRef.slice(4);
+    assert.equal(process.env[envName], undefined);
+    process.env[envName] = "offline-injected-marker";
+    const controller = new AbortController();
+    let entered!: () => void, release!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const paused = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let credentials = 0,
+      providers = 0,
+      constructed = 0;
+    try {
+      const running = runRealStackJourney({
+        authority: f.guard,
+        signal: controller.signal,
+        factory: async (...args) => {
+          const adapter = await createRealStackAdapter(...args);
+          constructed++;
+          if (phase === "constructed") {
+            entered();
+            await paused;
+          }
+          return adapter;
+        },
+        credential: async () => {
+          credentials++;
+          if (phase === "credential") {
+            entered();
+            await paused;
+          }
+          return "offline-injected-marker";
+        },
+        transport: async (...args) => {
+          providers++;
+          if (phase === "provider") {
+            entered();
+            await paused;
+          }
+          return f.transport(...args);
+        },
+      });
+      void running.catch(() => {});
+      await Promise.race([
+        reached,
+        running.then(() => {
+          throw Error("offline-bootstrap-did-not-pause");
+        }),
+      ]);
+      controller.abort(new Error("offline-bootstrap-abort"));
+      release();
+      await assert.rejects(
+        running,
+        /v2-authority-closed|offline-bootstrap-abort/,
+      );
+      assert.equal(credentials, 1);
+      assert.equal(
+        providers,
+        phase === "constructed" ? 3 : phase === "provider" ? 1 : 0,
+      );
+      assert.equal(constructed, phase === "constructed" ? 1 : 0);
+      const journal = f.guard.snapshot();
+      assert.equal(journal.closed, true);
+      assert.equal(journal.counts.credentials, 1);
+      assert.equal(journal.counts.credentialResolverInvocations, 1);
+      assert.equal(journal.counts["invocations:service.start"], undefined);
+      assert.equal(journal.process, null);
+      assert.equal(journal.processExit, false);
+      assert.equal(
+        journal.httpRequests.length,
+        phase === "constructed" ? 3 : 1,
+      );
+      assert.equal(
+        journal.httpRequests[0]?.phase,
+        phase === "constructed"
+          ? "responded"
+          : phase === "provider"
+            ? "invoked"
+            : "reserved",
+      );
+      assert.equal(
+        journal.counts["invocations:service.stop"],
+        phase === "constructed" ? 1 : undefined,
+      );
+      await assert.rejects(
+        f.guard.beforeCredentialLookup(),
+        /v2-authority-closed/,
+      );
+    } finally {
+      release();
+      await f.guard.close();
+      delete process.env[envName];
+      if (previous === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previous;
+    }
+  });

@@ -64,7 +64,12 @@ no later effect is released. Token caching never bypasses validity. Source/binar
 checked before effects, using a bounded initial hash and metadata revalidation.
 Changed pins hold the run; they do not grant a retry or replacement identity.
 The original teardown horizon permits only owned stop/interrupt calls after a
-main authority fault. It continues to verify canonical ownership.
+main authority fault. It continues to verify canonical ownership. Failed runtime
+identity capture does not revoke cleanup through that runtime's exact owned child
+handle; cleanup remains journaled and cannot establish process exit without the
+normal exact identity and termination proof. Abort is bound before adapter
+construction, so preaborted journeys invoke no factory and in-flight bootstrap
+abort holds authority before any later credential, provider or service effect.
 
 Only exact `https://api.github.com` requests are permitted. REST reads and the two
 literal read-only GraphQL documents have explicit per-rule versions. Captured PR

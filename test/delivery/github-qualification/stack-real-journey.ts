@@ -22,17 +22,16 @@ export interface StackRealJourneyInput {
 export async function runRealStackJourney(input: StackRealJourneyInput) {
   const { authority, signal } = input,
     m = authority.manifest;
-  const adapter = await (input.factory ?? createRealStackAdapter)(
-    authority,
-    input.credential,
-    input.transport,
-  );
-  let startAttempted = false,
-    stop: Promise<void> | undefined;
-  const stopOnce = () => (stop ??= adapter.stop());
+  let adapter: Adapter | undefined;
+  let stop: Promise<void> | undefined;
+  const stopOnce = () => {
+    if (!adapter) throw Error("v2-adapter-not-constructed");
+    stop ??= adapter.stop();
+    return stop;
+  };
   const abort = () => {
     authority.hold();
-    if (startAttempted) void stopOnce().catch(() => {});
+    if (adapter) void stopOnce().catch(() => {});
   };
   signal?.addEventListener("abort", abort, { once: true });
   const current = () => {
@@ -63,8 +62,15 @@ export async function runRealStackJourney(input: StackRealJourneyInput) {
     throw Error("v2-execution-remains-owned");
   };
   try {
+    if (signal?.aborted) abort();
     current();
-    startAttempted = true;
+    stage = "adapter-construction";
+    adapter = await (input.factory ?? createRealStackAdapter)(
+      authority,
+      input.credential,
+      input.transport,
+    );
+    current();
     stage = "service-start";
     await adapter.start();
     current();
@@ -220,13 +226,13 @@ export async function runRealStackJourney(input: StackRealJourneyInput) {
     )
       disposition = "held";
   } finally {
-    signal?.removeEventListener("abort", abort);
     try {
-      if (startAttempted) {
+      if (adapter) {
         stage = `${stage}:teardown`;
         await stopOnce();
       }
     } finally {
+      signal?.removeEventListener("abort", abort);
       await authority.close();
     }
   }
