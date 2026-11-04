@@ -1,3 +1,8 @@
+import {
+  assertOwnedTaskWritable,
+  assertProjectWritable,
+  taskAcceptsWrites,
+} from "../core/project-lifecycle.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DomainConflictError } from "../core/domain-errors.js";
@@ -185,6 +190,7 @@ export class DraftingRunStore {
         );
       return existing;
     }
+    assertProjectWritable(this.db, input.projectId);
     this.db
       .prepare(
         `INSERT INTO drafting_runs
@@ -216,6 +222,7 @@ export class DraftingRunStore {
     const run = this.read(runId);
     if (
       run?.state === "proposed" &&
+      taskAcceptsWrites(this.db, runId) &&
       run.expiresAt &&
       run.expiresAt <= this.now()
     )
@@ -272,6 +279,10 @@ export class DraftingRunStore {
    * conflict thrown when it was for other content.
    */
   recordReceipt<T>(key: string, content: unknown, receipt: T): T {
+    const prior = this.receipt<T>(key, content);
+    if (prior !== undefined) return prior;
+    const runId = (receipt as { runId?: unknown })?.runId;
+    if (typeof runId === "string") assertOwnedTaskWritable(this.db, runId);
     this.db
       .prepare(
         "INSERT OR IGNORE INTO drafting_command_receipts (key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?)",
@@ -288,11 +299,13 @@ export class DraftingRunStore {
   /** Settles every overdue proposal and drops old receipts; run at service start. */
   sweepExpired(): void {
     this.db
-      .prepare("DELETE FROM drafting_command_receipts WHERE createdAt < ?")
+      .prepare(
+        "DELETE FROM drafting_command_receipts WHERE createdAt < ? AND json_extract(receiptJson, '$.runId') NOT IN (SELECT d.runId FROM drafting_runs d JOIN domain_projects p ON p.id = d.projectId WHERE p.archived = 1)",
+      )
       .run(this.now() - receiptRetentionMs);
     const overdue = this.db
       .prepare(
-        "SELECT runId FROM drafting_runs WHERE state = 'proposed' AND proposedAt <= ?",
+        "SELECT runId FROM drafting_runs WHERE state = 'proposed' AND proposedAt <= ? AND projectId IN (SELECT id FROM domain_projects WHERE archived = 0)",
       )
       .all(this.now() - draftingProposalTtlMs) as Array<{ runId: string }>;
     for (const { runId } of overdue) this.get(runId);
@@ -303,6 +316,7 @@ export class DraftingRunStore {
     runId: string,
     proposal: DraftProposal | IssueEditProposal,
   ): void {
+    assertOwnedTaskWritable(this.db, runId);
     const kind = this.require(runId).kind;
     // An issue run stores its body in the `outcome` column.
     const [title, outcome] =
@@ -338,6 +352,7 @@ export class DraftingRunStore {
     to: DraftingState,
     reason: string | null,
   ): DraftingRun {
+    assertOwnedTaskWritable(this.db, runId);
     return this.atomically(() => {
       const row = this.db
         .prepare("SELECT state, title FROM drafting_runs WHERE runId = ?")
