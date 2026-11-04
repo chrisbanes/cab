@@ -500,7 +500,10 @@ terminate active turns. Fairness remains a technical contract to specify.
 Retry confirmed transient
 execution failures at most twice with backoff, persisting the allowance across
 restart. Blind relaunches cannot reset it. Uncertain acceptance/effects must be
-reconciled before retry. Silence flags attention, not automatic restart or termination.
+reconciled before retry. A draft turn cannot report an assignment result; when its
+confirmed failure is retried, cab settles that generation's result effect atomically
+with the retry. Other pending effects and unresolved ownership still prevent retry.
+Silence flags attention, not automatic restart or termination.
 
 Each assignment has durable identity independent of its conversation. Follow-up
 retains history with a new work revision; stale results cannot complete newer work.
