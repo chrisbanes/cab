@@ -165,6 +165,9 @@ for (const [name, viewport] of [
     await captureBrowserEvidence(page, `${name}-neutral-wait-reason`);
 
     await page.goto(`${web.origin}/app/assignments/${workerId}/recovery`);
+    await page
+      .getByText("Execution runtime: Claude · sonnet · high.")
+      .waitFor();
     const retained = await page.locator("main").innerText();
     assert.ok(retained.includes("Execution runtime: Claude"), retained);
     assert.doesNotMatch(retained, /Codex|App Server/);
