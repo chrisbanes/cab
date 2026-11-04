@@ -2989,6 +2989,8 @@ export class DeliveryStore {
   ): PrDeliveryBinding {
     const prior = this.settlementReceipt(command);
     if (prior) return prior;
+    if (this.unstackPending(command.taskId))
+      throw new HandbackSettlementRefusedError("Task Unstack is pending");
     assertOwnedTaskWritable(this.db, command.taskId);
     const binding = this.delivery(command.taskId);
     if (!binding)

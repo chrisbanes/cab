@@ -566,11 +566,30 @@ test("lower durable membership removal during unknown retarget survives restart 
   );
 });
 
+function handbackCommand(f: Awaited<ReturnType<typeof prepared>>) {
+  const binding = f.current().delivery().delivery(f.dependent)!;
+  return {
+    actor: "operator" as const,
+    key: randomUUID(),
+    taskId: f.dependent,
+    expectedTaskVersion: Number(f.current().domain().task(f.dependent).version),
+    expectedDeliveryRevision: binding.revision,
+    expectedPolicyVersion: f.current().delivery().configuration(binding.projectId).version,
+    repositoryId: binding.observation.repositoryId,
+    prNumber: binding.observation.number,
+    expectedPrNodeId: binding.observation.nodeId,
+    expectedHeadSha: binding.observation.headSha,
+    decision: "accepted" as const,
+  };
+}
+
+for (const caller of ["refresh", "handback"] as const) {
 for (const outcome of ["success", "failure"] as const) {
-  test(`an inspection begun before Unstack cannot commit a late ${outcome} over its original journal authority`, async (t) => {
+  test(`${caller} inspection begun before Unstack cannot commit a late ${outcome} over its original journal authority`, async (t) => {
     const f = await prepared(t),
       i = await f.current().previewTaskUnstack(f.dependent),
-      command = f.command(i);
+      command = f.command(i),
+      handback = handbackCommand(f);
     let entered!: () => void, release!: () => void;
     const started = new Promise<void>((resolve) => {
         entered = resolve;
@@ -597,7 +616,12 @@ for (const outcome of ["success", "failure"] as const) {
       },
     );
     t.after(() => release());
-    const refresh = f.current().refreshGitHub();
+    const inspection = caller === "refresh"
+      ? f.current().refreshGitHub()
+      : f.current().settleHandback(handback);
+    const finished = caller === "handback"
+      ? assert.rejects(inspection, /Unstack is pending/)
+      : inspection;
     await started;
     f.lost("retarget");
     assert.equal(
@@ -607,7 +631,9 @@ for (const outcome of ["success", "failure"] as const) {
     const binding = f.current().delivery().delivery(f.dependent),
       original = f.journal()[0]!;
     release();
-    await refresh;
+    await finished;
+    if (caller === "handback")
+      assert.equal(f.current().delivery().settlementReceipt(handback), null);
     assert.deepEqual(f.current().delivery().delivery(f.dependent), binding);
     const continued = f.journal()[0]!;
     // refreshGitHub wakes the real scheduler, which may append a readback
@@ -632,6 +658,21 @@ for (const outcome of ["success", "failure"] as const) {
     assert.deepEqual(f.journal()[0]?.identity, original.identity);
   });
 }
+}
+
+test("a recorded handback receipt replays while a later Unstack is pending", async (t) => {
+  const f = await prepared(t),
+    handback = handbackCommand(f),
+    receipt = await f.current().settleHandback(handback),
+    i = await f.current().previewTaskUnstack(f.dependent),
+    command = f.command(i);
+  f.lost("retarget");
+  assert.equal((await f.current().unstackTask(command)).phase, "retarget-attempting");
+  const binding = f.current().delivery().delivery(f.dependent);
+  assert.deepEqual(await f.current().settleHandback(handback), receipt);
+  assert.deepEqual(f.current().delivery().delivery(f.dependent), binding);
+  assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+});
 
 for (const changed of [
   "node",
