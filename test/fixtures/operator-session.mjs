@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 
+/** Session bootstrap must settle before an anonymous-state assertion. */
+export async function waitForOperatorSignIn(page) {
+  await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+}
+
 /** Signed-in browser session transport for disposable qualification fixtures. */
 export async function sessionCommand(page, origin, command) {
   const response = await page

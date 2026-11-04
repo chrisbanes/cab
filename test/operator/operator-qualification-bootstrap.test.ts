@@ -15,11 +15,12 @@ const helpers = (await import(
     command: unknown,
   ): Promise<unknown>;
   signOutOperator(page: Page, origin: string): Promise<void>;
+  waitForOperatorSignIn(page: Page): Promise<void>;
 };
 const test = browserSuite("qualification-bootstrap");
 for (const engine of ["chromium", "webkit"] as const) {
   test(
-    `qualification session bootstrap, keyed command and logout use supported endpoints (${engine})`,
+    `qualification waits for delayed session bootstrap, then uses keyed commands and logout (${engine})`,
     { browserEngine: engine },
     async (_t, journey) => {
       const f = await journey.start("fixture.create", () =>
@@ -43,7 +44,49 @@ for (const engine of ["chromium", "webkit"] as const) {
       const page = await browser.newPage();
       journey.observe(page);
       page.setDefaultTimeout(5000);
-      await page.goto(`${web.origin}/login`);
+      const expectAnonymousSignIn = async (path: string) => {
+        let releaseSession!: () => void;
+        const sessionBarrier = new Promise<void>((resolve) => {
+          releaseSession = resolve;
+        });
+        await page.route(
+          `${web.origin}/api/operator/session`,
+          async (route) => {
+            await sessionBarrier;
+            await route.continue();
+          },
+          { times: 1 },
+        );
+        const sessionRequest = page.waitForRequest(
+          `${web.origin}/api/operator/session`,
+        );
+        try {
+          await page.goto(`${web.origin}${path}`);
+          await sessionRequest;
+          let ready = false;
+          const observed = helpers.waitForOperatorSignIn(page).then(() => {
+            ready = true;
+          });
+          void observed.catch(() => {});
+          await page.getByText("Loading sign-in…", { exact: true }).waitFor();
+          assert.equal(
+            ready,
+            false,
+            "the helper must not accept the pending bootstrap",
+          );
+          releaseSession();
+          await observed;
+          assert.equal(
+            await page
+              .getByRole("heading", { name: "Sign in", exact: true })
+              .innerText(),
+            "Sign in",
+          );
+        } finally {
+          releaseSession();
+        }
+      };
+      await expectAnonymousSignIn("/login");
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.locator("main.page h1").waitFor();
@@ -77,6 +120,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       assert.equal(f.service.capacityLimits().globalLimit, 3);
       await helpers.signOutOperator(page, web.origin);
       await page.getByLabel("Password", { exact: true }).waitFor();
+      await expectAnonymousSignIn("/app/settings/runtime");
       assert.equal(
         (
           await page.request.get(`${web.origin}/api/operator/workspace`)

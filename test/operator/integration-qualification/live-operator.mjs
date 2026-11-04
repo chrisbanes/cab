@@ -1,4 +1,7 @@
-import { signOutOperator } from "../../fixtures/operator-session.mjs";
+import {
+  signOutOperator,
+  waitForOperatorSignIn,
+} from "../../fixtures/operator-session.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -197,6 +200,7 @@ async function startOperator(port, origin) {
 }
 
 async function signIn() {
+  await waitForOperatorSignIn(page);
   assert.match(await page.locator("body").innerText(), /Sign in/);
   await page.getByLabel("Password", { exact: true }).fill(password);
   const response = page.waitForResponse(
@@ -445,6 +449,7 @@ async function run() {
 
   progress("restart-invalidates-session-and-retains-history-holds");
   await page.goto(`${origin}/app/settings/runtime`);
+  await waitForOperatorSignIn(page);
   const afterRestartLogin = await page.locator("body").innerText();
   assert.match(afterRestartLogin, /Sign in/);
   evidence.operator.restartInvalidatedSession = true;

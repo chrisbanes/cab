@@ -1,11 +1,12 @@
 # S04d operator integration
 
-The runtime operator routes sit on top of the authenticated
-local UI foundation in [S04c](s04c-operator-ui.md). The production `operator`
-command registers the runtime route slot with the same `LocalOperatorHttp` instance;
-they therefore inherit its login, exact-Origin, CSRF, input parsing, safe
-redirect and response-header behavior. The adapters receive service/domain
-interfaces, not raw HTTP request or response objects.
+The production `operator` command validates the required web bundle before
+starting the service, then mounts `OperatorWebBoundary` and `OperatorApi` on the
+same `LocalOperatorHttp` listener described in [S04c](s04c-operator-ui.md).
+The React application uses the authenticated JSON API for runtime reads and keyed
+commands, preserving session, exact-Origin, CSRF, input validation and response-header
+protections. API adapters receive service/domain interfaces rather than raw HTTP
+request or response objects.
 
 ## Runtime operator view
 

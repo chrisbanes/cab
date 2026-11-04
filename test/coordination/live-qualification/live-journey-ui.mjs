@@ -1,4 +1,7 @@
-import { sessionCommand } from "../../fixtures/operator-session.mjs";
+import {
+  sessionCommand,
+  waitForOperatorSignIn,
+} from "../../fixtures/operator-session.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
@@ -3712,6 +3715,7 @@ export async function runLiveJourney(mode) {
         operatorOwners.push(owner);
       });
       await page.goto(`${current.origin}/app/settings/runtime`);
+      await waitForOperatorSignIn(page);
       required(
         /Sign in/.test(await page.locator("body").innerText()),
         "restart-invalidates-old-session",

@@ -25,6 +25,7 @@ import {
   sep,
 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { waitForOperatorSignIn } from "../../fixtures/operator-session.mjs";
 
 const maximumSleepMs = 60_000;
 const maximumSleepDispatchDelayMs = 5_000;
@@ -1289,6 +1290,7 @@ async function runLiveJourney(approval) {
     page.setDefaultTimeout(20_000);
     page.setDefaultNavigationTimeout(20_000);
     await page.goto(`${origin}/app`);
+    await waitForOperatorSignIn(page);
     assert.match(await page.locator("body").innerText(), /Sign in/);
     await page.getByLabel("Password", { exact: true }).fill(password);
     const loginResponse = page.waitForResponse(

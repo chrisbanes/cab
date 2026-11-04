@@ -7,6 +7,7 @@ import {
 import {
   sessionCommand,
   signOutOperator,
+  waitForOperatorSignIn,
 } from "../../fixtures/operator-session.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -228,6 +229,7 @@ async function startOperator(port) {
 
 async function signIn() {
   await page.goto(`${origin}/login`);
+  await waitForOperatorSignIn(page);
   assert.match(await page.locator("body").innerText(), /Sign in/);
   await page.getByLabel("Password", { exact: true }).fill(password);
   const response = page.waitForResponse(
