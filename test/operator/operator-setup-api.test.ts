@@ -1,3 +1,11 @@
+import { waitUntil } from "../fixtures/refused-turn.js";
+import { DomainStore } from "../../src/core/domain.js";
+import {
+  readinessCheckIds,
+  type ReadinessResult,
+} from "../../src/operator/readiness.js";
+import { OperatorClient } from "../../web/src/api.js";
+import { ConfigurationDraft } from "../../web/src/settings-state.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
@@ -1343,4 +1351,561 @@ test("the setup home read refuses without a current session even when routed pas
     status(() => api.readSetupHome({ ownerKey: "short", current: () => true })),
     403,
   );
+});
+
+const starterCommand = () => ({
+  type: "profile.create" as const,
+  key: randomUUID(),
+  profileId: randomUUID(),
+  name: "Lead",
+  instructions: "",
+  capabilities: "",
+  runtime: { harness: "codex" as const },
+  starter: {
+    implementerId: randomUUID(),
+    reviewerId: randomUUID(),
+    reviewerHarness: "claude" as const,
+  },
+});
+const setupReadiness = (failed: readonly string[] = []): ReadinessResult => ({
+  observedAt: Date.now(),
+  data: {
+    checks: readinessCheckIds.map((id) => ({
+      id,
+      label: id,
+      status: failed.includes(id) ? "fail" : "pass",
+      reason: failed.includes(id) ? "Unavailable" : null,
+      fix: failed.includes(id) ? "Check configuration" : null,
+    })),
+  },
+});
+
+test("starter bundle snapshots exact ordinary profiles and replays before changed readiness", async (t) => {
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => f.close());
+  let reads = 0;
+  let readiness = setupReadiness();
+  const api = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    undefined,
+    async () => {
+      reads++;
+      return readiness;
+    },
+  );
+  const c = starterCommand();
+  const receipt = await api.execute(c);
+  const d = f.service.domain();
+  assert.equal(d.profiles().length, 3);
+  const implementer = d.profile(c.starter.implementerId),
+    reviewer = d.profile(c.starter.reviewerId);
+  assert.equal(implementer.name, "Implementer");
+  assert.equal(implementer.summary, "Builds scoped changes");
+  assert.equal(
+    implementer.instructions,
+    "Make the smallest complete change that meets the brief.\nValidate in proportion to the change and say what you ran.\nReport what changed, how you verified it, and anything left open.\nAsk the lead when scope or authority is unclear; don't widen the brief.",
+  );
+  assert.equal(reviewer.name, "Reviewer");
+  assert.equal(reviewer.summary, "Independent review");
+  assert.equal(
+    reviewer.instructions,
+    "Review the result against its brief; don't change files.\nRank findings by severity, each with evidence (file, line, failing case).\nEnd with a verdict: ship, fix-first or rethink.\nReport gaps you could not check rather than guessing.",
+  );
+  for (const id of [
+    c.profileId,
+    c.starter.implementerId,
+    c.starter.reviewerId,
+  ]) {
+    assert.equal(d.profile(id).version, 1);
+    assert.equal(d.profile(id).revoked, 0);
+    assert.equal(
+      d.profileRevision(id, 1).instructions,
+      d.profile(id).instructions,
+    );
+    assert.deepEqual(d.profileSkills(id), { plugins: [] });
+  }
+  assert.equal(d.profile(c.profileId).instructions, "");
+  assert.deepEqual(d.profileRuntime(c.starter.implementerId), {
+    harness: "codex",
+  });
+  assert.deepEqual(d.profileRuntime(c.starter.reviewerId), {
+    harness: "claude",
+    model: null,
+    reasoningEffort: null,
+  });
+  assert.equal(JSON.stringify(receipt).includes("Make the smallest"), false);
+  readiness = setupReadiness(["claude-token"]);
+  assert.deepEqual(await api.execute(c), receipt);
+  assert.equal(reads, 1);
+  await assert.rejects(
+    api.execute({ ...c, name: "Different bytes" }),
+    (e) => e instanceof OperatorApiError && e.code === "conflict",
+  );
+  assert.equal(d.profiles().length, 3);
+  const operation = await api.readOperation(
+    new URLSearchParams({
+      scope: `profile:${c.profileId}`,
+      type: c.type,
+      key: c.key,
+    }),
+  );
+  assert.deepEqual(operation.data, { state: "recorded", receipt });
+  assert.equal(f.runtime.turns, 0);
+});
+
+for (const failed of ["claude-token", "claude-executable", "read-failed"])
+  test(`starter alternate refuses ${failed}, while the lead runtime remains usable`, async (t) => {
+    const f = await createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      {},
+      undefined,
+      { runtimeHarnesses: ["codex", "claude"] },
+    );
+    t.after(() => f.close());
+    const api = new OperatorApi(
+      f.service,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        if (failed === "read-failed") throw Error("unreadable");
+        return setupReadiness([failed]);
+      },
+    );
+    const c = starterCommand();
+    await assert.rejects(
+      api.execute(c),
+      (e) =>
+        e instanceof OperatorApiError &&
+        e.fieldPaths?.[0] === "starter.reviewerHarness",
+    );
+    assert.equal(f.service.domain().profiles().length, 0);
+    assert.equal(
+      f.service.domain().recordedCommand({ ...c, actor: "operator" }),
+      undefined,
+    );
+    await api.execute({
+      ...c,
+      starter: { ...c.starter, reviewerHarness: "codex" },
+    });
+    assert.equal(f.service.domain().profiles().length, 3);
+    for (const p of f.service.domain().profiles())
+      assert.equal(
+        f.service.domain().profileRuntime(String(p.id)).harness,
+        "codex",
+      );
+  });
+
+test("starter bundle rejects existing and revoked profiles, and rolls back worker insertion failures", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service);
+  const c = starterCommand();
+  const sameRuntime = {
+    ...c,
+    starter: { ...c.starter, reviewerHarness: "codex" as const },
+  };
+  f.seedPersistedState((db) =>
+    db.exec(
+      "CREATE TRIGGER refuse_reviewer BEFORE INSERT ON profiles WHEN NEW.name = 'Reviewer' BEGIN SELECT RAISE(ABORT, 'injected worker failure'); END",
+    ),
+  );
+  await assert.rejects(
+    api.execute(sameRuntime),
+    (e) =>
+      e instanceof OperatorApiError && e.code === "command-outcome-unknown",
+  );
+  assert.equal(f.service.domain().profiles().length, 0);
+  assert.equal(
+    f.service.domain().recordedCommand({ ...sameRuntime, actor: "operator" }),
+    undefined,
+  );
+  f.seedPersistedState((db) => {
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM profile_revisions").get()?.n,
+      0,
+    );
+    db.exec("DROP TRIGGER refuse_reviewer");
+  });
+  await assert.rejects(
+    api.execute({
+      ...sameRuntime,
+      starter: { ...sameRuntime.starter, reviewerId: c.profileId },
+    }),
+  );
+  assert.equal(f.service.domain().profiles().length, 0);
+  const { starter: _starter, ...ordinary } = c;
+  const legacyReceipt = await api.execute(ordinary);
+  await api.execute({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: c.profileId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  await assert.rejects(
+    api.execute({ ...sameRuntime, key: randomUUID(), profileId: randomUUID() }),
+    (e) => e instanceof OperatorApiError && e.code === "invalid-input",
+  );
+  assert.deepEqual(await api.execute(ordinary), legacyReceipt);
+  assert.equal(f.service.domain().profiles().length, 1);
+});
+
+test("unknown starter results reread only, keep frozen identity through absent and unreadable receipts, and adopt a delayed commit", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service);
+  const original = starterCommand();
+  const c = {
+    ...original,
+    starter: { ...original.starter, reviewerHarness: "codex" as const },
+  };
+  const calls: string[] = [];
+  let unreadable = false;
+  const client = new OperatorClient(async (path, init) => {
+    calls.push(init?.method ?? "GET");
+    if (init?.method === "POST") throw Error("outcome lost while in flight");
+    if (unreadable) throw Error("read failed");
+    return Response.json(
+      await api.readOperation(
+        new URL(String(path), "http://fixture").searchParams,
+      ),
+    );
+  });
+  const draft = new ConfigurationDraft();
+  draft.initialize({
+    key: c.key,
+    profileId: c.profileId,
+    implementerId: c.starter.implementerId,
+    reviewerId: c.starter.reviewerId,
+    name: "Lead",
+  });
+  await draft.submit(client, c, "csrf");
+  const bytes = draft.bytes;
+  await draft.reconcile(client, "csrf");
+  assert.equal(draft.phase, "unknown");
+  assert.equal(draft.set("name", "Changed"), false);
+  unreadable = true;
+  await draft.reconcile(client, "csrf");
+  assert.equal(draft.phase, "unknown");
+  unreadable = false;
+  const receipt = await api.execute(c);
+  await draft.reconcile(client, "csrf");
+  assert.equal(draft.phase, "recorded");
+  assert.equal(draft.bytes, bytes);
+  assert.deepEqual(draft.frozen, c);
+  assert.deepEqual(draft.receipt, receipt);
+  assert.deepEqual(calls, ["POST", "GET", "GET", "GET"]);
+  assert.equal(f.service.domain().profiles().length, 3);
+});
+
+test("starter commit survives notification failure with its original receipt and no duplicate profiles", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  f.seedPersistedState((db) => {
+    const d = new DomainStore(db, () => {
+      throw Error("injected notification failure");
+    });
+    const original = starterCommand();
+    const command = {
+      ...original,
+      actor: "operator" as const,
+      starter: { ...original.starter, reviewerHarness: "codex" as const },
+    };
+    assert.throws(
+      () => d.execute(command),
+      /Command committed but change notification failed/,
+    );
+    const recorded = d.recordedCommand(command);
+    assert.ok(recorded);
+    assert.deepEqual(d.execute(command), recorded);
+    assert.equal(d.profiles().length, 3);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM command_receipts").get()?.n,
+      1,
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM profile_revisions").get()?.n,
+      3,
+    );
+  });
+});
+
+test("a profile created during the asynchronous readiness check wins the empty-installation race", async (t) => {
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => f.close());
+  const c = starterCommand();
+  const ordinaryApi = new OperatorApi(f.service);
+  const api = new OperatorApi(
+    f.service,
+    [],
+    undefined,
+    undefined,
+    undefined,
+    async () => {
+      const { starter: _starter, ...ordinary } = starterCommand();
+      await ordinaryApi.execute(ordinary);
+      return setupReadiness();
+    },
+  );
+  await assert.rejects(
+    api.execute(c),
+    (e) => e instanceof OperatorApiError && e.code === "invalid-input",
+  );
+  assert.equal(f.service.domain().profiles().length, 1);
+  assert.equal(
+    f.service.domain().recordedCommand({ ...c, actor: "operator" }),
+    undefined,
+  );
+});
+
+for (const mode of [
+  "ready",
+  "disabled",
+  "unavailable",
+  "login-failed",
+] as const)
+  test(`Claude lead and Codex reviewer require enabled available authenticated Codex: ${mode}`, async (t) => {
+    const f = await createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      {},
+      undefined,
+      {
+        runtimeHarnesses:
+          mode === "unavailable" ? ["claude"] : ["codex", "claude"],
+      },
+    );
+    t.after(() => f.close());
+    const api = new OperatorApi(
+      f.service,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      async () =>
+        setupReadiness(mode === "login-failed" ? ["codex-login"] : []),
+    );
+    if (mode === "disabled")
+      await api.execute({
+        type: "runtime.configure",
+        key: randomUUID(),
+        harness: "codex",
+        enabled: false,
+      });
+    const original = starterCommand();
+    const c = {
+      ...original,
+      runtime: {
+        harness: "claude" as const,
+        model: null,
+        reasoningEffort: null,
+      },
+      starter: { ...original.starter, reviewerHarness: "codex" as const },
+    };
+    if (mode === "ready") {
+      await api.execute(c);
+      assert.equal(
+        f.service.domain().profileRuntime(c.starter.implementerId).harness,
+        "claude",
+      );
+      assert.equal(
+        f.service.domain().profileRuntime(c.starter.reviewerId).harness,
+        "codex",
+      );
+    } else {
+      await assert.rejects(
+        api.execute(c),
+        (e) =>
+          e instanceof OperatorApiError &&
+          e.fieldPaths?.[0] === "starter.reviewerHarness",
+      );
+      assert.equal(f.service.domain().profiles().length, 0);
+    }
+  });
+
+test("legacy profile creates retain their persisted payload hash and receipt shape", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service);
+  const c = {
+    type: "profile.create" as const,
+    key: "10000000-0000-4000-8000-000000001468",
+    profileId: "20000000-0000-4000-8000-000000001468",
+    name: "Legacy lead",
+    instructions: "",
+    capabilities: "",
+  };
+  assert.equal(Object.hasOwn(operatorCommandSchema.parse(c), "starter"), false);
+  const receipt = await api.execute(c);
+  assert.deepEqual(receipt, {
+    kind: "configuration",
+    key: c.key,
+    recorded: true,
+    result: {
+      commandType: "profile.create",
+      resourceId: c.profileId,
+      version: 1,
+      revoked: false,
+    },
+  });
+  f.seedPersistedState((db) =>
+    assert.equal(
+      db
+        .prepare(
+          "SELECT payloadHash FROM command_receipts WHERE scope = ? AND key = ?",
+        )
+        .get(`profile:${c.profileId}`, c.key)?.payloadHash,
+      "ec75084d4bbbf5978d8e592d5e1089cb457e13f15f3214cbcb0dc18ab303c9ed",
+    ),
+  );
+  assert.deepEqual(await api.execute(c), receipt);
+});
+
+test("setup candidates are atomic, permitted with routing off, revocable and absent from later projects", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service);
+  const original = starterCommand();
+  const c = {
+    ...original,
+    starter: { ...original.starter, reviewerHarness: "codex" as const },
+  };
+  await api.execute(c);
+  const candidateProfileIds = [c.starter.implementerId, c.starter.reviewerId];
+  const project = {
+    type: "project.create" as const,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: "Starter project",
+    leadProfileId: c.profileId,
+    candidateProfileIds,
+  };
+  await api.execute(project);
+  const d = f.service.domain();
+  assert.deepEqual(
+    JSON.parse(String(d.routing(project.projectId).candidateProfileIds)),
+    candidateProfileIds,
+  );
+  assert.equal(d.routing(project.projectId).enabled, 0);
+  assert.equal(d.routing(project.projectId).guidance, "");
+  assert.equal(d.routingCredentialReference(project.projectId), null);
+  const options = await api.readComposerOptions(project.projectId);
+  assert.deepEqual(options.data.profiles.map((p) => p.name).sort(), [
+    "Implementer",
+    "Lead",
+    "Reviewer",
+  ]);
+  const taskId = randomUUID();
+  await api.execute({
+    type: "task.create",
+    key: randomUUID(),
+    projectId: project.projectId,
+    taskId,
+    title: "Coordinate starter workers",
+    outcome: "Use permitted profiles",
+    ready: true,
+  });
+  await api.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId: project.projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  await f.service.provisionTask(taskId);
+  await waitUntil(
+    () => f.runtime.prompts.length > 0,
+    "starter lead coordination prompt",
+  );
+  const context = JSON.parse(
+    f.runtime.prompts[0]!.split(
+      "Current cab coordination context (JSON): ",
+    )[1]!.split("\n")[0]!,
+  );
+  assert.deepEqual(context.permittedProfiles, [
+    { id: c.profileId, name: "Lead", summary: "" },
+    {
+      id: c.starter.implementerId,
+      name: "Implementer",
+      summary: "Builds scoped changes",
+    },
+    {
+      id: c.starter.reviewerId,
+      name: "Reviewer",
+      summary: "Independent review",
+    },
+  ]);
+  const later = {
+    ...project,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: "Later project",
+  };
+  const { candidateProfileIds: _candidates, ...ordinary } = later;
+  await api.execute(ordinary);
+  assert.deepEqual(d.routingCandidates(ordinary.projectId), []);
+  await api.execute({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: c.starter.reviewerId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  assert.deepEqual(
+    d.routingCandidates(project.projectId).map((p) => p.profileId),
+    [c.starter.implementerId],
+  );
+  assert.deepEqual(
+    (await api.readComposerOptions(project.projectId)).data.profiles
+      .map((p) => p.name)
+      .sort(),
+    ["Implementer", "Lead"],
+  );
+  for (const ids of [
+    [c.starter.implementerId, c.starter.implementerId],
+    [c.starter.reviewerId],
+    [randomUUID()],
+  ]) {
+    const bad = {
+      ...later,
+      key: randomUUID(),
+      projectId: randomUUID(),
+      candidateProfileIds: ids,
+    };
+    await assert.rejects(api.execute(bad));
+    assert.equal(
+      d.projects().some((p) => p.id === bad.projectId),
+      false,
+    );
+    assert.equal(
+      d.recordedCommand({
+        ...bad,
+        actor: "operator",
+        candidateProfileIds: ids.length === 2 ? [] : ids,
+      }),
+      undefined,
+    );
+  }
 });

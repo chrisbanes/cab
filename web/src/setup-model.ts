@@ -115,6 +115,7 @@ export function buildProjectCreate(
     name: string;
     leadProfileId: string;
     instructions: string;
+    candidateProfileIds?: string[];
   },
   rows: SetupRow[],
   githubProjectNodeId: string,
@@ -128,6 +129,9 @@ export function buildProjectCreate(
     projectId: values.projectId,
     name: values.name,
     leadProfileId: values.leadProfileId || null,
+    ...(values.candidateProfileIds?.length
+      ? { candidateProfileIds: values.candidateProfileIds }
+      : {}),
     ...(values.instructions.trim()
       ? { instructions: values.instructions }
       : {}),
@@ -559,3 +563,30 @@ export function createHold(state: {
     return "Create the lead profile first, or clear its name.";
   return null;
 }
+
+/** Setup defaults to the lead unless the other runtime is enabled, running and authenticated. */
+export function starterReviewerHarness(
+  lead: "codex" | "claude",
+  workspace: Workspace["data"] | null,
+  readiness: ReadinessRead,
+) {
+  const alternate = lead === "codex" ? "claude" : "codex";
+  const status = workspace?.harnesses.find((h) => h.harness === alternate);
+  const checks =
+    alternate === "claude"
+      ? ["claude-executable", "claude-token"]
+      : ["codex-executable", "codex-login"];
+  return status?.enabled &&
+    status.state === "available" &&
+    readiness.state === "ready" &&
+    checks.every((id) =>
+      readiness.checks.some((c) => c.id === id && c.status === "pass"),
+    )
+    ? alternate
+    : lead;
+}
+export const starterOptionCopy = (
+  lead: "codex" | "claude",
+  reviewer: "codex" | "claude",
+) =>
+  `Adds Implementer (${executionHarnessLabels[lead]}) and Reviewer (${executionHarnessLabels[reviewer]})`;

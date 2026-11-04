@@ -2329,8 +2329,16 @@ const deliverySavedRowSchema = savedRowSchema
   .extend({
     /** A repository's additional check: `index` is into that repository's effective cab checks. */
     repositoryId: deliveryIdentity.optional(),
+    format: z.literal("post-status-strip-v1").optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (row) => row.section === "delivery-grants" || row.format === undefined,
+    {
+      path: ["format"],
+      message: "Only grant references have a format marker.",
+    },
+  );
 export const savedConfigurationRowSchema = savedRowSchema
   .extend({
     section: z.enum(["source", "repositories"]),
@@ -2859,6 +2867,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("project.create"),
       name: z.string().trim().min(1).max(512),
       leadProfileId: uuid.nullable(),
+      candidateProfileIds: z
+        .array(uuid)
+        .max(128)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          "Duplicate candidate",
+        )
+        .optional(),
       instructions: text.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z
@@ -2904,6 +2920,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       capabilities: text,
       runtime: profileRuntimeSchema.optional(),
       skills: profileSkillsSchema.optional(),
+      starter: z
+        .object({
+          implementerId: uuid,
+          reviewerId: uuid,
+          reviewerHarness: z.enum(["codex", "claude"]),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z

@@ -932,12 +932,30 @@ first eight characters of the project ID when the leads match or are missing
 (longer only when two IDs start alike); no two projects ever show the same label,
 and a unique name stays plain (except when it equals another project's full-ID label); IDs that differ only in letter
 case get " #1", " #2" after the full ID.
-When no profile exists, setup creates the lead profile inline, asking only for a name
-and runtime (summary and instructions are added later in Settings → Profiles),
-without losing other setup values. While discovery is unconfigured the repository step
-starts collapsed behind "Add a repository". The project is created paused; the ready
-check then replaces the setup form, and its primary action resumes the project and
-opens the composer, and its secondary action keeps it paused.
+When no profile exists, including revoked profiles, setup offers an inline lead
+profile form with a prechecked option to add Implementer and Reviewer. The option
+names their resolved runtimes: Implementer uses the lead runtime; Reviewer uses the
+other runtime only when enabled, available and its executable and authentication
+checks pass (including a readable Claude token), otherwise the lead runtime. A
+pending readiness read holds checked creation; an unreadable read uses the lead.
+The lead instructions remain blank; workers use ordinary editable/revocable profile
+revisions with default model and effort and no skills. Reviewer instructions to
+avoid file changes are advisory, not an enforced restriction. cab prescribes no
+worker order. Unchecking preserves ordinary lead creation.
+The three profiles and the original keyed receipt commit atomically. An unknown
+bundle outcome retains the frozen IDs and command and re-reads its operation;
+missing or unreadable receipts retain the hold without resending creation. Creating
+the lead selects it without losing other setup values. Profile and project creation
+remain separate submissions. Only the subsequent project using that inline lead
+receives both workers as candidates, with routing disabled, blank guidance and no
+routing credential; its coordination context permits them. Changing the selected
+lead adds no starter candidates. If a worker is revoked before project creation,
+setup offers an explicit way to continue without starter candidates while preserving
+the lead and remaining draft. Later projects use ordinary candidate selection.
+While discovery is unconfigured the repository step starts collapsed behind "Add
+a repository". The project is created paused; the ready check replaces setup and
+its primary action resumes the project and opens the composer; its secondary keeps
+it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends, and which setup (step 3, opened or not), the Settings
 discovery credential row, the Readiness GitHub discovery row and the project-configuration
@@ -2284,7 +2302,7 @@ conditions; observed PR auto-closure is reconciled, not assumed to complete all 
 Writes record confirmed success, confirmed failure or uncertainty; local edits
 cannot masquerade as confirmed remote updates.
 
-The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
+The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Unavailable grant references also carry an opaque post-migration format marker. A fresh save with an older unmarked reference is refused; refresh the policy and discard the draft. An already-open pre-upgrade tab shows a generic conflict and an ordinary refresh may fail to read the new projection. A deliberate full page reload discards its unsaved draft and recovers. Exact recorded requests remain replayable. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
 
 A grant row reads as a sentence of names ("Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas"); an ID no read names shows as "<ID> (name not found)", and a row still being filled in shows "(not chosen)". Its Action select shows each kind's plain label and a one-line description, from the one wording the task's delivery actions and `cab delivery get` also use (a recorded action whose kind this version does not know keeps its recorded text). Its Repository is chosen from the project's linked repositories and, when GitHub discovery lists them, the others the credential can see; its Project, field and options are chosen from what discovery lists, the Project from the owner's Projects as well as those linked, with Other… to type a Project's node ID. Where discovery cannot list a value, or the saved value is not in the list, the control is a typed node-ID field labelled as the fallback and stays typed while it is shown. A Jira container is a typed Jira project ID, as no read lists them. Stored grants, the `delivery.configure` command and replay are unchanged: names are display only, and every value stays an ID. A save the service refuses for a named field shows the service's fixed sentence for it in the save outcome, as a refused status mapping does, with a Go to field action that focuses the first highlighted control; the draft stays.
 

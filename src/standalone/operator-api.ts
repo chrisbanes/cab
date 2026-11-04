@@ -1,3 +1,4 @@
+import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -690,6 +691,7 @@ export class OperatorApi {
     ) => Pick<GitHubSourceReader, "readSelection"> = (ref) =>
       service.gitHubSourceReader(ref),
     private readonly setup: OperatorSetupSeams = {},
+    private readonly readSetupReadiness?: () => Promise<ReadinessResult>,
   ) {
     this.commands = new DomainCommands(service.domain());
   }
@@ -1017,6 +1019,9 @@ export class OperatorApi {
         section,
         version: configuration.version,
         index,
+        ...(section === "delivery-grants"
+          ? { format: "post-status-strip-v1" as const }
+          : {}),
         ...(repositoryId === undefined ? {} : { repositoryId }),
       },
     });
@@ -8945,6 +8950,24 @@ export class OperatorApi {
       throw new OperatorApiError(503, "unavailable");
     if (fence !== this.configurationVisibility())
       throw new OperatorApiError(409, "conflict");
+    if (
+      c.grants.some(
+        (row) =>
+          "savedRow" in row &&
+          row.savedRow.section === "delivery-grants" &&
+          row.savedRow.projectId === c.projectId &&
+          row.savedRow.version === c.expectedVersion &&
+          row.savedRow.repositoryId === undefined &&
+          !row.savedRow.format,
+      )
+    )
+      throw new OperatorApiError(
+        409,
+        "conflict",
+        undefined,
+        undefined,
+        "This delivery draft is out of date. Discard it and reread the policy before saving.",
+      );
     const seen = new Set<string>();
     type Reference = Extract<
       (typeof c.grants)[number],
@@ -9482,6 +9505,43 @@ export class OperatorApi {
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
+        if (
+          c.type === "profile.create" &&
+          c.starter &&
+          this.domain().recordedCommand({ ...c, actor: "operator" }) ===
+            undefined
+        ) {
+          const lead =
+            c.runtime?.harness ?? this.domain().enabledRuntimes()[0] ?? "codex";
+          if (c.starter.reviewerHarness !== lead) {
+            let ready = false;
+            try {
+              const read = await this.readSetupReadiness?.();
+              const status = this.service
+                .harnessStatuses()
+                .find((h) => h.harness === c.starter?.reviewerHarness);
+              const checks =
+                c.starter.reviewerHarness === "claude"
+                  ? ["claude-executable", "claude-token"]
+                  : ["codex-executable", "codex-login"];
+              ready = Boolean(
+                status?.enabled &&
+                  status.state === "available" &&
+                  checks.every((id) =>
+                    read?.data.checks.some(
+                      (c) => c.id === id && c.status === "pass",
+                    ),
+                  ),
+              );
+            } catch {
+              /* A failed readiness read cannot authorize an alternate runtime. */
+            }
+            if (!ready)
+              throw new OperatorApiError(400, "invalid-input", [
+                "starter.reviewerHarness",
+              ]);
+          }
+        }
         // Skill plugins must exist and be loadable; both harnesses receive them.
         if (
           (c.type === "profile.create" || c.type === "profile.configure") &&

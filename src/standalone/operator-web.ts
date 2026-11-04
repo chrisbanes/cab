@@ -192,7 +192,7 @@ export class OperatorWebBoundary {
   constructor(
     readonly bundle: OperatorWebBundle,
     readonly api: OperatorApi,
-    readonly readiness?: Readiness,
+    readonly readiness?: Pick<Readiness, "read" | "claudeToken">,
   ) {}
   shell(path: string) {
     return (
