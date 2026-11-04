@@ -85,7 +85,7 @@ function AvailabilityNotice({ data }: { data: ProjectConfigurationData }) {
 export function RoutingTab(p: TabProps) {
   const { data, projectId } = p,
     draftKey = `routing.configure:${projectId}`,
-    d = useDraft(p.drafts, draftKey);
+    d = useDraft(p.drafts, draftKey, p.readOnly);
   const initial: Values = {
     expectedVersion: String(data.routing.version),
     enabled: data.routing.enabled,

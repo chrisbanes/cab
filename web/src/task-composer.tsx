@@ -1,3 +1,4 @@
+import { visibleProjects } from "./project-lifecycle-model.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CirclePlay, Clock } from "lucide-react";
 import { flushSync } from "react-dom";
@@ -119,6 +120,10 @@ export function TaskComposer({
   );
   const edit = (patch: Partial<ComposerInput>) => state.edit(patch);
   const projectOptions = options.state.data?.data;
+  const projectReadOnly =
+    !projectOptions ||
+    projectOptions.project.id !== input.projectId ||
+    projectOptions.project.archived;
   const drafting = useDrafting({
     state,
     client,
@@ -130,7 +135,7 @@ export function TaskComposer({
           ? { name: projectOptions.lead.name }
           : null
         : undefined,
-    locked,
+    locked: locked || projectReadOnly,
     releaseDraft,
   });
   // Fresh options can show a stored selection is no longer permitted before submit.
@@ -163,6 +168,7 @@ export function TaskComposer({
     document.getElementById(`composer-${field}`)?.focus();
   };
   async function submit(ready: boolean) {
+    if (projectReadOnly) return;
     if (
       state.phase === "editable" &&
       input.projectId &&
@@ -378,7 +384,7 @@ export function TaskComposer({
                   }}
                 >
                   <option value="">Choose a project</option>
-                  {workspace?.data.projects.map((p) => (
+                  {visibleProjects(workspace?.data.projects ?? []).map((p) => (
                     <option key={p.id} value={p.id}>
                       {labels.get(p.id)?.text}
                     </option>
@@ -728,10 +734,13 @@ export function TaskComposer({
                     ? "Check the optional settings to continue. Your input is still here."
                     : "Save draft keeps it without starting."}
                 </p>
-                <Button type="submit">Create and start</Button>
+                <Button type="submit" disabled={projectReadOnly}>
+                  Create and start
+                </Button>
                 <Button
                   type="button"
                   variant="secondary"
+                  disabled={projectReadOnly}
                   onClick={() => void submit(false)}
                 >
                   Save draft

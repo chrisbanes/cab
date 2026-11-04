@@ -83,7 +83,7 @@ import {
 } from "../core/execution-runtime.js";
 import { GitHubSourceStore } from "../core/github-source.js";
 import { hasLabelName } from "../core/github-source-contracts.js";
-import { Store } from "../core/store.js";
+import { Store, transaction } from "../core/store.js";
 import {
   type CommandReceipt,
   type DraftProposal,
@@ -3767,6 +3767,19 @@ export class StandaloneService {
           } catch {}
           return result;
         }),
+    );
+  }
+  recordedProjectDeletion(projectId: string, key: string) {
+    this.started();
+    return new ProjectTombstones(this.cache!, false).recordedResult(
+      projectId,
+      key,
+    );
+  }
+  projectLifecycleStatus(projectId: string) {
+    const domain = this.domain();
+    return transaction(this.cache!, () =>
+      domain.projectArchiveBlockersWithinTransaction(projectId),
     );
   }
   deletedProject(projectId: string) {

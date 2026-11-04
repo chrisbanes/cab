@@ -282,7 +282,14 @@ export function WaitReasons({
  * project, so it is cleared; an unknown outcome or a conflict stays until resolved.
  */
 export function useResumeDraft(p: WaitProps, projectId: string) {
-  const draft = useDraft(p.drafts, `project.resume-fix:${projectId}`);
+  const owner = p.workspace?.data.projects.find(
+    (project) => project.id === projectId,
+  );
+  const draft = useDraft(
+    p.drafts,
+    `project.resume-fix:${projectId}`,
+    !owner || owner.archived,
+  );
   const { recorded, read } = resumeVersions(p, projectId);
   useEffect(() => {
     if (draft.phase === "recorded") draft.purge();
@@ -351,7 +358,7 @@ export function ResumeProjectFix({
         <Button
           type="button"
           variant={variant}
-          disabled={!project || draft.phase === "pending"}
+          disabled={!project || project.archived || draft.phase === "pending"}
           onClick={() => {
             // Each open starts a fresh operation, so a cancelled one never keeps an old version.
             // Review changes may already have adopted a version newer than the shown one.
@@ -395,7 +402,9 @@ export function ResumeProjectFix({
         <div className="stop-dialog-actions">
           <Button
             type="button"
+            disabled={!project || project.archived}
             onClick={async () => {
+              if (!project || project.archived) return;
               setOpen(false);
               await draft.submit(
                 p.client,

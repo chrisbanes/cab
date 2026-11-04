@@ -56,6 +56,10 @@ export type RequestIdentity = {
 
 /** Every flag the CLI accepts; a command reads only the ones it documents. */
 export type Values = {
+  archived?: boolean | undefined;
+  preview?: boolean | undefined;
+  "confirm-name"?: string | undefined;
+  "preview-digest"?: string | undefined;
   local?: boolean | undefined;
   "local-state"?: string | undefined;
   "local-installation"?: string | undefined;

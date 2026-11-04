@@ -63,7 +63,7 @@ export function StatusMappingPanel(
 ) {
   useFragmentFocus();
   const { view, projectId } = p,
-    d = useDraft(p.drafts, `status-mapping.configure:${projectId}`),
+    d = useDraft(p.drafts, `status-mapping.configure:${projectId}`, p.readOnly),
     saved = view.mapping,
     firstSelection =
       view.selections.find((s) => s.active) ?? view.selections[0],
@@ -328,7 +328,7 @@ export function StatusMappingPanel(
 export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
   useFragmentFocus();
   const { view, projectId } = p,
-    d = useDraft(p.drafts, `status-mapping.configure:${projectId}`),
+    d = useDraft(p.drafts, `status-mapping.configure:${projectId}`, p.readOnly),
     saved = view.mapping,
     initial: Values = {
       expectedVersion: String(view.version),

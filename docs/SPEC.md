@@ -244,7 +244,28 @@ resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pe
 older descriptors without sufficient Git proof never authorize a guessed removal.
 Successful item checkpoints prune private payloads, while stable opaque thread identities
 continue to refuse restoration of deleted conversations. Private exclusions persist
-independently of cleanup progress. Lifecycle API/CLI/UI remain unimplemented.
+independently of cleanup progress.
+
+The operator API exposes versioned `project.archive`, `project.restore` and
+`project.delete` commands. `GET /api/operator/projects/:id` distinguishes live projects
+from deleted tombstones; `GET /api/operator/projects/:id/delete-preview` exposes counts,
+worktree dirty/unpushed/unknown status, affected projects and retained external state.
+These public reads omit captured cleanup identities and private redaction values.
+The original deletion receipt stays unchanged as cleanup progresses; read the tombstone
+for current cleanup status. Deleted IDs never resolve to a later project with the same name.
+
+Project lists hide archived projects by default. `includeArchived=true`,
+`cab project list --archived` and Settings' Show archived include both active and archived
+projects. Direct archived task and assignment reads retain their history, inspector links
+and original-operation receipt checks. New mutations and retry sends are disabled;
+service guards enforce the same freeze. An absent project in a filtered picker does not
+establish its lifecycle. The retired `/project/:id` editor remains an authenticated 404.
+
+The project settings Danger zone offers archive after pause/drain, restore into a paused
+state, and deletion only after an inspected preview and an exact typed name. Rename,
+restore or a stale preview requires a new inspection. A conflict keeps the typed name;
+an unknown outcome keeps the original body and request key for receipt lookup. Successful
+deletion shows a tombstone and its separate cleanup progress.
 The service refuses archive when authoritative in-flight facts are unavailable.
 
 ## Admission, project placement and task dependencies

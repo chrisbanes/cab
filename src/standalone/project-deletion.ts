@@ -237,6 +237,17 @@ export class ProjectTombstones {
     return deletionResult.parse(JSON.parse(row.resultJson));
   }
 
+  recordedResult(projectId: string, key: string) {
+    const row = this.db
+      .prepare(
+        "SELECT resultJson FROM project_tombstones WHERE projectId=? AND commandKey=?",
+      )
+      .get(id.parse(projectId), id.parse(key)) as
+      | { resultJson: string }
+      | undefined;
+    return row ? deletionResult.parse(JSON.parse(row.resultJson)) : undefined;
+  }
+
   status(projectId: string) {
     id.parse(projectId);
     const row = this.db

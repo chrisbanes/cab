@@ -2137,6 +2137,7 @@ test("global labels exclude retained private revisions without any task or proje
     profileRevision: d.profileRevision.bind(d),
     profileRuntime: d.profileRuntime.bind(d),
     claudeTokenReference: () => null,
+    discoveryCredentialReference: () => null,
     projects: () => [],
     gettingStartedDismissed: () => false,
   };
@@ -2145,6 +2146,9 @@ test("global labels exclude retained private revisions without any task or proje
     runtimeStatus: () => ({ state: "available" }),
     harnessStatuses: () => [],
     taskTurnStarted: () => false,
+    localAccess: () => null,
+    providerCredentialExclusions: () => ({ values: [], redactions: [] }),
+    redactionExclusions: (values: readonly string[]) => values,
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   assert.doesNotMatch(
     JSON.stringify(await isolated.readWorkspace()),
@@ -2171,6 +2175,7 @@ test("global snapshot privacy fails closed before excessive revision lookup work
     },
     profileRuntime: () => ({ harness: "codex" }),
     claudeTokenReference: () => null,
+    discoveryCredentialReference: () => null,
     gettingStartedDismissed: () => false,
   };
   const api = new OperatorApi({
@@ -2178,10 +2183,17 @@ test("global snapshot privacy fails closed before excessive revision lookup work
     runtimeStatus: () => ({ state: "available" }),
     harnessStatuses: () => [],
     taskTurnStarted: () => false,
+    localAccess: () => null,
+    providerCredentialExclusions: () => ({ values: [], redactions: [] }),
+    redactionExclusions: (values: readonly string[]) => values,
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
-  const read = await api.readWorkspace();
-  assert.equal(read.data.profiles[0]?.name, null);
-  assert.equal(read.data.profiles[0]?.id, profileId);
+  await assert.rejects(
+    api.readWorkspace(),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 503 &&
+      error.code === "redaction-limit",
+  );
   assert.equal(lookups, 0);
 });
 
@@ -2216,7 +2228,10 @@ test("project task summaries share task workspace and repository exclusions", as
     title: `Workspace ${workspace.path} ${repository.sourcePath} ${repository.workspacePath} ${repository.gitCommonDir}`,
   });
   const task = (await api.readTask(ids.taskId)).data.task.title;
-  const project = (await api.readProject(ids.projectId)).data.tasks[0]?.title;
+  const read = (await api.readProject(ids.projectId)).data;
+  assert.equal(read.state, "live");
+  if (read.state !== "live") throw Error("expected live project");
+  const project = read.tasks[0]?.title;
   assert.equal(project, task);
   assert.ok(!String(project).includes(workspace.path));
   assert.doesNotMatch(String(project), /synthetic/);

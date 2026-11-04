@@ -26,6 +26,8 @@ import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import "./settings.css";
 export interface SettingsProps {
+  /** Authoritative direct-ID lifecycle read; never inferred from a default-filtered picker. */
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   drafts: ConfigurationDrafts;
@@ -80,10 +82,18 @@ const fresh = (values: Values) => ({ ...values, key: crypto.randomUUID() });
 export const reloadDraft = (d: ConfigurationDraft, values: Values) =>
   d.startOperation(fresh(values));
 export const locked = (d: ConfigurationDraft) =>
-  d.phase === "pending" || d.phase === "unknown" || d.phase === "recorded";
-export function useDraft(drafts: ConfigurationDrafts, key: string) {
+  d.readOnly ||
+  d.phase === "pending" ||
+  d.phase === "unknown" ||
+  d.phase === "recorded";
+export function useDraft(
+  drafts: ConfigurationDrafts,
+  key: string,
+  readOnly = false,
+) {
   const [, render] = useReducer((v) => v + 1, 0);
   const d = drafts.get(key, render);
+  d.readOnly = readOnly;
   // Each commit reports the changes it shows, so `afterRender` runs on the one that shows its own.
   const revision = d.revision;
   useEffect(() => d.committed(revision));
@@ -399,9 +409,19 @@ export function PrivateTextField({
           variant="secondary"
           aria-label={failed ? `Try again to reveal ${noun}` : `Reveal ${noun}`}
           aria-busy={loading || undefined}
-          aria-disabled={loading || locked(draft) || undefined}
+          aria-disabled={
+            loading ||
+            draft.phase === "pending" ||
+            draft.phase === "unknown" ||
+            undefined
+          }
           onClick={() => {
-            if (loading || locked(draft)) return;
+            if (
+              loading ||
+              draft.phase === "pending" ||
+              draft.phase === "unknown"
+            )
+              return;
             focusNext.current = true;
             onReveal();
           }}
@@ -621,6 +641,7 @@ export function DraftOutcome({
           <Button
             type="submit"
             disabled={
+              draft.readOnly ||
               draft.phase === "pending" ||
               draft.phase === "recorded" ||
               saveDisabled
@@ -757,7 +778,7 @@ export async function submitDraft(
   held = false,
 ) {
   e.preventDefault();
-  if (held) return;
+  if (held || d.readOnly) return;
   await sendDraft(
     e.currentTarget,
     d,

@@ -1,3 +1,4 @@
+import { taskProjectReadOnly } from "./project-lifecycle-model.js";
 import { useRef, useState } from "react";
 import {
   type CommandReceipt,
@@ -114,6 +115,7 @@ function Dependencies({
   session: Session;
   onChanged: () => void;
 }) {
+  const readOnly = taskProjectReadOnly(data.task.projectId, data.project);
   const taskId = data.task.id,
     candidates = data.dependencyCandidates;
   const [choice, setChoice] = useState("");
@@ -126,9 +128,10 @@ function Dependencies({
       if (kind === "recorded") setChoice("");
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
+    readOnly,
   );
   // A send waiting for a check holds every other dependency change until it is resolved.
-  const busy = Boolean(sending) || uncertain;
+  const busy = readOnly || Boolean(sending) || uncertain;
   const change = (type: "dependency.add" | "dependency.remove", id: string) =>
     void send(
       operatorCommandSchema.parse({
@@ -356,6 +359,7 @@ export function TaskExecution({
  * the revisions the next turn captures; an unconfirmed send stays checkable once the row is current.
  */
 export function ApplyInstructions({
+  readOnly = false,
   assignment,
   projectId,
   taskId,
@@ -363,6 +367,7 @@ export function ApplyInstructions({
   session,
   onChanged,
 }: {
+  readOnly?: boolean;
   assignment: Data["assignments"][number];
   projectId: string;
   taskId: string;
@@ -387,6 +392,7 @@ export function ApplyInstructions({
     (kind) => {
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
+    readOnly,
   );
   if (!stale.length && !uncertain && !outcome) return null;
   return (
@@ -404,7 +410,7 @@ export function ApplyInstructions({
           title="Apply current instructions for the next turn?"
           description="The next turn captures the current project instructions and profile revision. A turn already running keeps the revisions it started with."
           confirm="Apply"
-          disabled={Boolean(sending)}
+          disabled={readOnly || Boolean(sending)}
           onConfirm={() =>
             void send(
               operatorCommandSchema.parse({

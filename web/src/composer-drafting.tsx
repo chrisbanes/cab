@@ -181,6 +181,8 @@ export function useDrafting({
   }, [run?.state]);
 
   const send = async (command: Command) => {
+    if (locked)
+      return { state: "unknown" as const, command, code: "unavailable" };
     setBusy(true);
     const result = await client.command(command, csrfToken);
     setBusy(false);
@@ -212,7 +214,7 @@ export function useDrafting({
   };
   const start = async () => {
     const idea = input.idea ?? "";
-    if (!input.projectId || idea.trim() === "") return;
+    if (locked || !input.projectId || idea.trim() === "") return;
     const next = crypto.randomUUID();
     const key = crypto.randomUUID();
     // Stored with its key before it is sent, so a reload reattaches to a run that did
@@ -513,7 +515,7 @@ export function DraftWithLead({
             <Button
               type="button"
               variant="secondary"
-              disabled={busy}
+              disabled={locked || busy}
               onClick={() => void stop()}
             >
               Stop
@@ -541,7 +543,7 @@ export function DraftWithLead({
               <Button
                 type="button"
                 variant="secondary"
-                disabled={busy}
+                disabled={locked || busy}
                 onClick={() => void stop()}
               >
                 Stop again
@@ -560,7 +562,7 @@ export function DraftWithLead({
               <Button
                 type="button"
                 variant="secondary"
-                disabled={busy}
+                disabled={locked || busy}
                 onClick={() => void settle("discard")}
               >
                 Discard draft
@@ -595,7 +597,7 @@ export function DraftWithLead({
               <Button
                 type="button"
                 variant="secondary"
-                disabled={busy}
+                disabled={locked || busy}
                 onClick={() => void settle("discard")}
               >
                 Dismiss
@@ -628,7 +630,7 @@ export function DraftChoice({ d, field }: { d: Drafting; field: DraftField }) {
         <Button
           type="button"
           variant="secondary"
-          disabled={d.busy}
+          disabled={d.locked || d.busy}
           onClick={() => d.choose(choice, true)}
         >
           Replace {field}
@@ -636,7 +638,7 @@ export function DraftChoice({ d, field }: { d: Drafting; field: DraftField }) {
         <Button
           type="button"
           variant="secondary"
-          disabled={d.busy}
+          disabled={d.locked || d.busy}
           onClick={() => d.choose(choice, false)}
         >
           Keep mine

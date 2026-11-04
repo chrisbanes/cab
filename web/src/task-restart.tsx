@@ -57,12 +57,14 @@ export function RestartDestinationLink({
  * When the service does not offer it, the reason and the recovery that applies are shown instead.
  */
 export function StartAgainAction({
+  readOnly = false,
   client,
   session,
   task,
   onChanged,
   onStart,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   task: Task;
@@ -89,6 +91,7 @@ export function StartAgainAction({
     (kind) => {
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
+    readOnly,
   );
   // A confirmation belongs to the request it was sent for: a restarted request refused again
   // is a new offer.
@@ -115,7 +118,7 @@ export function StartAgainAction({
           !uncertain && (
             <Button
               variant="secondary"
-              disabled={Boolean(sending)}
+              disabled={readOnly || Boolean(sending)}
               onClick={() => {
                 onStart?.();
                 void send(

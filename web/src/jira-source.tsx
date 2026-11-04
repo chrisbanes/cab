@@ -56,12 +56,13 @@ const reasonCopy: Record<NonNullable<Credential["reason"]>, string> = {
 
 /** The installation's Jira site credentials: three environment variable names per site. */
 function JiraCredentials({
+  readOnly = false,
   client,
   session,
   drafts,
   refreshNonce,
   onChange,
-}: Pick<TabProps, "client" | "session" | "drafts"> & {
+}: Pick<TabProps, "client" | "session" | "drafts" | "readOnly"> & {
   refreshNonce?: number | undefined;
   /** A credential was saved or cleared, so the site choices changed. */
   onChange: () => void;
@@ -77,7 +78,7 @@ function JiraCredentials({
   );
   const status = useOperatorResource(session.csrfToken, loader);
   useHeaderRefresh(refreshNonce, status.refresh);
-  const d = useDraft(drafts, "issue-tracker-credential.configure");
+  const d = useDraft(drafts, "issue-tracker-credential.configure", readOnly);
   useEffect(() => d.initialize(blank()), [d]);
   const [open, setOpen] = useState(false);
   const credentials = status.state.data?.data.credentials;
@@ -235,7 +236,7 @@ export function JiraSourceTab(
   // A rule the read withholds cannot be shown, so a save leaves it as it is.
   const withheld = saved && data.source.readiness.kind === "unavailable";
   const savedRuleLines = ruleLines(rule);
-  const d = useDraft(p.drafts, `jira.configure:${projectId}`);
+  const d = useDraft(p.drafts, `jira.configure:${projectId}`, p.readOnly);
   const priv = usePrivateValues(
     p.client,
     p.session,
@@ -320,6 +321,7 @@ export function JiraSourceTab(
   };
   const [refreshing, setRefreshing] = useState(false);
   const refresh = async () => {
+    if (p.readOnly) return;
     setRefreshing(true);
     await p.client.refreshSources(p.session.csrfToken).catch(() => {});
     p.observations.refresh();
@@ -580,7 +582,7 @@ export function JiraSourceTab(
               <Button
                 type="button"
                 variant="secondary"
-                disabled={refreshing}
+                disabled={p.readOnly || refreshing}
                 onClick={() => void refresh()}
               >
                 {refreshing ? "Refreshing…" : "Refresh now"}
@@ -613,6 +615,7 @@ export function JiraSourceTab(
       </div>
       <div className="settings-column">
         <JiraCredentials
+          readOnly={p.readOnly === true}
           client={p.client}
           session={p.session}
           drafts={p.drafts}
