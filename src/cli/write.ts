@@ -192,6 +192,8 @@ export async function sendCommand(
     command: Record<string, unknown>;
     /** Checks a 2xx receipt belongs to this request; defaults to the CLI3 matcher. */
     match?: (receipt: CommandReceipt) => boolean;
+    /** Lifecycle retries must keep the first actual versioned JSON body, not only intent. */
+    freezeBody?: boolean;
   },
 ): Promise<{ receipt: CommandReceipt; request: RequestIdentity }> {
   const request: RequestIdentity = {
@@ -202,10 +204,30 @@ export async function sendCommand(
   };
   const body = JSON.stringify(o.command);
   checkCommandSize(body, o.type);
-  await ctx.journal.append(request, o.digest, "sending");
+  const bodyDigest = o.freezeBody
+    ? createHash("sha256").update(body).digest("hex")
+    : undefined;
+  if (bodyDigest) {
+    const previous = await ctx.journal.state(request);
+    if (previous?.bodyDigest && previous.bodyDigest !== bodyDigest)
+      throw new CliError(
+        "conflict",
+        "This request key belongs to a different original body; nothing was sent. Use its original confirmation and version.",
+        { request },
+      );
+    if (previous?.reached && !previous.bodyDigest)
+      throw new CliError(
+        "command-outcome-unknown",
+        "The original body is not proved by this journal. Check its operation; do not resend current state.",
+        { request, retryable: true },
+      );
+  }
+  await ctx.journal.append(request, o.digest, "sending", bodyDigest);
   // A settle failure leaves the `sending` line, which `operation get` reconciles.
   const settle = (state: "recorded" | "rejected" | "unknown") =>
-    ctx.journal.append(request, o.digest, state).catch(() => undefined);
+    ctx.journal
+      .append(request, o.digest, state, bodyDigest)
+      .catch(() => undefined);
   try {
     const raw = await session.client.command(
       body,

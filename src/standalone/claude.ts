@@ -1,3 +1,9 @@
+import {
+  capturedFilesystemState,
+  observeFilesystem,
+  type CleanupOutcome,
+  type FilesystemIdentity,
+} from "./project-cleanup-identities.js";
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -304,23 +310,107 @@ async function ensureTemporaryBase(base: string): Promise<string | undefined> {
   return undefined;
 }
 
-/** Removes a task's sandbox temporary base when it is still the private directory cab made. */
-export async function releaseClaudeTemporaryBase(
+const pendingTemporaryRelease = new Map<string, Promise<CleanupOutcome>>();
+function withTemporaryRelease(
+  base: string,
+  run: () => Promise<CleanupOutcome>,
+): Promise<CleanupOutcome> {
+  const previous = pendingTemporaryRelease.get(base) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(run);
+  pendingTemporaryRelease.set(base, operation);
+  return operation.finally(() => {
+    if (pendingTemporaryRelease.get(base) === operation)
+      pendingTemporaryRelease.delete(base);
+  });
+}
+
+/** A resolved helper is not proof by itself: report absence or verified removal explicitly. */
+export function releaseClaudeTemporaryBase(
   workspace: string,
-): Promise<void> {
-  const base = claudeTemporaryBase(workspace);
+): Promise<CleanupOutcome> {
+  const path = claudeTemporaryBase(workspace);
+  return withTemporaryRelease(path, () =>
+    removePrivateTemporaryBase(path, () => true),
+  );
+}
+export function releaseCapturedClaudeTemporaryBase(
+  captured: {
+    path: string;
+    workspacePath?: string | undefined;
+    canonicalPath?: string | undefined;
+    filesystem: FilesystemIdentity | { unavailable: true };
+  },
+  allowed: () => boolean,
+): Promise<CleanupOutcome> {
+  return withTemporaryRelease(captured.path, () =>
+    removePrivateTemporaryBase(captured.path, allowed, captured),
+  );
+}
+async function removePrivateTemporaryBase(
+  path: string,
+  allowed: () => boolean,
+  captured?: {
+    workspacePath?: string | undefined;
+    canonicalPath?: string | undefined;
+    filesystem: FilesystemIdentity | { unavailable: true };
+  },
+): Promise<CleanupOutcome> {
+  const pending = (
+    reason: "unsafe" | "unavailable" | "failed" | "unknown",
+  ): CleanupOutcome => ({ outcome: "pending", reason });
   try {
-    const stat = await lstat(base);
+    if (!/^ens-[0-9a-f]{16}$/.test(basename(path)) || dirname(path) !== "/tmp")
+      return pending("unsafe");
+    // /tmp is a system alias on macOS. Resolve its parent once and operate on that canonical path.
+    const canonical = join(await realpath("/tmp"), basename(path));
+    const current = await observeFilesystem(canonical);
+    if (current.state === "absent") return { outcome: "complete" };
+    if (current.state !== "observed") return pending("unavailable");
     if (
-      !stat.isDirectory() ||
-      stat.uid !== process.getuid?.() ||
-      (stat.mode & 0o777) !== 0o700
+      captured &&
+      (!captured.workspacePath ||
+        !captured.canonicalPath ||
+        "unavailable" in captured.filesystem)
     )
-      return;
+      return pending("unavailable");
+    if (
+      captured &&
+      (claudeTemporaryBase(captured.workspacePath!) !== path ||
+        captured.canonicalPath !== canonical)
+    )
+      return pending("unsafe");
+    if (
+      !current.stat.isDirectory() ||
+      current.stat.isSymbolicLink() ||
+      current.stat.uid !== process.getuid?.() ||
+      (current.stat.mode & 0o777) !== 0o700
+    )
+      return pending("unsafe");
+    if (
+      captured &&
+      !("unavailable" in captured.filesystem) &&
+      (await capturedFilesystemState(canonical, captured.filesystem)) !== "same"
+    )
+      return pending("unsafe");
+    const final = await observeFilesystem(canonical);
+    if (
+      final.state !== "observed" ||
+      final.stat.isSymbolicLink() ||
+      !final.stat.isDirectory() ||
+      final.stat.dev !== current.stat.dev ||
+      final.stat.ino !== current.stat.ino ||
+      final.stat.uid !== process.getuid?.() ||
+      (final.stat.mode & 0o777) !== 0o700 ||
+      !allowed()
+    )
+      return pending("unsafe");
+    await rm(canonical, { recursive: true, force: true });
+    return (await observeFilesystem(canonical)).state === "absent"
+      ? { outcome: "complete" }
+      : pending("unknown");
   } catch {
-    return;
+    return pending("failed");
   }
-  await rm(base, { recursive: true, force: true });
 }
 
 function defaultSandboxSelfTest(input: {

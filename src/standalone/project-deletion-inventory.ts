@@ -1623,7 +1623,7 @@ export const projectDeletionInventory = {
       "cleanupState",
     ],
     ownership:
-      "KEEP minimal deletion receipt and pending captured cleanup only",
+      "KEEP minimal deletion receipt and pending captured cleanup only; cleanupJson.items[].gitRemoval is private workspace-only repositoryId plus capturedDigest, validated against that item captured binding, never a new domain owner",
   },
 } as const;
 

@@ -85,6 +85,7 @@ const config = (): ProjectConfigurationData =>
       name: "Atlas",
       version: 3,
       paused: false,
+      archived: false,
       leadProfileId: mira,
     },
     profiles: [

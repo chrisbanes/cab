@@ -55,6 +55,9 @@ const documentedWrites = [
   "project prepare-routing",
   "project prepare-repositories",
   "project apply",
+  "project archive",
+  "project restore",
+  "project delete",
   "capacity prepare",
   "capacity apply",
   "assignment apply-current",
@@ -161,6 +164,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "delivery.write",
     "recovery.read",
     "recovery.write",
+    "project.lifecycle",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;

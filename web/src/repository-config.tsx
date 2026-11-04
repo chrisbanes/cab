@@ -53,7 +53,7 @@ import { useOperatorResource } from "./resource.js";
 export function RepositoryTab(p: TabProps) {
   const { data, projectId } = p,
     draftKey = `repositories.configure:${projectId}`,
-    d = useDraft(p.drafts, draftKey);
+    d = useDraft(p.drafts, draftKey, p.readOnly);
   // Saved local paths load with the tab; they show only while read at the link version now
   // loaded, and otherwise read as unavailable until read again.
   const priv = usePrivateValues(

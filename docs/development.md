@@ -341,8 +341,31 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
    holds (writer, capacity and uncertainty) read as one `Ownership held`; `Stop
    requested` and `Task hold` are the others. The separate flags stay in JSON and
    in `recovery get`.
+Project lifecycle commands use the selected service and normal request journal:
+
+```sh
+cab project archive PROJECT_ID
+cab project restore PROJECT_ID
+cab project delete PROJECT_ID --preview
+cab project delete PROJECT_ID --confirm-name 'Exact project name' --expected-version VERSION --preview-digest DIGEST
+```
+
+Archive requires a paused, drained project. Restore keeps it paused. Inspect the deletion
+preview before confirming: deletion can force-discard dirty, untracked and unpushed work
+in captured managed worktrees. External branches, PRs, issues and tracker items remain.
+There is no `--yes` or `--force` bypass. `project get` reads archived history or the old ID's
+deleted tombstone; cleanup progress is separate from the original deletion receipt.
+
+A lost lifecycle reply retains its request ID. Check the original operation before retrying.
+When an archive/restore attempt selected a version automatically, use the original
+`--expected-version` printed with the failure and its `--request-id`; the CLI never substitutes
+a newer version for that request. Lifecycle journal entries retain only a body digest,
+not the confirmation body or private cleanup material. Delete retries require the same
+name, version and preview digest. The service rechecks every confirmation atomically.
+
 4. Read-only browsing, with either credential scope:
-   - `project list|get ID|instructions ID [--revision N]|revisions ID` and the same
+   - `project list [--archived]`, `project get ID`, `project instructions ID [--revision N]`,
+     `project revisions ID` and the same
      for `profile`;
    - `task list [--project ID] [--state open|done|cancelled]`,
      `task search QUERY [--project ID] [--type task|decision|result] [--after T]
@@ -358,7 +381,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
    `State` and `Next` (the web UI's column and who acts next), `Lead` and `Task id`;
    `task search` is `Title`, `Project` (omitted under `--project`), `Type`, `Created`, `Excerpt` and `Task id`;
    `project list` is `Name`, `Lead` (the profile's name), `Paused`, `Version` and
-   `Project id`; `profile list` is `Name`, `Revoked`, `Version`, `Summary` and
+   `Project id`; `--archived` adds an `Archived` column. `profile list` is `Name`, `Revoked`, `Version`, `Summary` and
    `Profile id`. `project list` and `profile list` end with a `Runtime:` line only when
    the runtime is unavailable.
 

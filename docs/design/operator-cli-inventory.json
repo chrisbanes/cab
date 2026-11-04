@@ -1735,6 +1735,60 @@
       "observation": "synthetic",
       "state": "bounded",
       "gap": "The HTTPS proofs use a local TLS proxy with a throwaway certificate on the same host; no private route (Tailscale Serve), second machine or real certificate chain (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
+      "id": "project archive",
+      "kind": "command",
+      "area": "project",
+      "scenarios": ["CLI02", "CLI03"],
+      "evidence": [
+        "test/operator/operator-cli-project-lifecycle.test.ts",
+        "test/operator/operator-project-lifecycle.test.ts",
+        "test/operator/operator-project-lifecycle-browser.test.ts"
+      ],
+      "effect": "Versioned freeze of a paused, drained project.",
+      "denial": "Read-only authority cannot mutate; stale ownership/version/name/digest or incomplete drain refuses. Preview accepts read authority.",
+      "revision": "Expected project version; deletion additionally requires the inspected preview digest.",
+      "retry": "Original keyed body; journal body digest refuses substituted versions or confirmations. Original operation lookup remains readable.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Disposable loopback SQL/Git/fake-runtime and Chromium/WebKit coverage only; no installed projects, existing user threads, live provider writes or native archive probe."
+    },
+    {
+      "id": "project restore",
+      "kind": "command",
+      "area": "project",
+      "scenarios": ["CLI02", "CLI03"],
+      "evidence": [
+        "test/operator/operator-cli-project-lifecycle.test.ts",
+        "test/operator/operator-project-lifecycle.test.ts",
+        "test/operator/operator-project-lifecycle-browser.test.ts"
+      ],
+      "effect": "Restore into paused state while preserving history.",
+      "denial": "Read-only authority cannot mutate; stale ownership/version/name/digest or incomplete drain refuses. Preview accepts read authority.",
+      "revision": "Expected project version; deletion additionally requires the inspected preview digest.",
+      "retry": "Original keyed body; journal body digest refuses substituted versions or confirmations. Original operation lookup remains readable.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Disposable loopback SQL/Git/fake-runtime and Chromium/WebKit coverage only; no installed projects, existing user threads, live provider writes or native archive probe."
+    },
+    {
+      "id": "project delete",
+      "kind": "command",
+      "area": "project",
+      "scenarios": ["CLI02", "CLI03"],
+      "evidence": [
+        "test/operator/operator-cli-project-lifecycle.test.ts",
+        "test/operator/operator-project-lifecycle.test.ts",
+        "test/operator/operator-project-lifecycle-browser.test.ts"
+      ],
+      "effect": "Read-only preview or exact-name/version/digest archived deletion; cleanup status separate from the original receipt.",
+      "denial": "Read-only authority cannot mutate; stale ownership/version/name/digest or incomplete drain refuses. Preview accepts read authority.",
+      "revision": "Expected project version; deletion additionally requires the inspected preview digest.",
+      "retry": "Original keyed body; journal body digest refuses substituted versions or confirmations. Original operation lookup remains readable.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Disposable loopback SQL/Git/fake-runtime and Chromium/WebKit coverage only; no installed projects, existing user threads, live provider writes or native archive probe."
     }
   ],
   "excluded": [

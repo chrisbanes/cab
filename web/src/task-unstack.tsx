@@ -34,18 +34,21 @@ export function TaskUnstack({
   taskId,
   taskVersion,
   stacked,
+  readOnly,
 }: {
   client: OperatorClient;
   session: Session;
   taskId: string;
   taskVersion: number;
   stacked: boolean;
+  readOnly: boolean;
 }) {
   const [loaded, setView] = useState<UnstackRead["data"] | null>(null),
     [mode, setMode] = useState<"unstack" | "cancel" | null>(null),
     [note, setNote] = useState<string | null>(null),
     [checking, setChecking] = useState(false);
   const view = loaded?.taskId === taskId ? loaded : null;
+  const writeReadOnly = readOnly || Boolean(view?.readOnly);
   const safe = useRef<HTMLButtonElement>(null),
     trigger = useRef<HTMLElement | null>(null);
   const currentTask = useRef(taskId),
@@ -68,12 +71,21 @@ export function TaskUnstack({
       r.kind === "task-cancel" &&
       r.key === c.key &&
       r.taskId === c.taskId);
-  const unstack = useCommandSend(client, session, `${taskId}:unstack`, matches);
+  const unstack = useCommandSend(
+    client,
+    session,
+    `${taskId}:unstack`,
+    matches,
+    undefined,
+    writeReadOnly,
+  );
   const cancel = useCommandSend(
     client,
     session,
     `${taskId}:stacked-cancel`,
     matches,
+    undefined,
+    writeReadOnly,
   );
   const active = mode === "cancel" ? cancel : unstack;
   const refresh = useCallback(async () => {
@@ -202,7 +214,7 @@ export function TaskUnstack({
       cancel.entry.edit(String(taskVersion));
   };
   const submit = async () => {
-    if (!view || view.readOnly || active.uncertain || active.sending) return;
+    if (!view || writeReadOnly || active.uncertain || active.sending) return;
     const command: OperatorCommand | null =
       mode === "cancel" && view.cancelAvailable && cancelVersion === taskVersion
         ? {
@@ -254,7 +266,7 @@ export function TaskUnstack({
       <Button
         variant="secondary"
         onClick={(e) => open("unstack", e.currentTarget)}
-        disabled={!hasStatus && (!view?.available || view.readOnly)}
+        disabled={!hasStatus && (!view?.available || writeReadOnly)}
       >
         {hasStatus ? "Unstack status…" : "Unstack…"}
       </Button>
@@ -265,7 +277,7 @@ export function TaskUnstack({
           )}
           <Button
             variant="secondary"
-            disabled={!hasStatus && (!view?.available || view.readOnly)}
+            disabled={!hasStatus && (!view?.available || writeReadOnly)}
             onClick={(e) => open("unstack", e.currentTarget)}
           >
             Unstack failed dependency…
@@ -275,7 +287,7 @@ export function TaskUnstack({
             disabled={
               !hasCancelStatus &&
               (!view?.cancelAvailable ||
-                view.readOnly ||
+                writeReadOnly ||
                 Boolean(cancel.sending))
             }
             onClick={(e) => open("cancel", e.currentTarget)}
@@ -346,10 +358,10 @@ export function TaskUnstack({
               State changed. Close and review a fresh preview.
             </p>
           )}
-          {view?.readOnly && (
+          {writeReadOnly && (
             <p>
-              This project is archived. Reads and original receipt checks remain
-              available.
+              {view?.readOnly ? "This project is archived. Reads and original receipt checks remain available." :
+                "This project's current write authority is unavailable. Reads and original receipt checks remain available."}
             </p>
           )}
           {(active.uncertain ||
@@ -367,7 +379,7 @@ export function TaskUnstack({
           )}
           {!active.uncertain &&
             !active.sending &&
-            !view?.readOnly &&
+            !writeReadOnly &&
             (mode !== "cancel" || receipt?.kind !== "task-cancel") &&
             (mode === "unstack"
               ? view?.available &&

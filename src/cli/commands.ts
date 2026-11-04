@@ -1,4 +1,5 @@
 import { unstackBrowseCommands, unstackWriteCommands } from "./task-unstack.js";
+import { projectLifecycleCommands } from "./project-lifecycle.js";
 import { adoptCommands } from "./adopt.js";
 import {
   attentionBrowseCommands,
@@ -48,6 +49,7 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...unstackWriteCommands,
   ...profileWriteCommands,
   ...projectWriteCommands,
+  ...projectLifecycleCommands,
   ...routingWriteCommands,
   ...repositoryWriteCommands,
   ...capacityWriteCommands,

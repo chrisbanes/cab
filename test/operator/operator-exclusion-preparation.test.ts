@@ -84,10 +84,14 @@ test("list, project, Inbox and composer reads traverse retained instruction revi
     assert.equal(await measure(read), revisions * 3, name);
 
   // Each request reads current instructions: no list survives into the next request.
-  const titles = async () =>
-    (await api.readProject(projectId)).data.tasks
+  const titles = async () => {
+    const read = (await api.readProject(projectId)).data;
+    assert.equal(read.state, "live");
+    if (read.state !== "live") throw Error("expected live project");
+    return read.tasks
       .filter((task) => taskIds.includes(task.id))
       .map((task) => task.title);
+  };
   assert.ok((await titles()).every((title) => title?.includes("Canary")));
   d.execute({
     type: "project.configure",
@@ -270,13 +274,12 @@ test("project and composer reads yield during per-task exclusions and reuse the 
   for (const [name, read] of [
     [
       "project",
-      async () =>
-        new Map(
-          (await api.readProject(projectId)).data.tasks.map((x) => [
-            x.id,
-            x.title,
-          ]),
-        ),
+      async () => {
+        const read = (await api.readProject(projectId)).data;
+        assert.equal(read.state, "live");
+        if (read.state !== "live") throw Error("expected live project");
+        return new Map(read.tasks.map((x) => [x.id, x.title]));
+      },
     ],
     [
       "composer",

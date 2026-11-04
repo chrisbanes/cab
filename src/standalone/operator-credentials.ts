@@ -278,7 +278,9 @@ export function operatorRouteAuthority(
     /^\/api\/operator\/tasks\/[^/]+\/(?:review-anchors|questions)\/[^/]+$/.test(
       path,
     ) ||
-    /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
+    /^\/api\/operator\/projects\/[^/]+\/(?:composer-options|delete-preview)$/.test(
+      path,
+    ) ||
     /^\/api\/operator\/drafting-runs\/[^/]+$/.test(path) ||
     /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|recovery-options|instructions))?$/.test(
       path,

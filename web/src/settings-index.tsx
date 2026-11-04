@@ -1,3 +1,4 @@
+import { visibleProjects } from "./project-lifecycle-model.js";
 import {
   Fragment,
   type ReactNode,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import {
   projectConfigurationSchema,
+  workspaceSchema,
   runtimeSettingsSchema,
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
@@ -114,7 +116,28 @@ export function SettingsWorkspace(
     workspaceSettled: boolean;
   },
 ) {
-  const projects = p.workspace?.data.projects ?? [],
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedLoader = useCallback(
+    (signal: AbortSignal) =>
+      p.client.read(
+        "/api/operator/workspace?includeArchived=true",
+        workspaceSchema,
+        signal,
+      ),
+    [p.client],
+  );
+  const archivedWorkspace = useOperatorResource(
+    showArchived ? `${p.session.csrfToken}:archived-projects` : null,
+    archivedLoader,
+  );
+  useHeaderRefresh(p.refreshNonce, () => {
+    if (showArchived) void archivedWorkspace.refresh();
+  });
+  const projects = visibleProjects(
+      (showArchived ? archivedWorkspace.state.data : p.workspace)?.data
+        .projects ?? [],
+      showArchived,
+    ),
     profiles = p.workspace?.data.profiles ?? [],
     projectLabels = workspaceLabels(p.workspace);
   const { configs, retry } = useProjectConfigurations(
@@ -221,6 +244,14 @@ export function SettingsWorkspace(
           </ActionLink>
         }
       >
+        <label className="body check-field">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          Show archived
+        </label>
         {projects.map((r) => {
           const label = projectLabel(projectLabels, r.id, r.name),
             name = label.text,
@@ -232,7 +263,8 @@ export function SettingsWorkspace(
             <article className="settings-row" key={r.id}>
               <div className="settings-row-heading">
                 <h3 className="small-heading">
-                  <ProjectName label={label} id={r.id} />
+                  <ProjectName label={label} id={r.id} />{" "}
+                  {r.archived && <StatusBadge>Archived</StatusBadge>}
                 </h3>
                 {c && (
                   <span className="metadata muted">

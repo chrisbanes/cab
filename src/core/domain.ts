@@ -1,4 +1,5 @@
 import { UnstackStore } from "./unstack.js";
+import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
 import { projectDeleteCommandSchema } from "./project-lifecycle.js";
 import {
   archiveBlockers,
@@ -3006,6 +3007,13 @@ export class DomainStore {
           throw new Error(
             "Repository setup requires asynchronous verification",
           );
+        assertCleanupOwnershipAvailableWithinTransaction(
+          this.db,
+          repositories.flatMap((repository) => [
+            repository.path,
+            repository.gitCommonDirectory,
+          ]),
+        );
         this.db
           .prepare("INSERT INTO projects (id, instructions) VALUES (?, '')")
           .run(command.projectId);
@@ -3606,6 +3614,13 @@ export class DomainStore {
           throw new Error(
             "Linked repositories require asynchronous verification",
           );
+        assertCleanupOwnershipAvailableWithinTransaction(
+          this.db,
+          repositories.flatMap((repository) => [
+            repository.path,
+            repository.gitCommonDirectory,
+          ]),
+        );
         const links = repositories.map((repository, index) => {
           const row = command.repositories[index] as LinkRow;
           return storedLink(

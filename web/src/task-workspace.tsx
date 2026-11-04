@@ -1,4 +1,5 @@
 import { TaskUnstack } from "./task-unstack.js";
+import { taskProjectReadOnly } from "./project-lifecycle-model.js";
 import { ApprovalReview } from "./approval-review.js";
 import { IssueChangedSinceHandback } from "./issue-change-notice.js";
 import { useSendEntry } from "./command-send.js";
@@ -560,6 +561,26 @@ export function TaskWorkspace({
       loader,
     ),
     data = resource.state.data?.data;
+  const projectReadOnly = taskProjectReadOnly(
+    data?.task.projectId,
+    data?.project,
+  );
+  async function dispatch(input: OperatorCommand): Promise<CommandState> {
+    if (!projectReadOnly) return client.command(input, session.csrfToken);
+    if (input.type === "task.comment.send") {
+      try {
+        const read = await client.operation({
+          scope: `task:${taskId}`,
+          type: input.type,
+          key: input.key,
+        });
+        if (read.data.state === "recorded")
+          return { state: "recorded", receipt: read.data.receipt };
+      } catch {}
+    }
+    return { state: "unknown", command: input, code: "unavailable" };
+  }
+
   const publishWork = data?.publication
     ? hasPublishWork(data.publication)
     : false;
@@ -572,8 +593,7 @@ export function TaskWorkspace({
     JSON.stringify(
       taskHeaderReport(
         data,
-        workspace?.data.projects.find((p) => p.id === data.task.projectId)
-          ?.name ?? null,
+        data.project?.name ?? null,
         (window.history.state as { origin?: string } | null)?.origin,
       ),
     );
@@ -1034,7 +1054,13 @@ export function TaskWorkspace({
     followLink.current(link);
   }, [data, path, timeline.window, timeline.error]);
   async function command(input: OperatorCommand) {
-    if (pending) return;
+    if (
+      pending ||
+      (projectReadOnly &&
+        input.key !== state.frozen?.key &&
+        input.key !== unconfirmed?.key)
+    )
+      return;
     if (
       unconfirmed &&
       (input.type === "review.view" || input.type === "delivery.refresh") &&
@@ -1098,6 +1124,7 @@ export function TaskWorkspace({
         session.csrfToken,
         () => true,
         replayed ? undefined : input,
+        projectReadOnly,
       );
       setPending(false);
       if (!scope.current || !done) return;
@@ -1144,7 +1171,7 @@ export function TaskWorkspace({
     const outcome: CommandState =
       input.type === "task.comment.send" && state.uncertain
         ? await recordedOrRetry(input)
-        : await client.command(input, session.csrfToken);
+        : await dispatch(input);
     const settles =
       input.type === "task.comment.send" &&
       outcome.state === "recorded" &&
@@ -1338,7 +1365,7 @@ export function TaskWorkspace({
         code: "command-outcome-unknown",
       };
     }
-    return client.command(input, session.csrfToken);
+    return dispatch(input);
   }
   /** Assignment Reply: the shared composer, addressed to exactly that assignment. */
   const replyTo = (assignmentId: string) => {
@@ -1454,6 +1481,7 @@ export function TaskWorkspace({
       const approval = data.approvals.find((a) => a.interactionId === id);
       return approval ? (
         <ApprovalReview
+          readOnly={projectReadOnly}
           client={client}
           session={session}
           taskId={taskId}
@@ -1463,6 +1491,7 @@ export function TaskWorkspace({
         />
       ) : data.questions.some((q) => q.interactionId === id) ? (
         <QuestionResponse
+          readOnly={projectReadOnly}
           client={client}
           session={session}
           taskId={taskId}
@@ -1511,6 +1540,7 @@ export function TaskWorkspace({
           <PolicyDisclosure harness={execution.harness} workspace={workspace} />
         </details>
         <ApplyInstructions
+          readOnly={projectReadOnly}
           assignment={a}
           projectId={data.task.projectId}
           taskId={taskId}
@@ -1696,7 +1726,7 @@ export function TaskWorkspace({
     data?.commentRecipients === undefined ||
     hasBlockedRecipient(commentFacts, commentIds);
   async function send() {
-    if (!state.draft.trim() || pending) return;
+    if (projectReadOnly || !state.draft.trim() || pending) return;
     if (state.frozen) {
       await command(state.frozen);
       return;
@@ -1881,7 +1911,7 @@ export function TaskWorkspace({
       <div className="task-actions">
         <Button
           variant={destination === "comment" ? "primary" : "secondary"}
-          disabled={pending || state.uncertain}
+          disabled={projectReadOnly || pending || state.uncertain}
           onClick={() => {
             // A sent lead message's outcome is read by now; leaving it would keep that destination.
             if (
@@ -1898,7 +1928,7 @@ export function TaskWorkspace({
         {(draftTurn || state.leadInUse || destination === "lead") && (
           <Button
             variant={destination === "lead" ? "primary" : "secondary"}
-            disabled={pending || state.uncertain}
+            disabled={projectReadOnly || pending || state.uncertain}
             onClick={() => {
               state.destination = "lead";
               changed();
@@ -1912,7 +1942,7 @@ export function TaskWorkspace({
             variant={destination === "github" ? "primary" : "secondary"}
             // Native `disabled` is out of the tab order; an unavailable tab stays focusable so
             // its reason is read.
-            disabled={pending || state.uncertain}
+            disabled={projectReadOnly || pending || state.uncertain}
             aria-disabled={!comment.postable || undefined}
             aria-describedby={comment.postable ? undefined : githubReasonId}
             title={comment.sentence ?? undefined}
@@ -1941,7 +1971,7 @@ export function TaskWorkspace({
       <Textarea
         id="workspace-reply"
         value={state.draft}
-        disabled={pending || state.uncertain}
+        disabled={projectReadOnly || pending || state.uncertain}
         onChange={(e) => {
           state.draft = e.target.value;
           if (state.notice?.tone === "success") state.notice = null;
@@ -1957,7 +1987,7 @@ export function TaskWorkspace({
         <CommentRecipients
           facts={commentFacts}
           selection={state.commentRecipients}
-          disabled={pending || state.uncertain}
+          disabled={projectReadOnly || pending || state.uncertain}
           onChange={(ids) => {
             state.commentRecipients = ids;
             changed();
@@ -1968,6 +1998,7 @@ export function TaskWorkspace({
         <>
           <Button
             disabled={
+              projectReadOnly ||
               pending ||
               state.uncertain ||
               !state.draft.trim() ||
@@ -1989,7 +2020,7 @@ export function TaskWorkspace({
           {state.commentReview && (
             <CommentReview
               record={state.commentReview}
-              disabled={pending || state.uncertain}
+              disabled={projectReadOnly || pending || state.uncertain}
               confirm={(decision) => {
                 const review = state.commentReview;
                 if (!review) return;
@@ -2010,6 +2041,7 @@ export function TaskWorkspace({
       {(pending || !state.uncertain) && (
         <Button
           disabled={
+            projectReadOnly ||
             pending ||
             !state.draft.trim() ||
             (destination === "comment" && commentBlocked && !state.uncertain) ||
@@ -2072,6 +2104,7 @@ export function TaskWorkspace({
       session={session}
       taskId={taskId}
       state={state.review}
+      readOnly={projectReadOnly}
       changed={changed}
       repositoryNames={data.repositoryNames}
       reveal={() => selectTab("review")}
@@ -2091,6 +2124,16 @@ export function TaskWorkspace({
     >
       <article className="task-workspace" aria-label="Task workspace">
         <ResourceStatus state={resource.state} retry={refreshAll} />
+        {projectReadOnly && (
+          <p role="status">
+            {data.project?.archived
+              ? "This project is archived. Tasks and history are read-only."
+              : "Project lifecycle is unavailable; writes are disabled."}{" "}
+            <a href={`/app/projects/${data.task.projectId}/settings`}>
+              Project settings
+            </a>
+          </p>
+        )}
         <TaskStrip data={data} onNext={() => reveal("decisions")}>
           <div className="task-actions task-tools">
             {data.source && (
@@ -2103,6 +2146,7 @@ export function TaskWorkspace({
                 {improvePolicy && (
                   <Button
                     variant="secondary"
+                    disabled={projectReadOnly}
                     aria-expanded={improveShown}
                     onClick={() => setImproveOpen(!improveShown)}
                   >
@@ -2111,6 +2155,7 @@ export function TaskWorkspace({
                 )}
                 <Button
                   variant="secondary"
+                  disabled={projectReadOnly}
                   onClick={() => void refreshSource()}
                 >
                   Refresh source
@@ -2120,6 +2165,7 @@ export function TaskWorkspace({
             {!data.source && publishPolicy && (
               <Button
                 variant="secondary"
+                disabled={projectReadOnly}
                 aria-expanded={publishShown}
                 onClick={() => setPublishOpen(!publishShown)}
               >
@@ -2131,7 +2177,7 @@ export function TaskWorkspace({
             </Button>
           </div>
         </TaskStrip>
-        {publishPolicy && publishShown && (
+        {!projectReadOnly && publishPolicy && publishShown && (
           <PublishToGitHub
             client={client}
             csrfToken={session.csrfToken}
@@ -2142,7 +2188,7 @@ export function TaskWorkspace({
             onClose={() => setPublishOpen(false)}
           />
         )}
-        {improvePolicy && improveShown && (
+        {!projectReadOnly && improvePolicy && improveShown && (
           <ImproveWithLead
             client={client}
             csrfToken={session.csrfToken}
@@ -2165,6 +2211,7 @@ export function TaskWorkspace({
         />
         {/* Above the tabs: a send whose control is gone is checked from any of them. */}
         <RetainedSends
+          readOnly={projectReadOnly}
           client={client}
           session={session}
           taskId={taskId}
@@ -2214,6 +2261,7 @@ export function TaskWorkspace({
                 )}
                 {reviewing ? (
                   <ApprovalReview
+                    readOnly={projectReadOnly}
                     client={client}
                     session={session}
                     taskId={taskId}
@@ -2224,6 +2272,7 @@ export function TaskWorkspace({
                 ) : (
                   requestId && (
                     <QuestionResponse
+                      readOnly={projectReadOnly}
                       client={client}
                       session={session}
                       taskId={taskId}
@@ -2327,6 +2376,7 @@ export function TaskWorkspace({
                   ))}
                 {data.unresolvedResults.map((item) => (
                   <ResultDestination
+                    readOnly={projectReadOnly}
                     key={item.resultId}
                     client={client}
                     session={session}
@@ -2353,6 +2403,7 @@ export function TaskWorkspace({
                 {(data.attention.codes.includes("not-started") ||
                   startedAgain === taskId) && (
                   <StartAgainAction
+                    readOnly={projectReadOnly}
                     client={client}
                     session={session}
                     task={data}
@@ -2364,6 +2415,7 @@ export function TaskWorkspace({
                 {(data.source?.hold?.active ||
                   resumedSource?.taskId === taskId) && (
                   <SourceHoldCard
+                    readOnly={projectReadOnly}
                     client={client}
                     session={session}
                     task={data}
@@ -2434,6 +2486,7 @@ export function TaskWorkspace({
                   taskId={taskId}
                   taskVersion={data.task.version}
                   stacked={data.stack?.state === "stacked"}
+                  readOnly={projectReadOnly}
                 />
                 {stackSummary(data.stack, data.stackDelivery) && (
                   <p className="metadata muted">
@@ -2453,6 +2506,7 @@ export function TaskWorkspace({
                 openChanges={() => selectTab("changes")}
                 messageAssignment={(assignment) => (
                   <AssignmentReply
+                    readOnly={projectReadOnly}
                     label={recipientLabel(assignment, data.assignments)}
                     onReply={() => replyTo(assignment.assignmentId)}
                   />
@@ -2564,6 +2618,7 @@ export function TaskWorkspace({
                             })
                           }
                           disabled={
+                            projectReadOnly ||
                             Boolean(state.selectedResult && !selected) ||
                             Boolean(state.selectedSource && !source) ||
                             Boolean(unconfirmed)
@@ -2872,7 +2927,7 @@ export function TaskWorkspace({
                 taskId,
               })
             }
-            refreshDisabled={Boolean(unconfirmed)}
+            refreshDisabled={projectReadOnly || Boolean(unconfirmed)}
             reread={refreshAll}
             unconfirmed={unconfirmedCheck("delivery.refresh")}
             outcome={
@@ -2895,9 +2950,7 @@ export function TaskWorkspace({
         <TabPanel tab="execution" active={state.tab}>
           <TaskExecution
             data={data}
-            project={workspace?.data.projects.find(
-              (p) => p.id === data.task.projectId,
-            )}
+            project={data.project}
             client={client}
             session={session}
             onChanged={refreshAll}
@@ -3491,6 +3544,7 @@ function Changes({
         ))}
       {delivers && (
         <HandbackSettlement
+          readOnly={taskProjectReadOnly(data.task.projectId, data.project)}
           client={client}
           session={session}
           task={data}

@@ -46,7 +46,8 @@ for (const engine of ["chromium", "webkit"] as const) {
           lookups = 0,
           readOnly = false,
           hidden = false,
-          forgedLookup = true;
+          forgedLookup = true,
+          parentUnknown = false;
         const receipt = () => ({
           kind: "task-unstack",
           key: pending.command?.key,
@@ -57,6 +58,11 @@ for (const engine of ["chromium", "webkit"] as const) {
           phase: "unstack-attempting",
           revision: 2,
           reason: "readback-required",
+        });
+        await page.route(`**/api/operator/tasks/${taskId}`, async route => {
+          const response = await route.fetch(), body = await response.json();
+          if (parentUnknown) delete body.data.project;
+          await route.fulfill({ response, json: body });
         });
         await page.route(`**/api/operator/tasks/${taskId}/unstack`, (route) =>
           route.fulfill({
@@ -130,6 +136,14 @@ for (const engine of ["chromium", "webkit"] as const) {
           await dialog.innerText(),
           /cannot undo merges or automatic adoption/,
         );
+        parentUnknown = true;
+        await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
+        await page.getByText(/current write authority is unavailable/).waitFor();
+        assert.equal(await page.getByRole("button", { name: "Confirm Unstack", exact: true }).count(), 0);
+        assert.equal(posts, 0);
+        parentUnknown = false;
+        await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
+        await page.getByRole("button", { name: "Confirm Unstack", exact: true }).waitFor();
         hidden = true;
         await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
         await page.waitForFunction(
