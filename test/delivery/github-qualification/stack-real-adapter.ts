@@ -1,3 +1,4 @@
+import type { TerminationVerifier } from "../../../src/standalone/recovery-types.js";
 import { auditPreparedStack } from "./stack-audit.js";
 import { bindStackRuntime } from "./stack-runtime.js";
 import { verifyPreparedStackResources } from "./stack-resource-preflight.js";
@@ -20,6 +21,13 @@ export async function createRealStackAdapter(
   authority: StackV2Authority,
   credential: (reference: string) => Promise<string | undefined>,
   transport: typeof fetch = fetch,
+  /** Test-only constructor seam; live-stack never supplies this and always constructs CodexRuntime. */
+  offline?: {
+    mode: "offline-only";
+    runtime(context: RuntimeSpawnContext): Runtime;
+    termination: TerminationVerifier;
+    trace?(event: Readonly<Record<string, unknown>>): void;
+  },
 ) {
   await authority.open();
   try {
@@ -32,43 +40,74 @@ export async function createRealStackAdapter(
   const m = authority.manifest;
   let service: StandaloneService;
   let runtime: Runtime | undefined;
-  const boundaryFor = (role: "script" | "service") =>
-    new Proxy(authority, {
+  const boundaryFor = (role: "script" | "service", instance: number) => {
+    let request: unknown;
+    return new Proxy(authority, {
       get(target, property) {
         if (property === "fixtureRole") return role;
+        if (property === "beforeCredentialAccess")
+          return async () => {
+            offline?.trace?.({
+              kind: "credential-access",
+              instance,
+              role,
+              channel: request ? "http" : "direct-git",
+              ...(request ? { request } : {}),
+            });
+            return target.beforeCredentialAccess();
+          };
+        if (property === "afterResponse")
+          return async (
+            ...args: Parameters<StackV2Authority["afterResponse"]>
+          ) => {
+            try {
+              return await target.afterResponse(...args);
+            } finally {
+              request = undefined;
+            }
+          };
         if (property === "beforeCredential" || property === "beforeDispatch")
           return async (
-            request: Parameters<StackV2Authority["beforeCredential"]>[0],
+            nextRequest: Parameters<StackV2Authority["beforeCredential"]>[0],
           ) => {
+            request = nextRequest;
             const write = m.authority.writes.some(
               (rule) =>
-                rule.request.url === request.url &&
-                rule.request.method === request.method,
+                rule.request.url === nextRequest.url &&
+                rule.request.method === nextRequest.method,
             );
             if (
               write &&
               (role === "service"
-                ? request.method === "PUT"
-                : request.method !== "PUT")
+                ? nextRequest.method === "PUT"
+                : nextRequest.method !== "PUT")
             )
               throw Error("v2-provider-effect-owner");
-            return target[property](request);
+            return target[property](nextRequest);
           };
         const value: unknown = Reflect.get(target, property, target);
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
-  const provider = (role: "script" | "service" = "service") =>
-    new GitHubHttpDeliveryProvider(
-      () => credential(m.credentialRef),
+  };
+  let providerSequence = 0;
+  const provider = (role: "script" | "service" = "service") => {
+    const instance = ++providerSequence;
+    offline?.trace?.({ kind: "provider-created", instance, role });
+    return new GitHubHttpDeliveryProvider(
+      () => {
+        offline?.trace?.({ kind: "credential-resolver", instance, role });
+        return credential(m.credentialRef);
+      },
       transport,
       async () => {
         throw Error("v2-git-publication-denied");
       },
       undefined,
       "github.com",
-      boundaryFor(role),
+      boundaryFor(role, instance),
     );
+  };
   // Identity bootstrap uses the exact same HTTP/credential boundaries as later calls,
   // and completes before constructing a service that can migrate or schedule work.
   const fixtureProvider = provider("script");
@@ -86,9 +125,11 @@ export async function createRealStackAdapter(
       if (harness !== "codex" || runtime)
         throw Error("v2-runtime-factory-refused");
       runtime = bindStackRuntime(
-        new CodexRuntime(m.authority.host.runtimeExecutable.path, context),
+        offline?.runtime(context) ??
+          new CodexRuntime(m.authority.host.runtimeExecutable.path, context),
         authority,
         () => service,
+        offline?.termination,
       );
       return runtime;
     },

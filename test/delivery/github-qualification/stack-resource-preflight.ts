@@ -1,7 +1,9 @@
-import {
-  STANDALONE_MARKER_NAME,
-  STANDALONE_MARKER_CONTENTS,
-} from "../../../src/standalone/data-directory.js";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { hostname } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { DeliveryStore } from "../../../src/core/delivery.js";
 import { DomainStore } from "../../../src/core/domain.js";
 import { UnstackStore } from "../../../src/core/unstack.js";
@@ -10,14 +12,11 @@ import {
   codexLoginLink,
   operatorAuthFile,
 } from "../../../src/standalone/codex-home.js";
-import { hostname } from "node:os";
-import { fileURLToPath } from "node:url";
-import { readdir, realpath } from "node:fs/promises";
-import { lstat, readFile } from "node:fs/promises";
+import {
+  STANDALONE_MARKER_CONTENTS,
+  STANDALONE_MARKER_NAME,
+} from "../../../src/standalone/data-directory.js";
 import { repositoryBindingSchema } from "../../../src/standalone/workspaces.js";
-import { join, sep } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { z } from "zod";
 import {
   authorityHash,
   materialHash,
@@ -228,6 +227,49 @@ export function capturePreparedStackDatabase(databasePath: string) {
   }
 }
 
+/** Capture actual Git metadata; HEAD explicitly represents a detached checkout. */
+export async function captureSourceReferencePaths(
+  root: string,
+  git: (...args: string[]) => string,
+) {
+  const sourceHeadFile = resolve(root, git("rev-parse", "--git-path", "HEAD"));
+  const sourceBranch = git("branch", "--show-current") || "HEAD";
+  const loose = resolve(
+    root,
+    git("rev-parse", "--git-path", `refs/heads/${sourceBranch}`),
+  );
+  const sourceRefFile =
+    sourceBranch === "HEAD"
+      ? sourceHeadFile
+      : await lstat(loose).then(
+          () => loose,
+          (error: NodeJS.ErrnoException) => {
+            if (error.code !== "ENOENT") throw error;
+            return resolve(root, git("rev-parse", "--git-path", "packed-refs"));
+          },
+        );
+  return { sourceHeadFile, sourceBranch, sourceRefFile };
+}
+
+/** Exact commit identity for loose, packed and detached Git storage forms. */
+export function sourceReferenceMatches(
+  branch: string,
+  head: string,
+  ref: string,
+  commit: string,
+  packed: boolean,
+) {
+  if (branch === "HEAD")
+    return !packed && head.trim() === commit && ref.trim() === commit;
+  const name = `refs/heads/${branch}`;
+  if (head.trim() !== `ref: ${name}`) return false;
+  if (!packed) return ref.trim() === commit;
+  const entries = ref
+    .split(/\r?\n/)
+    .filter((line) => line.split(" ")[1] === name);
+  return entries.length === 1 && entries[0] === `${commit} ${name}`;
+}
+
 export async function verifyPreparedStackResources(
   authority: StackV2Authority,
 ) {
@@ -320,10 +362,15 @@ export async function verifyPreparedStackResources(
     if (!authority.readiness.source.some((pin) => pin.path === path))
       throw Error("v2-loaded-source-pin-missing");
   if (
-    (await readFile(host.sourceHeadFile, "utf8")).trim() !==
-      `ref: refs/heads/${host.sourceBranch}` ||
-    (await readFile(host.sourceRefFile, "utf8")).trim() !==
-      authority.readiness.sourceCommit
+    (host.sourceBranch === "HEAD" &&
+      host.sourceHeadFile !== host.sourceRefFile) ||
+    !sourceReferenceMatches(
+      host.sourceBranch,
+      await readFile(host.sourceHeadFile, "utf8"),
+      await readFile(host.sourceRefFile, "utf8"),
+      authority.readiness.sourceCommit,
+      host.sourceRefFile.endsWith("/packed-refs"),
+    )
   )
     throw Error("v2-source-head-changed");
   for (const pin of [host.runtimeExecutable, host.gitExecutable])

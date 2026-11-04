@@ -130,6 +130,12 @@ export async function runRealStackJourney(input: StackRealJourneyInput) {
           await delay(m.journey.pollIntervalMs);
           continue;
         }
+        // Observation grants no rewrite: wait for the platform's fresh head before
+        // spending the single service reconciliation and raw-proof opportunity.
+        if (!authority.snapshot().captures.upperHead) {
+          await delay(m.journey.pollIntervalMs);
+          continue;
+        }
         stage = "post-merge-adoption";
         await adapter.refresh();
         await settle(adapter);
@@ -157,9 +163,8 @@ export async function runRealStackJourney(input: StackRealJourneyInput) {
           disposition = "recorded";
           break;
         }
-        // Absence of a platform rebase grants no equivalent ref update or retained rewrite.
-        if (!head) break;
-        await delay(m.journey.pollIntervalMs);
+        // A failed/held proof has spent this journey's one reconciliation attempt.
+        break;
       }
     } else {
       if (m.scenario === "unstack-healthy") await settle(adapter);

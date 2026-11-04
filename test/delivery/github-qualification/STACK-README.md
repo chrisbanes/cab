@@ -40,7 +40,9 @@ Root must capture these actual inputs for each independent pair:
 - Source root/branch/commit/tree, HEAD/ref metadata and exact loaded module hashes,
   pinned Git/Node/Codex executable hashes, `.nvmrc`, package/lock hashes, versions,
   and the required package manager. Source HEAD/tree are checked with pinned
-  offline Git before service construction.
+  offline Git before service construction. Loose and packed refs and an explicitly
+  pinned detached HEAD are supported; a later loose override of a packed ref
+  invalidates its capture.
 - Checkpointed SQLite bytes, migration level 14 and schema fingerprint, exact
   project/task/lead/assignment configuration and immutable profile settings.
   `capturePreparedStackDatabase` computes the same readonly material. Unrelated
@@ -135,7 +137,7 @@ normal deployment/runtime trust limits still apply.
 `stack-real-journey.ts` drives separate `merge-adoption`, `unstack-healthy` and
 `unstack-failed` prepared pairs. It never reuses an adopted edge for Unstack.
 Merge/adoption compares retained HEAD/index/file digests and checks the stored raw
-proof, accepted base/head and branch metadata. An absent platform rebase remains
+proof, accepted base/head and branch metadata. The merge journey waits through its bounded provider observations for a captured fresh upper head, then spends at most one service refresh and raw proof attempt. An absent platform rebase remains
 unproved. Equivalent publication, pushes, fixture creation and provider cleanup
 are unsupported and denied; there is no fallback.
 
@@ -156,3 +158,5 @@ scope. Exact process-exit verification, ended callbacks and no unknown Git child
 are required. Checkpoints and exclusive locks remain for original-identity recovery;
 never delete a lock or choose a new key merely to retry. An injected factory or transport is
 always labelled `offline-injected`; it cannot supply live acceptance evidence.
+
+`stack-concrete-journey.test.ts` uses the actual adapter, service, provider and orchestration with an explicit offline-only runtime/termination constructor seam. Fresh pending leads and synthetic branch/PR preconditions are prepared before authority; full in-process provider snapshots prevent invented startup feedback from minimal seed records. A pinned offline Git executable redirects only the exact synthetic repository fetch to disposable local objects and delegates every proof operation to real Git. Immediate, delayed and absent platform rebases, missing initial registration and exhausted read authority are checked without real provider requests, operator credentials or runtime processes. Optional trace export records stages, literal requests, provider instances, HTTP/direct-Git credential accesses, callbacks and final audits; these traces are offline evidence only.

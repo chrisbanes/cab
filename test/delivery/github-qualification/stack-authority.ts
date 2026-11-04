@@ -9,7 +9,7 @@ import {
   realpath,
   rename,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { z } from "zod";
 import { unstackCommandSchema } from "../../../src/core/unstack.js";
 import type { RuntimeToolCall } from "../../../src/standalone/codex.js";
@@ -348,7 +348,7 @@ const journalSchema = z
           })
           .strict(),
       )
-      .max(160),
+      .max(288),
     effects: z.record(
       text,
       z
@@ -426,7 +426,26 @@ const journalSchema = z
   .strict();
 type Journal = z.output<typeof journalSchema>;
 
-/** One run owns one durable journal. A leftover lock requires operator investigation, never reset. */
+/** Packing is valid at capture; a later loose override invalidates that packed snapshot. */
+export async function assertNoPackedSourceShadow(host: {
+  sourceRefFile: string;
+  sourceBranch: string;
+}) {
+  if (
+    basename(host.sourceRefFile) !== "packed-refs" ||
+    host.sourceBranch === "HEAD"
+  )
+    return;
+  const shadow = await lstat(
+    join(dirname(host.sourceRefFile), "refs", "heads", host.sourceBranch),
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (shadow) throw Error("v2-source-ref-storage-changed");
+}
+
+/** One run owns one durable journal. A leftover lock requires investigation, never reset. */
 export class StackV2Authority implements GitHubDeliveryRequestBoundary {
   private journal!: Journal;
   private lock: Awaited<ReturnType<typeof open>> | undefined;
@@ -816,6 +835,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
         ])
           await this.pinnedFiles.verify(pin, () => this.current(), 262144);
       }
+      await assertNoPackedSourceShadow(host);
       for (const pin of [
         ...host.files,
         host.gitExecutable,
@@ -1800,7 +1820,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
     for (const args of [
       ["rev-parse", "--verify", "HEAD"],
       ["rev-parse", "--verify", "HEAD^{tree}"],
-      ["symbolic-ref", "--quiet", "HEAD"],
+      ["rev-parse", "--symbolic-full-name", "HEAD"],
     ]) {
       const sequence = await this.beginGitChild(key);
       this.current();
@@ -1822,7 +1842,8 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
     if (
       values[0] !== material.commit ||
       values[1] !== material.tree ||
-      values[2] !== `refs/heads/${material.branch}`
+      values[2] !==
+        (material.branch === "HEAD" ? "HEAD" : `refs/heads/${material.branch}`)
     )
       throw Error("v2-source-identity-changed");
     await this.confirm(key, materialHash(material));

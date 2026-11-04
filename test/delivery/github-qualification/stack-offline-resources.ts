@@ -4,68 +4,87 @@ import {
   chmod,
   lstat,
   mkdir,
-  readFile,
   readdir,
+  readFile,
   realpath,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import type { TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { z } from "zod";
-import { stackedDeliveryFixture } from "../../fixtures/stacked-delivery.js";
-import { git } from "../../fixtures/publication.js";
-import { STANDALONE_MARKER_NAME } from "../../../src/standalone/data-directory.js";
-import { codexHomeFor } from "../../../src/standalone/codex-home.js";
-import { StandaloneService } from "../../../src/standalone/service.js";
 import { materialDigest } from "../../../src/core/delivery.js";
+import { codexHomeFor } from "../../../src/standalone/codex-home.js";
+import { coordinationTools } from "../../../src/standalone/coordination-tools.js";
+import { STANDALONE_MARKER_NAME } from "../../../src/standalone/data-directory.js";
 import {
-  GitHubHttpDeliveryProvider,
   deliveryDocuments,
+  GitHubHttpDeliveryProvider,
 } from "../../../src/standalone/github-delivery.js";
-import { capturePreparedStackDatabase } from "./stack-resource-preflight.js";
+import { StandaloneService } from "../../../src/standalone/service.js";
+import { git } from "../../fixtures/publication.js";
+import { stackedDeliveryFixture } from "../../fixtures/stacked-delivery.js";
 import {
-  StackV2Authority,
   authorityHash,
   materialHash,
+  StackV2Authority,
   type stackAuthoritySchema,
 } from "./stack-authority.js";
 import { prepareStackV2Manifest } from "./stack-builders.js";
+import { freshOfflineStack } from "./stack-offline-preparation.js";
+import {
+  capturePreparedStackDatabase,
+  captureSourceReferencePaths,
+} from "./stack-resource-preflight.js";
 
 /** Entirely disposable, in-process HTTP/service qualification. Its env reference is never populated. */
-export async function offlineStackResources(t: TestContext) {
-  const f = await stackedDeliveryFixture(t),
+export async function offlineStackResources(
+  t: TestContext,
+  mergeAdoption = false,
+  platformRebase: "immediate" | "delayed" | "absent" = "immediate",
+  offlineReadBudget = 256,
+) {
+  const fresh = mergeAdoption ? await freshOfflineStack(t) : undefined;
+  const legacy = fresh ? undefined : await stackedDeliveryFixture(t);
+  const f = fresh ?? legacy!,
     [lowerTask, upperTask] = f.tasks as [string, string];
-  await f.waitTurn(lowerTask);
-  const lowerHead = await f.commit(lowerTask, "offline-lower");
-  await f.push(lowerTask, lowerHead);
-  await f.showPr(lowerTask);
-  await f.waitTurn(upperTask);
-  const upperHead = await f.commit(upperTask, "offline-upper");
-  await f.push(upperTask, upperHead);
-  await f.showPr(upperTask, {
-    baseRef: f.branchOf(lowerTask)!.branch,
-    baseSha: lowerHead,
-  });
-  f.run({
-    type: "project.configure",
-    projectId: f.projectId,
-    expectedVersion: Number(f.service.domain().project(f.projectId).version),
-    paused: true,
-  });
-  for (const task of [lowerTask, upperTask]) {
-    assert.equal(
-      (
-        await f.call(task, "cab_report_result", {
-          summary: "offline preparation",
-        })
-      ).success,
-      true,
-    );
-    await f.complete(task);
+  let lowerHead: string, upperHead: string;
+  if (fresh) {
+    lowerHead = fresh.lowerHead;
+    upperHead = fresh.upperHead;
+  } else {
+    const f = legacy!;
+    await f.waitTurn(lowerTask);
+    lowerHead = await f.commit(lowerTask, "offline-lower");
+    await f.push(lowerTask, lowerHead);
+    await f.showPr(lowerTask);
+    await f.waitTurn(upperTask);
+    upperHead = await f.commit(upperTask, "offline-upper");
+    await f.push(upperTask, upperHead);
+    await f.showPr(upperTask, {
+      baseRef: f.branchOf(lowerTask)!.branch,
+      baseSha: lowerHead,
+    });
+    f.run({
+      type: "project.configure",
+      projectId: f.projectId,
+      expectedVersion: Number(f.service.domain().project(f.projectId).version),
+      paused: true,
+    });
+    for (const task of [lowerTask, upperTask]) {
+      assert.equal(
+        (
+          await f.call(task, "cab_report_result", {
+            summary: "offline preparation",
+          })
+        ).success,
+        true,
+      );
+      await f.complete(task);
+    }
   }
   const lowerWorkspace = await f.workspaceOf(lowerTask),
     upperWorkspace = await f.workspaceOf(upperTask);
@@ -99,29 +118,55 @@ export async function offlineStackResources(t: TestContext) {
     operationKey: randomUUID(),
     unstackCommandSha256: materialHash(null),
   };
-  f.run({ type: "runtime.configure", harness: "codex", enabled: false });
+  if (!fresh)
+    f.run({ type: "runtime.configure", harness: "codex", enabled: false });
   await f.service.stop();
   const data = join(f.root, "data"),
     database = join(data, "standalone.sqlite");
   const credentialRef = `env:CAB_OFFLINE_UNRESOLVABLE_${randomUUID().replaceAll("-", "").toUpperCase()}`;
   const repo = "/repos/fixture/private";
   let unstacked = false,
-    retargeted = false;
+    retargeted = false,
+    merged = false,
+    rebased = false,
+    upperObservations = 0;
+  const trace: Array<{ url: string; method: string; body: string }> = [];
+  const providerHeads: Array<{
+    channel: "rest" | "graph" | "ref";
+    head: string;
+    merged: boolean;
+    rebased: boolean;
+    observation: number;
+  }> = [];
+  const recordUpperHead = (channel: "rest" | "graph" | "ref", head: string) => {
+    providerHeads.push({
+      channel,
+      head,
+      merged,
+      rebased,
+      observation: upperObservations,
+    });
+  };
   const graph = (n: number) => {
     const lower = n === 1,
-      head = lower ? lowerHead : upperHead,
-      base = lower || retargeted ? f.base : lowerHead;
+      head = lower ? lowerHead : rebased ? fresh!.rebasedHead : upperHead,
+      base =
+        lower || retargeted || rebased
+          ? merged
+            ? fresh!.mergedBase
+            : f.base
+          : lowerHead;
     return {
       id: lower ? resource.lowerPrId : resource.upperPrId,
       number: n,
       repository: { id: "R1", nameWithOwner: resource.repository },
-      baseRefName: lower || retargeted ? "main" : resource.lowerRef,
+      baseRefName: lower || retargeted || rebased ? "main" : resource.lowerRef,
       headRefName: lower ? resource.lowerRef : resource.upperRef,
       headRefOid: head,
       baseRefOid: base,
-      state: "OPEN",
-      isDraft: true,
-      merged: false,
+      state: lower && merged ? "MERGED" : "OPEN",
+      isDraft: false,
+      merged: lower && merged,
       mergeable: "MERGEABLE",
       mergeStateStatus: "CLEAN",
       reviewDecision: null,
@@ -139,8 +184,71 @@ export async function offlineStackResources(t: TestContext) {
   };
   const transport: typeof fetch = async (url, init) => {
     const u = new URL(String(url));
+    trace.push({
+      url: u.href,
+      method: init?.method ?? "GET",
+      body: String(init?.body ?? ""),
+    });
     assert.equal(u.origin, "https://api.github.com");
     const json = (body: unknown) => Response.json(body);
+    if (
+      init?.method === "PUT" &&
+      u.pathname === `${repo}/pulls/1/merge-async`
+    ) {
+      assert.equal(mergeAdoption, true);
+      assert.equal(
+        init.body,
+        JSON.stringify({
+          sha: lowerHead,
+          merge_method: "squash",
+          bypass_rules: false,
+          merge_action: "direct_merge",
+        }),
+      );
+      merged = true;
+      git(f.source, "update-ref", "refs/heads/main", fresh!.mergedBase);
+      if (platformRebase === "immediate") {
+        rebased = true;
+        git(
+          f.source,
+          "update-ref",
+          `refs/heads/${resource.upperRef}`,
+          fresh!.rebasedHead,
+        );
+      }
+      return Response.json(
+        { status: "pending", details: { uuid: "offline-merge" } },
+        { status: 202 },
+      );
+    }
+    if (u.pathname === `${repo}/pulls/2` && merged) {
+      upperObservations++;
+      if (platformRebase === "delayed" && upperObservations === 2) {
+        rebased = true;
+        git(
+          f.source,
+          "update-ref",
+          `refs/heads/${resource.upperRef}`,
+          fresh!.rebasedHead,
+        );
+      }
+    }
+    if (u.pathname === `${repo}/pulls/1/merge-async/offline-merge`)
+      return json({ status: "merged", details: { uuid: "offline-merge" } });
+    if (
+      u.pathname === `${repo}/pulls` &&
+      u.searchParams.get("head") === `fixture:${resource.lowerRef}`
+    )
+      return json([
+        {
+          node_id: resource.lowerPrId,
+          number: 1,
+          state: merged ? "closed" : "open",
+          merged_at: merged ? "2026-11-04T00:00:00Z" : null,
+          head: { ref: resource.lowerRef, repo: { node_id: "R1" } },
+          base: { ref: "main" },
+        },
+      ]);
     if (init?.method === "POST" && u.pathname === `${repo}/stacks/7/unstack`) {
       assert.equal(init.body, undefined);
       unstacked = true;
@@ -156,14 +264,13 @@ export async function offlineStackResources(t: TestContext) {
       return json({ login: "offline", node_id: "OFFLINE_ACTOR" });
     if (u.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
-      return json({
-        data: {
-          node:
-            body.query === deliveryDocuments.CabDeliveryRepository
-              ? { id: "R1", nameWithOwner: resource.repository }
-              : graph(body.variables.id === resource.lowerPrId ? 1 : 2),
-        },
-      });
+      const node =
+        body.query === deliveryDocuments.CabDeliveryRepository
+          ? { id: "R1", nameWithOwner: resource.repository }
+          : graph(body.variables.id === resource.lowerPrId ? 1 : 2);
+      if (body.variables.id === resource.upperPrId && "headRefOid" in node)
+        recordUpperHead("graph", node.headRefOid);
+      return json({ data: { node } });
     }
     if (u.pathname === repo)
       return json({
@@ -176,13 +283,14 @@ export async function offlineStackResources(t: TestContext) {
     for (const n of [1, 2])
       if (u.pathname === `${repo}/pulls/${n}`) {
         const p = graph(n);
+        if (n === 2) recordUpperHead("rest", p.headRefOid);
         return json({
           node_id: p.id,
           number: n,
-          state: "open",
+          state: n === 1 && merged ? "closed" : "open",
           body: "offline",
-          draft: true,
-          merged: false,
+          draft: false,
+          merged: n === 1 && merged,
           stack: unstacked
             ? null
             : {
@@ -190,7 +298,7 @@ export async function offlineStackResources(t: TestContext) {
                 number: 7,
                 position: n,
                 size: 2,
-                base: { ref: "main", sha: f.base },
+                base: { ref: "main", sha: merged ? fresh!.mergedBase : f.base },
               },
           head: {
             sha: p.headRefOid,
@@ -208,34 +316,51 @@ export async function offlineStackResources(t: TestContext) {
       return json({
         id: 7,
         number: 7,
-        base: { ref: "main", sha: f.base },
+        base: { ref: "main", sha: merged ? fresh!.mergedBase : f.base },
         pull_requests: (unstacked ? [] : [1, 2]).map((n) => {
           const p = graph(n);
           return {
             node_id: p.id,
             number: n,
-            state: "open",
-            merged_at: null,
+            state: n === 1 && merged ? "closed" : "open",
+            merged_at: n === 1 && merged ? "2026-11-04T00:00:00Z" : null,
             head: { ref: p.headRefName, sha: p.headRefOid },
           };
         }),
       });
     if (u.pathname.includes("/git/ref/heads/")) {
       const ref = decodeURIComponent(u.pathname.split("/git/ref/heads/")[1]!);
-      return json({
-        ref: `refs/heads/${ref}`,
-        object: {
-          sha:
-            ref === "main"
-              ? f.base
-              : ref === resource.lowerRef
-                ? lowerHead
-                : upperHead,
-        },
-      });
+      const refSha =
+        ref === "main"
+          ? merged
+            ? fresh!.mergedBase
+            : f.base
+          : ref === resource.lowerRef
+            ? lowerHead
+            : rebased
+              ? fresh!.rebasedHead
+              : upperHead;
+      if (ref === resource.upperRef) recordUpperHead("ref", refSha);
+      return json({ ref: `refs/heads/${ref}`, object: { sha: refSha } });
     }
     if (u.pathname.endsWith("/check-runs"))
-      return json({ total_count: 0, check_runs: [] });
+      return json({
+        total_count: fresh ? 1 : 0,
+        check_runs: fresh
+          ? [
+              {
+                name: "offline-check",
+                node_id: "OFFLINE-CHECK",
+                completed_at: "2026-11-04T00:00:00Z",
+                started_at: "2026-11-04T00:00:00Z",
+                head_sha: u.pathname.split("/commits/")[1]!.split("/")[0],
+                status: "completed",
+                conclusion: "success",
+                app: null,
+              },
+            ]
+          : [],
+      });
     if (u.pathname.includes("/protection"))
       return new Response(null, { status: 404 });
     if (
@@ -265,6 +390,56 @@ export async function offlineStackResources(t: TestContext) {
     db.prepare(
       "UPDATE delivery_policies SET policyJson=? WHERE projectId=?",
     ).run(JSON.stringify(policy), f.projectId);
+    if (fresh) {
+      db.prepare("UPDATE domain_projects SET paused=0").run();
+      db.prepare(
+        "UPDATE installation_runtimes SET enabled=1 WHERE harness='codex'",
+      ).run();
+      for (const [n, taskId] of [lowerTask, upperTask].entries()) {
+        // Provider-normalized preparation snapshot, not prior runtime or callback evidence.
+        const observation = await new GitHubHttpDeliveryProvider(
+          async () => "offline-preparation-marker",
+          transport,
+        ).inspectPr(
+          {
+            repositoryId: "R1",
+            prNumber: n + 1,
+            expectedPrNodeId: n === 0 ? resource.lowerPrId : resource.upperPrId,
+            expectedHeadSha: n === 0 ? lowerHead : upperHead,
+          },
+          policy,
+        );
+        const digest = materialDigest(observation);
+        db.prepare("INSERT INTO delivery_pr_bindings VALUES (?,?)").run(
+          taskId,
+          JSON.stringify({
+            taskId,
+            projectId: f.projectId,
+            leadAssignmentId: String(
+              db
+                .prepare(
+                  "SELECT assignmentId FROM task_lead_bindings WHERE taskId=?",
+                )
+                .get(taskId)!.assignmentId,
+            ),
+            registeredWorkId: `synthetic-precondition:offline:${n}`,
+            revision: 1,
+            mode: "reviewable-pr",
+            observationDigest: digest,
+            settlement: null,
+            observation,
+            observedAt: Date.now(),
+            readError: null,
+          }),
+        );
+        db.prepare("INSERT INTO delivery_observations VALUES (?,?,?,?)").run(
+          taskId,
+          digest,
+          JSON.stringify(observation),
+          Date.now(),
+        );
+      }
+    }
     db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   } finally {
     db.close();
@@ -307,19 +482,28 @@ export async function offlineStackResources(t: TestContext) {
     expectedVersion: number;
     materialHash: string;
   };
-  try {
-    await preparation.start();
-    const identity = await preparation.previewTaskUnstack(upperTask);
+  if (!fresh)
+    try {
+      await preparation.start();
+      const identity = await preparation.previewTaskUnstack(upperTask);
+      command = {
+        type: "task.unstack",
+        key: resource.operationKey,
+        taskId: upperTask,
+        expectedVersion: identity.taskVersion,
+        materialHash: materialDigest(identity),
+      };
+    } finally {
+      await preparation.stop();
+    }
+  else
     command = {
       type: "task.unstack",
       key: resource.operationKey,
       taskId: upperTask,
-      expectedVersion: identity.taskVersion,
-      materialHash: materialDigest(identity),
+      expectedVersion: 1,
+      materialHash: materialHash(null),
     };
-  } finally {
-    await preparation.stop();
-  }
   resource.unstackCommandSha256 = materialHash(command);
   const observed = capturePreparedStackDatabase(database);
   const sourceRoot = await realpath(
@@ -345,17 +529,33 @@ export async function offlineStackResources(t: TestContext) {
   const auth = await lstat(authTarget),
     common = await realpath(join(f.source, ".git"));
   await mkdir(join(common, "refs", "cab", "adopted"), { recursive: true });
-  const gitExecutable = await pin(await realpath("/usr/bin/git")),
+  const offlineGit = join(f.root, "OFFLINE-git.cjs");
+  await writeFile(
+    offlineGit,
+    `#!${process.execPath}
+const { spawnSync } = require('node:child_process');
+let args = process.argv.slice(2);
+let env = {...process.env};
+const remote = 'https://github.com/fixture/private.git';
+if(args.includes('fetch')) {
+  if(!args.includes(remote)) throw Error('offline-git-remote-denied');
+  args = ['-c','protocol.file.allow=always',...args.map(x => x === remote ? ${JSON.stringify(f.source)} : x)];
+  env.GIT_ALLOW_PROTOCOL = 'file';
+  delete env.CAB_PUSH_TOKEN;
+}
+const r = spawnSync('/usr/bin/git', args, {env,stdio:'inherit'});
+process.exit(r.status ?? 1);
+`,
+  );
+  await chmod(offlineGit, 0o700);
+  const gitExecutable = await pin(
+      fresh ? offlineGit : await realpath("/usr/bin/git"),
+    ),
     runtimeExecutable = await pin(fakeExecutable);
-  const sourceHeadFile = resolve(
-    sourceRoot,
-    git(sourceRoot, "rev-parse", "--git-path", "HEAD"),
-  );
-  const sourceBranch = git(sourceRoot, "symbolic-ref", "--short", "HEAD");
-  const sourceRefFile = resolve(
-    sourceRoot,
-    git(sourceRoot, "rev-parse", "--git-path", `refs/heads/${sourceBranch}`),
-  );
+  const { sourceHeadFile, sourceBranch, sourceRefFile } =
+    await captureSourceReferencePaths(sourceRoot, (...args) =>
+      git(sourceRoot, ...args),
+    );
   const source = await Promise.all(
     (
       await readdir(join(sourceRoot, "src"), {
@@ -399,7 +599,7 @@ export async function offlineStackResources(t: TestContext) {
       join(sourceRoot, "test/delivery/github-qualification/live-stack.mjs"),
     ),
     await pin(sourceHeadFile),
-    await pin(sourceRefFile),
+    ...(sourceRefFile === sourceHeadFile ? [] : [await pin(sourceRefFile)]),
   );
   const directories = await Promise.all(
     [
@@ -472,11 +672,38 @@ export async function offlineStackResources(t: TestContext) {
     add(request(`${repo}/rules/branches/${encodeURIComponent(ref)}`));
     add(request(`${repo}/branches/${encodeURIComponent(ref)}/protection`));
   }
-  for (const sha of [lowerHead, upperHead]) {
+  for (const sha of [
+    lowerHead,
+    upperHead,
+    ...(fresh ? ["__CAB_UPPER_HEAD__"] : []),
+  ]) {
     add(
       request(`${repo}/commits/${sha}/check-runs?per_page=100&filter=latest`),
     );
     add(request(`${repo}/commits/${sha}/statuses?per_page=100`));
+  }
+  if (fresh) {
+    add(
+      request(
+        `${repo}/pulls?state=all&head=${encodeURIComponent(`fixture:${resource.lowerRef}`)}&per_page=100`,
+      ),
+      8,
+    );
+    add(request(`${repo}/pulls/1/merge-async/__CAB_MERGE_REQUEST__`), 8);
+    for (const rule of reads) {
+      if (
+        rule.request.url === `https://api.github.com${repo}` ||
+        rule.request.body.includes("query CabDeliveryRepository")
+      )
+        rule.maxCalls = 39;
+      if (
+        rule.request.url.endsWith("/pulls/1") ||
+        rule.request.url.endsWith("/pulls/2") ||
+        rule.request.url.includes("/git/ref/heads/")
+      )
+        rule.maxCalls = 24;
+      if (/\/(comments|reviews)\?/.test(rule.request.url)) rule.maxCalls = 8;
+    }
   }
   const call = (
     id: z.input<typeof stackAuthoritySchema>["serviceCalls"][number]["id"],
@@ -564,6 +791,7 @@ export async function offlineStackResources(t: TestContext) {
       databaseFiles: [await pin(database)],
       schemaFingerprint: observed.schemaFingerprint,
       writes: [
+        ...(fresh ? [lowerWorkspace.root, upperWorkspace.root] : []),
         data,
         scratch,
         join(common, "objects"),
@@ -571,7 +799,7 @@ export async function offlineStackResources(t: TestContext) {
         authTarget,
       ],
       workspaceImage: { maxFiles: 100, maxBytes: 1048576 },
-      teardownDeadline: new Date(now + 120000).toISOString(),
+      teardownDeadline: new Date(now + 300000).toISOString(),
     },
     gitFetch: {
       repositoryUrl: "https://github.com/fixture/private.git",
@@ -581,10 +809,10 @@ export async function offlineStackResources(t: TestContext) {
       scratchParent: scratch,
       commits: [lowerHead, upperHead, f.base],
       branch: resource.upperRef,
-      maxFetches: 0,
-      maxChildren: 32,
+      maxFetches: fresh ? 1 : 0,
+      maxChildren: fresh ? 100 : 32,
       maxObjectBytes: 1048576,
-      maxElapsedMs: 1000,
+      maxElapsedMs: fresh ? 20000 : 1000,
     },
     runtime: observed.assignments.map((assignment) => {
       const settings = observed.runtimeSettings.find(
@@ -611,39 +839,136 @@ export async function offlineStackResources(t: TestContext) {
         assignmentVersions: [assignment.version],
         instructionsRevision: lead.instructionsRevision,
         profileRevision: lead.profileRevision,
-        maxPromptBytes: 1024,
-        maxTurns: 0,
-        maxCallbacks: 0,
+        maxPromptBytes: fresh ? 32768 : 1024,
+        maxTurns: fresh ? 2 : 0,
+        maxCallbacks: fresh ? 3 : 0,
       };
     }),
     limits: {
-      reads: 128,
-      writes: 2,
-      credentials: 8,
-      credentialCallbacks: 128,
-      callbacks: 0,
-      turns: 0,
-      firstEffects: 8,
-      serviceCalls: 12,
-      gitFetches: 0,
+      reads: fresh ? offlineReadBudget : 128,
+      writes: fresh ? 1 : 2,
+      credentials: fresh ? 7 : 8,
+      credentialCallbacks: fresh ? 256 : 128,
+      callbacks: fresh ? 6 : 0,
+      turns: fresh ? 4 : 0,
+      firstEffects: fresh ? 120 : 8,
+      serviceCalls: fresh ? 64 : 12,
+      gitFetches: fresh ? 1 : 0,
     },
   };
+  if (fresh) {
+    authority.writes = [
+      {
+        id: "offline:merge",
+        request: {
+          url: `https://api.github.com${repo}/pulls/1/merge-async`,
+          method: "PUT",
+          body: JSON.stringify({
+            sha: lowerHead,
+            merge_method: "squash",
+            bypass_rules: false,
+            merge_action: "direct_merge",
+          }),
+          version: "2026-03-10",
+        },
+        maxCalls: 1,
+      },
+    ];
+    authority.captures.mergeRuleId = "offline:merge";
+    authority.serviceCalls = authority.serviceCalls.filter(
+      (value) =>
+        !value.id.includes("unstack") && value.id !== "service.operation.read",
+    );
+    const lifecycle = {
+      executable: runtimeExecutable,
+      version: authority.host.runtimeVersion,
+    };
+    authority.serviceCalls.push(
+      call("runtime.start", lifecycle),
+      call("runtime.stop", lifecycle),
+      call(
+        "fixture.observe",
+        { repositoryId: "R1", lowerPr: 1, upperPr: 2 },
+        8,
+      ),
+      call(
+        "fixture.poll",
+        { repositoryId: "R1", number: 1, operationKey: resource.operationKey },
+        8,
+      ),
+      call("fixture.merge", {
+        kind: "pr.merge",
+        method: "squash",
+        reviewedResultIds: [],
+        target: {
+          repositoryId: "R1",
+          number: 1,
+          nodeId: resource.lowerPrId,
+          headRef: resource.lowerRef,
+          baseRef: "main",
+          expectedHeadSha: lowerHead,
+        },
+      }),
+      call("service.refresh", { projectId: f.projectId }, 1),
+      call("host.workspace.image", { workspace: upperWorkspace.path }, 2),
+      call("git.prove", {
+        repositoryId: "R1",
+        repositoryUrl: authority.gitFetch.repositoryUrl,
+        workspacePath: upperWorkspace.path,
+        commonDirectory: common,
+        branch: resource.upperRef,
+        commits: authority.gitFetch.commits,
+      }),
+    );
+    authority.serviceCalls.find(
+      (value) => value.id === "service.observe",
+    )!.maxCalls = 3;
+    for (const scope of authority.runtime) {
+      const material = {
+        taskId: scope.taskId,
+        assignmentId: scope.assignmentId,
+        workspace: scope.workspace,
+        settingsSha256: scope.settingsSha256,
+        policySha256: scope.policySha256,
+      };
+      authority.serviceCalls.push(
+        call("runtime.thread.start", {
+          ...scope,
+          toolsSha256: materialHash(coordinationTools),
+        }),
+        call("runtime.thread.resume", {
+          ...scope,
+          toolsSha256: materialHash(coordinationTools),
+        }),
+        call("runtime.turn", material, 2),
+        call(
+          "runtime.wait",
+          { taskId: scope.taskId, assignmentId: scope.assignmentId },
+          2,
+        ),
+      );
+    }
+  }
   const prepared = prepareStackV2Manifest(
     {
       version: 2,
       runId,
-      scenario: "unstack-healthy",
+      scenario: fresh ? "merge-adoption" : "unstack-healthy",
       resource,
       credentialRef,
       authority,
       unstackCommand: command,
-      journey: { maxObservations: 1, settlePolls: 1, pollIntervalMs: 250 },
+      journey: {
+        maxObservations: fresh ? 8 : 1,
+        settlePolls: fresh ? 60 : 1,
+        pollIntervalMs: 250,
+      },
     },
     {
       version: 2,
       runId,
       observedAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + 60000).toISOString(),
+      expiresAt: new Date(now + 240000).toISOString(),
       source,
       sourceCommit: git(sourceRoot, "rev-parse", "HEAD"),
       sourceTree: git(sourceRoot, "rev-parse", "HEAD^{tree}"),
@@ -658,7 +983,7 @@ export async function offlineStackResources(t: TestContext) {
   const grant = JSON.stringify({
     ...prepared.grantBindings,
     issuedAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + 60000).toISOString(),
+    expiresAt: new Date(now + 240000).toISOString(),
     teardownDeadline: authority.host.teardownDeadline,
   });
   const paths = {
@@ -677,8 +1002,13 @@ export async function offlineStackResources(t: TestContext) {
     Date.now,
     paths,
   );
+  const preparationTrace = trace.splice(0);
   return {
     guard,
+    preparationTrace,
+    trace,
+    providerHeads,
+    fresh,
     resource,
     credentialRef,
     fakeLogin,
