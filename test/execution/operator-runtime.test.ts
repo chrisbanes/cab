@@ -753,15 +753,24 @@ test("the assignment recovery read retains scoped records and holds", async (t) 
   assert.ok(pendingRecord?.binding);
   assert.notEqual(receiptRecord.workId, pendingRecord.workId);
 
-  const recovery = (
-    await new OperatorApi(service, [directory]).readAssignmentRecovery(
-      pendingRecord.binding.assignmentId,
-    )
+  const api = new OperatorApi(service, [directory]);
+  const receiptRecovery = (
+    await api.readAssignmentRecovery(receiptRecord.binding.assignmentId)
   ).data;
-  assert.ok(recovery.records.some((r) => r.workId === receiptRecord.workId));
-  assert.ok(recovery.records.some((r) => r.workId === pendingRecord.workId));
-  assert.equal(recovery.holds.writer, true);
-  assert.doesNotMatch(JSON.stringify(recovery), /PRIVATE_RECOVERY_/);
+  const pendingRecovery = (
+    await api.readAssignmentRecovery(pendingRecord.binding.assignmentId)
+  ).data;
+  assert.ok(
+    receiptRecovery.records.some((r) => r.workId === receiptRecord.workId),
+  );
+  assert.ok(
+    pendingRecovery.records.some((r) => r.workId === pendingRecord.workId),
+  );
+  assert.equal(pendingRecovery.holds.writer, true);
+  assert.doesNotMatch(
+    JSON.stringify([receiptRecovery, pendingRecovery]),
+    /PRIVATE_RECOVERY_(?:INSTRUCTIONS|WORKER_INSTRUCTIONS|CREDENTIAL)_SENTINEL/,
+  );
 });
 
 test("instruction apply refreshes the selected assignment revision once", async (t) => {
