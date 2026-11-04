@@ -164,9 +164,8 @@ for (const [name, viewport] of [
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-neutral-wait-reason`);
 
-    await page.goto(`${web.origin}/runtime/assignment/${workerId}`);
+    await page.goto(`${web.origin}/app/assignments/${workerId}/recovery`);
     const retained = await page.locator("main").innerText();
-    // The retained page shows a fixed recovery reason, never the raw hold text.
     assert.ok(retained.includes("Execution runtime: Claude"), retained);
     assert.doesNotMatch(retained, /Codex|App Server/);
     await captureBrowserEvidence(page, `${name}-neutral-runtime-assignment`);

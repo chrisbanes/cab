@@ -1164,9 +1164,6 @@ export function AssignmentRecovery(
               <Aside
                 title="Advanced destinations · desktop-first"
                 items={[
-                  <a key="a" href={`/runtime/assignment/${p.assignmentId}`}>
-                    Advanced recovery evidence and exact Apply
-                  </a>,
                   <a
                     key="b"
                     href={`/app/tasks/${data.taskId}?section=execution`}
@@ -1181,9 +1178,6 @@ export function AssignmentRecovery(
                   </a>,
                   <a key="d" href={inspect}>
                     Task detail
-                  </a>,
-                  <a key="f" href={`/assignment/${p.assignmentId}`}>
-                    Exact captured instructions and result destination
                   </a>,
                 ]}
               />

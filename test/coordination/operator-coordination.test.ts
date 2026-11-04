@@ -15,7 +15,6 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { until } from "../fixtures/until.js";
@@ -154,24 +153,6 @@ test("operator status follows a newer queued continuation over completed history
   assert.equal(requests[1]?.state, "queued");
   const history = service.coordinationView().readTask(taskId).history;
   assert.ok(history.some((entry) => entry.state === "completed"));
-
-  const runtimeAssignmentRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "GET" &&
-      candidate.path === "/runtime/assignment/:assignmentId",
-  );
-  assert.ok(runtimeAssignmentRoute);
-  const runtimeAssignmentPage = await runtimeAssignmentRoute.handler({
-    params: { assignmentId: String(assignment.id) },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(runtimeAssignmentPage.kind, "html");
-  if (runtimeAssignmentPage.kind === "html")
-    assert.match(
-      runtimeAssignmentPage.body,
-      /Execution status: Queued; waiting for capacity admission\./,
-    );
 
   const taskRead = (
     await new OperatorApi(service, [directory]).readTask(taskId)
@@ -329,26 +310,6 @@ test("operator reads retain an active worker turn after applying next-turn revis
     "running",
   );
 
-  const runtimeRoutes = runtimeOperatorRoutes(service);
-  const runtimeAssignmentPage = await route(
-    runtimeRoutes,
-    "GET",
-    "/runtime/assignment/:assignmentId",
-  ).handler({
-    params: { assignmentId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(runtimeAssignmentPage.kind, "html");
-  if (runtimeAssignmentPage.kind === "html") {
-    assert.match(runtimeAssignmentPage.body, /Execution status: Running\./);
-    assert.ok(
-      runtimeAssignmentPage.body.includes(
-        `Captured instruction revision ${updatedAssignment.instructionsRevision}; profile revision ${updatedAssignment.profileRevision}.`,
-      ),
-    );
-  }
-
   const api = new OperatorApi(service, [directory]);
   const running = (await api.readTask(taskId)).data;
   const runningWorker = running.assignments.find(
@@ -444,18 +405,6 @@ function command(service: StandaloneService, body: object): unknown {
     actor: "operator",
     ...body,
   } as never);
-}
-
-function route(
-  routes: ReturnType<typeof runtimeOperatorRoutes>,
-  method: "GET" | "POST",
-  path: string,
-) {
-  const result = routes.find(
-    (candidate) => candidate.method === method && candidate.path === path,
-  );
-  assert.ok(result, `${method} ${path} route exists`);
-  return result;
 }
 
 test("routing availability distinguishes credentials, clients, and project scope", async (t) => {

@@ -4,8 +4,6 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { holdPills } from "../../web/src/settings-view.js";
 import { openOverviewCard } from "../fixtures/task-tabs.js";
 import {
@@ -203,11 +201,9 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .getByRole("link")
     .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
   assert.deepEqual(hrefs, [
-    `/runtime/assignment/${ids.assignmentId}`,
     `/app/tasks/${ids.taskId}?section=execution`,
     `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
     `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
-    `/assignment/${ids.assignmentId}`,
   ]);
   assert.equal(await page.locator("main form").count(), 0);
   assert.equal(
@@ -329,11 +325,9 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .getByRole("link")
     .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
   assert.deepEqual(siblingHrefs, [
-    `/runtime/assignment/${siblingId}`,
     `/app/tasks/${ids.taskId}?section=execution`,
     `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
     `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
-    `/assignment/${siblingId}`,
   ]);
   await captureBrowserEvidence(page, "1366-recovery");
 });
@@ -732,102 +726,5 @@ test("bound recovery blocks redacted, missing and refreshed identities without t
     true,
   );
   assert.equal(posts, 0);
-  assert.equal(f.runtime.turns, 0);
-});
-
-test("retained HTML review cancels without a write and keeps the original request on refusal", async (_t, journey) => {
-  const { page, f, ids, web } = await startSettings(
-    journey,
-    "/app/assignments/:assignment/recovery",
-  );
-  const api = new OperatorApi(f.service, [f.directory]);
-  const options = await api.readRecoveryOptions(ids.assignmentId);
-  const r = options.data.records[0]!;
-  r.workId = "retained-review-work";
-  r.threadId = "retained-thread";
-  r.turnId = "retained-turn";
-  r.process = {
-    processId: "23456",
-    processStartedAt: "retained-birth",
-    bootId: "retained-boot",
-  };
-  r.paths = [{ path: "bound-turn-recover", eligible: true, blockedBy: [] }];
-  options.data.records = [r];
-  options.data.gaps = [];
-  // Browser coverage of native HTML/forms. T3 and the adjacent retained-handler test own real mutation rules.
-  const routes = runtimeOperatorRoutes(f.service, {
-    readRecoveryOptions: async () => options,
-    readOperation: (q) => api.readOperation(q),
-  });
-  const template = await (
-    await page.request.get(
-      `${web.origin}/runtime/assignment/${ids.assignmentId}`,
-    )
-  ).text();
-  const submitted: string[] = [];
-  await page.route("**/runtime/**", async (route) => {
-    const url = new URL(route.request().url()),
-      path = url.pathname;
-    const matched = routes.find(
-      (r) =>
-        r.method === route.request().method() &&
-        (r.path === path ||
-          (r.path === "/runtime/assignment/:assignmentId" &&
-            path === `/runtime/assignment/${ids.assignmentId}`)),
-    );
-    if (!matched) return route.continue();
-    const fields = Object.fromEntries(
-      new URLSearchParams(route.request().postData() ?? ""),
-    );
-    delete fields.csrfToken;
-    if (path.endsWith("/recover")) submitted.push(fields.payload!);
-    const result = await matched.handler({
-      params: { assignmentId: ids.assignmentId },
-      fields,
-      csrfToken: "fixture-csrf",
-    });
-    assert.equal(result.kind, "html");
-    if (result.kind !== "html") throw Error("Expected retained HTML");
-    await route.fulfill({
-      contentType: "text/html",
-      body: template.replace(/<main>[\s\S]*<\/main>/, result.body),
-    });
-  });
-  await page.goto(`${web.origin}/runtime/assignment/${ids.assignmentId}`);
-  const prepare = async () => {
-    await page
-      .getByLabel("I independently confirmed this exact process exited")
-      .check();
-    await page.getByLabel("All effects and callbacks are settled").check();
-    await page.getByLabel("Workspace disposition").selectOption("preserved");
-    await page.getByRole("button", { name: "Review reconciliation" }).focus();
-    await page.keyboard.press("Enter");
-    await page
-      .getByRole("heading", { name: "Bound-turn reconciliation" })
-      .waitFor();
-  };
-  await prepare();
-  await page.waitForFunction(
-    () =>
-      document.activeElement?.textContent === "Cancel and return to evidence",
-  );
-  await captureBrowserEvidence(page, "1366-retained-review");
-  await page.setViewportSize(phone);
-  await noPageOverflow(page);
-  await captureBrowserEvidence(page, "390-retained-review");
-  await page.keyboard.press("Enter");
-  await page.getByRole("button", { name: "Review reconciliation" }).waitFor();
-  assert.equal(submitted.length, 0);
-  await prepare();
-  await page.getByRole("button", { name: "Confirm reconciliation" }).focus();
-  await page.keyboard.press("Enter");
-  await page.getByText(/Recovery refused or outcome unknown/).waitFor();
-  assert.equal(submitted.length, 1);
-  const original = JSON.parse(submitted[0]!);
-  await page.getByRole("button", { name: "Check original receipt" }).click();
-  await page.getByText(/No receipt is recorded/).waitFor();
-  await page.getByRole("button", { name: "Confirm reconciliation" }).click();
-  await page.getByText(/Recovery refused or outcome unknown/).waitFor();
-  assert.deepEqual(JSON.parse(submitted[1]!), original);
   assert.equal(f.runtime.turns, 0);
 });

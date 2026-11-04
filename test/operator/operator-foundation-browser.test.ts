@@ -111,9 +111,7 @@ test("retained HTML routes share the production foundation and native interactio
   const destinations = [
     "/",
     `/profile/${profileId}`,
-    `/assignment/${assignmentId}`,
     "/runtime",
-    `/runtime/assignment/${assignmentId}`,
   ];
   let stylesheetHref = "";
   let verifiedFonts = false;

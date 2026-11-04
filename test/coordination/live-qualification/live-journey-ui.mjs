@@ -2650,17 +2650,14 @@ async function completeRepoFree(current, page, repositoryFree, evidence) {
         Number(current.service.domain().profile(assignment.profileId).version)
     )
       continue;
-    await page.goto(`${current.origin}/runtime/assignment/${assignment.id}`);
-    const apply = page.locator(
-      'form[action="/runtime/control/instruction-apply"]',
-    );
-    if (await apply.count())
-      await submitForm(
-        page,
-        apply,
-        "/runtime/control/instruction-apply",
-        "Apply current instructions for the next turn",
-      );
+    const applied = await postOperatorCommand(current, {
+      type: "assignment.apply",
+      key: randomUUID(),
+      projectId: alpha.projectId,
+      assignmentId: String(assignment.id),
+      expectedVersion: Number(assignment.version),
+    });
+    required(applied.status === 200, "assignment-apply-recorded");
   }
   await waitUntil(
     () => taskView(current.service, alpha.taskId).task.state === "done",

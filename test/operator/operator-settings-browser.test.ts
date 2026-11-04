@@ -924,11 +924,11 @@ for (const layout of [
     assert.equal(
       await page
         .getByRole("link", {
-          name: "Advanced recovery evidence and exact Apply",
+          name: "View task-wide execution evidence",
           exact: true,
         })
         .getAttribute("href"),
-      `/runtime/assignment/${ids.assignmentId}`,
+      `/app/tasks/${ids.taskId}?section=execution`,
     );
     assert.equal(
       await page

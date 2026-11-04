@@ -1311,14 +1311,12 @@ async function runLiveJourney(approval) {
         ),
     );
     evidence.operator.liveQuestionVisible = true;
-    // The retained page of the task's (lead) assignment: its status and the task's holds.
-    const activeAssignmentPage = () =>
-      `${origin}/runtime/assignment/${String(service.domain().assignments(activeTaskId)[0]?.id)}`;
-    await page.goto(activeAssignmentPage());
-    assert.match(
-      await page.locator("body").innerText(),
-      /Execution status: Running\./,
-    );
+    const readExecution = async () => {
+      const response = await page.request.get(`${origin}/api/operator/tasks/${activeTaskId}`);
+      assert.equal(response.status(), 200);
+      return (await response.json()).data;
+    };
+    assert.equal((await readExecution()).execution.state, "running");
 
     progress("owned-wake-schedule-preflight");
     const fixtureId = randomUUID();
@@ -1447,11 +1445,10 @@ async function runLiveJourney(approval) {
       throw fail("duplicate-or-replacement-execution-observed");
 
     progress("authenticated-recovery-view");
-    await page.goto(activeAssignmentPage());
-    const recoveryBody = await page.locator("body").innerText();
-    assert.match(recoveryBody, /Execution state is uncertain/);
-    assert.match(recoveryBody, /Writer ownership remains held/);
-    assert.match(recoveryBody, /Capacity remains held/);
+    const recovery = await readExecution();
+    assert.equal(recovery.execution.state, "uncertain");
+    assert.equal(recovery.executionRecovery.holds.writer, true);
+    assert.equal(recovery.executionRecovery.holds.capacity, true);
     evidence.operator.recoveryVisible = true;
   } catch (error) {
     evidence.failure = { stage, kind: failureKind(error) };

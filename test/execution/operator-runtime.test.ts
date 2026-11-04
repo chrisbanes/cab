@@ -472,33 +472,6 @@ test("runtime details distinguish selected, queued, and running assignments acro
   assert.equal(await state(runningTask), "running");
   assert.equal(await state(queuedTask), "queued");
   assert.equal(await state(selectedTask), "waiting");
-  const selectedAssignmentPage = await get(
-    "/runtime/assignment/:assignmentId",
-  ).handler({
-    params: { assignmentId: selectedWorker },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(selectedAssignmentPage.kind, "html");
-  if (selectedAssignmentPage.kind === "html") {
-    assert.match(
-      selectedAssignmentPage.body,
-      /Execution status: Selected; blocked from admission/,
-    );
-    assert.match(
-      selectedAssignmentPage.body,
-      /<p>Execution runtime: Codex\.<\/p>/,
-    );
-    assert.match(
-      selectedAssignmentPage.body,
-      /Accountable project lead: Lead B/,
-    );
-    assert.match(
-      selectedAssignmentPage.body,
-      new RegExp(`/app/tasks/${selectedTask}\\?section=execution`),
-    );
-    assert.doesNotMatch(selectedAssignmentPage.body, /PRIVATE_/);
-  }
   const overview = await get("/runtime").handler({
     params: {},
     fields: {},
@@ -578,7 +551,7 @@ test("capacity control replays the same keyed change", async (t) => {
   );
 });
 
-test("task execution and the assignment page keep the writer hold visible after Resume", async (t) => {
+test("task execution keeps the writer hold visible after Resume", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "cab-runtime-task-"));
   const heldRuntime = new HeldRuntime();
   const service = new StandaloneService(
@@ -626,7 +599,6 @@ test("task execution and the assignment page keep the writer hold visible after 
   });
   await until(() => heldRuntime.turns > 0);
 
-  const routes = runtimeOperatorRoutes(service);
   const api = new OperatorApi(service, [directory]);
   const read = async () => (await api.readTask(taskId)).data;
   assert.equal((await read()).execution.state, "running");
@@ -639,39 +611,10 @@ test("task execution and the assignment page keep the writer hold visible after 
   const resumed = await read();
   assert.equal(resumed.execution.holds.stop, false);
   assert.equal(resumed.executionRecovery?.holds.writer, true);
-  const leadAssignment = service
-    .domain()
-    .assignments(taskId)
-    .find((assignment) => assignment.profileId === profileId);
-  assert.ok(leadAssignment);
-  const assignmentRoute = routes.find(
-    (candidate) =>
-      candidate.method === "GET" &&
-      candidate.path === "/runtime/assignment/:assignmentId",
-  );
-  assert.ok(assignmentRoute);
-  const heldAssignmentPage = await assignmentRoute.handler({
-    params: { assignmentId: String(leadAssignment.id) },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(heldAssignmentPage.kind, "html");
-  if (heldAssignmentPage.kind === "html") {
-    assert.match(
-      heldAssignmentPage.body,
-      /Execution status: Held; recovery is required\./,
-    );
-    assert.match(heldAssignmentPage.body, /Writer ownership remains held/);
-    assert.match(heldAssignmentPage.body, /&lt;script&gt;/);
-    assert.doesNotMatch(heldAssignmentPage.body, /<script>/);
-    assert.doesNotMatch(
-      heldAssignmentPage.body,
-      /PRIVATE_(?:PROFILE|OUTCOME)_SENTINEL/,
-    );
-  }
+
 });
 
-test("the assignment recovery view renders every scoped record without implying release", async (t) => {
+test("the assignment recovery read retains scoped records and holds", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "cab-runtime-recovery-view-"));
   const runtime = new RecoveryEvidenceRuntime();
   const service = new StandaloneService(
@@ -811,81 +754,13 @@ test("the assignment recovery view renders every scoped record without implying 
   assert.ok(pendingRecord?.binding);
   assert.notEqual(receiptRecord.workId, pendingRecord.workId);
 
-  const assignmentRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "GET" &&
-      candidate.path === "/runtime/assignment/:assignmentId",
-  );
-  assert.ok(assignmentRoute);
-  const assignmentPage = await assignmentRoute.handler({
-    params: { assignmentId: pendingRecord.binding.assignmentId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(assignmentPage.kind, "html");
-  if (assignmentPage.kind !== "html") return;
-
-  for (const page of [assignmentPage.body]) {
-    assert.match(page, new RegExp(`Recovery record: ${receiptRecord.workId}`));
-    assert.match(page, new RegExp(`Recovery record: ${pendingRecord.workId}`));
-    assert.ok(
-      page.includes(
-        `Assignment ${receiptRecord.binding.assignmentId} (version ${receiptRecord.binding.assignmentVersion}; instructions revision ${receiptRecord.binding.instructionsRevision}; profile revision ${receiptRecord.binding.profileRevision})`,
-      ),
-    );
-    assert.match(page, /Generation: work revision 1; request sequence 1/);
-    assert.match(page, /Runtime intent: reconciled/);
-    assert.match(
-      page,
-      /intent reason: Execution state requires operator attention/,
-    );
-    assert.match(page, /Turn request: held/);
-    assert.match(
-      page,
-      /request reason: Execution state requires operator attention/,
-    );
-    assert.match(
-      page,
-      /Recorded thread identity.*not proof of termination or release/,
-    );
-    assert.match(
-      page,
-      /Recorded turn identity: fixture-turn-[0-9]+-&amp;-recorded/,
-    );
-    assert.match(page, /Recorded process identity/);
-    assert.match(page, /process ID fixture-process-&lt;script&gt;/);
-    assert.match(page, /started fixture-started-&amp;-bounded/);
-    assert.match(page, /boot identity fixture-boot-identity/);
-    assert.match(
-      page,
-      /Recorded recovery receipt: [0-9a-f-]+; workspace disposition: reconciled/,
-    );
-    assert.match(
-      page,
-      /Observation: termination-verified — Original process termination was independently verified/,
-    );
-    assert.match(
-      page,
-      /Observation: receipt-accepted — A validated recovery receipt resolved this generation/,
-    );
-    assert.match(
-      page,
-      /Pending effect: pending — Assignment result has not been committed/,
-    );
-    assert.match(page, /Task hold reason: Task stopped/);
-    assert.match(
-      page,
-      /fixture-thread-[0-9]+-&lt;img src=x onerror=alert\(1\)&gt;/,
-    );
-    assert.doesNotMatch(page, /<img src=x onerror=alert\(1\)>/);
-    assert.match(page, /Effects may continue while an execution is stopping/);
-    assert.doesNotMatch(page, /no unresolved execution hold is reported/i);
-    assert.doesNotMatch(page, /execution stopped and released/i);
-    assert.doesNotMatch(
-      page,
-      /PRIVATE_RECOVERY_(?:INSTRUCTIONS|WORKER_INSTRUCTIONS|OUTCOME|BRIEF|CREDENTIAL)_SENTINEL/,
-    );
-  }
+  const recovery = (await new OperatorApi(service, [directory]).readAssignmentRecovery(
+    pendingRecord.binding.assignmentId,
+  )).data;
+  assert.ok(recovery.records.some((r) => r.workId === receiptRecord.workId));
+  assert.ok(recovery.records.some((r) => r.workId === pendingRecord.workId));
+  assert.equal(recovery.holds.writer, true);
+  assert.doesNotMatch(JSON.stringify(recovery), /PRIVATE_RECOVERY_/);
 });
 
 test("instruction apply refreshes the selected assignment revision once", async (t) => {
@@ -939,96 +814,21 @@ test("instruction apply refreshes the selected assignment revision once", async 
     instructions: "updated project instructions",
   });
 
-  const route = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/instruction-apply",
-  );
-  assert.ok(route, "instruction apply route exists");
-  const context = {
-    params: {},
-    fields: {
-      key: randomUUID(),
-      projectId,
-      assignmentId,
-      expectedVersion: "1",
-    },
-    csrfToken: "token",
+  const input = {
+    type: "assignment.apply" as const,
+    key: randomUUID(),
+    projectId,
+    assignmentId,
+    expectedVersion: 1,
   };
-  assert.deepEqual(await route.handler(context), {
-    kind: "redirect",
-    location: `/runtime/assignment/${assignmentId}`,
-  });
+  const receipt = await new OperatorApi(service, [directory]).execute(input);
   await service.stop();
   service = new StandaloneService(join(directory, "data"), () => runtime);
   await service.start();
-  const restartedRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "POST" &&
-      candidate.path === "/runtime/control/instruction-apply",
-  );
-  assert.ok(restartedRoute);
-  assert.deepEqual(await restartedRoute.handler(context), {
-    kind: "redirect",
-    location: `/runtime/assignment/${assignmentId}`,
-  });
+  assert.deepEqual(await new OperatorApi(service, [directory]).execute(input), receipt);
   const assignment = service.domain().assignment(assignmentId);
   assert.equal(Number(assignment.version), 2);
   assert.equal(Number(assignment.instructionsRevision), 2);
-  const readRoute = runtimeOperatorRoutes(service).find(
-    (candidate) =>
-      candidate.method === "GET" &&
-      candidate.path === "/runtime/assignment/:assignmentId",
-  );
-  assert.ok(readRoute);
-  const page = await readRoute.handler({
-    params: { assignmentId },
-    fields: {},
-    csrfToken: "token",
-  });
-  assert.equal(page.kind, "html");
-  if (page.kind === "html")
-    assert.doesNotMatch(
-      page.body,
-      /PRIVATE_ASSIGNMENT_PROMPT/,
-      "assignment prompts stay out of the operator route",
-    );
-});
-
-test("retained assignment page keeps its controls and the recovery link when the recovery read fails", async (t) => {
-  const w = await boundWorld(t),
-    service = w.s.f.service;
-  const api = new OperatorApi(service, [w.s.f.directory]);
-  const params = { assignmentId: w.g.assignmentId };
-  const render = async (
-    recovery: Parameters<typeof runtimeOperatorRoutes>[1],
-  ) => {
-    const route = runtimeOperatorRoutes(service, recovery).find(
-      (r) => r.path === "/runtime/assignment/:assignmentId",
-    );
-    assert.ok(route);
-    const result = await route.handler({ fields: {}, params, csrfToken: "c" });
-    assert.equal(result.kind, "html");
-    return result.kind === "html" ? result.body : "";
-  };
-  const failed = await render({
-    readRecoveryOptions: async () => {
-      throw new Error("lookup unavailable");
-    },
-    readOperation: api.readOperation.bind(api),
-  });
-  assert.match(failed, /assignment<\/h1>/);
-  assert.match(failed, /<h2>Instruction revisions/);
-  assert.match(failed, /Recovery evidence could not be read/);
-  assert.ok(
-    failed.includes(
-      `href="/app/assignments/${encodeURIComponent(w.g.assignmentId)}/recovery"`,
-    ),
-  );
-  assert.doesNotMatch(failed, /lookup unavailable/);
-  const working = await render(api);
-  assert.match(working, /Eligible for review/);
-  assert.doesNotMatch(working, /could not be read/);
 });
 
 test("retained bound-turn controls review without writes, retain refusal and read original receipt before exact retry", async (t) => {
@@ -1047,13 +847,9 @@ test("retained bound-turn controls review without writes, retain refusal and rea
     assert.equal(result.kind, "html");
     return result.kind === "html" ? result.body : "";
   };
-  const page = await call(
-    "/runtime/assignment/:assignmentId",
-    {},
-    { assignmentId: w.g.assignmentId },
-  );
-  assert.match(page, /Eligible for review/);
-  assert.match(page, /birth .*boot/);
+  const options = await api.readRecoveryOptions(w.g.assignmentId);
+  assert.ok(options.data.records.some((r) => r.paths.some((p) => p.path === "bound-turn-recover" && p.eligible)));
+  const recoveryHref = `/app/assignments/${encodeURIComponent(w.g.assignmentId)}/recovery`;
   const original = w.recovery();
   const payload = JSON.stringify(original);
   const fields = {
@@ -1065,6 +861,7 @@ test("retained bound-turn controls review without writes, retain refusal and rea
   const review = await call("/runtime/control/bound-turn/review", fields);
   assert.match(review, /cannot be undone/);
   assert.match(review, /Cancel and return to evidence/);
+  assert.ok(review.includes(recoveryHref));
   assert.equal(service.recoveryForTask(w.g.taskId)[0]?.receipt, null);
   const stale = structuredClone(original);
   stale.receipt.turnId = "another-turn";
@@ -1073,6 +870,7 @@ test("retained bound-turn controls review without writes, retain refusal and rea
     payload: JSON.stringify(stale),
   });
   assert.match(staleReview, /identity changed/);
+  assert.ok(staleReview.includes(recoveryHref));
   assert.match(staleReview, /another-turn/);
   assert.match(staleReview, new RegExp(original.key));
   assert.doesNotMatch(staleReview, /<button>Confirm reconciliation|<form/);
@@ -1082,6 +880,7 @@ test("retained bound-turn controls review without writes, retain refusal and rea
     workspace: "reconciled",
   });
   assert.match(blockedReview, /Independent assertions retained/);
+  assert.ok(blockedReview.includes(recoveryHref));
   assert.match(blockedReview, /workspace reconciled/);
   assert.match(blockedReview, /&quot;workspace&quot;:&quot;reconciled&quot;/);
   assert.match(blockedReview, new RegExp(original.key));
@@ -1115,11 +914,13 @@ test("retained bound-turn controls review without writes, retain refusal and rea
     confirmed: "yes",
   });
   assert.match(refused, /Check original receipt/);
+  assert.ok(refused.includes(recoveryHref));
   assert.doesNotMatch(refused, /<button>Confirm reconciliation/);
   assert.match(refused, new RegExp(original.key));
   assert.equal(service.recoveryForTask(w.g.taskId)[0]?.holds.writer, true);
   const absent = await call("/runtime/control/bound-turn/check", { payload });
   assert.match(absent, /No receipt is recorded/);
+  assert.ok(absent.includes(recoveryHref));
   assert.match(absent, /Confirm reconciliation/);
   w.setMode("verified");
   const accepted = await call("/runtime/control/bound-turn/recover", {
@@ -1127,9 +928,11 @@ test("retained bound-turn controls review without writes, retain refusal and rea
     confirmed: "yes",
   });
   assert.match(accepted, /Execution reconciled/);
+  assert.ok(accepted.includes(recoveryHref));
   const checks = w.checks();
   const readback = await call("/runtime/control/bound-turn/check", { payload });
   assert.match(readback, /Execution reconciled/);
+  assert.ok(readback.includes(recoveryHref));
   assert.doesNotMatch(readback, /<button>Confirm reconciliation/);
   assert.equal(w.checks(), checks);
   assert.equal(w.runtime.turnInvocations.length, 1);

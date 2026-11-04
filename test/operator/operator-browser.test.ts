@@ -193,23 +193,6 @@ async function save(page: Page, form: Locator): Promise<void> {
   assert.equal((await response).status(), 303);
 }
 
-/** The runtime page's Task controls copy: two plain sentences, no service vocabulary. */
-async function submitControl(
-  page: Page,
-  form: Locator,
-  path: string,
-  buttonName: string,
-): Promise<void> {
-  const response = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === path &&
-      candidate.request().method() === "POST",
-    { timeout: 5_000 },
-  );
-  await form.getByRole("button", { name: buttonName }).click();
-  assert.equal((await response).status(), 303);
-}
-
 function command(service: StandaloneService, value: object): unknown {
   return service.domain().execute({
     key: randomUUID(),
@@ -840,16 +823,13 @@ test("authenticated project pause and resume preserve captured instructions whil
     2,
   );
 
-  await page.goto(`${origin}/runtime/assignment/${assignment.id}`);
-  const applyForm = page.locator(
-    'form[action="/runtime/control/instruction-apply"]',
-  );
-  await submitControl(
-    page,
-    applyForm,
-    "/runtime/control/instruction-apply",
-    "Apply current instructions for the next turn",
-  );
+  await api.execute({
+    type: "assignment.apply",
+    key: randomUUID(),
+    projectId,
+    assignmentId: String(assignment.id),
+    expectedVersion: Number(service.domain().assignment(String(assignment.id)).version),
+  });
   await until(() => runtime.turns === 2);
   assert.ok(runtime.prompts[1]?.includes(changedInstructions));
   assert.ok(!runtime.prompts[0]?.includes(changedInstructions));
@@ -1231,20 +1211,13 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     .assignments(instructionTaskId)
     .find((assignment) => assignment.profileId === leadProfileId);
   assert.ok(instructionAssignment);
-  await page.goto(`${origin}/runtime/assignment/${instructionAssignment.id}`);
-  const instructionForm = page
-    .locator('form[action="/runtime/control/instruction-apply"]')
-    .filter({
-      has: page.locator(
-        `input[name="assignmentId"][value="${instructionAssignment.id}"]`,
-      ),
-    });
-  await submitControl(
-    page,
-    instructionForm,
-    "/runtime/control/instruction-apply",
-    "Apply current instructions for the next turn",
-  );
+  await api.execute({
+    type: "assignment.apply",
+    key: randomUUID(),
+    projectId,
+    assignmentId: String(instructionAssignment.id),
+    expectedVersion: Number(instructionAssignment.version),
+  });
   assert.equal(
     Number(
       service.domain().assignment(String(instructionAssignment.id))
@@ -1253,46 +1226,15 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     2,
   );
 
-  // Stop and Resume are JSON commands; the retained assignment page reads the task's holds.
-  const holdsPage = `${origin}/runtime/assignment/${leadAssignment.id}`;
+  // Stop and Resume preserve the writer hold in the curated recovery read.
   await api.execute({ type: "task.stop", key: randomUUID(), taskId });
-  await page.goto(holdsPage);
-  let runtimeText = await page.locator("body").innerText();
-  assert.match(runtimeText, /Operator Stop remains active/);
-  assert.match(runtimeText, /Writer ownership remains held/);
-  assert.match(runtimeText, /Effects may continue/);
-  const stoppedRecoveryRecord = service
-    .recoveryView()
-    .find((record) => record.binding?.taskId === taskId);
-  assert.ok(stoppedRecoveryRecord?.binding);
-  assert.ok(stoppedRecoveryRecord.intent.threadId);
-  assert.ok(stoppedRecoveryRecord.intent.turnId);
-  assert.ok(
-    runtimeText.includes(`Recovery record: ${stoppedRecoveryRecord.workId}`),
-  );
-  assert.ok(
-    runtimeText.includes(
-      `Assignment ${stoppedRecoveryRecord.binding.assignmentId} (version ${stoppedRecoveryRecord.binding.assignmentVersion};`,
-    ),
-  );
-  assert.match(runtimeText, /Generation: work revision .*; request sequence/);
-  assert.ok(
-    runtimeText.includes(
-      `Recorded thread identity: ${stoppedRecoveryRecord.intent.threadId}`,
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      `Recorded turn identity: ${stoppedRecoveryRecord.intent.turnId}`,
-    ),
-  );
-  assert.match(runtimeText, /not proof of termination or release/);
+  const stopped = (await api.readAssignmentRecovery(String(leadAssignment.id))).data;
+  assert.equal(stopped.holds.stop, true);
+  assert.equal(stopped.holds.writer, true);
   await api.execute({ type: "task.resume", key: randomUUID(), taskId });
-  await page.goto(holdsPage);
-  runtimeText = await page.locator("body").innerText();
-  assert.match(runtimeText, /Operator Stop is not active/);
-  assert.match(runtimeText, /Writer ownership remains held/);
-  assert.match(runtimeText, /Effects may continue/);
+  const resumed = (await api.readAssignmentRecovery(String(leadAssignment.id))).data;
+  assert.equal(resumed.holds.stop, false);
+  assert.equal(resumed.holds.writer, true);
 
   await journey.closeStep("http.stop", http.stop.bind(http));
   http = undefined;
@@ -1360,21 +1302,11 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     .recoveryView()
     .find((record) => record.binding?.assignmentId === workerAssignmentId);
   assert.ok(persistedRecoveryRecord?.binding);
-  await page.goto(
-    `${origin}/runtime/assignment/${persistedRecoveryRecord.binding.assignmentId}`,
-  );
-  const persistedAssignmentText = await page.locator("body").innerText();
-  assert.ok(
-    persistedAssignmentText.includes(
-      `Recovery record: ${persistedRecoveryRecord.workId}`,
-    ),
-  );
-  assert.match(persistedAssignmentText, /Observations:/);
-  assert.match(persistedAssignmentText, /Pending effects:/);
-  assert.match(
-    persistedAssignmentText,
-    /Recorded identities, observations, receipts, and dispositions are evidence only/,
-  );
+  const persistedRecovery = (await new OperatorApi(service, [directory]).readAssignmentRecovery(
+    persistedRecoveryRecord.binding.assignmentId,
+  )).data;
+  assert.ok(persistedRecovery.records.length > 0);
+  assert.equal(persistedRecovery.holds.writer, true);
   // The restarted service has its own API.
   await new OperatorApi(service, [directory]).execute({
     type: "dependency.remove",
