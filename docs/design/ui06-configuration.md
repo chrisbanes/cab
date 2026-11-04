@@ -1,6 +1,6 @@
 # UI06 configuration and recovery contract
 
-The React operator provides the setup, configuration and recovery surfaces, served by the existing listener. Authenticated task, profile, assignment and Runtime HTML controls stay reachable; project configuration uses React Settings. UI07 (#745) owns final visual/usability parity; these surfaces do not qualify release, cutover, real provider access or native structured input.
+The React operator provides the setup, configuration and recovery surfaces, served by the existing listener; project configuration uses React Settings. Assignment reads use React Recovery, the task inspector and the CLI recovery-options read. Bound-turn review, check and recovery POST flows remain available through Recovery; the legacy assignment HTML pages and Apply POST are retired. UI02 lists the other retained HTML controls. UI07 (#745) owns final visual/usability parity; these surfaces do not qualify release, cutover, real provider access or native structured input.
 
 ## Configuration and receipt behavior
 

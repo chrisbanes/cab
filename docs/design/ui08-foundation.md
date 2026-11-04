@@ -72,8 +72,8 @@ follows the disposition:
 | UI06 disposition | Presentation |
 | --- | --- |
 | Implemented replacement, or explicit complete replacement (project, profile, routing, source, task composer, capacity, navigation, sign-out) | React shared foundation: Button, Input, Textarea, NativeSelect and labelled native checks; Alert, Badge and Card for status |
-| Observation request (`github.refresh`) and read-only recovery evidence (assignment recovery reads) | React shared foundation: Card, Badge and Alert |
-| Retained exact editors and details (delivery policy and detail, Runtime task controls, Coordination controls, captured assignment reads, `/login`) | Retained server HTML styled by `.legacy-operator` with the shared appearance; no hydration or handlers |
+| Observation request (`github.refresh`) and read-only recovery evidence (assignment reads in Recovery and the task inspector; CLI recovery-options remains available) | React shared foundation: Card, Badge and Alert |
+| Retained exact editors and details (delivery policy and detail, Runtime task controls, Coordination controls, `/login`), plus bound-turn review, check and recovery POST flows linked from Recovery | Retained server HTML styled by `.legacy-operator` with the shared appearance; no hydration or handlers. Legacy assignment HTML reads and Apply POST are retired. |
 
 ## State, keyboard and responsive coverage
 
