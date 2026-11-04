@@ -16,7 +16,7 @@
     {
       "file": "chromium-recovery-desktop.png",
       "viewport": "1366x900",
-      "sha256": "00632c60c47c368157f197cf8738bd1865e75d10188fa5e53a39223c08578694"
+      "sha256": "fcc93984f610f8b0ef51634a4900f0cf0012e0fa6b95ae1bfbde325b81bf765f"
     },
     {
       "file": "chromium-keyboard-focus.png",
@@ -88,7 +88,8 @@
       "legacyRuntimeLink": true
     }
   ],
-  "captureScriptSha256": "eb2f69aceab0aa5eb28ab026993ecd548015efe9c3b76bd806efec4740684dc0",
+  "captureScriptSha256": "a73e5b8089827ccc568b20e8288d3417257851f935f9c8f5fd51aa67b657551d",
   "mask": "Bound-turn panel and inspector fact paragraphs masked to avoid recording identity values; fixture values are synthetic.",
-  "qualification": "npm run test:built -- --suite=operator,execution --profile=all; 2534 passed, 0 failed, 1 skipped"
+  "qualification": "npm run test:built -- --suite=operator,execution --profile=all; 2534 passed, 0 failed, 1 skipped",
+  "captureScriptFile": "capture-script.txt"
 }
