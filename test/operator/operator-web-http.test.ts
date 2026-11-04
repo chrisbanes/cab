@@ -834,3 +834,83 @@ test("source refresh acknowledgement rechecks exact session after completed actu
     }
   }
 });
+
+test("HTTP rejects a session bound to another origin without deleting it", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Origin-bound review");
+  const web = await f.startWeb();
+  const other = "http://192.0.2.10:8787";
+  const anonymous = web.auth.createAnonymousSession(other);
+  const deniedLogin = await fetch(`${web.origin}/api/operator/login`, {
+    method: "POST",
+    headers: {
+      cookie: `cab_operator_session=${anonymous.id}`,
+      origin: web.origin,
+      "x-csrf-token": anonymous.csrfToken,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ password: web.password }),
+  });
+  assert.equal(deniedLogin.status, 403);
+  assert.equal(web.auth.getSession(anonymous.id, other)?.authenticated, false);
+  const session = await web.auth.authenticate(
+    anonymous.id,
+    web.password,
+    other,
+  );
+  assert.ok(session);
+  const cookie = `cab_operator_session=${session.id}`;
+  const ownerKey = web.auth.reviewOwnerKey(session.id, other);
+  assert.ok(ownerKey);
+  const owner = {
+    ownerKey,
+    current: () => web.auth.reviewOwnerKey(session.id, other) === ownerKey,
+  };
+  const api = new OperatorApi(f.service, []);
+  await api.execute(
+    {
+      type: "review.draft.save",
+      key: randomUUID(),
+      taskId: task.taskId,
+      expectedDraftVersion: 0,
+      draft: { summary: "Private origin draft", comments: [] },
+    },
+    owner,
+  );
+  const deniedDraft = await fetch(
+    `${web.origin}/api/operator/tasks/${task.taskId}/review-draft`,
+    { headers: { cookie } },
+  );
+  assert.equal(deniedDraft.status, 401);
+  assert.equal(
+    (
+      await fetch(`${web.origin}/api/operator/workspace`, {
+        headers: { cookie },
+      })
+    ).status,
+    401,
+  );
+  const replacement = await fetch(`${web.origin}/api/operator/session`, {
+    headers: { cookie },
+  });
+  assert.equal(
+    ((await replacement.json()) as { authenticated: boolean }).authenticated,
+    false,
+  );
+  assert.notEqual(replacement.headers.get("set-cookie")?.split(";")[0], cookie);
+  const logout = await fetch(`${web.origin}/api/operator/logout`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: web.origin,
+      "x-csrf-token": session.csrfToken,
+      "content-type": "application/json",
+    },
+    body: "{}",
+  });
+  assert.equal(logout.status, 401);
+  assert.equal(web.auth.getSession(session.id, other)?.authenticated, true);
+  const retained = await api.readLocalReviewDraft(task.taskId, owner);
+  assert.equal(retained.data.draft.summary, "Private origin draft");
+});

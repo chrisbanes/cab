@@ -296,7 +296,10 @@ function writeText(
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
   private server: Server | undefined;
-  private readonly secureCookie: boolean;
+  private readonly browserContext: Readonly<{
+    origin: string;
+    secureCookie: boolean;
+  }>;
   private readonly web: OperatorWebBoundary;
   private readonly credentials: OperatorCredentialStore | undefined;
   private readonly localAccess: LocalAccess | undefined;
@@ -312,13 +315,17 @@ export class LocalOperatorHttp {
     this.localAccess = options.localAccess;
     this.credentials = options.credentials;
     this.push = options.push;
-    this.secureCookie = new URL(auth.origin).protocol === "https:";
+    this.browserContext = Object.freeze({
+      origin: auth.origin,
+      secureCookie: new URL(auth.origin).protocol === "https:",
+    });
   }
 
   async start(port = 0): Promise<number> {
     if (this.server) throw new Error("Operator UI already started");
     const server = createServer(async (request, response) => {
       let session: OperatorSession | undefined;
+      const context = this.browserContext;
       try {
         const address = server.address();
         const localOrigin =
@@ -387,10 +394,11 @@ export class LocalOperatorHttp {
           return;
         }
         const id = cookieId(request);
-        session = id ? this.auth.getSession(id) : undefined;
+        session = id ? this.auth.getSession(id, context.origin) : undefined;
         this.purgeExpiredReviewOwners();
 
-        if (await this.handleWeb(request, response, url, session)) return;
+        if (await this.handleWeb(request, response, url, session, context))
+          return;
         request.resume();
         writeText(response, 404, "Not found");
       } catch (error) {
@@ -436,23 +444,28 @@ export class LocalOperatorHttp {
       );
   }
 
-  private currentSession(session: OperatorSession | undefined): boolean {
-    const current = session && this.auth.getSession(session.id);
+  private currentSession(
+    session: OperatorSession | undefined,
+    context: typeof this.browserContext,
+  ): boolean {
+    const current = session && this.auth.getSession(session.id, context.origin);
     this.purgeExpiredReviewOwners();
     return !!current?.authenticated && current.csrfToken === session?.csrfToken;
   }
   private reviewSession(
     session: OperatorSession | undefined,
+    context: typeof this.browserContext,
   ): OperatorReviewSessionContext | undefined {
     if (!session?.authenticated) return undefined;
-    const ownerKey = this.auth.reviewOwnerKey(session.id);
+    const ownerKey = this.auth.reviewOwnerKey(session.id, context.origin);
     if (!ownerKey) {
       this.purgeExpiredReviewOwners();
       return undefined;
     }
     return {
       ownerKey,
-      current: () => this.auth.reviewOwnerKey(session.id) === ownerKey,
+      current: () =>
+        this.auth.reviewOwnerKey(session.id, context.origin) === ownerKey,
     };
   }
   private purgeExpiredReviewOwners(): void {
@@ -465,6 +478,7 @@ export class LocalOperatorHttp {
     response: ServerResponse,
     url: URL,
     session: OperatorSession | undefined,
+    context: typeof this.browserContext,
   ): Promise<boolean> {
     const web = this.web;
     if (!web.owns(url.pathname)) return false;
@@ -529,14 +543,15 @@ export class LocalOperatorHttp {
         return true;
       }
       if (path === "/api/operator/session") {
-        const current = session ?? this.auth.createAnonymousSession();
+        const current =
+          session ?? this.auth.createAnonymousSession(context.origin);
         json(
           200,
           sessionSchema.parse({
             authenticated: current.authenticated,
             csrfToken: current.csrfToken,
           }),
-          { "set-cookie": cookieHeader(current.id, this.secureCookie) },
+          { "set-cookie": cookieHeader(current.id, context.secureCookie) },
         );
         return true;
       }
@@ -547,17 +562,21 @@ export class LocalOperatorHttp {
       if (method === "POST") {
         if (
           !session ||
-          request.headers.origin !== this.auth.origin ||
+          request.headers.origin !== context.origin ||
           !this.auth.validateCsrf(
             session.id,
             String(request.headers["x-csrf-token"] ?? ""),
+            context.origin,
           )
         ) {
           deny(403, "forbidden");
           return true;
         }
         const body = await readJson(request, path === "/api/operator/commands");
-        if (path !== "/api/operator/login" && !this.currentSession(session)) {
+        if (
+          path !== "/api/operator/login" &&
+          !this.currentSession(session, context)
+        ) {
           deny(401, "unauthenticated");
           return true;
         }
@@ -573,6 +592,7 @@ export class LocalOperatorHttp {
           const current = await this.auth.authenticate(
             session.id,
             input.password,
+            context.origin,
           );
           if (!current) {
             deny(401, "unauthenticated");
@@ -584,18 +604,18 @@ export class LocalOperatorHttp {
               authenticated: true,
               csrfToken: current.csrfToken,
             }),
-            { "set-cookie": cookieHeader(current.id, this.secureCookie) },
+            { "set-cookie": cookieHeader(current.id, context.secureCookie) },
           );
           return true;
         }
         if (path === "/api/operator/logout") {
           z.object({}).strict().parse(body);
-          const ownerKey = this.auth.logout(session.id);
+          const ownerKey = this.auth.logout(session.id, context.origin);
           if (ownerKey) web.api.purgeLocalReviewDrafts(ownerKey);
           json(
             200,
             { authenticated: false },
-            { "set-cookie": clearedCookie(this.secureCookie) },
+            { "set-cookie": clearedCookie(context.secureCookie) },
           );
           return true;
         }
@@ -653,7 +673,7 @@ export class LocalOperatorHttp {
           } else {
             z.object({}).strict().parse(body);
             const outcome = await push.test(id);
-            if (!this.currentSession(session)) {
+            if (!this.currentSession(session, context)) {
               deny(401, "unauthenticated");
               return true;
             }
@@ -665,7 +685,7 @@ export class LocalOperatorHttp {
         if (path === "/api/operator/source-refresh") {
           z.object({}).strict().parse(body);
           const data = await web.api.refreshSources();
-          if (!this.currentSession(session)) {
+          if (!this.currentSession(session, context)) {
             deny(401, "unauthenticated");
             return true;
           }
@@ -677,8 +697,11 @@ export class LocalOperatorHttp {
             ? await web.api.listFolders(body)
             : path === "/api/operator/setup/verify-checkout"
               ? await web.api.verifyCheckout(body)
-              : await web.api.execute(body, this.reviewSession(session));
-        if (!this.currentSession(session)) {
+              : await web.api.execute(
+                  body,
+                  this.reviewSession(session, context),
+                );
+        if (!this.currentSession(session, context)) {
           deny(401, "unauthenticated");
           return true;
         }
@@ -725,7 +748,7 @@ export class LocalOperatorHttp {
           artifact[1] ?? "",
           artifact[2] ?? "",
         );
-        if (!this.currentSession(session)) {
+        if (!this.currentSession(session, context)) {
           deny(401, "unauthenticated");
           return true;
         }
@@ -743,16 +766,16 @@ export class LocalOperatorHttp {
         path,
         url.searchParams,
         url.search,
-        this.reviewSession(session),
+        this.reviewSession(session, context),
       );
-      if (!this.currentSession(session)) {
+      if (!this.currentSession(session, context)) {
         deny(401, "unauthenticated");
         return true;
       }
       if (data === undefined) deny(404, "not-found");
       else json(200, data);
     } catch (error) {
-      if (session?.authenticated && !this.currentSession(session)) {
+      if (session?.authenticated && !this.currentSession(session, context)) {
         deny(401, "unauthenticated");
         return true;
       }

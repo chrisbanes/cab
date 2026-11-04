@@ -581,3 +581,123 @@ test("operator auth refuses missing, linked, exposed, or malformed files", async
     rmSync(state.directory, { recursive: true, force: true });
   }
 });
+
+test("sessions cannot be used or invalidated from another browser origin", async () => {
+  const state = await fixture();
+  const other = "http://192.0.2.10:8787";
+  try {
+    const anonymous = state.auth.createAnonymousSession();
+    assert.equal(
+      await state.auth.authenticate(anonymous.id, password, other),
+      undefined,
+    );
+    const authenticated = await state.auth.authenticate(anonymous.id, password);
+    assert.ok(authenticated);
+    assert.equal(state.auth.getSession(authenticated.id, other), undefined);
+    assert.equal(
+      state.auth.validateCsrf(authenticated.id, authenticated.csrfToken, other),
+      false,
+    );
+    assert.equal(state.auth.reviewOwnerKey(authenticated.id, other), undefined);
+    assert.equal(state.auth.logout(authenticated.id, other), undefined);
+    assert.ok(state.auth.getSession(authenticated.id));
+  } finally {
+    state.auth.close();
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("origin mismatch does not refresh sessions or purge another review owner", async () => {
+  const state = await fixture();
+  const other = "http://192.0.2.10:8787";
+  try {
+    const a = await state.auth.authenticate(
+      state.auth.createAnonymousSession().id,
+      password,
+    );
+    const b = await state.auth.authenticate(
+      state.auth.createAnonymousSession(other).id,
+      password,
+      other,
+    );
+    assert.ok(a && b);
+    const ownerA = state.auth.reviewOwnerKey(a.id);
+    const ownerB = state.auth.reviewOwnerKey(b.id, other);
+    assert.ok(ownerA && ownerB && ownerA !== ownerB);
+    state.now.value += 500;
+    assert.equal(state.auth.getSession(a.id, other), undefined);
+    assert.equal(state.auth.logout(a.id, other), undefined);
+    assert.ok(state.auth.getSession(b.id, other));
+    state.now.value += 500;
+    assert.equal(state.auth.getSession(a.id), undefined);
+    assert.deepEqual(state.auth.takeInvalidatedReviewOwnerKeys(), [ownerA]);
+    assert.equal(state.auth.logout(b.id, other), ownerB);
+    assert.deepEqual(state.auth.takeInvalidatedReviewOwnerKeys(), []);
+  } finally {
+    state.auth.close();
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("login lockout and derivation capacity are shared between origins", async () => {
+  const state = await controlledFixture({ loginFailureLimit: 1 });
+  const other = "http://192.0.2.10:8787";
+  const pending: AuthAttempt[] = [];
+  try {
+    for (let i = 0; i < 4; i++) {
+      const session = state.auth.createAnonymousSession(i % 2 ? other : origin);
+      pending.push(
+        state.auth.authenticate(
+          session.id,
+          i === 0 ? "wrong" : password,
+          i % 2 ? other : origin,
+        ),
+      );
+    }
+    await state.deriver.waitForCalls(4);
+    const extra = state.auth.createAnonymousSession(other);
+    assert.equal(
+      await state.auth.authenticate(extra.id, password, other),
+      undefined,
+    );
+    state.deriver.release(0);
+    assert.equal(await pending[0], undefined);
+    state.deriver.releaseAll();
+    assert.deepEqual(await Promise.all(pending), [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    assert.equal(
+      await state.auth.authenticate(extra.id, password, other),
+      undefined,
+    );
+  } finally {
+    state.deriver.releaseAll();
+    await Promise.allSettled(pending);
+    state.auth.close();
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("a held login remains bound to its origin after the session expires", async () => {
+  const state = await controlledFixture();
+  const other = "http://192.0.2.10:8787";
+  let pending: AuthAttempt | undefined;
+  try {
+    const session = state.auth.createAnonymousSession(other);
+    pending = state.auth.authenticate(session.id, password, other);
+    await state.deriver.waitForCalls(1);
+    assert.equal(state.auth.logout(session.id), undefined);
+    state.now.value += 1_000;
+    state.deriver.release(0);
+    assert.equal(await pending, undefined);
+    assert.equal(state.auth.getSession(session.id, other), undefined);
+  } finally {
+    state.deriver.releaseAll();
+    if (pending) await Promise.allSettled([pending]);
+    state.auth.close();
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});

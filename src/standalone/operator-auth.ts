@@ -37,6 +37,7 @@ type PasswordRecord = {
 
 type SessionRecord = {
   idHash: string;
+  origin: string;
   csrfToken: string;
   reviewOwnerKey: string;
   authenticated: boolean;
@@ -331,16 +332,17 @@ export class OperatorAuth {
     }
   }
 
-  createAnonymousSession(): OperatorSession {
-    return this.createSession(false);
+  createAnonymousSession(origin = this.origin): OperatorSession {
+    return this.createSession(false, origin);
   }
 
   async authenticate(
     id: string,
     password: string,
+    origin = this.origin,
   ): Promise<OperatorSession | undefined> {
     if (this.closed || this.now() < this.lockedUntil) return undefined;
-    const current = this.lookup(id);
+    const current = this.lookup(id, origin);
     if (
       !current ||
       current.authenticated ||
@@ -375,7 +377,7 @@ export class OperatorAuth {
         }
         return undefined;
       }
-      const latest = this.lookup(id);
+      const latest = this.lookup(id, origin);
       if (
         this.closed ||
         this.now() < this.lockedUntil ||
@@ -387,29 +389,29 @@ export class OperatorAuth {
       this.failedLogins = 0;
       this.lockedUntil = 0;
       this.deleteSession(id);
-      return this.createSession(true);
+      return this.createSession(true, origin);
     } finally {
       this.derivingSessions.delete(current);
       this.activeDerivations -= 1;
     }
   }
 
-  getSession(id: string): OperatorSession | undefined {
-    const record = this.lookup(id);
+  getSession(id: string, origin = this.origin): OperatorSession | undefined {
+    const record = this.lookup(id, origin);
     if (!record) return undefined;
     record.lastUsedAt = this.now();
     return this.view(record, id);
   }
 
-  validateCsrf(id: string, token: string): boolean {
-    const record = this.lookup(id);
+  validateCsrf(id: string, token: string, origin = this.origin): boolean {
+    const record = this.lookup(id, origin);
     return Boolean(
       record && typeof token === "string" && safeEqual(record.csrfToken, token),
     );
   }
 
-  reviewOwnerKey(id: string): string | undefined {
-    const record = this.lookup(id);
+  reviewOwnerKey(id: string, origin = this.origin): string | undefined {
+    const record = this.lookup(id, origin);
     return record?.authenticated ? record.reviewOwnerKey : undefined;
   }
 
@@ -419,8 +421,10 @@ export class OperatorAuth {
     return owners;
   }
 
-  logout(id: string): string | undefined {
-    const ownerKey = this.reviewOwnerKey(id);
+  logout(id: string, origin = this.origin): string | undefined {
+    const record = this.lookup(id, origin);
+    if (!record) return undefined;
+    const ownerKey = record.authenticated ? record.reviewOwnerKey : undefined;
     this.deleteSession(id);
     return ownerKey;
   }
@@ -432,7 +436,10 @@ export class OperatorAuth {
     this.lockedUntil = 0;
   }
 
-  private createSession(authenticated: boolean): OperatorSession {
+  private createSession(
+    authenticated: boolean,
+    origin: string,
+  ): OperatorSession {
     if (this.closed) throw invalidAuthConfiguration();
     this.removeExpiredSessions();
     if (this.sessions.size >= MAX_SESSIONS) {
@@ -449,6 +456,7 @@ export class OperatorAuth {
     const idHash = sha256(id).toString("hex");
     this.sessions.set(idHash, {
       idHash,
+      origin,
       csrfToken,
       reviewOwnerKey,
       authenticated,
@@ -458,12 +466,12 @@ export class OperatorAuth {
     return { id, csrfToken, authenticated };
   }
 
-  private lookup(id: string): SessionRecord | undefined {
+  private lookup(id: string, origin: string): SessionRecord | undefined {
     if (this.closed || typeof id !== "string" || id.length > 64)
       return undefined;
     const idHash = sha256(id).toString("hex");
     const record = this.sessions.get(idHash);
-    if (!record) return undefined;
+    if (!record || record.origin !== origin) return undefined;
     const now = this.now();
     if (
       now - record.lastUsedAt >= this.idleTimeoutMs ||

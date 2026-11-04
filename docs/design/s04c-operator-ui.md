@@ -24,7 +24,10 @@ The `operator` command requires `CAB_OPERATOR_AUTH_FILE` and
 is limited to `127.0.0.1`, and remote origins must use HTTPS. Sessions are
 process-local, so service restart invalidates them. Login rotates the anonymous
 session ID and CSRF token; logout deletes the session. Idle and absolute expiry,
-bounded session storage and failed-login throttling are enforced in memory.
+bounded session storage and failed-login throttling are enforced in memory. Each
+session is bound to its trusted browser origin; a request in another origin cannot
+use, refresh or delete it or access its review drafts. Password verification,
+throttling and session limits remain shared.
 There is one operator password, not account or role administration.
 
 ## HTTP boundary
