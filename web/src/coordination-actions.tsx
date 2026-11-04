@@ -108,6 +108,7 @@ export function SendFeedback({
  * version only; Settle as closed sends the outcome back. Neither writes to the code host.
  */
 export function HandbackSettlement(props: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   task: Task;
@@ -121,11 +122,13 @@ export function HandbackSettlement(props: {
   return <HandbackSettlementCard {...props} />;
 }
 function HandbackSettlementCard({
+  readOnly = false,
   client,
   session,
   task,
   onChanged,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   task: Task;
@@ -144,6 +147,7 @@ function HandbackSettlementCard({
     (kind) => {
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
+    readOnly,
   );
   if (d?.mode !== "reviewable-pr" || !b || b.state === "MERGED") return null;
   const gitlab = b.codeHost === "gitlab";
@@ -213,7 +217,7 @@ function HandbackSettlementCard({
               <div className="question-actions">
                 {b.state === "OPEN" && !b.draft && !outsidePush && (
                   <Button
-                    disabled={Boolean(sending)}
+                    disabled={readOnly || Boolean(sending)}
                     onClick={() => void settle("accepted")}
                   >
                     {pending("accepted") ? "Sending…" : "Accept handback"}
@@ -221,7 +225,7 @@ function HandbackSettlementCard({
                 )}
                 <Button
                   variant="secondary"
-                  disabled={Boolean(sending)}
+                  disabled={readOnly || Boolean(sending)}
                   onClick={() => void settle("closed")}
                 >
                   {pending("closed") ? "Sending…" : "Settle as closed"}
@@ -250,12 +254,14 @@ function HandbackSettlementCard({
 
 /** A result with no recorded destination, delivered to the one recipient the service permits. */
 export function ResultDestination({
+  readOnly = false,
   client,
   session,
   task,
   item,
   onConflict,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   task: Task;
@@ -280,6 +286,7 @@ export function ResultDestination({
     (kind) => {
       if (kind === "conflict") onConflict();
     },
+    readOnly,
   );
   const name = recipient?.name ?? "the permitted recipient";
   return (
@@ -294,7 +301,7 @@ export function ResultDestination({
         !uncertain && (
           <Button
             variant="secondary"
-            disabled={Boolean(sending)}
+            disabled={readOnly || Boolean(sending)}
             onClick={() =>
               void send(
                 operatorCommandSchema.parse({
@@ -343,15 +350,17 @@ export function ResultDestination({
  * comment composer, which owns the send, its preview and its unconfirmed-outcome check.
  */
 export function AssignmentReply({
+  readOnly = false,
   label,
   onReply,
 }: {
+  readOnly?: boolean;
   /** The assignment's name, with its short identity when another assignment shares it. */
   label: string;
   onReply: () => void;
 }) {
   return (
-    <Button variant="secondary" onClick={onReply}>
+    <Button variant="secondary" disabled={readOnly} onClick={onReply}>
       Reply to {label}
     </Button>
   );
@@ -362,11 +371,13 @@ export function AssignmentReply({
  * page shows: the service may already have acted, so their resource can have left the lists.
  */
 export function RetainedSends({
+  readOnly = false,
   client,
   session,
   taskId,
   onChanged,
 }: {
+  readOnly?: boolean;
   client: OperatorClient;
   session: Session;
   taskId: string;
@@ -414,7 +425,13 @@ export function RetainedSends({
       focus={false}
       check={() => {
         checkedHere.current.add(key);
-        void entry.send(client, session.csrfToken, entry.matches!);
+        void entry.send(
+          client,
+          session.csrfToken,
+          entry.matches!,
+          undefined,
+          readOnly,
+        );
       }}
     />
   ));

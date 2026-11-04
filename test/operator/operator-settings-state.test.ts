@@ -2052,3 +2052,137 @@ test("delivery JSON row comparison ignores UI keys but retains optional presence
   d.set("grants", JSON.stringify([grant]));
   assert.equal(d.dirty, true);
 });
+
+test("archive read-only transition preserves frozen private configuration and checks only its original receipt", async () => {
+  const projectId = randomUUID(),
+    key = randomUUID();
+  const requests: Array<{ url: string; method: string }> = [];
+  let recorded = false;
+  const client = new OperatorClient(async (url, init) => {
+    const method = init?.method ?? "GET";
+    requests.push({ url: String(url), method });
+    if (method === "POST") throw Error("lost reply");
+    return Response.json({
+      observedAt: 1,
+      data: recorded
+        ? {
+            state: "recorded",
+            receipt: {
+              kind: "configuration",
+              key,
+              recorded: true,
+              result: {
+                commandType: "project.configure",
+                resourceId: projectId,
+                version: 3,
+                paused: true,
+                leadProfileId: null,
+                instructionsRevision: 3,
+              },
+            },
+          }
+        : { state: "not-recorded" },
+    });
+  });
+  const draft = new ConfigurationDraft();
+  draft.set("instructions", "Private unsent edit");
+  await draft.submit(
+    client,
+    {
+      type: "project.configure",
+      key,
+      projectId,
+      expectedVersion: 2,
+      instructions: "Private unsent edit",
+    },
+    "csrf",
+  );
+  assert.equal(draft.phase, "unknown");
+  const frozen = draft.frozen;
+  draft.readOnly = true;
+  assert.equal(draft.set("instructions", "Replacement"), false);
+  await draft.submit(
+    client,
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 4,
+      instructions: "Replacement",
+    },
+    "csrf",
+  );
+  await draft.reconcile(client, "csrf");
+  assert.deepEqual(draft.frozen, frozen);
+  assert.equal(draft.phase, "unknown");
+  assert.equal(requests.filter((r) => r.method === "POST").length, 1);
+  const query = new URL(requests.at(-1)!.url, "http://fixture.invalid")
+    .searchParams;
+  assert.equal(query.get("key"), key);
+  assert.equal(query.get("scope"), `project:${projectId}`);
+  recorded = true;
+  await draft.reconcile(client, "csrf");
+  assert.equal(draft.phase, "recorded");
+  assert.equal(requests.filter((r) => r.method === "POST").length, 1);
+});
+
+test("read-only capacity recovery preserves the original system-scoped command and never retries a missing owner", async () => {
+  const owner = randomUUID(),
+    key = randomUUID();
+  const command = {
+    type: "capacity.configure" as const,
+    key,
+    globalLimit: 9,
+    projectOverrides: { [owner]: 7 },
+  };
+  const requests: Array<{ method: string; url: string }> = [];
+  let recorded = false;
+  const client = new OperatorClient(async (url, init) => {
+    requests.push({ method: init?.method ?? "GET", url: String(url) });
+    if (init?.method === "POST") throw Error("lost reply");
+    return Response.json({
+      observedAt: 1,
+      data: recorded
+        ? {
+            state: "recorded",
+            receipt: {
+              kind: "configuration",
+              key,
+              recorded: true,
+              result: {
+                commandType: "capacity.configure",
+                resourceId: "system:capacity",
+                globalLimit: 9,
+                defaultProjectLimit: 2,
+                projectOverrides: { [owner]: 7 },
+              },
+            },
+          }
+        : { state: "not-recorded" },
+    });
+  });
+  const d = new ConfigurationDraft();
+  d.set("globalLimit", "9");
+  d.set(`limit-${owner}`, "7");
+  await d.submit(client, command, "csrf");
+  assert.equal(d.phase, "unknown");
+  const frozen = d.frozen,
+    values = structuredClone(d.values);
+  d.readOnly = true;
+  await d.reconcile(client, "csrf");
+  assert.equal(d.phase, "unknown");
+  assert.deepEqual(d.frozen, frozen);
+  assert.deepEqual(d.values, values);
+  const query = new URL(requests[1]!.url, "http://fixture.invalid")
+    .searchParams;
+  assert.equal(query.get("scope"), "system:capacity");
+  assert.equal(query.get("type"), "capacity.configure");
+  assert.equal(query.get("key"), key);
+  recorded = true;
+  await d.reconcile(client, "csrf");
+  assert.equal(d.phase, "recorded");
+  assert.equal(
+    requests.filter((request) => request.method === "POST").length,
+    1,
+  );
+});

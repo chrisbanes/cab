@@ -70,6 +70,14 @@ cleanup identities survive, as do private redaction-only values and shared insta
 records. Retained private values never restore a project or become agent instructions.
 _Avoid_: Archive or external issue deletion
 
+**Project tombstone**:
+The minimal durable record of a deleted project: old ID and name, deletion time, counts,
+retained external references, original deletion receipt and captured cleanup progress.
+It remains readable without project/task rows. Cleanup success prunes private captured
+payloads; the separate redaction-only value store remains. A new project may reuse the
+name with a different ID.
+_Avoid_: Restorable project or mutable deletion receipt
+
 **Task stop**:
 An operator hold on an open task that holds its pending work and requests
 best-effort cancellation of its active executions. It is neither cancellation

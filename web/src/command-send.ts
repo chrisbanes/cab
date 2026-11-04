@@ -6,6 +6,7 @@ import {
   useReducer,
   useRef,
 } from "react";
+import { operationTypeSchema } from "../../src/operator/contracts.js";
 import type {
   CommandReceipt,
   OperatorCommand,
@@ -75,7 +76,9 @@ export class CommandSend {
     csrfToken: string,
     matches: Matches,
     command?: OperatorCommand,
+    readOnly = false,
   ): Promise<{ kind: SendOutcome["kind"]; result: CommandState } | null> {
+    if (readOnly && command) return null;
     if (command) {
       // A recorded command is finished; only an unconfirmed one must be resent before another.
       if (this.lifecycle.receipt) this.lifecycle.reset();
@@ -86,7 +89,31 @@ export class CommandSend {
     const currentAuthentication = client.captureAuthenticationScope();
     this.sending = begun;
     this.changed();
-    const result = await client.command(begun, csrfToken);
+    let result: CommandState;
+    if (readOnly) {
+      // A historical check can only use an existing read operation; it never retries a POST.
+      result = { state: "unknown", command: begun, code: "unavailable" };
+      const type = operationTypeSchema.safeParse(begun.type);
+      const scope =
+        "projectId" in begun
+          ? `project:${begun.projectId}`
+          : "taskId" in begun
+            ? `task:${begun.taskId}`
+            : null;
+      if (type.success && scope) {
+        try {
+          const read = await client.operation({
+            scope,
+            type: type.data,
+            key: begun.key,
+          });
+          if (read.data.state === "recorded")
+            result = { state: "recorded", receipt: read.data.receipt };
+        } catch {
+          /* Keep the original request unknown when its receipt cannot be read. */
+        }
+      }
+    } else result = await client.command(begun, csrfToken);
     if (!currentAuthentication()) return null;
     return { kind: this.settle(begun, result, matches), result };
   }
@@ -180,6 +207,7 @@ export function useCommandSend(
   matches: Matches,
   /** Runs once each send settles while this component is mounted, with how it ended. */
   onSettled?: (kind: SendOutcome["kind"]) => void,
+  readOnly = false,
 ) {
   const sends = useCommandSends(),
     entry = useSendEntry(key),
@@ -203,7 +231,7 @@ export function useCommandSend(
   return {
     entry,
     send: (command?: OperatorCommand) =>
-      entry.send(client, session.csrfToken, matches, command),
+      entry.send(client, session.csrfToken, matches, command, readOnly),
     sending: entry.sending,
     outcome: entry.outcome,
     /** The last send's outcome is unconfirmed; only `send()` may resolve it. */

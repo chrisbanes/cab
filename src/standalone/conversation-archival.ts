@@ -1,3 +1,5 @@
+import { isDeletedProjectThread } from "./project-cleanup-reservations.js";
+import type { CleanupOutcome } from "./project-cleanup-identities.js";
 import {
   workAcceptsWrites,
   ProjectArchivedError,
@@ -139,30 +141,34 @@ export class ConversationArchival {
         if (!this.accepting()) return;
         // Earlier archives await, so eligibility may have changed since the scan.
         if (this.pending.has(threadId) || !this.eligible(threadId)) continue;
-        // Persist before RPC: a lost acknowledgement must still be recoverable on resume.
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO conversation_archives VALUES (?, 'requested')`,
+        const operation = this.withThreadLock(threadId, async () => {
+          if (
+            !this.accepting() ||
+            isDeletedProjectThread(this.db, threadId) ||
+            !this.eligible(threadId)
           )
-          .run(threadId);
-        const archive = () =>
-          setArchived(threadId, true).then(() => {
+            return;
+          // Persist before RPC: a lost acknowledgement remains recoverable.
+          this.db
+            .prepare(
+              "INSERT OR IGNORE INTO conversation_archives VALUES (?, 'requested')",
+            )
+            .run(threadId);
+          const archive = async () => {
+            await setArchived(threadId, true);
             this.db
               .prepare(
-                "UPDATE conversation_archives SET state = 'archived' WHERE threadId = ?",
+                "UPDATE conversation_archives SET state='archived' WHERE threadId=?",
               )
               .run(threadId);
-          });
-        const operation = this.projectWrite
-          ? this.projectWrite(threadId, archive)
-          : archive();
-        this.pending.set(threadId, operation);
+          };
+          if (this.projectWrite) await this.projectWrite(threadId, archive);
+          else await archive();
+        });
         try {
           await operation;
         } catch {
           // Cleanup is best effort; retain the request and retry on the next sweep.
-        } finally {
-          this.pending.delete(threadId);
         }
       }
     } finally {
@@ -170,33 +176,107 @@ export class ConversationArchival {
     }
   }
 
-  async restore(runtime: Runtime, threadId: string): Promise<void> {
-    const owners = this.db
-      .prepare("SELECT workId FROM execution_intents WHERE threadId = ?")
-      .all(threadId) as { workId: string }[];
-    if (owners.some((owner) => !workAcceptsWrites(this.db, owner.workId)))
-      throw new ProjectArchivedError();
-    await this.pending.get(threadId)?.catch(() => {});
-    if (
-      !this.db
-        .prepare("SELECT 1 FROM conversation_archives WHERE threadId = ?")
-        .get(threadId)
-    )
-      return;
-    if (!runtime.setThreadArchived)
-      throw new Error("Conversation restoration unavailable");
-    const restore = async () => {
-      const current = this.db
-        .prepare("SELECT workId FROM execution_intents WHERE threadId = ?")
-        .all(threadId) as { workId: string }[];
-      if (current.some((owner) => !workAcceptsWrites(this.db, owner.workId)))
-        throw new ProjectArchivedError();
-      await runtime.setThreadArchived!(threadId, false);
-      this.db
-        .prepare("DELETE FROM conversation_archives WHERE threadId = ?")
-        .run(threadId);
-    };
-    if (this.projectWrite) await this.projectWrite(threadId, restore);
-    else await restore();
+  private withThreadLock(
+    threadId: string,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const previous = this.pending.get(threadId);
+    let operation: Promise<void>;
+    if (previous) {
+      operation = previous.catch(() => {}).then(run);
+      this.pending.set(threadId, operation);
+    } else {
+      // Reserve before invoking user/runtime code, but preserve synchronous lease/RPC admission.
+      let resolve!: () => void, reject!: (error: unknown) => void;
+      operation = new Promise<void>((done, failed) => {
+        resolve = done;
+        reject = failed;
+      });
+      this.pending.set(threadId, operation);
+      try {
+        void run().then(resolve, reject);
+      } catch (error) {
+        reject(error);
+      }
+    }
+    return operation.finally(() => {
+      if (this.pending.get(threadId) === operation)
+        this.pending.delete(threadId);
+    });
+  }
+
+  /** Uses captured qualified identity, never a discovery query requiring deleted intents. */
+  async archiveCaptured(
+    runtime: Runtime | undefined,
+    threadId: string,
+    allowed: () => boolean = () => true,
+  ): Promise<CleanupOutcome> {
+    let outcome: CleanupOutcome = { outcome: "pending", reason: "unavailable" };
+    if (this.pending.has(threadId))
+      return { outcome: "pending", reason: "unknown" };
+    try {
+      await this.withThreadLock(threadId, async () => {
+        if (!runtime?.setThreadArchived || !this.accepting() || !allowed())
+          return;
+        if (
+          !isDeletedProjectThread(this.db, threadId) ||
+          this.db
+            .prepare("SELECT 1 FROM execution_intents WHERE threadId=? LIMIT 1")
+            .get(threadId) ||
+          this.db
+            .prepare(
+              "SELECT 1 FROM execution_recovery_identities WHERE threadId=? LIMIT 1",
+            )
+            .get(threadId) ||
+          this.db
+            .prepare(
+              "SELECT 1 FROM coordination_runtime_questions WHERE threadId=? OR json_extract(identityJson,'$.threadId')=? LIMIT 1",
+            )
+            .get(threadId, threadId)
+        ) {
+          outcome = { outcome: "pending", reason: "unsafe" };
+          return;
+        }
+        // CodexRuntime first reads archive state and otherwise requires the RPC acknowledgement.
+        // Repeating after a lost acknowledgement is idempotent and never unarchives the thread.
+        await runtime.setThreadArchived(threadId, true);
+        outcome = { outcome: "complete" };
+      });
+    } catch {
+      outcome = { outcome: "pending", reason: "unknown" };
+    }
+    return outcome;
+  }
+
+  restore(runtime: Runtime, threadId: string): Promise<void> {
+    return this.withThreadLock(threadId, async () => {
+      const check = () => {
+        if (isDeletedProjectThread(this.db, threadId))
+          throw new ProjectArchivedError();
+        const owners = this.db
+          .prepare("SELECT workId FROM execution_intents WHERE threadId=?")
+          .all(threadId) as { workId: string }[];
+        if (owners.some((owner) => !workAcceptsWrites(this.db, owner.workId)))
+          throw new ProjectArchivedError();
+      };
+      check();
+      if (
+        !this.db
+          .prepare("SELECT 1 FROM conversation_archives WHERE threadId=?")
+          .get(threadId)
+      )
+        return;
+      if (!runtime.setThreadArchived)
+        throw new Error("Conversation restoration unavailable");
+      const restore = async () => {
+        check();
+        await runtime.setThreadArchived!(threadId, false);
+        this.db
+          .prepare("DELETE FROM conversation_archives WHERE threadId=?")
+          .run(threadId);
+      };
+      if (this.projectWrite) await this.projectWrite(threadId, restore);
+      else await restore();
+    });
   }
 }

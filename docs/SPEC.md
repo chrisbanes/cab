@@ -236,7 +236,50 @@ preview and atomic explicit ownership traversal are implemented.
 The traversal checks every table and column against a fixed inventory, captures detached
 receipt keys before removing parents, and retains validated private exclusion strings
 with the tombstone in the same transaction. An unprovable ownership identity refuses
-deletion. Lifecycle API/CLI/UI and postcommit physical cleanup remain unimplemented.
+deletion. Immediate, startup and periodic cleanup passes use durable captured identities,
+with bounded admission and shared
+workspace/thread locks. Force-discard is confined to the captured managed worktree;
+source checkouts, branches, PRs and retained Codex archive files remain intact. Missing
+resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pending;
+older descriptors without sufficient Git proof never authorize a guessed removal.
+Surviving ownership anywhere beneath the removal root, including a repository's
+source subdirectory or Git common directory, prevents removal. Repository setup,
+repository configuration and workspace binding also check those pending captured roots
+inside the transaction that acquires checkout or common-directory ownership. A checkout
+outside the removal root is still refused if its separate Git directory lies inside it;
+checking ownership only after an already-dispatched child exits cannot protect that owner.
+Destructive Git is
+preceded by a private item reservation bound to its captured identity. A bounded
+result without observed child exit retains that reservation and task lock until the
+exact child positively exits; shutdown does not wait indefinitely for that proof.
+A restarted process cannot recover the old process-local exit notification, so an
+unsettled reservation (including legacy unknown workspace outcomes) stays pending
+without another removal, even when paths are absent. Late exit alone cannot clear a
+reservation after ownership changes or shutdown; fenced identity readback is required.
+Successful item checkpoints prune private payloads, while stable opaque thread identities
+continue to refuse restoration of deleted conversations. Private exclusions persist
+independently of cleanup progress.
+
+The operator API exposes versioned `project.archive`, `project.restore` and
+`project.delete` commands. `GET /api/operator/projects/:id` distinguishes live projects
+from deleted tombstones; `GET /api/operator/projects/:id/delete-preview` exposes counts,
+worktree dirty/unpushed/unknown status, affected projects and retained external state.
+These public reads omit captured cleanup identities and private redaction values.
+The original deletion receipt stays unchanged as cleanup progresses; read the tombstone
+for current cleanup status. Deleted IDs never resolve to a later project with the same name.
+
+Project lists hide archived projects by default. `includeArchived=true`,
+`cab project list --archived` and Settings' Show archived include both active and archived
+projects. Direct archived task and assignment reads retain their history, inspector links
+and original-operation receipt checks. New mutations and retry sends are disabled;
+service guards enforce the same freeze. An absent project in a filtered picker does not
+establish its lifecycle. The retired `/project/:id` editor remains an authenticated 404.
+
+The project settings Danger zone offers archive after pause/drain, restore into a paused
+state, and deletion only after an inspected preview and an exact typed name. Rename,
+restore or a stale preview requires a new inspection. A conflict keeps the typed name;
+an unknown outcome keeps the original body and request key for receipt lookup. Successful
+deletion shows a tombstone and its separate cleanup progress.
 The service refuses archive when authoritative in-flight facts are unavailable.
 
 ## Admission, project placement and task dependencies

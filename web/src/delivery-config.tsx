@@ -97,7 +97,7 @@ export function DeliveryTab(p: TabProps) {
 
 /** The project's stacking switch saves its own project.configure, so it never touches the policy draft. */
 function StackingPanel(p: TabProps) {
-  const d = useDraft(p.drafts, `project.stacking:${p.projectId}`);
+  const d = useDraft(p.drafts, `project.stacking:${p.projectId}`, p.readOnly);
   const saved = p.data.stacking;
   const initial =
     saved === undefined
@@ -157,7 +157,7 @@ function StackingPanel(p: TabProps) {
 
 /** Structured policy editing uses the same receipt, draft and authentication lifecycle as Settings. */
 function DeliveryPolicyForm(p: TabProps) {
-  const d = useDraft(p.drafts, `delivery.configure:${p.projectId}`);
+  const d = useDraft(p.drafts, `delivery.configure:${p.projectId}`, p.readOnly);
   const form = useRef<HTMLFormElement>(null);
   const origin = useRef<HTMLElement | null>(null);
   const [bulk, setBulk] = useState("");

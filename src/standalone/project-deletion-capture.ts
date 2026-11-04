@@ -1,7 +1,11 @@
-import { lstat, realpath } from "node:fs/promises";
+import {
+  projectCleanupId as cleanupId,
+  observeFilesystem as observed,
+  type CapturedRepositoryIdentity,
+} from "./project-cleanup-identities.js";
+import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { z } from "zod";
-import { materialDigest } from "../core/delivery.js";
 import { runGit } from "./git-process.js";
 import { assertCanonicalDirectoryPath } from "./data-directory.js";
 import { claudeTemporaryBase } from "./claude.js";
@@ -25,28 +29,6 @@ export const deletionWorktreeStatusSchema = z
 export type DeletionWorktreeStatus = z.output<
   typeof deletionWorktreeStatusSchema
 >;
-const cleanupId = (kind: string, value: string) => {
-  const hex = materialDigest({ kind, value });
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-};
-async function observed(path: string) {
-  try {
-    const stat = await lstat(path);
-    return {
-      state: "observed" as const,
-      stat,
-      filesystem: {
-        device: String(stat.dev),
-        inode: String(stat.ino),
-        ownerUid: stat.uid,
-      },
-    };
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT"
-      ? { state: "absent" as const }
-      : { state: "unavailable" as const };
-  }
-}
 async function gitRead(
   cwd: string,
   args: string[],
@@ -66,6 +48,58 @@ async function gitRead(
   return result.status === "ok"
     ? result.stdout.toString("utf8").trim()
     : undefined;
+}
+
+async function captureGitIdentity(
+  repository: z.output<typeof repositoryBindingSchema>,
+  executable?: string,
+  signal?: AbortSignal,
+): Promise<CapturedRepositoryIdentity> {
+  const root = await observed(repository.workspacePath);
+  if (root.state === "absent")
+    return { repositoryId: repository.repositoryId, state: "absent" };
+  const unavailable = {
+    repositoryId: repository.repositoryId,
+    state: "unavailable" as const,
+  };
+  if (
+    root.state !== "observed" ||
+    !root.stat.isDirectory() ||
+    root.stat.isSymbolicLink() ||
+    !repository.gitCommonDir
+  )
+    return unavailable;
+  const gitEntry = await observed(join(repository.workspacePath, ".git")),
+    source = await observed(repository.sourcePath),
+    common = await observed(repository.gitCommonDir);
+  const directory = await gitRead(
+    repository.workspacePath,
+    ["rev-parse", "--absolute-git-dir"],
+    executable,
+    signal,
+  );
+  if (!directory || !isAbsolute(directory)) return unavailable;
+  const gitDirectory = await observed(directory);
+  if (
+    gitEntry.state !== "observed" ||
+    !gitEntry.stat.isFile() ||
+    source.state !== "observed" ||
+    common.state !== "observed" ||
+    gitDirectory.state !== "observed"
+  )
+    return unavailable;
+  return {
+    repositoryId: repository.repositoryId,
+    state: "observed",
+    root: root.filesystem,
+    gitEntry: gitEntry.filesystem,
+    source: source.filesystem,
+    commonDirectory: {
+      path: repository.gitCommonDir,
+      filesystem: common.filesystem,
+    },
+    gitDirectory: { path: directory, filesystem: gitDirectory.filesystem },
+  };
 }
 
 /** Read-only preparation: never calls WorkspaceManager.get/recover or any provider. */
@@ -142,6 +176,11 @@ export async function captureDeletionCleanup(
         } catch {
           /* Preserve lexical spellings even when the path is gone. */
         }
+      const gitIdentities: CapturedRepositoryIdentity[] = [];
+      for (const repository of binding.repositories)
+        gitIdentities.push(
+          await captureGitIdentity(repository, gitExecutable, signal),
+        );
       const id = cleanupId("workspace", binding.workspaceId),
         observation = await observed(binding.path);
       let inspection: DeletionWorktreeStatus["inspection"] =
@@ -187,6 +226,7 @@ export async function captureDeletionCleanup(
             kind: "workspace",
             binding,
             managedRoot,
+            gitIdentities,
             filesystem:
               observation.state === "observed"
                 ? observation.filesystem
@@ -256,6 +296,13 @@ export async function captureDeletionCleanup(
         tempId = cleanupId("claude-temp", binding.workspaceId),
         temp = await observed(tempPath);
       retiring.push(tempPath);
+      let canonicalTemp: string | undefined;
+      try {
+        canonicalTemp = await realpath(tempPath);
+        retiring.push(canonicalTemp);
+      } catch {
+        /* An unavailable identity stays pending. */
+      }
       if (temp.state === "absent")
         items.push({ id: tempId, kind: "claude-temp", state: "complete" });
       else
@@ -275,6 +322,8 @@ export async function captureDeletionCleanup(
           captured: {
             kind: "claude-temp",
             path: tempPath,
+            workspacePath: binding.path,
+            ...(canonicalTemp ? { canonicalPath: canonicalTemp } : {}),
             taskId: binding.taskId,
             workspaceId: binding.workspaceId,
             filesystem:

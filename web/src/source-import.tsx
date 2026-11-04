@@ -169,6 +169,7 @@ export function ImportPanel(
 
   /** Preview every saved inactive source once, then refresh once; a retry resumes. */
   async function go(refreshOnly = false) {
+    if (latest.current.readOnly) return;
     // The synchronous guard stops a double press; busy also covers a press made before a remount.
     const now = latest.current,
       // A refresh-only retry reports on the sources of the press it continues.
@@ -462,7 +463,8 @@ export function ImportPanel(
         <div>
           <Button
             type="button"
-            aria-disabled={busy || unusable || undefined}
+            disabled={p.readOnly}
+            aria-disabled={p.readOnly || busy || unusable || undefined}
             aria-busy={busy || undefined}
             aria-describedby={unusable ? credentialReasonId : undefined}
             onClick={() => {

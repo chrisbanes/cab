@@ -261,6 +261,21 @@ export function RuntimeSettings(p: SettingsProps) {
     resource = useOperatorResource(p.session.csrfToken, loader),
     data = resource.state.data?.data,
     d = useDraft(p.drafts, "capacity.configure");
+  const writableProjects =
+    resource.state.status === "fresh" &&
+    !resource.state.pending &&
+    !resource.state.error
+      ? (data?.projects.filter((row) => row.project.archived === false) ?? [])
+      : [];
+  const writableProjectIds = new Set(
+    writableProjects.map((row) => row.project.id),
+  );
+  const frozenCapacity = d.frozen;
+  d.readOnly =
+    frozenCapacity?.type === "capacity.configure" &&
+    Object.keys(frozenCapacity.projectOverrides).some(
+      (id) => !writableProjectIds.has(id),
+    );
   useHeaderRefresh(p.refreshNonce, resource.refresh);
   const initial: Values | null = data
     ? {
@@ -281,7 +296,11 @@ export function RuntimeSettings(p: SettingsProps) {
   const labelOf = (r: ProjectRow) =>
     projectLabel(labels, r.project.id, r.project.name);
   const lines = data
-    ? capacityChanges(data, d.values, (r) => labelOf(r).text)
+    ? capacityChanges(
+        { ...data, projects: writableProjects },
+        d.values,
+        (r) => labelOf(r).text,
+      )
     : [];
   return (
     <div className="settings-page">
@@ -357,7 +376,7 @@ export function RuntimeSettings(p: SettingsProps) {
                         key: d.values.key,
                         globalLimit: Number(d.values.globalLimit),
                         projectOverrides: Object.fromEntries(
-                          data.projects.map((r) => [
+                          writableProjects.map((r) => [
                             r.project.id,
                             d.values[`override-${r.project.id}`]
                               ? Number(d.values[`limit-${r.project.id}`])
@@ -388,20 +407,27 @@ export function RuntimeSettings(p: SettingsProps) {
                             Project {r.project.paused ? "paused" : "enabled"}
                           </span>
                         </div>
-                        <DraftCheck
-                          draft={d}
-                          field={`override-${r.project.id}`}
-                          label={`Set capacity override for ${name}`}
-                        />
-                        {d.values[`override-${r.project.id}`] && (
-                          <DraftField
-                            draft={d}
-                            field={`limit-${r.project.id}`}
-                            errorField={`projectOverrides.${r.project.id}`}
-                            label={`Active-turn cap for ${name}`}
-                            type="number"
-                          />
+                        {r.project.archived && (
+                          <p className="metadata muted">
+                            Archived · capacity is read-only.
+                          </p>
                         )}
+                        <fieldset disabled={r.project.archived}>
+                          <DraftCheck
+                            draft={d}
+                            field={`override-${r.project.id}`}
+                            label={`Set capacity override for ${name}`}
+                          />
+                          {d.values[`override-${r.project.id}`] && (
+                            <DraftField
+                              draft={d}
+                              field={`limit-${r.project.id}`}
+                              errorField={`projectOverrides.${r.project.id}`}
+                              label={`Active-turn cap for ${name}`}
+                              type="number"
+                            />
+                          )}
+                        </fieldset>
                         {r.usage > 0 && r.tasks.some((t) => t.held) && (
                           <p className="metadata muted">
                             A slot in use may belong to a held execution;
@@ -701,6 +727,7 @@ function BoundTurnForm(
       p.record.process,
   );
   const allowed =
+    !p.readOnly &&
     p.fresh &&
     !identityChanged &&
     completeIdentity &&
@@ -716,6 +743,7 @@ function BoundTurnForm(
     r.key === c.key &&
     r.workId === c.receipt.workId;
   const send = async (c: BoundCommand) => {
+    if (p.readOnly) return;
     if (!lifecycle.frozen) lifecycle.restoreUnknown(c);
     const original = lifecycle.begin();
     if (!original) return;
@@ -771,7 +799,9 @@ function BoundTurnForm(
         p.refresh();
       } else if (result.data.state === "not-recorded") {
         setMessage(
-          "No receipt is recorded. You may retry only the exact original command; the service will recheck its proof.",
+          p.readOnly
+            ? "No receipt is recorded. This project is archived; retry is disabled and the original request is kept."
+            : "No receipt is recorded. You may retry only the exact original command; the service will recheck its proof.",
         );
         setRetry(true);
       } else
@@ -907,7 +937,7 @@ function BoundTurnForm(
           {retry && (
             <Button
               type="button"
-              disabled={pending}
+              disabled={pending || p.readOnly}
               onClick={() => void send(frozen)}
             >
               Retry exact recovery
@@ -997,6 +1027,13 @@ export function AssignmentRecovery(
       />
       {data && (
         <>
+          {data.project.archived && (
+            <p role="status">
+              This project is archived. Recovery evidence and original receipt
+              checks remain available; new recovery and retry sends are
+              disabled.
+            </p>
+          )}
           <p className="settings-status body muted">
             <StatusBadge tone={status?.held ? "warning" : "idle"}>
               {status?.held ? "Execution held" : status?.label}
@@ -1148,6 +1185,9 @@ export function AssignmentRecovery(
               <BoundTurnRecovery
                 key={`${p.session.csrfToken}:${p.assignmentId}:${data.project.id}`}
                 {...p}
+                readOnly={
+                  data.project.archived || data.assignment.readOnly === true
+                }
                 projectId={data.project.id}
                 taskId={data.taskId}
               />

@@ -1,3 +1,4 @@
+import { projectLifecycleCommands } from "./project-lifecycle.js";
 import { adoptCommands } from "./adopt.js";
 import {
   attentionBrowseCommands,
@@ -45,6 +46,7 @@ export const browseCommands = new Map<string, BrowseCommand>([
 export const writeCommands = new Map<string, WriteCommand>([
   ...profileWriteCommands,
   ...projectWriteCommands,
+  ...projectLifecycleCommands,
   ...routingWriteCommands,
   ...repositoryWriteCommands,
   ...capacityWriteCommands,

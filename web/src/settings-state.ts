@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import {
   genericInvalidInputMessage,
+  operationTypeSchema,
   operatorCommandSchema,
   type OperatorCommand,
   type CommandReceipt,
@@ -96,6 +97,15 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.configVersion === c.expectedVersion &&
       result.selectionId === c.selectionId &&
       result.active
+    );
+  if (c.type === "project.delete")
+    return result.commandType === "project.delete";
+  if (c.type === "project.archive" || c.type === "project.restore")
+    return (
+      result.commandType === c.type &&
+      result.version === c.expectedVersion + 1 &&
+      result.archived === (c.type === "project.archive") &&
+      result.paused
     );
   if (!("version" in result)) return false;
   if (c.type === "project.create" || c.type === "profile.create")
@@ -217,6 +227,8 @@ function canonical(field: string, value: unknown): string {
 }
 
 export class ConfigurationDraft {
+  /** Presentation write gate from the authoritative direct-ID owner read; frozen receipts stay readable. */
+  readOnly = false;
   values: Record<string, string | boolean | string[]> = {};
   phase:
     | "editing"
@@ -283,6 +295,7 @@ export class ConfigurationDraft {
   }
   set(field: string, value: string | boolean | string[]) {
     if (
+      this.readOnly ||
       this.phase === "pending" ||
       this.phase === "recorded" ||
       this.lifecycle.uncertain
@@ -313,6 +326,7 @@ export class ConfigurationDraft {
     current?: string,
   ) {
     if (
+      this.readOnly ||
       this.phase === "pending" ||
       this.phase === "recorded" ||
       this.lifecycle.uncertain
@@ -480,6 +494,7 @@ export class ConfigurationDraft {
     this.changed();
   }
   async submit(client: OperatorClient, input: unknown, csrf: string) {
+    if (this.readOnly) return;
     if (
       this.phase === "pending" ||
       this.phase === "recorded" ||
@@ -542,12 +557,59 @@ export class ConfigurationDraft {
     this.changed();
     if (generation !== this.generation) return;
     let result: CommandState;
-    if (translatedConfiguration(c) && !currentAuthentication()) {
+    if (this.readOnly) {
+      result = { state: "unknown", command: c, code: "unavailable" };
+      const type = operationTypeSchema.safeParse(c.type);
+      const scope =
+        "taskId" in c
+          ? `task:${c.taskId}`
+          : "projectId" in c
+            ? `project:${c.projectId}`
+            : c.type === "capacity.configure"
+              ? "system:capacity"
+              : null;
+      if (checkReceipt && type.success && scope) {
+        try {
+          const operation = await client.operation({
+            scope,
+            type: type.data,
+            key: c.key,
+          });
+          if (currentAuthentication() && operation.data.state === "recorded")
+            result = { state: "recorded", receipt: operation.data.receipt };
+        } catch {
+          /* Keep the frozen original body and key; archive cannot authorize a retry. */
+        }
+      }
+    } else if (translatedConfiguration(c) && !currentAuthentication()) {
       result = { state: "unknown", command: c, code: "unauthenticated" };
     } else if (checkReceipt && c.type === "profile.create" && c.starter) {
       try {
         const operation = await client.operation({
           scope: `profile:${c.profileId}`,
+          type: c.type,
+          key: c.key,
+        });
+        result =
+          currentAuthentication() && operation.data.state === "recorded"
+            ? { state: "recorded", receipt: operation.data.receipt }
+            : { state: "unknown", command: c, code: "unavailable" };
+      } catch (error) {
+        result = {
+          state: "unknown",
+          command: c,
+          code: error instanceof ClientError ? error.code : "unavailable",
+        };
+      }
+    } else if (
+      checkReceipt &&
+      (c.type === "project.archive" ||
+        c.type === "project.restore" ||
+        c.type === "project.delete")
+    ) {
+      try {
+        const operation = await client.operation({
+          scope: `project:${c.projectId}`,
           type: c.type,
           key: c.key,
         });

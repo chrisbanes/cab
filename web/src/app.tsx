@@ -1,3 +1,4 @@
+import { visibleProjects } from "./project-lifecycle-model.js";
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
 import { useMediaQuery } from "./use-media-query.js";
@@ -224,7 +225,7 @@ function ProjectNavigation({
       {workspace?.data.projects.length === 0 && (
         <p className="nav-empty body muted">No projects yet.</p>
       )}
-      {workspace?.data.projects.map((p) =>
+      {visibleProjects(workspace?.data.projects ?? []).map((p) =>
         link(
           `/app/projects/${p.id}`,
           pathname === `/app/projects/${p.id}` ||
