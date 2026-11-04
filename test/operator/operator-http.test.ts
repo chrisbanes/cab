@@ -1185,7 +1185,6 @@ test("real runtime routes inherit HTTP guards and persist capacity", async () =>
     // The removed endpoints did not change the assignment; Runtime remains available.
     assert.equal(Number(domain.assignment(assignmentId).version), 1);
     assert.equal((await signedIn("GET", "/runtime")).status, 200);
-
   } finally {
     await http?.stop();
     auth?.close();

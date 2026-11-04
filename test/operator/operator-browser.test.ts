@@ -828,7 +828,9 @@ test("authenticated project pause and resume preserve captured instructions whil
     key: randomUUID(),
     projectId,
     assignmentId: String(assignment.id),
-    expectedVersion: Number(service.domain().assignment(String(assignment.id)).version),
+    expectedVersion: Number(
+      service.domain().assignment(String(assignment.id)).version,
+    ),
   });
   await until(() => runtime.turns === 2);
   assert.ok(runtime.prompts[1]?.includes(changedInstructions));
@@ -1228,11 +1230,13 @@ test("operator commands and Chromium runtime controls keep durable readback", as
 
   // Stop and Resume preserve the writer hold in the curated recovery read.
   await api.execute({ type: "task.stop", key: randomUUID(), taskId });
-  const stopped = (await api.readAssignmentRecovery(String(leadAssignment.id))).data;
+  const stopped = (await api.readAssignmentRecovery(String(leadAssignment.id)))
+    .data;
   assert.equal(stopped.holds.stop, true);
   assert.equal(stopped.holds.writer, true);
   await api.execute({ type: "task.resume", key: randomUUID(), taskId });
-  const resumed = (await api.readAssignmentRecovery(String(leadAssignment.id))).data;
+  const resumed = (await api.readAssignmentRecovery(String(leadAssignment.id)))
+    .data;
   assert.equal(resumed.holds.stop, false);
   assert.equal(resumed.holds.writer, true);
 
@@ -1302,9 +1306,11 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     .recoveryView()
     .find((record) => record.binding?.assignmentId === workerAssignmentId);
   assert.ok(persistedRecoveryRecord?.binding);
-  const persistedRecovery = (await new OperatorApi(service, [directory]).readAssignmentRecovery(
-    persistedRecoveryRecord.binding.assignmentId,
-  )).data;
+  const persistedRecovery = (
+    await new OperatorApi(service, [directory]).readAssignmentRecovery(
+      persistedRecoveryRecord.binding.assignmentId,
+    )
+  ).data;
   assert.ok(persistedRecovery.records.length > 0);
   assert.equal(persistedRecovery.holds.writer, true);
   // The restarted service has its own API.

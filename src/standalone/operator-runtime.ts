@@ -40,8 +40,15 @@ type RuntimeDomain = Pick<DomainStore, "admission" | "projects" | "tasks">;
 export interface RuntimeOperatorApi {
   domain(): RuntimeDomain;
   executionForWork(workId: string): ExecutionIntent | undefined;
-  recoveryFor(assignmentId: string, assignmentVersion: number, workId?: string): RecoveryRecord[];
-  currentTurnRequest(assignmentId: string, version: number): TurnRequest | undefined;
+  recoveryFor(
+    assignmentId: string,
+    assignmentVersion: number,
+    workId?: string,
+  ): RecoveryRecord[];
+  currentTurnRequest(
+    assignmentId: string,
+    version: number,
+  ): TurnRequest | undefined;
   powerStatus(): ReturnType<StandaloneService["powerStatus"]>;
   harnessStatuses(): ReturnType<StandaloneService["harnessStatuses"]>;
   capacityLimits(projectIds?: string[]): CapacityLimits;

@@ -1312,7 +1312,9 @@ async function runLiveJourney(approval) {
     );
     evidence.operator.liveQuestionVisible = true;
     const readExecution = async () => {
-      const response = await page.request.get(`${origin}/api/operator/tasks/${activeTaskId}`);
+      const response = await page.request.get(
+        `${origin}/api/operator/tasks/${activeTaskId}`,
+      );
       assert.equal(response.status(), 200);
       return (await response.json()).data;
     };

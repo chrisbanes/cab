@@ -611,7 +611,6 @@ test("task execution keeps the writer hold visible after Resume", async (t) => {
   const resumed = await read();
   assert.equal(resumed.execution.holds.stop, false);
   assert.equal(resumed.executionRecovery?.holds.writer, true);
-
 });
 
 test("the assignment recovery read retains scoped records and holds", async (t) => {
@@ -754,9 +753,11 @@ test("the assignment recovery read retains scoped records and holds", async (t) 
   assert.ok(pendingRecord?.binding);
   assert.notEqual(receiptRecord.workId, pendingRecord.workId);
 
-  const recovery = (await new OperatorApi(service, [directory]).readAssignmentRecovery(
-    pendingRecord.binding.assignmentId,
-  )).data;
+  const recovery = (
+    await new OperatorApi(service, [directory]).readAssignmentRecovery(
+      pendingRecord.binding.assignmentId,
+    )
+  ).data;
   assert.ok(recovery.records.some((r) => r.workId === receiptRecord.workId));
   assert.ok(recovery.records.some((r) => r.workId === pendingRecord.workId));
   assert.equal(recovery.holds.writer, true);
@@ -825,7 +826,10 @@ test("instruction apply refreshes the selected assignment revision once", async 
   await service.stop();
   service = new StandaloneService(join(directory, "data"), () => runtime);
   await service.start();
-  assert.deepEqual(await new OperatorApi(service, [directory]).execute(input), receipt);
+  assert.deepEqual(
+    await new OperatorApi(service, [directory]).execute(input),
+    receipt,
+  );
   const assignment = service.domain().assignment(assignmentId);
   assert.equal(Number(assignment.version), 2);
   assert.equal(Number(assignment.instructionsRevision), 2);
@@ -848,7 +852,11 @@ test("retained bound-turn controls review without writes, retain refusal and rea
     return result.kind === "html" ? result.body : "";
   };
   const options = await api.readRecoveryOptions(w.g.assignmentId);
-  assert.ok(options.data.records.some((r) => r.paths.some((p) => p.path === "bound-turn-recover" && p.eligible)));
+  assert.ok(
+    options.data.records.some((r) =>
+      r.paths.some((p) => p.path === "bound-turn-recover" && p.eligible),
+    ),
+  );
   const recoveryHref = `/app/assignments/${encodeURIComponent(w.g.assignmentId)}/recovery`;
   const original = w.recovery();
   const payload = JSON.stringify(original);
