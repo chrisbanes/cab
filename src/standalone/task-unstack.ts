@@ -45,7 +45,7 @@ export class TaskUnstack {
   constructor(private readonly options: Options) {
     this.journal = new UnstackStore(options.db);
   }
-  private local(taskId: string, except?: string) {
+  private local(taskId: string, except?: string, captured?: UnstackIdentity) {
     const { db, domain, delivery, workspaces } = this.options;
     const task = domain.task(taskId),
       projectId = String(task.projectId);
@@ -99,6 +99,22 @@ export class TaskUnstack {
       throw new UnstackAuthorityChangedError(
         "Selected lower PR identity is unproved",
       );
+    // Removing this captured membership is an expected effect, not new authority.
+    // A different stack/position is not that effect and must remain a refusal.
+    const lowerStack = lower.observation.stack;
+    if (captured && lowerStack) {
+      const position =
+        captured.stack.members.findIndex(
+          (member) => member.nodeId === lower.observation.nodeId,
+        ) + 1;
+      if (
+        lowerStack.id !== captured.stack.id ||
+        lowerStack.number !== captured.stack.number ||
+        lowerStack.position !== position ||
+        lowerStack.size !== captured.stack.members.length
+      )
+        throw new UnstackAuthorityChangedError("Selected lower stack changed");
+    }
     const raw = db
       .prepare(`SELECT s.*,d.seq FROM stacked_dependencies s JOIN task_dependency_records d
       ON d.taskId=s.taskId AND d.blockerTaskId=s.blockerTaskId WHERE s.taskId=?`)
@@ -123,8 +139,20 @@ export class TaskUnstack {
       },
       branch,
       lower: {
-        revision: lower.revision,
-        observationDigest: lower.observationDigest,
+        taskId: lower.taskId,
+        projectId: lower.projectId,
+        leadAssignmentId: lower.leadAssignmentId,
+        registeredWorkId: lower.registeredWorkId,
+        mode: lower.mode,
+        // Keep all non-membership observation and authority material. Revision,
+        // digest and observedAt are derived refresh metadata, not authority.
+        observation: { ...lower.observation, stack: null },
+        acceptedBaseRef: lower.acceptedBaseRef,
+        acceptedRetarget: lower.acceptedRetarget,
+        baseChange: lower.baseChange,
+        rebaseProofs: lower.rebaseProofs,
+        readError: lower.readError,
+        settlement: lower.settlement,
       },
       lowerBranch,
       edge: raw,
@@ -245,7 +273,7 @@ export class TaskUnstack {
     return result;
   }
   private validate(identity: UnstackIdentity, operationId: string) {
-    const current = this.local(identity.taskId, operationId);
+    const current = this.local(identity.taskId, operationId, identity);
     if (
       current.projectId !== identity.projectId ||
       current.authorityDigest !== identity.authorityDigest ||

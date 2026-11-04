@@ -2959,13 +2959,15 @@ export class DeliveryStore {
   }
   recordPrReadFailure(taskId: string): void {
     if (!taskAcceptsWrites(this.db, taskId)) return;
-    this.transaction(() => {
-      const binding = this.delivery(taskId);
-      if (!binding) return;
-      if (binding.readError !== "provider-read-unavailable") binding.revision++;
-      binding.readError = "provider-read-unavailable";
-      this.saveDelivery(binding);
-    });
+    this.transaction(() => this.recordPrReadFailureWithinTransaction(taskId));
+  }
+  recordPrReadFailureWithinTransaction(taskId: string): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
+    const binding = this.delivery(taskId);
+    if (!binding) return;
+    if (binding.readError !== "provider-read-unavailable") binding.revision++;
+    binding.readError = "provider-read-unavailable";
+    this.saveDelivery(binding);
   }
   settlementReceipt(command: HandbackSettlement): PrDeliveryBinding | null {
     const row = this.db

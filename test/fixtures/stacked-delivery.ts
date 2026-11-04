@@ -480,6 +480,7 @@ export async function stackedDeliveryFixture(
     return turn;
   };
   return {
+    provider,
     prs,
     onRebaseProof: (hook: () => void | Promise<void>) => {
       afterRebaseProof = hook;

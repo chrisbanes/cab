@@ -1180,6 +1180,19 @@ export class DeliveryCoordinator {
     const policy = this.store.configuration(binding.projectId),
       p = binding.observation,
       provider = this.provider(binding.projectId, p.repositoryId, policy);
+    // ProjectWrites tracks lifetime; it does not serialize an Unstack against
+    // this provider await. Renew the journal and CAS fences in each write transaction.
+    const inspectionCurrent = () => {
+      const current = this.store.delivery(taskId);
+      if (!current)
+        throw new DomainConflictError(
+          "PR delivery disappeared during inspection",
+        );
+      if (this.store.unstackPending(taskId)) return null;
+      if (!lifecycleCurrent() || current.revision !== binding.revision)
+        throw new DomainConflictError("PR delivery changed during inspection");
+      return current;
+    };
     let observation: PrDeliveryObservation;
     try {
       observation = await provider.inspectPr(
@@ -1193,17 +1206,17 @@ export class DeliveryCoordinator {
         policy,
       );
     } catch {
-      this.store.recordPrReadFailure(taskId);
+      const failed = this.store.transaction(() => {
+        if (!inspectionCurrent()) return false;
+        this.store.recordPrReadFailureWithinTransaction(taskId);
+        return true;
+      });
+      if (!failed) return this.store.delivery(taskId) ?? binding;
       throw new DeliveryReadUnavailable();
     }
     const updated = this.store.transaction(() => {
-      const current = this.store.delivery(taskId);
-      if (
-        !lifecycleCurrent() ||
-        !current ||
-        current.revision !== binding.revision
-      )
-        throw new DomainConflictError("PR delivery changed during inspection");
+      const current = inspectionCurrent();
+      if (!current) return null;
       const result = this.store.observePrWithinTransaction(
         taskId,
         observation,
@@ -1227,6 +1240,7 @@ export class DeliveryCoordinator {
         );
       return result.binding;
     });
+    if (!updated) return this.store.delivery(taskId) ?? binding;
     await this.options.postMergeRebase?.(taskId, provider);
     return this.store.delivery(taskId) ?? updated;
   }

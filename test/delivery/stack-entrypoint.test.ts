@@ -9,6 +9,7 @@ import {
   operationReadSchema,
 } from "../../src/operator/contracts.js";
 import { unstackReadSchema } from "../../src/operator/unstack-contracts.js";
+import { StackFixtureRunner } from "./github-qualification/stack-guard.js";
 import {
   authorizeStackComposition,
   runStackComposition,
@@ -789,6 +790,78 @@ test("intent and both counters are durable before credential/transport/runtime e
   assert.ok(late);
   await assert.rejects(late(), /closed/);
   assert.equal(f.counts().turns, 2);
+});
+
+test("runtime reservation crossing expiry consumes its budget without releasing a turn", async (t) => {
+  const f = await fixture(t),
+    reserve = StackFixtureRunner.prototype.beginRuntimeTurn;
+  t.mock.method(
+    StackFixtureRunner.prototype,
+    "beginRuntimeTurn",
+    async function (this: StackFixtureRunner) {
+      const permit = await reserve.call(this);
+      f.expire();
+      return permit;
+    },
+  );
+  await assert.rejects(f.run(), /expired/);
+  assert.equal(f.counts().turns, 0);
+  assert.deepEqual(f.counts().writes, []);
+  const state = JSON.parse(await readFile(f.resultPath, "utf8")),
+    provider = JSON.parse(await readFile(`${f.resultPath}.provider`, "utf8"));
+  assert.equal(state.turns, 1);
+  assert.equal(provider.turns, 1);
+});
+
+test("a pending runtime reservation cannot release a turn after the composition closes", async (t) => {
+  const f = await fixture(t),
+    reserve = StackFixtureRunner.prototype.beginRuntimeTurn;
+  let reached!: () => void,
+    release!: () => void,
+    late: Promise<number> | undefined;
+  const reserved = new Promise<void>((resolve) => {
+      reached = resolve;
+    }),
+    blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  t.after(() => release());
+  t.mock.method(
+    StackFixtureRunner.prototype,
+    "beginRuntimeTurn",
+    async function (this: StackFixtureRunner) {
+      const permit = await reserve.call(this);
+      reached();
+      await blocked;
+      return permit;
+    },
+  );
+  const factory: StackPortFactory = (scope) => ({
+    ...f.factory(scope),
+    turn: async (_task, _operation, beforeTurn) => {
+      late = beforeTurn();
+      await reserved;
+      throw Error("Synthetic runtime continuation ended");
+    },
+  });
+  const result = await runStackComposition({
+    manifest: f.raw,
+    grant: f.grant,
+    readiness: f.readinessRaw,
+    resultPath: f.resultPath,
+    factory,
+    now: () => Date.parse(f.readiness.observedAt),
+  });
+  assert.equal(result.disposition, "held");
+  assert.ok(late);
+  const refused = assert.rejects(late, /closed/);
+  release();
+  await refused;
+  assert.equal(f.counts().turns, 0);
+  const provider = JSON.parse(
+    await readFile(`${f.resultPath}.provider`, "utf8"),
+  );
+  assert.equal(provider.turns, 1);
 });
 
 test("provider credential callback crossing expiry performs no transport and retains the original intent", async (t) => {

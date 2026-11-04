@@ -516,3 +516,156 @@ test("assembled concurrent same-key confirmation shares its original operation a
   assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
   assert.equal(f.journal().length, 1);
 });
+
+test("lower durable membership removal during unknown retarget survives restart and preserves the original operation", async (t) => {
+  const f = await prepared(t),
+    lower = f.prs.get(`PR-${f.lower}`)!;
+  f.prs.set(lower.nodeId, {
+    ...lower,
+    stack: { id: 1, number: 1, position: 1, size: 2 },
+  });
+  await f.current().refreshGitHub();
+  const i = await f.current().previewTaskUnstack(f.dependent),
+    command = f.command(i),
+    image = f.image();
+  f.lost("retarget");
+  assert.equal(
+    (await f.current().unstackTask(command)).phase,
+    "retarget-attempting",
+  );
+  const original = f.journal()[0]!,
+    before = f.current().delivery().delivery(f.lower)!;
+  f.hostRetargeted();
+  await f.current().refreshGitHub();
+  const after = f.current().delivery().delivery(f.lower)!;
+  assert.equal(after.observation.stack, null);
+  assert.ok(after.revision > before.revision);
+  assert.notEqual(after.observationDigest, before.observationDigest);
+  assert.equal(f.journal()[0]?.phase, "retarget-attempting");
+  await f.restart();
+  f.readAs({ state: "removed", baseRef: "main", baseSha: f.base });
+  assert.equal(
+    (await f.current().reconcileTaskUnstack(command.key)).phase,
+    "confirmed",
+  );
+  const final = f.journal()[0]!;
+  assert.deepEqual(final.identity, original.identity);
+  assert.deepEqual(final.command, original.command);
+  assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+  assert.deepEqual(f.image(), image);
+  assert.equal(f.current().domain().activeStackedDependency(f.dependent), null);
+  f.readDb((db) =>
+    assert.equal(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM coordination_external_delivery_notices WHERE identity=?",
+        )
+        .get(`unstack-restack:${command.key}`)?.n,
+      1,
+    ),
+  );
+});
+
+for (const outcome of ["success", "failure"] as const) {
+  test(`an inspection begun before Unstack cannot commit a late ${outcome} over its original journal authority`, async (t) => {
+    const f = await prepared(t),
+      i = await f.current().previewTaskUnstack(f.dependent),
+      command = f.command(i);
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      }),
+      barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const inspect = f.provider.inspectPr.bind(f.provider);
+    let paused = false;
+    t.mock.method(
+      f.provider,
+      "inspectPr",
+      async (...args: Parameters<typeof inspect>) => {
+        const observation = await inspect(...args);
+        if (!paused && observation.nodeId === i.pr.nodeId) {
+          paused = true;
+          entered();
+          await barrier;
+          if (outcome === "failure")
+            throw Error("synthetic late inspection rejection");
+          return { ...observation, stack: null };
+        }
+        return observation;
+      },
+    );
+    t.after(() => release());
+    const refresh = f.current().refreshGitHub();
+    await started;
+    f.lost("retarget");
+    assert.equal(
+      (await f.current().unstackTask(command)).phase,
+      "retarget-attempting",
+    );
+    const binding = f.current().delivery().delivery(f.dependent),
+      original = f.journal()[0]!;
+    release();
+    await refresh;
+    assert.deepEqual(f.current().delivery().delivery(f.dependent), binding);
+    const continued = f.journal()[0]!;
+    // refreshGitHub wakes the real scheduler, which may append a readback
+    // checkpoint. Only its revision/time may move; authority and effect state cannot.
+    assert.ok(continued.revision >= original.revision);
+    assert.deepEqual(
+      {
+        ...continued,
+        revision: original.revision,
+        updatedAt: original.updatedAt,
+      },
+      original,
+    );
+    assert.equal(f.journal().length, 1);
+    assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+    f.readAs({ state: "removed", baseRef: "main", baseSha: f.base });
+    assert.equal(
+      (await f.current().reconcileTaskUnstack(command.key)).phase,
+      "confirmed",
+    );
+    assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+    assert.deepEqual(f.journal()[0]?.identity, original.identity);
+  });
+}
+
+for (const changed of [
+  "node",
+  "head",
+  "accepted-base",
+  "other-stack",
+] as const) {
+  test(`lower ${changed} change remains an authority refusal after membership removal`, async (t) => {
+    const f = await prepared(t),
+      i = await f.current().previewTaskUnstack(f.dependent),
+      command = f.command(i);
+    f.lost("retarget");
+    assert.equal(
+      (await f.current().unstackTask(command)).phase,
+      "retarget-attempting",
+    );
+    const original = f.journal()[0]!;
+    f.readDb((db) => {
+      const lower = f.current().delivery().delivery(f.lower)!;
+      if (changed === "node") lower.observation.nodeId = "changed-node";
+      if (changed === "head") lower.observation.headSha = "f".repeat(40);
+      if (changed === "accepted-base") lower.acceptedBaseRef = "changed-base";
+      if (changed === "other-stack")
+        lower.observation.stack = { id: 2, number: 2, position: 1, size: 2 };
+      db.prepare(
+        "UPDATE delivery_pr_bindings SET recordJson=? WHERE taskId=?",
+      ).run(JSON.stringify(lower), f.lower);
+    });
+    f.readAs({ state: "removed", baseRef: "main", baseSha: f.base });
+    const result = await f.current().reconcileTaskUnstack(command.key);
+    assert.equal(result.phase, "retarget-confirmed");
+    assert.equal(result.reason, "authority-changed");
+    assert.deepEqual(result.identity, original.identity);
+    assert.deepEqual(f.counts(), { unstackSends: 1, retargetSends: 1 });
+    assert.ok(f.current().domain().activeStackedDependency(f.dependent));
+  });
+}

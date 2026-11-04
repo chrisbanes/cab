@@ -746,7 +746,9 @@ export async function runStackComposition(options: {
               state.turns++;
               await save();
               current();
-              return provider.beginRuntimeTurn();
+              const permit = await provider.beginRuntimeTurn();
+              current();
+              return permit;
             }),
           );
           if (state.turns !== priorTurns + 1)
