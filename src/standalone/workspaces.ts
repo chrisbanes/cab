@@ -117,6 +117,12 @@ export interface CapturedWorkspaceDiscard {
   gitIdentities?: CapturedRepositoryIdentity[] | undefined;
 }
 
+export interface CapturedWorkspaceRemovalJournal {
+  begin(repositoryId: string): boolean;
+  settled(repositoryId: string): boolean;
+  unobserved(): void;
+}
+
 export interface WorkspaceCleanupEvidence {
   deliveryConfirmed: boolean;
   writerOwnershipResolved: boolean;
@@ -134,6 +140,8 @@ export type WorkspaceManagerOptions = {
   beforePathAccess?: (path: string) => void;
   /** Test-only executable override; production always resolves the `git` command. */
   gitExecutable?: string;
+  /** Test-only captured-cleanup child runner; never used by ordinary workspace operations. */
+  capturedGitRunner?: typeof runGit;
   /** Test-only shortened per-operation deadlines. */
   gitTimeoutMs?: Partial<Record<GitOperation, number>>;
   /** Test-only bounds for exact-child termination and final stream observation. */
@@ -202,7 +210,7 @@ class WorkspaceGitError extends Error {
     readonly kind: GitFailureKind,
     readonly childExitObserved: boolean,
     readonly childExitSignal: NodeJS.Signals | null,
-    childStarted: boolean,
+    readonly childStarted: boolean,
   ) {
     super(`Workspace Git ${kind} during ${operation}`);
     this.name = "WorkspaceGitError";
@@ -397,6 +405,8 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
 export class WorkspaceManager implements TaskWorkspaceLifecycle {
   private readonly workspaceRoot: string;
   private readonly inFlight = new Map<string, Promise<unknown>>();
+  private readonly unobservedCaptured = new Set<string>();
+  private readonly settlementWaiters = new Set<() => void>();
   private readonly gitExecutable: string;
   private readonly gitTimeouts: Partial<Record<GitOperation, number>>;
   private readonly gitTerminationGraceMs: number;
@@ -445,10 +455,27 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     this.gitCancellation.abort();
   }
 
-  /** Waits for workspace callers to persist their bounded cancellation outcome. */
+  /** Waits for bounded outcomes; unobserved captured children remain reserved beyond shutdown. */
   async settle(): Promise<void> {
-    while (this.inFlight.size > 0)
-      await Promise.allSettled([...this.inFlight.values()]);
+    while (this.inFlight.size > 0) {
+      let changed!: () => void;
+      const notification = new Promise<void>((resolve) => {
+        changed = resolve;
+      });
+      this.settlementWaiters.add(changed);
+      try {
+        const waiting = [...this.inFlight].filter(
+          ([id]) => !this.unobservedCaptured.has(id),
+        );
+        if (!waiting.length) return;
+        await Promise.race([
+          Promise.allSettled(waiting.map(([, operation]) => operation)),
+          notification,
+        ]);
+      } finally {
+        this.settlementWaiters.delete(changed);
+      }
+    }
   }
 
   provision(
@@ -676,6 +703,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   discardCaptured(
     captured: CapturedWorkspaceDiscard,
     allowed: () => boolean,
+    journal: CapturedWorkspaceRemovalJournal,
   ): Promise<CleanupOutcome> {
     return this.withTaskIdentityLock(
       captured.binding.taskId,
@@ -859,12 +887,55 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
                   finalRepo.stat.isSymbolicLink()))
             )
               return pending("unsafe");
-            await this.capturedGit(repository.sourcePath, [
-              "worktree",
-              "remove",
-              "--force",
-              repository.workspacePath,
-            ]);
+            // A failed reservation write must precede (and prevent) child dispatch.
+            if (!journal.begin(repository.repositoryId))
+              return pending("unsafe");
+            let failure: unknown;
+            try {
+              await this.capturedGit(
+                repository.sourcePath,
+                ["worktree", "remove", "--force", repository.workspacePath],
+                () => {
+                  this.unobservedCaptured.add(binding.taskId);
+                  for (const notify of this.settlementWaiters) notify();
+                  journal.unobserved();
+                },
+                () => {
+                  this.unobservedCaptured.delete(binding.taskId);
+                },
+              );
+            } catch (error) {
+              // A bounded unobserved result never gets here until exact-child exit.
+              if (
+                !(error instanceof WorkspaceGitError) ||
+                (error.childStarted && !error.childExitObserved)
+              )
+                throw error;
+              failure = error;
+            }
+            // Positive exit (or proof no child spawned) alone is not permission to clear.
+            // Recheck the captured source/common/root and competing owners after the await.
+            for (const [path, identity] of [
+              [repository.sourcePath, proof.source],
+              [proof.commonDirectory.path, proof.commonDirectory.filesystem],
+              [binding.path, captured.filesystem],
+            ] as const) {
+              if ((await capturedFilesystemState(path, identity)) !== "same")
+                return pending("unsafe");
+            }
+            const remaining = await observeFilesystem(repository.workspacePath);
+            if (
+              remaining.state !== "absent" &&
+              (remaining.state !== "observed" ||
+                remaining.stat.isSymbolicLink() ||
+                String(remaining.stat.dev) !== proof.root.device ||
+                String(remaining.stat.ino) !== proof.root.inode)
+            )
+              return pending("unsafe");
+            if (!journal.settled(repository.repositoryId))
+              return pending("unsafe");
+            if (!allowed()) return pending("unavailable");
+            if (failure) throw failure;
             if (
               (await observeFilesystem(repository.workspacePath)).state !==
               "absent"
@@ -886,7 +957,9 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
             : pending("unknown");
         } catch (error) {
           return pending(
-            isUncertainGitError(error) && error.uncertain
+            error instanceof WorkspaceGitError &&
+              error.childStarted &&
+              !error.childExitObserved
               ? "unknown"
               : "failed",
           );
@@ -897,18 +970,39 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     );
   }
 
-  private async capturedGit(cwd: string, args: string[]): Promise<string> {
+  private async capturedGit(
+    cwd: string,
+    args: string[],
+    unobserved?: () => void,
+    observed?: () => void,
+  ): Promise<string> {
     this.assertNotCancelled();
-    const result = await runGit({
+    let result = await (this.options.capturedGitRunner ?? runGit)({
       executable: this.gitExecutable,
       cwd,
       args: ["--no-optional-locks", "-C", cwd, ...args],
       timeoutMs: 10_000,
+      observeSettlement: !!unobserved,
       terminationGraceMs: this.gitTerminationGraceMs,
       observationMs: this.gitTerminationObservationMs,
       maxOutputBytes: maxGitOutputBytes,
       signal: this.gitCancellation.signal,
     });
+    if (
+      unobserved &&
+      result.status === "interrupted" &&
+      result.spawned &&
+      !result.childExitObserved
+    ) {
+      unobserved();
+      // A malformed injected result keeps the durable marker; it never authorizes a retry.
+      if (!result.settlement)
+        throw new Error("Captured Git settlement notification unavailable");
+      await result.settlement;
+      observed?.();
+      this.assertNotCancelled();
+      result = { ...result, childExitObserved: true };
+    }
     if (result.status === "ok") return result.stdout.toString("utf8").trim();
     if (result.status === "exit")
       throw reportGitFailure(

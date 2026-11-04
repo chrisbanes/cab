@@ -28,7 +28,13 @@ export class ProjectDeletionCleanup {
   private readonly store: ProjectTombstones;
   private running: Promise<void> | undefined;
   private afterProject: string | undefined;
-  private readonly effects = new Map<string, Promise<CleanupOutcome>>();
+  private readonly effects = new Map<
+    string,
+    {
+      effect: Promise<CleanupOutcome>;
+      boundedSettlement: Promise<unknown>;
+    }
+  >();
   constructor(
     private readonly db: Database,
     private readonly options: CleanupOptions,
@@ -61,7 +67,10 @@ export class ProjectDeletionCleanup {
   }
   async settle(): Promise<void> {
     await this.running;
-    await Promise.allSettled([...this.effects.values()]);
+    // An unobserved child remains reserved, but cannot prevent bounded service shutdown.
+    await Promise.allSettled(
+      [...this.effects.values()].map((entry) => entry.boundedSettlement),
+    );
   }
   private async pass(projectId?: string) {
     const deadline = Date.now() + (this.options.budgetMs ?? 30_000);
@@ -86,28 +95,43 @@ export class ProjectDeletionCleanup {
         if (!allowed() || processed++ >= 16) return;
         const key = `${row.projectId}:${item.id}`;
         // A timed-out RPC or filesystem call retains its lock until actual settlement.
-        if (this.effects.has(key)) {
-          transaction(this.db, () =>
-            this.store.retainCleanupWithinTransaction(
-              row.projectId,
-              item.id,
-              "unknown",
-            ),
-          );
+        if (this.effects.has(key)) continue;
+        // A prior process cannot transfer its child-exit proof. Legacy unknown workspace
+        // effects are equally conservative: missing paths and elapsed time are not proof.
+        if (
+          item.captured.kind === "workspace" &&
+          (item.gitRemoval || item.reason === "unknown")
+        )
           continue;
-        }
         if (this.effects.size >= 16) return;
+        let unobserved!: () => void,
+          exitUnobserved = false;
+        const uncertainty = new Promise<void>((resolve) => {
+          unobserved = () => {
+            exitUnobserved = true;
+            resolve();
+          };
+        });
         const effect = Promise.resolve()
-          .then(() => this.effect(item, allowed))
+          .then(() => this.effect(row.projectId, item, allowed, unobserved))
           .catch(
             (): CleanupOutcome => ({ outcome: "pending", reason: "unknown" }),
           );
-        this.effects.set(key, effect);
+        const entry = {
+          effect,
+          boundedSettlement: Promise.race([effect, uncertainty]),
+        };
+        this.effects.set(key, entry);
         void effect.finally(() => {
-          if (this.effects.get(key) === effect) this.effects.delete(key);
+          if (this.effects.get(key) === entry) this.effects.delete(key);
         });
         const outcome = await this.withDeadline(
-          effect,
+          Promise.race([
+            effect,
+            uncertainty.then(
+              (): CleanupOutcome => ({ outcome: "pending", reason: "unknown" }),
+            ),
+          ]),
           Math.max(1, deadline - Date.now()),
         );
         try {
@@ -128,7 +152,13 @@ export class ProjectDeletionCleanup {
                 row.projectId,
                 item.id,
               );
-            else
+            else if (
+              !(
+                exitUnobserved &&
+                current.captured.kind === "workspace" &&
+                !current.gitRemoval
+              )
+            )
               this.store.retainCleanupWithinTransaction(
                 row.projectId,
                 item.id,
@@ -159,8 +189,10 @@ export class ProjectDeletionCleanup {
     }
   }
   private effect(
+    projectId: string,
     item: PendingItem,
     allowed: () => boolean,
+    unobserved: () => void,
   ): Promise<CleanupOutcome> {
     if (!allowed())
       return Promise.resolve({ outcome: "pending", reason: "unavailable" });
@@ -179,6 +211,37 @@ export class ProjectDeletionCleanup {
           captured,
           () =>
             allowed() && capturedWorkspaceUnclaimed(this.db, captured.binding),
+          {
+            begin: (repositoryId) =>
+              allowed() &&
+              transaction(
+                this.db,
+                () =>
+                  capturedWorkspaceUnclaimed(this.db, captured.binding) &&
+                  this.store.checkpointWorkspaceRemovalWithinTransaction(
+                    projectId,
+                    item.id,
+                    materialDigest(captured),
+                    repositoryId,
+                    "begin",
+                  ),
+              ),
+            settled: (repositoryId) =>
+              this.options.accepting() &&
+              transaction(
+                this.db,
+                () =>
+                  capturedWorkspaceUnclaimed(this.db, captured.binding) &&
+                  this.store.checkpointWorkspaceRemovalWithinTransaction(
+                    projectId,
+                    item.id,
+                    materialDigest(captured),
+                    repositoryId,
+                    "settled",
+                  ),
+              ),
+            unobserved,
+          },
         );
       }
       case "claude-temp":

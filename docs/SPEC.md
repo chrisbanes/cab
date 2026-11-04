@@ -242,6 +242,15 @@ workspace/thread locks. Force-discard is confined to the captured managed worktr
 source checkouts, branches, PRs and retained Codex archive files remain intact. Missing
 resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pending;
 older descriptors without sufficient Git proof never authorize a guessed removal.
+Surviving ownership anywhere beneath the removal root, including a repository's
+source subdirectory or Git common directory, prevents removal. Destructive Git is
+preceded by a private item reservation bound to its captured identity. A bounded
+result without observed child exit retains that reservation and task lock until the
+exact child positively exits; shutdown does not wait indefinitely for that proof.
+A restarted process cannot recover the old process-local exit notification, so an
+unsettled reservation (including legacy unknown workspace outcomes) stays pending
+without another removal, even when paths are absent. Late exit alone cannot clear a
+reservation after ownership changes or shutdown; fenced identity readback is required.
 Successful item checkpoints prune private payloads, while stable opaque thread identities
 continue to refuse restoration of deleted conversations. Private exclusions persist
 independently of cleanup progress.
