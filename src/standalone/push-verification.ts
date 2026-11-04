@@ -123,6 +123,9 @@ export function verifierGit(workspacePath: string, signal?: AbortSignal): Git {
       environmentOverrides: {
         GIT_NO_REPLACE_OBJECTS: "1",
         GIT_GRAFT_FILE: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_ATTR_NOSYSTEM: "1",
       },
       ...(signal ? { signal } : {}),
     });
