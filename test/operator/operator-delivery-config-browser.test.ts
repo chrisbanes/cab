@@ -373,6 +373,63 @@ test("Delivery rejection and conflict retain edits until deliberate review or di
   await savedOutcome(page);
 });
 
+test("Delivery requires refresh and discard for a legacy kept grant draft", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(journey, path);
+  const hidden = "HIDDEN_LEGACY_GRANT";
+  f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: `env:${hidden}`,
+    grants: [
+      { action: "issue.comment", repositoryId: hidden, mode: "approval" },
+    ],
+    requiredChecks: [],
+  });
+  await page.route("**/projects/*/configuration", async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    delete json.data.delivery.grants[0].savedRow.format;
+    await route.fulfill({ response, json });
+  });
+  await read(page);
+  await page.getByLabel("Completion mode").selectOption("through-merge");
+  await page
+    .getByText(
+      "This delivery draft is out of date. Refresh the policy, then discard changes before saving.",
+    )
+    .waitFor();
+  assert.equal(await save(page).isDisabled(), true);
+  await page.unroute("**/projects/*/configuration");
+  await read(page);
+  assert.equal(
+    await page.getByLabel("Completion mode").inputValue(),
+    "through-merge",
+  );
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  assert.equal(
+    await page.getByLabel("Completion mode").inputValue(),
+    "reviewable-pr",
+  );
+  await page.getByLabel("Completion mode").selectOption("through-merge");
+  const sent = body(page);
+  await save(page).click();
+  const command = await sent;
+  assert.equal(
+    (command.grants as Array<{ savedRow: { format: string } }>)[0]!.savedRow
+      .format,
+    "post-status-strip-v1",
+  );
+  await savedOutcome(page);
+  assert.doesNotMatch(
+    await page.locator("body").innerText(),
+    new RegExp(hidden),
+  );
+});
+
 test("a refused grant shows the service's sentence in the save outcome and Go to field reaches the grant", async (_t, journey) => {
   const { page } = await startSettings(journey, path);
   await page.getByRole("button", { name: "Add grant", exact: true }).click();

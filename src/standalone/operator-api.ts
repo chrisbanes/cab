@@ -999,6 +999,9 @@ export class OperatorApi {
         section,
         version: configuration.version,
         index,
+        ...(section === "delivery-grants"
+          ? { format: "post-status-strip-v1" as const }
+          : {}),
         ...(repositoryId === undefined ? {} : { repositoryId }),
       },
     });
@@ -8906,6 +8909,24 @@ export class OperatorApi {
       throw new OperatorApiError(503, "unavailable");
     if (fence !== this.configurationVisibility())
       throw new OperatorApiError(409, "conflict");
+    if (
+      c.grants.some(
+        (row) =>
+          "savedRow" in row &&
+          row.savedRow.section === "delivery-grants" &&
+          row.savedRow.projectId === c.projectId &&
+          row.savedRow.version === c.expectedVersion &&
+          row.savedRow.repositoryId === undefined &&
+          !row.savedRow.format,
+      )
+    )
+      throw new OperatorApiError(
+        409,
+        "conflict",
+        undefined,
+        undefined,
+        "This delivery draft is out of date. Discard it and reread the policy before saving.",
+      );
     const seen = new Set<string>();
     type Reference = Extract<
       (typeof c.grants)[number],

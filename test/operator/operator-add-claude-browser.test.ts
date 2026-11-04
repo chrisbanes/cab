@@ -109,6 +109,9 @@ test("Add Claude copies the runbook commands and checks a saved file: reference 
     desktop,
   );
   // Add Claude is the first panel of the runtime page's left column.
+  await page
+    .getByRole("heading", { name: "Add Claude", exact: true })
+    .waitFor();
   assert.equal(
     await page
       .locator(".settings-column")

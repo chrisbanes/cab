@@ -237,6 +237,9 @@ function DeliveryPolicyForm(p: TabProps) {
   const v = d.values;
   const draft = deliveryEditorDraft(v);
   const grants = deliveryRows<GrantRow>(v.grants);
+  const legacyGrant = grants.some(
+    (row) => "savedRow" in row && !row.savedRow.format,
+  );
   const links = p.data.repositories.links;
   // Linked repositories name first; a discovered one the project does not link names the rest.
   const discovered =
@@ -439,6 +442,12 @@ function DeliveryPolicyForm(p: TabProps) {
         );
       }}
     >
+      {legacyGrant && (
+        <Alert role="alert">
+          This delivery draft is out of date. Refresh the policy, then discard
+          changes before saving.
+        </Alert>
+      )}
       <Dialog
         open={Boolean(
           pending && pending.base === currentFingerprint && !isLocked,
@@ -877,13 +886,16 @@ function DeliveryPolicyForm(p: TabProps) {
             client={p.client}
             session={p.session}
             label="Save delivery"
-            saveDisabled={!lines.length}
+            saveDisabled={!lines.length || legacyGrant}
             discard={() => reloadDraft(d, initial)}
             refresh={p.refreshConfiguration}
-            review={() =>
-              d.adoptLatest(saved.version, initial, [
-                ["prefixMode", "branchPrefix"],
-              ])
+            review={
+              legacyGrant
+                ? undefined
+                : () =>
+                    d.adoptLatest(saved.version, initial, [
+                      ["prefixMode", "branchPrefix"],
+                    ])
             }
           />
         </aside>

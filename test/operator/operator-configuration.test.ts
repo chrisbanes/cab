@@ -17,6 +17,7 @@ import {
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
 import { insertExternalItem } from "../fixtures/source-rows.js";
+import { loginCli, startCliService } from "../fixtures/operator-cli.js";
 import { checkout, createSetupHome } from "../fixtures/setup-home.js";
 import {
   createOperatorFixture,
@@ -2062,7 +2063,13 @@ test("delivery excluded rows and prefix expose only version-bound references and
   assert.deepEqual(read.grants[0], {
     kind: "unavailable",
     label: "Unavailable saved row",
-    savedRow: { projectId, section: "delivery-grants", version: 2, index: 0 },
+    savedRow: {
+      projectId,
+      section: "delivery-grants",
+      version: 2,
+      index: 0,
+      format: "post-status-strip-v1",
+    },
   });
   assert.deepEqual(read.requiredChecks[0], {
     kind: "unavailable",
@@ -2142,6 +2149,7 @@ test("delivery saved row references reject duplicates foreign sections indexes a
     section: "delivery-grants",
     version: 2,
     index: 0,
+    format: "post-status-strip-v1",
   };
   for (const [extra, status, paths] of [
     [
@@ -2166,7 +2174,15 @@ test("delivery saved row references reject duplicates foreign sections indexes a
     [
       {
         grants: [
-          { savedRow: { ...savedRow, section: "delivery-checks" }, keep: true },
+          {
+            savedRow: {
+              projectId,
+              section: "delivery-checks",
+              version: 2,
+              index: 0,
+            },
+            keep: true,
+          },
         ],
       },
       400,
@@ -2209,6 +2225,121 @@ test("delivery saved row references reject duplicates foreign sections indexes a
       { state: "not-recorded" },
     );
   }
+});
+
+test("a pre-migration kept grant cannot select a different grant after restart", async (t) => {
+  const { f, projectId } = await deliveryFixture(t);
+  const a = {
+    action: "issue.comment",
+    repositoryId: "PRIVATE_A",
+    mode: "allow",
+  };
+  const b = {
+    action: "issue.close",
+    repositoryId: "PRIVATE_A_B",
+    mode: "allow",
+  };
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO delivery_policies VALUES (?, ?, ?) ON CONFLICT(projectId) DO UPDATE SET version=excluded.version, policyJson=excluded.policyJson",
+    ).run(
+      projectId,
+      4,
+      JSON.stringify({
+        mode: "reviewable-pr",
+        credentialRef: "env:PRIVATE_A",
+        branchPrefix: "cab/",
+        grants: [
+          { action: "issue.status", repositoryId: "old", mode: "allow" },
+          a,
+          b,
+        ],
+        requiredChecks: [],
+        repositories: [],
+      }),
+    );
+  });
+  await f.reopen();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const stale = deliveryInput(projectId, {
+    expectedVersion: 4,
+    grants: [
+      {
+        savedRow: {
+          projectId,
+          section: "delivery-grants",
+          version: 4,
+          index: 1,
+        },
+        keep: true,
+      },
+    ],
+  });
+  await assert.rejects(api.execute(stale), (error: unknown) => {
+    assert.ok(error instanceof OperatorApiError);
+    assert.equal(error.status, 409);
+    assert.match(error.publicMessage ?? "", /Discard/);
+    assert.doesNotMatch(JSON.stringify(error), /PRIVATE_A/);
+    return true;
+  });
+  assert.deepEqual(f.service.delivery().configuration(projectId).grants, [
+    a,
+    b,
+  ]);
+  assert.equal(f.service.delivery().configuration(projectId).version, 4);
+  const lookup = await api.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key: stale.key,
+    }),
+  );
+  assert.notEqual(lookup.data.state, "recorded");
+  const read = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.doesNotMatch(JSON.stringify(read), /PRIVATE_A/);
+  const first = read.grants[0]!;
+  assert.ok("savedRow" in first);
+  assert.equal(first.savedRow.format, "post-status-strip-v1");
+  await api.execute(
+    deliveryInput(projectId, {
+      expectedVersion: 4,
+      preserveBranchPrefix: true,
+      grants: [{ savedRow: first.savedRow, keep: true }],
+    }),
+  );
+  const after = f.service.delivery().configuration(projectId);
+  assert.equal(after.version, 5);
+  assert.equal(after.branchPrefix, "cab/");
+  assert.equal(after.credentialRef, "env:PRIVATE_A");
+  assert.deepEqual(after.grants, [a]);
+});
+
+test("CLI delivery preparation preserves the opaque grant reference", async (t) => {
+  const s = await startCliService(t);
+  const hidden = "CLI_HIDDEN_GRANT";
+  s.f.service.domain().execute({
+    ...deliveryInput(s.projectId, {
+      credentialRef: `env:${hidden}`,
+      grants: [
+        { action: "issue.comment", repositoryId: hidden, mode: "allow" },
+      ],
+    }),
+    actor: "operator",
+  } as never);
+  const { cli, h } = await loginCli(t, s);
+  const result = await cli("ro", [
+    "delivery",
+    "configure",
+    s.projectId,
+    "--branch-prefix",
+    "cab/",
+    "--out",
+    join(h.dir, "delivery.json"),
+  ]);
+  assert.equal(result.code, 0, result.err);
+  const command = result.json().data.document.command;
+  assert.equal(command.grants[0].savedRow.format, "post-status-strip-v1");
+  assert.doesNotMatch(JSON.stringify(command), new RegExp(hidden));
 });
 
 test("delivery missing exclusion evidence withholds policy text and refuses normalization", async (t) => {
@@ -4486,6 +4617,9 @@ test("a retried per-repository save replays only the exact request, kept-row ref
       section,
       version,
       index,
+      ...(section === "delivery-grants"
+        ? { format: "post-status-strip-v1" }
+        : {}),
       ...(section === "delivery-checks" ? { repositoryId: "visible" } : {}),
     },
     keep: true,
@@ -4533,4 +4667,52 @@ test("a retried per-repository save replays only the exact request, kept-row ref
     }),
   );
   assert.doesNotMatch(JSON.stringify(recorded), /requestDigest/);
+  // Simulate a receipt made by the earlier client, retaining the digest of its exact request.
+  const legacy = deliveryInput(projectId, {
+    key,
+    expectedVersion: version,
+    preserveBranchPrefix: true,
+    grants: [
+      {
+        savedRow: { projectId, section: "delivery-grants", version, index: 0 },
+        keep: true,
+      },
+    ],
+    repositories: [
+      {
+        repositoryId: "visible",
+        mergeMethod: "squash",
+        requiredChecks: [kept("delivery-checks", 0)],
+      },
+    ],
+  });
+  const { key: _key, ...legacyRequest } = legacy;
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare("SELECT result FROM command_receipts WHERE scope=? AND key=?")
+      .get(projectId, key) as { result: string };
+    const result = JSON.parse(row.result);
+    result.requestDigest = historicalDeliveryHash(legacyRequest);
+    db.prepare(
+      "UPDATE command_receipts SET result=? WHERE scope=? AND key=?",
+    ).run(JSON.stringify(result), projectId, key);
+  });
+  assert.deepEqual(await api.execute(legacy), first);
+  assert.equal(
+    (
+      await api.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "delivery.configure",
+          key,
+        }),
+      )
+    ).data.state,
+    "recorded",
+  );
+  await assert.rejects(
+    api.execute({ ...legacy, mode: "through-merge" }),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
 });

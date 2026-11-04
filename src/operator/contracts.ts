@@ -2329,8 +2329,16 @@ const deliverySavedRowSchema = savedRowSchema
   .extend({
     /** A repository's additional check: `index` is into that repository's effective cab checks. */
     repositoryId: deliveryIdentity.optional(),
+    format: z.literal("post-status-strip-v1").optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (row) => row.section === "delivery-grants" || row.format === undefined,
+    {
+      path: ["format"],
+      message: "Only grant references have a format marker.",
+    },
+  );
 export const savedConfigurationRowSchema = savedRowSchema
   .extend({
     section: z.enum(["source", "repositories"]),
