@@ -41,7 +41,7 @@ test(`service and operator journey on ${process.version}: start, login, graceful
 
     await f.close();
     closed = true;
-    await assert.rejects(fetch(web.origin), /./, `${where}: listener`);
+    await assert.rejects(fetch(`${web.origin}/app`), /./, `${where}: listener`);
     await assert.rejects(
       stat(f.directory),
       { code: "ENOENT" },

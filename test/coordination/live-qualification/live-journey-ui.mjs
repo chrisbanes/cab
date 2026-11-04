@@ -1,3 +1,7 @@
+import {
+  sessionCommand,
+  waitForOperatorSignIn,
+} from "../../fixtures/operator-session.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
@@ -23,14 +27,9 @@ import {
   CodexRuntime,
   StandaloneService,
 } from "../../../dist/src/standalone/index.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
@@ -313,12 +312,6 @@ async function unusedPort() {
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return address.port;
-}
-
-function operatorRoutes(service) {
-  const routes = new OperatorRouteRegistry();
-  routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-  return routes;
 }
 
 class ObservedCodexRuntime extends CodexRuntime {
@@ -670,17 +663,6 @@ function streamEvidenceForTask(runtime, service, taskId) {
   };
 }
 
-async function saveForm(page, form) {
-  const response = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === "/command" &&
-      candidate.request().method() === "POST",
-    { timeout: 10_000 },
-  );
-  await form.getByRole("button", { name: "Save" }).click();
-  required((await response).status() === 303, "operator-command-redirect");
-}
-
 /** Opens a task's Execution tab in the signed-in app and returns its section. */
 async function openExecutionTab(page, origin, taskId) {
   await page.goto(`${origin}/app/tasks/${taskId}?section=execution`);
@@ -724,38 +706,39 @@ async function headerHoldCommand(page, kind) {
 }
 
 async function login(page, origin, password) {
-  // With the web boundary on, /login is the React shell; a legacy page renders the sign-in form.
-  await page.goto(`${origin}/`);
-  await page.locator('input[name="password"]').fill(password);
+  // The public app shell acquires its session through the JSON API.
+  await page.goto(`${origin}/app`);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   const response = page.waitForResponse(
     (candidate) =>
-      new URL(candidate.url()).pathname === "/login" &&
+      new URL(candidate.url()).pathname === "/api/operator/login" &&
       candidate.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Sign in" }).click();
-  required((await response).status() === 303, "operator-login");
+  required((await response).status() === 200, "operator-login");
 }
 
 async function createProfile(page, origin, name, instructions, capabilities) {
-  await page.goto(`${origin}/`);
-  const form = page.locator('form[data-command="profile.create"]');
-  const profileId = await form.locator('input[name="profileId"]').inputValue();
-  await form.locator('input[name="name"]').fill(name);
-  await form.locator('textarea[name="instructions"]').fill(instructions);
-  await form.locator('textarea[name="capabilities"]').fill(capabilities);
-  await saveForm(page, form);
+  const profileId = randomUUID();
+  await sessionCommand(page, origin, {
+    type: "profile.create",
+    key: randomUUID(),
+    profileId,
+    name,
+    instructions,
+    capabilities,
+  });
   return profileId;
 }
-
 async function createProject(page, origin, name, leadProfileId) {
-  await page.goto(`${origin}/`);
-  const form = page.locator('form[data-command="project.create"]');
-  const projectId = await form.locator('input[name="projectId"]').inputValue();
-  await form.locator('input[name="name"]').fill(name);
-  await form
-    .locator('select[name="leadProfileId"]')
-    .selectOption(leadProfileId);
-  await saveForm(page, form);
+  const projectId = randomUUID();
+  await sessionCommand(page, origin, {
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name,
+    leadProfileId,
+  });
   return projectId;
 }
 
@@ -1120,19 +1103,12 @@ export function runFixtureRelativeFileApprovalAdapter({
 }
 
 async function setCapacity(page, origin, limit) {
-  await page.goto(`${origin}/runtime`);
-  const form = page.locator('form[action="/runtime/control/capacity"]');
-  await form.locator('input[name="globalLimit"]').fill(String(limit));
-  await form.locator('select[name="projectId"]').selectOption("");
-  await form.locator('input[name="projectLimit"]').fill("");
-  const response = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === "/runtime/control/capacity" &&
-      candidate.request().method() === "POST",
-  );
-  await form.getByRole("button", { name: "Save capacity" }).click();
-  required((await response).status() === 303, "capacity-configured-through-ui");
-  await page.goto(`${origin}/`);
+  await sessionCommand(page, origin, {
+    type: "capacity.configure",
+    key: randomUUID(),
+    globalLimit: limit,
+    projectOverrides: {},
+  });
 }
 
 async function createLocalRepository(root) {
@@ -1251,20 +1227,15 @@ async function startOperator(current, evidence, onCreated) {
       origin: current.origin,
     });
     owner.authClosed = false;
-    owner.http = new LocalOperatorHttp(
-      new LocalOperatorUi(current.service.domain()),
-      owner.auth,
-      {
-        routes: operatorRoutes(current.service),
-        // The JSON operator API carries the coordination commands and task reads.
-        web: new OperatorWebBoundary(
-          await OperatorWebBundle.open(
-            fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
-          ),
-          new OperatorApi(current.service, [dirname(current.dataDir)]),
+    owner.http = new LocalOperatorHttp(owner.auth, {
+      // The JSON operator API carries the coordination commands and task reads.
+      web: new OperatorWebBoundary(
+        await OperatorWebBundle.open(
+          fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
         ),
-      },
-    );
+        new OperatorApi(current.service, [dirname(current.dataDir)]),
+      ),
+    });
     owner.startAttempted = true;
     owner.httpStopped = false;
     return await owner.http.start(current.port);
@@ -1374,16 +1345,21 @@ async function runRepositoryJourney(
   );
   const leadInstructions = `${initialLeadInstructions} S05_REPOSITORY_LEAD_PRIVATE_INSTRUCTIONS. ${noNetwork} The exact implementer profile is ${implementerId}; the exact reviewer profile is ${reviewerId}.`;
   privateValues.push(leadInstructions);
-  await page.goto(`${current.origin}/profile/${leadId}`);
-  const leadForm = page.locator('form[data-command="profile.configure"]');
-  required((await leadForm.count()) === 1, "lead-profile-configuration-form");
-  await leadForm
-    .locator('textarea[name="instructions"]')
-    .fill(leadInstructions);
-  await leadForm
-    .locator('textarea[name="capabilities"]')
-    .fill("accountable task lead");
-  await saveForm(page, leadForm);
+  const leadConfiguration = await (
+    await page
+      .context()
+      .request.get(
+        `${current.origin}/api/operator/profiles/${leadId}/configuration`,
+      )
+  ).json();
+  await sessionCommand(page, current.origin, {
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: leadId,
+    expectedVersion: leadConfiguration.data.profile.version,
+    instructions: leadInstructions,
+    capabilities: "accountable task lead",
+  });
 
   const projectId = await createProject(
     page,
@@ -3738,7 +3714,8 @@ export async function runLiveJourney(mode) {
       await startOperator(current, evidence, (owner) => {
         operatorOwners.push(owner);
       });
-      await page.goto(`${current.origin}/runtime`);
+      await page.goto(`${current.origin}/app/settings/runtime`);
+      await waitForOperatorSignIn(page);
       required(
         /Sign in/.test(await page.locator("body").innerText()),
         "restart-invalidates-old-session",

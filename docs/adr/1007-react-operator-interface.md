@@ -21,9 +21,11 @@ The foundation maps the [design foundations' tokens](../../design/DESIGN.md#toke
 onto shadcn's token layer, with self-hosted Geist and Geist Mono, owned
 Button/Input/Textarea/NativeSelect/Badge/Alert/Card/Sheet source, and Tailwind v4
 build integration. The build still uses the Dark / Neutral / Default token set
-until it adopts the handoff's palette (see the handoff's Implementation status). The same validated bundle stylesheet
-styles retained server-rendered HTML through the existing document wrapper without
-hydrating those pages or changing their forms. See the
+until it adopts the handoff's palette (see the handoff's Implementation status). The operator listener requires the validated browser bundle before service startup.
+The app remains at `/app`, with the public login shell at `/login` and same-origin
+JSON authentication and commands. There is no server-rendered fallback or shared
+HTML wrapper; retired paths return ordinary not-found responses without minting
+sessions. See the
 [foundation contract](../design/ui08-foundation.md) and
 [foundation evidence](../evidence/ui08-foundation.md).
 

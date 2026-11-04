@@ -121,25 +121,22 @@ test("sleep listener reads authenticated execution before and after a held recov
   const origin = `http://127.0.0.1:${port}`;
   const path = `${origin}/api/operator/tasks/${taskId}`;
   assert.equal((await fetch(path)).status, 401);
-  // The web boundary serves a React shell at /login; / is the legacy sign-in.
-  const signIn = await fetch(`${origin}/`);
+  const signIn = await fetch(`${origin}/api/operator/session`);
   const cookie = signIn.headers.get("set-cookie")?.split(";", 1)[0];
-  const csrf = (await signIn.text()).match(
-    /name="csrfToken"[^>]*value="([^"]+)"/,
-  )?.[1];
+  const { csrfToken } = (await signIn.json()) as { csrfToken: string };
   assert.ok(cookie);
-  assert.ok(csrf);
-  const login = await fetch(`${origin}/login`, {
+  assert.ok(csrfToken);
+  const login = await fetch(`${origin}/api/operator/login`, {
     method: "POST",
     headers: {
       cookie,
       origin: authOrigin,
-      "content-type": "application/x-www-form-urlencoded",
+      "content-type": "application/json",
+      "x-csrf-token": csrfToken,
     },
-    body: new URLSearchParams({ password, csrfToken: csrf }),
-    redirect: "manual",
+    body: JSON.stringify({ password }),
   });
-  assert.equal(login.status, 303);
+  assert.equal(login.status, 200);
   const session = login.headers.get("set-cookie")?.split(";", 1)[0];
   assert.ok(session);
   const request = {

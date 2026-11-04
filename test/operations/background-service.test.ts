@@ -1,20 +1,18 @@
+import { syntheticOperatorBundle } from "../fixtures/operator-bundle.js";
+import { OperatorWebBoundary } from "../../src/standalone/operator-web.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DatabaseSync } from "node:sqlite";
-import { DomainStore } from "../../src/core/domain.js";
+import type { DatabaseSync } from "node:sqlite";
 import { defaultExecutionHarness } from "../../src/core/execution-runtime.js";
-import { Store } from "../../src/core/store.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { GitHubSourceReader } from "../../src/standalone/github-source.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../src/standalone/operator.js";
 import { OperatorPush } from "../../src/standalone/operator-push.js";
 import { OperatorWebBundle } from "../../src/standalone/operator-web.js";
 import {
@@ -1115,10 +1113,6 @@ test("an operator fatal notification already latched before its wait closes the 
     const authFile = join(root, "operator-auth.json");
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const service = makeService(data, new FixtureRuntime(), diagnostics);
-    const operatorDb = new DatabaseSync(join(root, "operator.sqlite"));
-    new Store(operatorDb).ensureHost("operator-early-fixture");
-    const domain = new DomainStore(operatorDb);
-    domain.migrate();
     let auth: OperatorAuth | undefined;
     let listener: LocalOperatorHttp | undefined;
     let listenerStops = 0;
@@ -1152,7 +1146,12 @@ test("an operator fatal notification already latched before its wait closes the 
         authCloses++;
         closeAuth();
       };
-      listener = new LocalOperatorHttp(new LocalOperatorUi(domain), auth);
+      listener = new LocalOperatorHttp(auth, {
+        web: new OperatorWebBoundary(
+          await syntheticOperatorBundle(root),
+          new OperatorApi(service),
+        ),
+      });
       const closeListener = listener.stop.bind(listener);
       listener.stop = async () => {
         listenerStops++;
@@ -1200,7 +1199,6 @@ test("an operator fatal notification already latched before its wait closes the 
       if (listener && listenerStops === 0)
         await listener.stop().catch(() => {});
       if (auth && authCloses === 0) auth.close();
-      if (operatorDb.isOpen) operatorDb.close();
       if (serviceDb?.isOpen && originalClose)
         Object.defineProperty(serviceDb, "close", {
           configurable: true,
@@ -1332,11 +1330,10 @@ test("production operator CLI joins an already-fatal service and closes the live
   });
 });
 
-test("operator CLI consumes fatal failures before first accessor and across bundle and push loading", async () => {
+test("operator CLI consumes fatal failures before first accessor and across push loading", async () => {
   await withCapturedIntervals(async (intervals) => {
     for (const timing of [
       "before-first-accessor",
-      "during-bundle-open",
       "during-push-open",
     ] as const) {
       const priorExitCode = process.exitCode;
@@ -1402,10 +1399,6 @@ test("operator CLI consumes fatal failures before first accessor and across bund
           configurable: true,
           value: async (directory: string) => {
             bundleOpens++;
-            if (timing === "during-bundle-open") {
-              loadEntered.resolve();
-              await releaseLoad.promise;
-            }
             return originalBundleOpen.call(OperatorWebBundle, directory);
           },
         });
@@ -1549,7 +1542,7 @@ test("operator CLI consumes fatal failures before first accessor and across bund
         assert.equal(authCloses, 1);
         assert.throws(() => auth!.createAnonymousSession());
         assert.equal(accessorsAfterFatal, 0);
-        assert.equal(bundleOpens, timing === "before-first-accessor" ? 0 : 1);
+        assert.equal(bundleOpens, 1);
         assert.equal(pollInjected, timing === "before-first-accessor");
         assert.equal(diagnostics.length, 1);
         assert.equal(diagnostics[0]?.operation, "github-poll");
@@ -2001,7 +1994,6 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
     const poll = deferred<void>();
     let auth: OperatorAuth | undefined;
     let listener: LocalOperatorHttp | undefined;
-    let operatorDb: DatabaseSync | undefined;
     let stopCount = 0;
     let authCloseCount = 0;
     let serviceStopCount = 0;
@@ -2011,10 +2003,6 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
       await service.start();
       serviceAccess(service).refreshGitHub = () => poll.promise;
 
-      operatorDb = new DatabaseSync(join(root, "operator.sqlite"));
-      new Store(operatorDb).ensureHost("operator-fixture");
-      const domain = new DomainStore(operatorDb);
-      domain.migrate();
       await OperatorAuth.initialize(authFile, "fixture password");
       auth = await OperatorAuth.open({
         authFile,
@@ -2025,10 +2013,12 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
         authCloseCount++;
         originalAuthClose();
       };
-      const actualListener = new LocalOperatorHttp(
-        new LocalOperatorUi(domain),
-        auth,
-      );
+      const actualListener = new LocalOperatorHttp(auth, {
+        web: new OperatorWebBoundary(
+          await syntheticOperatorBundle(root),
+          new OperatorApi(service),
+        ),
+      });
       const originalListenerStop = actualListener.stop.bind(actualListener);
       actualListener.stop = async () => {
         stopCount++;
@@ -2073,7 +2063,6 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
         await service.waitForBackgroundShutdown(notification).catch(() => {});
       await service.stop().catch(() => {});
       if (auth && authCloseCount === 0) auth.close();
-      if (operatorDb?.isOpen) operatorDb.close();
       process.exitCode = priorExitCode;
       rmSync(root, { recursive: true, force: true });
     }

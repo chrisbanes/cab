@@ -1,17 +1,17 @@
 # UI02 foundation contract
 
-The React operator is served at `/app`; `/` and the retained operator forms remain available (the coordination pages are retired). One production operator listener serves the built bundle and same-origin `/api/operator` boundary. The boundary delegates durable writes to existing domain and coordination commands. Receipts prove recorded outcomes only. `observedAt` means server capture, never successful provider sync.
+The React operator is served at `/app`; `/` and every legacy operator page/form route return not-found without redirect or session creation. A validated built web bundle is required before operator service startup. One production operator listener serves the built bundle and same-origin `/api/operator` boundary. The boundary delegates durable writes to existing domain and coordination commands. Receipts prove recorded outcomes only. `observedAt` means server capture, never successful provider sync.
 
-## Retained-control inventory
+## Control inventory
 
-Each semicolon-separated control has an individual disposition. Project controls use the listed React destinations and JSON commands; the legacy project route and its exclusive form handlers are absent. Shared form capabilities remain. Coordination task and assignment controls use their task-view destinations. JSON readiness says whether a curated JSON adapter exists. [UI06 configuration and recovery](ui06-configuration.md) records the individual control dispositions.
+Each semicolon-separated control has an individual disposition. Project controls use the listed React destinations and JSON commands; the legacy project route and its exclusive form handlers are absent. Shared domain commands remain through JSON and CLI. Coordination task and assignment controls use their task-view destinations. JSON readiness says whether a curated JSON adapter exists. [UI06 configuration and recovery](ui06-configuration.md) records the individual control dispositions.
 
-| Existing destination | Command/action | Controls/read destinations | React surface or retained destination | JSON readiness |
+| Existing destination | Command/action | Controls/read destinations | React surface or supported destination | JSON readiness |
 | --- | --- | --- | --- | --- |
-| / | project.create | create project; name; lead | Settings | no |
-| / | profile.create | create profile; name; instructions; capabilities | Settings | no |
+| Project creation | project.create | create project; name; lead | Settings | yes |
+| Profile creation | profile.create | create profile; name; instructions; capabilities | Settings | yes |
 | Project Settings | project.configure | name; lead; instructions; pause | `/app/projects/:id/settings` | yes |
-| /profile/:id | profile.configure | name; instructions; capabilities; revoke | Settings | no |
+| Profile Settings | profile.configure | name; instructions; capabilities; revoke | Settings | yes |
 | Project Settings | routing.configure | enable; guidance; candidates; set/clear credential reference | `/app/projects/:id/settings?tab=routing` | yes |
 | Project Settings | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | `/app/projects/:id/settings?tab=github` | yes |
 | Project Settings | repositories.configure | repositories | `/app/projects/:id/settings?tab=repositories` | yes |
@@ -25,7 +25,7 @@ Each semicolon-separated control has an individual disposition. Project controls
 | Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
 | /app/tasks/:id | task.configure | local title; outcome; readiness | Task header Edit task… | yes |
 | /app/tasks/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Task Overview decision card and inspector | yes |
-| /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
+| Runtime Settings | capacity.configure | global capacity; project override; remove override | Settings (Runtime) | yes |
 | /app/tasks/:id | dependency.add | local dependency add | Task Execution tab | yes |
 | /app/tasks/:id | dependency.remove | local dependency remove | Task Execution tab | yes |
 | /app/tasks/:id | assignment.apply | apply project instructions and profile revisions | Task inspector stale started assignment row | yes |
@@ -38,24 +38,31 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /app/tasks/:id | read | retained captured history; omissions; results | Task conversation | yes |
 | /app/tasks/:id | question.answer | plain question and exact revision answer | Inbox and task request view | yes |
 | /app/tasks/:id | approval.decide | retained exact material; approve; deny | Task request view | yes |
-| /login | /login | password sign-in | Sign-in | yes |
-| all authenticated views | /logout | sign-out | Account menu | yes |
-| all views | navigation | delivered overview/project List/Board/composer; retained profile/Runtime destinations | App shell and retained destinations | curated reads |
+| /login | /api/operator/login | password sign-in | Sign-in | yes |
+| all authenticated views | /api/operator/logout | sign-out | Account menu | yes |
+| all views | navigation | delivered overview/project List/Board/composer; profile/Runtime Settings destinations | App shell | curated reads |
 
 The delivery rows describe the structured Delivery tab, with curated JSON reads, `delivery.configure` and minimal receipts. All 16 action kinds, optional scopes, required-check app bindings and absent versus empty prefixes retain their existing meanings. Unavailable saved rows and prefix are preserved without revealing them. The task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
 
-Jira source definitions and readiness use the existing source Settings section, selected by the saved tracker or `?tab=github&tracker=jira`. Source and repository rows withheld by exclusions remain keep/remove placeholders bound to project, section, version and ordinal. An unsafe optional status-mapping view is omitted as a whole, leaving the persisted mapping unchanged. A missing view is not an editable empty mapping. The legacy project route, four links and eight exclusive form handlers are absent. Project Settings and the task composer provide the current controls; shared task creation and other retained form capabilities remain.
+Jira source definitions and readiness use the existing source Settings section, selected by the saved tracker or `?tab=github&tracker=jira`. Source and repository rows withheld by exclusions remain keep/remove placeholders bound to project, section, version and ordinal. An unsafe optional status-mapping view is omitted as a whole, leaving the persisted mapping unchanged. A missing view is not an editable empty mapping. The legacy project route, four links and eight exclusive form handlers are absent. Project Settings and the task composer provide the current controls; shared task creation and other domain commands remain through JSON and CLI.
 
-Historical pre-turn and no-turn adoption routes have no rendered form or React control; bound-turn reconciliation is available in Assignment recovery. The host operator supplies the reviewed evidence and exact command material under the existing Origin, session and CSRF checks; model tools have no adoption authority. The operator CLI reaches the same service methods through receipted `recovery.*` commands on `/api/operator/commands`; a command key recorded through either entry point replays through the other, and these session routes stay closed to bearer credentials.
+Historical pre-turn and no-turn adoption use receipted JSON/CLI recovery commands;
+bound-turn reconciliation is available in React Assignment Recovery. The operator
+supplies reviewed exact evidence; model tools have no adoption authority. Session
+commands preserve Origin/CSRF protections and bearer commands preserve their
+explicit scope policy. Original keys/payloads recorded through removed form routes
+still replay their original receipts through JSON without another effect. The
+legacy cross-project admission summary is dropped deliberately; List/Board per-task
+waiting reasons and project views replace it.
 
 | Advanced route | Owner and disposition |
 | --- | --- |
-| `/runtime/control/pre-turn/adopt` | historical pre-turn evidence adoption; exact held generation, operator attestation and immutable command receipt. Witness acknowledgement appears on the assignment recovery view. |
-| `/runtime/control/pre-turn/recover` | exact witness-bound recovery; independently verified termination and settled effects/workspace reconcile ownership without dispatch. Assignment recovery records the receipt and retained holds. |
-| `/runtime/control/no-turn/adopt` | distinct historical no-turn-submission evidence adoption; reviewed complete invocation ledger and exact known-null-predecessor generation. Assignment recovery acknowledges the witness while retaining possible idle-thread creation. |
-| `/runtime/control/no-turn/recover` | exact no-turn witness-bound recovery; verified process termination and settled effects/workspace reconcile ownership without dispatch. Separate conversation replacement and NEW message remain required; no model tool authority or new forms in the curated operator UI. |
-| `/runtime/control/bound-turn/review`, `/runtime/control/bound-turn/check`, `/runtime/control/bound-turn/recover` | retained review, original receipt check and exact recovery; return links open Assignment recovery. |
-| `/runtime/control/conversation-replace` | explicit recovery counterpart; assignment/conversation revision checks and immutable keyed result prevent duplicate increments. Fresh operator message remains separately required for continuation. |
+| `recovery.pre-turn.adopt` | historical pre-turn evidence adoption; exact held generation, operator attestation and immutable command receipt. Witness acknowledgement appears on the assignment recovery view. |
+| `recovery.pre-turn.recover` | exact witness-bound recovery; independently verified termination and settled effects/workspace reconcile ownership without dispatch. Assignment recovery records the receipt and retained holds. |
+| `recovery.no-turn.adopt` | distinct historical no-turn-submission evidence adoption; reviewed complete invocation ledger and exact known-null-predecessor generation. Assignment recovery acknowledges the witness while retaining possible idle-thread creation. |
+| `recovery.no-turn.recover` | exact no-turn witness-bound recovery; verified process termination and settled effects/workspace reconcile ownership without dispatch. Separate conversation replacement and NEW message remain required; no model tool authority or new forms in the curated operator UI. |
+| `recovery.bound-turn.recover` and original operation GET | React Assignment Recovery owns exact review/cancel/confirmation and frozen original-receipt GET readback; JSON and CLI preserve keyed recovery and independent holds. |
+| `recovery.conversation.replace` | explicit recovery counterpart; assignment/conversation revision checks and immutable keyed result prevent duplicate increments. Fresh operator message remains separately required for continuation. |
 
 Programmatic support (no new HTTP exposure):
 

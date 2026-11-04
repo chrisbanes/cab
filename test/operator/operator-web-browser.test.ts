@@ -649,6 +649,7 @@ test("React shell Inbox poll surfaces a runtime failure on its own", async (_t, 
   f.runtime.crash();
   await page.clock.fastForward(16000);
   await banner.waitFor();
+  await screenshot(page, "1366-runtime-unavailable");
 });
 
 browserTest(

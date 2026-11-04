@@ -783,109 +783,6 @@ nav {
   overflow-wrap: anywhere;
 }
 
-.legacy-operator {
-  min-height: 100dvh;
-  padding: var(--space-20);
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-}
-
-.legacy-operator nav {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-12);
-  padding-bottom: var(--space-16);
-  margin-bottom: var(--space-24);
-  border-bottom: 1px solid var(--border);
-}
-
-.legacy-operator main {
-  max-width: 900px;
-}
-
-.legacy-operator pre {
-  max-width: 100%;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.legacy-operator h1,
-.legacy-operator h2,
-.legacy-operator h3 {
-  font-size: var(--type-lg);
-  font-weight: var(--weight-semibold);
-  line-height: var(--leading-1-25);
-}
-
-.legacy-operator form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-12);
-  margin-block: var(--space-16);
-}
-
-.legacy-operator label {
-  display: flex;
-  min-width: min(100%, 220px);
-  flex-direction: column;
-  gap: var(--space-8);
-  font-size: var(--type-sm);
-  line-height: var(--leading-1-5);
-}
-
-.legacy-operator input:not([type="hidden"]):not([type="checkbox"]),
-.legacy-operator select,
-.legacy-operator textarea {
-  min-width: 0;
-  min-height: 32px;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-lg);
-  padding: 6px 10px;
-  background: var(--nova-input-bg);
-  color: var(--foreground);
-  font:
-    var(--weight-medium) var(--type-sm) / var(--leading-1-25) var(--font-sans);
-}
-
-.legacy-operator textarea {
-  min-height: 96px;
-  resize: vertical;
-}
-
-.legacy-operator input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--foreground);
-}
-
-.legacy-operator button,
-.legacy-operator input[type="submit"] {
-  min-height: 32px;
-  border: 1px solid var(--primary);
-  border-radius: var(--radius-lg);
-  padding: 6px 10px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font: 500 var(--type-sm) / var(--leading-1-25) var(--font-sans);
-  cursor: pointer;
-}
-
-.legacy-operator button:disabled,
-.legacy-operator input:disabled,
-.legacy-operator select:disabled,
-.legacy-operator textarea:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.legacy-operator :focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
 @media (max-width: 1120px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
@@ -1014,21 +911,6 @@ nav {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .legacy-operator {
-    padding: var(--space-16);
-  }
-
-  .legacy-operator form {
-    align-items: stretch;
-  }
-
-  .legacy-operator form > button,
-  .legacy-operator input:not([type="hidden"]):not([type="checkbox"]),
-  .legacy-operator select,
-  .legacy-operator textarea {
-    min-height: 44px;
   }
 
   [data-slot="button"] {

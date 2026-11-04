@@ -112,11 +112,9 @@ function parseWorkspaceInspectionQuery(
 export class OperatorWebBundle {
   private constructor(
     private readonly files: ReadonlyMap<string, { body: Buffer; type: string }>,
-    readonly stylesheets: readonly string[],
   ) {}
   static async open(directory: string) {
     const files = new Map<string, { body: Buffer; type: string }>();
-    const stylesheets: string[] = [];
     const root = await lstat(directory);
     if (!root.isDirectory() || root.isSymbolicLink())
       throw Error("Operator build unavailable");
@@ -179,10 +177,8 @@ export class OperatorWebBundle {
         !files.has(match[1])
       )
         throw Error("Operator build references unavailable asset");
-      if (match[0].startsWith("href=") && match[1].endsWith(".css"))
-        stylesheets.push(match[1]);
     }
-    return new OperatorWebBundle(files, Object.freeze(stylesheets));
+    return new OperatorWebBundle(files);
   }
   asset(path: string) {
     return this.files.get(path);

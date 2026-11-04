@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-test("built React assets, JSON and retained routes share one service listener and receipts survive restart", async (t) => {
+test("built React assets and JSON share one service listener and receipts survive restart", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const web = await f.startWeb();
@@ -41,7 +41,6 @@ test("built React assets, JSON and retained routes share one service listener an
   for (const asset of assets)
     assert.equal((await fetch(`${web.origin}${asset}`)).status, 200);
   for (const path of [
-    "/runtime",
     "/app",
     `/app/projects/${projectId}`,
     "/api/operator/workspace",

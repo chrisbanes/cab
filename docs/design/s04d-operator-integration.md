@@ -1,17 +1,18 @@
 # S04d operator integration
 
-The runtime operator routes sit on top of the authenticated
-local UI foundation in [S04c](s04c-operator-ui.md). The production `operator`
-command registers the runtime route slot with the same `LocalOperatorHttp` instance;
-they therefore inherit its login, exact-Origin, CSRF, input parsing, safe
-redirect and response-header behavior. The adapters receive service/domain
-interfaces, not raw HTTP request or response objects.
+The production `operator` command validates the required web bundle before
+starting the service, then mounts `OperatorWebBoundary` and `OperatorApi` on the
+same `LocalOperatorHttp` listener described in [S04c](s04c-operator-ui.md).
+The React application uses the authenticated JSON API for runtime reads and keyed
+commands, preserving session, exact-Origin, CSRF, input validation and response-header
+protections. API adapters receive service/domain interfaces rather than raw HTTP
+request or response objects.
 
 ## Runtime operator view
 
-The Runtime overview reports configured global/default/effective project
-capacity and current reservations. Its forms configure the global and optional
-project limit. Task and assignment views show selected, queued, admitted,
+React Runtime settings report configured global/default/effective project
+capacity and current reservations, and submit the keyed `capacity.configure` JSON
+command for the global limit and optional project overrides. Task and assignment views show selected, queued, admitted,
 running, stopping, held and completed evidence, local task dependencies,
 captured profile/instruction revisions and the explicit apply-for-next-turn
 action. Task controls add/remove local dependency edges, request current
@@ -63,10 +64,10 @@ credential reference, not a configured credential.
 ## Verification boundary
 
 Deterministic adapter tests use real SQLite and fake only the runtime boundary.
-The HTTP integration test registers the production adapter routes on a real
-loopback server and checks pre-login confidentiality, unauthenticated writes,
-exact Origin and CSRF refusals, malformed and duplicate field rejection, safe
-shared response headers, and idempotent capacity submission. Chromium exercises the task view and the production JSON commands for dependency, instruction Apply and Stop/Resume; coordination writes are covered through the operator API and the task view's browser tests.
+The HTTP integration tests serve the required bundle and JSON API on a real
+loopback listener, checking pre-login confidentiality, unauthenticated writes,
+exact Origin and CSRF refusals, malformed JSON rejection, safe shared response
+headers, removed-path not-found/no-session behavior and keyed receipt replay. Chromium exercises the task view and the production JSON commands for dependency, instruction Apply and Stop/Resume; coordination writes are covered through the operator API and the task view's browser tests.
 
 The opt-in [`test/operator/integration-qualification/live-operator.mjs`](../../test/operator/integration-qualification/live-operator.mjs)
 uses a disposable service with the real Codex App Server, generated local

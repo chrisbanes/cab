@@ -10,10 +10,7 @@ import {
 } from "../../src/standalone/operator-web.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../src/standalone/operator.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { createControlledPasswordDeriver } from "../fixtures/operator-auth-concurrency.js";
@@ -51,27 +48,17 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
   });
   t.after(() => auth.close());
   const bundle = await OperatorWebBundle.open(bundlePath);
-  assert.deepEqual(bundle.stylesheets, ["/assets/main.css"]);
   assert.equal(bundle.asset("/favicon.svg")?.type, "image/svg+xml");
-  const http = new LocalOperatorHttp(
-    new LocalOperatorUi(f.service.domain()),
-    auth,
-    {
-      web: new OperatorWebBoundary(
-        bundle,
-        new OperatorApi(f.service, [f.directory]),
-      ),
-    },
-  );
+  const http = new LocalOperatorHttp(auth, {
+    web: new OperatorWebBoundary(
+      bundle,
+      new OperatorApi(f.service, [f.directory]),
+    ),
+  });
   const port = await http.start();
   t.after(() => http.stop());
   const origin = `http://127.0.0.1:${port}`;
   assert.equal((await fetch(`${origin}/app`)).status, 200);
-  const loginPage = await fetch(`${origin}/runtime`);
-  const loginHtml = await loginPage.text();
-  assert.equal(loginPage.status, 200);
-  assert.match(loginHtml, /<body class="legacy-operator">/);
-  assert.match(loginHtml, /<link rel="stylesheet" href="\/assets\/main\.css">/);
   const stylesheet = await fetch(`${origin}/assets/main.css`);
   assert.equal(stylesheet.status, 200);
   assert.match(stylesheet.headers.get("content-type") ?? "", /text\/css/);
@@ -400,16 +387,12 @@ test("HTTPS configured origin retains Secure host-only cookie and rejects loopba
   const configured = "https://ensemble.fixture.ts.net";
   const auth = await OperatorAuth.open({ authFile, origin: configured });
   t.after(() => auth.close());
-  const http = new LocalOperatorHttp(
-    new LocalOperatorUi(f.service.domain()),
-    auth,
-    {
-      web: new OperatorWebBoundary(
-        await OperatorWebBundle.open(path),
-        new OperatorApi(f.service, [f.directory]),
-      ),
-    },
-  );
+  const http = new LocalOperatorHttp(auth, {
+    web: new OperatorWebBoundary(
+      await OperatorWebBundle.open(path),
+      new OperatorApi(f.service, [f.directory]),
+    ),
+  });
   const port = await http.start();
   t.after(() => http.stop());
   const origin = `http://127.0.0.1:${port}`;
@@ -464,16 +447,12 @@ test("JSON login settles concurrent, duplicate, and stale attempts with generic 
     derivePassword: deriver.derivePassword,
   });
   const bundle = await OperatorWebBundle.open(bundlePath);
-  const http = new LocalOperatorHttp(
-    new LocalOperatorUi(f.service.domain()),
-    auth,
-    {
-      web: new OperatorWebBoundary(
-        bundle,
-        new OperatorApi(f.service, [f.directory]),
-      ),
-    },
-  );
+  const http = new LocalOperatorHttp(auth, {
+    web: new OperatorWebBoundary(
+      bundle,
+      new OperatorApi(f.service, [f.directory]),
+    ),
+  });
   const pendingRequests: Promise<Response>[] = [];
   try {
     const port = await http.start();
@@ -621,7 +600,6 @@ test("only sign-in surfaces start a session: favicon and unknown paths never min
   for (const path of [
     "/favicon.ico",
     "/robots.txt",
-    "/logout",
     "/no-such-page",
     "/project",
     "/projectx",

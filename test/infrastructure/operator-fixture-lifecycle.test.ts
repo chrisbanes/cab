@@ -55,7 +55,7 @@ test("rejected disconnected browser close retains dependent fixture resources", 
       false,
       "Disconnected Playwright mock leaves the real HTTP client live",
     );
-    assert.equal((await fetch(web.origin)).status, 200);
+    assert.equal((await fetch(`${web.origin}/app`)).status, 200);
     assert.ok(fixture.service.domain());
   } finally {
     peer.destroy();
@@ -199,7 +199,7 @@ test("a stalled web startup retains its resources while an independent listener 
   try {
     await assert.rejects(fixture.startWeb(), /listener-2.start: timed-out/);
     await assert.rejects(fixture.close(), /web-2.cleanup: dependency-skipped/);
-    await assert.rejects(fetch(first.origin));
+    await assert.rejects(fetch(`${first.origin}/app`));
     await access(fixture.directory);
     assert.ok(fixture.service.domain());
     for (const name of [
@@ -480,8 +480,8 @@ test("stalled listener close bounds both entry points and retains a late rejecti
       attempts.filter((name) => name === "listener-2.close").length,
       1,
     );
-    assert.equal((await fetch(first.origin)).status, 200);
-    await assert.rejects(fetch(second.origin));
+    assert.equal((await fetch(`${first.origin}/app`)).status, 200);
+    await assert.rejects(fetch(`${second.origin}/app`));
     await access(fixture.directory);
     reject(Error("Injected late listener rejection"));
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -530,7 +530,7 @@ test("a stalled browser close remains uncertain until its eventual completion", 
     await assert.rejects(fixture.close(), /browser.close: timed-out/);
     assert.equal(attempts, 1);
     await access(fixture.directory);
-    assert.equal((await fetch(web.origin)).status, 200);
+    assert.equal((await fetch(`${web.origin}/app`)).status, 200);
     const step = fixture.lifecycle.steps.find(
       (step) => step.name === "browser.close",
     );
@@ -593,7 +593,7 @@ browserTest(
         code: "ESRCH",
       });
       await assert.rejects(access(fixture.directory));
-      await assert.rejects(fetch(web.origin));
+      await assert.rejects(fetch(`${web.origin}/app`));
     } finally {
       await killBrowser(browser).catch(() => undefined);
       await fixture.close().catch(() => undefined);
@@ -641,8 +641,8 @@ test("one rejected listener preserves the primary assertion and closes an indepe
       attempts.filter((name) => name === "listener-2.close").length,
       1,
     );
-    assert.equal((await fetch(first.origin)).status, 200);
-    await assert.rejects(fetch(second.origin));
+    assert.equal((await fetch(`${first.origin}/app`)).status, 200);
+    await assert.rejects(fetch(`${second.origin}/app`));
     await access(fixture.directory);
     assert.ok(fixture.service.domain());
     rejectClose = false;

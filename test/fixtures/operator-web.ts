@@ -20,10 +20,7 @@ import type {
   RuntimeTurnSettings,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   OperatorPush,
@@ -31,8 +28,6 @@ import {
 } from "../../src/standalone/operator-push.js";
 import { serviceReadiness } from "../../src/standalone/readiness.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import {
   OperatorWebBoundary,
@@ -490,8 +485,7 @@ export async function createOperatorFixture<
         });
         const auth = owned.auth;
         if (!auth) throw Error("Fixture authentication unavailable");
-        const routes = new OperatorRouteRegistry();
-        routes.registerSlot("runtime", runtimeOperatorRoutes(service));
+
         let bundle!: OperatorWebBundle;
         await start(`bundle-${id}.open`, async () => {
           bundle = await OperatorWebBundle.open(
@@ -524,26 +518,14 @@ export async function createOperatorFixture<
           store: service.operatorPush(),
           keyFile: join(directory, "operator-push-vapid.json"),
         });
-        const http = new LocalOperatorHttp(
-          new LocalOperatorUi(
-            service.domain(),
-            readerFactory ??
-              ((reference) => service.gitHubSourceReader(reference)),
-            service.githubSources(),
-            () => service.refreshGitHub(),
-            (projectId) => service.gitHubSourceCredentialStatus(projectId),
-          ),
-          auth,
-          {
-            routes,
-            credentials: service.operatorCredentials(),
-            push,
-            web: new OperatorWebBoundary(bundle, api, {
-              read: () => (readReadiness ? readReadiness() : readiness.read()),
-              claudeToken: () => readiness.claudeToken(),
-            }),
-          },
-        );
+        const http = new LocalOperatorHttp(auth, {
+          credentials: service.operatorCredentials(),
+          push,
+          web: new OperatorWebBoundary(bundle, api, {
+            read: () => (readReadiness ? readReadiness() : readiness.read()),
+            claudeToken: () => readiness.claudeToken(),
+          }),
+        });
         owned.http = http;
         await start(`listener-${id}.start`, async () => {
           await http.start(port);

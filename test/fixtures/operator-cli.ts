@@ -6,18 +6,13 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { serviceReadiness } from "../../src/standalone/readiness.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import type { OperatorPush } from "../../src/standalone/operator-push.js";
-import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
 } from "../../src/standalone/operator-web.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../src/standalone/operator.js";
 import { harness } from "./cli-harness.js";
 import { createOperatorFixture } from "./operator-web.js";
 import { createReleaseDeliveryFixture } from "./delivery-integration.js";
@@ -113,9 +108,6 @@ export async function serveCli<F extends Fixture>(
   t.after(() => auth.close());
   const bundle = await OperatorWebBundle.open(bundlePath);
   const build = () => {
-    // The retained keyless Stop and Resume forms, for entry-point parity.
-    const routes = new OperatorRouteRegistry();
-    routes.registerSlot("runtime", runtimeOperatorRoutes(f.service));
     const api = new OperatorApi(
       f.service,
       options.controlPaths ?? [f.directory],
@@ -127,31 +119,19 @@ export async function serveCli<F extends Fixture>(
         ...options.setup,
       },
     );
-    return new LocalOperatorHttp(
-      new LocalOperatorUi(
-        f.service.domain(),
-        options.previewReader ??
-          ((reference) => f.service.gitHubSourceReader(reference)),
-        f.service.githubSources(),
-        () => f.service.refreshGitHub(),
-        (projectId) => f.service.gitHubSourceCredentialStatus(projectId),
+    return new LocalOperatorHttp(auth, {
+      credentials: f.service.operatorCredentials(),
+      localAccess: f.service.localAccess(),
+      ...(options.push ? { push: options.push } : {}),
+      web: new OperatorWebBoundary(
+        bundle,
+        api,
+        serviceReadiness(f.service, api, {
+          dataDir: join(f.directory, "data"),
+          authFile,
+        }),
       ),
-      auth,
-      {
-        routes,
-        credentials: f.service.operatorCredentials(),
-        localAccess: f.service.localAccess(),
-        ...(options.push ? { push: options.push } : {}),
-        web: new OperatorWebBoundary(
-          bundle,
-          api,
-          serviceReadiness(f.service, api, {
-            dataDir: join(f.directory, "data"),
-            authFile,
-          }),
-        ),
-      },
-    );
+    });
   };
   let http = build();
   const port = await http.start();
@@ -189,18 +169,6 @@ export async function serveCli<F extends Fixture>(
   if (r.status !== 200) throw Error(`login failed ${r.status}`);
   cookie = r.headers.get("set-cookie")?.split(";")[0] ?? "";
   csrf = ((await r.json()) as { csrfToken: string }).csrfToken;
-  /** A retained HTML form post (urlencoded, session and CSRF). */
-  const sessionForm = (path: string, fields: Record<string, string>) =>
-    fetch(`${origin}${path}`, {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        cookie,
-        origin: authOrigin,
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ ...fields, csrfToken: csrf }).toString(),
-    });
   const sessionGet = (path: string) =>
     fetch(`${origin}${path}`, { headers: { cookie } });
   const issue = async (
@@ -252,7 +220,6 @@ export async function serveCli<F extends Fixture>(
       return cookie;
     },
     sessionPost,
-    sessionForm,
     sessionGet,
     issue,
     bearer,
