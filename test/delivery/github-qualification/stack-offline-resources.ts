@@ -1005,6 +1005,17 @@ process.exit(r.status ?? 1);
   const preparationTrace = trace.splice(0);
   return {
     guard,
+    offline: {
+      mode: "offline-only" as const,
+      runtime: () => {
+        throw Error("offline-prefix-runtime-not-granted");
+      },
+      termination: {
+        verify: async () => {
+          throw Error("offline-prefix-termination-not-granted");
+        },
+      },
+    },
     preparationTrace,
     trace,
     providerHeads,

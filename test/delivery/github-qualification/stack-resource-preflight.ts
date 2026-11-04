@@ -272,6 +272,7 @@ export function sourceReferenceMatches(
 
 export async function verifyPreparedStackResources(
   authority: StackV2Authority,
+  executionMode: "native" | "offline-only" = "native",
 ) {
   authority.current();
   const m = authority.manifest,
@@ -280,7 +281,7 @@ export async function verifyPreparedStackResources(
     throw Error("v2-credential-reference-not-supported");
   if (
     !authority.hasBoundInputs() ||
-    process.platform !== "darwin" ||
+    (executionMode !== "offline-only" && process.platform !== "darwin") ||
     authority.readiness.hostId !== hostname()
   )
     throw Error("v2-host-readiness");

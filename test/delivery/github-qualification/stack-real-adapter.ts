@@ -31,7 +31,7 @@ export async function createRealStackAdapter(
 ) {
   await authority.open();
   try {
-    await verifyPreparedStackResources(authority);
+    await verifyPreparedStackResources(authority, offline?.mode);
     authority.current();
   } catch (error) {
     await authority.close();

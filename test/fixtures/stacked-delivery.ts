@@ -308,10 +308,17 @@ export async function stackedDeliveryFixture(
         .some((b) => b.taskId === taskId)
     )
       return [];
-    const binding = await service.taskWorkspace(taskId);
-    if (!binding) return [];
-    const path = realpathSync(binding.path);
-    return turns.filter((turn) => turn.workspace === path);
+    // Observe persisted task/turn bindings without taking provisioning's task lock or running Git.
+    const workIds = new Set(
+      service.turnRequestsForTask(taskId).map((work) => work.workId),
+    );
+    const turnIds = new Set(
+      service
+        .list()
+        .filter((intent) => workIds.has(intent.workId))
+        .map((intent) => intent.turnId),
+    );
+    return turns.filter((turn) => turnIds.has(turn.turnId));
   };
   /** The task's `count`th turn, once it runs. */
   const waitTurn = async (taskId: string, count = 1) => {

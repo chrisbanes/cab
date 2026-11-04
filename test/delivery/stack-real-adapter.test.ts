@@ -33,6 +33,7 @@ test("concrete stack adapter constructs the actual service and previews through 
         dispatches++;
         return f.transport(...args);
       },
+      f.offline,
     );
     assert.equal(lookups, 1);
     assert.equal(dispatches, 3);
@@ -115,9 +116,14 @@ test("preaborted concrete journey never invokes factory, credential or provider"
     runRealStackJourney({
       authority: f.guard,
       signal: controller.signal,
-      factory: async (...args) => {
+      factory: async (authority, credential, transport) => {
         factories++;
-        return createRealStackAdapter(...args);
+        return createRealStackAdapter(
+          authority,
+          credential,
+          transport,
+          f.offline,
+        );
       },
       credential: async () => {
         credentials++;
@@ -160,8 +166,13 @@ for (const phase of ["credential", "provider", "constructed"] as const)
       const running = runRealStackJourney({
         authority: f.guard,
         signal: controller.signal,
-        factory: async (...args) => {
-          const adapter = await createRealStackAdapter(...args);
+        factory: async (authority, credential, transport) => {
+          const adapter = await createRealStackAdapter(
+            authority,
+            credential,
+            transport,
+            f.offline,
+          );
           constructed++;
           if (phase === "constructed") {
             entered();
@@ -288,4 +299,28 @@ test("merge gate requires both exact initial registrations and successful curren
     () => assertInitialStackReports(authority),
     /initial-registration-report/,
   );
+});
+
+test("native stack adapter refuses a non-macOS host before credential or provider access", {
+  skip: process.platform === "darwin",
+}, async (t) => {
+  const f = await offlineStackResources(t, true);
+  let lookups = 0,
+    dispatches = 0;
+  await assert.rejects(
+    createRealStackAdapter(
+      f.guard,
+      async () => {
+        lookups++;
+        return "offline-injected-marker";
+      },
+      async () => {
+        dispatches++;
+        throw Error("native-provider-must-not-dispatch");
+      },
+    ),
+    /v2-host-readiness/,
+  );
+  assert.deepEqual({ lookups, dispatches }, { lookups: 0, dispatches: 0 });
+  assert.equal(f.guard.snapshot().closed, true);
 });
