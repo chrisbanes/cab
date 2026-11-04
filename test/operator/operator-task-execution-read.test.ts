@@ -121,18 +121,47 @@ async function seed() {
     blockerId,
     candidateId,
     projectId,
+    workerId,
     leadAssignment,
     workerAssignment,
   };
 }
 
 test("assignment recovery projects the fenced task facts while keeping records assignment-scoped", async (t) => {
-  const { f, api, taskId, leadAssignment, workerAssignment } = await seed();
+  const {
+    f,
+    api,
+    taskId,
+    projectId,
+    workerId,
+    leadAssignment,
+    workerAssignment,
+  } = await seed();
   t.after(() => f.close());
+  const d = f.service.domain();
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(d.project(projectId).version),
+    instructions: "New project instructions",
+  });
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: workerId,
+    expectedVersion: Number(d.profile(workerId).version),
+    instructions: "New worker instructions",
+  });
   f.seedPersistedState((db) => {
     db.prepare(
       "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)",
     ).run(taskId, "Held for private review");
+    db.prepare(
+      "UPDATE domain_assignments SET resultDestination = ? WHERE id = ?",
+    ).run("private destination", workerAssignment);
   });
   const task = (await api.readTask(taskId)).data;
   const lead = (await api.readAssignmentRecovery(leadAssignment)).data;
@@ -150,14 +179,12 @@ test("assignment recovery projects the fenced task facts while keeping records a
     assert.equal(recovery.holds.writer, true);
     assert.equal(recovery.holds.capacity, true);
     assert.equal(recovery.holds.uncertainty, true);
-    assert.equal(
-      JSON.stringify({
-        execution: recovery.execution,
-        lead: recovery.lead,
-        taskHold: recovery.taskHold,
-      }).includes("PRIVATE"),
-      false,
-    );
+    const added = JSON.stringify({
+      execution: recovery.execution,
+      lead: recovery.lead,
+      taskHold: recovery.taskHold,
+    });
+    assert.doesNotMatch(added, /threadId|turnId|processId|PRIVATE/);
   }
   assert.equal(lead.omittedCount, 1);
   assert.equal(lead.records.length, 20);
@@ -167,9 +194,23 @@ test("assignment recovery projects the fenced task facts while keeping records a
     "worker-record-2",
     "worker-record-3",
   ]);
-  assert.equal(worker.assignment.resultDestination, "operator");
+  assert.equal(lead.assignment.resultDestination, "operator");
+  assert.equal(worker.assignment.resultDestination, "[redacted] destination");
+  assert.equal(worker.assignment.state, "pending");
+  assert.equal(worker.assignment.started, true);
+  assert.equal(worker.assignment.instructionsRevision, 1);
+  assert.equal(worker.assignment.currentInstructionsRevision, 2);
+  assert.equal(worker.assignment.profileRevision, 1);
+  assert.equal(worker.assignment.currentProfileRevision, 2);
   assert.equal(worker.execution.state, "stopping");
   assert.equal(lead.taskHold?.reason, "Held for [redacted] review");
+  await f.service.resumeTask(taskId);
+  const uncertain = (await api.readTask(taskId)).data.execution;
+  assert.equal(uncertain.state, "uncertain");
+  assert.deepEqual(
+    (await api.readAssignmentRecovery(workerAssignment)).data.execution,
+    uncertain,
+  );
 });
 
 test("assignment recovery retains null and withheld task facts from the task read", async (t) => {
