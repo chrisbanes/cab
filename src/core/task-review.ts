@@ -1,3 +1,7 @@
+import {
+  assertOwnedTaskWritable,
+  taskAcceptsWrites,
+} from "./project-lifecycle.js";
 import { DomainConflictError } from "./domain-errors.js";
 import { createHash, randomUUID } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
@@ -61,6 +65,10 @@ export class TaskReviewStore {
         .all(cursor) as Row[];
       for (const row of rows) {
         const taskId = String(row.id);
+        if (!taskAcceptsWrites(this.db, taskId)) {
+          cursor = Number(row.cursor);
+          continue;
+        }
         if (
           !this.db
             .prepare("SELECT 1 FROM task_review_sources WHERE taskId=? LIMIT 1")
@@ -109,6 +117,10 @@ export class TaskReviewStore {
         const source = sourceSnapshotSchema.parse(
           JSON.parse(String(row.recordJson)),
         );
+        if (!taskAcceptsWrites(this.db, source.taskId)) {
+          cursor = Number(row.cursor);
+          continue;
+        }
         this.db
           .prepare(
             "INSERT OR IGNORE INTO task_review_search VALUES(?,?,?,?,?,?,?,?)",
@@ -138,6 +150,10 @@ export class TaskReviewStore {
         )
         .all(cursor) as Row[];
       for (const row of rows) {
+        if (!taskAcceptsWrites(this.db, String(row.taskId))) {
+          cursor = Number(row.cursor);
+          continue;
+        }
         const existing = this.db
           .prepare(
             "SELECT recordJson FROM task_review_results WHERE resultId=?",
@@ -375,14 +391,16 @@ export class TaskReviewStore {
   ) {
     if (!entries.length) return [];
     const snapshot = this.snapshot();
-    return entries.map((entry) =>
-      this.captureSourceWithSnapshot(
-        entry.taskId,
-        entry.kind,
-        entry.supplied,
-        snapshot,
-      ),
-    );
+    return entries
+      .filter((entry) => taskAcceptsWrites(this.db, entry.taskId))
+      .map((entry) =>
+        this.captureSourceWithSnapshot(
+          entry.taskId,
+          entry.kind,
+          entry.supplied,
+          snapshot,
+        ),
+      );
   }
   captureSource(
     taskId: string,
@@ -402,6 +420,7 @@ export class TaskReviewStore {
     supplied: { title: string; body: string } | undefined,
     snapshot: { excluded: readonly string[] | undefined },
   ) {
+    assertOwnedTaskWritable(this.db, taskId);
     const t = this.db
       .prepare(
         "SELECT t.id,t.projectId,t.version,t.outcome,b.title FROM domain_tasks t JOIN tasks b ON b.id=t.id WHERE t.id=?",
@@ -507,6 +526,7 @@ export class TaskReviewStore {
       .prepare("SELECT * FROM domain_assignments WHERE id=?")
       .get(assignmentId) as Row | undefined;
     if (!a) throw Error("Review assignment unavailable");
+    assertOwnedTaskWritable(this.db, String(a.taskId));
     const prior = this.db
       .prepare(
         "SELECT recordJson FROM task_review_contexts WHERE assignmentId=? AND assignmentVersion=? AND workId IS ?",
@@ -574,6 +594,7 @@ export class TaskReviewStore {
     createdAt: number,
     snapshot?: { excluded: readonly string[] | undefined },
   ) {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.db
       .prepare(
         "INSERT OR IGNORE INTO task_review_search VALUES(?,?,?,?,?,?,?,?)",
@@ -779,6 +800,7 @@ export class TaskReviewStore {
     },
     input: unknown,
   ) {
+    assertOwnedTaskWritable(this.db, result.taskId);
     const metadata = reviewMetadataSchema.parse(input);
     const snapshot = { excluded: this.exclusions() };
     if (
@@ -1095,6 +1117,7 @@ export class TaskReviewStore {
         if (prior.material !== material)
           throw new DomainConflictError("Viewing key reused");
       } else {
+        assertOwnedTaskWritable(this.db, taskId);
         this.db
           .prepare(
             "INSERT INTO task_review_viewed VALUES(?,?) ON CONFLICT(taskId) DO UPDATE SET recordJson=excluded.recordJson",

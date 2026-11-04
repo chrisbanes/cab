@@ -1,3 +1,7 @@
+import {
+  workAcceptsWrites,
+  ProjectArchivedError,
+} from "../core/project-lifecycle.js";
 import type { Database } from "../core/store.js";
 import type { Runtime } from "./codex.js";
 import type { ExecutionState } from "./state.js";
@@ -12,6 +16,10 @@ export class ConversationArchival {
     private readonly state: ExecutionState,
     private readonly busy: (workId: string) => boolean,
     private readonly accepting: () => boolean,
+    private readonly projectWrite?: <T>(
+      threadId: string,
+      run: () => Promise<T>,
+    ) => Promise<T>,
   ) {
     db.exec(`CREATE TABLE IF NOT EXISTS conversation_archives (
       threadId TEXT PRIMARY KEY,
@@ -29,6 +37,7 @@ export class ConversationArchival {
     if (intents.length === 0) return false;
     for (const intent of intents) {
       if (
+        !workAcceptsWrites(this.db, intent.workId) ||
         this.busy(intent.workId) ||
         !["completed", "reconciled", "resolved-failed"].includes(
           intent.state,
@@ -136,13 +145,17 @@ export class ConversationArchival {
             `INSERT OR IGNORE INTO conversation_archives VALUES (?, 'requested')`,
           )
           .run(threadId);
-        const operation = setArchived(threadId, true).then(() => {
-          this.db
-            .prepare(
-              "UPDATE conversation_archives SET state = 'archived' WHERE threadId = ?",
-            )
-            .run(threadId);
-        });
+        const archive = () =>
+          setArchived(threadId, true).then(() => {
+            this.db
+              .prepare(
+                "UPDATE conversation_archives SET state = 'archived' WHERE threadId = ?",
+              )
+              .run(threadId);
+          });
+        const operation = this.projectWrite
+          ? this.projectWrite(threadId, archive)
+          : archive();
         this.pending.set(threadId, operation);
         try {
           await operation;
@@ -158,6 +171,11 @@ export class ConversationArchival {
   }
 
   async restore(runtime: Runtime, threadId: string): Promise<void> {
+    const owners = this.db
+      .prepare("SELECT workId FROM execution_intents WHERE threadId = ?")
+      .all(threadId) as { workId: string }[];
+    if (owners.some((owner) => !workAcceptsWrites(this.db, owner.workId)))
+      throw new ProjectArchivedError();
     await this.pending.get(threadId)?.catch(() => {});
     if (
       !this.db
@@ -167,9 +185,18 @@ export class ConversationArchival {
       return;
     if (!runtime.setThreadArchived)
       throw new Error("Conversation restoration unavailable");
-    await runtime.setThreadArchived(threadId, false);
-    this.db
-      .prepare("DELETE FROM conversation_archives WHERE threadId = ?")
-      .run(threadId);
+    const restore = async () => {
+      const current = this.db
+        .prepare("SELECT workId FROM execution_intents WHERE threadId = ?")
+        .all(threadId) as { workId: string }[];
+      if (current.some((owner) => !workAcceptsWrites(this.db, owner.workId)))
+        throw new ProjectArchivedError();
+      await runtime.setThreadArchived!(threadId, false);
+      this.db
+        .prepare("DELETE FROM conversation_archives WHERE threadId = ?")
+        .run(threadId);
+    };
+    if (this.projectWrite) await this.projectWrite(threadId, restore);
+    else await restore();
   }
 }

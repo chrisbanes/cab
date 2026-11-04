@@ -97,6 +97,8 @@ const cases = {
   },
   "project.create": project,
   "project.configure": project,
+  "project.archive": { ...project, archived: 1, paused: 1 },
+  "project.restore": { ...project, archived: 0, paused: 1 },
   "task.create": task,
   "task.configure": task,
   "profile.create": profile,
@@ -613,5 +615,26 @@ test("historical Jira configuration receipts keep their original shape", () => {
       closedIssues: "done",
     }).result.closedIssues,
     "done",
+  );
+});
+
+test("fresh project results require lifecycle while legacy keyed receipts preserve exact shape", () => {
+  assert.deepEqual(
+    parseDomainCommandOutcome("project.create", project).result,
+    project,
+  );
+  assert.throws(() =>
+    parseFreshDomainCommandOutcome("project.create", project),
+  );
+  assert.deepEqual(
+    parseFreshDomainCommandOutcome("project.create", {
+      ...project,
+      archived: 0,
+    }).result,
+    { ...project, archived: 0 },
+  );
+  assert.throws(() => parseDomainCommandOutcome("project.archive", project));
+  assert.throws(() =>
+    parseDomainCommandOutcome("project.restore", { ...project, archived: 2 }),
   );
 });

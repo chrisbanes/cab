@@ -1,3 +1,9 @@
+import {
+  assertOwnedTaskWritable,
+  assertProjectWritable,
+  projectAcceptsWrites,
+  projectLifecycle,
+} from "./project-lifecycle.js";
 import { DeliveryStore } from "./delivery.js";
 import { composeIssueBrief, type IssueCommentsRead } from "./issue-brief.js";
 import { LeadTextStore } from "./lead-text.js";
@@ -105,6 +111,7 @@ export type { IssueCommentsRead } from "./issue-brief.js";
 export interface GitHubObservationBinding {
   projectId: string;
   configVersion: number;
+  projectVersion?: number;
   credentialRef: string | null;
 }
 
@@ -336,10 +343,24 @@ export class GitHubSourceStore {
       : new GitHubSourceStore(this.db, row);
   }
 
+  private ownerWritable(taskId: string): boolean {
+    const task = this.db
+      .prepare("SELECT projectId FROM domain_tasks WHERE id = ?")
+      .get(taskId) as { projectId: string } | undefined;
+    return task !== undefined && projectAcceptsWrites(this.db, task.projectId);
+  }
+
   private currentBinding(
     binding: GitHubObservationBinding,
     selectionId?: string,
   ): boolean {
+    if (!projectAcceptsWrites(this.db, binding.projectId)) return false;
+    if (
+      binding.projectVersion !== undefined &&
+      projectLifecycle(this.db, binding.projectId).version !==
+        binding.projectVersion
+    )
+      return false;
     const current = this.db
       .prepare(
         "SELECT version, credentialRef FROM project_task_sources WHERE projectId = ?",
@@ -484,6 +505,7 @@ export class GitHubSourceStore {
    */
   completeFromProviderClosure(taskId: string, settled: () => boolean): boolean {
     return transaction(this.db, () => {
+      if (!this.ownerWritable(taskId)) return false;
       const task = this.db
         .prepare(`SELECT e.externalId AS nodeId, e.provider, e.instance, t.projectId FROM external_items e
         JOIN domain_tasks t ON t.id = e.taskId
@@ -682,7 +704,7 @@ export class GitHubSourceStore {
       if ((prior?.status === "closed") !== (observation.status === "closed"))
         this.db
           .prepare(
-            "UPDATE domain_tasks SET version = version + 1 WHERE id IN (SELECT taskId FROM local_dependencies WHERE blockerTaskId = ?)",
+            "UPDATE domain_tasks SET version = version + 1 WHERE projectId IN (SELECT id FROM domain_projects WHERE archived = 0) AND id IN (SELECT taskId FROM local_dependencies WHERE blockerTaskId = ?)",
           )
           .run(String(issue.taskId));
       return true;
@@ -703,12 +725,14 @@ export class GitHubSourceStore {
     transaction(this.db, () => {
       this.db
         .prepare(`UPDATE domain_tasks SET importedBlockers = 'unknown', version = version + 1
-        WHERE id IN (SELECT taskId FROM external_items WHERE provider = ? AND instance = ?)
+        WHERE projectId IN (SELECT id FROM domain_projects WHERE archived = 0)
+          AND id IN (SELECT taskId FROM external_items WHERE provider = ? AND instance = ?)
           AND importedBlockers != 'unknown'`)
         .run(this.tracker.provider, this.tracker.instance);
       this.db
         .prepare(`UPDATE domain_tasks SET version = version + 1
-        WHERE id IN (SELECT d.taskId FROM local_dependencies d
+        WHERE projectId IN (SELECT id FROM domain_projects WHERE archived = 0)
+          AND id IN (SELECT d.taskId FROM local_dependencies d
           JOIN external_items e ON e.taskId = d.blockerTaskId
           JOIN external_item_status s ON ${sameItem("s", "e")}
           WHERE s.status = 'closed' AND e.provider = ? AND e.instance = ?)`)
@@ -720,12 +744,17 @@ export class GitHubSourceStore {
         .run(this.tracker.provider, this.tracker.instance);
       this.db
         .prepare(
-          "UPDATE source_dependency_observations SET complete = 0, reason = 'startup-refresh-required' WHERE provider = ? AND instance = ?",
+          "UPDATE source_dependency_observations SET complete = 0, reason = 'startup-refresh-required' WHERE provider = ? AND instance = ? AND externalId IN (SELECT e.externalId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId JOIN domain_projects p ON p.id = t.projectId WHERE e.provider = ? AND e.instance = ? AND p.archived = 0)",
         )
-        .run(this.tracker.provider, this.tracker.instance);
+        .run(
+          this.tracker.provider,
+          this.tracker.instance,
+          this.tracker.provider,
+          this.tracker.instance,
+        );
       this.db
         .prepare(
-          "UPDATE source_sync_state SET complete = 0, reason = 'startup-refresh-required'",
+          "UPDATE source_sync_state SET complete = 0, reason = 'startup-refresh-required' WHERE projectId IN (SELECT id FROM domain_projects WHERE archived = 0)",
         )
         .run();
     });
@@ -758,7 +787,8 @@ export class GitHubSourceStore {
         .run(binding.projectId);
       this.db
         .prepare(`UPDATE domain_tasks SET version = version + 1
-        WHERE id IN (SELECT d.taskId FROM local_dependencies d
+        WHERE projectId IN (SELECT id FROM domain_projects WHERE archived = 0)
+          AND id IN (SELECT d.taskId FROM local_dependencies d
           JOIN external_items e ON e.taskId = d.blockerTaskId
           JOIN domain_tasks b ON b.id = e.taskId
           JOIN external_item_status s ON ${sameItem("s", "e")}
@@ -806,19 +836,20 @@ export class GitHubSourceStore {
     },
   ): boolean {
     return (
-      !binding ||
-      (this.currentBinding(binding, binding.selectionId) &&
-        nodeId === binding.reference.nodeId &&
-        issue.repositoryId === binding.reference.repositoryId &&
-        issue.repositoryName === binding.reference.repositoryName &&
-        Number(issue.issueNumber) === binding.reference.number &&
-        Boolean(
-          this.db
-            .prepare(
-              `SELECT 1 FROM source_memberships WHERE projectId = ? AND selectionId = ? AND ${itemIs()}`,
-            )
-            .get(binding.projectId, binding.selectionId, ...this.key(nodeId)),
-        ))
+      this.ownerWritable(String(issue.taskId)) &&
+      (!binding ||
+        (this.currentBinding(binding, binding.selectionId) &&
+          nodeId === binding.reference.nodeId &&
+          issue.repositoryId === binding.reference.repositoryId &&
+          issue.repositoryName === binding.reference.repositoryName &&
+          Number(issue.issueNumber) === binding.reference.number &&
+          Boolean(
+            this.db
+              .prepare(
+                `SELECT 1 FROM source_memberships WHERE projectId = ? AND selectionId = ? AND ${itemIs()}`,
+              )
+              .get(binding.projectId, binding.selectionId, ...this.key(nodeId)),
+          )))
     );
   }
 
@@ -981,6 +1012,7 @@ export class GitHubSourceStore {
     binding?: GitHubObservationBinding,
   ): boolean {
     return transaction(this.db, () => {
+      if (!projectAcceptsWrites(this.db, projectId)) return false;
       if (
         binding &&
         (binding.projectId !== projectId ||
@@ -1094,25 +1126,27 @@ export class GitHubSourceStore {
           }
         } else {
           taskId = String(existing.taskId);
-          this.adoptText(taskId, issue);
-          this.db
-            .prepare(
-              `UPDATE external_items SET containerId = ?, containerName = ?, number = ?, observedTitle = ?, observedBody = ?, observedState = ?, labels = ?, observedStatus = ?, observedFields = ? WHERE ${itemIs()}`,
-            )
-            .run(
-              issue.repositoryId,
-              issue.repositoryName,
-              issue.number,
-              issue.title,
-              issue.body,
-              issue.state,
-              JSON.stringify(issue.labels),
-              issue.status ? JSON.stringify(issue.status) : null,
-              issue.selectFields ? JSON.stringify(issue.selectFields) : null,
-              ...this.key(issue.nodeId),
-            );
+          if (this.ownerWritable(taskId)) {
+            this.adoptText(taskId, issue);
+            this.db
+              .prepare(
+                `UPDATE external_items SET containerId = ?, containerName = ?, number = ?, observedTitle = ?, observedBody = ?, observedState = ?, labels = ?, observedStatus = ?, observedFields = ? WHERE ${itemIs()}`,
+              )
+              .run(
+                issue.repositoryId,
+                issue.repositoryName,
+                issue.number,
+                issue.title,
+                issue.body,
+                issue.state,
+                JSON.stringify(issue.labels),
+                issue.status ? JSON.stringify(issue.status) : null,
+                issue.selectFields ? JSON.stringify(issue.selectFields) : null,
+                ...this.key(issue.nodeId),
+              );
+          }
         }
-        if (issue.unreadSelectFields)
+        if (issue.unreadSelectFields && this.ownerWritable(taskId))
           new DeliveryStore(this.db).recordReadinessCoverage(
             taskId,
             issue.unreadSelectFields,
@@ -1129,6 +1163,7 @@ export class GitHubSourceStore {
             issue.projectItemNodeId ?? null,
             issue.projectReadAt ?? Date.now(),
           );
+        if (!this.ownerWritable(taskId)) continue;
         sourceCaptures.push({
           taskId,
           kind: sourceKind,
@@ -1172,7 +1207,8 @@ export class GitHubSourceStore {
                 ...this.key(String(membership.nodeId)),
               );
             const external = this.issue(String(membership.nodeId));
-            if (external) this.updateReadiness(String(external.taskId));
+            if (external && this.ownerWritable(String(external.taskId)))
+              this.updateReadiness(String(external.taskId));
           }
       } else {
         const retained = this.db
@@ -1181,6 +1217,7 @@ export class GitHubSourceStore {
           WHERE m.projectId = ? AND m.selectionId = ?`)
           .all(projectId, selectionId) as Row[];
         for (const issue of retained) {
+          if (!this.ownerWritable(String(issue.taskId))) continue;
           this.db
             .prepare(
               `UPDATE source_dependency_observations SET complete = 0, reason = 'source-read-incomplete' WHERE ${itemIs()}`,
@@ -1225,7 +1262,7 @@ export class GitHubSourceStore {
         Number(previousSync.complete) !== Number(snapshot.complete)
       )
         this.db
-          .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE id IN (
+          .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE projectId IN (SELECT id FROM domain_projects WHERE archived=0) AND id IN (
           SELECT e.taskId FROM external_items e JOIN source_memberships m ON ${sameItem("m", "e")}
           WHERE m.projectId = ? AND m.selectionId = ?)`)
           .run(projectId, selectionId);
@@ -1292,6 +1329,8 @@ export class GitHubSourceStore {
     itemNodeId: string | null;
     projectFields: z.output<typeof projectFieldsSchema>;
   }): void {
+    assertProjectWritable(this.db, input.projectId);
+    assertOwnedTaskWritable(this.db, input.taskId);
     const now = Date.now();
     this.db
       .prepare(
@@ -1353,6 +1392,7 @@ export class GitHubSourceStore {
     operationId: string,
     closerPrNodeId: string | null,
     closedEventId: string | null,
+    projectVersion?: number,
   ): boolean {
     const snapshot = z
       .object({
@@ -1375,6 +1415,12 @@ export class GitHubSourceStore {
       .strict()
       .parse(input);
     return transaction(this.db, () => {
+      if (
+        !projectAcceptsWrites(this.db, projectId) ||
+        (projectVersion !== undefined &&
+          projectLifecycle(this.db, projectId).version !== projectVersion)
+      )
+        return false;
       const issue = this.issue(snapshot.nodeId),
         config = this.db
           .prepare(
@@ -1459,6 +1505,8 @@ export class GitHubSourceStore {
     });
   }
   recordDeliveryClosureUnavailable(nodeId: string): void {
+    const issue = this.issue(nodeId);
+    if (!issue || !this.ownerWritable(String(issue.taskId))) return;
     const hold = this.db
       .prepare(`SELECT active,reason FROM source_holds WHERE ${itemIs()}`)
       .get(...this.key(nodeId)) as Row | undefined;
@@ -1471,6 +1519,8 @@ export class GitHubSourceStore {
    */
   recordDeliveryClosureAttributionUnproved(nodeId: string): void {
     transaction(this.db, () => {
+      const owned = this.issue(nodeId);
+      if (!owned || !this.ownerWritable(String(owned.taskId))) return;
       const issue = this.issue(nodeId);
       if (!issue) return;
       const hold = this.hold(nodeId);
@@ -1513,6 +1563,8 @@ export class GitHubSourceStore {
    */
   supersedeDeliveryClosure(nodeId: string, operationId: string): void {
     transaction(this.db, () => {
+      const owned = this.issue(nodeId);
+      if (!owned || !this.ownerWritable(String(owned.taskId))) return;
       this.db
         .prepare(
           "INSERT OR IGNORE INTO source_closure_supersessions (provider, instance, externalId, operationId, supersededAt) VALUES (?, ?, ?, ?, ?)",
@@ -1536,6 +1588,7 @@ export class GitHubSourceStore {
 
   /** `deliveryClosure` marks the own-delivery closure flow, which sets its own hold. */
   updateReadiness(taskId: string, deliveryClosure = false): void {
+    if (!this.ownerWritable(taskId)) return;
     const owner = this.ownerOf(taskId);
     if (owner !== this) {
       owner.updateReadiness(taskId, deliveryClosure);
@@ -1977,6 +2030,7 @@ export class GitHubSourceStore {
     taskId: string,
     text: { title: string; body: string },
   ): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare("UPDATE tasks SET title = ? WHERE id = ? AND title IS NOT ?")
       .run(text.title, taskId, text.title);
@@ -1988,6 +2042,8 @@ export class GitHubSourceStore {
   }
 
   private setSourceHold(nodeId: string, reason: string): void {
+    const owned = this.issue(nodeId);
+    if (owned && !this.ownerWritable(String(owned.taskId))) return;
     this.db
       .prepare(`INSERT INTO source_holds (provider, instance, externalId, active, reason, generation) VALUES (?, ?, ?, 1, ?, 1)
       ON CONFLICT(provider, instance, externalId) DO UPDATE SET active = 1, reason = excluded.reason,

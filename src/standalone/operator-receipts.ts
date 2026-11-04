@@ -265,7 +265,10 @@ export function commandReceipt(
             ready: outcome.result.ready === 1,
           },
         };
+      case "project.archive":
+      case "project.restore":
       case "assignment.create":
+        // These domain commands have no public operator receipt contract here yet.
         throw new ReceiptShapeError();
       default: {
         const exhaustive: never = outcome;

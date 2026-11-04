@@ -726,6 +726,7 @@ const SCHEMA_PINS: Record<number, string> = {
   10: "166659f79dd8253d641808c6b0ac6f0915fdb5a7fb038701734b32151dd53c47",
   // Data only: the delivery policies lose their retired issue.status grants.
   11: "166659f79dd8253d641808c6b0ac6f0915fdb5a7fb038701734b32151dd53c47",
+  12: "2f824de0d7791f4d7dcf8d040eccfc0a7fcd7712cffe96007feedb084fc5d10a",
 };
 
 test("the migration level matches the schema this build creates", async () => {

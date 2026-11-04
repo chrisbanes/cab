@@ -202,6 +202,39 @@ work or task completion; the service enforces completion conditions and permissi
 See the [routing design](design/assignment-routing.md) for revision and failure
 boundaries. Typed judgments and confidence are not proof of correctness or authority.
 
+## Project archive and deletion
+
+Archive freezes a paused, drained project without cancelling work or removing its
+open tasks, configuration, source memberships or history. Refuse while assignments,
+executions, ownership/recovery holds, pending effects, reservations, drafting/routing,
+agent requests or provider writes remain unresolved. Unknown inspection is a refusal.
+Check durable and in-flight service facts again inside the archive transaction; do
+not hold that transaction across network or filesystem operations.
+
+Archived projects reserve their case-folded names and admit only name-only rename,
+restore and deletion. Restore increments the version and leaves the project paused.
+Internal ownership and privacy enumeration includes archived projects; public lists
+and pickers hide them by default and offer explicit archived-history access. Late
+source reads cannot commit after archive, or after archive followed by restore under
+a different project version. An active project's selection of a shared item may
+record its own membership without rewriting the archived owner's task or brief.
+
+Deletion is archived-only, irreversible and addressed by project ID. It requires the
+exact current display name and a version/digest-bound ownership and cleanup preview.
+Remove all owned records atomically while preserving shared profiles, installation
+and authentication state, provider identity exceptions and private redaction values.
+Capture minimal worktree, Claude temporary-directory and qualified cab-home Codex
+thread cleanup identities before removing their source rows. Postcommit cleanup is
+retryable from tombstones; failure never restores the project. Completed cleanup
+drops captured path/binding payload. No code-host branch/PR or tracker item is removed.
+
+Core archive/restore commands, durable lifecycle migration, service effect registration,
+store admission and retention-sweep guards, and versioned source-read fences are authored.
+The final stack journal drain adapter awaits the stack implementation. Archive/freeze
+coverage, lifecycle API/CLI/UI, exhaustive deletion and physical cleanup remain
+unqualified. The service refuses archive when authoritative in-flight facts are
+unavailable. Tombstone and ownership helpers alone do not implement deletion.
+
 ## Admission, project placement and task dependencies
 
 The operator admits local work or configures the source's optional readiness rule.

@@ -1,3 +1,8 @@
+import {
+  assertOwnedTaskWritable,
+  assertProjectWritable,
+  taskAcceptsWrites,
+} from "./project-lifecycle.js";
 import { TaskReviewStore } from "./task-review.js";
 import {
   issueBodyLimit,
@@ -913,10 +918,15 @@ export class DeliveryStore {
       }
     });
   }
+  isTaskWritable(taskId: string): boolean {
+    return taskAcceptsWrites(this.db, taskId);
+  }
+
   transaction<T>(run: () => T): T {
     return transaction(this.db, run);
   }
   private save(record: DeliveryActionRecord): void {
+    assertOwnedTaskWritable(this.db, record.binding.taskId);
     this.db
       .prepare("UPDATE delivery_actions SET recordJson=? WHERE operationId=?")
       .run(
@@ -1037,6 +1047,8 @@ export class DeliveryStore {
     approved: boolean,
     policyVersion?: number,
   ): void {
+    assertProjectWritable(this.db, binding.projectId);
+    assertOwnedTaskWritable(this.db, binding.taskId);
     const policy = this.configuration(binding.projectId);
     if (isOperatorDeliveryCaller(binding)) {
       this.validateOperatorCaller(binding);
@@ -1505,6 +1517,7 @@ export class DeliveryStore {
       );
   }
   validateOperatorCaller(input: OperatorDeliveryCaller): void {
+    assertProjectWritable(this.db, input.projectId);
     const caller = operatorDeliveryCallerSchema.parse(input),
       policy = this.configuration(caller.projectId),
       source = new TaskReviewStore(this.db).sources(caller.taskId).at(-1),
@@ -1849,6 +1862,7 @@ export class DeliveryStore {
           );
         return this.action(request.operationId);
       }
+      assertOwnedTaskWritable(this.db, binding.taskId);
       let denied = false;
       try {
         admission();
@@ -1931,6 +1945,7 @@ export class DeliveryStore {
     return this.transaction(() => {
       validate();
       const record = this.action(operationId);
+      assertOwnedTaskWritable(this.db, record.binding.taskId);
       if (
         record.state !== "prepared" &&
         !(
@@ -1964,6 +1979,7 @@ export class DeliveryStore {
     return this.transaction(() => {
       const record = this.action(operationId);
       if (record.state === "confirmed-success") return record;
+      assertOwnedTaskWritable(this.db, record.binding.taskId);
       // A read that failed or timed out must not forget the code host's merge request.
       if (
         observation.state === "uncertain" &&
@@ -2192,6 +2208,7 @@ export class DeliveryStore {
   ): TaskBranch {
     const existing = this.taskBranch(taskId, repositoryId);
     if (existing) return existing;
+    assertOwnedTaskWritable(this.db, taskId);
     const task = z
         .object({ projectId: z.string(), title: z.string() })
         .parse(
@@ -2281,6 +2298,7 @@ export class DeliveryStore {
     });
   }
   private saveDelivery(binding: PrDeliveryBinding): void {
+    assertOwnedTaskWritable(this.db, binding.taskId);
     this.db
       .prepare(
         "INSERT INTO delivery_pr_bindings VALUES (?,?) ON CONFLICT(taskId) DO UPDATE SET recordJson=excluded.recordJson",
@@ -2293,6 +2311,7 @@ export class DeliveryStore {
     leadAssignmentId: string,
     linkRef?: string | null,
   ): PrDeliveryBinding {
+    assertOwnedTaskWritable(this.db, caller.taskId);
     const current = this.delivery(caller.taskId),
       policy = this.configuration(caller.projectId);
     this.db
@@ -2351,6 +2370,7 @@ export class DeliveryStore {
     /** Newly recorded: the PR's head is on the task branch but is no commit cab pushed. */
     outsideHead: boolean;
   } {
+    assertOwnedTaskWritable(this.db, taskId);
     // The retarget fact decides below and is not kept: it is read afresh while the base differs.
     const { retarget, ...observation } = prObservationSchema.parse(input),
       binding = this.delivery(taskId);
@@ -2434,6 +2454,7 @@ export class DeliveryStore {
     taskId: string,
     observation: PrDeliveryObservation,
   ): boolean {
+    assertOwnedTaskWritable(this.db, taskId);
     const branch = this.taskBranch(taskId, observation.repositoryId);
     if (!branch || branch.branch !== observation.headRef) return false;
     // A PR keeps its head commit after the branch is deleted: only a ref read proves the branch is back.
@@ -2461,6 +2482,8 @@ export class DeliveryStore {
   }
   /** The remote branch was read back at the commit cab last pushed: any outside record is obsolete. */
   clearOutsideHead(taskId: string, repositoryId: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         "UPDATE delivery_task_branches SET outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
@@ -2488,6 +2511,7 @@ export class DeliveryStore {
     );
   }
   recordPrReadFailure(taskId: string): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.transaction(() => {
       const binding = this.delivery(taskId);
       if (!binding) return;
@@ -2514,6 +2538,9 @@ export class DeliveryStore {
   settleHandbackWithinTransaction(
     command: HandbackSettlement,
   ): PrDeliveryBinding {
+    const prior = this.settlementReceipt(command);
+    if (prior) return prior;
+    assertOwnedTaskWritable(this.db, command.taskId);
     const binding = this.delivery(command.taskId);
     if (!binding)
       throw new HandbackSettlementRefusedError("Unknown PR delivery");
@@ -2711,10 +2738,12 @@ export class DeliveryStore {
   }
   /** Jira select fields the last read of the task's issue left unread. */
   recordReadinessCoverage(taskId: string, unreadSelectFields: string[]): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.readiness().recordCoverage(taskId, unreadSelectFields);
   }
   /** Called after a committed source write: latches settlements whose inputs it changed. */
   observeReadinessInputs(taskId: string): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.readiness().observe(taskId, () => this.ownClose(taskId, false));
   }
   /**
@@ -2777,6 +2806,7 @@ export class DeliveryStore {
     version: number,
     change: "closed" | "reopened-read",
   ): void {
+    assertOwnedTaskWritable(this.db, taskId);
     // Most Ready flips belong to tasks that never had a cab close: skip the lookups for them.
     if (
       change === "reopened-read" &&
@@ -2941,6 +2971,7 @@ export class DeliveryStore {
     repositoryIds: readonly string[],
     credentialRef: DeliveryPolicy["credentialRef"],
   ): void {
+    assertProjectWritable(this.db, projectId);
     const policy = deliveryPolicySchema.parse({
       mode: "reviewable-pr",
       credentialRef,
@@ -3019,6 +3050,7 @@ export class DeliveryStore {
     expectedVersion: number,
     input: unknown,
   ) {
+    assertProjectWritable(this.db, projectId);
     const current = this.configuration(projectId);
     if (current.version !== expectedVersion)
       throw new DomainConflictError(

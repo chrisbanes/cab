@@ -27,10 +27,16 @@ export const projectCommandResultSchema = z
     name: z.string(),
     version: positiveInteger,
     paused: sqliteFlag,
+    archived: sqliteFlag,
     leadProfileId: id.nullable(),
     instructionsRevision: positiveInteger,
     instructions: z.string(),
   })
+  .strict();
+
+// Existing keyed receipts keep their exact historical shape.
+const legacyProjectCommandResultSchema = projectCommandResultSchema
+  .extend({ archived: sqliteFlag.optional() })
   .strict();
 
 export const taskCommandResultSchema = z
@@ -229,8 +235,10 @@ export const runtimeEnablementCommandResultSchema = z
 export interface DomainCommandResultMap {
   "delivery.configure": z.output<typeof deliveryCommandResultSchema>;
   "status-mapping.configure": z.output<typeof statusMappingCommandResultSchema>;
-  "project.create": z.output<typeof projectCommandResultSchema>;
-  "project.configure": z.output<typeof projectCommandResultSchema>;
+  "project.create": z.output<typeof legacyProjectCommandResultSchema>;
+  "project.configure": z.output<typeof legacyProjectCommandResultSchema>;
+  "project.archive": z.output<typeof projectCommandResultSchema>;
+  "project.restore": z.output<typeof projectCommandResultSchema>;
   "task.create": z.output<typeof taskCommandResultSchema>;
   "task.configure": z.output<typeof taskCommandResultSchema>;
   "profile.create": z.output<typeof legacyProfileCommandResultSchema>;
@@ -354,6 +362,15 @@ function parseCommandOutcome(
       };
     case "project.create":
     case "project.configure":
+      return {
+        type,
+        result: parseUnchanged(
+          fresh ? projectCommandResultSchema : legacyProjectCommandResultSchema,
+          value,
+        ),
+      };
+    case "project.archive":
+    case "project.restore":
       return {
         type,
         result: parseUnchanged(projectCommandResultSchema, value),

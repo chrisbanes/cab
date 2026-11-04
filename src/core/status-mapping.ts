@@ -1,3 +1,8 @@
+import {
+  assertOwnedTaskWritable,
+  assertProjectWritable,
+  projectAcceptsWrites,
+} from "./project-lifecycle.js";
 import { z } from "zod";
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import {
@@ -128,6 +133,7 @@ export class StatusMappingStore {
     expectedVersion: number,
     input: unknown,
   ) {
+    assertProjectWritable(this.db, projectId);
     const current = this.current(projectId);
     if (current.version !== expectedVersion)
       throw new DomainConflictError("Version conflict");
@@ -189,6 +195,7 @@ export class StatusMappingStore {
 
   /** Drops what the mapping knows about the project's tasks: what it watched, wrote and observed. */
   forget(projectId: string): void {
+    if (!projectAcceptsWrites(this.db, projectId)) return;
     const tasks = "SELECT id FROM domain_tasks WHERE projectId = ?";
     // Checked first: a delete that matches nothing still takes the write lock, and passes are frequent.
     if (
@@ -227,6 +234,7 @@ export class StatusMappingStore {
   }
   /** Records, or with `null` clears, the turns started when a handback was sent back. */
   setSentBack(taskId: string, turns: number | null): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `INSERT INTO status_mapping_task_state (taskId, lastEvent, sentBackTurns) VALUES (?, 'none', ?)
@@ -236,6 +244,7 @@ export class StatusMappingStore {
   }
   /** Marks a task the mapping has seen before it was done. */
   watch(taskId: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `INSERT INTO status_mapping_task_state (taskId, lastEvent, watched) VALUES (?, 'none', 1)
@@ -249,6 +258,7 @@ export class StatusMappingStore {
     lastEvent: StatusMappingEvent | "none",
     operationId: string | null,
   ): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `INSERT INTO status_mapping_task_state (taskId, lastEvent, operationId)
@@ -260,6 +270,7 @@ export class StatusMappingStore {
   }
   /** The newest observation of the item's Status (`null` is no value): a confirmed write, or a read of the item while the task was Ready. */
   observed(taskId: string, optionNodeId: string | null, at = Date.now()): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `INSERT INTO status_mapping_task_state (taskId, lastEvent, observedOptionNodeId, observedAt)

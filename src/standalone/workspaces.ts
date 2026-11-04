@@ -1,3 +1,8 @@
+import {
+  assertOwnedTaskWritable,
+  taskAcceptsWrites,
+  ProjectArchivedError,
+} from "../core/project-lifecycle.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -38,7 +43,7 @@ const workspaceStateSchema = z.enum([
   "archived",
 ]);
 
-const repositoryBindingSchema = z.object({
+export const repositoryBindingSchema = z.object({
   repositoryId: z.string().min(1).max(512),
   sourcePath: z.string().min(1),
   workspacePath: z.string().min(1),
@@ -47,7 +52,7 @@ const repositoryBindingSchema = z.object({
   commit: z.string().nullable(),
 });
 
-const taskWorkspaceSchema = z.object({
+export const taskWorkspaceSchema = z.object({
   taskId: z.string().min(1).max(512),
   workspaceId: z.string().uuid(),
   path: z.string().min(1),
@@ -141,6 +146,10 @@ export interface TaskWorkspaceLifecycle {
 }
 
 export interface WorkspaceBindingStore {
+  writable?(taskId: string): boolean;
+  projectWrite?:
+    | (<T>(taskId: string, run: () => Promise<T>) => Promise<T>)
+    | undefined;
   createOrGet(
     taskId: string,
     workspaceId: string,
@@ -192,6 +201,10 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   constructor(
     private readonly db: Database,
     private readonly table = "task_workspace_bindings",
+    readonly projectWrite?: <T>(
+      taskId: string,
+      run: () => Promise<T>,
+    ) => Promise<T>,
   ) {
     if (!/^[a-z_]+$/.test(table)) throw new Error("Invalid workspace table");
     this.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (
@@ -214,12 +227,17 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
         CHECK(gitUncertain IN (0,1))`);
   }
 
+  writable(taskId: string): boolean {
+    return taskAcceptsWrites(this.db, taskId);
+  }
+
   createOrGet(
     taskId: string,
     workspaceId: string,
     path: string,
     repositories: TaskWorkspaceRepository[],
   ): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
     const now = new Date().toISOString();
     this.db
       .prepare(
@@ -261,6 +279,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     gitCommonDir: string,
     commit: string,
   ): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
     return transaction(this.db, () => {
       const binding = this.get(taskId);
       if (!binding) throw new Error(`No task workspace for ${taskId}`);
@@ -288,6 +307,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
 
   /** Moves a repository's recorded starting point forward, as after a restack; no transaction of its own. */
   advanceCommit(taskId: string, repositoryId: string, commit: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
     const binding = this.get(taskId);
     if (!binding) return;
     this.db
@@ -312,6 +332,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     state: TaskWorkspaceBinding["state"],
     reason: string | null,
   ): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `UPDATE ${this.table} SET state = ?, reason = ?, updatedAt = ? WHERE taskId = ?`,
@@ -321,6 +342,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   }
 
   markGitUncertain(taskId: string, reason: string): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `UPDATE ${this.table} SET state = 'held', reason = ?, gitUncertain = 1, updatedAt = ? WHERE taskId = ?`,
@@ -435,6 +457,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     options: { reuseRecentIdentity?: boolean } = {},
   ): Promise<TaskWorkspaceBinding | undefined> {
     const id = z.string().trim().min(1).max(512).parse(taskId);
+    if (this.store.writable?.(id) === false) return this.store.get(id);
     return this.withTaskLock(id, async () => {
       const binding = this.store.get(id);
       if (binding?.state !== "ready") return binding;
@@ -443,6 +466,8 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   }
 
   async forExecution(taskId: string): Promise<TaskWorkspaceBinding> {
+    if (this.store.writable?.(taskId) === false)
+      throw new ProjectArchivedError();
     const binding = await this.get(taskId);
     if (!binding) throw new Error(`Task ${taskId} has no workspace binding`);
     if (binding.state !== "ready")
@@ -454,6 +479,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 
   async recover(): Promise<void> {
     for (const binding of this.store.list()) {
+      if (this.store.writable?.(binding.taskId) === false) continue;
       await this.withTaskLock(binding.taskId, async () => {
         if (binding.path !== join(this.workspaceRoot, binding.workspaceId)) {
           this.store.update(
@@ -1073,7 +1099,11 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       .catch(() => {})
       .then(() => {
         this.assertNotCancelled();
-        return operation();
+        if (this.store.writable?.(taskId) === false)
+          throw new ProjectArchivedError();
+        return this.store.projectWrite
+          ? this.store.projectWrite(taskId, operation)
+          : operation();
       });
     this.inFlight.set(taskId, current);
     return current.finally(() => {

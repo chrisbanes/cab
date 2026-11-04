@@ -1,3 +1,4 @@
+import { workAcceptsWrites } from "../core/project-lifecycle.js";
 import { type Database, transaction } from "../core/store.js";
 import {
   diagnosticRetentionDays,
@@ -289,6 +290,18 @@ export class ExecutionDiagnosticsStore {
   }
 
   begin(identity: DiagnosticExecutionIdentity): void {
+    if (!workAcceptsWrites(this.db, identity.workId)) return;
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='domain_projects'",
+        )
+        .get() &&
+      this.db
+        .prepare("SELECT 1 FROM domain_projects WHERE id=? AND archived=1")
+        .get(identity.projectId)
+    )
+      return;
     this.guard(() =>
       this.db
         .prepare(`INSERT OR IGNORE INTO diagnostic_executions
@@ -314,6 +327,7 @@ export class ExecutionDiagnosticsStore {
   }
 
   bindThread(workId: string, threadId: string): void {
+    if (!workAcceptsWrites(this.db, workId)) return;
     this.guard(() =>
       this.db
         .prepare(
@@ -324,6 +338,7 @@ export class ExecutionDiagnosticsStore {
   }
 
   bindTurn(workId: string, turnId: string): void {
+    if (!workAcceptsWrites(this.db, workId)) return;
     this.guard(() =>
       this.db
         .prepare("UPDATE diagnostic_executions SET turnId = ? WHERE workId = ?")
@@ -344,6 +359,7 @@ export class ExecutionDiagnosticsStore {
     payload: unknown,
     exclusions: readonly string[] | undefined,
   ): void {
+    if (!workAcceptsWrites(this.db, workId)) return;
     this.guard(() => {
       let state: "available" | "omitted" = "available";
       let reason: DiagnosticGapCode | null = null;
@@ -430,10 +446,12 @@ export class ExecutionDiagnosticsStore {
 
   /** Adds `count` to a coalesced gap; never throws. */
   gap(workId: string, code: DiagnosticGapCode, bytes = 0, count = 1): void {
+    if (!workAcceptsWrites(this.db, workId)) return;
     this.guard(() => this.upsertGap(workId, code, count, bytes, 0));
   }
 
   finish(workId: string): void {
+    if (!workAcceptsWrites(this.db, workId)) return;
     this.guard(() =>
       this.db
         .prepare(
@@ -453,6 +471,7 @@ export class ExecutionDiagnosticsStore {
           )
           .all() as { workId: string }[];
         for (const { workId } of open) {
+          if (!workAcceptsWrites(this.db, workId)) continue;
           this.upsertGap(workId, "capture-interrupted", 1, 0, 0);
           this.db
             .prepare(
@@ -484,7 +503,8 @@ export class ExecutionDiagnosticsStore {
       transaction(this.db, () => {
         this.db.exec(`UPDATE diagnostic_executions SET payloadBytes = COALESCE(
             (SELECT SUM(payloadBytes) FROM diagnostic_items i
-              WHERE i.workId = diagnostic_executions.workId), 0);
+              WHERE i.workId = diagnostic_executions.workId), 0)
+          WHERE ${this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='domain_projects'").get() ? "NOT EXISTS (SELECT 1 FROM domain_projects p WHERE p.id=diagnostic_executions.projectId AND p.archived=1)" : "1"};
           UPDATE diagnostic_usage SET totalBytes = COALESCE(
             (SELECT SUM(payloadBytes) FROM diagnostic_items), 0) WHERE id = 1`);
       }),
@@ -656,6 +676,7 @@ export class ExecutionDiagnosticsStore {
     bytes: number,
     maxPrunedSequence: number,
   ): void {
+    if (!workAcceptsWrites(this.db, workId)) return;
     const now = this.now();
     this.db
       .prepare(`INSERT INTO diagnostic_gaps
@@ -669,12 +690,24 @@ export class ExecutionDiagnosticsStore {
   }
 
   /** Deletes up to one batch of items older than `cutoff`; returns rows removed. */
+  private liveDiagnosticSql(): string {
+    if (
+      !this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='domain_projects'",
+        )
+        .get()
+    )
+      return "1";
+    return "NOT EXISTS (SELECT 1 FROM diagnostic_executions e JOIN domain_projects p ON p.id=e.projectId WHERE e.workId=diagnostic_items.workId AND p.archived=1)";
+  }
+
   private removeBatch(code: "expired", cutoff: number): number {
     return transaction(this.db, () =>
       this.deleteRows(
         this.db
           .prepare(
-            "SELECT sequence, workId, payloadBytes FROM diagnostic_items WHERE createdAt < ? ORDER BY createdAt, sequence LIMIT ?",
+            `SELECT sequence, workId, payloadBytes FROM diagnostic_items WHERE createdAt < ? AND ${this.liveDiagnosticSql()} ORDER BY createdAt, sequence LIMIT ?`,
           )
           .all(cutoff, batchRows) as unknown as DeleteRow[],
         code,
@@ -689,7 +722,7 @@ export class ExecutionDiagnosticsStore {
       const rows: DeleteRow[] = [];
       for (const row of this.db
         .prepare(
-          "SELECT sequence, workId, payloadBytes FROM diagnostic_items ORDER BY sequence LIMIT ?",
+          `SELECT sequence, workId, payloadBytes FROM diagnostic_items WHERE ${this.liveDiagnosticSql()} ORDER BY sequence LIMIT ?`,
         )
         .all(batchRows) as unknown as DeleteRow[]) {
         if (excess <= 0 && rows.length > 0) break;
