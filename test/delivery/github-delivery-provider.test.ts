@@ -257,6 +257,8 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
   const raw = {
     node_id: "P7",
     number: 7,
+    state: "open",
+    stack: null,
     title: "PR",
     body: "B",
     draft: false,
@@ -718,6 +720,7 @@ import type { ExternalAction } from "../../src/core/delivery.js";
 test("all eleven concrete action transports preserve exact target, incremental labels and readback", async () => {
   const writes: Array<{ path: string; method: string; body: unknown }> = [];
   let reads = 0;
+  let stackReads = 0;
   class DispatchProvider extends GitHubHttpDeliveryProvider {
     override async inspectAction() {
       reads++;
@@ -731,6 +734,30 @@ test("all eleven concrete action transports preserve exact target, incremental l
   const provider = new DispatchProvider(
     "fixture-marker",
     async (input, init) => {
+      if (
+        new URL(String(input)).pathname === "/repos/org/repo/pulls/7" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        stackReads++;
+        assert.equal(
+          new Headers(init?.headers).get("X-GitHub-Api-Version"),
+          "2026-03-10",
+        );
+        return Response.json({
+          node_id: "P7",
+          number: 7,
+          state: "open",
+          merged: false,
+          body: "Body",
+          head: {
+            ref: "cb/change",
+            sha: "1".repeat(40),
+            repo: { node_id: "R1" },
+          },
+          base: { ref: "main", repo: { node_id: "R1" } },
+          stack: null,
+        });
+      }
       writes.push({
         path: new URL(String(input)).pathname,
         method: init?.method ?? "GET",
@@ -803,6 +830,7 @@ test("all eleven concrete action transports preserve exact target, incremental l
     );
   }
   assert.equal(reads, 11);
+  assert.equal(stackReads, 1);
   assert.deepEqual(
     writes.map((w) => [w.method, w.path]),
     [

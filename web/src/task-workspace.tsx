@@ -2427,8 +2427,10 @@ export function TaskWorkspace({
                   executionHref={`/app/tasks/${taskId}?section=execution`}
                   assignments={data.assignments}
                 />
-                {stackSummary(data.stack) && (
-                  <p className="metadata muted">{stackSummary(data.stack)}</p>
+                {stackSummary(data.stack, data.stackDelivery) && (
+                  <p className="metadata muted">
+                    {stackSummary(data.stack, data.stackDelivery)}
+                  </p>
                 )}
               </section>
               <TaskConversation

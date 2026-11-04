@@ -888,8 +888,10 @@ async function run(
         `Next:    ${next.text}${next.operator ? ` (cab inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
-        ...(stackSummary(read.data.stack)
-          ? [`Stack:   ${stackSummary(read.data.stack)}`]
+        ...(stackSummary(read.data.stack, read.data.stackDelivery)
+          ? [
+              `Stack:   ${stackSummary(read.data.stack, read.data.stackDelivery)}`,
+            ]
           : []),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
