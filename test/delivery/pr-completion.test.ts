@@ -1463,11 +1463,47 @@ test("a Project Status moved to Done by the workflow after cab's own close keeps
     const completion = await requestCompletionAfterClose(f, async () => {
       f.setStatus(fixtureProject.done);
       await f.service.refreshGitHub();
+      await f.service.refreshGitHub();
+      assert.equal(
+        f.service.githubSources().issue("I1")?.observedState,
+        "closed",
+      );
+      assert.ok(
+        f.service
+          .delivery()
+          .actions(f.taskId)
+          .some(
+            (action) =>
+              action.request.action.kind === "issue.close" &&
+              action.state === "confirmed-success",
+          ),
+      );
+      const db = databaseOf(f.service);
+      assert.equal(
+        (
+          db
+            .prepare("SELECT reason FROM source_holds WHERE active = 1")
+            .get() as { reason: string }
+        ).reason,
+        "closed",
+      );
+      assert.match(
+        String(
+          (
+            db.prepare("SELECT fields FROM source_memberships").get() as {
+              fields: string;
+            }
+          ).fields,
+        ),
+        new RegExp(fixtureProject.done),
+      );
       assert.equal(latched(f), 0);
       assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
     });
     assert.equal(completion.success, true, completion.text);
     assert.equal(receipts(f), 1);
+    await settleInto(f, "done");
+    assert.equal(f.domain.task(f.taskId).state, "done");
   } finally {
     await f.close();
   }
@@ -1505,6 +1541,158 @@ test("a move to an option the rule accepts during an own close ends the settleme
     await f.service.refreshGitHub();
     assert.equal(latched(f), 1);
     assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a referenced label changed alongside Done still ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    const db = databaseOf(f.service);
+    const row = db
+      .prepare("SELECT readiness FROM project_task_sources")
+      .get() as { readiness: string };
+    const rule = JSON.parse(row.readiness) as {
+      mode: string;
+      conditions: unknown[];
+    };
+    rule.conditions.push({ kind: "label", operator: "has", name: "ready" });
+    db.prepare("UPDATE project_task_sources SET readiness = ?").run(
+      JSON.stringify(rule),
+    );
+    await f.service.refreshGitHub();
+    await settleThenClose(f);
+    f.setStatus(fixtureProject.done);
+    f.setSourceLabels([]);
+    await f.service.refreshGitHub();
+    await f.service.refreshGitHub();
+    assert.equal(latched(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("another referenced Project field changed alongside Done ends the settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    const db = databaseOf(f.service);
+    const row = db
+      .prepare("SELECT readiness FROM project_task_sources")
+      .get() as { readiness: string };
+    const rule = JSON.parse(row.readiness) as { conditions: unknown[] };
+    rule.conditions.push({
+      kind: "project-field",
+      projectNodeId: fixtureProject.projectNodeId,
+      fieldNodeId: "FLD2",
+      operator: "in",
+      optionNodeIds: ["other"],
+    });
+    db.prepare("UPDATE project_task_sources SET readiness = ?").run(
+      JSON.stringify(rule),
+    );
+    await f.service.refreshGitHub();
+    await settleThenClose(f);
+    f.service.githubSources().reconcileSelection(f.projectId, "repo", {
+      complete: true,
+      reason: null,
+      issues: [
+        {
+          providerInstance: "github.com",
+          nodeId: "I1",
+          repositoryId: "R1",
+          repositoryName: "org/repo",
+          number: 1,
+          title: "T",
+          body: "O",
+          state: "closed",
+          labels: ["ready"],
+          projectItemNodeId: fixtureProject.itemNodeId,
+          projectFields: [
+            {
+              projectNodeId: fixtureProject.projectNodeId,
+              fieldNodeId: fixtureProject.fieldNodeId,
+              optionNodeId: fixtureProject.done,
+            },
+            {
+              projectNodeId: fixtureProject.projectNodeId,
+              fieldNodeId: "FLD2",
+              optionNodeId: "other",
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(latched(f), 1);
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("closure Project proof is bound to the current complete unlatched settlement and exact operation", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    await settleThenClose(f);
+    f.setStatus(fixtureProject.done);
+    await f.service.refreshGitHub();
+    const db = databaseOf(f.service);
+    const delivery = f.service.delivery();
+    assert.ok(delivery.closureProjectFields(f.taskId));
+    assert.equal(
+      delivery.closureProjectFields(f.taskId, "other-operation"),
+      null,
+    );
+    const action = db
+      .prepare("SELECT operationId, recordJson FROM delivery_actions")
+      .get() as { operationId: string; recordJson: string };
+    db.prepare(
+      "UPDATE delivery_actions SET recordJson = json_set(recordJson, '$.state', 'uncertain') WHERE operationId = ?",
+    ).run(action.operationId);
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.prepare(
+      "UPDATE delivery_actions SET recordJson = ? WHERE operationId = ?",
+    ).run(action.recordJson, action.operationId);
+    db.prepare(
+      "INSERT INTO source_closure_supersessions VALUES ('github', 'github.com', 'I1', ?, 'now')",
+    ).run(action.operationId);
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.prepare(
+      "DELETE FROM source_closure_supersessions WHERE operationId = ?",
+    ).run(action.operationId);
+    db.exec("UPDATE external_items SET observedState = 'open'");
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.exec("UPDATE external_items SET observedState = 'closed'");
+    const frozen = db
+      .prepare("SELECT inputsJson FROM delivery_settlement_readiness")
+      .get() as { inputsJson: string };
+    db.prepare(
+      "UPDATE delivery_settlement_readiness SET inputsJson = json_set(inputsJson, '$.item', 'other')",
+    ).run();
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.prepare("UPDATE delivery_settlement_readiness SET inputsJson = ?").run(
+      frozen.inputsJson,
+    );
+    db.prepare(
+      "UPDATE delivery_settlement_readiness SET inputsJson = json_set(inputsJson, '$.rule', 'null')",
+    ).run();
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.prepare("UPDATE delivery_settlement_readiness SET inputsJson = ?").run(
+      frozen.inputsJson,
+    );
+    db.exec("UPDATE delivery_settlement_readiness SET invalidated = 1");
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.exec("UPDATE delivery_settlement_readiness SET invalidated = 0");
+    db.exec("UPDATE source_sync_state SET complete = 0");
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.exec("UPDATE source_sync_state SET complete = 1");
+    db.exec(
+      "UPDATE delivery_settlement_readiness SET commandKey = 'other-key'",
+    );
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
+    db.exec("DELETE FROM delivery_settlement_readiness");
+    assert.equal(delivery.closureProjectFields(f.taskId), null);
   } finally {
     await f.close();
   }

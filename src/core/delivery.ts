@@ -3080,6 +3080,19 @@ export class DeliveryStore {
     if (!taskAcceptsWrites(this.db, taskId)) return;
     this.readiness().observe(taskId, () => this.ownClose(taskId, false));
   }
+  /** Frozen values for a proven close's Project transition on the current settlement. */
+  closureProjectFields(taskId: string, operationId?: string) {
+    if (!this.ownClose(taskId, true)) return null;
+    const item = this.db
+      .prepare("SELECT externalId FROM external_items WHERE taskId = ?")
+      .get(taskId) as { externalId: string } | undefined;
+    if (!item) return null;
+    const operation = this.ownClosureOperation(taskId, item.externalId);
+    if (!operation || (operationId && operation.operationId !== operationId))
+      return null;
+    const key = this.delivery(taskId)?.settlement?.key;
+    return key ? this.readiness().closureProjectFields(taskId, key) : null;
+  }
   /**
    * Cab's own `issue.close` on the item, whose effects are not input changes. Pending: any
    * unsuperseded close in flight, uncertain or confirmed. Proven: the confirmed closure the

@@ -391,6 +391,11 @@ after import holds the task in both closed-issue modes, whatever its readiness. 
 Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
 is complete and its execution has settled, with no writer, ambiguity or unfinished
 execution; provider closure never resolves uncertain execution or clears other holds.
+When proving an own confirmed `issue.close`, a current, complete, uninvalidated settlement
+can also establish the readiness that the close removed by moving a referenced Project
+field from an accepted option set to a different nonempty unaccepted set. The same item
+and rule must still apply, and every other referenced input is compared; attribution,
+membership, execution and independent holds remain subject to their existing gates.
 Reopening returns a provider-completed task to open and recomputes readiness from the
 rule; reopening grants no readiness and keeps any closure hold. Switching a source to
 Skip reopens its provider-completed tasks under a closure hold. Under Treat closure
@@ -2837,7 +2842,10 @@ not observed; closing the outcome is not.
 
 It stays valid across a task-version change made only by cab's own confirmed
 `issue.close`: the closure and the readiness it removes, while the issue is observed
-closed. The close's own effects on the values are not changes: for Jira, the move to the
+closed. Closure readiness can use the frozen Project values only when the current settlement
+is complete and uninvalidated, the same item and rule are observed, and a referenced field
+actually moved from an accepted option set to a nonempty unaccepted set. Other referenced
+changes are still effective even when an `any` rule remains satisfied. The close's own effects on the values are not changes: for Jira, the move to the
 Done status the close recorded as its target, and for a Project field the rule reads, a
 move to an option the rule does not accept (a Project workflow that sets Status to Done
 when the issue closes). While the close is in flight, uncertain or confirmed such a move
