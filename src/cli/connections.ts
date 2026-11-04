@@ -58,8 +58,10 @@ const connectionSchema = z
     url: z.string(),
     installationId: z.uuid(),
     credential: credentialRefSchema.optional(),
+    allowHttp: z.literal(true).optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => !(value.allowHttp && value.credential?.kind === "local"));
 export type Connection = z.infer<typeof connectionSchema>;
 const configSchema = z
   .object({

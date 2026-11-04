@@ -336,8 +336,10 @@ API version, capabilities, the service's persistent installation identity and th
 calling credential's metadata. A connection records the installation identity at
 login; a later mismatch fails as `service-identity-changed`.
 
-Remote connections require HTTPS with certificate verification. Existing loopback
-HTTP remains available on the host. Do not send credentials across redirects to
+Remote connections use HTTPS with certificate verification by default. A token login
+can opt a named connection into HTTP with `--allow-http`; this sends the token
+without TLS and saves consent only for that connection. Existing loopback HTTP
+remains available on the host without this option. Do not send credentials across redirects to
 another origin or add automatic insecure/public connectivity. Reads and writes
 use the live service rather than opening its database from the client.
 
