@@ -185,6 +185,7 @@ async function replaceSettings(
     await file.chmod(0o600);
     await file.writeFile(bytes);
     await file.sync();
+    const written = await file.stat();
     await file.close();
     await checkPrivateDirectory(dir, process.getuid?.());
     const current = await readSafe(path);
@@ -204,7 +205,13 @@ async function replaceSettings(
       await directory.close();
     }
     const result = await readSafe(path);
-    if (!result?.bytes.equals(bytes)) throw new Error("Readback mismatch");
+    if (
+      !result ||
+      result.stat.dev !== written.dev ||
+      result.stat.ino !== written.ino ||
+      !result.bytes.equals(bytes)
+    )
+      throw new Error("Readback mismatch");
     return result;
   } catch (error) {
     if (renamed)

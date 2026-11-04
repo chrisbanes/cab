@@ -386,6 +386,56 @@ test("install rollback preserves malformed bytes and refuses a replaced sidecar"
   }
 });
 
+test("install readback refuses an identical replacement before creating a rollback handle", async (t) => {
+  const { open, readFile, rename, stat, writeFile } = await import(
+    "node:fs/promises"
+  );
+  const { updateNetworkSettingsForInstall, networkSettingsPath } = await import(
+    "../../src/operator/network-access.js"
+  );
+  const directory = await mkdtemp(join(tmpdir(), "cab-network-readback-"));
+  await chmod(directory, 0o700);
+  const data = join(directory, "data");
+  const path = networkSettingsPath(data);
+  try {
+    const handle = await open(join(directory, "probe"), "w", 0o600);
+    const prototype = Object.getPrototypeOf(handle) as typeof handle;
+    const sync = prototype.sync;
+    await handle.close();
+    let syncs = 0;
+    let replacementBytes: Buffer | undefined;
+    let replacementInode: number | undefined;
+    const mock = t.mock.method(
+      prototype,
+      "sync",
+      async function (this: typeof handle) {
+        await sync.call(this);
+        if (++syncs !== 2) return;
+        replacementBytes = await readFile(path);
+        const original = await stat(path);
+        const replacement = join(directory, "replacement");
+        await writeFile(replacement, replacementBytes, { mode: 0o600 });
+        await rename(replacement, path);
+        replacementInode = (await stat(path)).ino;
+        assert.notEqual(replacementInode, original.ino);
+      },
+    );
+    await assert.rejects(
+      updateNetworkSettingsForInstall(data, 8787, {
+        schema: "cab.operator-network/v1",
+        lan: null,
+      }),
+      /persistence is uncertain/,
+    );
+    mock.mock.restore();
+    assert.ok(replacementBytes);
+    assert.deepEqual(await readFile(path), replacementBytes);
+    assert.equal((await stat(path)).ino, replacementInode);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("rollback of a newly created sidecar refuses to remove a concurrent replacement", async () => {
   const { chmod, mkdtemp, readFile, rename, rm, writeFile } = await import(
     "node:fs/promises"
