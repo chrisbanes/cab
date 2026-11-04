@@ -243,7 +243,7 @@ async function waitForOperator() {
         });
         if (response.status !== 200) return null;
         const body = await response.text();
-        if (!body.includes("Sign in")) return null;
+        if (!body.includes("<html")) return null;
         observedProcessIds.add(pid);
         return pid;
       } catch {
@@ -263,61 +263,39 @@ function readCookie(response) {
   return cookie;
 }
 
-function readCsrf(html) {
-  const token = /name="csrfToken" type="hidden" value="([^"]+)"/.exec(
-    html,
-  )?.[1];
-  assert.ok(token, "operator page contains a CSRF token");
-  return token;
-}
-
 async function authenticateOperator() {
-  const loginPage = await fetch(`${origin}/login`, {
+  const anonymous = await fetch(`${origin}/api/operator/session`, {
     signal: AbortSignal.timeout(5_000),
   });
-  assert.equal(loginPage.status, 200);
-  const anonymousCookie = readCookie(loginPage);
-  const csrf = readCsrf(await loginPage.text());
-  const login = await fetch(`${origin}/login`, {
+  assert.equal(anonymous.status, 200);
+  const csrf = (await anonymous.json()).csrfToken;
+  const login = await fetch(`${origin}/api/operator/login`, {
     method: "POST",
     headers: {
-      cookie: anonymousCookie,
+      cookie: readCookie(anonymous),
       origin,
-      "content-type": "application/x-www-form-urlencoded",
+      "content-type": "application/json",
+      "x-csrf-token": csrf,
     },
-    body: new URLSearchParams({ csrfToken: csrf, password }),
-    redirect: "manual",
+    body: JSON.stringify({ password }),
     signal: AbortSignal.timeout(10_000),
   });
-  assert.equal(login.status, 303);
-  const sessionCookie = readCookie(login);
-  const home = await fetch(`${origin}/`, {
-    headers: { cookie: sessionCookie },
-    signal: AbortSignal.timeout(5_000),
-  });
-  assert.equal(home.status, 200);
-  const html = await home.text();
-  assert.match(html, /<h1>cab<\/h1>/);
-  return { cookie: sessionCookie, csrf: readCsrf(html) };
+  assert.equal(login.status, 200);
+  return { cookie: readCookie(login), csrf: (await login.json()).csrfToken };
 }
-
 async function postCommand(session, fields) {
-  const response = await fetch(`${origin}/command`, {
+  const response = await fetch(`${origin}/api/operator/commands`, {
     method: "POST",
     headers: {
       cookie: session.cookie,
       origin,
-      "content-type": "application/x-www-form-urlencoded",
+      "content-type": "application/json",
+      "x-csrf-token": session.csrf,
     },
-    body: new URLSearchParams({
-      ...fields,
-      csrfToken: session.csrf,
-      key: randomUUID(),
-    }),
-    redirect: "manual",
+    body: JSON.stringify({ ...fields, key: randomUUID() }),
     signal: AbortSignal.timeout(10_000),
   });
-  assert.equal(response.status, 303);
+  assert.equal(response.status, 200);
 }
 
 async function seedPublicState(session) {
@@ -343,16 +321,19 @@ async function seedPublicState(session) {
     taskId,
     title: "S08a unready fixture task",
     outcome: "Remain unready during the backup/restore proof.",
-    ready: "0",
+    ready: false,
   });
   return { profileId, projectId, taskId };
 }
 
 async function readRestoredPublicState(session, records) {
-  const profile = await fetch(`${origin}/profile/${records.profileId}`, {
-    headers: { cookie: session.cookie },
-    signal: AbortSignal.timeout(5_000),
-  });
+  const profile = await fetch(
+    `${origin}/api/operator/profiles/${records.profileId}/configuration`,
+    {
+      headers: { cookie: session.cookie },
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
   assert.equal(profile.status, 200);
   assert.match(await profile.text(), /S08a disposable profile/);
   // The task page is gone: the task read carries the title and the unready state.

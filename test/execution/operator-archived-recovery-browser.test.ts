@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import {
+  browserSuite,
+  captureBrowserEvidence,
+} from "../fixtures/browser-diagnostics.js";
 import { startSettings } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-archived-recovery-browser");
@@ -151,6 +154,10 @@ for (const engine of ["chromium", "webkit"] as const) {
       assert.equal(reads[0]?.get("scope"), `assignment:${ids.assignmentId}`);
       assert.equal(reads[0]?.get("key"), posts[0]?.key);
       assert.equal(reads[0]?.get("type"), "recovery.bound-turn.recover");
+      await captureBrowserEvidence(
+        page,
+        `1366-archived-original-absent-${engine}`,
+      );
       // History and inspector destinations are still keyboard reachable on an archived direct read.
       const inspector = page.getByRole("link", {
         name: "Inspect execution",
@@ -175,6 +182,10 @@ for (const engine of ["chromium", "webkit"] as const) {
         })
         .waitFor();
       assert.equal(posts.length, 1);
+      await captureBrowserEvidence(
+        page,
+        `1366-archived-original-recorded-${engine}`,
+      );
     },
   );
 }

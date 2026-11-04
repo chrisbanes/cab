@@ -9,7 +9,7 @@ const test = browserSuite("operator-foundation-browser");
 import { chromium, type Browser } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
-test("retained HTML routes share the production foundation and native interactions", async (_t, journey) => {
+test("long approval material stays within the phone app viewport", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
   );
@@ -88,115 +88,6 @@ test("retained HTML routes share the production foundation and native interactio
 
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
-  const desktop = await browser.newPage({
-    viewport: { width: 1366, height: 820 },
-  });
-  journey.observe(desktop);
-  desktop.setDefaultTimeout(5000);
-  const requestedUrls: string[] = [];
-  desktop.on("request", (request) => requestedUrls.push(request.url()));
-  await desktop.goto(`${web.origin}/app`);
-  await desktop.getByLabel("Password", { exact: true }).fill(web.password);
-  await desktop.getByRole("button", { name: "Sign in", exact: true }).click();
-  await desktop
-    .getByRole("button", { name: "Operator account", exact: true })
-    .waitFor();
-  // #835: the global fallback link is gone; contextual links reach the retained pages.
-  assert.equal(
-    await desktop
-      .getByRole("link", { name: "Existing operator controls", exact: true })
-      .count(),
-    0,
-  );
-  const destinations = ["/", `/profile/${profileId}`, "/runtime"];
-  let stylesheetHref = "";
-  let verifiedFonts = false;
-  for (const path of destinations) {
-    await desktop.goto(web.origin + path);
-    await desktop.locator("body.legacy-operator").waitFor();
-    const style = await desktop.evaluate(() => {
-      const link = document.querySelector<HTMLLinkElement>(
-        'link[rel="stylesheet"]',
-      );
-      const body = getComputedStyle(document.body);
-      return {
-        href: link?.getAttribute("href") ?? "",
-        loaded: link?.sheet !== null,
-        background: body.backgroundColor,
-        foreground: body.color,
-        family: body.fontFamily,
-        scripts: document.scripts.length,
-        overflow: document.documentElement.scrollWidth > innerWidth,
-      };
-    });
-    assert.match(style.href, /^\/assets\/[A-Za-z0-9_.-]+\.css$/);
-    assert.equal(style.loaded, true, path);
-    assert.equal(style.background, "rgb(10, 10, 11)", path);
-    assert.equal(style.foreground, "rgb(244, 244, 245)", path);
-    assert.match(style.family, /Geist/);
-    assert.equal(style.scripts, 0, "legacy HTML remains non-hydrated");
-    assert.equal(style.overflow, false, path);
-    const fontFaces = await desktop.evaluate(async () => {
-      const sans = await document.fonts.load('14px "Geist"');
-      const mono = await document.fonts.load('14px "Geist Mono"');
-      return {
-        sans: sans.map((face) => ({
-          family: face.family,
-          status: face.status,
-        })),
-        mono: mono.map((face) => ({
-          family: face.family,
-          status: face.status,
-        })),
-        sansChecked: document.fonts.check('14px "Geist"'),
-        monoChecked: document.fonts.check('14px "Geist Mono"'),
-      };
-    });
-    assert.ok(fontFaces.sans.length > 0, `${path}: Geist face loaded`);
-    assert.ok(fontFaces.mono.length > 0, `${path}: Geist Mono face loaded`);
-    assert.ok(
-      fontFaces.sans.every((face) => face.status === "loaded"),
-      path,
-    );
-    assert.ok(
-      fontFaces.mono.every((face) => face.status === "loaded"),
-      path,
-    );
-    assert.equal(fontFaces.sansChecked, true, `${path}: Geist is available`);
-    assert.equal(
-      fontFaces.monoChecked,
-      true,
-      `${path}: Geist Mono is available`,
-    );
-    if (!verifiedFonts) {
-      const response = await desktop.request.get(web.origin + path);
-      const csp = response.headers()["content-security-policy"] ?? "";
-      assert.match(csp, /font-src 'self'/);
-      verifiedFonts = true;
-    }
-    if (stylesheetHref) assert.equal(style.href, stylesheetHref);
-    stylesheetHref = style.href;
-    if (path === `/profile/${profileId}`) {
-      const input = desktop
-        .locator('body.legacy-operator input:not([type="hidden"])')
-        .first();
-      const inputStyle = await input.evaluate((el) => ({
-        height: getComputedStyle(el).height,
-        family: getComputedStyle(el).fontFamily,
-      }));
-      assert.equal(inputStyle.height, "32px");
-      assert.match(inputStyle.family, /Geist/);
-      await captureBrowserEvidence(desktop, "1366-retained-profile-editor");
-    }
-  }
-  const cssResponse = await desktop.request.get(web.origin + stylesheetHref);
-  assert.equal(cssResponse.status(), 200);
-  assert.match(cssResponse.headers()["content-type"] ?? "", /text\/css/);
-  assert.ok(
-    requestedUrls.every((url) => new URL(url).origin === web.origin),
-    "retained routes load same-origin assets only",
-  );
-
   const phone = await browser.newPage({
     viewport: { width: 390, height: 844 },
   });
@@ -206,21 +97,6 @@ test("retained HTML routes share the production foundation and native interactio
   await phone.getByLabel("Password", { exact: true }).fill(web.password);
   await phone.getByRole("button", { name: "Sign in", exact: true }).click();
   await phone.locator("main.page h1").waitFor();
-  await phone.goto(`${web.origin}/runtime`);
-  await phone.locator("body.legacy-operator").waitFor();
-  const phoneControl = phone
-    .locator('body.legacy-operator input:not([type="hidden"])')
-    .first();
-  assert.equal(
-    await phoneControl.evaluate((el) => getComputedStyle(el).height),
-    "44px",
-  );
-  await phoneControl.focus();
-  assert.equal(
-    await phoneControl.evaluate((el) => el === document.activeElement),
-    true,
-  );
-  await captureBrowserEvidence(phone, "390-retained-runtime-controls");
   // The approval's long material stays inside a phone viewport on its in-app review.
   await phone.goto(
     `${web.origin}/app/tasks/${taskId}?request=${approvalInteractionId}`,
@@ -234,10 +110,6 @@ test("retained HTML routes share the production foundation and native interactio
     ),
   );
   await captureBrowserEvidence(phone, "390-long-approval-material");
-  await phone.goto(`${web.origin}/runtime`);
-  await phone.getByRole("link", { name: "New interface", exact: true }).click();
-  await phone.locator("main.page h1").waitFor();
-  assert.equal(new URL(phone.url()).pathname, "/app");
 });
 
 test("Nova primitives keep 32px controls, the documented radii and tinted destructive tokens", async (_t, journey) => {

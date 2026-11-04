@@ -97,7 +97,7 @@ export async function host(config, offline = false) {
   const { OperatorApi } = await import(
     "../../../dist/src/standalone/operator-api.js"
   );
-  const { LocalOperatorHttp, LocalOperatorUi } = await import(
+  const { LocalOperatorHttp } = await import(
     "../../../dist/src/standalone/operator.js"
   );
   const { OperatorWebBundle, OperatorWebBoundary } = await import(
@@ -701,7 +701,7 @@ export async function host(config, offline = false) {
     const bundle = await OperatorWebBundle.open(
       new URL("../../../dist/operator", import.meta.url).pathname,
     );
-    http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
+    http = new LocalOperatorHttp(auth, {
       credentials: service.operatorCredentials(),
       localAccess: service.localAccess(),
       web: new OperatorWebBoundary(bundle, new OperatorApi(service, [root])),

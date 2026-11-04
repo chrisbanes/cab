@@ -956,18 +956,23 @@ is resumed from the decision card in its Overview, through the receipted `task.c
 the task read discloses exactly (`task.textExact`); text the service redacts or withholds is never
 offered for editing or written back, and the dialog sends only the fields the operator changed. A
 task with redacted text changes Ready through `cab task configure TASK_ID --ready true|false`.
-There is no server-rendered task page: `/task/:id` is not found, and `/command` rejects
-`task.configure` and `source.review`. A task's Execution tab (`/app/tasks/:id?section=execution`)
+There are no server-rendered operator pages apart from the public React shell.
+`/`, `/runtime`, `/profile/:id`, `/command` and the legacy login/logout and recovery
+form POSTs return ordinary not-found responses without creating sessions or redirecting. A task's Execution tab (`/app/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions
-for its next turn. These use the same receipted JSON commands as the CLI. The Runtime
-overview (`/runtime`) remains. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
+for its next turn. These use the same receipted JSON commands as the CLI. Runtime settings at `/app/settings/runtime` show capacity, runtime availability and
+effective policy. The separate cross-project admission summary is dropped; List/Board
+per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
-[operator integration](design/s04d-operator-integration.md) designs. The
-web-disabled diagnostic fallback is not qualified for production visual parity.
+[operator integration](design/s04d-operator-integration.md) designs. The operator listener requires a validated web bundle. The `operator` command checks
+it before starting the service; a missing or invalid bundle fails with
+`operator web UI not built; run npm run build:web`. Other service commands retain
+their startup behavior. The application stays at `/app`; `/login` serves its public
+shell, and login/logout use `/api/operator/login` and `/api/operator/logout`.
 
 ### Everyday navigation and attention
 

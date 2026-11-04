@@ -47,16 +47,43 @@ if (args.length !== 1 || args[0] !== "--live") {
   }
 
   if (config) {
-    let phase = "fixture password prompt";
-    let password = "";
-    let browser;
-    let context;
-    let page;
-    let signedIn = false;
-    let failed = false;
-    let capacityRestore;
-    let capacityChangeAttempted = false;
-    let capacityRestored = false;
+    let phase = "fixture password prompt",
+      password = "",
+      browser,
+      context,
+      page;
+    let signedIn = false,
+      failed = false,
+      capacityRestore,
+      capacityRestored = false;
+    const session = async () => {
+      const response = await context.request.get(
+        `${config.origin}/api/operator/session`,
+      );
+      assert.equal(response.status(), 200);
+      return response.json();
+    };
+    const command = async (body, headers) => {
+      const current = await session();
+      return postWithoutFollowingRedirects(
+        context.request,
+        `${config.origin}/api/operator/commands`,
+        {
+          headers: headers ?? {
+            origin: config.origin,
+            "x-csrf-token": current.csrfToken,
+          },
+          data: body,
+        },
+      );
+    };
+    const capacity = async () => {
+      const response = await context.request.get(
+        `${config.origin}/api/operator/runtime`,
+      );
+      assert.equal(response.status(), 200);
+      return (await response.json()).data;
+    };
     try {
       password = await readHiddenPassword(
         process.stdin,
@@ -69,140 +96,109 @@ if (args.length !== 1 || args[0] !== "--live") {
       page = await context.newPage();
       page.setDefaultTimeout(15_000);
       page.setDefaultNavigationTimeout(15_000);
-
       phase = "unauthenticated private read";
       const privatePath = `/app/projects/${encodeURIComponent(config.projectId)}/settings`;
-      const preLogin = await page.goto(`${config.origin}${privatePath}`);
-      assert.equal(new URL(page.url()).origin, config.origin);
-      assert.equal(preLogin?.status(), 200);
+      assert.equal(
+        (await page.goto(config.origin + privatePath))?.status(),
+        200,
+      );
       await page
         .getByRole("button", { name: "Sign in", exact: true })
         .waitFor();
-      const preLoginBody = await page.locator("body").innerText();
-      assert.match(preLoginBody, /Sign in/);
-      assert.equal(preLoginBody.includes(config.privateMarker), false);
+      assert.equal(
+        (await page.locator("body").innerText()).includes(config.privateMarker),
+        false,
+      );
       const anonymousCookie = (await context.cookies()).find(
-        (cookie) => cookie.name === "cab_operator_session",
+        (c) => c.name === "cab_operator_session",
       );
       assert.ok(anonymousCookie);
-
       phase = "unauthenticated runtime and workspace reads";
-      const runtimeRead = await page.goto(`${config.origin}/runtime`);
-      assert.equal(runtimeRead?.status(), 200);
-      const runtimeReadBody = await page.locator("body").innerText();
-      assert.match(runtimeReadBody, /Sign in/);
-      assert.equal(runtimeReadBody.includes(config.privateMarker), false);
+      await page.goto(`${config.origin}/app/settings/runtime`);
+      await page
+        .getByRole("button", { name: "Sign in", exact: true })
+        .waitFor();
       assert.equal(
-        await page.locator('form[method="post"]').getAttribute("action"),
-        "/login",
+        (await page.locator("body").innerText()).includes(config.privateMarker),
+        false,
       );
-      const anonymousWorkspaceContext = await browser.newContext();
+      const anonymous = await browser.newContext();
       try {
-        const anonymousWorkspace = await anonymousWorkspaceContext.request.get(
-          `${config.origin}/api/operator/workspace`,
-        );
-        assert.equal(anonymousWorkspace.status(), 401);
-        assert.equal(
-          (await anonymousWorkspace.text()).includes(config.privateMarker),
-          false,
-        );
-      } finally {
-        await anonymousWorkspaceContext.close();
-      }
-
-      phase = "unauthenticated private write";
-      const unauthenticatedName = `Unauthenticated proof ${randomUUID()}`;
-      const anonymousContext = await browser.newContext();
-      try {
-        const response = await postWithoutFollowingRedirects(
-          anonymousContext.request,
-          `${config.origin}/command`,
+        for (const path of [
+          "/api/operator/workspace",
+          "/api/operator/runtime",
+        ]) {
+          const response = await anonymous.request.get(config.origin + path);
+          assert.equal(response.status(), 401);
+          assert.equal(
+            (await response.text()).includes(config.privateMarker),
+            false,
+          );
+        }
+        phase = "unauthenticated private write";
+        const response = await anonymous.request.post(
+          `${config.origin}/api/operator/commands`,
           {
             headers: { origin: config.origin },
-            form: {
+            data: {
               type: "project.create",
               key: randomUUID(),
               projectId: randomUUID(),
-              name: unauthenticatedName,
+              name: "Unauthenticated proof",
             },
           },
         );
         assert.equal(response.status(), 401);
-        const runtimeWrite = await postWithoutFollowingRedirects(
-          anonymousContext.request,
-          `${config.origin}/runtime/control/capacity`,
-          {
-            headers: { origin: config.origin },
-            form: {
-              key: randomUUID(),
-              globalLimit: "2",
-              projectId: config.projectId,
-              projectLimit: "2",
-            },
-          },
-        );
-        assert.equal(runtimeWrite.status(), 401);
       } finally {
-        await anonymousContext.close();
+        await anonymous.close();
       }
-
       phase = "independent login";
-      await page.locator('input[name="password"]').fill(password);
+      await page.getByLabel("Password", { exact: true }).fill(password);
       const loginResponse = page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === "/login" &&
-          response.request().method() === "POST",
+        (r) =>
+          new URL(r.url()).pathname === "/api/operator/login" &&
+          r.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Sign in" }).click();
-      const login = await loginResponse;
-      assert.equal(login.status(), 303);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      assert.equal((await loginResponse).status(), 200);
       signedIn = true;
-      assert.equal(login.headers().location, "/");
-      await page.waitForURL(`${config.origin}/`);
-      assert.equal(new URL(page.url()).origin, config.origin);
+      password = "";
       const authenticatedCookie = (await context.cookies()).find(
-        (cookie) => cookie.name === "cab_operator_session",
+        (c) => c.name === "cab_operator_session",
       );
       assert.ok(authenticatedCookie);
       assert.notEqual(authenticatedCookie.value, anonymousCookie.value);
       assert.equal(authenticatedCookie.httpOnly, true);
       assert.equal(authenticatedCookie.sameSite, "Strict");
       assert.equal(authenticatedCookie.secure, true);
-      password = "";
-
       phase = "authenticated private read";
-      await page.goto(`${config.origin}${privatePath}`);
-      assert.equal(new URL(page.url()).origin, config.origin);
+      await page.goto(config.origin + privatePath);
       await page
         .getByRole("navigation", { name: "Project configuration sections" })
         .waitFor();
-      const configuration = await context.request.get(
-        `${config.origin}/api/operator/projects/${encodeURIComponent(config.projectId)}/configuration`,
-      );
-      assert.equal(configuration.status(), 200);
       const privateValues = await context.request.get(
         `${config.origin}/api/operator/projects/${encodeURIComponent(config.projectId)}/private-values`,
       );
+      const configuration = await context.request.get(
+        `${config.origin}/api/operator/projects/${encodeURIComponent(config.projectId)}/configuration`,
+      );
       assert.equal(privateValues.status(), 200);
-      const privateBody =
-        (await configuration.text()) + (await privateValues.text());
-      assert.equal(privateBody.includes(config.privateMarker), true);
-      await page.goto(`${config.origin}/runtime`);
-      assert.equal(new URL(page.url()).origin, config.origin);
-      const runtimeBody = await page.locator("body").innerText();
-      assert.equal(runtimeBody.includes(config.privateMarker), true);
-      const globalLimit = Number(
-        /Global active turns:\s*(\d+)/.exec(runtimeBody)?.[1],
+      assert.equal(configuration.status(), 200);
+      assert.equal(
+        ((await privateValues.text()) + (await configuration.text())).includes(
+          config.privateMarker,
+        ),
+        true,
       );
-      const projectLine = runtimeBody
-        .split("\n")
-        .find((line) => line.includes(config.privateMarker));
-      const projectLimit = Number(
-        /:\s*(\d+) active turns/.exec(projectLine ?? "")?.[1],
+      const runtime = await capacity();
+      const project = runtime.projects.find(
+        (r) => r.project.id === config.projectId,
       );
-      assert.ok(Number.isSafeInteger(globalLimit) && globalLimit > 0);
-      assert.ok(Number.isSafeInteger(projectLimit) && projectLimit > 0);
-      // The signed-in workspace read replaces the removed coordination page.
+      assert.ok(project);
+      assert.equal(
+        JSON.stringify(runtime).includes(config.privateMarker),
+        true,
+      );
       const workspace = await context.request.get(
         `${config.origin}/api/operator/workspace`,
       );
@@ -211,148 +207,91 @@ if (args.length !== 1 || args[0] !== "--live") {
         (await workspace.text()).includes(config.privateMarker),
         true,
       );
-      await page.goto(`${config.origin}/`);
-      assert.equal(new URL(page.url()).origin, config.origin);
-      assert.equal(
-        (await page.locator("body").innerText()).includes(unauthenticatedName),
-        false,
-      );
-
       phase = "origin and CSRF refusals";
-      const csrfToken = await page
-        .locator('input[name="csrfToken"]')
-        .first()
-        .inputValue();
+      const current = await session();
       const deniedName = `Rejected proof ${randomUUID()}`;
-      for (const attempt of [
-        { headers: { origin: config.origin }, csrfToken: "" },
-        { headers: {}, csrfToken },
-        { headers: { origin: "null" }, csrfToken },
+      for (const headers of [
+        { origin: config.origin },
+        { "x-csrf-token": current.csrfToken },
+        { origin: "null", "x-csrf-token": current.csrfToken },
         {
-          headers: { origin: "https://elsewhere.example" },
-          csrfToken,
+          origin: "https://elsewhere.example",
+          "x-csrf-token": current.csrfToken,
         },
       ]) {
-        const response = await postWithoutFollowingRedirects(
-          context.request,
-          `${config.origin}/command`,
+        for (const body of [
           {
-            headers: attempt.headers,
-            form: {
-              type: "project.create",
-              key: randomUUID(),
-              projectId: randomUUID(),
-              name: deniedName,
-              csrfToken: attempt.csrfToken,
-            },
+            type: "project.create",
+            key: randomUUID(),
+            projectId: randomUUID(),
+            name: deniedName,
           },
-        );
-        assert.equal(response.status(), 403);
-        const runtimeResponse = await postWithoutFollowingRedirects(
-          context.request,
-          `${config.origin}/runtime/control/capacity`,
           {
-            headers: attempt.headers,
-            form: {
-              key: randomUUID(),
-              globalLimit: String(globalLimit),
-              projectId: config.projectId,
-              projectLimit: String(projectLimit),
-              csrfToken: attempt.csrfToken,
-            },
+            type: "capacity.configure",
+            key: randomUUID(),
+            globalLimit: runtime.globalLimit,
+            projectOverrides: { [config.projectId]: project.limit },
           },
-        );
-        assert.equal(runtimeResponse.status(), 403);
+        ])
+          assert.equal((await command(body, headers)).status(), 403);
       }
-      await page.goto(`${config.origin}/`);
-      assert.equal(new URL(page.url()).origin, config.origin);
-      const deniedBody = await page.locator("body").innerText();
-      assert.equal(deniedBody.includes(deniedName), false);
-      assert.equal(deniedBody.includes(unauthenticatedName), false);
-
-      phase = "same-origin runtime capacity write and replay";
-      const changedProjectLimit = projectLimit === 1 ? 2 : projectLimit - 1;
-      const capacityKey = randomUUID();
+      const deniedWorkspace = await context.request.get(
+        `${config.origin}/api/operator/workspace`,
+      );
+      assert.equal((await deniedWorkspace.text()).includes(deniedName), false);
+      phase = "same-origin capacity write and replay";
       capacityRestore = {
-        globalLimit,
-        projectId: config.projectId,
-        projectLimit,
-        csrfToken,
+        type: "capacity.configure",
+        key: randomUUID(),
+        globalLimit: runtime.globalLimit,
+        projectOverrides: { [config.projectId]: project.override },
       };
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        capacityChangeAttempted = true;
-        const response = await postWithoutFollowingRedirects(
-          context.request,
-          `${config.origin}/runtime/control/capacity`,
-          {
-            headers: { origin: config.origin },
-            form: {
-              key: capacityKey,
-              globalLimit: String(globalLimit),
-              projectId: config.projectId,
-              projectLimit: String(changedProjectLimit),
-              csrfToken,
-            },
-          },
-        );
-        assert.equal(response.status(), 303);
-        assert.equal(response.headers().location, "/runtime");
+      const changed = project.limit === 1 ? 2 : project.limit - 1;
+      const change = {
+        type: "capacity.configure",
+        key: randomUUID(),
+        globalLimit: runtime.globalLimit,
+        projectOverrides: { [config.projectId]: changed },
+      };
+      let receipt;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await command(change);
+        assert.equal(response.status(), 200);
+        const value = await response.json();
+        if (receipt) assert.deepEqual(value, receipt);
+        receipt = value;
       }
-      await page.goto(`${config.origin}/runtime`);
-      const updatedRuntimeBody = await page.locator("body").innerText();
-      assert.equal(updatedRuntimeBody.includes(config.privateMarker), true);
-      const updatedProjectLine = updatedRuntimeBody
-        .split("\n")
-        .find((line) => line.includes(config.privateMarker));
-      assert.match(
-        updatedProjectLine ?? "",
-        new RegExp(`:\\s*${changedProjectLimit} active turns`),
+      assert.equal(
+        (await capacity()).projects.find(
+          (r) => r.project.id === config.projectId,
+        ).limit,
+        changed,
       );
-      const restoreKey = randomUUID();
-      const restored = await postWithoutFollowingRedirects(
-        context.request,
-        `${config.origin}/runtime/control/capacity`,
-        {
-          headers: { origin: config.origin },
-          form: {
-            key: restoreKey,
-            globalLimit: String(globalLimit),
-            projectId: config.projectId,
-            projectLimit: String(projectLimit),
-            csrfToken,
-          },
-        },
-      );
-      assert.equal(restored.status(), 303);
-      await page.goto(`${config.origin}/runtime`);
-      const restoredRuntimeBody = await page.locator("body").innerText();
-      const restoredProjectLine = restoredRuntimeBody
-        .split("\n")
-        .find((line) => line.includes(config.privateMarker));
-      assert.match(
-        restoredProjectLine ?? "",
-        new RegExp(`:\\s*${projectLimit} active turns`),
+      assert.equal((await command(capacityRestore)).status(), 200);
+      assert.equal(
+        (await capacity()).projects.find(
+          (r) => r.project.id === config.projectId,
+        ).override,
+        project.override,
       );
       capacityRestored = true;
-
       phase = "same-origin configuration write";
-      await page.goto(`${config.origin}/`);
       const createdName = `S04c private proof ${randomUUID()}`;
-      const projectForm = page.locator('form[data-command="project.create"]');
-      await projectForm.locator('input[name="name"]').fill(createdName);
-      const createResponse = page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === "/command" &&
-          response.request().method() === "POST",
-      );
-      await projectForm.getByRole("button", { name: "Save" }).click();
-      const created = await createResponse;
-      assert.equal(created.status(), 303);
-      assert.equal(created.headers().location, "/");
       assert.equal(
-        (await page.locator("body").innerText()).includes(createdName),
-        true,
+        (
+          await command({
+            type: "project.create",
+            key: randomUUID(),
+            projectId: randomUUID(),
+            name: createdName,
+          })
+        ).status(),
+        200,
       );
+      const createdWorkspace = await context.request.get(
+        `${config.origin}/api/operator/workspace`,
+      );
+      assert.equal((await createdWorkspace.text()).includes(createdName), true);
     } catch {
       failed = true;
       process.stderr.write(
@@ -360,28 +299,9 @@ if (args.length !== 1 || args[0] !== "--live") {
       );
     } finally {
       password = "";
-      if (
-        capacityRestore &&
-        capacityChangeAttempted &&
-        !capacityRestored &&
-        context
-      ) {
+      if (capacityRestore && !capacityRestored && context) {
         try {
-          const response = await postWithoutFollowingRedirects(
-            context.request,
-            `${config.origin}/runtime/control/capacity`,
-            {
-              headers: { origin: config.origin },
-              form: {
-                key: randomUUID(),
-                globalLimit: String(capacityRestore.globalLimit),
-                projectId: capacityRestore.projectId,
-                projectLimit: String(capacityRestore.projectLimit),
-                csrfToken: capacityRestore.csrfToken,
-              },
-            },
-          );
-          assert.equal(response.status(), 303);
+          assert.equal((await command(capacityRestore)).status(), 200);
           capacityRestored = true;
         } catch {
           failed = true;
@@ -390,18 +310,20 @@ if (args.length !== 1 || args[0] !== "--live") {
           );
         }
       }
-      if (signedIn && page) {
+      if (signedIn && context) {
         try {
-          phase = "browser logout cleanup";
-          await page.goto(`${config.origin}/`);
-          assert.equal(new URL(page.url()).origin, config.origin);
-          const logoutResponse = page.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname === "/logout" &&
-              response.request().method() === "POST",
+          const current = await session();
+          const response = await context.request.post(
+            `${config.origin}/api/operator/logout`,
+            {
+              headers: {
+                origin: config.origin,
+                "x-csrf-token": current.csrfToken,
+              },
+              data: {},
+            },
           );
-          await page.getByRole("button", { name: "Log out" }).click();
-          assert.equal((await logoutResponse).status(), 303);
+          assert.equal(response.status(), 200);
         } catch {
           failed = true;
           process.stderr.write(
@@ -412,7 +334,6 @@ if (args.length !== 1 || args[0] !== "--live") {
       await context?.close().catch(() => undefined);
       await browser?.close().catch(() => undefined);
     }
-
     if (failed) process.exitCode = 1;
     else
       process.stdout.write(

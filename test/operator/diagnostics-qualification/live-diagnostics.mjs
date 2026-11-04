@@ -17,10 +17,7 @@ import {
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import {
@@ -135,7 +132,7 @@ try {
   }
 
   auth = await OperatorAuth.open({ authFile, origin: "http://127.0.0.1:1" });
-  http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
+  http = new LocalOperatorHttp(auth, {
     credentials: service.operatorCredentials(),
     web: new OperatorWebBoundary(
       await OperatorWebBundle.open(bundle),

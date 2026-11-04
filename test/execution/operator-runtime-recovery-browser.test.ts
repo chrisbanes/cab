@@ -81,6 +81,14 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
     `/app/assignments/${ids.assignmentId}/recovery`,
   );
   await captureBrowserEvidence(page, "1366-runtime");
+  await page
+    .getByText(/Limits and untested surfaces/)
+    .first()
+    .click();
+  await captureBrowserEvidence(page, "1366-runtime-policy-limits");
+  await page.setViewportSize(phone);
+  await captureBrowserEvidence(page, "390-runtime-policy-limits");
+  await page.setViewportSize({ width: 1366, height: 900 });
   // Task controls opens the task's Execution tab, which keeps the recorded holds in view.
   await card.getByRole("link", { name: "Task controls" }).click();
   await page.getByRole("tab", { name: "Execution", selected: true }).waitFor();

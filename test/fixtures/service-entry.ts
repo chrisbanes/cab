@@ -1,3 +1,4 @@
+import { OperatorWebBundle } from "../../src/standalone/operator-web.js";
 import { runServiceEntry } from "../../src/standalone/cli.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import { StandaloneService } from "../../src/standalone/service.js";
@@ -5,6 +6,10 @@ import { StandaloneService } from "../../src/standalone/service.js";
 /** Process fixture: `service-entry.js MODE serve|operator DATA_DIR` runs the real service entry point. */
 const [mode, ...argv] = process.argv.slice(2);
 const secret = process.env.FIXTURE_SECRET ?? "";
+if (mode === "bundle-preflight") {
+  const open = OperatorWebBundle.open.bind(OperatorWebBundle);
+  OperatorWebBundle.open = () => open(process.env.FIXTURE_BUNDLE ?? "");
+}
 
 function failure(): Error {
   const error = new Error(`${mode} failed with ${secret} in ${argv[1]}`, {
@@ -17,6 +22,8 @@ function failure(): Error {
 // The stub runtime holds no handle; production's runtime process keeps the loop alive.
 const keepAlive = setInterval(() => {}, 60_000);
 await runServiceEntry(argv, (dataDir) => {
+  if (mode === "bundle-preflight")
+    process.stdout.write("service-constructed\n");
   const service = new StandaloneService(
     dataDir,
     () =>

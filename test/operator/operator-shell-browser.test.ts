@@ -1015,13 +1015,6 @@ for (const engine of ["chromium", "webkit"] as const)
       assert.equal(icon.headers()["content-type"], "image/svg+xml");
       assert.equal(icon.headers()["set-cookie"], undefined);
       assert.match(await icon.text(), /viewBox="0 0 16 16"/);
-      const legacy = await page.request.get(`${web.origin}/runtime`);
-      const legacyHtml = await legacy.text();
-      assert.match(legacyHtml, /rel="icon"[^>]*href="\/favicon.svg"/);
-      assert.match(
-        legacyHtml,
-        /<svg aria-hidden="true"[^>]*width="20" height="20"/,
-      );
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.locator(".inbox-row").first().waitFor();

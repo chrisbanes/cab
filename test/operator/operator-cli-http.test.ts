@@ -275,11 +275,8 @@ test("bearer credentials read through the service under server-side route author
     ["POST", "/api/operator/credentials", { name: "x", scope: "read-write" }],
     ["POST", `/api/operator/credentials/${read.credential.id}/rotate`, {}],
     ["POST", `/api/operator/credentials/${read.credential.id}/revoke`, {}],
-    ["GET", "/"],
     ["GET", "/app"],
     ["GET", "/assets/main.js"],
-    ["POST", "/command", {}],
-    ["POST", "/runtime/control/capacity", {}],
   ];
   for (const token of [read.token, write.token])
     for (const [method, path, body] of denied) {
@@ -650,7 +647,7 @@ test("every known API route has an explicit authority", () => {
   );
 });
 
-test("Stop and Resume are receipted commands under bearer scope; retained forms stay session-only", async (t) => {
+test("Stop and Resume are receipted commands under bearer scope", async (t) => {
   const s = await startCliService(t, {
     service: { supervisor: { observationMs: 50 } },
   });
@@ -672,19 +669,6 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
       ((await r.json()) as { error: { code: string } }).error.code,
       "insufficient-scope",
     );
-  }
-  // A bearer credential reaches no retained session form route.
-  for (const token of [read.token, write.token]) {
-    const r = await fetch(`${s.origin}/runtime/control/capacity`, {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ taskId: s.taskId }).toString(),
-    });
-    assert.equal(r.status, 403);
   }
   assert.equal(databaseDigest(s.f), before);
   assert.equal(s.f.service.isTaskStopped(s.taskId), false);

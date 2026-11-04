@@ -28,10 +28,7 @@ import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
@@ -348,7 +345,7 @@ async function start() {
   const port = await unusedPort();
   origin = `http://127.0.0.1:${port}`;
   const auth = await OperatorAuth.open({ authFile, origin });
-  http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
+  http = new LocalOperatorHttp(auth, {
     web: new OperatorWebBoundary(
       await OperatorWebBundle.open(
         fileURLToPath(new URL("../../../dist/operator", import.meta.url)),

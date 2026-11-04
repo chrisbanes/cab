@@ -29,14 +29,9 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
+import { LocalOperatorHttp } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
@@ -223,20 +218,14 @@ async function startService(root, dataDir, password) {
   );
   await service.start();
   const auth = await OperatorAuth.open({ authFile, origin: authOrigin });
-  const routes = new OperatorRouteRegistry();
-  routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-  const http = new LocalOperatorHttp(
-    new LocalOperatorUi(service.domain()),
-    auth,
-    {
-      routes,
-      credentials: service.operatorCredentials(),
-      web: new OperatorWebBoundary(
-        await OperatorWebBundle.open(bundle),
-        new OperatorApi(service, [root]),
-      ),
-    },
-  );
+
+  const http = new LocalOperatorHttp(auth, {
+    credentials: service.operatorCredentials(),
+    web: new OperatorWebBoundary(
+      await OperatorWebBundle.open(bundle),
+      new OperatorApi(service, [root]),
+    ),
+  });
   const port = await http.start(Number(option("--port") ?? 0) || undefined);
   const origin = `http://127.0.0.1:${port}`;
   let r = await fetch(`${origin}/api/operator/session`);
@@ -1144,13 +1133,6 @@ async function journey() {
 
   stage("remote authority and logout");
   for (const [method, path, body, type] of [
-    // A retained session form route: bearer credentials never reach it.
-    [
-      "POST",
-      "/runtime/control/capacity",
-      `taskId=${taskId}`,
-      "application/x-www-form-urlencoded",
-    ],
     ["GET", "/api/operator/credentials"],
     [
       "POST",

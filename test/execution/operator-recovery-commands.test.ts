@@ -129,40 +129,38 @@ test("a runtime-captured pre-turn generation recovers without adoption", async (
   assert.equal(w.requestState(), "held");
 });
 
-test("a command recorded through either entry point replays through the other", async (t) => {
+test("old form payloads replay their original recovery receipts through JSON without another effect", async (t) => {
   const w = await world(t, "no-turn");
   const c = commands(w.g);
-  // Bearer first, then the retained session form with the same inner payload.
   const adopt = c.adopt();
+  const { type: _type, assignmentId: _assignment, ...inner } = adopt;
+  const originalAdoption = w.s.f.service.adoptHistoricalNoTurnSubmission(
+    JSON.parse(JSON.stringify(inner)),
+  );
+  const adopted = databaseDigest(w.s.f);
   const receipt = await w.ok(adopt);
-  const { type: _t, assignmentId: _a, ...inner } = adopt;
-  const before = databaseDigest(w.s.f);
-  let r = await w.s.sessionForm("/runtime/control/no-turn/adopt", {
-    payload: JSON.stringify(inner),
-  });
-  assert.equal(r.status, 303);
-  assert.equal(databaseDigest(w.s.f), before);
-  // Session form first, then the bearer command replays its receipt.
+  assert.equal(receipt.witnessId, originalAdoption.witnessId);
+  assert.equal(databaseDigest(w.s.f), adopted);
   const recover = c.recover();
-  const { type: _rt, assignmentId: _ra, ...recoverInner } = recover;
-  r = await w.s.sessionForm("/runtime/control/no-turn/recover", {
-    payload: JSON.stringify(recoverInner),
-  });
-  assert.equal(r.status, 303);
+  const {
+    type: _recoverType,
+    assignmentId: _recoverAssignment,
+    ...recoverInner
+  } = recover;
+  const originalRecovery = await w.s.f.service.recoverNoTurnExecution(
+    JSON.parse(JSON.stringify(recoverInner)),
+  );
   const recovered = databaseDigest(w.s.f);
   const replayed = await w.ok(recover);
-  assert.equal(replayed.kind, "recovery-resolution");
+  assert.equal(replayed.receiptId, originalRecovery.id);
   assert.equal(databaseDigest(w.s.f), recovered);
   const replace = c.replace();
-  r = await w.s.sessionForm("/runtime/control/conversation-replace", {
-    key: replace.key,
-    assignmentId: replace.assignmentId,
-    expectedAssignmentVersion: "1",
-    expectedConversationRevision: "1",
-  });
-  assert.equal(r.status, 303);
-  assert.equal((await w.ok(replace)).revision, 2);
-  assert.ok(receipt.witnessId);
+  const { type: _replaceType, ...replaceInner } = replace;
+  const originalReplacement =
+    w.s.f.service.replaceConversationCommand(replaceInner);
+  const replaced = databaseDigest(w.s.f);
+  assert.equal((await w.ok(replace)).revision, originalReplacement.revision);
+  assert.equal(databaseDigest(w.s.f), replaced);
 });
 
 test("read-only, cross-origin and malformed recovery commands change nothing", async (t) => {
@@ -175,25 +173,6 @@ test("read-only, cross-origin and malformed recovery commands change nothing", a
     assert.equal(r.status, 403);
     assert.equal((r.body.error as Json).code, "insufficient-scope");
   }
-  for (const path of [
-    "/runtime/control/no-turn/adopt",
-    "/runtime/control/no-turn/recover",
-    "/runtime/control/pre-turn/adopt",
-    "/runtime/control/pre-turn/recover",
-    "/runtime/control/conversation-replace",
-  ])
-    for (const token of [w.ro, w.rw]) {
-      const r = await fetch(`${w.s.origin}${path}`, {
-        method: "POST",
-        redirect: "manual",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({ payload: "{}" }).toString(),
-      });
-      assert.equal(r.status, 403, path);
-    }
   const noCsrf = await fetch(`${w.s.origin}/api/operator/commands`, {
     method: "POST",
     headers: {

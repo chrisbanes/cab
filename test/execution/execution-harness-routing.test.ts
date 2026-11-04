@@ -1280,13 +1280,15 @@ test("start-up does not wait for a failed secondary runtime's cleanup, and shutd
   });
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
-  const settled = (promise: Promise<unknown>) =>
+  const settled = (promise: Promise<unknown>, ms: number) =>
     Promise.race([
       promise.then(() => "settled"),
-      new Promise((resolve) => setTimeout(() => resolve("pending"), 200)),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), ms)),
     ]);
   try {
-    assert.equal(await settled(service.start()), "settled");
+    // The cleanup stays gated, so any settlement proves start-up did not wait;
+    // the long timer only stops a regression from hanging the suite.
+    assert.equal(await settled(service.start(), 10_000), "settled");
     assert.equal(runtimes.claude.stops, 1);
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
@@ -1308,7 +1310,7 @@ test("start-up does not wait for a failed secondary runtime's cleanup, and shutd
 
     // Shutdown still waits for the tracked cleanup before releasing state.
     const stopping = service.stop();
-    assert.equal(await settled(stopping), "pending");
+    assert.equal(await settled(stopping, 200), "pending");
     release();
     await stopping;
   } finally {
