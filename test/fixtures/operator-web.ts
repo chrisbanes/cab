@@ -157,8 +157,10 @@ export interface OperatorFixture<R extends Runtime> {
     setup?: OperatorSetupSeams,
     push?: FixturePushOptions,
     readReadiness?: () => Promise<ReadinessResult>,
+    lan?: { address: string; origin?: string },
   ): Promise<{
     origin: string;
+    lanOrigin?: string;
     password: string;
     auth: OperatorAuth;
     http: LocalOperatorHttp;
@@ -424,6 +426,7 @@ export async function createOperatorFixture<
       setup?: OperatorSetupSeams,
       pushOptions?: FixturePushOptions,
       readReadiness?: () => Promise<ReadinessResult>,
+      lan?: { address: string; origin?: string },
     ) {
       const id = ++listenerSequence;
       const owned: OwnedWeb = {
@@ -519,6 +522,7 @@ export async function createOperatorFixture<
           keyFile: join(directory, "operator-push-vapid.json"),
         });
         const http = new LocalOperatorHttp(auth, {
+          ...(lan ? { lan } : {}),
           credentials: service.operatorCredentials(),
           push,
           web: new OperatorWebBoundary(bundle, api, {
@@ -538,7 +542,17 @@ export async function createOperatorFixture<
             ),
           );
         };
-        return { origin, password, auth, http, push, close };
+        return {
+          origin,
+          ...(lan
+            ? { lanOrigin: lan.origin ?? `http://${lan.address}:${port}` }
+            : {}),
+          password,
+          auth,
+          http,
+          push,
+          close,
+        };
       } finally {
         owned.starting = false;
       }

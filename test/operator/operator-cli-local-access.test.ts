@@ -430,3 +430,53 @@ test("local capability shares route authority and known secrets remain excluded 
     "prefix[redacted]suffix",
   );
 });
+
+test("LAN transport accepts scoped tokens but never local capability", async (t) => {
+  const { request } = await import("node:http");
+  const { testLanAddress } = await import("../fixtures/operator-network.js");
+  const address = testLanAddress();
+  const s = await startCliService(t, { lan: { address } });
+  const port = new URL(s.origin).port;
+  const local = await readLocalAccess(join(s.f.directory, "data"));
+  const read = await s.issue("read");
+  const write = await s.issue("read-write");
+  const call = (
+    path: string,
+    token: string,
+    host = `${address}:${port}`,
+    method = "GET",
+  ) =>
+    new Promise<number>((resolve, reject) => {
+      const req = request(
+        `http://${address}:${port}${path}`,
+        {
+          method,
+          headers: {
+            host,
+            authorization: `Bearer ${token}`,
+            origin: s.origin,
+            "x-forwarded-host": `127.0.0.1:${port}`,
+            "x-forwarded-for": "127.0.0.1",
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode ?? 0));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  assert.equal(await call("/api/operator/cli", local.secret), 401);
+  assert.equal(
+    await call("/api/operator/cli", local.secret, `127.0.0.1:${port}`),
+    403,
+  );
+  assert.equal(await call("/api/operator/cli", read.token), 200);
+  assert.equal(await call("/api/operator/cli", write.token), 200);
+  assert.equal(await call("/api/operator/credentials", write.token), 403);
+  assert.equal(
+    await call("/api/operator/commands", read.token, undefined, "POST"),
+    403,
+  );
+});

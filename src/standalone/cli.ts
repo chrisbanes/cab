@@ -1,3 +1,7 @@
+import {
+  networkSettingsPath,
+  readNetworkSettings,
+} from "../operator/network-access.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { ROOT_REFUSAL } from "./launchd.js";
@@ -99,9 +103,12 @@ export const productionService = (dataDir: string) =>
     diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
     runtimeHarnesses: productionRuntimeHarnesses,
     // Control paths like OperatorApi's: failure records must not disclose them.
-    failureRedactionPaths: process.env.CAB_OPERATOR_AUTH_FILE
-      ? [process.env.CAB_OPERATOR_AUTH_FILE]
-      : [],
+    failureRedactionPaths: [
+      networkSettingsPath(dataDir),
+      ...(process.env.CAB_OPERATOR_AUTH_FILE
+        ? [process.env.CAB_OPERATOR_AUTH_FILE]
+        : []),
+    ],
   });
 
 export async function main(
@@ -128,6 +135,11 @@ export async function main(
       throw new Error(message);
     }
   }
+  const port = args[0] ? Number(args[0]) : 8787;
+  const network =
+    command === "operator"
+      ? await readNetworkSettings(dataDir, port)
+      : undefined;
   const service = serviceFactory(dataDir);
   const records = log ?? new ServiceLog();
   records.attach(service);
@@ -213,7 +225,7 @@ export async function main(
       const authFile = process.env.CAB_OPERATOR_AUTH_FILE ?? "";
       const api = new OperatorApi(
         service,
-        [dataDir, authFile],
+        [dataDir, authFile, networkSettingsPath(dataDir)],
         undefined,
         undefined,
         undefined,
@@ -229,12 +241,13 @@ export async function main(
       // A failure while push loaded has already cleared the domain the UI needs.
       if (await consumeFatalFailure()) return;
       const ui = new LocalOperatorHttp(operatorAuth, {
+        ...(network?.lan ? { lan: network.lan } : {}),
         credentials: service.operatorCredentials(),
         localAccess: service.localAccess(),
         push,
         web: new OperatorWebBoundary(bundle, api, readiness),
       });
-      const port = await ui.start(args[0] ? Number(args[0]) : 8787);
+      const boundPort = await ui.start(port);
       process.stdout.write(`${operatorAuth.origin}/app\n`);
       try {
         fatalBackgroundFailure =
@@ -244,7 +257,7 @@ export async function main(
               log?.started({
                 version: releaseVersion(),
                 mode: "operator",
-                port,
+                port: boundPort,
                 serviceId: service.serviceId(),
               }),
             onSignal: (signal) => {

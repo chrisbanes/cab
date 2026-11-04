@@ -19,6 +19,19 @@ HTTPS over Tailscale has passed from the fixture host only; independent-device
 reachability, physical sleep/wake and operational host-restart qualification are
 unproved.
 
+## Operator network settings
+
+The operator reads `${resolve(dataDir)}.operator-network.json` before starting the
+service. Missing settings disable LAN access. A private `cab.operator-network/v1`
+sidecar can specify one explicit IPv4 address and an optional canonical HTTP origin;
+the listener binds that address on the loopback port. LAN settings reject port 80,
+which the existing local-access origin contract does not support. Binding failure
+aborts startup.
+The sidecar is outside database snapshots and version trees. The host configuration
+command is not yet implemented. LAN HTTP transmits credentials without TLS, and
+browser notifications are unavailable in that insecure context. The local OS-account
+capability remains limited to the loopback socket.
+
 ## Confirmed review decisions
 
 - Use Codex first, with the existing operator login, and qualify Codex App Server

@@ -117,7 +117,7 @@ routing and accountability.
 | R01 | Codex App Server uses the existing operator login on macOS, including restart. Expired/unavailable login visibly holds affected work; no silent switch of agent execution to API credentials or billing. TypeSafe routing credentials are a separate opt-in integration. |
 | R02 | Defaults are four active turns globally and two per project; concurrent admission respects both. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
 | R03 | Sleep assertion exists only during active execution and releases when idle or supervision ends. Forced sleep/wake reconciles execution before more dispatch, without duplicates. |
-| R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. |
+| R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. Explicit LAN HTTP access retains those checks and sends credentials without TLS. |
 | R05 | Conversation history and durable operator messages survive restart. Duplicate submission does not duplicate delivery; the next eligible turn receives the message without bypassing holds. No live steering is exposed. |
 | R06 | Fresh standalone startup never reads or mutates the prototype database. Backup/restore preserves standalone records. Cutover records old active-work disposition before enabling competing work. |
 | R07 | Routing-enabled eligible task supplies its initial brief without a lead turn. Explicit permitted assignee bypasses TypeSafe; disabled projects allocate through the lead without API calls. Profile capabilities and project routing guidance are used; ineligible profiles cannot be selected and full transcripts/credentials are excluded. |
@@ -186,6 +186,15 @@ release or cutover gates. Preserve the task workspace behaviour. Recorded eviden
 | WI11 | Change, rename or delete reviewed files, replace the latest turn capture, restart or remove the workspace | Bounded retained review context remains tied to original content. Affected comments show outdated status; missing or unknown comparison remains explicit. No automatic retargeting, newer-byte substitution or implied whole-workspace history occurs. |
 | WI12 | Inspect a draft and send, retry a confirmed failure, or reconcile an uncertain submission | One logical review containing the exact comments and summary reaches the named accountable lead with a receipt. Confirmed failures preserve editable drafts; unknown outcomes retain the original operation for reconciliation without duplicate delivery. No GitHub call, approval, readiness/completion change, merge authority or hold release occurs. |
 | WI13 | Navigate among files, diffs and exact result evidence while drafting on desktop, phone and keyboard | Draft content and anchors survive navigation/refresh under session privacy rules. Sent feedback remains inspectable with its original context. Existing contextual feedback is preserved; no unrelated thread-resolution or retraction workflow is introduced. |
+
+### LAN operator access acceptance
+
+A disposable service with an explicitly configured non-loopback IPv4 address
+binds it and numeric loopback on one port. Browser sessions are origin-bound;
+scoped tokens retain their permissions and the local OS-account capability is
+rejected on LAN. A failed second bind releases the loopback listener and publishes
+no ready endpoint. Same-host socket evidence does not establish second-device
+routing; browser qualification and offline host configuration remain separate.
 
 ### Local operator access acceptance
 

@@ -32,13 +32,19 @@ There is one operator password, not account or role administration.
 
 ## HTTP boundary
 
-The server binds only to `127.0.0.1`. It accepts `Host` only for that listener or
-the configured origin. It does not trust `X-Forwarded-Host`, `X-Forwarded-Proto`
+The server binds to `127.0.0.1` by default. An explicitly configured IPv4
+address adds a listener on the same port. That listener accepts only its configured
+HTTP Host; loopback accepts its numeric Host and an existing HTTPS proxy Host.
+A proxy Host that equals the loopback Host is ambiguous: use a distinct HTTPS
+proxy Host or disable LAN access. LAN-enabled contexts use distinct cookie names
+so browsers can retain sessions on the same hostname across ports. It does not trust
+`X-Forwarded-Host`, `X-Forwarded-Proto`
 or other forwarded headers. Remote TLS termination and private routing are
 provided by a separately managed transport such as a narrowly configured
-Tailscale Serve route; this UI neither configures nor exposes a public listener.
+Tailscale Serve route. The configured LAN HTTP listener carries passwords, cookies
+and bearer tokens without TLS; enabling it requires explicit configuration.
 Session-authenticated API POSTs, including `/api/operator/login`, require the exact
-configured Origin and that session's CSRF token. Login uses the pre-login session;
+browser context's Origin and that session's CSRF token. Login uses the pre-login session;
 other writes require authentication. JSON bodies and command-specific envelopes
 are bounded and runtime validated. Bearer access retains its explicit route and
 scope policy; it neither reads nor upgrades cookie sessions.

@@ -2087,3 +2087,77 @@ test("the production service runs Claude beside Codex, with Codex still the prof
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("operator rejects malformed network settings before constructing the service", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const root = mkdtempSync(join(tmpdir(), "cab-network-before-start-"));
+  chmodSync(root, 0o700);
+  const data = join(root, "data");
+  try {
+    await writeFile(`${data}.operator-network.json`, "{bad", { mode: 0o600 });
+    let constructed = false;
+    await assert.rejects(
+      main(["operator", data, "8787"], () => {
+        constructed = true;
+        throw new Error("service must not be constructed");
+      }),
+    );
+    assert.equal(constructed, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed LAN bind stops the service without announcing startup", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const root = mkdtempSync(join(tmpdir(), "cab-network-start-failure-"));
+  chmodSync(root, 0o700);
+  const data = join(root, "data");
+  const authFile = join(root, "operator-auth.json");
+  const previousAuth = process.env.CAB_OPERATOR_AUTH_FILE;
+  const previousOrigin = process.env.CAB_OPERATOR_ORIGIN;
+  process.env.CAB_OPERATOR_AUTH_FILE = authFile;
+  process.env.CAB_OPERATOR_ORIGIN = "http://127.0.0.1:8787";
+  let service: StandaloneService | undefined;
+  let stops = 0;
+  const lines: string[] = [];
+  try {
+    await OperatorAuth.initialize(authFile, "fixture password");
+    await writeFile(
+      `${data}.operator-network.json`,
+      JSON.stringify({
+        schema: "cab.operator-network/v1",
+        lan: { address: "192.0.2.10" },
+      }),
+      { mode: 0o600 },
+    );
+    await assert.rejects(
+      main(
+        ["operator", data, "0"],
+        (directory) => {
+          service = makeService(directory, new FixtureRuntime(), []);
+          const original = service.stop.bind(service);
+          service.stop = async () => {
+            stops++;
+            await original();
+          };
+          return service;
+        },
+        new ServiceLog((line) => lines.push(line)),
+      ),
+      /Could not bind configured operator LAN address/,
+    );
+    assert.equal(stops, 1);
+    assert.equal(
+      lines.some((line) => line.includes('"service-start"')),
+      false,
+    );
+  } finally {
+    await service?.stop().catch(() => undefined);
+    if (previousAuth === undefined) delete process.env.CAB_OPERATOR_AUTH_FILE;
+    else process.env.CAB_OPERATOR_AUTH_FILE = previousAuth;
+    if (previousOrigin === undefined) delete process.env.CAB_OPERATOR_ORIGIN;
+    else process.env.CAB_OPERATOR_ORIGIN = previousOrigin;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
