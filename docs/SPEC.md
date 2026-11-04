@@ -243,7 +243,12 @@ source checkouts, branches, PRs and retained Codex archive files remain intact. 
 resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pending;
 older descriptors without sufficient Git proof never authorize a guessed removal.
 Surviving ownership anywhere beneath the removal root, including a repository's
-source subdirectory or Git common directory, prevents removal. Destructive Git is
+source subdirectory or Git common directory, prevents removal. Repository setup,
+repository configuration and workspace binding also check those pending captured roots
+inside the transaction that acquires checkout or common-directory ownership. A checkout
+outside the removal root is still refused if its separate Git directory lies inside it;
+checking ownership only after an already-dispatched child exits cannot protect that owner.
+Destructive Git is
 preceded by a private item reservation bound to its captured identity. A bounded
 result without observed child exit retains that reservation and task lock until the
 exact child positively exits; shutdown does not wait indefinitely for that proof.

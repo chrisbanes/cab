@@ -456,7 +456,19 @@ for (const owner of [
       } else if (owner === "repository-link") {
         db.prepare(
           "UPDATE project_repository_links SET links=? WHERE projectId=?",
-        ).run(JSON.stringify([{ path }]), f.projectB);
+        ).run(
+          JSON.stringify([
+            {
+              codeHost: "github",
+              host: "github.com",
+              repositoryId: "R_survivor",
+              ref: "main",
+              path,
+              gitCommonDirectory: f.survivor!.repositories[0]!.gitCommonDir,
+            },
+          ]),
+          f.projectB,
+        );
       } else {
         const repositories = f.survivor!.repositories.map((repo) => ({
           ...repo,

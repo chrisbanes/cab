@@ -267,22 +267,25 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     path: string,
     repositories: TaskWorkspaceRepository[],
   ): TaskWorkspaceBinding {
-    assertOwnedTaskWritable(this.db, taskId);
-    assertCapturedWorkspaceAvailable(this.db, {
-      taskId,
-      workspaceId,
-      path,
-      repositories,
-    });
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO ${this.table}
-          (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, 'provisioning', NULL, 0, ?, ?)`,
-      )
-      .run(taskId, workspaceId, path, JSON.stringify(repositories), now, now);
-    return this.get(taskId) ?? this.invalidRow();
+    const create = () => {
+      assertOwnedTaskWritable(this.db, taskId);
+      assertCapturedWorkspaceAvailable(this.db, {
+        taskId,
+        workspaceId,
+        path,
+        repositories,
+      });
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO ${this.table}
+            (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, 'provisioning', NULL, 0, ?, ?)`,
+        )
+        .run(taskId, workspaceId, path, JSON.stringify(repositories), now, now);
+      return this.get(taskId) ?? this.invalidRow();
+    };
+    return this.db.isTransaction ? create() : transaction(this.db, create);
   }
 
   get(taskId: string): TaskWorkspaceBinding | undefined {
@@ -315,8 +318,8 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     gitCommonDir: string,
     commit: string,
   ): TaskWorkspaceBinding {
-    assertOwnedTaskWritable(this.db, taskId);
     return transaction(this.db, () => {
+      assertOwnedTaskWritable(this.db, taskId);
       const binding = this.get(taskId);
       if (!binding) throw new Error(`No task workspace for ${taskId}`);
       const index = binding.repositories.findIndex(
@@ -332,6 +335,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       }
       const repositories = [...binding.repositories];
       repositories[index] = { ...current, gitCommonDir, commit };
+      assertCapturedWorkspaceAvailable(this.db, { ...binding, repositories });
       this.db
         .prepare(
           `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,

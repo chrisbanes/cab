@@ -1,15 +1,14 @@
-import { isAbsolute, resolve, sep } from "node:path";
+import { repositoryLinkListSchema } from "../core/repository-links.js";
+import { isAbsolute } from "node:path";
+import {
+  assertCleanupOwnershipAvailableWithinTransaction,
+  hasProjectTombstones as tombstones,
+  withinCapturedRemoval as within,
+} from "../core/project-cleanup-reservations.js";
 import type { Database } from "../core/store.js";
 import { projectCleanupId } from "./project-cleanup-identities.js";
 import type { TaskWorkspaceBinding } from "./workspaces.js";
 
-function tombstones(db: Database) {
-  return !!db
-    .prepare(
-      "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='project_tombstones'",
-    )
-    .get();
-}
 export function isDeletedProjectThread(
   db: Database,
   threadId: string,
@@ -20,11 +19,6 @@ export function isDeletedProjectThread(
     WHERE json_extract(i.value,'$.kind')='codex-thread' AND (json_extract(i.value,'$.id')=? OR json_extract(i.value,'$.captured.threadId')=?) LIMIT 1`)
     .get(projectCleanupId("codex-thread", threadId), threadId);
 }
-const within = (path: string, root: string) => {
-  const normalized = resolve(path),
-    parent = resolve(root);
-  return normalized === parent || normalized.startsWith(parent + sep);
-};
 /** Cooperating binding creation cannot claim an identity while captured cleanup is pending. */
 export function assertCapturedWorkspaceAvailable(
   db: Database,
@@ -41,35 +35,18 @@ export function assertCapturedWorkspaceAvailable(
       .get(projectCleanupId("workspace", binding.workspaceId))
   )
     throw new Error("Workspace identity belongs to a deleted project");
-  const pending = db
-    .prepare(`SELECT json_extract(i.value,'$.captured.binding.path') AS path,
-    json_extract(i.value,'$.captured.binding.taskId') AS taskId FROM project_tombstones t,json_each(t.cleanupJson,'$.items') i
-    WHERE json_extract(i.value,'$.kind')='workspace' AND json_extract(i.value,'$.state')='pending' LIMIT 10001`)
-    .all() as { path: unknown; taskId: unknown }[];
-  if (pending.length > 10000)
-    throw new Error("Workspace cleanup ownership unavailable");
-  for (const row of pending) {
-    if (
-      typeof row.path !== "string" ||
-      !isAbsolute(row.path) ||
-      typeof row.taskId !== "string"
-    )
-      throw new Error("Workspace cleanup ownership unavailable");
-    const root = row.path;
-    if (
-      row.taskId === binding.taskId ||
-      within(binding.path, root) ||
-      binding.repositories.some(
-        (repo) =>
-          within(repo.sourcePath, root) ||
-          within(repo.workspacePath, root) ||
-          (repo.gitCommonDir !== null && within(repo.gitCommonDir, root)),
-      )
-    )
-      throw new Error(
-        "Workspace identity is reserved by deleted-project cleanup",
-      );
-  }
+  assertCleanupOwnershipAvailableWithinTransaction(
+    db,
+    [
+      binding.path,
+      ...binding.repositories.flatMap((repo) => [
+        repo.sourcePath,
+        repo.workspacePath,
+        ...(repo.gitCommonDir === null ? [] : [repo.gitCommonDir]),
+      ]),
+    ],
+    binding.taskId,
+  );
 }
 /** Checked again by the locked physical operation after each asynchronous identity read. */
 export function capturedWorkspaceUnclaimed(
@@ -134,10 +111,29 @@ export function capturedWorkspaceUnclaimed(
     )
       return false;
   }
-  return unclaimed(
-    db
-      .prepare(`SELECT json_extract(r.value,'$.path') AS path
-        FROM project_repository_links p,json_each(p.links) r LIMIT 10001`)
-      .all() as { path: unknown }[],
-  );
+  const savedLinks = db
+    .prepare("SELECT links FROM project_repository_links LIMIT 10001")
+    .all() as { links: unknown }[];
+  if (savedLinks.length > 10000) return false;
+  for (const row of savedLinks) {
+    try {
+      if (
+        typeof row.links !== "string" ||
+        !repositoryLinkListSchema.safeParse(JSON.parse(row.links)).success
+      )
+        return false;
+    } catch {
+      return false;
+    }
+  }
+  for (const field of ["path", "gitCommonDirectory"]) {
+    const rows = db
+      .prepare(`SELECT json_extract(r.value,'$.${field}') AS path
+        FROM project_repository_links p,json_each(p.links) r
+        ${field === "gitCommonDirectory" ? "WHERE json_extract(r.value,'$.gitCommonDirectory') IS NOT NULL" : ""}
+        LIMIT 10001`)
+      .all() as { path: unknown }[];
+    if (!unclaimed(rows)) return false;
+  }
+  return true;
 }
