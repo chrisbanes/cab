@@ -70,14 +70,31 @@ for (const engine of ["chromium", "webkit"] as const) {
       const restored = f.service.domain().project(f.projectId);
       assert.equal(restored.paused, 1);
       assert.equal(restored.archived, 0);
+      const archive = panel.getByRole("button", {
+        name: "Archive project",
+        exact: true,
+      });
+      // Restore's callbacks can be queued after a drained check, so re-read until
+      // the page itself allows archiving.
       await until(
-        () => f.service.projectLifecycleStatus(f.projectId).length === 0,
-        "restored project callbacks drained",
+        async () => {
+          if (f.service.projectLifecycleStatus(f.projectId).length !== 0)
+            return false;
+          const read = page.waitForResponse(
+            (r) =>
+              new URL(r.url()).pathname ===
+              `/api/operator/projects/${f.projectId}`,
+          );
+          await page
+            .getByRole("button", { name: "Refresh", exact: true })
+            .click();
+          await read;
+          return archive.isEnabled();
+        },
+        "archiving allowed after the restored project drained",
+        15_000,
       );
-      await page.getByRole("button", { name: "Refresh", exact: true }).click();
-      await panel
-        .getByRole("button", { name: "Archive project", exact: true })
-        .click();
+      await archive.click();
       await panel
         .getByRole("button", { name: "Inspect deletion preview", exact: true })
         .waitFor();

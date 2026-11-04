@@ -227,9 +227,22 @@ test("production workspace retains literal captured text, pending request, focus
       ),
   );
   await readingButton.focus();
+  // The re-read returns 250+ retained items and can outlast the 5 s default on a
+  // contended CI runner, so wait for it before checking what it rendered.
+  const timelineRead = page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === `/api/operator/tasks/${a.taskId}/timeline` &&
+        !url.searchParams.has("before")
+      );
+    },
+    { timeout: 15_000 },
+  );
   await page
     .getByRole("button", { name: "Refresh task", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
+  await timelineRead;
   await newestItem.waitFor();
   assert.ok(
     Math.abs(
