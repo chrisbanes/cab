@@ -189,11 +189,10 @@ test("assignment recovery projects the fenced task facts while keeping records a
   assert.equal(lead.omittedCount, 1);
   assert.equal(lead.records.length, 20);
   assert.equal(worker.omittedCount, 0);
-  assert.deepEqual(worker.records.map((r) => r.workId), [
-    "worker-record-1",
-    "worker-record-2",
-    "worker-record-3",
-  ]);
+  assert.deepEqual(
+    worker.records.map((r) => r.workId),
+    ["worker-record-1", "worker-record-2", "worker-record-3"],
+  );
   assert.equal(lead.assignment.resultDestination, "operator");
   assert.equal(worker.assignment.resultDestination, "[redacted] destination");
   assert.equal(worker.assignment.state, "pending");
