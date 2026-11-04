@@ -71,6 +71,22 @@ normal exact identity and termination proof. Abort is bound before adapter
 construction, so preaborted journeys invoke no factory and in-flight bootstrap
 abort holds authority before any later credential, provider or service effect.
 
+New runtime callbacks recheck source, binary and bound input pins before reserving
+and releasing their service effect. Revocation still permits recording completion
+evidence and stopping the original owned child. The final settlement audit counts
+undelivered inbox events, queued delivery batches, ready executions, eligible
+pending assignments and reporting repairs as unfinished work, even when earlier
+turns completed successfully. Each initial live turn must register its exact
+existing PR before reporting, so its current work retains the waiting-delivery
+association needed for later provider notices.
+
+Request budgets follow the finite call graph, including each fresh service
+provider instance, initial registrations, permitted observations, refreshes and
+original-UUID polls. Version 2 accepts an explicitly granted total of at most 256
+reads; that ceiling grants no requests by itself. Every exact route retains its
+own cap. Credential value resolutions and per-request accesses are separate
+budgets, and the six feedback first pages remain independently bounded.
+
 Only exact `https://api.github.com` requests are permitted. REST reads and the two
 literal read-only GraphQL documents have explicit per-rule versions. Captured PR
 reads use 2026-03-10; repository, refs, checks, protection, GraphQL, merge polls and

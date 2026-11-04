@@ -1,9 +1,11 @@
-import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { DomainStore } from "../../../src/core/domain.js";
+import { CoordinationStore } from "../../../src/core/coordination.js";
 import { DeliveryStore } from "../../../src/core/delivery.js";
+import { DomainStore } from "../../../src/core/domain.js";
 import { UnstackStore } from "../../../src/core/unstack.js";
+import { SchedulerWakeQueries } from "../../../src/standalone/scheduler-wake-queries.js";
 import type { StackV2Authority } from "./stack-authority.js";
 
 /** Snapshot exact original-operation facts together; never infer retirement from an HTTP receipt. */
@@ -80,11 +82,39 @@ export function auditPreparedStack(authority: StackV2Authority) {
         total + db.prepare(`SELECT taskId FROM ${table}`).all().length,
       0,
     );
-    const unfinished = db
+    const unfinishedExecutions = db
       .prepare(
-        "SELECT workId FROM execution_intents WHERE state IN ('submitting','running','held','capacity-waiting')",
+        "SELECT workId FROM execution_intents WHERE state IN ('ready','submitting','running','held','capacity-waiting')",
       )
       .all().length;
+    const coordination = new CoordinationStore(db, domain);
+    const pendingInboxEvents = coordination
+      .pendingEventRecipients()
+      .reduce(
+        (total, recipient) =>
+          total + coordination.pendingEvents(recipient).length,
+        0,
+      );
+    const queuedDeliveries = coordination.queuedDeliveries().length;
+    const reportingRepairs = db
+      .prepare(
+        "SELECT assignmentId FROM coordination_reporting_repairs WHERE state = 'queued'",
+      )
+      .all().length;
+    const wakeQueries = new SchedulerWakeQueries(db);
+    const runnableAssignments = domain
+      .pendingAssignments()
+      .filter(
+        (assignment) =>
+          domain.assignmentAdmission(String(assignment.id)).eligible &&
+          !wakeQueries.hasWork(`assignment:${String(assignment.id)}:initial`),
+      ).length;
+    const unfinished =
+      unfinishedExecutions +
+      pendingInboxEvents +
+      queuedDeliveries +
+      reportingRepairs +
+      runnableAssignments;
     return {
       taskId: task,
       targetBaseRef: m.resource.base,

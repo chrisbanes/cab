@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { unstackReadSchema } from "../../src/operator/unstack-contracts.js";
 import { offlineStackResources } from "./github-qualification/stack-offline-resources.js";
 import { createRealStackAdapter } from "./github-qualification/stack-real-adapter.js";
-import { runRealStackJourney } from "./github-qualification/stack-real-journey.js";
-import { unstackReadSchema } from "../../src/operator/unstack-contracts.js";
+import {
+  assertInitialStackReports,
+  runRealStackJourney,
+} from "./github-qualification/stack-real-journey.js";
 
 // Native runtime startup is disabled in the prepared DB and has no granted call.
 // Credential resolution and every HTTP response remain injected/in-process.
@@ -237,3 +240,52 @@ for (const phase of ["credential", "provider", "constructed"] as const)
       else process.env.CODEX_HOME = previous;
     }
   });
+
+test("merge gate requires both exact initial registrations and successful current reports", async (t) => {
+  const f = await offlineStackResources(t);
+  await f.guard.open();
+  const journal = f.guard.snapshot();
+  await f.guard.close();
+  const authority = { manifest: f.guard.manifest, snapshot: () => journal };
+  assert.throws(
+    () => assertInitialStackReports(authority),
+    /initial-registration-report/,
+  );
+  for (const scope of authority.manifest.authority.runtime) {
+    const workId = `assignment:${scope.assignmentId}:initial`;
+    journal.runtimeBindings.push({
+      taskId: scope.taskId,
+      assignmentId: scope.assignmentId,
+      workId,
+      threadId: `thread:${workId}`,
+      turnId: `turn:${workId}`,
+      processSha256: "a".repeat(64),
+    });
+    journal.terminals[workId] = "completed";
+    for (const tool of ["cab_register_pr", "cab_report_result"] as const)
+      journal.callbacks.push({
+        key: "b".repeat(64),
+        workId,
+        callId: `${tool}:${workId}`,
+        tool,
+        argumentsSha256: "c".repeat(64),
+        invoked: true,
+        state: "ended",
+        succeeded: true,
+      });
+  }
+  assert.doesNotThrow(() => assertInitialStackReports(authority));
+  for (const callback of journal.callbacks) {
+    callback.succeeded = false;
+    assert.throws(
+      () => assertInitialStackReports(authority),
+      /initial-registration-report/,
+    );
+    callback.succeeded = true;
+  }
+  journal.runtimeBindings[0]!.workId += ":historical";
+  assert.throws(
+    () => assertInitialStackReports(authority),
+    /initial-registration-report/,
+  );
+});

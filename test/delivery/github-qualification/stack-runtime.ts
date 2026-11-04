@@ -1,18 +1,18 @@
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 import { z } from "zod";
-import { reviewMetadataSchema } from "../../../src/core/task-review.js";
 import { registerPrArgumentsSchema } from "../../../src/core/delivery.js";
+import { reviewMetadataSchema } from "../../../src/core/task-review.js";
 import type {
   Runtime,
   RuntimeTurnSettings,
 } from "../../../src/standalone/codex.js";
-import type { StandaloneService } from "../../../src/standalone/service.js";
 import type { TerminationVerifier } from "../../../src/standalone/recovery-types.js";
+import type { StandaloneService } from "../../../src/standalone/service.js";
 import { MacProcessTerminationVerifier } from "../../../src/standalone/termination.js";
 import {
-  type StackV2Authority,
-  materialHash,
   authorityHash,
+  materialHash,
+  type StackV2Authority,
 } from "./stack-authority.js";
 
 type Intent = ReturnType<StandaloneService["list"]>[number];
@@ -177,6 +177,7 @@ export function bindStackRuntime(
       let succeeded = false;
       try {
         await process();
+        await authority.preflight();
         authority.current();
         if (
           service()

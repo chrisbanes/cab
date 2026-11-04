@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import {
-  mkdtemp,
   mkdir,
+  mkdtemp,
   readFile,
   realpath,
   stat,
@@ -11,20 +12,23 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
+
 const opened: StackV2Authority[] = [];
 after(async () => {
   for (const guard of opened) await guard.close();
 });
+
 import {
-  StackV2Authority,
   authorityHash,
   materialHash,
+  StackV2Authority,
 } from "./github-qualification/stack-authority.js";
 
 async function fixture(
   feedback = false,
   runtimeEnabled = false,
   gitEnabled = false,
+  mergeScenario = false,
 ) {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "cab-authority-offline-")),
@@ -38,6 +42,7 @@ async function fixture(
   await writeFile(file, "offline-inert-test-input");
   const pin = { path: file, sha256: authorityHash("offline-inert-test-input") };
   const stamp = await stat(root);
+  const credentialStamp = await stat(file);
   const runId = randomUUID(),
     taskA = randomUUID(),
     taskB = randomUUID();
@@ -85,8 +90,8 @@ async function fixture(
         home: root,
         userHome: root,
         authTarget: file,
-        dev: stamp.dev,
-        ino: stamp.ino,
+        dev: credentialStamp.dev,
+        ino: credentialStamp.ino,
       },
       runtimeVersion: "offline",
       settingsSha256: materialHash(null),
@@ -297,7 +302,7 @@ async function fixture(
   const manifest = JSON.stringify({
     version: 2,
     runId,
-    scenario: "unstack-healthy",
+    scenario: mergeScenario ? "merge-adoption" : "unstack-healthy",
     journey: { maxObservations: 1, settlePolls: 1, pollIntervalMs: 250 },
     unstackCommand: null,
     resource,
@@ -317,13 +322,24 @@ async function fixture(
     expiresAt: new Date(now + 60000).toISOString(),
     teardownDeadline: authority.host.teardownDeadline,
   });
-  const guard = () => {
+  const inputPaths = {
+    manifest: join(root, "manifest.json"),
+    grant: join(root, "grant.json"),
+    readiness: join(root, "readiness.json"),
+  };
+  const guard = (bindInputs = false) => {
+    if (bindInputs) {
+      writeFileSync(inputPaths.manifest, manifest);
+      writeFileSync(inputPaths.grant, grant);
+      writeFileSync(inputPaths.readiness, readiness);
+    }
     const guard = new StackV2Authority(
       manifest,
       grant,
       readiness,
       join(root, "result"),
       () => clock,
+      bindInputs ? inputPaths : undefined,
     );
     opened.push(guard);
     return guard;
@@ -336,6 +352,7 @@ async function fixture(
     manifest,
     grant,
     readiness,
+    inputPaths,
     requests: authority.reads.map((rule) => rule.request),
     gitMaterial,
     expire: () => {
@@ -529,10 +546,12 @@ async function runtimeFixture(
     startFailure?: boolean;
     exitProof?: boolean;
     nullIdentity?: boolean;
+    boundInputs?: boolean;
+    mergeScenario?: boolean;
   } = {},
 ) {
-  const f = await fixture(false, true),
-    guard = f.guard();
+  const f = await fixture(false, true, false, options.mergeScenario),
+    guard = f.guard(options.boundInputs);
   await guard.open();
   const scope = guard.manifest.authority.runtime[0]!;
   const identity = {
@@ -741,6 +760,132 @@ test("source revocation blocks a new turn but leaves original owned process stop
   assert.equal(f.calls.turns, 0);
   await f.runtime.stop();
   assert.equal(f.calls.stops, 1);
+  assert.equal(f.guard.snapshot().processExit, true);
+});
+
+test("merge runtime registers its exact existing PR before reporting", async () => {
+  const f = await runtimeFixture({ mergeScenario: true });
+  const turnId = await f.turn();
+  f.running(turnId);
+  const r = f.guard.manifest.resource;
+  await f.invoke({
+    threadId: "offline-thread",
+    turnId,
+    callId: "initial-register",
+    tool: "cab_register_pr",
+    arguments: {
+      repositoryId: r.repositoryNodeId,
+      prNumber: r.lowerPr,
+      expectedPrNodeId: r.lowerPrId,
+      expectedHeadSha: r.lowerHead,
+    },
+  });
+  await f.invoke({
+    threadId: "offline-thread",
+    turnId,
+    callId: "initial-report",
+    tool: "cab_report_result",
+    arguments: { summary: "initial result" },
+  });
+  assert.equal(f.calls.callbacks, 2);
+  assert.equal(f.guard.snapshot().callbacks.length, 2);
+  await f.runtime.stop();
+});
+
+for (const refusal of [
+  "report-before-registration",
+  "repeat-registration",
+] as const)
+  test(`merge runtime refuses ${refusal} before its service mutation`, async () => {
+    const f = await runtimeFixture({ mergeScenario: true });
+    const turnId = await f.turn();
+    f.running(turnId);
+    const r = f.guard.manifest.resource;
+    const register = {
+      threadId: "offline-thread",
+      turnId,
+      callId: "initial-register",
+      tool: "cab_register_pr",
+      arguments: {
+        repositoryId: r.repositoryNodeId,
+        prNumber: r.lowerPr,
+        expectedPrNodeId: r.lowerPrId,
+        expectedHeadSha: r.lowerHead,
+      },
+    };
+    if (refusal === "repeat-registration") await f.invoke(register);
+    await assert.rejects(
+      f.invoke(
+        refusal === "repeat-registration"
+          ? { ...register, callId: "second-register" }
+          : {
+              threadId: "offline-thread",
+              turnId,
+              callId: "initial-report",
+              tool: "cab_report_result",
+              arguments: { summary: "initial result" },
+            },
+      ),
+      refusal === "repeat-registration"
+        ? /v2-registration-already-attempted/
+        : /v2-initial-registration-required/,
+    );
+    assert.equal(f.calls.callbacks, refusal === "repeat-registration" ? 1 : 0);
+    await f.runtime.stop();
+  });
+
+for (const revoked of ["source", "grant", "readiness"] as const) {
+  test(`revoked ${revoked} refuses a new result callback before service mutation`, async () => {
+    const f = await runtimeFixture({ boundInputs: true });
+    const turnId = await f.turn();
+    f.running(turnId);
+    const path = revoked === "source" ? f.file : f.inputPaths[revoked];
+    await writeFile(path, "revoked-bound-input");
+    await assert.rejects(
+      f.invoke({
+        threadId: "offline-thread",
+        turnId,
+        callId: "revoked-result",
+        tool: "cab_report_result",
+        arguments: { summary: "must not reach the service" },
+      }),
+      /v2-source-pin/,
+    );
+    assert.equal(f.calls.callbacks, 0);
+    assert.equal(f.guard.snapshot().callbacks.length, 0);
+    await f.runtime.stop();
+    assert.equal(f.calls.stops, 1);
+    assert.equal(f.guard.snapshot().processExit, true);
+  });
+}
+
+test("source revoked after callback reservation cannot reach its listener, but completion evidence settles", async () => {
+  const f = await runtimeFixture();
+  const turnId = await f.turn();
+  f.running(turnId);
+  let revoked = false;
+  f.onIdentity(() => {
+    if (!revoked && f.guard.snapshot().callbacks.length === 1) {
+      revoked = true;
+      writeFileSync(f.file, "revoked-after-reservation");
+    }
+  });
+  await assert.rejects(
+    f.invoke({
+      threadId: "offline-thread",
+      turnId,
+      callId: "reserved-result",
+      tool: "cab_report_result",
+      arguments: { summary: "must not reach the service" },
+    }),
+    /v2-source-pin/,
+  );
+  assert.equal(f.calls.callbacks, 0);
+  assert.equal(f.guard.snapshot().callbacks.length, 1);
+  assert.equal(f.guard.snapshot().callbacks[0]?.state, "ended");
+  assert.equal(f.guard.snapshot().callbacks[0]?.invoked, false);
+  assert.equal(f.guard.snapshot().callbacks[0]?.succeeded, false);
+  await f.runtime.stop();
   assert.equal(f.guard.snapshot().processExit, true);
 });
 
@@ -1011,22 +1156,22 @@ test("counter persistence failure refuses before credentials and preserves origi
   );
 });
 
-import { operationReadSchema } from "../../src/operator/contracts.js";
-import { unstackRecordSchema } from "../../src/core/unstack.js";
 import { materialDigest } from "../../src/core/delivery.js";
+import { unstackRecordSchema } from "../../src/core/unstack.js";
+import { operationReadSchema } from "../../src/operator/contracts.js";
 import { deliveryDocuments } from "../../src/standalone/github-delivery.js";
 import {
-  fullUnstackProof,
   type auditPreparedStack,
+  fullUnstackProof,
 } from "./github-qualification/stack-audit.js";
-import { runRealStackJourney } from "./github-qualification/stack-real-journey.js";
-import type { createRealStackAdapter } from "./github-qualification/stack-real-adapter.js";
 import {
+  stackV2GrantSchema,
   stackV2ManifestSchema,
   stackV2ReadinessSchema,
-  stackV2GrantSchema,
 } from "./github-qualification/stack-authority.js";
 import { stackV2Schemas } from "./github-qualification/stack-builders.js";
+import type { createRealStackAdapter } from "./github-qualification/stack-real-adapter.js";
+import { runRealStackJourney } from "./github-qualification/stack-real-journey.js";
 
 for (const field of ["manifest", "grant", "readiness"] as const)
   test(`v2 missing ${field} refuses before any owned effect`, async () => {

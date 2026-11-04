@@ -1,29 +1,29 @@
-import { unstackCommandSchema } from "../../../src/core/unstack.js";
-import { StackPinnedFiles } from "./stack-files.js";
-import {
-  runGit,
-  gitChildExited,
-  type GitRunResult,
-} from "../../../src/standalone/git-process.js";
-import type { RuntimeToolCall } from "../../../src/standalone/codex.js";
-import { constants } from "node:fs";
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import {
   lstat,
   open,
+  readdir,
   readFile,
   readlink,
-  readdir,
   realpath,
   rename,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { z } from "zod";
+import { unstackCommandSchema } from "../../../src/core/unstack.js";
+import type { RuntimeToolCall } from "../../../src/standalone/codex.js";
+import {
+  type GitRunResult,
+  gitChildExited,
+  runGit,
+} from "../../../src/standalone/git-process.js";
 import type {
   GitHubDeliveryRequest,
   GitHubDeliveryRequestBoundary,
 } from "../../../src/standalone/github-delivery.js";
 import { deliveryDocuments } from "../../../src/standalone/github-delivery.js";
+import { StackPinnedFiles } from "./stack-files.js";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
@@ -183,7 +183,7 @@ export const stackAuthoritySchema = z
       .length(2),
     limits: z
       .object({
-        reads: count.max(128),
+        reads: count.max(256),
         writes: count.max(32),
         credentials: count.max(32),
         credentialCallbacks: count.max(256),
@@ -1988,6 +1988,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
   }
   beginCallback(call: RuntimeToolCall) {
     return this.serial(async () => {
+      await this.preflight();
       this.current();
       const binding = this.journal.runtimeBindings.find(
         (value) =>
@@ -2008,6 +2009,27 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
       const key = materialHash({ workId: binding.workId, callId: call.callId });
       if (this.journal.callbacks.some((value) => value.key === key))
         throw Error("v2-callback-already-attempted");
+      if (this.manifest.scenario === "merge-adoption") {
+        const registrations = this.journal.callbacks.filter(
+          (callback) =>
+            callback.tool === "cab_register_pr" &&
+            this.journal.runtimeBindings.some(
+              (registered) =>
+                registered.workId === callback.workId &&
+                registered.taskId === binding.taskId &&
+                registered.assignmentId === binding.assignmentId,
+            ),
+        );
+        if (tool === "cab_register_pr" && registrations.length !== 0)
+          throw Error("v2-registration-already-attempted");
+        if (
+          tool === "cab_report_result" &&
+          !registrations.some(
+            (callback) => callback.state === "ended" && callback.succeeded,
+          )
+        )
+          throw Error("v2-initial-registration-required");
+      }
       this.increment("callbacks", this.manifest.authority.limits.callbacks);
       this.increment(`callbacks:${scope.taskId}`, scope.maxCallbacks);
       this.increment(
@@ -2025,6 +2047,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
         succeeded: null,
       });
       await this.save();
+      await this.preflight();
       this.current();
       return key;
     });

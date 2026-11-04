@@ -1,12 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { operationReadSchema } from "../../../src/operator/contracts.js";
 import {
-  unstackReceiptSchema,
   unstackReadSchema,
+  unstackReceiptSchema,
 } from "../../../src/operator/unstack-contracts.js";
-import { type StackV2Authority, materialHash } from "./stack-authority.js";
-import { createRealStackAdapter } from "./stack-real-adapter.js";
 import { fullUnstackProof } from "./stack-audit.js";
+import { materialHash, type StackV2Authority } from "./stack-authority.js";
+import { createRealStackAdapter } from "./stack-real-adapter.js";
 
 type Adapter = Awaited<ReturnType<typeof createRealStackAdapter>>;
 export interface StackRealJourneyInput {
@@ -16,6 +16,39 @@ export interface StackRealJourneyInput {
   signal?: AbortSignal;
   /** Deterministic offline qualification uses the same orchestration, visibly labelled. */
   factory?: typeof createRealStackAdapter;
+}
+
+/** Both prepared assignments must register and report in their completed initial turn. */
+export function assertInitialStackReports(
+  authority: Pick<StackV2Authority, "snapshot" | "manifest">,
+) {
+  const journal = authority.snapshot(),
+    m = authority.manifest;
+  for (const taskId of [m.resource.lowerTask, m.resource.upperTask]) {
+    const scope = m.authority.runtime.find((value) => value.taskId === taskId);
+    const binding =
+      scope &&
+      journal.runtimeBindings.find(
+        (value) =>
+          value.taskId === taskId &&
+          value.assignmentId === scope.assignmentId &&
+          value.workId === `assignment:${scope.assignmentId}:initial`,
+      );
+    if (
+      !binding ||
+      journal.terminals[binding.workId] !== "completed" ||
+      !["cab_register_pr", "cab_report_result"].every((tool) =>
+        journal.callbacks.some(
+          (callback) =>
+            callback.workId === binding.workId &&
+            callback.tool === tool &&
+            callback.state === "ended" &&
+            callback.succeeded,
+        ),
+      )
+    )
+      throw Error("v2-initial-registration-report-required");
+  }
 }
 
 /** Finite actual service/API journey. No fixture creation, publication or cleanup fallback. */
@@ -85,6 +118,7 @@ export async function runRealStackJourney(input: StackRealJourneyInput) {
         !initial.selectedEdgeActive
       )
         throw Error("v2-adoption-baseline");
+      assertInitialStackReports(authority);
       stage = "merge-request";
       await adapter.mergeLower();
       for (let n = 0; n < m.journey.maxObservations; n++) {
