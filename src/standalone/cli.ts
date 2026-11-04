@@ -118,6 +118,18 @@ export async function main(
     throw new Error(
       "Usage: cab <serve|operator|run|list> ABSOLUTE_DATA_DIR [workId prompt workspace previousWorkId]",
     );
+  let bundle: OperatorWebBundle | undefined;
+  if (command === "operator") {
+    try {
+      bundle = await OperatorWebBundle.open(
+        fileURLToPath(new URL("../../operator", import.meta.url)),
+      );
+    } catch {
+      const message = "operator web UI not built; run npm run build:web";
+      process.stderr.write(`${message}\n`);
+      throw new Error(message);
+    }
+  }
   const service = serviceFactory(dataDir);
   const records = log ?? new ServiceLog();
   records.attach(service);
@@ -199,9 +211,7 @@ export async function main(
       if (!operatorAuth)
         throw new Error("Operator authentication is unavailable");
       const routes = new OperatorRouteRegistry();
-      const bundle = await OperatorWebBundle.open(
-        fileURLToPath(new URL("../../operator", import.meta.url)),
-      );
+      if (!bundle) throw new Error("Operator web UI not built");
       if (await consumeFatalFailure()) return;
       const authFile = process.env.CAB_OPERATOR_AUTH_FILE ?? "";
       const api = new OperatorApi(

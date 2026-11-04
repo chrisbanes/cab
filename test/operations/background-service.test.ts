@@ -1332,11 +1332,10 @@ test("production operator CLI joins an already-fatal service and closes the live
   });
 });
 
-test("operator CLI consumes fatal failures before first accessor and across bundle and push loading", async () => {
+test("operator CLI consumes fatal failures before first accessor and across push loading", async () => {
   await withCapturedIntervals(async (intervals) => {
     for (const timing of [
       "before-first-accessor",
-      "during-bundle-open",
       "during-push-open",
     ] as const) {
       const priorExitCode = process.exitCode;
@@ -1402,10 +1401,6 @@ test("operator CLI consumes fatal failures before first accessor and across bund
           configurable: true,
           value: async (directory: string) => {
             bundleOpens++;
-            if (timing === "during-bundle-open") {
-              loadEntered.resolve();
-              await releaseLoad.promise;
-            }
             return originalBundleOpen.call(OperatorWebBundle, directory);
           },
         });
@@ -1549,7 +1544,7 @@ test("operator CLI consumes fatal failures before first accessor and across bund
         assert.equal(authCloses, 1);
         assert.throws(() => auth!.createAnonymousSession());
         assert.equal(accessorsAfterFatal, 0);
-        assert.equal(bundleOpens, timing === "before-first-accessor" ? 0 : 1);
+        assert.equal(bundleOpens, 1);
         assert.equal(pollInjected, timing === "before-first-accessor");
         assert.equal(diagnostics.length, 1);
         assert.equal(diagnostics[0]?.operation, "github-poll");
