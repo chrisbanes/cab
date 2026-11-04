@@ -830,6 +830,57 @@ test("a failed write-ahead reservation prevents destructive Git dispatch", async
   await absent(f.binding!.path);
 });
 
+for (const reservation of ["legacy-unknown", "git-removal"] as const) {
+  for (const restart of [false, true]) {
+    test(`${reservation} cleanup reservations allow later items to progress${restart ? " after restart" : ""}`, async (t) => {
+      const f = await deletedCleanupFixture(t, {
+        workspaces: true,
+        temp: true,
+      });
+      await f.commit();
+      const db = databaseOf(f.service),
+        cleanup = f.store().pendingCleanupProject(f.projectId)!.cleanup,
+        workspace = cleanup.items.find((item) => item.kind === "workspace")!;
+      assert.equal(workspace.state, "pending");
+      if (workspace.state !== "pending") throw new Error("Missing workspace");
+      const blocked = Array.from({ length: 16 }, () => ({
+        ...workspace,
+        id: randomUUID(),
+        ...(reservation === "legacy-unknown"
+          ? { reason: "unknown" as const }
+          : {
+              gitRemoval: {
+                repositoryId: f.binding!.repositories[0]!.repositoryId,
+                capturedDigest: materialDigest(workspace.captured),
+              },
+            }),
+      }));
+      cleanup.items = [
+        ...blocked,
+        ...cleanup.items.filter((item) => item.id !== workspace.id),
+      ];
+      db.prepare(
+        "UPDATE project_tombstones SET cleanupJson=? WHERE projectId=?",
+      ).run(JSON.stringify(cleanup), f.projectId);
+      const runner = f.runner();
+      await runner.sweep(f.projectId);
+      assert.ok(await lstat(f.temp!));
+      await (restart ? f.runner() : runner).sweep(f.projectId);
+      await absent(f.temp!);
+      assert.ok(await lstat(f.binding!.path));
+      const retained = f.store().pendingCleanupProject(f.projectId)!.cleanup;
+      for (const item of blocked)
+        assert.deepEqual(
+          retained.items.find((current) => current.id === item.id),
+          item,
+          "rotation preserves the exact uncertainty reservation",
+        );
+      assert.equal(f.fixture.runtime.turns, 0);
+      f.assertDeleted();
+    });
+  }
+}
+
 for (const invalid of [
   "legacy-unknown",
   "wrong-digest",
@@ -865,12 +916,22 @@ for (const invalid of [
       "UPDATE project_tombstones SET cleanupJson=? WHERE projectId=?",
     ).run(retained, f.projectId);
     await f.runner().sweep();
-    assert.equal(
-      db
-        .prepare("SELECT cleanupJson FROM project_tombstones WHERE projectId=?")
-        .get(f.projectId)!.cleanupJson,
-      retained,
-    );
+    const after = db
+      .prepare("SELECT cleanupJson FROM project_tombstones WHERE projectId=?")
+      .get(f.projectId)!.cleanupJson;
+    if (invalid === "legacy-unknown")
+      assert.deepEqual(
+        JSON.parse(String(after)),
+        {
+          ...cleanup,
+          items: [
+            ...cleanup.items.filter((current) => current.id !== item.id),
+            item,
+          ],
+        },
+        "only queue position changes; every reservation and completed item remains exact",
+      );
+    else assert.equal(after, retained);
     assert.ok(await lstat(f.binding!.path));
     f.assertDeleted();
   });
