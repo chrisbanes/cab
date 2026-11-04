@@ -1,3 +1,8 @@
+import {
+  unstackReadSchema,
+  unstackReceiptSchema,
+} from "../operator/unstack-contracts.js";
+import type { UnstackRecord } from "../core/unstack.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -6503,7 +6508,123 @@ export class OperatorApi {
       });
     });
   }
-  /** Reads back one configuration, adoption or source receipt by scope, type and key. */
+  /** Filters the full private journal before projecting its bounded public receipt. */
+  private projectUnstackReceipt(
+    record: UnstackRecord,
+    excluded: readonly string[] | undefined,
+  ) {
+    if (
+      this.requireTask(record.identity.taskId).projectId !==
+      record.identity.projectId
+    )
+      throw new OperatorApiError(409, "conflict");
+    if (
+      excluded === undefined ||
+      !this.disclosable(JSON.stringify(record), excluded)
+    )
+      throw new OperatorApiError(503, "unavailable");
+    return unstackReceiptSchema.parse({
+      kind: "task-unstack",
+      key: record.command.key,
+      taskId: record.identity.taskId,
+      recorded: true,
+      expectedVersion: record.command.expectedVersion,
+      materialHash: record.command.materialHash,
+      phase: record.phase,
+      revision: record.revision,
+      reason: record.reason,
+    });
+  }
+  async readUnstack(taskId: string) {
+    return this.readWithExclusionFence(async () => {
+      const visibility = this.visibilityToken(),
+        task = this.requireTask(taskId),
+        projectId = String(task.projectId),
+        project = this.domain().project(projectId),
+        excluded = await this.exclusions(projectId, taskId);
+      const record = this.service.taskUnstackOperations(taskId).at(-1);
+      const operation = record
+        ? this.projectUnstackReceipt(record, excluded)
+        : null;
+      const cancelOperation = this.service.latestTaskCancelReceipt(taskId);
+      if (
+        cancelOperation &&
+        (excluded === undefined ||
+          !this.disclosable(JSON.stringify(cancelOperation), excluded))
+      )
+        throw new OperatorApiError(503, "unavailable");
+      const pending =
+        operation && !["confirmed", "failed"].includes(operation.phase);
+      let preview = null,
+        unavailable:
+          | "archived"
+          | "unproved"
+          | "not-stacked"
+          | "pending"
+          | null = project.archived
+          ? "archived"
+          : pending
+            ? "pending"
+            : !this.domain().activeStackedDependency(taskId)
+              ? "not-stacked"
+              : null;
+      if (!unavailable) {
+        try {
+          const identity = await this.service.previewTaskUnstack(taskId);
+          if (
+            excluded === undefined ||
+            !this.disclosable(JSON.stringify(identity), excluded)
+          )
+            unavailable = "unproved";
+          else
+            preview = {
+              taskId,
+              expectedVersion: identity.taskVersion,
+              materialHash: materialDigest(identity),
+              repository: identity.repositoryPath.slice("/repos/".length),
+              selectedPr: identity.pr.number,
+              stackNumber: identity.stack.number,
+              targetBase: identity.targetBaseRef,
+              members: identity.stack.members.map((m) => ({
+                number: m.number,
+                state: m.state,
+              })),
+            };
+        } catch (error) {
+          if (!(error instanceof DomainConflictError)) throw error;
+          unavailable = "unproved";
+        }
+      }
+      const currentProject = this.domain().project(projectId),
+        currentTask = this.requireTask(taskId);
+      if (
+        visibility !== this.visibilityToken() ||
+        currentTask.version !== task.version ||
+        currentTask.projectId !== task.projectId ||
+        currentProject.version !== project.version ||
+        currentProject.archived !== project.archived
+      )
+        throw new OperatorApiError(409, "conflict");
+      return unstackReadSchema.parse({
+        data: {
+          taskId,
+          readOnly: Boolean(project.archived),
+          failedBlocker: this.domain().failedStackedBlocker(taskId),
+          cancelAvailable:
+            !project.archived &&
+            task.state === "open" &&
+            this.domain().failedStackedBlocker(taskId),
+          preview,
+          operation,
+          available: preview !== null,
+          unavailable,
+          cancelOperation,
+        },
+        observedAt: Date.now(),
+      });
+    });
+  }
+  /** Reads back an original receipt by scope, type and key without repeating effects. */
   async readOperation(query: URLSearchParams) {
     const names = ["scope", "type", "key"];
     if (
@@ -6517,6 +6638,46 @@ export class OperatorApi {
     if (!scope.success || !type.success || !key.success)
       throw new OperatorApiError(400, "invalid-input");
     const [kind, id = ""] = scope.data.split(":");
+    if (type.data === "task.unstack") {
+      if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
+      return this.readWithExclusionFence(async () => {
+        const task = this.requireTask(id),
+          excluded = await this.exclusions(String(task.projectId), id);
+        const record = this.service.taskUnstackOperation(id, key.data);
+        return operationReadSchema.parse({
+          data: record
+            ? {
+                state: "recorded",
+                receipt: this.projectUnstackReceipt(record, excluded),
+              }
+            : { state: "not-recorded" },
+          observedAt: Date.now(),
+        });
+      });
+    }
+    if (type.data === "task.cancel") {
+      if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
+      return this.readWithExclusionFence(async () => {
+        this.requireTask(id);
+        const receipt = this.service.taskCancelReceipt(id, key.data);
+        const excluded = await this.exclusions(
+          String(this.requireTask(id).projectId),
+          id,
+        );
+        if (
+          receipt &&
+          (excluded === undefined ||
+            !this.disclosable(JSON.stringify(receipt), excluded))
+        )
+          throw new OperatorApiError(503, "unavailable");
+        return operationReadSchema.parse({
+          data: receipt
+            ? { state: "recorded", receipt }
+            : { state: "not-recorded" },
+          observedAt: Date.now(),
+        });
+      });
+    }
     if (type.data === "task.comment.send") {
       if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
       return this.readWithExclusionFence(async () => {
@@ -9689,11 +9850,58 @@ export class OperatorApi {
           throw error;
         }
       }
+      if (c.type === "task.unstack") {
+        const task = this.requireTask(c.taskId),
+          prior = this.service.taskUnstackOperation(c.taskId, c.key);
+        if (prior)
+          this.projectUnstackReceipt(
+            prior,
+            await this.exclusions(String(task.projectId), c.taskId),
+          );
+        else {
+          const shown = (await this.readUnstack(c.taskId)).data.preview;
+          if (
+            !shown ||
+            shown.expectedVersion !== c.expectedVersion ||
+            shown.materialHash !== c.materialHash
+          )
+            throw new OperatorApiError(409, "conflict");
+        }
+        const saved = await this.service.unstackTask({
+          key: c.key,
+          taskId: c.taskId,
+          expectedVersion: c.expectedVersion,
+          materialHash: c.materialHash,
+        });
+        const visibility = this.visibilityToken(),
+          current = this.requireTask(c.taskId),
+          excluded = await this.exclusions(String(task.projectId), c.taskId);
+        if (
+          visibility !== this.visibilityToken() ||
+          this.requireTask(c.taskId).version !== current.version
+        )
+          throw new OperatorApiError(409, "conflict");
+        return this.projectUnstackReceipt(saved, excluded);
+      }
       if (c.type === "task.cancel") {
-        this.requireTask(c.taskId);
-        return commandReceiptSchema.parse(
+        const task = this.requireTask(c.taskId);
+        const receipt = commandReceiptSchema.parse(
           await this.service.cancelStackedTask(c),
         );
+        const visibility = this.visibilityToken(),
+          version = this.requireTask(c.taskId).version,
+          excluded = await this.exclusions(String(task.projectId), c.taskId);
+        if (
+          visibility !== this.visibilityToken() ||
+          this.requireTask(c.taskId).version !== version
+        )
+          throw new OperatorApiError(409, "conflict");
+        if (
+          excluded === undefined ||
+          !this.disclosable(JSON.stringify(receipt), excluded)
+        )
+          throw new OperatorApiError(503, "unavailable");
+        return receipt;
       }
       if (c.type === "task.stop" || c.type === "task.resume") {
         this.requireTask(c.taskId);

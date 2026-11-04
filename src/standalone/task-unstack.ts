@@ -20,6 +20,9 @@ import type { CodeHostDeliveryProvider } from "./code-host.js";
 import { UnstackAuthorityChangedError, UnstackCoordinator } from "./unstack.js";
 import type { SqliteWorkspaceBindingStore } from "./workspaces.js";
 
+/** Optional provider preview failure; local storage/lifecycle failures retain their original type. */
+export class UnstackPreviewUnavailableError extends DomainConflictError {}
+
 type Options = {
   db: Database;
   domain: DomainStore;
@@ -169,10 +172,26 @@ export class TaskUnstack {
         provider = this.options.provider(taskId);
       if (!provider.prepareUnstack || !provider.unstackProvider)
         throw new DomainConflictError("GitHub Unstack unavailable");
-      const material = await provider.prepareUnstack(
-        before.binding.observation.repositoryId,
-        before.binding.observation.number,
-      );
+      let material: Awaited<
+        ReturnType<NonNullable<CodeHostDeliveryProvider["prepareUnstack"]>>
+      >;
+      try {
+        material = await provider.prepareUnstack(
+          before.binding.observation.repositoryId,
+          before.binding.observation.number,
+        );
+      } catch (error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "ERR_SQLITE_ERROR"
+        )
+          throw error;
+        throw new UnstackPreviewUnavailableError(
+          "GitHub Unstack preview is unavailable",
+        );
+      }
       const after = this.local(taskId);
       if (before.authorityDigest !== after.authorityDigest)
         throw new UnstackAuthorityChangedError(

@@ -1,3 +1,4 @@
+import { TaskUnstack } from "./task-unstack.js";
 import { ApprovalReview } from "./approval-review.js";
 import { IssueChangedSinceHandback } from "./issue-change-notice.js";
 import { useSendEntry } from "./command-send.js";
@@ -2426,6 +2427,13 @@ export function TaskWorkspace({
                   holds={holdLines(data.execution.holds, data.taskHold)}
                   executionHref={`/app/tasks/${taskId}?section=execution`}
                   assignments={data.assignments}
+                />
+                <TaskUnstack
+                  client={client}
+                  session={session}
+                  taskId={taskId}
+                  taskVersion={data.task.version}
+                  stacked={data.stack?.state === "stacked"}
                 />
                 {stackSummary(data.stack, data.stackDelivery) && (
                   <p className="metadata muted">

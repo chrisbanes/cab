@@ -1,3 +1,4 @@
+import { unstackReceiptSchema } from "./unstack-contracts.js";
 import { rebaseProofSchema } from "../core/rebase-proof.js";
 import { z } from "zod";
 import {
@@ -3413,6 +3414,15 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision,
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.unstack"),
+      taskId: uuid,
+      expectedVersion: revision,
+      materialHash: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   // Optional fence: Stop and Resume act on a hold, so an unrelated edit must not block them.
   z
     .object({
@@ -4402,6 +4412,7 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       ),
     })
     .strict(),
+  unstackReceiptSchema,
   z
     .object({
       kind: z.literal("task-cancel"),
@@ -5048,6 +5059,8 @@ export const configurationImpactSchema = envelope(
 );
 /** Commands whose receipts `GET /api/operator/operations` reads back. */
 export const operationTypeSchema = z.enum([
+  "task.unstack",
+  "task.cancel",
   "profile.create",
   "profile.configure",
   "project.create",

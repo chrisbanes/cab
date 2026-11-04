@@ -1,3 +1,4 @@
+import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
   type UnstackCommand,
@@ -4585,6 +4586,19 @@ export class StandaloneService {
   reconcileTaskUnstack(operationId: string) {
     return this.started().taskUnstack.reconcile(operationId);
   }
+  taskUnstackOperations(taskId: string) {
+    this.domain().task(taskId);
+    return new UnstackStore(this.cache!).records(taskId);
+  }
+  taskUnstackOperation(taskId: string, key: string) {
+    this.domain().task(taskId);
+    const record = new UnstackStore(this.cache!).get(key);
+    if (record && record.identity.taskId !== taskId)
+      throw new DomainConflictError(
+        "Unstack operation belongs to another task",
+      );
+    return record;
+  }
   taskUnstackReceipt(command: UnstackCommand) {
     return new UnstackStore(this.cache!).replay(command);
   }
@@ -5191,6 +5205,33 @@ export class StandaloneService {
     );
   }
 
+  latestTaskCancelReceipt(taskId: string) {
+    this.domain().task(taskId);
+    const row = this.cache!.prepare(
+      "SELECT key FROM task_control_receipts WHERE taskId=? AND json_extract(receiptJson,'$.kind')='task-cancel' ORDER BY createdAt DESC,rowid DESC LIMIT 1",
+    ).get(taskId) as { key: string } | undefined;
+    return row ? this.taskCancelReceipt(taskId, row.key) : null;
+  }
+  taskCancelReceipt(taskId: string, key: string) {
+    this.domain().task(taskId);
+    const row = this.cache!.prepare(
+      "SELECT payloadHash,receiptJson FROM task_control_receipts WHERE taskId=? AND key=?",
+    ).get(taskId, key) as
+      | { payloadHash: string; receiptJson: string }
+      | undefined;
+    if (!row) return null;
+    z.string()
+      .regex(/^[0-9a-f]{64}$/)
+      .parse(row.payloadHash);
+    const receipt = commandReceiptSchema.parse(JSON.parse(row.receiptJson));
+    if (
+      receipt.kind !== "task-cancel" ||
+      receipt.taskId !== taskId ||
+      receipt.key !== key
+    )
+      throw new DomainConflictError("Cancel receipt identity mismatch");
+    return receipt;
+  }
   cancelStackedTask(command: {
     key: string;
     taskId: string;

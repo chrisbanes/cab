@@ -229,6 +229,11 @@ export class OperatorWebBoundary {
     if (path === "/api/operator/search") return this.api.readSearch(query);
     if (path === "/api/operator/operations")
       return this.api.readOperation(query);
+    const unstack = path.match(/^\/api\/operator\/tasks\/([^/]+)\/unstack$/);
+    if (unstack) {
+      if ([...query].length) throw new OperatorApiError(400, "invalid-input");
+      return this.api.readUnstack(unstack[1] ?? "");
+    }
     const impact = path.match(
       /^\/api\/operator\/(projects|profiles)\/([^/]+)\/impact$/,
     );

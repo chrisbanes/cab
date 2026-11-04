@@ -360,7 +360,9 @@ original operation stays unfinished and readback-only: no repeat Unstack, replac
 operation key, queue cancellation, retarget, accepted-base advancement, edge retirement
 or restack follows. Cab does not infer a queue/lock reason from that partial result.
 Only later validated complete-removal readback under the original identity fences can
-continue. This partial outcome is not successful live acceptance. Both effects have separate intent and fresh
+continue. This partial outcome is not successful live acceptance.
+
+Both effects have separate intent and fresh
 identity-bound readback phases. Unknown sends are read back after restart and never
 resent. Every unfinished or unproved phase holds work, archive and deletion, including
 an observed removal whose retarget is still unknown or refused. A definite no-effect
@@ -372,8 +374,24 @@ blockers, Ready, pause, capacity, ownership and delivery holds remain. Ordinary 
 refresh cannot recreate the retired generation; a deliberate new dependency is separate.
 The journal is explicitly task/project owned, included in private-material traversal and
 captured-task deletion, and retained as audit history until deletion. Terminal receipt
-replay after archive makes no provider request. Operator API/CLI/web confirmation controls
-remain the next delivery slice; the live acceptance journey remains separately gated.
+replay after archive makes no provider request.
+
+The operator API validates `task.unstack {key, taskId, expectedVersion, materialHash}`
+against a freshly fenced preview. `GET /api/operator/tasks/:id/unstack` provides the
+filtered preview, archive/write availability and typed current operation status; raw proof,
+head and member material are not exposed outside the exclusion fences. A `task-unstack`
+receipt means the intent is recorded, not that the provider effects succeeded. The phase
+states whether it remains unfinished, was definitely refused without effect, or confirmed.
+`GET /api/operator/operations?scope=task:ID&type=task.unstack&key=UUID` checks the original
+receipt without sending or reconciling provider effects; Cancel has the same typed lookup
+under `task.cancel`. Unknown receipt checks never pick a new key or POST again.
+The CLI reads `task unstack-preview TASK_ID`, then `task unstack TASK_ID
+--expected-version N --material-hash SHA256 --yes`; its existing request journal binds
+the exact body and key before sending. Both normal-stack and failed-blocker task-detail
+entry points use one captured confirmation/status/recovery dialog. Cancel is a separate
+explicit confirmation from Stop. Archived views disable new writes while preserving
+original receipt checks; private/unavailable member details remain withheld without
+throwing away the retained command. The live acceptance journey remains separately gated.
 
 Unknown membership is distinct from a proved plain chain. The CLI and task detail show the
 blocker and observed position; list rows and cards use `stacked on #N` only for a known

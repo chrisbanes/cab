@@ -569,6 +569,7 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/assignments/${id}/recovery-options`,
     `/api/operator/tasks/${id}/results`,
     `/api/operator/tasks/${id}/messages`,
+    `/api/operator/tasks/${id}/unstack`,
     `/api/operator/assignments/${id}`,
     `/api/operator/assignments/${id}/instructions`,
     `/api/operator/projects/${id}/instructions`,
@@ -584,6 +585,7 @@ test("every known API route has an explicit authority", () => {
   for (const path of [
     `/api/operator/tasks/${id}/results`,
     `/api/operator/tasks/${id}/messages`,
+    `/api/operator/tasks/${id}/unstack`,
     `/api/operator/assignments/${id}`,
     `/api/operator/assignments/${id}/instructions`,
     `/api/operator/projects/${id}/instructions`,

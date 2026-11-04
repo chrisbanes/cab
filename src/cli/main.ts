@@ -184,7 +184,11 @@ add-dependency/remove-dependency and task configure --ready true/false.`;
 const RUNTIME_NOTE = `Runtimes: runtime enable and runtime disable are a reverse pair. Disabling never
 cancels a running turn; work bound to that runtime waits until it is enabled again,
 and disabling one that bound tasks use needs --yes.`;
-const DELIVERY_NOTE = `Sources and delivery: delivery send-comment posts a public GitHub comment that
+const DELIVERY_NOTE = `Stack recovery: task unstack-preview TASK_ID shows the full captured provider stack.
+Task unstack TASK_ID requires --expected-version N --material-hash SHA256 --yes.
+Unknown Unstack uses only operation get with the original key; never resend or choose a new key.
+Task cancel TASK_ID --expected-version N --yes is separate from Stop and closes no external item.
+Sources and delivery: delivery send-comment posts a public GitHub comment that
 The CLI cannot edit or retract, and a confirm-comment decision is final (deny
 is the counterpart of approve). Removing a source selection discards its saved
 definition. preview-source has no deactivate command; saving any source change
