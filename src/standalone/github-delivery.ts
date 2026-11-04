@@ -45,6 +45,7 @@ import {
   type PrDeliveryObservation,
   type ProviderActionObservation,
   type RequiredCheck,
+  type StackLinkTarget,
 } from "../core/delivery.js";
 export type {
   PrDeliveryObservation,
@@ -95,8 +96,8 @@ export interface AdoptionContext {
   workspacePath: string;
   baseCommit: string;
 }
-export { PublicationRefusal };
 export type { AdoptFunction } from "./git-fetch.js";
+export { PublicationRefusal };
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
 ) => Promise<PushOutcome>;
@@ -140,6 +141,16 @@ export const deliveryDocuments = {
 } as const;
 const name = z.string().min(1);
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
+const githubStackMembership = z
+  .object({
+    id: z.number().int().positive(),
+    number: z.number().int().positive(),
+    position: z.number().int().positive(),
+    size: z.number().int().positive(),
+    base: z.object({ ref: name, sha }),
+  })
+  .refine((value) => value.position <= value.size)
+  .nullable();
 const page = z.object({
   hasNextPage: z.boolean(),
   endCursor: z.string().nullable(),
@@ -283,6 +294,7 @@ export class GitHubHttpDeliveryProvider
     path: string,
     method = "GET",
     body?: unknown,
+    version = "2022-11-28",
   ): Promise<{ json: unknown; response: Response }> {
     const url = new URL(path, api);
     if (url.origin !== api) throw new Error("provider-origin-mismatch");
@@ -297,7 +309,7 @@ export class GitHubHttpDeliveryProvider
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${credential}`,
-          "X-GitHub-Api-Version": "2022-11-28",
+          "X-GitHub-Api-Version": version,
           "Content-Type": "application/json",
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -308,7 +320,7 @@ export class GitHubHttpDeliveryProvider
       throw new ProviderFailure(
         response.status,
         await githubRateLimitResumeAt(response),
-        response.status === 409
+        response.status === 409 || response.status === 422
           ? await response.json().catch(() => undefined)
           : undefined,
       );
@@ -914,6 +926,302 @@ export class GitHubHttpDeliveryProvider
       allowedMethods: branch.allowedMethods,
     };
   }
+  /** Stack-bearing reads deliberately use the API version that exposes membership. */
+  private async stackPr(path: string, number: number) {
+    return z
+      .object({
+        node_id: name,
+        number: z.number().int().positive(),
+        state: z.enum(["open", "closed"]),
+        merged: z.boolean(),
+        body: z.string().nullable(),
+        head: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
+        base: z.object({ ref: name, repo: z.object({ node_id: name }) }),
+        // Missing is unknown, never the same as an explicit null.
+        stack: githubStackMembership,
+      })
+      .parse(
+        (
+          await this.request(
+            `${path}/pulls/${number}`,
+            "GET",
+            undefined,
+            "2026-03-10",
+          )
+        ).json,
+      );
+  }
+  private async stackPair(record: DeliveryActionRecord) {
+    const link = record.stackLink,
+      create = record.stackCreate;
+    if (!link || !create || record.request.action.kind !== "pr.create")
+      throw new Error("Stack identity unavailable");
+    const i = link.identity,
+      a = record.request.action;
+    const repo = await this.repository(i.repositoryId);
+    if (repo.path !== record.beforeState?.repositoryPath)
+      throw new Error("Stack repository path changed");
+    const blocker = await this.stackPr(repo.path, i.blockerPrNumber);
+    const dependent = await this.stackPr(repo.path, i.dependentPrNumber);
+    if (
+      blocker.node_id !== i.blockerPrNodeId ||
+      blocker.number !== i.blockerPrNumber ||
+      blocker.head.ref !== i.blockerBranch ||
+      blocker.head.sha !== create.blockerHeadSha ||
+      blocker.head.repo.node_id !== i.repositoryId ||
+      blocker.base.repo.node_id !== i.repositoryId ||
+      dependent.node_id !== i.dependentPrNodeId ||
+      dependent.number !== i.dependentPrNumber ||
+      dependent.head.ref !== a.target.headRef ||
+      dependent.head.sha !== a.target.expectedHeadSha ||
+      dependent.head.repo.node_id !== i.repositoryId ||
+      dependent.base.repo.node_id !== i.repositoryId ||
+      dependent.base.ref !== i.blockerBranch ||
+      !dependent.body?.includes(
+        `<!-- cab-operation:${record.operationId} -->`,
+      ) ||
+      blocker.state !== "open" ||
+      blocker.merged ||
+      dependent.state !== "open" ||
+      dependent.merged
+    )
+      throw new Error("Stack PR identity changed");
+    return { path: repo.path, blocker, dependent };
+  }
+  private async orderedStack(
+    path: string,
+    membership: {
+      id: number;
+      number: number;
+      size: number;
+      base: { ref: string };
+    },
+  ) {
+    const stack = z
+      .object({
+        id: z.number().int().positive(),
+        number: z.number().int().positive(),
+        base: z.object({ ref: name }),
+        pull_requests: z.array(
+          z.object({
+            node_id: name,
+            number: z.number().int().positive(),
+            head: z.object({ ref: name, sha }),
+            state: z.enum(["open", "closed"]),
+            merged_at: z.string().nullable(),
+          }),
+        ),
+      })
+      .parse(
+        (
+          await this.request(
+            `${path}/stacks/${membership.number}`,
+            "GET",
+            undefined,
+            "2026-03-10",
+          )
+        ).json,
+      );
+    if (
+      stack.id !== membership.id ||
+      stack.number !== membership.number ||
+      stack.base.ref !== membership.base.ref ||
+      stack.pull_requests.length !== membership.size ||
+      new Set(stack.pull_requests.map((p) => p.number)).size !==
+        membership.size ||
+      new Set(stack.pull_requests.map((p) => p.node_id)).size !==
+        membership.size
+    )
+      throw new Error("Stack membership inconsistent");
+    return stack;
+  }
+  /** The async endpoint merges downstack too: establish that no other open layer is below this PR. */
+  private async qualifyStackMerge(
+    action: Extract<ExternalAction, { kind: "pr.merge" }>,
+    path: string,
+  ) {
+    const own = await this.stackPr(path, action.target.number);
+    if (
+      own.node_id !== action.target.nodeId ||
+      own.number !== action.target.number ||
+      own.head.repo.node_id !== action.target.repositoryId ||
+      own.base.repo.node_id !== action.target.repositoryId ||
+      own.head.ref !== action.target.headRef ||
+      own.head.sha !== action.target.expectedHeadSha ||
+      own.base.ref !== action.target.baseRef
+    )
+      throw new Error("provider-stack-merge-identity-unproved");
+    if (own.stack === null) return;
+    const stack = await this.orderedStack(path, own.stack);
+    const index = own.stack.position - 1;
+    const entry = stack.pull_requests[index];
+    if (
+      entry?.node_id !== own.node_id ||
+      entry.number !== own.number ||
+      entry.head.ref !== own.head.ref ||
+      entry.head.sha !== own.head.sha
+    )
+      throw new Error("provider-stack-merge-membership-unproved");
+    for (const lower of stack.pull_requests.slice(0, index)) {
+      if (lower.state !== "closed" || lower.merged_at === null)
+        throw new Error("provider-stack-lower-pr-unmerged");
+      // Revalidate the exact PR identity in this repository, not only a stack row's state.
+      const pr = await this.stackPr(path, lower.number);
+      if (
+        pr.node_id !== lower.node_id ||
+        pr.number !== lower.number ||
+        pr.head.repo.node_id !== action.target.repositoryId ||
+        pr.base.repo.node_id !== action.target.repositoryId ||
+        pr.head.ref !== lower.head.ref ||
+        pr.head.sha !== lower.head.sha ||
+        !pr.merged ||
+        pr.state !== "closed"
+      )
+        throw new Error("provider-stack-lower-pr-unproved");
+    }
+  }
+  async prepareStackLink(
+    record: DeliveryActionRecord,
+  ): Promise<StackLinkTarget> {
+    const { path, blocker, dependent } = await this.stackPair(record);
+    if (dependent.stack !== null)
+      throw new Error("Dependent already has stack membership");
+    if (blocker.stack === null) return null;
+    const stack = await this.orderedStack(path, blocker.stack);
+    const top = stack.pull_requests.at(-1);
+    if (
+      blocker.stack.position !== blocker.stack.size ||
+      top?.node_id !== blocker.node_id ||
+      top.number !== blocker.number ||
+      top.head.ref !== blocker.head.ref ||
+      top.head.sha !== blocker.head.sha ||
+      top.state !== "open" ||
+      top.merged_at !== null
+    )
+      throw new Error("Blocker is not the stack top");
+    return {
+      id: stack.id,
+      number: stack.number,
+      size: stack.pull_requests.length,
+    };
+  }
+  async performStackLink(
+    record: DeliveryActionRecord,
+  ): Promise<ProviderActionObservation> {
+    const link = record.stackLink;
+    if (link?.phase !== "link-attempting" || link.target === undefined)
+      throw new Error("Stack send intent unavailable");
+    const path = z
+      .string()
+      .regex(/^\/repos\/[^/?#]+\/[^/?#]+$/)
+      .parse(record.beforeState?.repositoryPath);
+    try {
+      await this.request(
+        link.target === null
+          ? `${path}/stacks`
+          : `${path}/stacks/${link.target.number}/add`,
+        "POST",
+        {
+          pull_requests:
+            link.target === null
+              ? [link.identity.blockerPrNumber, link.identity.dependentPrNumber]
+              : [link.identity.dependentPrNumber],
+        },
+        "2026-03-10",
+      );
+      return {
+        state: "uncertain",
+        reason: "stack-link-readback-required",
+        receipt: null,
+      };
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.status === 422) {
+        const message = z.object({ message: z.string() }).safeParse(error.body);
+        return {
+          state: "uncertain",
+          reason: "stack-link-refused",
+          receipt: null,
+          stackLinkRefused: true,
+          // Fixed prefix and a bounded host message; never persist the raw provider body.
+          hostReason: (message.success
+            ? message.data.message
+            : "GitHub refused the stack (422)"
+          )
+            .replace(/\p{Cc}/gu, " ")
+            .slice(0, 500),
+        };
+      }
+      return {
+        state: "uncertain",
+        reason:
+          error instanceof ProviderFailure && error.status === 409
+            ? "stack-link-concurrent-change"
+            : "stack-link-effect-unproved",
+        receipt: null,
+      };
+    }
+  }
+  async inspectStackLink(
+    record: DeliveryActionRecord,
+  ): Promise<ProviderActionObservation> {
+    const link = record.stackLink;
+    if (link?.phase !== "link-attempting" || link.target === undefined)
+      throw new Error("Stack send intent unavailable");
+    const { path, blocker, dependent } = await this.stackPair(record);
+    const receipt = record.observation?.receipt ?? null;
+    if (!receipt || receipt.nodeId !== link.identity.dependentPrNodeId)
+      throw new Error("Stack receipt unavailable");
+    if (dependent.stack === null) {
+      return record.observation?.stackLinkRefused
+        ? {
+            state: "confirmed-success",
+            reason: "stack-link-refused-plain-chain",
+            receipt,
+            stack: null,
+            stackLinkRefused: true,
+            hostReason: record.observation.hostReason,
+          }
+        : { state: "uncertain", reason: "stack-link-effect-unproved", receipt };
+    }
+    const membership = dependent.stack;
+    const stack = await this.orderedStack(path, membership);
+    const lower = stack.pull_requests[membership.position - 2];
+    const own = stack.pull_requests[membership.position - 1];
+    if (
+      !blocker.stack ||
+      blocker.stack.id !== membership.id ||
+      blocker.stack.number !== membership.number ||
+      blocker.stack.size !== membership.size ||
+      blocker.stack.position + 1 !== membership.position ||
+      blocker.stack.base.ref !== membership.base.ref ||
+      blocker.stack.base.sha !== membership.base.sha ||
+      lower?.node_id !== blocker.node_id ||
+      lower.number !== blocker.number ||
+      lower.head.ref !== blocker.head.ref ||
+      lower.head.sha !== blocker.head.sha ||
+      own?.node_id !== dependent.node_id ||
+      own.number !== dependent.number ||
+      own.head.ref !== dependent.head.ref ||
+      own.head.sha !== dependent.head.sha ||
+      (link.target !== null &&
+        (link.target.id !== membership.id ||
+          link.target.number !== membership.number ||
+          membership.position !== link.target.size + 1)) ||
+      (link.target === null && membership.position !== 2)
+    )
+      throw new Error("Stack link membership unproved");
+    return {
+      state: "confirmed-success",
+      reason: null,
+      receipt,
+      stack: {
+        id: membership.id,
+        number: membership.number,
+        position: membership.position,
+        size: membership.size,
+      },
+    };
+  }
   async inspectPr(
     identity: PrIdentity,
     policy: DeliveryPolicy,
@@ -923,11 +1231,19 @@ export class GitHubHttpDeliveryProvider
       .object({
         node_id: name,
         number: z.number().int().positive(),
+        stack: githubStackMembership.optional(),
         head: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
         base: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
       })
       .parse(
-        (await this.request(`${repo.path}/pulls/${identity.prNumber}`)).json,
+        (
+          await this.request(
+            `${repo.path}/pulls/${identity.prNumber}`,
+            "GET",
+            undefined,
+            "2026-03-10",
+          )
+        ).json,
       );
     if (
       raw.node_id !== identity.expectedPrNodeId ||
@@ -1236,6 +1552,19 @@ export class GitHubHttpDeliveryProvider
           }
         : undefined;
     return prObservationSchema.parse({
+      ...(raw.stack === undefined
+        ? {}
+        : {
+            stack:
+              raw.stack === null
+                ? null
+                : {
+                    id: raw.stack.id,
+                    number: raw.stack.number,
+                    position: raw.stack.position,
+                    size: raw.stack.size,
+                  },
+          }),
       repositoryId: identity.repositoryId,
       nodeId: raw.node_id,
       number: raw.number,
@@ -1392,6 +1721,8 @@ export class GitHubHttpDeliveryProvider
               .mergeMethod)
       )
         throw new Error("provider-merge-gates-held");
+      if (action.kind === "pr.merge")
+        await this.qualifyStackMerge(action, repo.path);
       return {
         repositoryPath: repo.path,
         nodeId: observation.nodeId,
@@ -1564,6 +1895,7 @@ export class GitHubHttpDeliveryProvider
           break;
         case "pr.merge": {
           // The one merge write: nothing after it sends the request again, only reads it.
+          await this.qualifyStackMerge(a, repo.path);
           const sent = await this.mergeAsync(repo.path, a);
           readback = {
             ...record,

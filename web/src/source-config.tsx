@@ -71,7 +71,7 @@ import type { ObservationResource } from "./sync-placement.js";
 export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const { data, projectId } = p,
     draftKey = `github.configure:${projectId}`,
-    d = useDraft(p.drafts, draftKey);
+    d = useDraft(p.drafts, draftKey, p.readOnly);
   const observed = p.observations.state.data?.data.projects.find(
     (r) => r.projectId === projectId,
   );

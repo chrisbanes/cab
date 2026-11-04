@@ -21,16 +21,30 @@ const positiveInteger = z.number().int().positive();
 const nonnegativeInteger = z.number().int().nonnegative();
 const sqliteFlag = z.union([z.literal(0), z.literal(1)]);
 
+export const projectDeletionCommandResultSchema = z
+  .object({
+    kind: z.literal("project-deleted"),
+    projectId: id,
+    deletedAt: z.string().datetime(),
+  })
+  .strict();
+
 export const projectCommandResultSchema = z
   .object({
     id,
     name: z.string(),
     version: positiveInteger,
     paused: sqliteFlag,
+    archived: sqliteFlag,
     leadProfileId: id.nullable(),
     instructionsRevision: positiveInteger,
     instructions: z.string(),
   })
+  .strict();
+
+// Existing keyed receipts keep their exact historical shape.
+const legacyProjectCommandResultSchema = projectCommandResultSchema
+  .extend({ archived: sqliteFlag.optional() })
   .strict();
 
 export const taskCommandResultSchema = z
@@ -229,8 +243,11 @@ export const runtimeEnablementCommandResultSchema = z
 export interface DomainCommandResultMap {
   "delivery.configure": z.output<typeof deliveryCommandResultSchema>;
   "status-mapping.configure": z.output<typeof statusMappingCommandResultSchema>;
-  "project.create": z.output<typeof projectCommandResultSchema>;
-  "project.configure": z.output<typeof projectCommandResultSchema>;
+  "project.create": z.output<typeof legacyProjectCommandResultSchema>;
+  "project.configure": z.output<typeof legacyProjectCommandResultSchema>;
+  "project.archive": z.output<typeof projectCommandResultSchema>;
+  "project.restore": z.output<typeof projectCommandResultSchema>;
+  "project.delete": z.output<typeof projectDeletionCommandResultSchema>;
   "task.create": z.output<typeof taskCommandResultSchema>;
   "task.configure": z.output<typeof taskCommandResultSchema>;
   "profile.create": z.output<typeof legacyProfileCommandResultSchema>;
@@ -354,6 +371,20 @@ function parseCommandOutcome(
       };
     case "project.create":
     case "project.configure":
+      return {
+        type,
+        result: parseUnchanged(
+          fresh ? projectCommandResultSchema : legacyProjectCommandResultSchema,
+          value,
+        ),
+      };
+    case "project.delete":
+      return {
+        type,
+        result: parseUnchanged(projectDeletionCommandResultSchema, value),
+      };
+    case "project.archive":
+    case "project.restore":
       return {
         type,
         result: parseUnchanged(projectCommandResultSchema, value),

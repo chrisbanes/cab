@@ -1,5 +1,25 @@
+import { assertCapturedWorkspaceAvailable } from "./project-cleanup-reservations.js";
+import {
+  capturedFilesystemState,
+  observeFilesystem,
+  type CapturedRepositoryIdentity,
+  type FilesystemIdentity,
+  type CleanupOutcome,
+} from "./project-cleanup-identities.js";
+import {
+  assertOwnedTaskWritable,
+  taskAcceptsWrites,
+  ProjectArchivedError,
+} from "../core/project-lifecycle.js";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+} from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import { z } from "zod";
@@ -38,7 +58,7 @@ const workspaceStateSchema = z.enum([
   "archived",
 ]);
 
-const repositoryBindingSchema = z.object({
+export const repositoryBindingSchema = z.object({
   repositoryId: z.string().min(1).max(512),
   sourcePath: z.string().min(1),
   workspacePath: z.string().min(1),
@@ -47,7 +67,7 @@ const repositoryBindingSchema = z.object({
   commit: z.string().nullable(),
 });
 
-const taskWorkspaceSchema = z.object({
+export const taskWorkspaceSchema = z.object({
   taskId: z.string().min(1).max(512),
   workspaceId: z.string().uuid(),
   path: z.string().min(1),
@@ -90,6 +110,19 @@ export type TaskWorkspaceRepository = z.infer<typeof repositoryBindingSchema>;
 
 export type TaskWorkspaceBinding = z.infer<typeof taskWorkspaceSchema>;
 
+export interface CapturedWorkspaceDiscard {
+  binding: TaskWorkspaceBinding;
+  managedRoot: string;
+  filesystem: FilesystemIdentity | { unavailable: true };
+  gitIdentities?: CapturedRepositoryIdentity[] | undefined;
+}
+
+export interface CapturedWorkspaceRemovalJournal {
+  begin(repositoryId: string): boolean;
+  settled(repositoryId: string): boolean;
+  unobserved(): void;
+}
+
 export interface WorkspaceCleanupEvidence {
   deliveryConfirmed: boolean;
   writerOwnershipResolved: boolean;
@@ -107,6 +140,8 @@ export type WorkspaceManagerOptions = {
   beforePathAccess?: (path: string) => void;
   /** Test-only executable override; production always resolves the `git` command. */
   gitExecutable?: string;
+  /** Test-only captured-cleanup child runner; never used by ordinary workspace operations. */
+  capturedGitRunner?: typeof runGit;
   /** Test-only shortened per-operation deadlines. */
   gitTimeoutMs?: Partial<Record<GitOperation, number>>;
   /** Test-only bounds for exact-child termination and final stream observation. */
@@ -141,6 +176,10 @@ export interface TaskWorkspaceLifecycle {
 }
 
 export interface WorkspaceBindingStore {
+  writable?(taskId: string): boolean;
+  projectWrite?:
+    | (<T>(taskId: string, run: () => Promise<T>) => Promise<T>)
+    | undefined;
   createOrGet(
     taskId: string,
     workspaceId: string,
@@ -171,7 +210,7 @@ class WorkspaceGitError extends Error {
     readonly kind: GitFailureKind,
     readonly childExitObserved: boolean,
     readonly childExitSignal: NodeJS.Signals | null,
-    childStarted: boolean,
+    readonly childStarted: boolean,
   ) {
     super(`Workspace Git ${kind} during ${operation}`);
     this.name = "WorkspaceGitError";
@@ -192,6 +231,10 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   constructor(
     private readonly db: Database,
     private readonly table = "task_workspace_bindings",
+    readonly projectWrite?: <T>(
+      taskId: string,
+      run: () => Promise<T>,
+    ) => Promise<T>,
   ) {
     if (!/^[a-z_]+$/.test(table)) throw new Error("Invalid workspace table");
     this.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (
@@ -214,21 +257,35 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
         CHECK(gitUncertain IN (0,1))`);
   }
 
+  writable(taskId: string): boolean {
+    return taskAcceptsWrites(this.db, taskId);
+  }
+
   createOrGet(
     taskId: string,
     workspaceId: string,
     path: string,
     repositories: TaskWorkspaceRepository[],
   ): TaskWorkspaceBinding {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO ${this.table}
-          (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, 'provisioning', NULL, 0, ?, ?)`,
-      )
-      .run(taskId, workspaceId, path, JSON.stringify(repositories), now, now);
-    return this.get(taskId) ?? this.invalidRow();
+    const create = () => {
+      assertOwnedTaskWritable(this.db, taskId);
+      assertCapturedWorkspaceAvailable(this.db, {
+        taskId,
+        workspaceId,
+        path,
+        repositories,
+      });
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO ${this.table}
+            (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, 'provisioning', NULL, 0, ?, ?)`,
+        )
+        .run(taskId, workspaceId, path, JSON.stringify(repositories), now, now);
+      return this.get(taskId) ?? this.invalidRow();
+    };
+    return this.db.isTransaction ? create() : transaction(this.db, create);
   }
 
   get(taskId: string): TaskWorkspaceBinding | undefined {
@@ -262,6 +319,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     commit: string,
   ): TaskWorkspaceBinding {
     return transaction(this.db, () => {
+      assertOwnedTaskWritable(this.db, taskId);
       const binding = this.get(taskId);
       if (!binding) throw new Error(`No task workspace for ${taskId}`);
       const index = binding.repositories.findIndex(
@@ -277,6 +335,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       }
       const repositories = [...binding.repositories];
       repositories[index] = { ...current, gitCommonDir, commit };
+      assertCapturedWorkspaceAvailable(this.db, { ...binding, repositories });
       this.db
         .prepare(
           `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,
@@ -288,6 +347,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
 
   /** Moves a repository's recorded starting point forward, as after a restack; no transaction of its own. */
   advanceCommit(taskId: string, repositoryId: string, commit: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
     const binding = this.get(taskId);
     if (!binding) return;
     this.db
@@ -312,6 +372,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     state: TaskWorkspaceBinding["state"],
     reason: string | null,
   ): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `UPDATE ${this.table} SET state = ?, reason = ?, updatedAt = ? WHERE taskId = ?`,
@@ -321,6 +382,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   }
 
   markGitUncertain(taskId: string, reason: string): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         `UPDATE ${this.table} SET state = 'held', reason = ?, gitUncertain = 1, updatedAt = ? WHERE taskId = ?`,
@@ -347,6 +409,8 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
 export class WorkspaceManager implements TaskWorkspaceLifecycle {
   private readonly workspaceRoot: string;
   private readonly inFlight = new Map<string, Promise<unknown>>();
+  private readonly unobservedCaptured = new Set<string>();
+  private readonly settlementWaiters = new Set<() => void>();
   private readonly gitExecutable: string;
   private readonly gitTimeouts: Partial<Record<GitOperation, number>>;
   private readonly gitTerminationGraceMs: number;
@@ -395,10 +459,27 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     this.gitCancellation.abort();
   }
 
-  /** Waits for workspace callers to persist their bounded cancellation outcome. */
+  /** Waits for bounded outcomes; unobserved captured children remain reserved beyond shutdown. */
   async settle(): Promise<void> {
-    while (this.inFlight.size > 0)
-      await Promise.allSettled([...this.inFlight.values()]);
+    while (this.inFlight.size > 0) {
+      let changed!: () => void;
+      const notification = new Promise<void>((resolve) => {
+        changed = resolve;
+      });
+      this.settlementWaiters.add(changed);
+      try {
+        const waiting = [...this.inFlight].filter(
+          ([id]) => !this.unobservedCaptured.has(id),
+        );
+        if (!waiting.length) return;
+        await Promise.race([
+          Promise.allSettled(waiting.map(([, operation]) => operation)),
+          notification,
+        ]);
+      } finally {
+        this.settlementWaiters.delete(changed);
+      }
+    }
   }
 
   provision(
@@ -435,6 +516,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     options: { reuseRecentIdentity?: boolean } = {},
   ): Promise<TaskWorkspaceBinding | undefined> {
     const id = z.string().trim().min(1).max(512).parse(taskId);
+    if (this.store.writable?.(id) === false) return this.store.get(id);
     return this.withTaskLock(id, async () => {
       const binding = this.store.get(id);
       if (binding?.state !== "ready") return binding;
@@ -443,6 +525,8 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   }
 
   async forExecution(taskId: string): Promise<TaskWorkspaceBinding> {
+    if (this.store.writable?.(taskId) === false)
+      throw new ProjectArchivedError();
     const binding = await this.get(taskId);
     if (!binding) throw new Error(`Task ${taskId} has no workspace binding`);
     if (binding.state !== "ready")
@@ -454,6 +538,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 
   async recover(): Promise<void> {
     for (const binding of this.store.list()) {
+      if (this.store.writable?.(binding.taskId) === false) continue;
       await this.withTaskLock(binding.taskId, async () => {
         if (binding.path !== join(this.workspaceRoot, binding.workspaceId)) {
           this.store.update(
@@ -616,6 +701,330 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           : this.store.update(id, "held", reason);
       }
     });
+  }
+
+  /** Deleted-domain cleanup: shared task lock, captured proof, no live binding lookup/update. */
+  discardCaptured(
+    captured: CapturedWorkspaceDiscard,
+    allowed: () => boolean,
+    journal: CapturedWorkspaceRemovalJournal,
+  ): Promise<CleanupOutcome> {
+    return this.withTaskIdentityLock(
+      captured.binding.taskId,
+      async (): Promise<CleanupOutcome> => {
+        const pending = (
+          reason: "unsafe" | "unavailable" | "failed" | "unknown",
+        ): CleanupOutcome => ({ outcome: "pending", reason });
+        const { binding } = captured;
+        try {
+          if (
+            !allowed() ||
+            captured.managedRoot !== this.workspaceRoot ||
+            binding.path !== join(this.workspaceRoot, binding.workspaceId)
+          )
+            return pending("unsafe");
+          const managed = await observeFilesystem(this.workspaceRoot);
+          if (managed.state === "absent") {
+            return (await realpath(dirname(this.workspaceRoot))) ===
+              dirname(this.workspaceRoot) && allowed()
+              ? { outcome: "complete" }
+              : pending("unsafe");
+          }
+          if (managed.state !== "observed") return pending("unavailable");
+          if (
+            !managed.stat.isDirectory() ||
+            managed.stat.isSymbolicLink() ||
+            (await realpath(this.workspaceRoot)) !== this.workspaceRoot
+          )
+            return pending("unsafe");
+          const root = await observeFilesystem(binding.path);
+          if (root.state === "absent")
+            return allowed() ? { outcome: "complete" } : pending("unsafe");
+          if ("unavailable" in captured.filesystem)
+            return pending("unavailable");
+          const rootState = await capturedFilesystemState(
+            binding.path,
+            captured.filesystem,
+          );
+          if (rootState !== "same")
+            return pending(rootState === "unsafe" ? "unsafe" : "unavailable");
+          await this.assertManagedRoot(binding);
+          const identities = captured.gitIdentities ?? [];
+          if (
+            identities.length !== binding.repositories.length ||
+            new Set(identities.map((identity) => identity.repositoryId))
+              .size !== identities.length
+          )
+            return pending("unavailable");
+          for (const repository of binding.repositories) {
+            if (!allowed()) return pending("unavailable");
+            const proof = identities.find(
+              (item) => item.repositoryId === repository.repositoryId,
+            );
+            const current = await observeFilesystem(repository.workspacePath);
+            if (!proof) return pending("unavailable");
+            if (proof.state !== "observed") {
+              if (current.state === "absent") continue;
+              return pending(
+                proof.state === "absent" ? "unsafe" : "unavailable",
+              );
+            }
+            if (
+              proof.commonDirectory.path !== repository.gitCommonDir ||
+              dirname(proof.gitDirectory.path) !==
+                join(proof.commonDirectory.path, "worktrees")
+            )
+              return pending("unsafe");
+            for (const [path, identity] of [
+              [repository.sourcePath, proof.source],
+              [proof.commonDirectory.path, proof.commonDirectory.filesystem],
+            ] as const) {
+              const state = await capturedFilesystemState(path, identity);
+              if (state !== "same")
+                return pending(state === "unsafe" ? "unsafe" : "unavailable");
+            }
+            const admin = await capturedFilesystemState(
+              proof.gitDirectory.path,
+              proof.gitDirectory.filesystem,
+            );
+            if (current.state === "absent" && admin === "absent") continue;
+            if (admin !== "same")
+              return pending(
+                admin === "unsafe" || admin === "absent"
+                  ? "unsafe"
+                  : "unavailable",
+              );
+            const backPointer = await observeFilesystem(
+              join(proof.gitDirectory.path, "gitdir"),
+            );
+            if (
+              backPointer.state !== "observed" ||
+              !backPointer.stat.isFile() ||
+              backPointer.stat.isSymbolicLink() ||
+              (
+                await readFile(join(proof.gitDirectory.path, "gitdir"), "utf8")
+              ).trim() !== join(repository.workspacePath, ".git")
+            )
+              return pending("unsafe");
+            if (current.state !== "absent") {
+              for (const [path, identity, kind] of [
+                [repository.workspacePath, proof.root, "directory"],
+                [
+                  join(repository.workspacePath, ".git"),
+                  proof.gitEntry,
+                  "file",
+                ],
+              ] as const) {
+                const state = await capturedFilesystemState(
+                  path,
+                  identity,
+                  kind,
+                );
+                if (state !== "same")
+                  return pending(
+                    state === "unsafe" || state === "absent"
+                      ? "unsafe"
+                      : "unavailable",
+                  );
+              }
+              if (
+                (await this.capturedGit(repository.workspacePath, [
+                  "rev-parse",
+                  "--absolute-git-dir",
+                ])) !== proof.gitDirectory.path ||
+                (await this.capturedGit(repository.workspacePath, [
+                  "rev-parse",
+                  "--path-format=absolute",
+                  "--git-common-dir",
+                ])) !== proof.commonDirectory.path ||
+                (await this.capturedGit(repository.workspacePath, [
+                  "rev-parse",
+                  "--show-toplevel",
+                ])) !== repository.workspacePath
+              )
+                return pending("unsafe");
+            }
+            this.options.beforePathAccess?.(repository.workspacePath);
+            // Every await above permits another cab request; fence and compare immediately before mutation.
+            for (const [path, identity] of [
+              [repository.sourcePath, proof.source],
+              [proof.commonDirectory.path, proof.commonDirectory.filesystem],
+              [proof.gitDirectory.path, proof.gitDirectory.filesystem],
+            ] as const) {
+              if ((await capturedFilesystemState(path, identity)) !== "same")
+                return pending("unsafe");
+            }
+            if (
+              current.state === "observed" &&
+              (await capturedFilesystemState(
+                join(repository.workspacePath, ".git"),
+                proof.gitEntry,
+                "file",
+              )) !== "same"
+            )
+              return pending("unsafe");
+            const finalPointer = await observeFilesystem(
+              join(proof.gitDirectory.path, "gitdir"),
+            );
+            if (
+              finalPointer.state !== "observed" ||
+              finalPointer.stat.isSymbolicLink() ||
+              !finalPointer.stat.isFile() ||
+              finalPointer.stat.dev !== backPointer.stat.dev ||
+              finalPointer.stat.ino !== backPointer.stat.ino ||
+              (
+                await readFile(join(proof.gitDirectory.path, "gitdir"), "utf8")
+              ).trim() !== join(repository.workspacePath, ".git")
+            )
+              return pending("unsafe");
+            const finalRoot = await capturedFilesystemState(
+              binding.path,
+              captured.filesystem,
+            );
+            const finalRepo = await observeFilesystem(repository.workspacePath);
+            if (finalRoot !== "same" || !allowed()) return pending("unsafe");
+            if (
+              finalRepo.state !== current.state ||
+              (finalRepo.state === "observed" &&
+                (String(finalRepo.stat.dev) !== proof.root.device ||
+                  String(finalRepo.stat.ino) !== proof.root.inode ||
+                  finalRepo.stat.isSymbolicLink()))
+            )
+              return pending("unsafe");
+            // A failed reservation write must precede (and prevent) child dispatch.
+            if (!journal.begin(repository.repositoryId))
+              return pending("unsafe");
+            let failure: unknown;
+            try {
+              await this.capturedGit(
+                repository.sourcePath,
+                ["worktree", "remove", "--force", repository.workspacePath],
+                () => {
+                  this.unobservedCaptured.add(binding.taskId);
+                  for (const notify of this.settlementWaiters) notify();
+                  journal.unobserved();
+                },
+                () => {
+                  this.unobservedCaptured.delete(binding.taskId);
+                },
+              );
+            } catch (error) {
+              // A bounded unobserved result never gets here until exact-child exit.
+              if (
+                !(error instanceof WorkspaceGitError) ||
+                (error.childStarted && !error.childExitObserved)
+              )
+                throw error;
+              failure = error;
+            }
+            // Positive exit (or proof no child spawned) alone is not permission to clear.
+            // Recheck the captured source/common/root and competing owners after the await.
+            for (const [path, identity] of [
+              [repository.sourcePath, proof.source],
+              [proof.commonDirectory.path, proof.commonDirectory.filesystem],
+              [binding.path, captured.filesystem],
+            ] as const) {
+              if ((await capturedFilesystemState(path, identity)) !== "same")
+                return pending("unsafe");
+            }
+            const remaining = await observeFilesystem(repository.workspacePath);
+            if (
+              remaining.state !== "absent" &&
+              (remaining.state !== "observed" ||
+                remaining.stat.isSymbolicLink() ||
+                String(remaining.stat.dev) !== proof.root.device ||
+                String(remaining.stat.ino) !== proof.root.inode)
+            )
+              return pending("unsafe");
+            if (!journal.settled(repository.repositoryId))
+              return pending("unsafe");
+            if (!allowed()) return pending("unavailable");
+            if (failure) throw failure;
+            if (
+              (await observeFilesystem(repository.workspacePath)).state !==
+              "absent"
+            )
+              return pending("unknown");
+          }
+          this.options.beforePathAccess?.(binding.path);
+          if (
+            (await capturedFilesystemState(
+              binding.path,
+              captured.filesystem,
+            )) !== "same" ||
+            !allowed()
+          )
+            return pending("unsafe");
+          await rm(binding.path, { recursive: true, force: true });
+          return (await observeFilesystem(binding.path)).state === "absent"
+            ? { outcome: "complete" }
+            : pending("unknown");
+        } catch (error) {
+          return pending(
+            error instanceof WorkspaceGitError &&
+              error.childStarted &&
+              !error.childExitObserved
+              ? "unknown"
+              : "failed",
+          );
+        }
+      },
+    ).catch(
+      (): CleanupOutcome => ({ outcome: "pending", reason: "unavailable" }),
+    );
+  }
+
+  private async capturedGit(
+    cwd: string,
+    args: string[],
+    unobserved?: () => void,
+    observed?: () => void,
+  ): Promise<string> {
+    this.assertNotCancelled();
+    let result = await (this.options.capturedGitRunner ?? runGit)({
+      executable: this.gitExecutable,
+      cwd,
+      args: ["--no-optional-locks", "-C", cwd, ...args],
+      timeoutMs: 10_000,
+      observeSettlement: !!unobserved,
+      terminationGraceMs: this.gitTerminationGraceMs,
+      observationMs: this.gitTerminationObservationMs,
+      maxOutputBytes: maxGitOutputBytes,
+      signal: this.gitCancellation.signal,
+    });
+    if (
+      unobserved &&
+      result.status === "interrupted" &&
+      result.spawned &&
+      !result.childExitObserved
+    ) {
+      unobserved();
+      // A malformed injected result keeps the durable marker; it never authorizes a retry.
+      if (!result.settlement)
+        throw new Error("Captured Git settlement notification unavailable");
+      await result.settlement;
+      observed?.();
+      this.assertNotCancelled();
+      result = { ...result, childExitObserved: true };
+    }
+    if (result.status === "ok") return result.stdout.toString("utf8").trim();
+    if (result.status === "exit")
+      throw reportGitFailure(
+        this.options.gitFailureObserver,
+        "worktree-remove",
+        "failed",
+        result.childExitObserved,
+        result.signal,
+        true,
+      );
+    throw reportGitFailure(
+      this.options.gitFailureObserver,
+      "worktree-remove",
+      result.kind,
+      result.childExitObserved,
+      result.childExitSignal,
+      result.spawned,
+    );
   }
 
   private async provisionBinding(
@@ -1065,6 +1474,19 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   }
 
   private withTaskLock<T>(
+    taskId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return this.withTaskIdentityLock(taskId, () => {
+      if (this.store.writable?.(taskId) === false)
+        throw new ProjectArchivedError();
+      return this.store.projectWrite
+        ? this.store.projectWrite(taskId, operation)
+        : operation();
+    });
+  }
+
+  private withTaskIdentityLock<T>(
     taskId: string,
     operation: () => Promise<T>,
   ): Promise<T> {

@@ -1,3 +1,13 @@
+import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
+import { projectDeleteCommandSchema } from "./project-lifecycle.js";
+import {
+  archiveBlockers,
+  assertProjectWritable,
+  assertTaskProjectWritable,
+  taskAcceptsWrites,
+  ProjectArchiveBlockedError,
+  type ProjectLifecycleFacts,
+} from "./project-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -145,6 +155,14 @@ const commandSchema = z.discriminatedUnion("type", [
       name: label,
       leadProfileId: id.nullable(),
       // Guided setup: recorded with the project in one transaction, after verification.
+      candidateProfileIds: z
+        .array(id)
+        .max(128)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          "Duplicate candidate",
+        )
+        .optional(),
       instructions: prose.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
@@ -164,6 +182,23 @@ const commandSchema = z.discriminatedUnion("type", [
         message: "A delivery default needs repositories",
       },
     ),
+  projectDeleteCommandSchema,
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("project.archive"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("project.restore"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+    })
+    .strict(),
   z
     .object({
       ...commandBase,
@@ -229,6 +264,14 @@ const commandSchema = z.discriminatedUnion("type", [
       capabilities: prose,
       runtime: profileRuntimeSchema.optional(),
       skills: profileSkillsSchema.optional(),
+      starter: z
+        .object({
+          implementerId: id,
+          reviewerId: id,
+          reviewerHarness: z.enum(["codex", "claude"]),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -613,6 +656,7 @@ export class DomainStore {
     private readonly db: Database,
     private readonly onChange?: () => void,
     private readonly verifyRepository: RepositoryVerifier = unconfiguredVerifier,
+    private readonly lifecycleFacts?: ProjectLifecycleFacts,
   ) {}
 
   /** Credential references a command selected but has not recorded yet; see select. */
@@ -642,6 +686,7 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS domain_projects (
           id TEXT PRIMARY KEY REFERENCES projects(id), name TEXT NOT NULL,
           version INTEGER NOT NULL, paused INTEGER NOT NULL CHECK(paused IN (0,1)),
+          archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
           leadProfileId TEXT, instructionsRevision INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS project_instruction_revisions (
@@ -930,6 +975,14 @@ export class DomainStore {
             WHERE c.projectId = domain_tasks.projectId)
           WHERE id IN (SELECT taskId FROM imported_tasks)`);
       }
+      if (
+        !(
+          this.db.prepare("PRAGMA table_info(domain_projects)").all() as Row[]
+        ).some((column) => column.name === "archived")
+      )
+        this.db.exec(
+          "ALTER TABLE domain_projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))",
+        );
       upgradeReadinessConditions(this.db);
       new LeadTextStore(this.db).migrate();
     });
@@ -1315,6 +1368,7 @@ export class DomainStore {
     const outcome = transaction(this.db, () => {
       const prior = this.replayed(scope, command.key, hash, command.type);
       if (prior !== undefined) return { outcome: prior, recorded: false };
+      this.assertCommandProjectWritable(command);
       const result = parseFreshDomainCommandOutcome(
         command.type,
         this.apply(command, verifiedRepositories),
@@ -1360,7 +1414,7 @@ export class DomainStore {
 
   project(projectId: string): Row {
     return this.required(
-      "SELECT p.id, p.name, p.version, p.paused, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision WHERE p.id = ?",
+      "SELECT p.id, p.name, p.version, p.paused, p.archived, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision WHERE p.id = ?",
       id.parse(projectId),
     );
   }
@@ -1637,7 +1691,7 @@ export class DomainStore {
   projects(): Row[] {
     return this.db
       .prepare(
-        "SELECT p.id, p.name, p.version, p.paused, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision ORDER BY p.name, p.id",
+        "SELECT p.id, p.name, p.version, p.paused, p.archived, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision ORDER BY p.name, p.id",
       )
       .all() as Row[];
   }
@@ -1795,6 +1849,7 @@ export class DomainStore {
       .get(key) as Row | undefined;
     if (existing) return existing;
     const task = this.task(key);
+    assertTaskProjectWritable(this.db, key);
     const project = this.project(String(task.projectId));
     const leadProfileId = present(project, "leadProfileId");
     if (!leadProfileId) return undefined;
@@ -2115,6 +2170,7 @@ export class DomainStore {
       ...(this.publicationSending(taskId) ? ["task-publication-pending"] : []),
     ];
     if (project.paused) reasons.push("project-paused");
+    if (project.archived) reasons.push("project-archived");
     const lead = project.leadProfileId
       ? this.one(
           "SELECT revoked FROM profiles WHERE id = ?",
@@ -2254,6 +2310,7 @@ export class DomainStore {
   recordStackedDependency(
     taskId: string,
   ): ReturnType<DomainStore["stackedDependency"]> {
+    assertTaskProjectWritable(this.db, taskId);
     return transaction(this.db, () => {
       const existing = this.stackedDependency(taskId);
       if (existing) return existing;
@@ -2305,6 +2362,7 @@ export class DomainStore {
     const delivery = new DeliveryStore(this.db);
     /** Whether the dependency needs a change; with `apply`, makes it. */
     const step = (taskId: string, apply: boolean): boolean => {
+      if (!taskAcceptsWrites(this.db, taskId)) return false;
       const row = this.one(
         "SELECT * FROM stacked_dependencies WHERE taskId = ?",
         taskId,
@@ -2786,6 +2844,58 @@ export class DomainStore {
     );
   }
 
+  projectArchiveBlockersWithinTransaction(projectId: string) {
+    const blockers = archiveBlockers(this.db, projectId, this.lifecycleFacts);
+    try {
+      blockers.push(
+        ...new DeliveryStore(this.db).projectStackArchiveBlockers(projectId),
+      );
+    } catch {
+      blockers.push({
+        kind: "unavailable",
+        reason: "Stack delivery drain could not be established",
+      });
+    }
+    return blockers;
+  }
+
+  private assertCommandProjectWritable(command: ParsedCommand): void {
+    if (command.type === "capacity.configure")
+      for (const projectId of Object.keys(command.projectOverrides))
+        assertProjectWritable(this.db, projectId);
+    if (
+      !("projectId" in command) ||
+      command.type === "project.create" ||
+      command.type === "project.archive" ||
+      command.type === "project.restore" ||
+      command.type === "project.delete"
+    )
+      return;
+    const project = this.project(command.projectId);
+    const rename =
+      command.type === "project.configure" &&
+      command.name !== undefined &&
+      Object.keys(command).every((key) =>
+        [
+          "type",
+          "actor",
+          "key",
+          "projectId",
+          "expectedVersion",
+          "name",
+        ].includes(key),
+      );
+    if (project.archived && !rename)
+      assertProjectWritable(this.db, command.projectId);
+    if (command.type === "github.place")
+      assertProjectWritable(this.db, command.chosenProjectId);
+    if (
+      command.type === "dependency.add" ||
+      command.type === "dependency.remove"
+    )
+      assertTaskProjectWritable(this.db, command.blockerTaskId);
+  }
+
   private apply(
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
@@ -2795,12 +2905,32 @@ export class DomainStore {
       case "project.create": {
         this.operator(command);
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
+        for (const profileId of command.candidateProfileIds ?? [])
+          this.activeProfile(profileId);
+        if (
+          this.db
+            .prepare(
+              "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='project_tombstones'",
+            )
+            .get() &&
+          this.db
+            .prepare("SELECT 1 FROM project_tombstones WHERE projectId=?")
+            .get(command.projectId)
+        )
+          throw new DomainConflictError("Deleted project IDs cannot be reused");
         this.assertProjectNameAvailable(command.name);
         const repositories = verifiedRepositories ?? [];
         if ((command.repositories?.length ?? 0) !== repositories.length)
           throw new Error(
             "Repository setup requires asynchronous verification",
           );
+        assertCleanupOwnershipAvailableWithinTransaction(
+          this.db,
+          repositories.flatMap((repository) => [
+            repository.path,
+            repository.gitCommonDirectory,
+          ]),
+        );
         this.db
           .prepare("INSERT INTO projects (id, instructions) VALUES (?, '')")
           .run(command.projectId);
@@ -2816,9 +2946,12 @@ export class DomainStore {
           .run(command.projectId, command.instructions ?? "");
         this.db
           .prepare(
-            "INSERT INTO project_routing (projectId, version, enabled, guidance, credentialRef, candidateProfileIds) VALUES (?, 1, 0, '', NULL, '[]')",
+            "INSERT INTO project_routing (projectId, version, enabled, guidance, credentialRef, candidateProfileIds) VALUES (?, 1, 0, '', NULL, ?)",
           )
-          .run(command.projectId);
+          .run(
+            command.projectId,
+            JSON.stringify(command.candidateProfileIds ?? []),
+          );
         this.db
           .prepare(
             "INSERT INTO project_task_sources (projectId, provider, instance, version, credentialRef, selections, readiness) VALUES (?, ?, ?, 1, ?, ?, ?)",
@@ -2870,6 +3003,40 @@ export class DomainStore {
             repositories.map((repository) => repository.repositoryId),
             command.deliveryDefault.credentialRef ?? null,
           );
+        return this.project(command.projectId);
+      }
+      case "project.delete":
+        throw new DomainConflictError(
+          "Project deletion requires service preparation",
+        );
+      case "project.archive": {
+        this.operator(command);
+        const current = this.project(command.projectId);
+        this.version(current, command.expectedVersion);
+        if (current.archived)
+          throw new DomainConflictError("Project is already archived");
+        const blockers = this.projectArchiveBlockersWithinTransaction(
+          command.projectId,
+        );
+        if (blockers.length) throw new ProjectArchiveBlockedError(blockers);
+        this.db
+          .prepare(
+            "UPDATE domain_projects SET archived = 1, version = version + 1 WHERE id = ?",
+          )
+          .run(command.projectId);
+        return this.project(command.projectId);
+      }
+      case "project.restore": {
+        this.operator(command);
+        const current = this.project(command.projectId);
+        this.version(current, command.expectedVersion);
+        if (!current.archived)
+          throw new DomainConflictError("Project is not archived");
+        this.db
+          .prepare(
+            "UPDATE domain_projects SET archived = 0, paused = 1, version = version + 1 WHERE id = ?",
+          )
+          .run(command.projectId);
         return this.project(command.projectId);
       }
       case "project.configure": {
@@ -2999,22 +3166,83 @@ export class DomainStore {
       }
       case "profile.create": {
         this.operator(command);
-        this.db
-          .prepare(
-            "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime, skills) VALUES (?, 1, ?, ?, ?, ?, 0, ?, ?)",
+        const runtime =
+          command.runtime ?? defaultProfileRuntime(this.enabledRuntimes());
+        if (command.starter) {
+          if (this.one("SELECT id FROM profiles LIMIT 1"))
+            throw new DomainPolicyError(
+              "invalid-input",
+              "Starter profiles require an empty installation",
+            );
+          if (
+            new Set([
+              command.profileId,
+              command.starter.implementerId,
+              command.starter.reviewerId,
+            ]).size !== 3
           )
-          .run(
-            command.profileId,
-            command.name,
-            command.summary ?? "",
-            command.instructions,
-            command.capabilities,
-            canonical(
-              command.runtime ?? defaultProfileRuntime(this.enabledRuntimes()),
-            ),
-            canonical(command.skills ?? noProfileSkills),
+            throw new DomainPolicyError(
+              "invalid-input",
+              "Starter profile IDs must be distinct",
+            );
+        }
+        const insert = (
+          profileId: string,
+          name: string,
+          summary: string,
+          instructions: string,
+          capabilities: string,
+          runtime: ProfileRuntime,
+          skills: ProfileSkills,
+        ) => {
+          this.db
+            .prepare(
+              "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime, skills) VALUES (?, 1, ?, ?, ?, ?, 0, ?, ?)",
+            )
+            .run(
+              profileId,
+              name,
+              summary,
+              instructions,
+              capabilities,
+              canonical(runtime),
+              canonical(skills),
+            );
+          this.snapshotProfile(profileId);
+        };
+        insert(
+          command.profileId,
+          command.name,
+          command.summary ?? "",
+          command.instructions,
+          command.capabilities,
+          runtime,
+          command.skills ?? noProfileSkills,
+        );
+        if (command.starter) {
+          const defaults = (harness: ExecutionHarness): ProfileRuntime =>
+            harness === "claude"
+              ? { harness, model: null, reasoningEffort: null }
+              : { harness };
+          insert(
+            command.starter.implementerId,
+            "Implementer",
+            "Builds scoped changes",
+            "Make the smallest complete change that meets the brief.\nValidate in proportion to the change and say what you ran.\nReport what changed, how you verified it, and anything left open.\nAsk the lead when scope or authority is unclear; don't widen the brief.",
+            "",
+            defaults(runtime.harness),
+            noProfileSkills,
           );
-        this.snapshotProfile(command.profileId);
+          insert(
+            command.starter.reviewerId,
+            "Reviewer",
+            "Independent review",
+            "Review the result against its brief; don't change files.\nRank findings by severity, each with evidence (file, line, failing case).\nEnd with a verdict: ship, fix-first or rethink.\nReport gaps you could not check rather than guessing.",
+            "",
+            defaults(command.starter.reviewerHarness),
+            noProfileSkills,
+          );
+        }
         return this.profile(command.profileId);
       }
       case "profile.configure": {
@@ -3178,7 +3406,7 @@ export class DomainStore {
               (SELECT id FROM domain_tasks WHERE projectId = ?))`)
           .run(command.projectId);
         this.db
-          .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE id IN (
+          .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE projectId IN (SELECT id FROM domain_projects WHERE archived = 0) AND id IN (
             SELECT d.taskId FROM local_dependencies d JOIN imported_tasks i ON i.taskId = d.blockerTaskId
             JOIN domain_tasks b ON b.id = i.taskId JOIN external_item_status s ON ${sameItem("s", "i")}
             WHERE b.projectId = ? AND s.status = 'closed')`)
@@ -3303,6 +3531,13 @@ export class DomainStore {
           throw new Error(
             "Linked repositories require asynchronous verification",
           );
+        assertCleanupOwnershipAvailableWithinTransaction(
+          this.db,
+          repositories.flatMap((repository) => [
+            repository.path,
+            repository.gitCommonDirectory,
+          ]),
+        );
         const links = repositories.map((repository, index) => {
           const row = command.repositories[index] as LinkRow;
           return storedLink(
@@ -3715,6 +3950,7 @@ export class DomainStore {
    */
   applyCurrentRevisions(assignmentId: string): Row {
     const assignment = this.assignment(assignmentId);
+    assertProjectWritable(this.db, String(assignment.projectId));
     const profile = this.profile(String(assignment.profileId));
     const project = this.project(String(assignment.projectId));
     if (
@@ -3737,6 +3973,10 @@ export class DomainStore {
 
   /** Must run inside the caller's transaction. Reopens a completed assignment at a new version. */
   reopenCompletedAssignment(assignmentId: string): void {
+    assertProjectWritable(
+      this.db,
+      String(this.assignment(assignmentId).projectId),
+    );
     this.db
       .prepare(
         "UPDATE domain_assignments SET version = version + 1, state = 'pending' WHERE id = ? AND state = 'completed'",
@@ -3745,6 +3985,7 @@ export class DomainStore {
   }
 
   ensureLeadAssignmentWithinTransaction(taskId: string): Row | undefined {
+    assertTaskProjectWritable(this.db, taskId);
     const assignmentId = this.ensureLeadBindingWithinTransaction(taskId);
     if (!assignmentId) return undefined;
     const existing = this.one(

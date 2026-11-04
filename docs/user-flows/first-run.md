@@ -3,6 +3,11 @@
 **Status:** implemented. The screens exist ([getting started](getting-started.md),
 [project setup](project-setup.md), [first task](first-task.md)) and the one-command
 install is implemented ([operations](../operations/standalone-macos.md#install)).
+Keeping or unchecking the starter profiles option is part of the same setup form
+fill. Both option states retain the seven-interaction repository-free journey and
+eight-interaction linked-project journey; checked setup adds ordinary workers as
+candidates with routing disabled and leaves the lead instructions blank.
+
 The interactions budget is asserted at 1366 × 900, 390 × 844 and in WebKit at
 390 × 844 by `first run budget: seven interactions from sign-in to a created task`
 and, with a repository and its linked GitHub Project, `first run budget: eight
@@ -31,7 +36,8 @@ each screen leading to the next and nothing to look up.
    `cab` runnable ([operations](../operations/standalone-macos.md#install)).
 2. Sign in. Home shows the getting-started card and nothing else until the first
    turn.
-3. Project setup creates the lead profile inline (name and runtime), then the project;
+3. Project setup creates the lead inline (name and runtime), optionally with the
+   prechecked Implementer and Reviewer bundle, then the project;
    the ready check replaces the form and offers Resume and create first task. With a
    linked GitHub Project it first offers Preview and import now
    ([import issues](import-issues.md)); importing is optional.

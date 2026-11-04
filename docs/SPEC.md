@@ -202,6 +202,86 @@ work or task completion; the service enforces completion conditions and permissi
 See the [routing design](design/assignment-routing.md) for revision and failure
 boundaries. Typed judgments and confidence are not proof of correctness or authority.
 
+## Project archive and deletion
+
+Archive freezes a paused, drained project without cancelling work or removing its
+open tasks, configuration, source memberships or history. Refuse while assignments,
+executions, ownership/recovery holds, pending effects, reservations, drafting/routing,
+agent requests or provider writes remain unresolved. Unknown inspection is a refusal.
+Check durable and in-flight service facts again inside the archive transaction; do
+not hold that transaction across network or filesystem operations.
+
+Archived projects reserve their case-folded names and admit only name-only rename,
+restore and deletion. Restore increments the version and leaves the project paused.
+Internal ownership and privacy enumeration includes archived projects; public lists
+and pickers hide them by default and offer explicit archived-history access. Late
+source reads cannot commit after archive, or after archive followed by restore under
+a different project version. An active project's selection of a shared item may
+record its own membership without rewriting the archived owner's task or brief.
+
+Deletion is archived-only, irreversible and addressed by project ID. It requires the
+exact current display name and a version/digest-bound ownership and cleanup preview.
+Remove all owned records atomically while preserving shared profiles, installation
+and authentication state, provider identity exceptions and private redaction values.
+Capture minimal worktree, Claude temporary-directory and qualified cab-home Codex
+thread cleanup identities before removing their source rows. Postcommit cleanup is
+retryable from tombstones; failure never restores the project. Completed cleanup
+drops captured path/binding payload. No code-host branch/PR or tracker item is removed.
+
+Core archive/restore commands, durable lifecycle migration, service effect registration,
+store admission and retention-sweep guards, and versioned source-read fences are authored.
+Stack drain validates the persisted create/link journal and its confirmed outcome;
+unknown or pending nested phases refuse archive. The archived-only service deletion
+preview and atomic explicit ownership traversal are implemented.
+The traversal checks every table and column against a fixed inventory, captures detached
+receipt keys before removing parents, and retains validated private exclusion strings
+with the tombstone in the same transaction. An unprovable ownership identity refuses
+deletion. Immediate, startup and periodic cleanup passes use durable captured identities,
+with bounded admission and shared
+workspace/thread locks. Force-discard is confined to the captured managed worktree;
+source checkouts, branches, PRs and retained Codex archive files remain intact. Missing
+resources converge. Replaced, unsafe, unavailable or ambiguous resources stay pending;
+older descriptors without sufficient Git proof never authorize a guessed removal.
+Surviving ownership anywhere beneath the removal root, including a repository's
+source subdirectory or Git common directory, prevents removal. Repository setup,
+repository configuration and workspace binding also check those pending captured roots
+inside the transaction that acquires checkout or common-directory ownership. A checkout
+outside the removal root is still refused if its separate Git directory lies inside it;
+checking ownership only after an already-dispatched child exits cannot protect that owner.
+Destructive Git is
+preceded by a private item reservation bound to its captured identity. A bounded
+result without observed child exit retains that reservation and task lock until the
+exact child positively exits; shutdown does not wait indefinitely for that proof.
+A restarted process cannot recover the old process-local exit notification, so an
+unsettled reservation (including legacy unknown workspace outcomes) stays pending
+without another removal, even when paths are absent. Late exit alone cannot clear a
+reservation after ownership changes or shutdown; fenced identity readback is required.
+Successful item checkpoints prune private payloads, while stable opaque thread identities
+continue to refuse restoration of deleted conversations. Private exclusions persist
+independently of cleanup progress.
+
+The operator API exposes versioned `project.archive`, `project.restore` and
+`project.delete` commands. `GET /api/operator/projects/:id` distinguishes live projects
+from deleted tombstones; `GET /api/operator/projects/:id/delete-preview` exposes counts,
+worktree dirty/unpushed/unknown status, affected projects and retained external state.
+These public reads omit captured cleanup identities and private redaction values.
+The original deletion receipt stays unchanged as cleanup progresses; read the tombstone
+for current cleanup status. Deleted IDs never resolve to a later project with the same name.
+
+Project lists hide archived projects by default. `includeArchived=true`,
+`cab project list --archived` and Settings' Show archived include both active and archived
+projects. Direct archived task and assignment reads retain their history, inspector links
+and original-operation receipt checks. New mutations and retry sends are disabled;
+service guards enforce the same freeze. An absent project in a filtered picker does not
+establish its lifecycle. The retired `/project/:id` editor remains an authenticated 404.
+
+The project settings Danger zone offers archive after pause/drain, restore into a paused
+state, and deletion only after an inspected preview and an exact typed name. Rename,
+restore or a stale preview requires a new inspection. A conflict keeps the typed name;
+an unknown outcome keeps the original body and request key for receipt lookup. Successful
+deletion shows a tombstone and its separate cleanup progress.
+The service refuses archive when authoritative in-flight facts are unavailable.
+
 ## Admission, project placement and task dependencies
 
 The operator admits local work or configures the source's optional readiness rule.
@@ -268,7 +348,30 @@ pushed commit, and branch proofs check against it. When the blocker's last pushe
 cab queues a restack for the dependent's lead, published with `branch.force-push` under the
 project's grant; restacks run bottom-up, and the starting point moves once the dependent's push
 lands. Turning stacking off affects only dependents that have not started; merges cannot be
-undone.
+undone. For a recorded stacked dependency, `pr.create` must name the blocker's assigned
+task branch as `baseRef`. A different base, a missing blocker branch or a repository mismatch
+is refused before provider selection; the recorded dependency and branch are checked again
+at the effect boundary after preflight. On GitHub the same `pr.create` journal freezes the
+blocker's task, branch and PR identity before creating the dependent PR. The marked PR is
+verified by readback and its receipt is persisted before stack linking. cab creates an ordered
+`[blocker, dependent]` stack, or appends only the dependent when an ordered stack read proves
+that the blocker is its current top. Stack calls and stack-bearing PR reads use GitHub API
+version `2026-03-10`. Missing or inconsistent membership is unknown and holds the action.
+
+The stack link has its own durable send boundary inside that journal. Before that boundary,
+recovery may resume after rechecking the original authority and identities; at or after it,
+recovery only reads and never resends either effect. A 409 is reconciled by readback. A 422
+retains the verified PR receipt and a bounded host reason; the action confirms a plain chained
+PR only after a fresh PR read explicitly reports no stack. An unavailable or inconsistent read
+holds the action, preserving its receipt and rejection evidence. A crash after recording link
+intent but before sending can therefore leave an unresolved action even when no write landed;
+absence on a later read does not prove that a possibly sent request cannot land.
+
+Task detail, list and the operator API expose the same recorded blocker PR identity, nullable
+observed stack id/number/position/size, membership-known flag and bounded link reason.
+Unknown membership is distinct from a proved plain chain. The CLI and task detail show the
+blocker and observed position; list rows and cards use `stacked on #N` only for a known
+bound blocker PR. Exclusion handling applies to these facts and host reasons too.
 
 External identity includes provider instance and is independent of source query.
 Multiple sources in one project produce one task with multiple memberships.
@@ -505,7 +608,10 @@ terminate active turns. Fairness remains a technical contract to specify.
 Retry confirmed transient
 execution failures at most twice with backoff, persisting the allowance across
 restart. Blind relaunches cannot reset it. Uncertain acceptance/effects must be
-reconciled before retry. Silence flags attention, not automatic restart or termination.
+reconciled before retry. A draft turn cannot report an assignment result; when its
+confirmed failure is retried, cab settles that generation's result effect atomically
+with the retry. Other pending effects and unresolved ownership still prevent retry.
+Silence flags attention, not automatic restart or termination.
 
 Each assignment has durable identity independent of its conversation. Follow-up
 retains history with a new work revision; stale results cannot complete newer work.
@@ -937,12 +1043,30 @@ first eight characters of the project ID when the leads match or are missing
 (longer only when two IDs start alike); no two projects ever show the same label,
 and a unique name stays plain (except when it equals another project's full-ID label); IDs that differ only in letter
 case get " #1", " #2" after the full ID.
-When no profile exists, setup creates the lead profile inline, asking only for a name
-and runtime (summary and instructions are added later in Settings → Profiles),
-without losing other setup values. While discovery is unconfigured the repository step
-starts collapsed behind "Add a repository". The project is created paused; the ready
-check then replaces the setup form, and its primary action resumes the project and
-opens the composer, and its secondary action keeps it paused.
+When no profile exists, including revoked profiles, setup offers an inline lead
+profile form with a prechecked option to add Implementer and Reviewer. The option
+names their resolved runtimes: Implementer uses the lead runtime; Reviewer uses the
+other runtime only when enabled, available and its executable and authentication
+checks pass (including a readable Claude token), otherwise the lead runtime. A
+pending readiness read holds checked creation; an unreadable read uses the lead.
+The lead instructions remain blank; workers use ordinary editable/revocable profile
+revisions with default model and effort and no skills. Reviewer instructions to
+avoid file changes are advisory, not an enforced restriction. cab prescribes no
+worker order. Unchecking preserves ordinary lead creation.
+The three profiles and the original keyed receipt commit atomically. An unknown
+bundle outcome retains the frozen IDs and command and re-reads its operation;
+missing or unreadable receipts retain the hold without resending creation. Creating
+the lead selects it without losing other setup values. Profile and project creation
+remain separate submissions. Only the subsequent project using that inline lead
+receives both workers as candidates, with routing disabled, blank guidance and no
+routing credential; its coordination context permits them. Changing the selected
+lead adds no starter candidates. If a worker is revoked before project creation,
+setup offers an explicit way to continue without starter candidates while preserving
+the lead and remaining draft. Later projects use ordinary candidate selection.
+While discovery is unconfigured the repository step starts collapsed behind "Add
+a repository". The project is created paused; the ready check replaces setup and
+its primary action resumes the project and opens the composer; its secondary keeps
+it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends, and which setup (step 3, opened or not), the Settings
 discovery credential row, the Readiness GitHub discovery row and the project-configuration
@@ -2161,7 +2285,14 @@ source and delivery credential references, their environment key names and value
 environment values whose names match `TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL`,
 and workspace/control paths are excluded before storage; current exclusions are
 also applied when reading history. If safe redaction is unavailable, text is
-omitted. Diagnostic capture failures and missing history cannot establish
+omitted. A private redaction-only ledger retains exact removed project instruction
+and exclusion values indefinitely, without project ownership or restoration metadata.
+Only sanitization consumes these values; they are never instructions, model context,
+public projections or ordinary exports. Existing database backups include the ledger.
+The union of live and retained inputs fails closed above 4096 distinct nonempty values,
+16 MiB UTF-8 total or 64 KiB per value, or when inputs are unavailable. Transactional
+capture is implemented; project deletion and lifecycle controls remain planned.
+Diagnostic capture failures and missing history cannot establish
 completion, release ownership or bypass an execution hold.
 
 ### Human requests and execution controls
@@ -2282,7 +2413,7 @@ conditions; observed PR auto-closure is reconciled, not assumed to complete all 
 Writes record confirmed success, confirmed failure or uncertainty; local edits
 cannot masquerade as confirmed remote updates.
 
-The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
+The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Unavailable grant references also carry an opaque post-migration format marker. A fresh save with an older unmarked reference is refused; refresh the policy and discard the draft. An already-open pre-upgrade tab shows a generic conflict and an ordinary refresh may fail to read the new projection. A deliberate full page reload discards its unsaved draft and recovers. Exact recorded requests remain replayable. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
 
 A grant row reads as a sentence of names ("Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas"); an ID no read names shows as "<ID> (name not found)", and a row still being filled in shows "(not chosen)". Its Action select shows each kind's plain label and a one-line description, from the one wording the task's delivery actions and `cab delivery get` also use (a recorded action whose kind this version does not know keeps its recorded text). Its Repository is chosen from the project's linked repositories and, when GitHub discovery lists them, the others the credential can see; its Project, field and options are chosen from what discovery lists, the Project from the owner's Projects as well as those linked, with Other… to type a Project's node ID. Where discovery cannot list a value, or the saved value is not in the list, the control is a typed node-ID field labelled as the fallback and stays typed while it is shown. A Jira container is a typed Jira project ID, as no read lists them. Stored grants, the `delivery.configure` command and replay are unchanged: names are display only, and every value stays an ID. A save the service refuses for a named field shows the service's fixed sentence for it in the save outcome, as a refused status mapping does, with a Go to field action that focuses the first highlighted control; the draft stays.
 
@@ -2304,6 +2435,16 @@ The Delivery tab offers every method cab can merge with on the code host (on Git
 The merge gate evaluates each repository's settings on the fresh provider read that precedes every merge. The code host's required checks are GitHub's ruleset and classic branch protection status checks, or `pipeline` when the GitLab project's "Pipelines must succeed" setting (`only_allow_merge_if_pipeline_succeeds`) is on. When those plus cab's additional checks are empty, the gate reports `no-required-checks` and holds the merge, so protection removed between saves is caught on the next read. It reports `merge-method-not-configured` when the repository has no merge method or the code host no longer allows it, and a `pr.merge` whose method is not the configured one is held as `provider-preflight-held` before any provider write. A through-merge repository therefore holds merges until the operator sets its method. Each PR observation records its required checks with their source (`code-host` or `cab`). `cab delivery get` and the task's delivery view list the bound PR's merge blockers from its last observation.
 
 The bound PR carries an accepted base, the branch its actions are authorised against: the base it was registered on, until a retarget is accepted. A fresh read that finds another base accepts it only when the new base is the repository link's base branch (the link's ref without a leading `refs/heads/`, `refs/remotes/origin/` or `origin/`; a commit id names none) and the change request it used to target is merged: on GitHub a pull request from that branch in the same repository is merged into the new base and none from it is open, and on GitLab the same of its merge requests. That is how a code host moves a PR onto the stack's trunk when the layer below merges. A failed lookup counts as not merged. Accepting moves the accepted base and the base recorded on the PR's unsettled `pr.*` actions, so their read-back confirms against the new base; the action request and its digest never change. Every other base change is held: `pr.edit`, `pr.ready`, `pr.merge` and thread actions on that PR are refused, with a `pr.merge` also refused as `merge-target-not-current-delivery`, and an action must name the accepted base as its `baseRef`. The hold clears when a later read shows the accepted base again or the retarget becomes acceptable, and has no operator override: it is lifted on the code host. A hold, and its lifting, are a new delivery revision that wakes the lead, and `cab delivery get` and the task's delivery view list a held change as the merge blocker `pr-base-change-held`. A PR bound before this was recorded takes its stored base as accepted.
+
+Before any provider call for `pr.merge`, cab walks the recorded stacked dependency chain in
+the same project and repository. Every lower layer must have an identity-bound PR observed as
+merged, without a read error; missing, mismatched or unmerged records hold the action. The
+same proof is rechecked synchronously after preflight. GitHub merge preflight and the send
+path validate the target's fresh explicit stack membership and ordered stack entries. Every
+lower entry must be merged, proved by its PR identity and fresh state; unknown reads fail
+closed. The async merge still requests only the task's own PR. GitHub supplies no conditional
+stack-snapshot merge, so another actor can change membership between the read and write;
+cab does not claim an atomic host guarantee.
 
 On GitHub every `pr.merge` is one `PUT /repos/{owner}/{repo}/pulls/{number}/merge-async` with the head `sha`, the repository's configured merge method and `bypass_rules: false`, so a stacked layer can merge. A repository with a merge queue stays unsupported: the merge gate holds the merge as `merge-queue-required` before any request is sent. The response carries a status (`pending`, `enqueued`, `merged` or `failed`) and `details`: a pending request's `uuid` with its merge options, or only a `message`, or a `message` with the merge commit's `sha`. So only a pending request has an id; cab records the id when there is one and the last status with the action, and the write response never establishes success. Read-back reads the pull request first: merged at the requested head is confirmed. Otherwise a `pending` or `merged` status with an id is polled at `GET .../merge-async/{id}` and stays unproved as `provider-merge-pending`; a status without an id has nothing to poll and stays unproved as `provider-merge-outcome-unknown` until the pull request shows merged; `failed` is a confirmed failure, `provider-merge-failed`, recording the code host's message (at most 500 characters); an `enqueued` request (read back defensively, since the gate sends no merge for a repository with a queue) is final but not a merge, so it stays unproved as `provider-merge-enqueued` until the pull request shows merged, or is a confirmed failure, `provider-merge-dequeued`, once the pull request is closed unmerged. GitHub keeps a result for 24 hours, so a poll answered 404, or an action with no recorded id, is settled by the pull request alone and otherwise stays unproved as `provider-merge-outcome-unknown`, which holds completion as an action with an unknown outcome until the pull request shows merged. A 409 that names a pending merge request is followed as that request, and any other 409 is a confirmed failure. No read-back, restart or replay sends the merge again.
 

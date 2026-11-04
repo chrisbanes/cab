@@ -1,3 +1,11 @@
+import {
+  ProjectArchivedError,
+  assertTaskProjectWritable,
+  assertOwnedTaskWritable,
+  assertOwnedWorkWritable,
+  taskAcceptsWrites,
+  workAcceptsWrites,
+} from "../core/project-lifecycle.js";
 import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
@@ -923,6 +931,7 @@ export class ExecutionState {
   }
 
   stopTask(taskId: string): StopTarget[] {
+    assertOwnedTaskWritable(this.db, taskId);
     const id = z.string().uuid().parse(taskId);
     transaction(this.db, () => this.holdTask(id));
     return this.stopTargets(id);
@@ -1026,6 +1035,7 @@ export class ExecutionState {
           throw new DomainConflictError("Request key reused for other content");
         return { receipt: JSON.parse(stored.receiptJson) as R, replayed: true };
       }
+      assertOwnedTaskWritable(this.db, id);
       const row = this.db
         .prepare("SELECT version FROM domain_tasks WHERE id = ?")
         .get(id) as { version: number } | undefined;
@@ -1134,7 +1144,7 @@ export class ExecutionState {
         AND workId IN (
           SELECT request.workId FROM turn_requests request
           JOIN execution_intents intent ON intent.workId = request.workId
-          WHERE request.draftTurn = 1 AND intent.state = 'completed')`);
+          WHERE request.draftTurn = 1 AND intent.state = 'completed' AND ${this.liveWorkSql("request.workId")})`);
   }
 
   /** Must run inside a transaction. */
@@ -1228,7 +1238,7 @@ export class ExecutionState {
               'unknown', NULL, ?, 'shutdown'
             FROM execution_intents e
             JOIN task_execution_bindings b ON b.workId = e.workId
-            WHERE e.state IN ('submitting','running')
+            WHERE e.state IN ('submitting','running') AND ${this.liveWorkSql("e.workId")}
               AND NOT EXISTS (
                 SELECT 1 FROM execution_stop_targets t WHERE t.workId = e.workId)
             RETURNING *`)
@@ -1300,6 +1310,7 @@ export class ExecutionState {
         assignmentId: string;
       }[];
       for (const batch of stuck) {
+        if (!taskAcceptsWrites(this.db, batch.taskId)) continue;
         const newest = leaves.filter(
           (leaf) =>
             leaf.taskId === batch.taskId &&
@@ -1377,6 +1388,7 @@ export class ExecutionState {
   }
 
   bindStopIdentity(workId: string, threadId: string, turnId?: string): void {
+    assertOwnedWorkWritable(this.db, workId);
     const target = this.stopTarget(workId);
     if (!target) return;
     if (
@@ -1405,6 +1417,7 @@ export class ExecutionState {
   }
 
   claimStopInterrupt(workId: string): boolean {
+    assertOwnedWorkWritable(this.db, workId);
     return (
       this.db
         .prepare(`UPDATE execution_stop_targets
@@ -1416,6 +1429,7 @@ export class ExecutionState {
   }
 
   recordStopInterrupt(workId: string, result: "acknowledged" | "failed"): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(`UPDATE execution_stop_targets SET interruptState = ?, reason = NULL
         WHERE workId = ? AND interruptState = 'uncertain'`)
@@ -1428,6 +1442,7 @@ export class ExecutionState {
     turnId: string,
     status: "completed" | "failed",
   ): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(`UPDATE execution_stop_targets SET terminalState = ?
         WHERE workId = ? AND threadId = ? AND turnId = ?`)
@@ -1444,6 +1459,7 @@ export class ExecutionState {
   }
 
   recordStopAnomaly(workId: string | undefined, reason: string): void {
+    if (workId) assertOwnedWorkWritable(this.db, workId);
     // An anomaly settles an uncertain interrupt as failed, so a late
     // acknowledgement cannot release it.
     const settle = `reason = ?, interruptState = CASE WHEN interruptState = 'uncertain'
@@ -1455,12 +1471,13 @@ export class ExecutionState {
     else
       this.db
         .prepare(
-          `UPDATE execution_stop_targets SET ${settle} WHERE interruptState != 'acknowledged'`,
+          `UPDATE execution_stop_targets SET ${settle} WHERE interruptState != 'acknowledged' AND ${this.liveWorkSql("execution_stop_targets.workId")}`,
         )
         .run(reason);
   }
 
   resumeTask(taskId: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
     const id = z.string().uuid().parse(taskId);
     transaction(this.db, () => this.releaseStop(id));
   }
@@ -1556,6 +1573,7 @@ export class ExecutionState {
   }
 
   beginArchive(taskId: string): boolean {
+    assertOwnedTaskWritable(this.db, taskId);
     const id = z.string().uuid().parse(taskId);
     return transaction(this.db, () => {
       const acquired =
@@ -1602,6 +1620,7 @@ export class ExecutionState {
   }
 
   endArchive(taskId: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare("DELETE FROM task_archival_holds WHERE taskId = ?")
       .run(z.string().uuid().parse(taskId));
@@ -1622,6 +1641,7 @@ export class ExecutionState {
         profileRevision: z.number().int().positive(),
       })
       .parse(context);
+    assertTaskProjectWritable(this.db, input.taskId);
     this.db
       .prepare(
         "INSERT OR IGNORE INTO assignment_conversations (assignmentId, revision) VALUES (?, 1)",
@@ -2534,6 +2554,20 @@ export class ExecutionState {
     input: RuntimeTerminalObservation,
     harness: ExecutionHarness = defaultExecutionHarness,
   ): RuntimeTerminalEvidence {
+    const frozen = this.db
+      .prepare(
+        "SELECT workId FROM execution_intents WHERE threadId=? AND turnId=?",
+      )
+      .all(input.threadId, input.turnId) as { workId: string }[];
+    if (frozen.some((row) => !workAcceptsWrites(this.db, row.workId))) {
+      const prior = this.db
+        .prepare(
+          "SELECT * FROM runtime_terminal_evidence WHERE threadId=? AND turnId=?",
+        )
+        .get(input.threadId, input.turnId);
+      if (prior) return parseRuntimeTerminalEvidence(prior);
+      throw new ProjectArchivedError();
+    }
     const executionHarness = executionHarnessSchema.parse(harness);
     const value = z
       .object({
@@ -2672,6 +2706,7 @@ export class ExecutionState {
     turnId: string,
     plugins: readonly TurnPlugin[],
   ): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(
         "INSERT OR IGNORE INTO execution_turn_skill_plugins (workId, turnId, plugins) VALUES (?, ?, ?)",
@@ -2695,11 +2730,19 @@ export class ExecutionState {
     return row ? turnPluginsSchema.parse(JSON.parse(row.plugins)) : [];
   }
 
+  private assertThreadWritable(threadId: string): void {
+    const rows = this.db
+      .prepare("SELECT workId FROM execution_intents WHERE threadId=?")
+      .all(threadId) as { workId: string }[];
+    for (const row of rows) assertOwnedWorkWritable(this.db, row.workId);
+  }
+
   registerRuntimeThreadTools(
     threadId: string,
     toolDigest: string,
     harness: ExecutionHarness = defaultExecutionHarness,
   ): void {
+    this.assertThreadWritable(threadId);
     const executionHarness = executionHarnessSchema.parse(harness);
     const id = z.string().min(1).max(512).parse(threadId);
     const digest = z
@@ -2757,6 +2800,7 @@ export class ExecutionState {
       })
       .strict()
       .parse(input);
+    this.assertThreadWritable(value.threadId);
     const prior = this.runtimeThreadQualification(value.threadId);
     if (!prior || prior.toolDigest !== value.toolDigest)
       throw new Error("Runtime thread tool baseline unavailable");
@@ -3089,6 +3133,19 @@ export class ExecutionState {
     command: { key: string },
     result: unknown,
   ): void {
+    const material = command as {
+      workId?: string;
+      assignmentId?: string;
+      receipt?: { workId?: string };
+    };
+    const workId = material.workId ?? material.receipt?.workId;
+    if (workId) assertOwnedWorkWritable(this.db, workId);
+    if (material.assignmentId) {
+      const owner = this.db
+        .prepare("SELECT taskId FROM domain_assignments WHERE id=?")
+        .get(material.assignmentId) as { taskId: string } | undefined;
+      if (owner) assertOwnedTaskWritable(this.db, owner.taskId);
+    }
     this.db
       .prepare(
         "INSERT INTO execution_pre_turn_commands (commandKey,scope,payloadMaterial,result) VALUES (?,?,?,?)",
@@ -3690,6 +3747,7 @@ export class ExecutionState {
     reconciledContinuation: boolean;
     holdIds: readonly string[];
   }): void {
+    assertOwnedWorkWritable(this.db, input.workId);
     const reason = z.string().min(1).max(1000).parse(input.reason);
     transaction(this.db, () => {
       this.db
@@ -3709,6 +3767,7 @@ export class ExecutionState {
 
   /** A post-continuation survivor invalidates recovery without rewriting its history. */
   holdReconciledContinuationSurvivor(workId: string, reason: string): void {
+    assertOwnedWorkWritable(this.db, workId);
     this.db
       .prepare(`INSERT OR IGNORE INTO task_writer_ambiguity_holds (taskId, reason)
       SELECT binding.taskId, ? FROM task_execution_bindings binding
@@ -3769,6 +3828,10 @@ export class ExecutionState {
   }
 
   replaceConversation(assignmentId: string): number {
+    const owner = this.db
+      .prepare("SELECT taskId FROM domain_assignments WHERE id = ?")
+      .get(assignmentId) as { taskId: string } | undefined;
+    if (owner) assertOwnedTaskWritable(this.db, owner.taskId);
     const id = z.string().uuid().parse(assignmentId);
     if (this.assignmentHasUnresolvedExecution(id))
       throw new RecoveryRejectedError("Assignment has unresolved execution");
@@ -3820,6 +3883,7 @@ export class ExecutionState {
   }
 
   recordResult(workId: string, payload: string): boolean {
+    assertOwnedWorkWritable(this.db, workId);
     const value = z.string().max(16000).parse(payload);
     const inserted = this.db
       .prepare(`INSERT OR IGNORE INTO task_execution_results (workId, payload)
@@ -3896,6 +3960,7 @@ export class ExecutionState {
         throw new Error("Work ID already used with different predecessor");
       return existing;
     }
+    assertOwnedWorkWritable(this.db, input.workId);
     const id = randomUUID();
     transaction(this.db, () => {
       this.db
@@ -4065,12 +4130,12 @@ export class ExecutionState {
   holdReadyOnStartupFailure(reason: string): void {
     this.db
       .prepare(`UPDATE execution_intents SET state = 'held', reason = ?
-        WHERE state = 'ready'`)
+        WHERE state = 'ready' AND ${this.liveWorkSql("execution_intents.workId")}`)
       .run(z.string().min(1).max(1024).parse(reason));
     if (this.hasTurnRequests)
       this.db
         .prepare(`UPDATE turn_requests SET state = 'held', reason = ?
-          WHERE state = 'queued'`)
+          WHERE state = 'queued' AND ${this.liveWorkSql("turn_requests.workId")}`)
         .run(reason);
   }
 
@@ -4218,7 +4283,7 @@ export class ExecutionState {
         .prepare(`INSERT INTO execution_power_reconciliation_pending (workId, revision)
         SELECT intent.workId, ? FROM task_writer_admissions admission
         JOIN execution_intents intent ON intent.workId = admission.workId
-        WHERE intent.state IN ('held','submitting','running')
+        WHERE ${this.liveWorkSql("intent.workId")} AND intent.state IN ('held','submitting','running')
         ON CONFLICT(workId) DO UPDATE SET revision = excluded.revision`)
         .run(revision);
       return revision;
@@ -4318,6 +4383,7 @@ export class ExecutionState {
     kind: string,
     terminalStatus?: "completed" | "failed",
   ): void {
+    assertOwnedWorkWritable(this.db, workId);
     const safeKind = z
       .enum([
         "exact-live",
@@ -4753,6 +4819,7 @@ export class ExecutionState {
         }
       }
 
+      assertOwnedWorkWritable(this.db, value.workId);
       if (command && value.kind === "bound-turn") {
         const blocked = this.boundTurnRecoveryBlockers(
           value.workId,
@@ -4999,20 +5066,44 @@ export class ExecutionState {
   }
 
   setWorkspaceKey(id: string, workspace: string): void {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     this.db
       .prepare("UPDATE execution_intents SET workspace = ? WHERE id = ?")
       .run(workspace, id);
   }
 
   /** An interrupted service cannot prove a send failed or a writer stopped. */
+  projectWorkWritable(workId: string): boolean {
+    return workAcceptsWrites(this.db, workId);
+  }
+
+  private liveWorkSql(column: string): string {
+    const tables = [
+      "turn_requests",
+      "task_execution_bindings",
+      "domain_projects",
+      "domain_tasks",
+    ];
+    if (
+      !tables.every((name) =>
+        this.db
+          .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?")
+          .get(name),
+      )
+    )
+      return "1";
+    return `NOT EXISTS (SELECT 1 FROM turn_requests r JOIN domain_projects p ON p.id=r.projectId WHERE r.workId=${column} AND p.archived=1)
+      AND NOT EXISTS (SELECT 1 FROM task_execution_bindings b JOIN domain_tasks t ON t.id=b.taskId JOIN domain_projects p ON p.id=t.projectId WHERE b.workId=${column} AND p.archived=1)`;
+  }
+
   holdUnfinishedOnOpen(): void {
     // An unresolved shutdown target must leave exactly today's restart hold.
     this.db.exec(
-      "DELETE FROM execution_stop_targets WHERE origin = 'shutdown'",
+      `DELETE FROM execution_stop_targets WHERE origin = 'shutdown' AND ${this.liveWorkSql("execution_stop_targets.workId")}`,
     );
     const held = this.db
       .prepare(
-        "UPDATE execution_intents SET state = 'held', reason = 'service restarted with unresolved execution' WHERE state IN ('submitting','running') RETURNING workId",
+        `UPDATE execution_intents SET state = 'held', reason = 'service restarted with unresolved execution' WHERE state IN ('submitting','running') AND ${this.liveWorkSql("execution_intents.workId")} RETURNING workId`,
       )
       .all() as { workId: string }[];
     if (this.hasTurnRequests)
@@ -5036,6 +5127,7 @@ export class ExecutionState {
       projectId: null,
     },
   ): boolean {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     return transaction(this.db, () => {
       const reasons = options.validate?.() ?? [];
       if (reasons.length > 0) {
@@ -5390,6 +5482,7 @@ export class ExecutionState {
         .all(threadId, threadId) as Array<{ workId: string }>;
       const workId = rows.length === 1 ? rows[0]?.workId : undefined;
       if (!workId) return false;
+      assertOwnedWorkWritable(this.db, workId);
       this.db
         .prepare(`UPDATE execution_recovery_identities
           SET processId = ?, processStartedAt = ?, bootId = ? WHERE workId = ?`)
@@ -5404,6 +5497,7 @@ export class ExecutionState {
   }
 
   bindThread(id: string, threadId: string): boolean {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     if (
       this.db
         .prepare(
@@ -5436,6 +5530,7 @@ export class ExecutionState {
   }
 
   bindTurn(id: string, turnId: string, runtimeGeneration?: string): boolean {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     const ownsTransaction = !this.db.isTransaction;
     if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE");
     const finish = (result: boolean): boolean => {
@@ -5512,6 +5607,7 @@ export class ExecutionState {
     turnId: string,
     reason: string,
   ): boolean {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     return (
       this.db
         .prepare(
@@ -5523,6 +5619,7 @@ export class ExecutionState {
 
   /** Returns false when the intent was already settled and stays unheld. */
   hold(id: string, reason: string): boolean {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     const held = this.db
       .prepare(
         "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ? AND state NOT IN ('completed','reconciled','resolved-failed') RETURNING workId",
@@ -5539,6 +5636,7 @@ export class ExecutionState {
   }
 
   wait(id: string, reason: string): void {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     this.db
       .prepare(
         "UPDATE execution_intents SET state = 'ready', reason = ? WHERE id = ? AND state IN ('ready','capacity-waiting')",
@@ -5553,6 +5651,7 @@ export class ExecutionState {
   }
 
   holdTerminalConflict(id: string, reason: string): void {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     this.db
       .prepare(
         "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ? AND state IN ('submitting','running','completed')",
@@ -5618,6 +5717,7 @@ export class ExecutionState {
         };
       }
 
+      assertOwnedWorkWritable(this.db, value.workId);
       const current = this.db
         .prepare(`SELECT intent.id, intent.state, intent.threadId,
         intent.turnId, intent.workspace, request.requestKey, request.kind,
@@ -5705,7 +5805,8 @@ export class ExecutionState {
         EXISTS (SELECT 1 FROM execution_stop_targets WHERE workId = ?) AS stopped,
         EXISTS (SELECT 1 FROM execution_request_refusals WHERE workId = ?) AS refused,
         EXISTS (SELECT 1 FROM execution_pending_effects
-          WHERE workId = ? AND state = 'pending') AS pendingEffect,
+          WHERE workId = ? AND state = 'pending'
+          AND NOT (? = 1 AND effectKey = 'assignment-result')) AS pendingEffect,
         EXISTS (SELECT 1 FROM task_execution_bindings binding
           JOIN task_writer_holds hold ON hold.taskId = binding.taskId
           WHERE binding.workId = ?) AS taskHold,
@@ -5729,6 +5830,7 @@ export class ExecutionState {
           value.workId,
           value.workId,
           value.workId,
+          current.draftTurn,
           value.workId,
           value.workId,
           value.workId,
@@ -5900,6 +6002,12 @@ export class ExecutionState {
         );
       if (!resolved)
         throw new Error("Failed generation changed before retry resolution");
+      if (current.draftTurn === 1)
+        this.db
+          .prepare(`UPDATE execution_pending_effects SET state = 'settled',
+          reason = 'Draft turns record no result'
+          WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'pending'`)
+          .run(value.workId);
       this.db
         .prepare(`UPDATE turn_requests SET state = 'held',
         reason = 'Confirmed transient failure resolved; retry queued'
@@ -6033,6 +6141,7 @@ export class ExecutionState {
         };
       }
 
+      assertOwnedWorkWritable(this.db, value.workId);
       const current = this.db
         .prepare(`SELECT intent.id, intent.state, intent.threadId,
         intent.turnId, intent.workspace, request.kind, request.taskId,
@@ -6295,6 +6404,7 @@ export class ExecutionState {
    * or a recovery receipt.
    */
   releaseDraftingExecution(workId: string): boolean {
+    assertOwnedWorkWritable(this.db, workId);
     return transaction(this.db, () => {
       const request = this.db
         .prepare(`UPDATE turn_requests SET state = 'completed', reason = NULL
@@ -6333,6 +6443,7 @@ export class ExecutionState {
     turnId: string,
     alongside?: () => void,
   ): void {
+    assertOwnedWorkWritable(this.db, this.get(id).workId);
     transaction(this.db, () => {
       const row = this.db
         .prepare(

@@ -1,3 +1,17 @@
+import { ProjectDeletionCleanup } from "./project-deletion-cleanup.js";
+import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
+import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
+import type { ProjectDeleteCommand } from "../core/project-lifecycle.js";
+import { ProjectWrites } from "./project-writes.js";
+import {
+  assertOwnedWorkWritable,
+  projectAcceptsWrites,
+  taskAcceptsWrites,
+  workAcceptsWrites,
+  taskProjectId,
+  workProjectId,
+} from "../core/project-lifecycle.js";
+import { DeletedProjectRedactionStore } from "../core/deleted-project-redaction.js";
 import { LocalAccess, localAccessDirectory } from "../operator/local-access.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -69,7 +83,7 @@ import {
 } from "../core/execution-runtime.js";
 import { GitHubSourceStore } from "../core/github-source.js";
 import { hasLabelName } from "../core/github-source-contracts.js";
-import { Store } from "../core/store.js";
+import { Store, transaction } from "../core/store.js";
 import {
   type CommandReceipt,
   type DraftProposal,
@@ -649,6 +663,7 @@ interface ServiceGeneration {
 /** Every component operations use; published whole once start-up can admit work. */
 interface Started {
   conversationArchival: ConversationArchival;
+  projectDeletionCleanup: ProjectDeletionCleanup;
   state: ExecutionState;
   domain: DomainStore;
   githubSources: GitHubSourceStore;
@@ -811,6 +826,8 @@ export interface RoutingAvailability {
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
+  private deletedProjectRedaction: DeletedProjectRedactionStore | undefined;
+  private projectWrites: ProjectWrites | undefined;
   /** Statement-caching facade over `db` for this generation; `db` stays the lifecycle handle. */
   private cache: CachedDatabase | undefined;
   /** The only operational view; see started(). */
@@ -1006,6 +1023,8 @@ export class StandaloneService {
         "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL",
       );
       new Store(db).ensureHost("standalone-codex");
+      this.deletedProjectRedaction = new DeletedProjectRedactionStore(db);
+      new ProjectTombstones(db);
       const workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
       const operatorCredentials = new OperatorCredentialStore(db);
       this.localAccessState = await LocalAccess.create(
@@ -1014,6 +1033,32 @@ export class StandaloneService {
       );
       const operatorPush = new OperatorPushStore(db);
       const conversationHistory = new ConversationHistoryStore(db);
+      const projectWrites = new ProjectWrites(db);
+      this.projectWrites = projectWrites;
+      const domain = new DomainStore(
+        db,
+        () =>
+          this.observeBackgroundFailure(generation, "domain-wake", () =>
+            this.wakeScheduler(0, generation),
+          ),
+        verifiedRepository,
+        (projectId) => [
+          ...projectWrites.blockers(projectId),
+          ...[
+            ...new Set([
+              ...this.activeByWorkId.keys(),
+              ...this.callbacks.keys(),
+            ]),
+          ]
+            .filter((workId) => workProjectId(db, workId) === projectId)
+            .map((workId) => ({
+              kind: "callback" as const,
+              workId,
+              reason: "An execution callback has not ended",
+            })),
+        ],
+      );
+      domain.migrate();
       let diagnostics: ExecutionDiagnosticsStore | undefined;
       try {
         const store = new ExecutionDiagnosticsStore(db, {
@@ -1030,15 +1075,6 @@ export class StandaloneService {
       } catch {
         // Diagnostics are additive; without the store executions run uncaptured.
       }
-      const domain = new DomainStore(
-        db,
-        () =>
-          this.observeBackgroundFailure(generation, "domain-wake", () =>
-            this.wakeScheduler(0, generation),
-          ),
-        verifiedRepository,
-      );
-      domain.migrate();
       const githubSources = new GitHubSourceStore(db);
       githubSources.migrate();
       const reobservedTaskVersions = githubSources.importedTaskVersions();
@@ -1061,7 +1097,12 @@ export class StandaloneService {
       const routingAttempts = new RoutingAttemptStore(db);
       routingAttempts.migrate();
       const schedulerStore = new SchedulerStore(db);
-      const workspaceBindings = new SqliteWorkspaceBindingStore(db);
+      const workspaceBindings = new SqliteWorkspaceBindingStore(
+        db,
+        "task_workspace_bindings",
+        (taskId, run) =>
+          this.withProjectWrite(taskProjectId(db, taskId), "callback", run),
+      );
       const workspaces = acquire(
         "workspaces",
         new WorkspaceManager(
@@ -1076,6 +1117,8 @@ export class StandaloneService {
       const draftingBindings = new SqliteWorkspaceBindingStore(
         db,
         "drafting_workspace_bindings",
+        (taskId, run) =>
+          this.withProjectWrite(taskProjectId(db, taskId), "callback", run),
       );
       const draftingWorkspaces = acquire(
         "draftingWorkspaces",
@@ -1186,12 +1229,15 @@ export class StandaloneService {
       deliveryStore.migrate();
       // Once per store; coordination and domain tables exist by now, which its skip rules read.
       deliveryStore.applyOpenPrsDefault(
-        domain.projects().map((project) => ({
-          projectId: String(project.id),
-          repositoryIds: domain
-            .repositoryLinks(String(project.id))
-            .links.map((link) => link.repositoryId),
-        })),
+        domain
+          .projects()
+          .filter((project) => !project.archived)
+          .map((project) => ({
+            projectId: String(project.id),
+            repositoryIds: domain
+              .repositoryLinks(String(project.id))
+              .links.map((link) => link.repositoryId),
+          })),
       );
       const statusMappings = new StatusMappingStore(db);
       const taskPublications = new TaskPublicationStore(db);
@@ -1225,206 +1271,255 @@ export class StandaloneService {
       };
       const retryWaits = new AbortController();
       this.retryWaits = retryWaits;
-      const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
-        gh: () => ({
-          executable: this.options.ghExecutable,
-          environment: ghEnvironment(domain, { reference: "gh:github.com" }),
-        }),
-        ...(this.options.delivery?.fetcher
-          ? { fetcher: this.options.delivery.fetcher }
-          : {}),
-        ...(this.options.delivery?.push
-          ? { push: this.options.delivery.push }
-          : {}),
-        ...(this.options.delivery?.adopt
-          ? { adopt: this.options.delivery.adopt }
-          : {}),
-        issueTrackerFactories: {
-          jira: (projectId, _policy, instance) =>
-            new JiraIssueTrackerWriter(
-              () =>
-                resolveJiraAccess(
-                  domain
-                    .issueTrackerCredentials()
-                    .find((c) => c.instance === instance),
-                ),
-              this.options.issueTrackers?.jiraFetcher,
-              statusMappings.jiraDoneStatus(projectId),
-            ),
-          ...this.options.delivery?.issueTrackerFactories,
-        },
-        providerFactories: {
-          gitlab: gitLabDeliveryFactory(domain, {
-            glabExecutable: this.options.glabExecutable,
-            fetcher: this.options.delivery?.fetcher,
-            push: this.options.delivery?.push,
-            adopt: this.options.delivery?.adopt,
-            // A stopping service ends the waits of requests it would retry.
-            rateLimit: {
-              ...this.options.delivery?.rateLimit,
-              signal: retryWaits.signal,
-            },
+      const deliveryCoordinator = new DeliveryCoordinator(
+        deliveryStore,
+        {
+          gh: () => ({
+            executable: this.options.ghExecutable,
+            environment: ghEnvironment(domain, { reference: "gh:github.com" }),
           }),
-          ...this.options.delivery?.providerFactories,
-        },
-        issueTrackerOf: (projectId) => {
-          const source = projectIssueTracker(db, projectId);
-          return source
-            ? {
-                issueTracker: z
-                  .enum(["github", "jira"])
-                  .parse(source.provider) satisfies IssueTracker,
-                instance: source.instance,
-              }
-            : null;
-        },
-        codeHostOf: (projectId, repositoryId) =>
-          domain
-            .repositoryLinks(projectId)
-            .links.find((l) => l.repositoryId === repositoryId) ?? null,
-        ...(this.options.delivery?.statusWriteTimeoutMs
-          ? {
-              statusWriteTimeoutMs: this.options.delivery.statusWriteTimeoutMs,
-            }
-          : {}),
-        authorize: (caller, exceptOperationId, request) => {
-          this.authorizeDelivery(
-            {
-              deliveryStore,
-              state,
-              domain,
-              coordination,
-              statusMappings,
-              taskPublications,
-              workspaceBindings,
-            },
-            caller,
-            exceptOperationId,
-            request?.action.kind,
-          );
-          if (isOperatorDeliveryCaller(caller)) {
-            if (request && !isOperatorAction(request.action))
-              throw new DomainPolicyError(
-                "forbidden",
-                "Operator delivery only permits issue.comment",
-              );
-            return;
-          }
-          // Its repository, issue and readiness are checked by `DeliveryStore.authorize`.
-          if (isOperatorPublicationCaller(caller)) return;
-          // Its mapping, task and readiness are checked by `DeliveryStore.authorize`.
-          if (isServiceDeliveryCaller(caller)) return;
-          if (
-            request &&
-            (request.action.kind === "pr.merge" ||
-              request.action.kind === "issue.close")
-          ) {
-            const reasons = coordination.deliveryActionBlockers(
-              caller,
-              request.action.reviewedResultIds,
-              request.operationId,
-            );
-            if ((this.callbacks.get(caller.workId)?.size ?? 0) > 1)
-              reasons.push("unfinished-callback");
-            if (request.action.kind === "pr.merge") {
-              const binding = deliveryStore.delivery(caller.taskId),
-                target = request.action.target;
-              if (
-                !binding ||
-                binding.observation.nodeId !== target.nodeId ||
-                binding.observation.repositoryId !== target.repositoryId ||
-                binding.observation.number !== target.number ||
-                binding.observation.headSha !== target.expectedHeadSha ||
-                binding.baseChange ||
-                binding.acceptedBaseRef !== target.baseRef
-              )
-                reasons.push("merge-target-not-current-delivery");
-              if (!String(domain.project(caller.projectId).instructions).trim())
-                reasons.push("merge-instructions-unconfigured");
-            } else {
-              const imported = domain.importedTask(caller.taskId);
-              if (
-                !imported ||
-                imported.nodeId !== request.action.target.nodeId ||
-                imported.repositoryId !== request.action.target.repositoryId
-              )
-                reasons.push("closure-target-not-task-issue");
-            }
-            if (reasons.length) throw new Error("Completion action held");
-          }
-        },
-        taskVersion: (taskId) => Number(domain.task(taskId).version),
-        leadAssignmentId: (taskId) =>
-          String(
-            domain.leadBindings().find((b) => b.taskId === taskId)
-              ?.assignmentId ?? "",
-          ),
-        feedback: (taskId, reason, identity) =>
-          coordination.ensureDeliveryEventWithinTransaction(
-            taskId,
-            reason,
-            identity,
-          ),
-        taskWorkspace,
-        stackedBase: (taskId, repositoryId) => {
-          const stacked = domain.stackedDependency(taskId);
-          return stacked?.repositoryId === repositoryId
-            ? stacked.parentHead
-            : null;
-        },
-        verifyPush: async ({
-          taskId,
-          repositoryId,
-          commitSha,
-          lastPushedSha,
-        }) => {
-          const workspace = await taskWorkspace(taskId, repositoryId);
-          return workspace
-            ? verifyTaskPush(workspace, commitSha, lastPushedSha)
-            : null;
-        },
-        approved: (request, caller) =>
-          isServiceDeliveryCaller(caller)
-            ? false
-            : isOperatorPublicationCaller(caller)
-              ? taskPublications.actionApproved(request, caller)
-              : isOperatorDeliveryCaller(caller)
-                ? deliveryStore.operatorApprovalCurrent(request, caller)
-                : Boolean(
-                    request.approval &&
-                      deliveryStore.approvalCurrent(
-                        request.approval.interactionId,
-                        caller,
-                        request.action,
-                        request.operationId,
-                      ) &&
-                      coordination.authorizationFor({
-                        assignmentId: caller.assignmentId,
-                        ...request.approval,
-                        action: request.action.kind,
-                        target: canonicalMaterial(request.action.target),
-                        material: request.action,
-                      }),
+          ...(this.options.delivery?.fetcher
+            ? { fetcher: this.options.delivery.fetcher }
+            : {}),
+          ...(this.options.delivery?.push
+            ? { push: this.options.delivery.push }
+            : {}),
+          ...(this.options.delivery?.adopt
+            ? { adopt: this.options.delivery.adopt }
+            : {}),
+          issueTrackerFactories: {
+            jira: (projectId, _policy, instance) =>
+              new JiraIssueTrackerWriter(
+                () =>
+                  resolveJiraAccess(
+                    domain
+                      .issueTrackerCredentials()
+                      .find((c) => c.instance === instance),
                   ),
-        activationAllowed: (policy) => {
-          if (!policy.credentialRef) return true;
-          // A `gh:github.com` reference keeps the old snapshot's gh variables and token values out too.
-          const excluded =
-            policy.credentialRef === "gh:github.com"
-              ? credentialReferenceExclusions(policy.credentialRef)
-              : {
-                  names: [policy.credentialRef.slice(4)],
-                  values: [process.env[policy.credentialRef.slice(4)] ?? ""],
-                };
-          const snapshot = runtimeSpawnSnapshot ?? {};
-          return (
-            !excluded.names.some((name) => snapshot[name]) &&
-            !Object.values(snapshot).some((value) =>
-              excluded.values.includes(value ?? ""),
-            )
-          );
+                this.options.issueTrackers?.jiraFetcher,
+                statusMappings.jiraDoneStatus(projectId),
+              ),
+            ...this.options.delivery?.issueTrackerFactories,
+          },
+          providerFactories: {
+            gitlab: gitLabDeliveryFactory(domain, {
+              glabExecutable: this.options.glabExecutable,
+              fetcher: this.options.delivery?.fetcher,
+              push: this.options.delivery?.push,
+              adopt: this.options.delivery?.adopt,
+              // A stopping service ends the waits of requests it would retry.
+              rateLimit: {
+                ...this.options.delivery?.rateLimit,
+                signal: retryWaits.signal,
+              },
+            }),
+            ...this.options.delivery?.providerFactories,
+          },
+          issueTrackerOf: (projectId) => {
+            const source = projectIssueTracker(db, projectId);
+            return source
+              ? {
+                  issueTracker: z
+                    .enum(["github", "jira"])
+                    .parse(source.provider) satisfies IssueTracker,
+                  instance: source.instance,
+                }
+              : null;
+          },
+          codeHostOf: (projectId, repositoryId) =>
+            domain
+              .repositoryLinks(projectId)
+              .links.find((l) => l.repositoryId === repositoryId) ?? null,
+          ...(this.options.delivery?.statusWriteTimeoutMs
+            ? {
+                statusWriteTimeoutMs:
+                  this.options.delivery.statusWriteTimeoutMs,
+              }
+            : {}),
+          authorize: (caller, exceptOperationId, request) => {
+            this.authorizeDelivery(
+              {
+                deliveryStore,
+                state,
+                domain,
+                coordination,
+                statusMappings,
+                taskPublications,
+                workspaceBindings,
+              },
+              caller,
+              exceptOperationId,
+              request?.action.kind,
+            );
+            if (isOperatorDeliveryCaller(caller)) {
+              if (request && !isOperatorAction(request.action))
+                throw new DomainPolicyError(
+                  "forbidden",
+                  "Operator delivery only permits issue.comment",
+                );
+              return;
+            }
+            // Its repository, issue and readiness are checked by `DeliveryStore.authorize`.
+            if (isOperatorPublicationCaller(caller)) return;
+            // Its mapping, task and readiness are checked by `DeliveryStore.authorize`.
+            if (isServiceDeliveryCaller(caller)) return;
+            if (
+              request &&
+              (request.action.kind === "pr.merge" ||
+                request.action.kind === "issue.close")
+            ) {
+              const reasons = coordination.deliveryActionBlockers(
+                caller,
+                request.action.reviewedResultIds,
+                request.operationId,
+              );
+              if ((this.callbacks.get(caller.workId)?.size ?? 0) > 1)
+                reasons.push("unfinished-callback");
+              if (request.action.kind === "pr.merge") {
+                const binding = deliveryStore.delivery(caller.taskId),
+                  target = request.action.target;
+                if (
+                  !binding ||
+                  binding.observation.nodeId !== target.nodeId ||
+                  binding.observation.repositoryId !== target.repositoryId ||
+                  binding.observation.number !== target.number ||
+                  binding.observation.headSha !== target.expectedHeadSha ||
+                  binding.baseChange ||
+                  binding.acceptedBaseRef !== target.baseRef
+                )
+                  reasons.push("merge-target-not-current-delivery");
+                if (
+                  !String(domain.project(caller.projectId).instructions).trim()
+                )
+                  reasons.push("merge-instructions-unconfigured");
+              } else {
+                const imported = domain.importedTask(caller.taskId);
+                if (
+                  !imported ||
+                  imported.nodeId !== request.action.target.nodeId ||
+                  imported.repositoryId !== request.action.target.repositoryId
+                )
+                  reasons.push("closure-target-not-task-issue");
+              }
+              if (reasons.length) throw new Error("Completion action held");
+            }
+          },
+          taskVersion: (taskId) => Number(domain.task(taskId).version),
+          leadAssignmentId: (taskId) =>
+            String(
+              domain.leadBindings().find((b) => b.taskId === taskId)
+                ?.assignmentId ?? "",
+            ),
+          feedback: (taskId, reason, identity) =>
+            coordination.ensureDeliveryEventWithinTransaction(
+              taskId,
+              reason,
+              identity,
+            ),
+          taskWorkspace,
+          stackedPrBase: (taskId) => {
+            const stacked = domain.stackedDependency(taskId);
+            if (!stacked) return null;
+            const blocker = domain.task(stacked.blockerTaskId);
+            if (blocker.projectId !== domain.task(taskId).projectId)
+              throw new Error("Stacked blocker project changed");
+            const branch = deliveryStore.taskBranch(
+              stacked.blockerTaskId,
+              stacked.repositoryId,
+            );
+            const binding = deliveryStore.delivery(stacked.blockerTaskId);
+            const pr = binding?.observation;
+            const verified =
+              binding &&
+              branch &&
+              pr &&
+              binding.projectId === blocker.projectId &&
+              pr.repositoryId === stacked.repositoryId &&
+              pr.headRef === branch.branch &&
+              pr.headSha === branch.lastPushedSha &&
+              branch.outsideHeadSha === null &&
+              pr.state === "OPEN" &&
+              !pr.merged &&
+              !binding.readError;
+            return {
+              ...(verified && pr
+                ? {
+                    blockerPrNodeId: pr.nodeId,
+                    blockerPrNumber: pr.number,
+                    blockerHeadSha: pr.headSha,
+                  }
+                : {}),
+              blockerTaskId: stacked.blockerTaskId,
+              repositoryId: stacked.repositoryId,
+              branch: branch?.branch ?? null,
+            };
+          },
+          stackedBase: (taskId, repositoryId) => {
+            const stacked = domain.stackedDependency(taskId);
+            return stacked?.repositoryId === repositoryId
+              ? stacked.parentHead
+              : null;
+          },
+          verifyPush: async ({
+            taskId,
+            repositoryId,
+            commitSha,
+            lastPushedSha,
+          }) => {
+            const workspace = await taskWorkspace(taskId, repositoryId);
+            return workspace
+              ? verifyTaskPush(workspace, commitSha, lastPushedSha)
+              : null;
+          },
+          approved: (request, caller) =>
+            isServiceDeliveryCaller(caller)
+              ? false
+              : isOperatorPublicationCaller(caller)
+                ? taskPublications.actionApproved(request, caller)
+                : isOperatorDeliveryCaller(caller)
+                  ? deliveryStore.operatorApprovalCurrent(request, caller)
+                  : Boolean(
+                      request.approval &&
+                        deliveryStore.approvalCurrent(
+                          request.approval.interactionId,
+                          caller,
+                          request.action,
+                          request.operationId,
+                        ) &&
+                        coordination.authorizationFor({
+                          assignmentId: caller.assignmentId,
+                          ...request.approval,
+                          action: request.action.kind,
+                          target: canonicalMaterial(request.action.target),
+                          material: request.action,
+                        }),
+                    ),
+          activationAllowed: (policy) => {
+            if (!policy.credentialRef) return true;
+            // A `gh:github.com` reference keeps the old snapshot's gh variables and token values out too.
+            const excluded =
+              policy.credentialRef === "gh:github.com"
+                ? credentialReferenceExclusions(policy.credentialRef)
+                : {
+                    names: [policy.credentialRef.slice(4)],
+                    values: [process.env[policy.credentialRef.slice(4)] ?? ""],
+                  };
+            const snapshot = runtimeSpawnSnapshot ?? {};
+            return (
+              !excluded.names.some((name) => snapshot[name]) &&
+              !Object.values(snapshot).some((value) =>
+                excluded.values.includes(value ?? ""),
+              )
+            );
+          },
         },
-      });
+        (taskId, run) =>
+          this.withProjectWrite(
+            String(domain.task(taskId).projectId),
+            "provider-write",
+            run,
+          ),
+      );
       acquire("deliveryCoordinator", deliveryCoordinator);
       const publicationDriver = new TaskPublicationDriver(
         taskPublications,
@@ -1438,6 +1533,8 @@ export class StandaloneService {
           statusMappings,
           githubSources,
           deliveryCoordinator,
+          (projectId, run) =>
+            this.withProjectWrite(projectId, "provider-write", run),
         ),
       );
       const deliveryCredentialNames = () =>
@@ -1746,14 +1843,24 @@ export class StandaloneService {
             this.handleBackgroundFailure(generation, "scheduler-drain", error),
         ),
       );
+      const conversationArchival = new ConversationArchival(
+        db,
+        state,
+        (workId) => this.activeByWorkId.has(workId),
+        () => this.generation === generation && generation.accepting,
+        (threadId, run) => this.withThreadProjectWrite(threadId, run),
+      );
+      const projectDeletionCleanup = new ProjectDeletionCleanup(db, {
+        roots: { task: workspacePath, drafting: draftingWorkspacePath },
+        workspaces: { task: workspaces, drafting: draftingWorkspaces },
+        archival: conversationArchival,
+        runtime: () => this.runtimes.get("codex"),
+        accepting: () => this.generation === generation && generation.accepting,
+      });
       // Admission begins here: scheduler drains and wakes need the whole record.
       this.current = {
-        conversationArchival: new ConversationArchival(
-          db,
-          state,
-          (workId) => this.activeByWorkId.has(workId),
-          () => this.generation === generation && generation.accepting,
-        ),
+        conversationArchival,
+        projectDeletionCleanup,
         state,
         domain,
         githubSources,
@@ -2518,6 +2625,13 @@ export class StandaloneService {
     return this.generation.id;
   }
 
+  /** Sanitization-only union; never use as prompt or public read data. */
+  redactionExclusions(live: readonly string[]): string[] {
+    if (!this.deletedProjectRedaction)
+      throw new Error("Private redaction inputs unavailable");
+    return this.deletedProjectRedaction.exclusions(live);
+  }
+
   /**
    * Everything a failure record must not disclose, or undefined when the service never
    * opened its domain and stopped without a snapshot: callers then emit identifiers only.
@@ -2556,9 +2670,7 @@ export class StandaloneService {
           ];
         }),
       ];
-      return prepareExclusions([
-        ...new Set(values.filter((value) => value.length > 0)),
-      ]);
+      return prepareExclusions(this.redactionExclusions(values));
     } catch {
       // A domain whose shutdown has begun can fail to answer; the snapshot still applies.
       return this.stoppedExclusions;
@@ -2735,6 +2847,9 @@ export class StandaloneService {
     await attempt("background callback settlement", async () => {
       await Promise.all([...this.backgroundRuns]);
     });
+    await attempt("deleted-project cleanup settlement", () =>
+      this.current?.projectDeletionCleanup.settle(),
+    );
     await attempt("supervisor settlement", () => supervisor?.settle());
 
     if (db?.isOpen)
@@ -3183,7 +3298,11 @@ export class StandaloneService {
   }
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
-    return this.started().supervisor.resolveHeldExecution(receipt);
+    return this.withProjectWrite(
+      workProjectId(this.cache!, receipt.workId),
+      "callback",
+      () => this.started().supervisor.resolveHeldExecution(receipt),
+    );
   }
   boundTurnRecoveryEligibility(workId: string, assignmentId: string) {
     return this.started().supervisor.boundTurnRecoveryEligibility(
@@ -3217,7 +3336,13 @@ export class StandaloneService {
     }
     const result: Promise<{ id: string; workId: string; state: "reconciled" }> =
       Promise.resolve()
-        .then(() => supervisor.resolveHeldExecution(value.receipt, value))
+        .then(() =>
+          this.withProjectWrite(
+            workProjectId(this.cache!, value.receipt.workId),
+            "callback",
+            () => supervisor.resolveHeldExecution(value.receipt, value),
+          ),
+        )
         .finally(() => {
           if (this.boundRecoveryRequests.get(value.key)?.result === result)
             this.boundRecoveryRequests.delete(value.key);
@@ -3246,7 +3371,12 @@ export class StandaloneService {
           .strict()
           .parse(replay),
       );
-    return this.started().supervisor.resolveHeldExecution(value.receipt, value);
+    return this.withProjectWrite(
+      workProjectId(this.cache!, value.receipt.workId),
+      "callback",
+      () =>
+        this.started().supervisor.resolveHeldExecution(value.receipt, value),
+    );
   }
   adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
     return this.started().state.adoptHistoricalNoTurnSubmission(command);
@@ -3268,7 +3398,12 @@ export class StandaloneService {
           .strict()
           .parse(replay),
       );
-    return this.started().supervisor.resolveHeldExecution(value.receipt, value);
+    return this.withProjectWrite(
+      workProjectId(this.cache!, value.receipt.workId),
+      "callback",
+      () =>
+        this.started().supervisor.resolveHeldExecution(value.receipt, value),
+    );
   }
   replaceConversationCommand(command: ReplaceConversationCommand) {
     return this.started().state.replaceConversationCommand(command);
@@ -3357,12 +3492,18 @@ export class StandaloneService {
       return prior;
     }
 
-    const { candidates } = await this.captureReviewAnchors(request);
-    return evidence.stageReviewAnchorDraft(
-      request.taskId,
-      request.operationId,
-      materialHash,
-      candidates,
+    return this.withProjectWrite(
+      this.taskProject(input.taskId),
+      "callback",
+      async () => {
+        const { candidates } = await this.captureReviewAnchors(request);
+        return evidence.stageReviewAnchorDraft(
+          request.taskId,
+          request.operationId,
+          materialHash,
+          candidates,
+        );
+      },
     );
   }
 
@@ -3447,24 +3588,30 @@ export class StandaloneService {
     };
     const prior = this.localReviews().replayStage(command);
     if (prior) return prior;
-    const request = retainedReviewAnchorStageRequestSchema.parse({
-      taskId: input.taskId,
-      operationId: randomUUID(),
-      anchors: input.anchors,
-    });
-    const { candidates, accessFingerprint } =
-      await this.captureReviewAnchors(request);
-    return this.localReviews().stageGroup({
-      commandKey: input.commandKey,
-      taskId: request.taskId,
-      ownerKey: input.ownerKey,
-      expectedDraftVersion: input.expectedDraftVersion,
-      requestHash: input.requestHash,
-      stageOperationId: request.operationId,
-      stageMaterialHash: retainedReviewAnchorMaterialHash(request),
-      candidates,
-      accessFingerprint,
-    });
+    return this.withProjectWrite(
+      this.taskProject(input.taskId),
+      "callback",
+      async () => {
+        const request = retainedReviewAnchorStageRequestSchema.parse({
+          taskId: input.taskId,
+          operationId: randomUUID(),
+          anchors: input.anchors,
+        });
+        const { candidates, accessFingerprint } =
+          await this.captureReviewAnchors(request);
+        return this.localReviews().stageGroup({
+          commandKey: input.commandKey,
+          taskId: request.taskId,
+          ownerKey: input.ownerKey,
+          expectedDraftVersion: input.expectedDraftVersion,
+          requestHash: input.requestHash,
+          stageOperationId: request.operationId,
+          stageMaterialHash: retainedReviewAnchorMaterialHash(request),
+          candidates,
+          accessFingerprint,
+        });
+      },
+    );
   }
 
   sealReviewAnchorDraft(input: {
@@ -3504,6 +3651,140 @@ export class StandaloneService {
       input.operationId,
       materialHash,
     );
+  }
+
+  private withProjectWrite<T>(
+    projectId: string | undefined,
+    kind: "callback" | "provider-write",
+    run: () => Promise<T>,
+  ): Promise<T> {
+    if (projectId === undefined) return run();
+    if (!this.projectWrites)
+      throw new Error("Project write authority is unavailable");
+    return this.projectWrites.run(projectId, kind, run);
+  }
+
+  private withThreadProjectWrite<T>(
+    threadId: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const work = this.cache!.prepare(
+      "SELECT workId FROM execution_intents WHERE threadId = ?",
+    ).all(threadId) as { workId: string }[];
+    const projects = [
+      ...new Set(
+        work
+          .map((row) => workProjectId(this.cache!, row.workId))
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
+    const enter = (index: number): Promise<T> =>
+      index === projects.length
+        ? run()
+        : this.withProjectWrite(projects[index], "provider-write", () =>
+            enter(index + 1),
+          );
+    return enter(0);
+  }
+
+  private taskProject(taskId: string): string {
+    return String(this.domain().task(taskId).projectId);
+  }
+
+  private writableTask(taskId: string): boolean {
+    return !!this.cache && taskAcceptsWrites(this.cache, taskId);
+  }
+
+  private writableWork(workId: string): boolean {
+    return !!this.cache && workAcceptsWrites(this.cache, workId);
+  }
+
+  private projectDeletion() {
+    const domain = this.domain(),
+      db = this.cache!;
+    if (!this.owner) throw new Error("Service project deletion is unavailable");
+    return new ProjectDeletion(db, {
+      roots: {
+        task: this.owner.workspacePath,
+        drafting: this.owner.draftingWorkspacePath,
+      },
+      gitExecutable: this.options.workspaceManager?.gitExecutable,
+      signal: this.retryWaits?.signal,
+      drain: (projectId) =>
+        domain.projectArchiveBlockersWithinTransaction(projectId),
+      privateInputs: (owner, paths) =>
+        prepareDeletionPrivateInputs(db, owner, paths, {
+          extra: () => [
+            this.dataDir,
+            ...this.localAccessExclusions(),
+            ...secretEnvironmentValues(),
+            ...this.providerCredentialExclusions().redactions,
+            ...(domain.claudeTokenReference()
+              ? claudeTokenExclusions(domain.claudeTokenReference()!).redactions
+              : []),
+            ...(this.options.conversationHistoryExclusions?.() ?? []),
+          ],
+          resolveReference: async (reference) => {
+            const resolved = reference.startsWith("glab:")
+              ? await glabToken(reference.slice(5), {
+                  executable: this.options.glabExecutable,
+                  environment: glabEnvironment(domain),
+                })
+              : await ghToken({
+                  executable: this.options.ghExecutable,
+                  environment: ghEnvironment(domain, { reference }),
+                });
+            if (!("token" in resolved))
+              throw new Error(
+                "Project deletion credential resolution unavailable",
+              );
+            return resolved.token;
+          },
+        }),
+    });
+  }
+
+  private trackProjectDeletion<T>(operation: Promise<T>): Promise<T> {
+    const observed = operation.then(
+      () => {},
+      () => {},
+    );
+    this.backgroundRuns.add(observed);
+    void observed.then(() => this.backgroundRuns.delete(observed));
+    return operation;
+  }
+  projectDeletionPreview(projectId: string) {
+    return this.trackProjectDeletion(this.projectDeletion().preview(projectId));
+  }
+  deleteProject(command: ProjectDeleteCommand) {
+    return this.trackProjectDeletion(
+      this.projectDeletion()
+        .delete(command)
+        .then(async (result) => {
+          // Failure after commit is pending cleanup, never a failed deletion receipt.
+          try {
+            await this.current?.projectDeletionCleanup.sweep(command.projectId);
+          } catch {}
+          return result;
+        }),
+    );
+  }
+  recordedProjectDeletion(projectId: string, key: string) {
+    this.started();
+    return new ProjectTombstones(this.cache!, false).recordedResult(
+      projectId,
+      key,
+    );
+  }
+  projectLifecycleStatus(projectId: string) {
+    const domain = this.domain();
+    return transaction(this.cache!, () =>
+      domain.projectArchiveBlockersWithinTransaction(projectId),
+    );
+  }
+  deletedProject(projectId: string) {
+    this.started();
+    return new ProjectTombstones(this.cache!, false).status(projectId);
   }
 
   domain(): DomainStore {
@@ -3642,20 +3923,26 @@ export class StandaloneService {
     return result;
   }
   private async finalizeDeliveryCompletion(requestId: string, workId: string) {
-    const started = this.started();
-    const request = started.coordination
-      .completionRequests()
-      .find((r) => r.requestId === requestId);
-    if (!request) throw new Error("Unknown completion request");
-    const deliveryValidation =
-      await started.deliveryCoordinator.qualifyCompletion(request.taskId);
-    await this.reconcileOwnDeliveryClosures(started);
-    return started.coordination.finalizeTaskCompletion({
-      requestId,
-      workId,
-      terminal: "completed",
-      deliveryValidation,
-    });
+    return this.withProjectWrite(
+      workProjectId(this.cache!, workId),
+      "callback",
+      async () => {
+        const started = this.started();
+        const request = started.coordination
+          .completionRequests()
+          .find((r) => r.requestId === requestId);
+        if (!request) throw new Error("Unknown completion request");
+        const deliveryValidation =
+          await started.deliveryCoordinator.qualifyCompletion(request.taskId);
+        await this.reconcileOwnDeliveryClosures(started);
+        return started.coordination.finalizeTaskCompletion({
+          requestId,
+          workId,
+          terminal: "completed",
+          deliveryValidation,
+        });
+      },
+    );
   }
   delivery(): DeliveryStore {
     return this.started().deliveryStore;
@@ -3684,6 +3971,8 @@ export class StandaloneService {
     exceptOperationId?: string,
     kind?: ExternalAction["kind"],
   ): void {
+    if (domain.project(caller.projectId).archived)
+      throw new DomainConflictError("Archived projects are read-only");
     if (isOperatorDeliveryCaller(caller)) {
       deliveryStore.validateOperatorCaller(caller);
       // The confirmed review is the operator's approval of an edit; like Stop, it does not wait
@@ -3876,16 +4165,22 @@ export class StandaloneService {
         );
       return prior;
     }
-    const caller = this.operatorCommentCaller(command.taskId);
-    if (caller.taskVersion !== command.expectedTaskVersion)
-      throw new DomainConflictError("Operator task revision conflict");
-    return this.started().deliveryCoordinator.submit(
-      {
-        operationId: command.key,
-        action: this.operatorCommentAction(caller, command.body),
-        ...(command.reviewId ? { operatorReviewId: command.reviewId } : {}),
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "provider-write",
+      async () => {
+        const caller = this.operatorCommentCaller(command.taskId);
+        if (caller.taskVersion !== command.expectedTaskVersion)
+          throw new DomainConflictError("Operator task revision conflict");
+        return this.started().deliveryCoordinator.submit(
+          {
+            operationId: command.key,
+            action: this.operatorCommentAction(caller, command.body),
+            ...(command.reviewId ? { operatorReviewId: command.reviewId } : {}),
+          },
+          caller,
+        );
       },
-      caller,
     );
   }
   private operatorEditAction(
@@ -4011,19 +4306,25 @@ export class StandaloneService {
       await this.refreshAfterStaleEdit(prior);
       return prior;
     }
-    const caller = this.operatorCommentCaller(command.taskId);
-    if (caller.taskVersion !== command.expectedTaskVersion)
-      throw new DomainConflictError("Operator task revision conflict");
-    const sent = await this.started().deliveryCoordinator.submit(
-      {
-        operationId: command.key,
-        action: review.action,
-        operatorReviewId: command.reviewId,
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "provider-write",
+      async () => {
+        const caller = this.operatorCommentCaller(command.taskId);
+        if (caller.taskVersion !== command.expectedTaskVersion)
+          throw new DomainConflictError("Operator task revision conflict");
+        const sent = await this.started().deliveryCoordinator.submit(
+          {
+            operationId: command.key,
+            action: review.action,
+            operatorReviewId: command.reviewId,
+          },
+          caller,
+        );
+        await this.refreshAfterStaleEdit(sent);
+        return sent;
       },
-      caller,
     );
-    await this.refreshAfterStaleEdit(sent);
-    return sent;
   }
   private publicationContext(taskId: string) {
     const started = this.started();
@@ -4113,13 +4414,20 @@ export class StandaloneService {
     publicationId: string;
     expectedTaskVersion: number;
   }): Promise<Publication> {
-    const started = this.started();
-    const begun = started.taskPublications.begin(
-      command,
-      this.publicationContext(command.taskId),
-    );
-    return (
-      (await started.publicationDriver.advance(command.publicationId)) ?? begun
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "callback",
+      async () => {
+        const started = this.started();
+        const begun = started.taskPublications.begin(
+          command,
+          this.publicationContext(command.taskId),
+        );
+        return (
+          (await started.publicationDriver.advance(command.publicationId)) ??
+          begun
+        );
+      },
     );
   }
   /**
@@ -4139,36 +4447,45 @@ export class StandaloneService {
       known.issueNumber === command.issueNumber
     )
       return known;
-    const publication = this.unresolvedCreate(command),
-      { review } = publication.publication,
-      inspected = await started.deliveryCoordinator.inspectPublishedIssue(
-        review.caller.projectId,
-        {
-          repositoryId: review.caller.repositoryId,
-          number: command.issueNumber,
-        },
-        command.publicationId,
-      );
-    // The same proof the automatic read-back asks for: marker, exact text, every label, the credential user.
-    if (
-      !inspected.hasMarker ||
-      !inspected.byCredentialUser ||
-      inspected.title !== review.issue.title ||
-      inspected.body !==
-        `${review.issue.body}\n\n${publicationMarker(command.publicationId)}` ||
-      !review.issue.labels.every((l) => hasLabelName(inspected.labels, l))
-    )
-      throw new DomainConflictError(
-        "That issue does not carry this publication's marker",
-      );
-    await started.deliveryCoordinator.resolveUnproved(command.publicationId, {
-      state: "confirmed-success",
-      reason: null,
-      receipt: { nodeId: inspected.nodeId, number: inspected.number },
-    });
-    return (
-      (await started.publicationDriver.advance(command.publicationId)) ??
-      publication.publication
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "callback",
+      async () => {
+        const publication = this.unresolvedCreate(command),
+          { review } = publication.publication,
+          inspected = await started.deliveryCoordinator.inspectPublishedIssue(
+            review.caller.projectId,
+            {
+              repositoryId: review.caller.repositoryId,
+              number: command.issueNumber,
+            },
+            command.publicationId,
+          );
+        // The same proof the automatic read-back asks for: marker, exact text, every label, the credential user.
+        if (
+          !inspected.hasMarker ||
+          !inspected.byCredentialUser ||
+          inspected.title !== review.issue.title ||
+          inspected.body !==
+            `${review.issue.body}\n\n${publicationMarker(command.publicationId)}` ||
+          !review.issue.labels.every((l) => hasLabelName(inspected.labels, l))
+        )
+          throw new DomainConflictError(
+            "That issue does not carry this publication's marker",
+          );
+        await started.deliveryCoordinator.resolveUnproved(
+          command.publicationId,
+          {
+            state: "confirmed-success",
+            reason: null,
+            receipt: { nodeId: inspected.nodeId, number: inspected.number },
+          },
+        );
+        return (
+          (await started.publicationDriver.advance(command.publicationId)) ??
+          publication.publication
+        );
+      },
     );
   }
   /** Gives up on an unproved create: the task is local again, and a duplicate issue may exist. */
@@ -4180,19 +4497,27 @@ export class StandaloneService {
       known = started.taskPublications.get(command.publicationId);
     if (known?.review.taskId === command.taskId && known.state === "abandoned")
       return known;
-    this.unresolvedCreate(command);
-    await started.deliveryCoordinator.resolveUnproved(
-      command.publicationId,
-      {
-        state: "confirmed-failure",
-        reason: publicationAbandonedReason,
-        receipt: null,
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "callback",
+      async () => {
+        this.unresolvedCreate(command);
+        await started.deliveryCoordinator.resolveUnproved(
+          command.publicationId,
+          {
+            state: "confirmed-failure",
+            reason: publicationAbandonedReason,
+            receipt: null,
+          },
+          () =>
+            started.taskPublications.end(command.publicationId, "abandoned"),
+        );
+        const publication = started.taskPublications.get(command.publicationId);
+        if (!publication)
+          throw new DomainConflictError("Publication unavailable");
+        return publication;
       },
-      () => started.taskPublications.end(command.publicationId, "abandoned"),
     );
-    const publication = started.taskPublications.get(command.publicationId);
-    if (!publication) throw new DomainConflictError("Publication unavailable");
-    return publication;
   }
   /** The sending publication whose create has an unknown outcome, which is all Link and Abandon act on. */
   private unresolvedCreate(command: { taskId: string; publicationId: string }) {
@@ -4250,7 +4575,9 @@ export class StandaloneService {
     Started,
     "domain" | "deliveryStore" | "githubSources" | "deliveryCoordinator"
   >): Promise<void> {
-    for (const project of domain.projects())
+    for (const project of domain
+      .projects()
+      .filter((project) => !project.archived))
       for (const task of domain.tasks(String(project.id))) {
         // Every consumer of an own closure needs an open task.
         if (task.state !== "open") continue;
@@ -4283,6 +4610,9 @@ export class StandaloneService {
             },
             sources.deliveryClosure(nodeId),
           );
+          if (!projectAcceptsWrites(this.cache!, String(project.id))) continue;
+          const current = domain.project(String(project.id));
+          if (current.archived || current.version !== project.version) continue;
           if (result.kind === "reopened")
             sources.supersedeDeliveryClosure(nodeId, result.operationId);
           else if (result.kind === "attribution-unproved")
@@ -4295,8 +4625,12 @@ export class StandaloneService {
               result.operationId,
               result.closerPrNodeId,
               result.closedEventId,
+              Number(project.version),
             );
         } catch {
+          if (!projectAcceptsWrites(this.cache!, String(project.id))) continue;
+          const current = domain.project(String(project.id));
+          if (current.archived || current.version !== project.version) continue;
           sources.recordDeliveryClosureUnavailable(nodeId);
         }
       }
@@ -4309,7 +4643,7 @@ export class StandaloneService {
   }: Pick<Started, "githubSources" | "state">): void {
     for (const sources of [githubSources, ...githubSources.jiraStores()])
       for (const hold of sources.activeHolds())
-        if (hold.reason === "closed")
+        if (hold.reason === "closed" && this.writableTask(hold.taskId))
           sources.completeFromProviderClosure(hold.taskId, () =>
             state.taskExecutionSettled(hold.taskId),
           );
@@ -4332,6 +4666,7 @@ export class StandaloneService {
       store.activeHolds(),
     );
     for (const hold of holds) {
+      if (!this.writableTask(hold.taskId)) continue;
       const recipients = new Set(
         domain
           .assignments(hold.taskId)
@@ -4438,55 +4773,65 @@ export class StandaloneService {
     taskId: string,
     repositories: TaskWorkspaceRepositoryInput[],
   ) {
-    const task = this.domain().task(taskId);
-    const imported = this.domain().importedTask(taskId);
-    if (imported) {
-      const config = this.domain().githubConfiguration(String(task.projectId));
-      const links = this.domain().repositoryLinks(String(task.projectId));
-      const linked = links.links;
-      for (const repository of repositories) {
-        const match = linked.find(
-          (candidate) => candidate.repositoryId === repository.repositoryId,
-        );
-        if (
-          !match ||
-          repository.path !== match.path ||
-          (repository.ref ?? "HEAD") !== match.ref
-        )
-          throw new Error(
-            "Imported task requires an exact linked repository binding",
+    return this.withProjectWrite(
+      this.taskProject(taskId),
+      "callback",
+      async () => {
+        const task = this.domain().task(taskId);
+        const imported = this.domain().importedTask(taskId);
+        if (imported) {
+          const config = this.domain().githubConfiguration(
+            String(task.projectId),
           );
-        const current = await verifiedRepository({
-          repositoryId: match.repositoryId,
-          path: match.path,
-          ref: match.ref,
-        });
-        if (
-          current.gitCommonDirectory !== match.gitCommonDirectory ||
-          current.path !== match.path
-        )
-          throw new Error("Linked repository identity changed");
-      }
-      const latestTask = this.domain().task(taskId);
-      const latestImported = this.domain().importedTask(taskId);
-      const latestConfig = this.domain().githubConfiguration(
-        String(task.projectId),
-      );
-      const latestLinks = this.domain().repositoryLinks(String(task.projectId));
-      if (
-        latestTask.version !== task.version ||
-        latestTask.projectId !== task.projectId ||
-        latestImported?.nodeId !== imported.nodeId ||
-        latestImported?.repositoryId !== imported.repositoryId ||
-        latestConfig.version !== config.version ||
-        latestLinks.version !== links.version ||
-        JSON.stringify(latestLinks.links) !== JSON.stringify(linked)
-      )
-        throw new Error(
-          "Imported task repository grant changed during verification",
-        );
-    }
-    return this.started().workspaces.provision(taskId, repositories);
+          const links = this.domain().repositoryLinks(String(task.projectId));
+          const linked = links.links;
+          for (const repository of repositories) {
+            const match = linked.find(
+              (candidate) => candidate.repositoryId === repository.repositoryId,
+            );
+            if (
+              !match ||
+              repository.path !== match.path ||
+              (repository.ref ?? "HEAD") !== match.ref
+            )
+              throw new Error(
+                "Imported task requires an exact linked repository binding",
+              );
+            const current = await verifiedRepository({
+              repositoryId: match.repositoryId,
+              path: match.path,
+              ref: match.ref,
+            });
+            if (
+              current.gitCommonDirectory !== match.gitCommonDirectory ||
+              current.path !== match.path
+            )
+              throw new Error("Linked repository identity changed");
+          }
+          const latestTask = this.domain().task(taskId);
+          const latestImported = this.domain().importedTask(taskId);
+          const latestConfig = this.domain().githubConfiguration(
+            String(task.projectId),
+          );
+          const latestLinks = this.domain().repositoryLinks(
+            String(task.projectId),
+          );
+          if (
+            latestTask.version !== task.version ||
+            latestTask.projectId !== task.projectId ||
+            latestImported?.nodeId !== imported.nodeId ||
+            latestImported?.repositoryId !== imported.repositoryId ||
+            latestConfig.version !== config.version ||
+            latestLinks.version !== links.version ||
+            JSON.stringify(latestLinks.links) !== JSON.stringify(linked)
+          )
+            throw new Error(
+              "Imported task repository grant changed during verification",
+            );
+        }
+        return this.started().workspaces.provision(taskId, repositories);
+      },
+    );
   }
 
   taskWorkspaceVisibility(taskId: string) {
@@ -4737,37 +5082,44 @@ export class StandaloneService {
   }
 
   async archiveTask(taskId: string, evidence: WorkspaceCleanupEvidence) {
-    this.domain().task(taskId);
-    const state = this.started().state;
-    const acquired =
-      evidence.writerOwnershipResolved && state.beginArchive(taskId);
-    if (!acquired)
-      return this.started().workspaces.archiveAndCleanup(taskId, {
-        ...evidence,
-        writerOwnershipResolved: false,
-      });
-    let releaseArchiveHold = false;
-    try {
-      const path = this.current?.workspaceBindings.get(taskId)?.path;
-      const workspace = path && existsSync(path) ? realpathSync(path) : path;
-      const result = await this.started().workspaces.archiveAndCleanup(
-        taskId,
-        evidence,
-        () => state.confirmArchive(taskId),
-      );
-      // The Claude sandbox temporary base lives exactly as long as the workspace.
-      if (result.outcome === "cleaned" && workspace)
-        await releaseClaudeTemporaryBase(workspace).catch(() => {});
-      releaseArchiveHold =
-        result.outcome === "cleaned" ||
-        (result.outcome === "retained" &&
-          result.binding.state === "ready" &&
-          !result.binding.gitUncertain);
-      return result;
-    } finally {
-      if (releaseArchiveHold) state.endArchive(taskId);
-      await this.wakeScheduler();
-    }
+    return this.withProjectWrite(
+      this.taskProject(taskId),
+      "callback",
+      async () => {
+        this.domain().task(taskId);
+        const state = this.started().state;
+        const acquired =
+          evidence.writerOwnershipResolved && state.beginArchive(taskId);
+        if (!acquired)
+          return this.started().workspaces.archiveAndCleanup(taskId, {
+            ...evidence,
+            writerOwnershipResolved: false,
+          });
+        let releaseArchiveHold = false;
+        try {
+          const path = this.current?.workspaceBindings.get(taskId)?.path;
+          const workspace =
+            path && existsSync(path) ? realpathSync(path) : path;
+          const result = await this.started().workspaces.archiveAndCleanup(
+            taskId,
+            evidence,
+            () => state.confirmArchive(taskId),
+          );
+          // The Claude sandbox temporary base lives exactly as long as the workspace.
+          if (result.outcome === "cleaned" && workspace)
+            await releaseClaudeTemporaryBase(workspace).catch(() => {});
+          releaseArchiveHold =
+            result.outcome === "cleaned" ||
+            (result.outcome === "retained" &&
+              result.binding.state === "ready" &&
+              !result.binding.gitUncertain);
+          return result;
+        } finally {
+          if (releaseArchiveHold) state.endArchive(taskId);
+          await this.wakeScheduler();
+        }
+      },
+    );
   }
 
   /** A replacement keeps the durable assignment and its captured revisions. */
@@ -4785,8 +5137,14 @@ export class StandaloneService {
   }
 
   stopTask(taskId: string): Promise<StopObservation> {
-    this.domain().task(taskId);
-    return this.afterStop(taskId, this.started().state.stopTask(taskId));
+    return this.withProjectWrite(
+      this.taskProject(taskId),
+      "callback",
+      async () => {
+        this.domain().task(taskId);
+        return this.afterStop(taskId, this.started().state.stopTask(taskId));
+      },
+    );
   }
 
   /** Receipted Stop or Resume; a replayed receipt repeats no post-commit work. */
@@ -5199,9 +5557,15 @@ export class StandaloneService {
   }
 
   async resumeTask(taskId: string): Promise<void> {
-    this.domain().task(taskId);
-    this.started().state.resumeTask(taskId);
-    await this.wakeScheduler();
+    return this.withProjectWrite(
+      this.taskProject(taskId),
+      "callback",
+      async () => {
+        this.domain().task(taskId);
+        this.started().state.resumeTask(taskId);
+        await this.wakeScheduler();
+      },
+    );
   }
 
   taskHold(taskId: string): string | undefined {
@@ -5226,6 +5590,7 @@ export class StandaloneService {
     const intent = state.byWorkId(workId);
     if (!intent || intent.state === "ready")
       throw new Error("No active execution to hold");
+    assertOwnedWorkWritable(this.cache!, workId);
     const holdReason = `Known unfinished execution: ${reason}`;
     // Refuses recovery in this process before any write; the durable marker and holds
     // then commit together, and only then is the evidence recorded.
@@ -5244,6 +5609,10 @@ export class StandaloneService {
 
   registerExecutionCallback(workId: string, callback: Promise<unknown>): void {
     const { state: executions, coordination } = this.started();
+    const projectId = workProjectId(this.cache!, workId);
+    const lease = projectId
+      ? this.projectWrites!.begin(projectId, "callback")
+      : undefined;
     const state = executions.byWorkId(workId)?.state;
     // Tracked first: a failed hold write must not leave the callback unseen.
     const set = this.callbacks.get(workId) ?? new Set<Promise<unknown>>();
@@ -5253,6 +5622,7 @@ export class StandaloneService {
       .finally(() => {
         set.delete(callback);
         if (set.size === 0) this.callbacks.delete(workId);
+        lease?.end();
       })
       .catch(() => {});
     if (
@@ -5493,6 +5863,7 @@ export class StandaloneService {
       if (page.length === 0) break;
       for (const question of page) {
         cursor = question.interactionId;
+        if (!this.writableTask(question.taskId)) continue;
         // Generations are not unique across harnesses: reply only through the
         // runtime the question's work is bound to; its own flush delivers it.
         if (
@@ -5590,6 +5961,11 @@ export class StandaloneService {
     if (!binding)
       return Promise.resolve({
         text: "Coordination call is not bound to current task work",
+        success: false,
+      });
+    if (!this.writableTask(binding.taskId))
+      return Promise.resolve({
+        text: "Archived projects are read-only",
         success: false,
       });
     if (binding.draftTurn) {
@@ -5900,6 +6276,8 @@ export class StandaloneService {
   private draftingAdmissionReasons(run: DraftingRun): string[] {
     const domain = this.domain();
     const reasons: string[] = [];
+    if (domain.project(run.projectId).archived)
+      reasons.push("project-archived");
     if (domain.project(run.projectId).paused) reasons.push("project-paused");
     if (domain.profile(run.profileId).revoked)
       reasons.push("project-lead-revoked");
@@ -5915,29 +6293,31 @@ export class StandaloneService {
     projectId: string;
     idea: string;
   }): Promise<DraftingRun> {
-    const value = z
-      .object({
-        runId: z.string().uuid(),
-        projectId: z.string().uuid(),
-        idea: z.string().min(1).max(16_000),
-      })
-      .strict()
-      .parse(input);
-    const { drafting, schedulerStore } = this.started();
-    // The run and its turn request commit together: neither can exist without the other.
-    const run = drafting.atomically(() => {
-      const existing = drafting.get(value.runId);
-      const created = existing
-        ? drafting.create({ ...existing, ...value })
-        : drafting.create({
-            ...value,
-            ...this.draftingLead(value.projectId),
-          });
-      schedulerStore.ensure(StandaloneService.draftingRequest(created));
-      return created;
+    return this.withProjectWrite(input.projectId, "callback", async () => {
+      const value = z
+        .object({
+          runId: z.string().uuid(),
+          projectId: z.string().uuid(),
+          idea: z.string().min(1).max(16_000),
+        })
+        .strict()
+        .parse(input);
+      const { drafting, schedulerStore } = this.started();
+      // The run and its turn request commit together: neither can exist without the other.
+      const run = drafting.atomically(() => {
+        const existing = drafting.get(value.runId);
+        const created = existing
+          ? drafting.create({ ...existing, ...value })
+          : drafting.create({
+              ...value,
+              ...this.draftingLead(value.projectId),
+            });
+        schedulerStore.ensure(StandaloneService.draftingRequest(created));
+        return created;
+      });
+      await this.wakeScheduler();
+      return drafting.require(run.runId);
     });
-    await this.wakeScheduler();
-    return drafting.require(run.runId);
   }
 
   /**
@@ -5950,84 +6330,90 @@ export class StandaloneService {
     taskId: string;
     note: string;
   }): Promise<DraftingRun> {
-    const value = z
-      .object({
-        runId: z.string().uuid(),
-        taskId: z.string().uuid(),
-        note: z.string().max(16_000),
-      })
-      .strict()
-      .parse(input);
-    const { drafting, schedulerStore } = this.started();
-    // A start that already created its run converges on it before the task and source are
-    // judged again: they may have changed since, and the run must not be orphaned.
-    const earlier = drafting.get(value.runId);
-    if (earlier) {
-      if (
-        earlier.kind !== "issue" ||
-        earlier.taskId !== value.taskId ||
-        earlier.sourceNodeId === null ||
-        earlier.observedTitle === null ||
-        earlier.observedBody === null
-      )
-        throw new DomainConflictError(
-          "Drafting run identity already used with other content",
-        );
-      const issue = {
-        taskId: value.taskId,
-        sourceNodeId: earlier.sourceNodeId,
-        observedTitle: earlier.observedTitle,
-        observedBody: earlier.observedBody,
-      };
-      const replayed = drafting.atomically(() => {
-        const created = drafting.create({
-          ...earlier,
-          idea: value.note,
-          issue,
+    return this.withProjectWrite(
+      this.taskProject(input.taskId),
+      "callback",
+      async () => {
+        const value = z
+          .object({
+            runId: z.string().uuid(),
+            taskId: z.string().uuid(),
+            note: z.string().max(16_000),
+          })
+          .strict()
+          .parse(input);
+        const { drafting, schedulerStore } = this.started();
+        // A start that already created its run converges on it before the task and source are
+        // judged again: they may have changed since, and the run must not be orphaned.
+        const earlier = drafting.get(value.runId);
+        if (earlier) {
+          if (
+            earlier.kind !== "issue" ||
+            earlier.taskId !== value.taskId ||
+            earlier.sourceNodeId === null ||
+            earlier.observedTitle === null ||
+            earlier.observedBody === null
+          )
+            throw new DomainConflictError(
+              "Drafting run identity already used with other content",
+            );
+          const issue = {
+            taskId: value.taskId,
+            sourceNodeId: earlier.sourceNodeId,
+            observedTitle: earlier.observedTitle,
+            observedBody: earlier.observedBody,
+          };
+          const replayed = drafting.atomically(() => {
+            const created = drafting.create({
+              ...earlier,
+              idea: value.note,
+              issue,
+            });
+            schedulerStore.ensure(StandaloneService.draftingRequest(created));
+            return created;
+          });
+          await this.wakeScheduler();
+          return drafting.require(replayed.runId);
+        }
+        const domain = this.domain();
+        const task = domain.task(value.taskId);
+        const imported = domain.importedTask(value.taskId);
+        const source = imported
+          ? this.githubSources().issue(String(imported.nodeId))
+          : undefined;
+        if (!imported || !source)
+          throw new DomainConflictError("Only an imported task has an issue");
+        if (task.state !== "open")
+          throw new DomainConflictError("Improve with lead needs an open task");
+        const projectId = String(task.projectId);
+        const issue = {
+          taskId: value.taskId,
+          sourceNodeId: String(imported.nodeId),
+          observedTitle: String(source.observedTitle),
+          observedBody: String(source.observedBody),
+        };
+        // The operator must be able to see all of this text to review a replacement.
+        if (
+          issue.observedTitle.length > issueTitleLimit ||
+          issue.observedBody.length > issueCurrentBodyLimit
+        )
+          throw new DomainConflictError("The issue is too long to rewrite");
+        // The run and its turn request commit together: neither can exist without the other.
+        const run = drafting.atomically(() => {
+          const created = drafting.create({
+            runId: value.runId,
+            projectId,
+            idea: value.note,
+            ...this.draftingLead(projectId),
+            issue,
+          });
+          schedulerStore.ensure(StandaloneService.draftingRequest(created));
+          return created;
         });
-        schedulerStore.ensure(StandaloneService.draftingRequest(created));
-        return created;
-      });
-      await this.wakeScheduler();
-      return drafting.require(replayed.runId);
-    }
-    const domain = this.domain();
-    const task = domain.task(value.taskId);
-    const imported = domain.importedTask(value.taskId);
-    const source = imported
-      ? this.githubSources().issue(String(imported.nodeId))
-      : undefined;
-    if (!imported || !source)
-      throw new DomainConflictError("Only an imported task has an issue");
-    if (task.state !== "open")
-      throw new DomainConflictError("Improve with lead needs an open task");
-    const projectId = String(task.projectId);
-    const issue = {
-      taskId: value.taskId,
-      sourceNodeId: String(imported.nodeId),
-      observedTitle: String(source.observedTitle),
-      observedBody: String(source.observedBody),
-    };
-    // The operator must be able to see all of this text to review a replacement.
-    if (
-      issue.observedTitle.length > issueTitleLimit ||
-      issue.observedBody.length > issueCurrentBodyLimit
-    )
-      throw new DomainConflictError("The issue is too long to rewrite");
-    // The run and its turn request commit together: neither can exist without the other.
-    const run = drafting.atomically(() => {
-      const created = drafting.create({
-        runId: value.runId,
-        projectId,
-        idea: value.note,
-        ...this.draftingLead(projectId),
-        issue,
-      });
-      schedulerStore.ensure(StandaloneService.draftingRequest(created));
-      return created;
-    });
-    await this.wakeScheduler();
-    return drafting.require(run.runId);
+        await this.wakeScheduler();
+        return drafting.require(run.runId);
+      },
+    );
   }
 
   /**
@@ -6077,30 +6463,40 @@ export class StandaloneService {
    * has nothing to wait for and ends at once.
    */
   async stopDrafting(runId: string): Promise<DraftingRun> {
-    const { drafting, state } = this.started();
-    const run = drafting.get(runId);
-    if (!run) throw new DomainConflictError("Unknown drafting run");
-    const workId = StandaloneService.draftingWorkId(runId);
-    if (run.state === "queued") {
-      // Leaving `queued` first, synchronously, ends any admission in flight.
-      drafting.transition(runId, "stopping", draftingCleanupReason);
-      state.releaseDraftingExecution(workId);
-      this.draftingGrants.delete(runId);
-      await this.settleUnadmitted(runId, "interrupted", draftingStoppedReason);
-    } else if (
-      run.state === "stopping" &&
-      !this.draftingControls.has(runId) &&
-      !state.recoveryIdentity(workId)
-    ) {
-      // Never admitted and waiting only for its copy to go: Stop retries the removal.
-      state.releaseDraftingExecution(workId);
-      await this.settleUnadmitted(
-        runId,
-        ...StandaloneService.unadmittedOutcome(run, draftingStoppedReason),
-      );
-    } else if (run.state === "running" || run.state === "stopping")
-      this.requestDraftingStop(runId, draftingStoppedReason);
-    return drafting.require(runId);
+    return this.withProjectWrite(
+      this.started().drafting.require(runId).projectId,
+      "callback",
+      async () => {
+        const { drafting, state } = this.started();
+        const run = drafting.get(runId);
+        if (!run) throw new DomainConflictError("Unknown drafting run");
+        const workId = StandaloneService.draftingWorkId(runId);
+        if (run.state === "queued") {
+          // Leaving `queued` first, synchronously, ends any admission in flight.
+          drafting.transition(runId, "stopping", draftingCleanupReason);
+          state.releaseDraftingExecution(workId);
+          this.draftingGrants.delete(runId);
+          await this.settleUnadmitted(
+            runId,
+            "interrupted",
+            draftingStoppedReason,
+          );
+        } else if (
+          run.state === "stopping" &&
+          !this.draftingControls.has(runId) &&
+          !state.recoveryIdentity(workId)
+        ) {
+          // Never admitted and waiting only for its copy to go: Stop retries the removal.
+          state.releaseDraftingExecution(workId);
+          await this.settleUnadmitted(
+            runId,
+            ...StandaloneService.unadmittedOutcome(run, draftingStoppedReason),
+          );
+        } else if (run.state === "running" || run.state === "stopping")
+          this.requestDraftingStop(runId, draftingStoppedReason);
+        return drafting.require(runId);
+      },
+    );
   }
 
   /**
@@ -6417,6 +6813,7 @@ export class StandaloneService {
   }): Promise<void> {
     c.drafting.sweepExpired();
     for (let run of c.drafting.unfinished()) {
+      if (!projectAcceptsWrites(this.cache!, run.projectId)) continue;
       const workId = StandaloneService.draftingWorkId(run.runId);
       if (run.state === "queued") {
         // A run that was committed without its request (an earlier build) gets it now.
@@ -6480,41 +6877,50 @@ export class StandaloneService {
   private async prepareDraftingWorkspace(
     request: TurnRequest,
   ): Promise<string | undefined> {
-    const { drafting, draftingWorkspaces, schedulerStore } = this.started();
-    const runId = this.draftingRunIdOf(request);
-    const run = drafting.get(runId);
-    if (run?.state !== "queued") return undefined;
-    const waits = this.draftingAdmissionReasons(run);
-    if (waits.length > 0) {
-      schedulerStore.wait(
-        request.workId,
-        `Admission waiting: ${waits.join(", ")}`,
-      );
-      return undefined;
-    }
-    try {
-      const { grant, repositories } = await this.verifiedLinkedRepositories(
-        run.projectId,
-      );
-      this.draftingGrants.set(runId, grant);
-      // A Stop during verification has settled the run: build nothing for it.
-      if (drafting.get(runId)?.state !== "queued") return undefined;
-      const binding = await draftingWorkspaces.provision(runId, repositories);
-      if (binding.state !== "ready")
-        throw new Error(binding.reason ?? "Working copy is not ready");
-      // A Stop during provisioning settled the run, so the copy it just got is not wanted.
-      if (drafting.get(runId)?.state !== "queued") {
-        await this.discardDraftingWorkspace(runId);
-        return undefined;
-      }
-      // Access may have changed while Git ran: a copy of the old grant is never used.
-      if (this.draftingGrantChanged(runId, run.projectId))
-        throw new Error("Linked repository access changed");
-      return realpathSync(binding.path);
-    } catch {
-      await this.failQueuedDrafting(request);
-      return undefined;
-    }
+    return this.withProjectWrite(
+      request.projectId ?? undefined,
+      "callback",
+      async () => {
+        const { drafting, draftingWorkspaces, schedulerStore } = this.started();
+        const runId = this.draftingRunIdOf(request);
+        const run = drafting.get(runId);
+        if (run?.state !== "queued") return undefined;
+        const waits = this.draftingAdmissionReasons(run);
+        if (waits.length > 0) {
+          schedulerStore.wait(
+            request.workId,
+            `Admission waiting: ${waits.join(", ")}`,
+          );
+          return undefined;
+        }
+        try {
+          const { grant, repositories } = await this.verifiedLinkedRepositories(
+            run.projectId,
+          );
+          this.draftingGrants.set(runId, grant);
+          // A Stop during verification has settled the run: build nothing for it.
+          if (drafting.get(runId)?.state !== "queued") return undefined;
+          const binding = await draftingWorkspaces.provision(
+            runId,
+            repositories,
+          );
+          if (binding.state !== "ready")
+            throw new Error(binding.reason ?? "Working copy is not ready");
+          // A Stop during provisioning settled the run, so the copy it just got is not wanted.
+          if (drafting.get(runId)?.state !== "queued") {
+            await this.discardDraftingWorkspace(runId);
+            return undefined;
+          }
+          // Access may have changed while Git ran: a copy of the old grant is never used.
+          if (this.draftingGrantChanged(runId, run.projectId))
+            throw new Error("Linked repository access changed");
+          return realpathSync(binding.path);
+        } catch {
+          await this.failQueuedDrafting(request);
+          return undefined;
+        }
+      },
+    );
   }
 
   /**
@@ -6660,6 +7066,7 @@ export class StandaloneService {
     state: ExecutionState,
     snapshot: RoutingSnapshot,
   ): RoutingStaleReason | undefined {
+    if (!this.writableTask(snapshot.taskId)) return "task-held";
     if (state.taskHold(snapshot.taskId)) return "task-held";
     const task = domain.task(snapshot.taskId);
     if (Number(task.version) !== snapshot.taskVersion)
@@ -6701,12 +7108,18 @@ export class StandaloneService {
       !this.current
     )
       return;
-    const operation = this.current.conversationArchival
-      .sweep(this.runtimes.get("codex"))
-      ?.catch(() => {});
-    if (!operation) return;
-    this.backgroundRuns.add(operation);
-    void operation.finally(() => this.backgroundRuns.delete(operation));
+    const archival = this.current.conversationArchival.sweep(
+      this.runtimes.get("codex"),
+    );
+    const cleanup = this.current.projectDeletionCleanup.hasPending()
+      ? this.current.projectDeletionCleanup.sweep()
+      : undefined;
+    for (const pending of [archival, cleanup]) {
+      if (!pending) continue;
+      const operation = pending.catch(() => {});
+      this.backgroundRuns.add(operation);
+      void operation.finally(() => this.backgroundRuns.delete(operation));
+    }
   }
 
   private async wakeScheduler(
@@ -6782,13 +7195,17 @@ export class StandaloneService {
           binding.assignmentVersion === delivery.assignmentVersion,
       );
     };
-    for (const delivery of coordination.queuedDeliveries())
+    for (const delivery of coordination
+      .queuedDeliveries()
+      .filter((delivery) => this.writableTask(delivery.taskId)))
       if (deliveryWorkCompleted(delivery))
         coordination.completeDeliveryBatch(delivery.deliveryWorkId);
 
     const withdrawStaleRefusedDeliveries = (): number => {
       let withdrawn = 0;
-      for (const delivery of coordination.queuedDeliveries())
+      for (const delivery of coordination
+        .queuedDeliveries()
+        .filter((delivery) => this.writableTask(delivery.taskId)))
         if (
           coordination.withdrawStaleRefusedDelivery(delivery.deliveryWorkId) ||
           coordination.releaseRefusedDraftTurnDelivery(delivery.deliveryWorkId)
@@ -6799,6 +7216,7 @@ export class StandaloneService {
     withdrawStaleRefusedDeliveries();
 
     for (const completion of queries.pendingCompletionIdentities()) {
+      if (!this.writableTask(completion.taskId)) continue;
       const intent = state.byWorkId(completion.leadWorkId);
       const binding = state.taskBinding(completion.leadWorkId);
       if (
@@ -6813,7 +7231,9 @@ export class StandaloneService {
         completion.leadWorkId,
       );
     }
-    for (const workId of coordination.completedWorkNeedingDisposition())
+    for (const workId of coordination
+      .completedWorkNeedingDisposition()
+      .filter((workId) => this.writableWork(workId)))
       coordination.recordSuccessfulTerminal(workId);
     state.settleDraftTurnEffects();
 
@@ -6821,6 +7241,7 @@ export class StandaloneService {
       const operation = domain.routingOperation(operationId);
       const disposition = String(operation.disposition);
       const taskId = String(operation.taskId);
+      if (!this.writableTask(taskId)) continue;
       const leadAssignment = domain.ensureLeadAssignment(taskId);
       if (!leadAssignment) continue;
       coordination.ensureRoutingFallbackEvent({
@@ -6834,6 +7255,7 @@ export class StandaloneService {
     }
 
     for (const identity of queries.uncommittedRoutingAttemptIdentities()) {
+      if (!this.writableTask(identity.taskId)) continue;
       const operation = routingAttempts.operation(
         identity.projectId,
         identity.taskId,
@@ -6855,6 +7277,7 @@ export class StandaloneService {
     }
 
     for (const task of domain.readyTasksWithLead()) {
+      if (!this.writableTask(String(task.id))) continue;
       const taskId = String(task.id);
       const route = domain.routing(String(task.projectId));
       // A lead that has only had draft turns has not started: routing runs as for any task.
@@ -6947,7 +7370,10 @@ export class StandaloneService {
             this.routingCoordinators.set(cacheKey, coordinator);
           }
           try {
-            outcome = await coordinator.route(snapshot);
+            const routingCoordinator = coordinator;
+            outcome = await this.withProjectWrite(projectId, "callback", () =>
+              routingCoordinator.route(snapshot),
+            );
           } catch (error) {
             if (error instanceof RoutingOperationStaleError) continue;
             throw error;
@@ -7050,6 +7476,7 @@ export class StandaloneService {
         : pending.length === 0;
     };
     for (const assignment of domain.pendingAssignments()) {
+      if (!this.writableTask(String(assignment.taskId))) continue;
       const taskId = String(assignment.taskId);
       const task = domain.task(taskId);
       if (Number(task.ready) !== 1 || task.state !== "open") continue;
@@ -7120,7 +7547,9 @@ export class StandaloneService {
       }
     }
 
-    for (const delivery of coordination.queuedDeliveries()) {
+    for (const delivery of coordination
+      .queuedDeliveries()
+      .filter((delivery) => this.writableTask(delivery.taskId))) {
       if (deliveryWorkCompleted(delivery)) {
         coordination.completeDeliveryBatch(delivery.deliveryWorkId);
         continue;
@@ -7206,6 +7635,7 @@ export class StandaloneService {
         assignment = leadAssignment;
       }
       const task = domain.task(String(assignment.taskId));
+      if (!this.writableTask(String(task.id))) continue;
       if (draftOnlyLeadWaits(assignment)) continue;
       if (
         (assignment.state !== "pending" && assignment.state !== "running") ||
@@ -7260,6 +7690,7 @@ export class StandaloneService {
     }
 
     for (const repair of coordination.reportingRepairs()) {
+      if (!this.writableTask(repair.taskId)) continue;
       if (repair.state !== "queued") continue;
       if (queries.hasWork(repair.repairWorkId)) continue;
       let assignment: ReturnType<DomainStore["assignment"]>;
@@ -7295,7 +7726,10 @@ export class StandaloneService {
         { requestKey: repair.repairWorkId, workId: repair.repairWorkId },
       );
     }
-    for (const queued of store.queued()) inboxStartup.capture(queued);
+    for (const queued of store
+      .queued()
+      .filter((request) => this.writableWork(request.workId)))
+      inboxStartup.capture(queued);
     if (this.generation !== generation || !generation.accepting) return;
     await scheduler.wake();
     if (refusalRebindPass === 0 && withdrawStaleRefusedDeliveries() > 0)
@@ -7823,6 +8257,11 @@ export class StandaloneService {
     generation = this.generation,
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
+      return;
+    if (
+      queued.projectId &&
+      !projectAcceptsWrites(this.cache!, queued.projectId)
+    )
       return;
     const state = this.started().state;
     const store = this.started().schedulerStore;
@@ -9316,7 +9755,7 @@ export class StandaloneService {
           ].flatMap((ref) => credentialReferenceValues(ref));
         }),
       ];
-      return values.filter((value) => value.length > 0);
+      return this.redactionExclusions(values);
     } catch {
       return undefined;
     }

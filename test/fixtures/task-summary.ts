@@ -36,6 +36,7 @@ export function summary(o: Overrides = {}): TaskListSummary {
       name: o.projectName === undefined ? "Project" : o.projectName,
       version: 1,
       paused: o.paused ?? false,
+      archived: false,
       leadProfileId: null,
     },
     lead:

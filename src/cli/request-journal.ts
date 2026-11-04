@@ -16,6 +16,10 @@ const lineSchema = z
     type: z.string(),
     key: z.string(),
     digest: z.string(),
+    bodyDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict();
 type Line = z.infer<typeof lineSchema>;
@@ -49,8 +53,15 @@ export class RequestJournal {
     identity: RequestIdentity,
     digest: string,
     state: JournalState,
+    bodyDigest?: string,
   ): Promise<void> {
-    const line: Line = { at: this.now(), state, ...identity, digest };
+    const line: Line = {
+      at: this.now(),
+      state,
+      ...identity,
+      digest,
+      ...(bodyDigest ? { bodyDigest } : {}),
+    };
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       await chmod(this.directory, 0o700);
@@ -145,10 +156,12 @@ export class RequestJournal {
         l.key === identity.key,
     );
     const match = lines.at(-1);
+    const bodyDigest = lines.find((l) => l.bodyDigest)?.bodyDigest;
     return (
       match && {
         state: match.state,
         digest: match.digest,
+        ...(bodyDigest ? { bodyDigest } : {}),
         reached:
           match.state === "sending" ||
           lines.some((l) => reachedStates.has(l.state)),

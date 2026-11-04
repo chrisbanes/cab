@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { ReadinessResult } from "../../src/operator/readiness.js";
 import assert from "node:assert/strict";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,6 +10,7 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import {
+  readinessBody,
   addRepository,
   chooseRepository,
   commandRequest,
@@ -1697,4 +1700,204 @@ test("Setup does not open Add a repository while the project is being created or
   await add.click({ force: true });
   assert.equal(await page.getByLabel("Repository (owner/name)").count(), 0);
   await page.unroute("**/api/operator/commands");
+});
+
+test("Setup freezes starter identity through an unknown committed create and grants candidates only to its inline lead", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, {
+    profiles: false,
+    claude: true,
+    readiness: async () => JSON.parse(readinessBody()),
+  });
+  const sent = sentCommands(page);
+  const inline = profileGroup(page);
+  const option = inline.getByRole("checkbox", {
+    name: "Adds Implementer (Codex) and Reviewer (Claude)",
+  });
+  assert.equal(await option.isChecked(), true);
+  await page
+    .getByLabel("Project name", { exact: true })
+    .fill("Starter project");
+  await page
+    .getByLabel("Instructions", { exact: true })
+    .fill("Kept private project instructions");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await page.route("**/api/operator/commands", async (route) => {
+    if (route.request().postDataJSON().type === "profile.create") {
+      await route.fetch();
+      await route.abort();
+    } else await route.continue();
+  });
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  const check = page.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.equal(await option.isDisabled(), true);
+  assert.equal(f.service.domain().profiles().length, 3);
+  await check.click();
+  const lead = page.getByLabel("Lead profile", { exact: true });
+  await lead.waitFor();
+  assert.equal(sent.filter((c) => c.type === "profile.create").length, 1);
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).inputValue(),
+    "Kept private project instructions",
+  );
+  await lead.selectOption({ label: "Implementer" });
+  await page.getByRole("button", { name: "Create paused project" }).click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const project = sent.find((c) => c.type === "project.create");
+  assert.equal(Object.hasOwn(project!, "candidateProfileIds"), false);
+  assert.equal(
+    f.service
+      .domain()
+      .routingCandidates(String(f.service.domain().projects()[0]?.id)).length,
+    0,
+  );
+});
+
+test("Setup omits the starter offer when profiles already exist", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  assert.equal(
+    await page.getByRole("checkbox", { name: /Adds Implementer/ }).count(),
+    0,
+  );
+});
+
+test("Setup holds checked creation for readiness, resolves both runtime labels, and refreshes a rejected alternate without losing the draft", async (_t, journey) => {
+  let tokenReady = true;
+  const { page, f } = await setupJourney(journey, {
+    profiles: false,
+    claude: true,
+    readiness: async () =>
+      JSON.parse(readinessBody(tokenReady ? {} : { "claude-token": "fail" })),
+  });
+  const sent = sentCommands(page);
+  const inline = profileGroup(page);
+  await inline
+    .getByRole("checkbox", {
+      name: "Adds Implementer (Codex) and Reviewer (Claude)",
+    })
+    .waitFor();
+  await inline.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  await inline
+    .getByRole("checkbox", {
+      name: "Adds Implementer (Claude) and Reviewer (Codex)",
+    })
+    .waitFor();
+  await inline.getByLabel("Runtime", { exact: true }).selectOption("codex");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await page
+    .getByLabel("Project name", { exact: true })
+    .fill("Retained project");
+  tokenReady = false;
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  const refresh = inline.getByRole("button", {
+    name: "Refresh starter runtimes",
+  });
+  await refresh.waitFor();
+  const first = sent.find((c) => c.type === "profile.create")!;
+  await refresh.click();
+  const option = inline.getByRole("checkbox", {
+    name: "Adds Implementer (Codex) and Reviewer (Codex)",
+  });
+  await option.waitFor();
+  assert.equal(await option.isChecked(), true);
+  assert.equal(
+    await inline.getByLabel("Profile name", { exact: true }).inputValue(),
+    "Ada",
+  );
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  const attempts = sent.filter((c) => c.type === "profile.create");
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts[1]);
+  assert.equal(attempts[1]?.key, first.key);
+  assert.equal(attempts[1]?.profileId, first.profileId);
+  assert.deepEqual(
+    (attempts[1].starter as { implementerId: string }).implementerId,
+    (first.starter as { implementerId: string }).implementerId,
+  );
+  assert.equal(f.service.domain().profiles().length, 3);
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Retained project",
+  );
+});
+
+test("Setup waits for a pending readiness read only while the starter option is checked", async (_t, journey) => {
+  let settle!: (value: ReadinessResult) => void;
+  const read = new Promise<ReadinessResult>((resolve) => {
+    settle = resolve;
+  });
+  const { page, f } = await setupJourney(journey, {
+    profiles: false,
+    readiness: () => read,
+  });
+  journey.cleanup(async () => {
+    settle(JSON.parse(readinessBody()));
+  }, "readiness.settle");
+  const inline = profileGroup(page);
+  const option = inline.getByRole("checkbox", { name: /Adds Implementer/ });
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  const create = inline.getByRole("button", { name: "Create profile" });
+  assert.equal(await option.isChecked(), true);
+  assert.equal(await create.isDisabled(), true);
+  await option.uncheck();
+  assert.equal(await create.isEnabled(), true);
+  await create.click();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  assert.equal(f.service.domain().profiles().length, 1);
+  settle(JSON.parse(readinessBody()));
+});
+
+test("Setup recovers explicitly from a revoked starter candidate while preserving the lead and draft", async (_t, journey) => {
+  const { page, f } = await setupJourney(journey, {
+    profiles: false,
+    readiness: async () => JSON.parse(readinessBody()),
+  });
+  const sent = sentCommands(page);
+  const inline = profileGroup(page);
+  await page
+    .getByLabel("Project name", { exact: true })
+    .fill("Preserved project");
+  await page
+    .getByLabel("Instructions", { exact: true })
+    .fill("Preserved instructions");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  const lead = page.getByLabel("Lead profile", { exact: true });
+  await lead.waitFor();
+  const created = sent.find((c) => c.type === "profile.create")!;
+  const reviewerId = (created.starter as { reviewerId: string }).reviewerId;
+  f.service.domain().execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewerId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  await page.getByRole("button", { name: "Create paused project" }).click();
+  const recovery = page.getByRole("group", {
+    name: "Starter candidates unavailable",
+  });
+  await recovery.waitFor();
+  assert.equal(f.service.domain().projects().length, 0);
+  await recovery
+    .getByRole("button", { name: "Continue without starter candidates" })
+    .click();
+  assert.equal(await lead.inputValue(), created.profileId);
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Preserved project",
+  );
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).inputValue(),
+    "Preserved instructions",
+  );
+  assert.equal(f.service.domain().profile(reviewerId).revoked, 1);
+  await page.getByRole("button", { name: "Create paused project" }).click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const projects = sent.filter((c) => c.type === "project.create");
+  assert.equal(projects.length, 2);
+  assert.equal(projects[1]?.leadProfileId, created.profileId);
+  assert.equal(Object.hasOwn(projects[1]!, "candidateProfileIds"), false);
 });

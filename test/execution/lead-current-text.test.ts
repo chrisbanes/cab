@@ -72,6 +72,7 @@ async function liveTextWorld(labels = ["ready"]) {
   };
   /** Turns that failed with transient, retryable evidence. */
   const transient = new Set<string>();
+  let harnessRetries = 0;
   let threads = 0;
   let toolCall:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -114,7 +115,7 @@ async function liveTextWorld(labels = ["ready"]) {
             classification: "transient" as const,
             reasonCode: "serverOverloaded" as const,
             source: "harness" as const,
-            harnessRetries: 0,
+            harnessRetries,
           }
         : undefined;
     },
@@ -260,6 +261,9 @@ async function liveTextWorld(labels = ["ready"]) {
     failTransiently(turnId: string) {
       transient.add(turnId);
       turn(turnId).resolve("failed");
+    },
+    exhaustRetryAllowance() {
+      harnessRetries = 2;
     },
     /** A planned shutdown, then a fresh service over the same data. */
     async restart() {
@@ -980,30 +984,159 @@ test("a draft turn's completed transient-failure retry makes draft turns availab
   const d = await draftWorld(t);
   const { w } = d;
   await startDraft(d, "First question.", 1);
-  // A retry needs the turn's result effect settled, and a draft turn cannot report a result
-  // (it is not Ready), so in production its transient failure stays held and is never retried.
-  // Settle the effect directly to reach the rows a retry writes, which availability reads.
-  databaseOf(w.service)
-    .prepare(
-      "UPDATE execution_pending_effects SET state = 'settled' WHERE effectKey = 'assignment-result'",
-    )
-    .run();
+  const original = w.service.turnRequests().find((r) => r.draftTurn);
+  assert.ok(original);
+  w.pause();
   w.failTransiently("turn-1");
-  await w.until(() => w.prompts.length === 2, "retried draft turn");
-  assert.equal(
-    w.service.turnRequests().find((r) => r.workId.startsWith("retry:"))
-      ?.draftTurn,
-    true,
+  await w.until(
+    () => w.service.turnRequests().some((r) => r.workId.startsWith("retry:")),
+    "queued draft retry",
   );
+  const retry = w.service
+    .turnRequests()
+    .find((r) => r.workId.startsWith("retry:"));
+  assert.ok(retry);
+  assert.equal(retry.state, "queued");
+  assert.equal(retry.draftTurn, true);
+  assert.equal(retry.draftTaskDigest, original.draftTaskDigest);
+  const db = databaseOf(w.service);
+  assert.equal(
+    w.service.list().find((i) => i.workId === original.workId)?.state,
+    "resolved-failed",
+  );
+  assert.deepEqual(
+    {
+      ...db
+        .prepare(
+          "SELECT state, reason FROM execution_pending_effects WHERE workId = ? AND effectKey = 'assignment-result'",
+        )
+        .get(original.workId),
+    },
+    { state: "settled", reason: "Draft turns record no result" },
+  );
+  assert.deepEqual(
+    {
+      ...db
+        .prepare(
+          "SELECT cabRetriesUsed, codexRetriesUsed FROM execution_retry_resolutions WHERE failedWorkId = ?",
+        )
+        .get(original.workId),
+    },
+    { cabRetriesUsed: 1, codexRetriesUsed: 0 },
+  );
+  const attempt = () =>
+    operator(w).execute({
+      type: "task.draft-turn",
+      key: randomUUID(),
+      taskId: w.taskId,
+      expectedVersion: Number(w.domain.task(w.taskId).version),
+      message: "Another question.",
+    });
   assert.deepEqual(await draftAvailability(d), {
     available: false,
     reason: "draft-turn-active",
   });
+  await assert.rejects(attempt());
+  w.unpause();
+  await w.until(() => w.prompts.length === 2, "retried draft turn");
+  assert.deepEqual(await draftAvailability(d), {
+    available: false,
+    reason: "draft-turn-active",
+  });
+  await assert.rejects(attempt());
   w.end("turn-2");
   await idle(w);
+  assert.deepEqual(
+    batches(w).map((batch) => [batch.deliveryWorkId, batch.state]),
+    [[retry.workId, "completed"]],
+  );
   assert.deepEqual(await draftAvailability(d), { available: true });
   await startDraft(d, "Second question.", 3);
   assert.match(w.prompts[2] ?? "", /Second question\./);
+});
+
+test("draft retry holds preserve the result effect and ownership", async (t) => {
+  for (const hold of [
+    "effect",
+    "callback",
+    "survivor",
+    "stop",
+    "budget",
+  ] as const) {
+    const d = await draftWorld(t);
+    const { w } = d;
+    await startDraft(d, `Question for ${hold}.`, 1);
+    const request = w.service.turnRequests().find((r) => r.draftTurn);
+    assert.ok(request);
+    const db = databaseOf(w.service);
+    if (hold === "effect")
+      db.prepare(
+        "INSERT INTO execution_pending_effects (workId, effectKey, state) VALUES (?, 'other-effect', 'pending')",
+      ).run(request.workId);
+    if (hold === "callback")
+      w.service.registerExecutionCallback(
+        request.workId,
+        new Promise<void>(() => {}),
+      );
+    if (hold === "survivor")
+      w.service.holdKnownSurvivor(request.workId, "unfinished child");
+    if (hold === "budget") w.exhaustRetryAllowance();
+    if (hold === "stop") w.service.stopTask(w.taskId);
+    w.failTransiently("turn-1");
+    await w.until(
+      () =>
+        w.service.list().find((i) => i.workId === request.workId)?.state ===
+        "held",
+      `${hold} holds the draft`,
+    );
+    if (hold === "budget")
+      await w.until(
+        () =>
+          !!db
+            .prepare(
+              "SELECT 1 FROM execution_retry_attempts WHERE workId = ? AND disposition = 'budget-exhausted'",
+            )
+            .get(request.workId),
+        "retry budget recorded",
+      );
+    else await w.settle();
+    assert.equal(
+      w.service.turnRequests().filter((r) => r.workId.startsWith("retry:"))
+        .length,
+      0,
+      hold,
+    );
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT state FROM execution_pending_effects WHERE workId = ? AND effectKey = 'assignment-result'",
+          )
+          .get(request.workId) as { state: string }
+      ).state,
+      "pending",
+      hold,
+    );
+    assert.ok(
+      db
+        .prepare("SELECT 1 FROM task_writer_admissions WHERE workId = ?")
+        .get(request.workId),
+      hold,
+    );
+    assert.ok(
+      db
+        .prepare(
+          "SELECT 1 FROM execution_capacity_reservations WHERE workId = ?",
+        )
+        .get(request.workId),
+      hold,
+    );
+    assert.deepEqual(
+      await draftAvailability(d),
+      { available: false, reason: "draft-turn-active" },
+      hold,
+    );
+  }
 });
 
 test("a draft turn that a planned shutdown requeued makes draft turns available once it completes", async (t) => {

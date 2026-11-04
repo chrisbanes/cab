@@ -41,6 +41,7 @@ export class JiraSynchronizer {
     // requests the select fields any of its projects' rules need, not just its own.
     const fieldsBySite = new Map<string, string[]>();
     for (const project of this.domain.projects()) {
+      if (project.archived) continue;
       const config = this.domain.jiraConfiguration(String(project.id));
       if (!config) continue;
       const ids = new Set(fieldsBySite.get(config.instance));
@@ -49,6 +50,7 @@ export class JiraSynchronizer {
       fieldsBySite.set(config.instance, [...ids]);
     }
     for (const project of this.domain.projects()) {
+      if (project.archived) continue;
       const projectId = String(project.id);
       const config = this.domain.jiraConfiguration(projectId);
       if (!config) continue;
@@ -73,6 +75,7 @@ export class JiraSynchronizer {
         const store = this.storeFor(config.instance);
         const binding = {
           projectId,
+          projectVersion: Number(project.version),
           configVersion: config.version,
           credentialRef: null,
         };

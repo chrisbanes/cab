@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chromium, webkit, type Browser, type Page } from "playwright";
 import {
+  type ReadinessResult,
   type ReadinessCheckId,
   readinessCheckIds,
   readinessSchema,
@@ -19,6 +20,7 @@ import { createSetupHome, fakeDiscovery } from "./setup-home.js";
 export async function setupJourney(
   journey: BrowserJourney,
   options: {
+    readiness?: () => Promise<ReadinessResult>;
     profiles?: boolean;
     projects?: boolean;
     discovery?: boolean;
@@ -114,13 +116,18 @@ export async function setupJourney(
       credentialRef: "env:FIXTURE_DISCOVERY",
     });
   const web = await journey.start("fixture.web", () =>
-    f.startWeb([f.directory], {
-      home: home.home,
-      discovery: fakeDiscovery(discoveryState),
-      ...gh,
-      ...glab,
-      ...(options.gitlab ? { gitlab: options.gitlab } : {}),
-    }),
+    f.startWeb(
+      [f.directory],
+      {
+        home: home.home,
+        discovery: fakeDiscovery(discoveryState),
+        ...gh,
+        ...glab,
+        ...(options.gitlab ? { gitlab: options.gitlab } : {}),
+      },
+      undefined,
+      options.readiness,
+    ),
   );
   browser = await journey.start("browser.launch", () =>
     (options.engine === "webkit" ? webkit : chromium).launch(),

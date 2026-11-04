@@ -1,3 +1,7 @@
+import {
+  assertOwnedTaskWritable,
+  taskAcceptsWrites,
+} from "./project-lifecycle.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -144,10 +148,15 @@ export class TaskPublicationStore {
           "SELECT * FROM task_publications WHERE state='sending' ORDER BY rowid",
         )
         .all() as Row[]
-    ).map((row) => this.publication(row));
+    )
+      .map((row) => this.publication(row))
+      .filter((publication) =>
+        taskAcceptsWrites(this.db, publication.review.taskId),
+      );
   }
 
   private save(publication: Publication): void {
+    assertOwnedTaskWritable(this.db, publication.review.taskId);
     publication.updatedAt = Date.now();
     this.db
       .prepare(
@@ -346,6 +355,7 @@ export class TaskPublicationStore {
         );
       return prior.review;
     }
+    assertOwnedTaskWritable(this.db, command.taskId);
     return transaction(this.db, () => {
       const task = this.db
         .prepare(
@@ -644,6 +654,8 @@ export class TaskPublicationStore {
     fields: z.output<typeof publicationProjectFieldSchema>[];
   }): void {
     const publication = this.get(input.publicationId);
+    if (publication)
+      assertOwnedTaskWritable(this.db, publication.review.taskId);
     if (
       publication?.state !== "sending" ||
       !publication.issueNodeId ||

@@ -1,3 +1,4 @@
+import { assertProjectWritable } from "../core/project-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   APIConnectionError,
@@ -340,6 +341,7 @@ export class RoutingAttemptStore {
           );
         return operation;
       }
+      assertProjectWritable(this.db, snapshot.projectId);
       const operationId = randomUUID();
       const now = Date.now();
       this.db
@@ -362,6 +364,10 @@ export class RoutingAttemptStore {
   }
 
   startAttempt(operationId: string, ownerId?: string): RoutingAttempt {
+    assertProjectWritable(
+      this.db,
+      this.operationById(operationId).snapshot.projectId,
+    );
     return transaction(this.db, () => {
       const operation = this.operationById(operationId);
       if (operation.status === "stale")
@@ -422,6 +428,10 @@ export class RoutingAttemptStore {
     response: RoutingChoiceResponse,
     outcome: RoutingOutcome,
   ): boolean {
+    assertProjectWritable(
+      this.db,
+      this.operationById(operationId).snapshot.projectId,
+    );
     return transaction(this.db, () => {
       const current = this.operationById(operationId);
       if (current.currentAttempt !== attempt || current.outcome !== null)
@@ -461,6 +471,10 @@ export class RoutingAttemptStore {
     failureCode: string,
     status: "failed" | "timed-out" = "failed",
   ): boolean {
+    assertProjectWritable(
+      this.db,
+      this.operationById(operationId).snapshot.projectId,
+    );
     return transaction(this.db, () => {
       const operation = this.operationById(operationId);
       if (operation.currentAttempt !== attempt || operation.outcome !== null)
@@ -483,6 +497,10 @@ export class RoutingAttemptStore {
   }
 
   markStale(operationId: string, reason: RoutingStaleReason): RoutingOperation {
+    assertProjectWritable(
+      this.db,
+      this.operationById(operationId).snapshot.projectId,
+    );
     const validatedReason = staleReasonSchema.parse(reason);
     transaction(this.db, () => {
       const current = this.operationById(operationId);
@@ -515,6 +533,10 @@ export class RoutingAttemptStore {
     operationId: string,
     outcome: Extract<RoutingOutcome, { kind: "lead-review" }>,
   ): RoutingOutcome {
+    assertProjectWritable(
+      this.db,
+      this.operationById(operationId).snapshot.projectId,
+    );
     const validated = routingOutcomeSchema.parse(outcome);
     if (validated.kind !== "lead-review")
       throw new Error("Expected a lead-review outcome");

@@ -1,3 +1,7 @@
+import {
+  assertOwnedTaskWritable,
+  taskAcceptsWrites,
+} from "./project-lifecycle.js";
 import { z } from "zod";
 import {
   hasLabelName,
@@ -279,6 +283,7 @@ export class DeliveryReadinessStore {
 
   /** Freezes the task's current inputs under the settlement; `false` when they are not fully observed. */
   capture(commandKey: string, taskId: string, required: boolean): boolean {
+    assertOwnedTaskWritable(this.db, taskId);
     const now = readinessInputs(this.db, taskId);
     if (!now) return true;
     if (!now.complete || now.inputs.components.some((c) => c.value === null))
@@ -304,6 +309,7 @@ export class DeliveryReadinessStore {
    * so, even if a later read shows the old values again: only a fresh settlement recovers.
    */
   observe(taskId: string, ownClose: () => OwnClose | undefined): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     const rows = this.db
       .prepare(
         "SELECT commandKey, inputsJson FROM delivery_settlement_readiness WHERE taskId = ? AND invalidated = 0",
@@ -345,6 +351,7 @@ export class DeliveryReadinessStore {
 
   /** The requested Jira select fields the last read of the task's issue did not return as a value or null. */
   recordCoverage(taskId: string, unreadSelectFields: string[]): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.db
       .prepare(
         `INSERT INTO delivery_readiness_coverage VALUES (?,?)

@@ -56,6 +56,28 @@ An operator hold on a project that lets active turns finish while holding its
 queued and new turns. Pause belongs to the project; a task has no pause of its own.
 _Avoid_: Task pause
 
+**Project archive**:
+A reversible, versioned freeze of a paused and drained project. Its tasks, memberships,
+configuration and history remain. Archived projects reserve their names and allow only
+name-only rename, restore and deletion. Restore keeps the project paused. Archive does
+not cancel work or release uncertain ownership; those conditions refuse the transition.
+_Avoid_: Pause or deletion
+
+**Project deletion**:
+Irreversible removal of an archived project's owned records, using an exact-name and
+version-bound preview confirmation. Minimal tombstone receipts and pending physical
+cleanup identities survive, as do private redaction-only values and shared installation
+records. Retained private values never restore a project or become agent instructions.
+_Avoid_: Archive or external issue deletion
+
+**Project tombstone**:
+The minimal durable record of a deleted project: old ID and name, deletion time, counts,
+retained external references, original deletion receipt and captured cleanup progress.
+It remains readable without project/task rows. Cleanup success prunes private captured
+payloads; the separate redaction-only value store remains. A new project may reuse the
+name with a different ID.
+_Avoid_: Restorable project or mutable deletion receipt
+
 **Task stop**:
 An operator hold on an open task that holds its pending work and requests
 best-effort cancellation of its active executions. It is neither cancellation

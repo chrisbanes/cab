@@ -1,6 +1,11 @@
 import {
+  projectExternalRetention,
+  retainedProjectLine,
+} from "../operator/project-lifecycle-copy.js";
+import {
   profileConfigurationSchema,
   projectConfigurationSchema,
+  projectSchema,
   runtimeSettingsSchema,
   searchReadSchema,
   taskListPageSchema,
@@ -58,12 +63,15 @@ const harnessLine = (r: {
     : r.harness;
 
 const projectList: BrowseCommand = {
-  usage: "project list",
+  usage: "project list [--archived]",
   positionals: 0,
   capabilities: ["cli.identity", "workspace.read"],
   async run(ctx) {
     const client = await ctx.connect();
-    const read = await client.get(`${API}/workspace`, workspaceSchema);
+    const read = await client.get(
+      `${API}/workspace${ctx.values.archived ? "?includeArchived=true" : ""}`,
+      workspaceSchema,
+    );
     const { projects, profiles, runtime } = read.data;
     return browseOutput(ctx, {
       data: { projects, runtime },
@@ -74,11 +82,19 @@ const projectList: BrowseCommand = {
       human: [
         projects.length
           ? table(
-              ["Name", "Lead", "Paused", "Version", "Project id"],
+              [
+                "Name",
+                "Lead",
+                "Paused",
+                ...(ctx.values.archived ? ["Archived"] : []),
+                "Version",
+                "Project id",
+              ],
               projects.map((p) => [
                 unavailable(p.name),
                 leadName(p.leadProfileId, profiles),
                 p.paused ? "yes" : "no",
+                ...(ctx.values.archived ? [p.archived ? "yes" : "no"] : []),
                 String(p.version),
                 p.id,
               ]),
@@ -135,6 +151,34 @@ const projectGet: BrowseCommand = {
   async run(ctx) {
     const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
     const client = await ctx.connect();
+    const lifecycle = await client.get(`${API}/projects/${id}`, projectSchema);
+    if (lifecycle.data.state === "deleted") {
+      const tombstone = lifecycle.data.tombstone;
+      return browseOutput(ctx, {
+        data: lifecycle.data,
+        observedAt: lifecycle.observedAt,
+        gaps: [],
+        human:
+          keyValues([
+            ["Project", id],
+            ["State", "Deleted"],
+            ["Name", unavailable(tombstone.name)],
+            ["Deleted at", tombstone.deletedAt],
+            ["Tasks", String(tombstone.counts.tasks)],
+            ["Assignments", String(tombstone.counts.assignments)],
+            ["Worktrees", String(tombstone.counts.worktrees)],
+            [
+              "Cleanup",
+              `${tombstone.cleanup.state}; ${tombstone.cleanup.pending} pending`,
+            ],
+          ]) +
+          "\n" +
+          [
+            projectExternalRetention,
+            ...tombstone.externalRemnants.map(retainedProjectLine),
+          ].join("\n"),
+      });
+    }
     const read = await client.get(
       `${API}/projects/${encodeURIComponent(id)}/configuration`,
       projectConfigurationSchema,
@@ -157,6 +201,7 @@ const projectGet: BrowseCommand = {
           ["Name", unavailable(d.project.name)],
           ["Version", String(d.project.version)],
           ["Paused", d.project.paused ? "yes" : "no"],
+          ["Archived", d.project.archived ? "yes" : "no"],
           ["Lead", leadName(d.project.leadProfileId, d.profiles)],
           [
             "Instructions",

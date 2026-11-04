@@ -762,6 +762,7 @@ test("corrupt stored results fail replay validation without reapplying", () => {
       name: "Alpha",
       version: 1,
       paused: 1,
+      archived: 0,
       leadProfileId: null,
       instructionsRevision: 1,
       instructions: "",

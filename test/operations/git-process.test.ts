@@ -219,3 +219,96 @@ test("a child whose exit is never observed still settles unobserved within the w
       options.terminationGraceMs + options.observationMs + 1000,
   );
 });
+
+for (const optedIn of [false, true]) {
+  test(`bounded unobserved fake child ${optedIn ? "retains exact exit notification" : "leaves default callers unchanged"}`, async (t) => {
+    const childOf = fakeGitChild(t);
+    const controller = new AbortController();
+    const pending = runGit({
+      args: [],
+      signal: controller.signal,
+      observeSettlement: optedIn,
+      timeoutMs: 1000,
+      terminationGraceMs: 1,
+      observationMs: 1,
+      maxOutputBytes: 1024,
+    });
+    await Promise.resolve();
+    controller.abort();
+    const result = await pending;
+    const child = childOf();
+    assert.equal(result.status, "interrupted");
+    if (result.status !== "interrupted") return;
+    assert.equal(result.spawned, true);
+    assert.equal(result.childExitObserved, false);
+    assert.equal(!!result.settlement, optedIn);
+    assert.equal(child.listenerCount("exit"), optedIn ? 1 : 0);
+    assert.equal(child.listenerCount("close"), 0);
+    if (optedIn) {
+      let observed = false;
+      void result.settlement!.then(() => {
+        observed = true;
+      });
+      await Promise.resolve();
+      assert.equal(observed, false);
+      child.emit(
+        "error",
+        new Error("Late exact-child error is not an unhandled event"),
+      );
+      child.emit("exit", 0, null);
+      await result.settlement;
+      assert.equal(observed, true);
+      assert.equal(child.listenerCount("exit"), 0);
+      assert.equal(child.listenerCount("error"), 0);
+    }
+  });
+}
+
+function fakeGitChild(t: TestContext, events?: (child: ChildProcess) => void) {
+  // No native child or PID: replace only ChildProcess's internal spawn in this serial file.
+  const descriptor = Object.getOwnPropertyDescriptor(
+    ChildProcess.prototype,
+    "spawn",
+  )!;
+  let child!: ChildProcess;
+  Object.defineProperty(ChildProcess.prototype, "spawn", {
+    ...descriptor,
+    value: function (this: ChildProcess) {
+      child = this;
+      queueMicrotask(() => (events ? events(this) : this.emit("spawn")));
+      return 0;
+    },
+  });
+  t.after(() =>
+    Object.defineProperty(ChildProcess.prototype, "spawn", descriptor),
+  );
+  t.mock.method(ChildProcess.prototype, "kill", () => true);
+  return () => child;
+}
+
+for (const outcome of ["success", "spawn-failure"] as const) {
+  test(`opted-in ${outcome} before the bounded result leaves no settlement listeners`, async (t) => {
+    const childOf = fakeGitChild(t, (child) => {
+      if (outcome === "spawn-failure")
+        child.emit("error", new Error("Fake spawn failure"));
+      else {
+        child.emit("spawn");
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      }
+    });
+    const result = await runGit({
+      args: [],
+      observeSettlement: true,
+      ...windows,
+    });
+    assert.equal(result.status, outcome === "success" ? "ok" : "interrupted");
+    if (result.status === "interrupted") {
+      assert.equal(result.spawned, false);
+      assert.equal(result.settlement, undefined);
+    }
+    const child = childOf();
+    for (const event of ["spawn", "error", "exit", "close"])
+      assert.equal(child.listenerCount(event), 0);
+  });
+}

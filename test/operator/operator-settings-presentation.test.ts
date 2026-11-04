@@ -1,3 +1,8 @@
+import {
+  starterReviewerHarness,
+  starterOptionCopy,
+} from "../../web/src/setup-model.js";
+import type { Workspace } from "../../src/operator/contracts.js";
 import { sourceCredentialExplanation } from "../../src/standalone/github-source-credential.js";
 import {
   commandNetworkAppliesNote,
@@ -80,6 +85,7 @@ const config = (): ProjectConfigurationData =>
       name: "Atlas",
       version: 3,
       paused: false,
+      archived: false,
       leadProfileId: mira,
     },
     profiles: [
@@ -2078,4 +2084,62 @@ test("opaque row identity cannot alias a visible id containing the serialized re
   assert.deepEqual(repositoryChanges(repositories, { repositories: "[]" }), [
     "− Unavailable saved repository link (saved since this form loaded)",
   ]);
+});
+
+test("starter option names actual runtimes and fails closed for unknown or incomplete readiness", () => {
+  const workspace = {
+    harnesses: ["codex", "claude"].map((harness) => ({
+      harness,
+      enabled: true,
+      state: "available",
+    })),
+  } as Workspace["data"];
+  for (const lead of ["codex", "claude"] as const) {
+    const alternate = lead === "codex" ? "claude" : "codex";
+    const checks = (
+      alternate === "claude"
+        ? ["claude-executable", "claude-token"]
+        : ["codex-executable", "codex-login"]
+    ).map((id) => ({
+      id,
+      status: "pass",
+      label: id,
+      reason: null,
+      fix: null,
+    })) as import("../../src/operator/readiness.js").ReadinessCheck[];
+    assert.equal(
+      starterReviewerHarness(lead, workspace, { state: "ready", checks }),
+      alternate,
+    );
+    for (const readiness of [
+      { state: "loading" },
+      { state: "unavailable" },
+      { state: "ready", checks: checks.slice(0, 1) },
+    ] as const)
+      assert.equal(starterReviewerHarness(lead, workspace, readiness), lead);
+    assert.equal(
+      starterReviewerHarness(
+        lead,
+        { ...workspace, harnesses: [] },
+        { state: "ready", checks },
+      ),
+      lead,
+    );
+  }
+  assert.equal(
+    starterOptionCopy("codex", "claude"),
+    "Adds Implementer (Codex) and Reviewer (Claude)",
+  );
+  assert.equal(
+    starterOptionCopy("claude", "codex"),
+    "Adds Implementer (Claude) and Reviewer (Codex)",
+  );
+  assert.equal(
+    starterOptionCopy("codex", "codex"),
+    "Adds Implementer (Codex) and Reviewer (Codex)",
+  );
+  assert.equal(
+    starterOptionCopy("claude", "claude"),
+    "Adds Implementer (Claude) and Reviewer (Claude)",
+  );
 });

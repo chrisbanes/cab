@@ -12,6 +12,7 @@ import {
 import { refreshed } from "../fixtures/browser-waits.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import {
+  readinessBody,
   atlasIssueReader,
   chooseRepository,
   setupJourney,
@@ -39,11 +40,13 @@ async function firstRun(
   engine?: "webkit",
   // A repository with its GitHub Project: the ready check offers Preview and import now.
   linked = false,
+  starters = true,
 ) {
   const gh = createFakeGh();
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     profiles: false,
+    readiness: async () => JSON.parse(readinessBody()),
     discovery: linked,
     path: "/app",
     viewport,
@@ -83,6 +86,9 @@ async function firstRun(
   // One screen's form fill counts as one interaction.
   await projectName.fill("Atlas");
   await profileName.fill("Ada");
+  const starter = profile.getByRole("checkbox", { name: /Adds Implementer/ });
+  assert.equal(await starter.isChecked(), true);
+  if (!starters) await starter.uncheck();
   interactions++;
   await firstScreen(page, "setup", [
     projectName,
@@ -187,40 +193,32 @@ async function firstRun(
   assert.equal(interactions, linked ? 8 : 7);
   const domain = f.service.domain();
   assert.equal(domain.projects().length, 1);
+  assert.equal(domain.profiles().length, starters ? 3 : 1);
+  assert.equal(
+    domain.routingCandidates(String(project.id)).length,
+    starters ? 2 : 0,
+  );
+  assert.equal(domain.routing(String(project.id)).enabled, 0);
   assert.equal(domain.project(String(project.id)).paused, 0);
   assert.equal(domain.tasks(String(project.id)).length, importedTasks + 1);
 }
 
-for (const [label, viewport] of [
-  ["1366 x 900", desktop],
-  ["390 x 844", phone],
-] as const)
-  test(`first run budget: seven interactions from sign-in to a created task (${label})`, async (_t, journey) => {
-    await firstRun(journey, viewport);
-  });
-
-test(
-  "first run budget: seven interactions from sign-in to a created task in WebKit (390 x 844)",
-  { browserEngine: "webkit" },
-  async (_t, journey) => {
-    journey.restart();
-    await firstRun(journey, phone, "webkit");
-  },
-);
-
-for (const [label, viewport] of [
-  ["1366 x 900", desktop],
-  ["390 x 844", phone],
-] as const)
-  test(`first run budget: eight interactions from sign-in to a created task with a linked GitHub Project (${label})`, async (_t, journey) => {
-    await firstRun(journey, viewport, undefined, true);
-  });
-
-test(
-  "first run budget: eight interactions from sign-in to a created task with a linked GitHub Project in WebKit (390 x 844)",
-  { browserEngine: "webkit" },
-  async (_t, journey) => {
-    journey.restart();
-    await firstRun(journey, phone, "webkit", true);
-  },
-);
+for (const starters of [true, false]) {
+  for (const linked of [false, true]) {
+    for (const [label, viewport] of [
+      ["1366 x 900", desktop],
+      ["390 x 844", phone],
+    ] as const)
+      test(`first run budget: ${linked ? "eight" : "seven"} interactions, starters ${starters ? "on" : "off"}, ${linked ? "linked Project" : "repository-free"} (${label})`, async (_t, journey) => {
+        await firstRun(journey, viewport, undefined, linked, starters);
+      });
+    test(
+      `first run budget: ${linked ? "eight" : "seven"} interactions, starters ${starters ? "on" : "off"}, ${linked ? "linked Project" : "repository-free"} in WebKit (390 x 844)`,
+      { browserEngine: "webkit" },
+      async (_t, journey) => {
+        journey.restart();
+        await firstRun(journey, phone, "webkit", linked, starters);
+      },
+    );
+  }
+}

@@ -97,7 +97,7 @@ export function DeliveryTab(p: TabProps) {
 
 /** The project's stacking switch saves its own project.configure, so it never touches the policy draft. */
 function StackingPanel(p: TabProps) {
-  const d = useDraft(p.drafts, `project.stacking:${p.projectId}`);
+  const d = useDraft(p.drafts, `project.stacking:${p.projectId}`, p.readOnly);
   const saved = p.data.stacking;
   const initial =
     saved === undefined
@@ -157,7 +157,7 @@ function StackingPanel(p: TabProps) {
 
 /** Structured policy editing uses the same receipt, draft and authentication lifecycle as Settings. */
 function DeliveryPolicyForm(p: TabProps) {
-  const d = useDraft(p.drafts, `delivery.configure:${p.projectId}`);
+  const d = useDraft(p.drafts, `delivery.configure:${p.projectId}`, p.readOnly);
   const form = useRef<HTMLFormElement>(null);
   const origin = useRef<HTMLElement | null>(null);
   const [bulk, setBulk] = useState("");
@@ -237,6 +237,9 @@ function DeliveryPolicyForm(p: TabProps) {
   const v = d.values;
   const draft = deliveryEditorDraft(v);
   const grants = deliveryRows<GrantRow>(v.grants);
+  const legacyGrant = grants.some(
+    (row) => "savedRow" in row && !row.savedRow.format,
+  );
   const links = p.data.repositories.links;
   // Linked repositories name first; a discovered one the project does not link names the rest.
   const discovered =
@@ -439,6 +442,12 @@ function DeliveryPolicyForm(p: TabProps) {
         );
       }}
     >
+      {legacyGrant && (
+        <Alert role="alert">
+          This delivery draft is out of date. Refresh the policy, then discard
+          changes before saving.
+        </Alert>
+      )}
       <Dialog
         open={Boolean(
           pending && pending.base === currentFingerprint && !isLocked,
@@ -877,13 +886,16 @@ function DeliveryPolicyForm(p: TabProps) {
             client={p.client}
             session={p.session}
             label="Save delivery"
-            saveDisabled={!lines.length}
+            saveDisabled={!lines.length || legacyGrant}
             discard={() => reloadDraft(d, initial)}
             refresh={p.refreshConfiguration}
-            review={() =>
-              d.adoptLatest(saved.version, initial, [
-                ["prefixMode", "branchPrefix"],
-              ])
+            review={
+              legacyGrant
+                ? undefined
+                : () =>
+                    d.adoptLatest(saved.version, initial, [
+                      ["prefixMode", "branchPrefix"],
+                    ])
             }
           />
         </aside>

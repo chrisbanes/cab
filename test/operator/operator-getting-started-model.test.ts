@@ -58,6 +58,7 @@ const workspace = (
         {
           id: projectId,
           name: "fixture-app",
+          archived: false,
           version: 2,
           paused: o.project === "paused",
           leadProfileId: (o.lead ?? o.profile) ? profileId : null,

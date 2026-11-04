@@ -6,6 +6,7 @@ import type {
   PrDeliveryObservation,
   ProviderActionObservation,
   RequiredCheck,
+  StackLinkTarget,
 } from "../core/delivery.js";
 import type { StoredRepositoryLink } from "../core/repository-links.js";
 import type {
@@ -36,6 +37,14 @@ export interface CodeHostDeliveryProvider {
     identity: PrIdentity,
     policy: DeliveryPolicy,
   ): Promise<PrDeliveryObservation>;
+  /** Stacked creates use a durable coordinator-owned send boundary. */
+  prepareStackLink?(record: DeliveryActionRecord): Promise<StackLinkTarget>;
+  performStackLink?(
+    record: DeliveryActionRecord,
+  ): Promise<ProviderActionObservation>;
+  inspectStackLink?(
+    record: DeliveryActionRecord,
+  ): Promise<ProviderActionObservation>;
   /** A fresh read of what the code host requires before merging into the repository's default branch. */
   repositoryRequirements?(
     repositoryId: string,

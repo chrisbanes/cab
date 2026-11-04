@@ -1,3 +1,7 @@
+import {
+  projectLifecycleReadSchema,
+  projectTombstoneSchema,
+} from "./project-lifecycle-contracts.js";
 import { z } from "zod";
 import {
   issueBodyLimit,
@@ -190,6 +194,7 @@ export const projectSummarySchema = z
     name: safeText,
     version: revision,
     paused: z.boolean(),
+    archived: z.boolean(),
     leadProfileId: uuid.nullable(),
   })
   .strict();
@@ -911,13 +916,23 @@ const taskSummary = z
   })
   .strict();
 export const projectSchema = envelope(
-  z
-    .object({
-      project: projectSummarySchema,
-      profiles: z.array(profileSummarySchema),
-      tasks: z.array(taskSummary),
-    })
-    .strict(),
+  z.discriminatedUnion("state", [
+    z
+      .object({
+        state: z.literal("live"),
+        project: projectSummarySchema,
+        profiles: z.array(profileSummarySchema),
+        tasks: z.array(taskSummary),
+        lifecycle: projectLifecycleReadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        state: z.literal("deleted"),
+        tombstone: projectTombstoneSchema,
+      })
+      .strict(),
+  ]),
 );
 export const admissionSchema = taskSchemaAdmission();
 function taskSchemaAdmission() {
@@ -1107,8 +1122,36 @@ export const taskSourceSummarySchema = z
   })
   .strict()
   .nullable();
+/** Recorded identities only; absence of a membership observation is distinct from no stack. */
+export const stackDeliveryFactsSchema = z
+  .object({
+    blockerPr: z
+      .object({
+        repositoryId: z.string().min(1).max(512),
+        nodeId: z.string().min(1).max(512),
+        number: z.number().int().positive(),
+      })
+      .strict()
+      .nullable(),
+    membership: z
+      .object({
+        id: z.number().int().positive(),
+        number: z.number().int().positive(),
+        position: z.number().int().positive(),
+        size: z.number().int().positive(),
+      })
+      .strict()
+      .refine((value) => value.position <= value.size)
+      .nullable(),
+    membershipKnown: z.boolean(),
+    reason: z.string().max(500).nullable(),
+  })
+  .strict();
+export type StackDeliveryFacts = z.infer<typeof stackDeliveryFactsSchema>;
+
 export const taskListSummarySchema = z
   .object({
+    stackDelivery: stackDeliveryFactsSchema.nullable().optional(),
     id: uuid,
     projectId: uuid,
     title: safeText,
@@ -1253,6 +1296,7 @@ const generation = z
 export const assignmentSchema = z
   .object({
     assignmentId: uuid,
+    readOnly: z.boolean().optional(),
     profileId: uuid,
     name: safeText,
     brief: safeText.optional(),
@@ -1791,6 +1835,7 @@ const assignmentRecoveryRecordSchema = z
 export const taskSchema = envelope(
   z
     .object({
+      project: projectSummarySchema.optional(),
       task: z
         .object({
           id: uuid,
@@ -1892,6 +1937,7 @@ export const taskSchema = envelope(
         })
         .strict(),
       /** Whether the task stacks on its single blocker (ADR-1023); optional so older services still parse. */
+      stackDelivery: stackDeliveryFactsSchema.nullable().optional(),
       stack: z
         .object({
           state: z.enum(["stacked", "waiting"]),
@@ -2329,8 +2375,16 @@ const deliverySavedRowSchema = savedRowSchema
   .extend({
     /** A repository's additional check: `index` is into that repository's effective cab checks. */
     repositoryId: deliveryIdentity.optional(),
+    format: z.literal("post-status-strip-v1").optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (row) => row.section === "delivery-grants" || row.format === undefined,
+    {
+      path: ["format"],
+      message: "Only grant references have a format marker.",
+    },
+  );
 export const savedConfigurationRowSchema = savedRowSchema
   .extend({
     section: z.enum(["source", "repositories"]),
@@ -2859,6 +2913,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("project.create"),
       name: z.string().trim().min(1).max(512),
       leadProfileId: uuid.nullable(),
+      candidateProfileIds: z
+        .array(uuid)
+        .max(128)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          "Duplicate candidate",
+        )
+        .optional(),
       instructions: text.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z
@@ -2904,6 +2966,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       capabilities: text,
       runtime: profileRuntimeSchema.optional(),
       skills: profileSkillsSchema.optional(),
+      starter: z
+        .object({
+          implementerId: uuid,
+          reviewerId: uuid,
+          reviewerHarness: z.enum(["codex", "claude"]),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -3431,6 +3501,29 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       disposition: z.enum(["accept", "discard"]),
     })
     .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("project.archive"),
+      expectedVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("project.restore"),
+      expectedVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
+      type: z.literal("project.delete"),
+      expectedVersion: revision,
+      confirmationName: z.string().min(1).max(512),
+      previewDigest: hash,
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -3438,6 +3531,22 @@ export const configurationReceiptSchema = z
     key: uuid,
     recorded: z.literal(true),
     result: z.discriminatedUnion("commandType", [
+      z
+        .object({
+          commandType: z.enum(["project.archive", "project.restore"]),
+          resourceId: uuid,
+          version: revision,
+          archived: z.boolean(),
+          paused: z.literal(true),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("project.delete"),
+          resourceId: uuid,
+          deletedAt: z.string().datetime(),
+        })
+        .strict(),
       z
         .object({
           commandType: z.enum(["project.create", "project.configure"]),
@@ -4929,6 +5038,7 @@ export const cliCapabilities = [
   "delivery.write",
   "recovery.read",
   "recovery.write",
+  "project.lifecycle",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(
@@ -4978,6 +5088,9 @@ export const operationTypeSchema = z.enum([
   "profile.configure",
   "project.create",
   "project.configure",
+  "project.archive",
+  "project.restore",
+  "project.delete",
   "routing.configure",
   "delivery.configure",
   "capacity.configure",

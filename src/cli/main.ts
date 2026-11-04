@@ -181,6 +181,11 @@ cannot be undone. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation of an open task; Resume clears only the operator
 Stop),
 add-dependency/remove-dependency and task configure --ready true/false.`;
+const PROJECT_NOTE = `Project lifecycle: project archive freezes a paused, drained project; project restore
+keeps it paused. project delete is irreversible and requires the inspected preview,
+exact name, version and digest. It can discard dirty, untracked and unpushed captured
+worktree contents. External branches, PRs and tracker items remain. Cleanup may stay
+pending after the original deletion receipt is recorded.`;
 const RUNTIME_NOTE = `Runtimes: runtime enable and runtime disable are a reverse pair. Disabling never
 cancels a running turn; work bound to that runtime waits until it is enabled again,
 and disabling one that bound tasks use needs --yes.`;
@@ -231,7 +236,7 @@ const AREA_NOTES: Record<string, string[]> = {
   approval: [TASK_NOTE],
   runtime: [RUNTIME_NOTE],
   delivery: [DELIVERY_NOTE],
-  project: [DELIVERY_NOTE],
+  project: [PROJECT_NOTE, DELIVERY_NOTE],
   recovery: [RECOVERY_NOTE],
   result: [RESULT_NOTE],
 };
@@ -288,7 +293,7 @@ ${indented([...COMMAND_USAGE].flatMap(([key, usage]) => helpEntry(key, usage))).
 
 ${SERVICE_USAGE}
 ${OPTIONS_HELP}
-${[TASK_NOTE, RUNTIME_NOTE, DELIVERY_NOTE, RESULT_NOTE, RECOVERY_NOTE].join("\n\n")}
+${[TASK_NOTE, PROJECT_NOTE, RUNTIME_NOTE, DELIVERY_NOTE, RESULT_NOTE, RECOVERY_NOTE].join("\n\n")}
 
 ${ORIGIN_NOTE}
 `;
@@ -336,6 +341,10 @@ export const OPTIONS = {
   after: { type: "string" },
   before: { type: "string" },
   historical: { type: "boolean" },
+  archived: { type: "boolean" },
+  preview: { type: "boolean" },
+  "confirm-name": { type: "string" },
+  "preview-digest": { type: "string" },
   revision: { type: "string" },
   out: { type: "string" },
   file: { type: "string" },
@@ -888,8 +897,10 @@ async function run(
         `Next:    ${next.text}${next.operator ? ` (cab inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
-        ...(stackSummary(read.data.stack)
-          ? [`Stack:   ${stackSummary(read.data.stack)}`]
+        ...(stackSummary(read.data.stack, read.data.stackDelivery)
+          ? [
+              `Stack:   ${stackSummary(read.data.stack, read.data.stackDelivery)}`,
+            ]
           : []),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"

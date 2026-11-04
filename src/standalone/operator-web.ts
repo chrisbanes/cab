@@ -192,7 +192,7 @@ export class OperatorWebBoundary {
   constructor(
     readonly bundle: OperatorWebBundle,
     readonly api: OperatorApi,
-    readonly readiness?: Readiness,
+    readonly readiness?: Pick<Readiness, "read" | "claudeToken">,
   ) {}
   shell(path: string) {
     return (
@@ -226,6 +226,15 @@ export class OperatorWebBoundary {
     rawSearch?: string,
     reviewSession?: OperatorReviewSessionContext,
   ) {
+    if (path === "/api/operator/workspace") {
+      for (const name of query.keys())
+        if (name !== "includeArchived" || query.getAll(name).length !== 1)
+          throw new OperatorApiError(400, "invalid-input");
+      const include = query.get("includeArchived");
+      if (include !== null && include !== "true" && include !== "false")
+        throw new OperatorApiError(400, "invalid-input");
+      return this.api.readWorkspace(include === "true");
+    }
     if (path === "/api/operator/search") return this.api.readSearch(query);
     if (path === "/api/operator/operations")
       return this.api.readOperation(query);
@@ -506,7 +515,12 @@ export class OperatorWebBoundary {
     if (draftingRun) return this.api.readDraftingRun(draftingRun[1] ?? "");
     if (path === "/api/operator/source-observations")
       return this.api.readSourceObservations();
-    if (path === "/api/operator/workspace") return this.api.readWorkspace();
+
+    const deletionPreview = path.match(
+      /^\/api\/operator\/projects\/([^/]+)\/delete-preview$/,
+    );
+    if (deletionPreview)
+      return this.api.readProjectDeletePreview(deletionPreview[1] ?? "");
     const match = path.match(/^\/api\/operator\/projects\/([^/]+)$/);
     if (match) return this.api.readProject(match[1] ?? "");
     return undefined;
