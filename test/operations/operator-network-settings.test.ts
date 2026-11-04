@@ -321,3 +321,95 @@ test("settings refuse a file whose opened descriptor belongs to another owner", 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("install network change restores exact prior bytes and removes its own new file", async () => {
+  const { chmod, mkdtemp, readFile, rm, writeFile } = await import(
+    "node:fs/promises"
+  );
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const modulePath = "../../src/operator/network-access.js";
+  const { updateNetworkSettingsForInstall, networkSettingsPath } = await import(
+    modulePath
+  );
+  const dir = await mkdtemp(join(tmpdir(), "cab-network-install-"));
+  await chmod(dir, 0o700);
+  const data = join(dir, "data");
+  const path = networkSettingsPath(data);
+  const off = { schema: "cab.operator-network/v1", lan: null };
+  try {
+    const rollbackNew = await updateNetworkSettingsForInstall(data, 8787, off);
+    await rollbackNew();
+    await assert.rejects(readFile(path));
+    const raw = '{  "schema" : "cab.operator-network/v1", "lan" : null }\n';
+    await writeFile(path, raw, { mode: 0o600 });
+    const rollbackExisting = await updateNetworkSettingsForInstall(
+      data,
+      8787,
+      off,
+    );
+    await rollbackExisting();
+    assert.equal(await readFile(path, "utf8"), raw);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("install rollback preserves malformed bytes and refuses a replaced sidecar", async () => {
+  const { chmod, mkdtemp, readFile, rename, rm, writeFile } = await import(
+    "node:fs/promises"
+  );
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { updateNetworkSettingsForInstall, networkSettingsPath } = await import(
+    "../../src/operator/network-access.js"
+  );
+  const dir = await mkdtemp(join(tmpdir(), "cab-network-rollback-"));
+  await chmod(dir, 0o700);
+  const data = join(dir, "data");
+  const path = networkSettingsPath(data);
+  const off = { schema: "cab.operator-network/v1", lan: null };
+  try {
+    const malformed = Buffer.from([0x7b, 0xff, 0x7d]);
+    await writeFile(path, malformed, { mode: 0o600 });
+    const restore = await updateNetworkSettingsForInstall(data, 8787, off);
+    await restore();
+    assert.deepEqual(await readFile(path), malformed);
+    const rollback = await updateNetworkSettingsForInstall(data, 8787, off);
+    const replacement = Buffer.from("replacement");
+    await writeFile(join(dir, "replacement"), replacement, { mode: 0o600 });
+    await rename(join(dir, "replacement"), path);
+    await assert.rejects(rollback(), /rollback refused/);
+    assert.deepEqual(await readFile(path), replacement);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("rollback of a newly created sidecar refuses to remove a concurrent replacement", async () => {
+  const { chmod, mkdtemp, readFile, rename, rm, writeFile } = await import(
+    "node:fs/promises"
+  );
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { updateNetworkSettingsForInstall, networkSettingsPath } = await import(
+    "../../src/operator/network-access.js"
+  );
+  const directory = await mkdtemp(join(tmpdir(), "cab-network-new-rollback-"));
+  await chmod(directory, 0o700);
+  const data = join(directory, "data");
+  const path = networkSettingsPath(data);
+  try {
+    const rollback = await updateNetworkSettingsForInstall(data, 8787, {
+      schema: "cab.operator-network/v1",
+      lan: null,
+    });
+    const replacement = join(directory, "replacement");
+    await writeFile(replacement, "other", { mode: 0o600 });
+    await rename(replacement, path);
+    await assert.rejects(rollback(), /rollback refused/);
+    assert.equal(await readFile(path, "utf8"), "other");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

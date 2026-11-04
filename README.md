@@ -157,6 +157,9 @@ owns delivery scope and status.
   with provider-owned readiness and dependency holds; operators can inspect and
   refresh source state. Scoped delivery records durable intents, confirmed readback,
   retained PR feedback and operator settlement controls.
+- **Network configuration.** `cab service configure` shows or changes an optional
+  IPv4 LAN listener offline; restarting the service applies it. LAN HTTP carries
+  credentials without TLS. See [macOS operations](docs/operations/standalone-macos.md#optional-lan-access).
 - **Operations.** `cab service install`, `upgrade` and `uninstall` manage a
   per-user macOS LaunchAgent bound to an unpacked release; upgrade stops the job,
   starts the new release and checks readiness, and a failure leaves the job
