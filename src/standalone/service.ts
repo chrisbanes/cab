@@ -1,3 +1,4 @@
+import { DeletedProjectRedactionStore } from "../core/deleted-project-redaction.js";
 import { LocalAccess, localAccessDirectory } from "../operator/local-access.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -811,6 +812,7 @@ export interface RoutingAvailability {
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
+  private deletedProjectRedaction: DeletedProjectRedactionStore | undefined;
   /** Statement-caching facade over `db` for this generation; `db` stays the lifecycle handle. */
   private cache: CachedDatabase | undefined;
   /** The only operational view; see started(). */
@@ -1006,6 +1008,7 @@ export class StandaloneService {
         "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL",
       );
       new Store(db).ensureHost("standalone-codex");
+      this.deletedProjectRedaction = new DeletedProjectRedactionStore(db);
       const workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
       const operatorCredentials = new OperatorCredentialStore(db);
       this.localAccessState = await LocalAccess.create(
@@ -2518,6 +2521,13 @@ export class StandaloneService {
     return this.generation.id;
   }
 
+  /** Sanitization-only union; never use as prompt or public read data. */
+  redactionExclusions(live: readonly string[]): string[] {
+    if (!this.deletedProjectRedaction)
+      throw new Error("Private redaction inputs unavailable");
+    return this.deletedProjectRedaction.exclusions(live);
+  }
+
   /**
    * Everything a failure record must not disclose, or undefined when the service never
    * opened its domain and stopped without a snapshot: callers then emit identifiers only.
@@ -2556,9 +2566,7 @@ export class StandaloneService {
           ];
         }),
       ];
-      return prepareExclusions([
-        ...new Set(values.filter((value) => value.length > 0)),
-      ]);
+      return prepareExclusions(this.redactionExclusions(values));
     } catch {
       // A domain whose shutdown has begun can fail to answer; the snapshot still applies.
       return this.stoppedExclusions;
@@ -9316,7 +9324,7 @@ export class StandaloneService {
           ].flatMap((ref) => credentialReferenceValues(ref));
         }),
       ];
-      return values.filter((value) => value.length > 0);
+      return this.redactionExclusions(values);
     } catch {
       return undefined;
     }

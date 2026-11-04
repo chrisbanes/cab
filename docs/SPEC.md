@@ -2156,7 +2156,14 @@ source and delivery credential references, their environment key names and value
 environment values whose names match `TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL`,
 and workspace/control paths are excluded before storage; current exclusions are
 also applied when reading history. If safe redaction is unavailable, text is
-omitted. Diagnostic capture failures and missing history cannot establish
+omitted. A private redaction-only ledger retains exact removed project instruction
+and exclusion values indefinitely, without project ownership or restoration metadata.
+Only sanitization consumes these values; they are never instructions, model context,
+public projections or ordinary exports. Existing database backups include the ledger.
+The union of live and retained inputs fails closed above 4096 distinct nonempty values,
+16 MiB UTF-8 total or 64 KiB per value, or when inputs are unavailable. Transactional
+capture is implemented; project deletion and lifecycle controls remain planned.
+Diagnostic capture failures and missing history cannot establish
 completion, release ownership or bypass an execution hold.
 
 ### Human requests and execution controls
