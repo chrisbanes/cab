@@ -95,14 +95,18 @@ export class ProjectDeletionCleanup {
         if (!allowed() || processed++ >= 16) return;
         const key = `${row.projectId}:${item.id}`;
         // A timed-out RPC or filesystem call retains its lock until actual settlement.
-        if (this.effects.has(key)) continue;
         // A prior process cannot transfer its child-exit proof. Legacy unknown workspace
         // effects are equally conservative: missing paths and elapsed time are not proof.
         if (
-          item.captured.kind === "workspace" &&
-          (item.gitRemoval || item.reason === "unknown")
-        )
+          this.effects.has(key) ||
+          (item.captured.kind === "workspace" &&
+            (item.gitRemoval || item.reason === "unknown"))
+        ) {
+          transaction(this.db, () => {
+            this.store.retainCleanupWithinTransaction(row.projectId, item.id);
+          });
           continue;
+        }
         if (this.effects.size >= 16) return;
         let unobserved!: () => void,
           exitUnobserved = false;

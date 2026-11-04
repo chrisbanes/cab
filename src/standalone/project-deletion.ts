@@ -363,7 +363,7 @@ export class ProjectTombstones {
   retainCleanupWithinTransaction(
     projectId: string,
     itemId: string,
-    reason: "unsafe" | "unavailable" | "failed" | "unknown",
+    reason?: "unsafe" | "unavailable" | "failed" | "unknown",
   ): void {
     if (!this.db.isTransaction)
       throw new Error("Project cleanup checkpoint requires a transaction");
@@ -374,10 +374,11 @@ export class ProjectTombstones {
     const cleanup = projectCleanupSchema.parse(JSON.parse(row.cleanupJson));
     const item = cleanup.items.find((value) => value.id === itemId);
     if (item?.state !== "pending") return;
-    // Rotate failed work durably, so one unsafe item cannot starve later identities on restart.
+    // Rotate blocked work durably, including across restart. With no new outcome,
+    // preserve the current reservation and reason rather than applying a stale snapshot.
     cleanup.items = [
       ...cleanup.items.filter((value) => value.id !== itemId),
-      { ...item, reason },
+      reason === undefined ? item : { ...item, reason },
     ];
     this.db
       .prepare("UPDATE project_tombstones SET cleanupJson=? WHERE projectId=?")
