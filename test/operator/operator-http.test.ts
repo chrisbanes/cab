@@ -1130,7 +1130,7 @@ test("real runtime routes inherit HTTP guards and persist capacity", async () =>
       1,
     );
 
-    // The removed task page and its four forms answer as any unknown route does, with no
+    // Removed legacy pages and forms answer as any unknown route does, with no
     // redirect, even to a signed-in, same-origin request with a valid CSRF token.
     const signedIn = (method: string, path: string) =>
       fetch(`${origin}${path}`, {
@@ -1147,6 +1147,7 @@ test("real runtime routes inherit HTTP guards and persist capacity", async () =>
                 key: randomUUID(),
                 projectId,
                 taskId,
+                assignmentId,
                 blockerTaskId: randomUUID(),
                 expectedVersion: "1",
               }),
@@ -1166,6 +1167,9 @@ test("real runtime routes inherit HTTP guards and persist capacity", async () =>
     };
     for (const [method, path] of [
       ["GET", `/runtime/task/${taskId}`],
+      ["GET", `/runtime/assignment/${assignmentId}`],
+      ["GET", `/assignment/${assignmentId}`],
+      ["POST", "/runtime/control/instruction-apply"],
       ["POST", "/runtime/control/dependency/add"],
       ["POST", "/runtime/control/dependency/remove"],
       ["POST", "/runtime/control/stop"],
@@ -1178,42 +1182,9 @@ test("real runtime routes inherit HTTP guards and persist capacity", async () =>
     }
     assert.equal(domain.dependencies(taskId).length, 0);
     assert.equal(service.isTaskStopped(taskId), false);
-    // The retained Runtime overview, assignment page and its Apply still work.
-    for (const path of ["/runtime", `/runtime/assignment/${assignmentId}`])
-      assert.equal((await signedIn("GET", path)).status, 200, path);
-    domain.execute({
-      key: randomUUID(),
-      actor: "operator",
-      type: "project.configure",
-      projectId,
-      expectedVersion: Number(domain.project(projectId).version),
-      instructions: "Changed instructions",
-    });
-    const apply = await fetch(`${origin}/runtime/control/instruction-apply`, {
-      method: "POST",
-      headers: {
-        origin,
-        cookie: sessionCookie,
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        csrfToken: protectedCsrf,
-        key: randomUUID(),
-        projectId,
-        assignmentId,
-        expectedVersion: String(domain.assignment(assignmentId).version),
-      }),
-      redirect: "manual",
-    });
-    assert.equal(apply.status, 303);
-    assert.equal(
-      apply.headers.get("location"),
-      `/runtime/assignment/${encodeURIComponent(assignmentId)}`,
-    );
-    assert.equal(
-      Number(domain.assignment(assignmentId).instructionsRevision),
-      Number(domain.project(projectId).instructionsRevision),
-    );
+    // The removed endpoints did not change the assignment; Runtime remains available.
+    assert.equal(Number(domain.assignment(assignmentId).version), 1);
+    assert.equal((await signedIn("GET", "/runtime")).status, 200);
   } finally {
     await http?.stop();
     auth?.close();

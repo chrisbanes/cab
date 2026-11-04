@@ -216,6 +216,9 @@ test("CLI01-CLI06 each have a disposition and every area has a row", () => {
       inventory.rows.some((r) => r.area === area),
       `area without a row: ${area}`,
     );
+  const apply = inventory.rows.find((r) => r.id === "assignment apply-current");
+  assert.match(apply?.gap ?? "", /task inspector offers Apply/);
+  assert.ok(!inventory.excluded.some((x) => x.id === "React adoption control"));
   const rowIds = new Set(inventory.rows.map((r) => r.id));
   for (const x of inventory.excluded) {
     assert.ok(

@@ -339,4 +339,197 @@ for (const engine of [
       );
     },
   );
+
+  test(
+    `recovery links to the exact assignment facts and task execution (${engine.name})`,
+    { browserEngine: engine.name },
+    async (_t, j) => {
+      const f = await j.start("fixture.create", () =>
+        createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+      );
+      let browser: Browser | undefined;
+      j.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      const a = await seedReviewTask(f, "Recovery link project", "Link task");
+      const d = f.service.domain(),
+        sibling = randomUUID(),
+        foreignTask = randomUUID(),
+        foreignAssignment = randomUUID();
+      d.execute({
+        type: "assignment.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: a.projectId,
+        taskId: a.taskId,
+        assignmentId: sibling,
+        profileId: a.profileId,
+        brief: "Sibling",
+        resultDestination: "lead",
+        requesterAssignmentId: null,
+      });
+      seedOperatorRecovery(f, {
+        projectId: a.projectId,
+        taskId: a.taskId,
+        assignmentId: a.assignmentId,
+      });
+      d.execute({
+        type: "task.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: a.projectId,
+        taskId: foreignTask,
+        title: "Other task",
+        outcome: "Done",
+        ready: false,
+      });
+      d.execute({
+        type: "assignment.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: a.projectId,
+        taskId: foreignTask,
+        assignmentId: foreignAssignment,
+        profileId: a.profileId,
+        brief: "Other task work",
+        resultDestination: "lead",
+        requesterAssignmentId: null,
+      });
+      d.execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: a.projectId,
+        expectedVersion: Number(d.project(a.projectId).version),
+        instructions: "Updated instructions",
+      });
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start(`browser.launch.${engine.name}`, () =>
+        engine.type.launch(),
+      );
+      const page = await browser.newPage({
+        viewport: { width: 1366, height: 900 },
+      });
+      j.observe(page);
+      page.setDefaultTimeout(5000);
+      const commands: unknown[] = [];
+      page.on("request", (r) => {
+        if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+          commands.push(r.postDataJSON());
+      });
+      const recovery = `/app/assignments/${a.assignmentId}/recovery`;
+      await signIn(page, web.origin, web.password, recovery);
+      const inspect = page.getByRole("link", {
+        name: "Inspect assignment to apply current instructions",
+      });
+      await inspect.waitFor();
+      assert.equal(
+        await page
+          .getByRole("button", { name: /Apply current instructions/ })
+          .count(),
+        0,
+      );
+      await inspect.focus();
+      await page.keyboard.press("Enter");
+      const target = page.locator(
+        `[data-record-id="assignment:${a.assignmentId}"]`,
+      );
+      const facts = target.locator("details.assignment-facts");
+      await facts
+        .getByRole("button", { name: /Apply current instructions/ })
+        .waitFor();
+      assert.ok((await facts.boundingBox())!.width >= 200);
+      assert.equal(await facts.getAttribute("open"), "");
+      assert.equal(
+        await page
+          .locator(
+            `[data-record-id="assignment:${sibling}"] details.assignment-facts`,
+          )
+          .getAttribute("open"),
+        null,
+      );
+      await facts.locator(":scope > summary").focus();
+      for (let n = 0; n < 20; n++) {
+        if (
+          await facts
+            .getByRole("button", { name: /Apply current instructions/ })
+            .evaluate((element) => element === document.activeElement)
+        )
+          break;
+        await page.keyboard.press(engine.name === "webkit" ? "Alt+Tab" : "Tab");
+      }
+      assert.equal(
+        await facts
+          .getByRole("button", { name: /Apply current instructions/ })
+          .evaluate((element) => element === document.activeElement),
+        true,
+      );
+      assert.deepEqual(commands, []);
+      await Promise.all([
+        facts.evaluate(
+          (element) =>
+            new Promise<void>((resolve) =>
+              element.addEventListener("toggle", () => resolve(), {
+                once: true,
+              }),
+            ),
+        ),
+        facts.locator(":scope > summary").click(),
+      ]);
+      await page.goBack();
+      await inspect.waitFor();
+      await page.goForward();
+      await page.locator("#assignments").waitFor();
+      assert.equal(await facts.getAttribute("open"), null);
+      assert.deepEqual(commands, []);
+
+      await page.goto(
+        `${web.origin}/app/tasks/${a.taskId}?section=assignments`,
+      );
+      await page.locator("#assignments").waitFor();
+      assert.equal(
+        await page
+          .getByText("The linked assignment is unavailable in this task.")
+          .count(),
+        0,
+      );
+      assert.equal(
+        await page.locator("details.assignment-facts[open]").count(),
+        0,
+      );
+      for (const id of ["", foreignAssignment]) {
+        await page.goto(
+          `${web.origin}/app/tasks/${a.taskId}?section=assignments&inspectAssignment=${id}`,
+        );
+        await page
+          .getByText("The linked assignment is unavailable in this task.")
+          .waitFor();
+        assert.equal(
+          await page.locator("details.assignment-facts[open]").count(),
+          0,
+        );
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(web.origin + recovery);
+      await inspect.click();
+      await facts
+        .getByRole("button", { name: /Apply current instructions/ })
+        .waitFor();
+      assert.equal(
+        await page.locator("details.inspector-fold").getAttribute("open"),
+        "",
+      );
+      assert.ok(await noHorizontalScroll(page));
+      await page.goto(web.origin + recovery);
+      await page
+        .getByRole("link", { name: "View task-wide execution evidence" })
+        .click();
+      await page
+        .getByRole("tab", { name: "Execution", selected: true })
+        .waitFor();
+      assert.deepEqual(commands, []);
+    },
+  );
 }

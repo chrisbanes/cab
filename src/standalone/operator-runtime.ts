@@ -5,7 +5,6 @@ import { z } from "zod";
 import type {
   CapacityConfigureCommand,
   CapacityLimits,
-  DomainCommand,
   DomainStore,
 } from "../core/domain.js";
 import type { OperatorRoute } from "./operator-routes.js";
@@ -15,11 +14,7 @@ import type { ExecutionIntent } from "./state.js";
 import type { StandaloneService } from "./service.js";
 import { escapeHtml, hidden } from "./operator-html.js";
 import { unavailableAlert } from "../operator/runtime-restart-copy.js";
-import {
-  type ExecutionHarness,
-  executionHarnessLabels,
-} from "./execution-harness.js";
-import { runtimeSummary } from "../core/execution-runtime.js";
+import { executionHarnessLabels } from "./execution-harness.js";
 
 const positiveIntegerString = z
   .string()
@@ -27,14 +22,6 @@ const positiveIntegerString = z
   .transform(Number)
   .refine(Number.isSafeInteger);
 const uuid = z.string().uuid();
-const instructionFields = z
-  .object({
-    key: uuid,
-    projectId: uuid,
-    assignmentId: uuid,
-    expectedVersion: positiveIntegerString,
-  })
-  .strict();
 const capacityFields = z
   .object({
     key: z.string().uuid(),
@@ -48,21 +35,7 @@ const capacityFields = z
       context.addIssue({ code: "custom", message: "Project is required" });
   });
 
-type RuntimeDomain = Pick<
-  DomainStore,
-  | "assignment"
-  | "assignmentAdmission"
-  | "assignments"
-  | "admission"
-  | "dependencies"
-  | "execute"
-  | "profile"
-  | "profileRuntime"
-  | "project"
-  | "projects"
-  | "task"
-  | "tasks"
->;
+type RuntimeDomain = Pick<DomainStore, "admission" | "projects" | "tasks">;
 
 export interface RuntimeOperatorApi {
   domain(): RuntimeDomain;
@@ -72,19 +45,16 @@ export interface RuntimeOperatorApi {
     assignmentVersion: number,
     workId?: string,
   ): RecoveryRecord[];
-  recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[];
-  powerStatus(): ReturnType<StandaloneService["powerStatus"]>;
-  harnessStatuses(): ReturnType<StandaloneService["harnessStatuses"]>;
-  bindingHarness(workId: string): ExecutionHarness | null;
   currentTurnRequest(
     assignmentId: string,
     version: number,
   ): TurnRequest | undefined;
+  powerStatus(): ReturnType<StandaloneService["powerStatus"]>;
+  harnessStatuses(): ReturnType<StandaloneService["harnessStatuses"]>;
   capacityLimits(projectIds?: string[]): CapacityLimits;
   configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
   ): Promise<CapacityLimits>;
-  taskHold(taskId: string): string | undefined;
   adoptHistoricalPreTurnRejection?: StandaloneService["adoptHistoricalPreTurnRejection"];
   adoptHistoricalNoTurnSubmission?: StandaloneService["adoptHistoricalNoTurnSubmission"];
   recoverPreTurnExecution?: StandaloneService["recoverPreTurnExecution"];
@@ -180,25 +150,13 @@ function capacityForm(
     )}</select></label><label>Project active turn limit; leave blank to remove an override <input name="projectLimit" type="number" min="1"></label><button type="submit">Save capacity</button></form>`;
 }
 
-function operationForm(
-  action: string,
-  fields: Array<[string, string]>,
-  csrfToken: string,
-  label: string,
-  keyed = true,
-): string {
-  return `<form method="post" action="${action}">${keyed ? hidden("key", randomUUID()) : ""}${hidden("csrfToken", csrfToken)}${fields
-    .map(([name, value]) => hidden(name, value))
-    .join("")}<button type="submit">${escapeHtml(label)}</button></form>`;
-}
-
 /** The task workspace's Execution tab. */
 function taskHref(taskId: string): string {
   return `/app/tasks/${encodeURIComponent(taskId)}?section=execution`;
 }
 
 function assignmentHref(assignmentId: string): string {
-  return `/runtime/assignment/${encodeURIComponent(assignmentId)}`;
+  return `/app/assignments/${encodeURIComponent(assignmentId)}/recovery`;
 }
 
 /** The turn request, recovery record and execution intent that describe an assignment's current execution. */
@@ -228,191 +186,6 @@ export function selectAssignmentExecution(
         );
   const intent = request ? api.executionForWork(request.workId) : undefined;
   return { request, record, intent };
-}
-
-function statusForAssignment(
-  assignment: ReturnType<RuntimeDomain["assignment"]>,
-  api: RuntimeOperatorApi,
-): string {
-  const id = String(assignment.id);
-  const {
-    request,
-    record: recovery,
-    intent,
-  } = selectAssignmentExecution(assignment, api);
-  if (recovery?.holds.stop) return "Stopping; effects may continue";
-  if (request?.state === "queued")
-    return "Queued; waiting for capacity admission";
-  if (request?.state === "active" && intent?.state === "running")
-    return "Running";
-  if (request?.state === "active" && intent?.state === "submitting")
-    return "Starting";
-  if (
-    request?.state === "held" ||
-    assignment.state === "held" ||
-    recovery?.holds.uncertainty ||
-    recovery?.holds.writer ||
-    recovery?.holds.capacity ||
-    recovery?.holds.task
-  )
-    return "Held; recovery is required";
-  if (request?.state === "completed" || assignment.state === "completed")
-    return "Completed";
-  if (request?.state === "active")
-    return "Admitted; runtime state is not confirmed";
-  if (request?.state === "queued" || assignment.state === "pending") {
-    const admission = api.domain().assignmentAdmission(id);
-    return admission.eligible
-      ? "Selected; waiting for admission"
-      : `Selected; blocked from admission: ${admission.reasons.map(admissionReason).join(", ")}`;
-  }
-  return "No active execution is reported";
-}
-
-function recoveryRecordEvidence(
-  record: RecoveryRecord,
-  taskHold: string | undefined,
-): string {
-  const binding = record.binding;
-  const assignment = binding
-    ? `Assignment ${escapeHtml(binding.assignmentId)} (version ${escapeHtml(binding.assignmentVersion)}; instructions revision ${escapeHtml(binding.instructionsRevision)}; profile revision ${escapeHtml(binding.profileRevision)})`
-    : "Assignment identity not recorded";
-  const workRevision =
-    record.generation.workRevision === null
-      ? "not recorded"
-      : escapeHtml(record.generation.workRevision);
-  const requestSequence = escapeHtml(record.generation.requestSequence);
-  const thread = record.intent.threadId
-    ? `Recorded thread identity: ${escapeHtml(record.intent.threadId)}`
-    : "Recorded thread identity: not available";
-  const turn = record.intent.turnId
-    ? `Recorded turn identity: ${escapeHtml(record.intent.turnId)}`
-    : "Recorded turn identity: not available";
-  const process = record.processIdentity
-    ? `Recorded process identity: process ID ${escapeHtml(record.processIdentity.processId)}; started ${escapeHtml(record.processIdentity.processStartedAt)}; boot identity ${escapeHtml(record.processIdentity.bootId)}`
-    : "Recorded process identity: not available";
-  const request = record.request;
-  const observations = record.observations.length
-    ? record.observations
-        .map(
-          (observation) =>
-            `<li>Observation: ${escapeHtml(observation.kind)} — ${escapeHtml(observation.reason ?? "Reason not recorded")}</li>`,
-        )
-        .join("")
-    : "<li>No recovery observations are recorded.</li>";
-  const pendingEffects = record.pendingEffects.length
-    ? record.pendingEffects
-        .map(
-          (effect) =>
-            `<li>Pending effect: ${escapeHtml(effect.state)} — ${escapeHtml(effect.reason)}</li>`,
-        )
-        .join("")
-    : "<li>No pending effects are recorded for this recovery record.</li>";
-  const uncertaintyReason =
-    record.intent.reason ??
-    request?.reason ??
-    "No uncertainty reason is recorded";
-  const taskHoldReason = record.holds.task ?? taskHold;
-  const noTurn = record.noTurnSubmission
-    ? `Recorded historical no-turn submission witness: ${escapeHtml(record.noTurnSubmission.id)}; operator-adopted; an unobserved idle thread may exist. This is evidence, not permission to dispatch.`
-    : "";
-  const rejection = record.preTurnRejection
-    ? `Recorded before-turn rejection witness: ${escapeHtml(record.preTurnRejection.id)}; source: ${escapeHtml(record.preTurnRejection.source)}; predecessor thread: ${escapeHtml(record.preTurnRejection.predecessorThreadId)}`
-    : "Recorded before-turn rejection witness: none";
-  const receipt = record.receipt
-    ? `Recorded recovery receipt: ${escapeHtml(record.receipt.id)}; workspace disposition: ${escapeHtml(record.receipt.workspaceDisposition)}`
-    : "Recorded recovery receipt: none";
-
-  return `<li><h3>Recovery record: ${escapeHtml(record.workId)}</h3><ul><li>${assignment}</li><li>Generation: work revision ${workRevision}; request sequence ${requestSequence}</li><li>Runtime intent: ${escapeHtml(record.intent.state)}; intent reason: ${escapeHtml(record.intent.reason ?? "not recorded")}</li><li>Turn request: ${escapeHtml(request?.state ?? "not recorded")}; request reason: ${escapeHtml(request?.reason ?? "not recorded")}</li><li>${thread}; not proof of termination or release</li><li>${turn}; not proof of termination or release</li><li>${process}; not proof of termination or release</li><li>${receipt}; not proof of termination or release</li><li>${rejection}; recovery still requires exact independent evidence</li>${noTurn ? `<li>${noTurn}</li>` : ""}<li>Task hold reason: ${escapeHtml(taskHoldReason ?? "not recorded")}</li><li>Uncertainty hold: ${record.holds.uncertainty ? `active; reason: ${escapeHtml(uncertaintyReason)}` : "not active for this record"}</li><li>Writer hold: ${record.holds.writer ? "active" : "not recorded"}; capacity hold: ${record.holds.capacity ? "active" : "not recorded"}; Stop hold: ${record.holds.stop ? "active" : "not recorded"}</li><li>Observations:<ul>${observations}</ul></li><li>Pending effects:<ul>${pendingEffects}</ul></li></ul></li>`;
-}
-
-function executionHoldSection(taskId: string, api: RuntimeOperatorApi): string {
-  const records = api
-    .recoveryForTask(taskId)
-    .filter((record) => record.binding?.taskId === taskId);
-  const hold = api.taskHold(taskId);
-  const stop = records.some((record) => record.holds.stop);
-  const writer = records.some((record) => record.holds.writer);
-  const capacity = records.some((record) => record.holds.capacity);
-  const uncertainty = records.some((record) => record.holds.uncertainty);
-  const held = hold !== undefined || stop || writer || capacity || uncertainty;
-  const maximumVisibleRecords = 20;
-  const visibleRecords = records.slice(-maximumVisibleRecords);
-  const omittedRecords = records.length - visibleRecords.length;
-  const recordEvidence = visibleRecords
-    .map((record) => recoveryRecordEvidence(record, hold))
-    .join("");
-  const omittedNotice = omittedRecords
-    ? `<p>Showing the newest ${maximumVisibleRecords} of ${records.length} recorded recovery records; ${omittedRecords} older records are omitted from this page.</p>`
-    : "";
-  const evidenceList = recordEvidence
-    ? `<h3>Recorded recovery evidence</h3>${omittedNotice}<ul>${recordEvidence}</ul><p>Recorded identities, observations, receipts, and dispositions are evidence only; they do not prove that a process has terminated or that all effects have been released.</p>`
-    : "";
-  if (!held)
-    return `<section><h2>Execution ownership and recovery</h2><p>No unresolved execution hold is reported.</p>${evidenceList}</section>`;
-  return `<section><h2>Execution ownership and recovery</h2><ul><li>${stop ? "Operator Stop remains active" : "Operator Stop is not active"}</li><li>${writer ? "Writer ownership remains held" : "No unresolved writer hold is recorded"}</li><li>${capacity ? "Capacity remains held" : "No unresolved capacity hold is recorded"}</li><li>${uncertainty ? "Execution state is uncertain" : "No uncertainty hold is recorded"}</li></ul>${evidenceList}<p>Effects may continue while an execution is stopping. Elapsed time, interruption acknowledgement, and Resume do not resolve writer ownership. Use independent recovery evidence before allowing another writer.</p></section>`;
-}
-
-/** The persisted binding harness when bound, else the captured revision's runtime. */
-function runtimeLine(
-  assignment: {
-    id?: unknown;
-    version?: unknown;
-    profileId?: unknown;
-    profileRevision?: unknown;
-  },
-  api: RuntimeOperatorApi,
-): string {
-  const runtime = api
-    .domain()
-    .profileRuntime(
-      String(assignment.profileId),
-      Number(assignment.profileRevision),
-    );
-  const request = api.currentTurnRequest(
-    String(assignment.id),
-    Number(assignment.version),
-  );
-  const bound = request ? api.bindingHarness(request.workId) : null;
-  return `Execution runtime: ${escapeHtml(
-    bound && bound !== runtime.harness
-      ? executionHarnessLabels[bound]
-      : runtimeSummary(runtime),
-  )}.`;
-}
-
-function assignmentPage(
-  assignmentId: string,
-  api: RuntimeOperatorApi,
-  csrfToken: string,
-): string {
-  const domain = api.domain();
-  const assignment = domain.assignment(uuid.parse(assignmentId));
-  const task = domain.task(String(assignment.taskId));
-  const project = domain.project(String(assignment.projectId));
-  const profile = domain.profile(String(assignment.profileId));
-  const leadProfile =
-    typeof project.leadProfileId === "string"
-      ? domain.profile(String(project.leadProfileId))
-      : undefined;
-  const status = statusForAssignment(assignment, api);
-  const needsApply =
-    Number(assignment.instructionsRevision) !==
-      Number(project.instructionsRevision) ||
-    Number(assignment.profileRevision) !== Number(profile.version);
-  const apply = needsApply
-    ? operationForm(
-        "/runtime/control/instruction-apply",
-        [
-          ["projectId", String(assignment.projectId)],
-          ["assignmentId", assignmentId],
-          ["expectedVersion", String(assignment.version)],
-        ],
-        csrfToken,
-        "Apply current instructions for the next turn",
-      )
-    : "<p>Current instruction and profile revisions are applied.</p>";
-  return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="${taskHref(String(task.id))}">${escapeHtml(task.title)}</a> in ${escapeHtml(project.name)}.</p><p>Execution status: ${escapeHtml(status)}.</p><p>${runtimeLine(assignment, api)}</p><p>Accountable project lead: ${leadProfile ? escapeHtml(leadProfile.name) : "No project lead is configured"}; lead accountability remains with the project.</p><p>Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.</p><p>Result destination: ${escapeHtml(assignment.resultDestination)}.</p><p><a href="/app/tasks/${encodeURIComponent(String(task.id))}?assignment=${encodeURIComponent(assignmentId)}">Assignment conversation</a></p>${executionHoldSection(String(task.id), api)}<section><h2>Instruction revisions</h2><p>Changing configuration does not change this assignment until explicitly applied for its next turn.</p>${apply}</section></main>`;
 }
 
 function boundReview(
@@ -770,55 +543,6 @@ export class RuntimeOperatorRoutes {
             projectOverrides,
           });
           return { kind: "redirect", location: "/runtime" };
-        },
-      },
-      {
-        method: "GET",
-        path: "/runtime/assignment/:assignmentId",
-        handler: async ({ params, csrfToken }) => {
-          const id = params.assignmentId ?? "";
-          const link = `<p><a href="/app/assignments/${encodeURIComponent(id)}/recovery">Review bound-turn recovery</a></p>`;
-          let controls = link;
-          // A failed advisory read must not blank Stop, holds and instructions on this page.
-          const options =
-            this.recovery && this.api.recoverBoundTurnExecution
-              ? await this.recovery.readRecoveryOptions(id).catch(() => null)
-              : undefined;
-          if (options === null)
-            controls = `<p>Recovery evidence could not be read.</p>${link}`;
-          if (options) {
-            controls = `<section><h2>Bound-turn recovery</h2><p>Eligibility is advisory. Submission verifies the exact identity again. Reconciliation is permanent and does not resume work.</p>${options.data.records
-              .map((r) => {
-                const path = r.paths.find(
-                  (p) => p.path === "bound-turn-recover",
-                );
-                return `<article><h3>Work ${escapeHtml(r.workId)}; revision ${r.generation.workRevision}; request ${r.generation.requestSequence}</h3><p>Thread ${escapeHtml(r.threadId)}; turn ${escapeHtml(r.turnId)}; process ${escapeHtml(r.process?.processId)}; birth ${escapeHtml(r.process?.processStartedAt)}; boot ${escapeHtml(r.process?.bootId)}</p><p>${path?.eligible && !options.data.gaps.length ? "Eligible for review" : `Recovery blocked: ${escapeHtml([...(path?.blockedBy ?? ["bound-identity-missing"]), ...options.data.gaps].join(", "))}`}</p>${path?.eligible && !options.data.gaps.length ? `<form method="post" action="/runtime/control/bound-turn/review">${hidden("csrfToken", csrfToken)}${hidden("payload", JSON.stringify({ key: randomUUID(), assignmentId: id, receipt: { kind: "bound-turn", workId: r.workId, workRevision: r.generation.workRevision, requestSequence: r.generation.requestSequence, processIdentity: r.process, threadId: r.threadId, turnId: r.turnId, termination: { kind: "process-exit" }, effects: "settled", workspace: "preserved" } }))}<label><input required type="checkbox" name="termination" value="confirmed">I independently confirmed this exact process exited</label><label><input required type="checkbox" name="effects" value="settled">All effects and callbacks are settled</label><label>Workspace disposition<select required name="workspace"><option value="">Choose after inspection</option><option value="preserved">Preserved</option><option value="reconciled">Reconciled</option></select></label><button>Review reconciliation</button></form>` : ""}</article>`;
-              })
-              .join("")}</section>`;
-          }
-          return {
-            kind: "html",
-            body: assignmentPage(id, this.api, csrfToken).replace(
-              "</main>",
-              `${controls}</main>`,
-            ),
-          };
-        },
-      },
-      {
-        method: "POST",
-        path: "/runtime/control/instruction-apply",
-        handler: ({ fields }) => {
-          const input = instructionFields.parse(fields);
-          this.api.domain().execute({
-            ...input,
-            type: "assignment.apply",
-            actor: "operator",
-          } as DomainCommand);
-          return {
-            kind: "redirect",
-            location: assignmentHref(input.assignmentId),
-          };
         },
       },
     ];

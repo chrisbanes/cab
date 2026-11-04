@@ -15,7 +15,7 @@ function form(html: string, command: string): string {
   return html.slice(start, end);
 }
 
-test("operator home, profile and assignment views render scoped editable forms", async () => {
+test("operator home and profile render scoped editable forms", async () => {
   const db = new DatabaseSync(":memory:");
   try {
     db.exec("PRAGMA foreign_keys = ON");
@@ -37,22 +37,13 @@ test("operator home, profile and assignment views render scoped editable forms",
       name: "Private operator project",
       leadProfileId: profile.id,
     })) as { id: string };
-    const task = (await ui.submit({
+    await ui.submit({
       key: randomUUID(),
       type: "task.create",
       projectId: project.id,
       title: "Local task title",
       outcome: "Local task outcome",
-    })) as { id: string };
-    const assignment = (await ui.submit({
-      key: randomUUID(),
-      type: "assignment.create",
-      projectId: project.id,
-      taskId: task.id,
-      profileId: profile.id,
-      brief: "Only a persisted proposal",
-      resultDestination: "lead:task",
-    })) as { id: string };
+    });
 
     const home = ui.home(csrfToken);
     const profilePage = ui.profile(profile.id, csrfToken);
@@ -69,15 +60,6 @@ test("operator home, profile and assignment views render scoped editable forms",
         );
       }
     }
-    const assignmentPage = ui.assignment(assignment.id);
-    assert.match(assignmentPage, /Assignment lifecycle state: pending/);
-    assert.ok(assignmentPage.includes(`/runtime/assignment/${assignment.id}`));
-    assert.ok(!assignmentPage.includes("/coordination/"));
-    assert.match(
-      assignmentPage,
-      /does not confirm runtime admission or execution/,
-    );
-    assert.doesNotMatch(ui.assignment(assignment.id), /data-command=/);
     assert.match(ui.runtime(), /Unavailable/i);
   } finally {
     db.close();

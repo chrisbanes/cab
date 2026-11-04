@@ -5,6 +5,7 @@ import { reasonLabels } from "./tasks.js";
 type Data = TaskRead["data"];
 type Holds = Execution["holds"];
 type Recovery = NonNullable<Data["executionRecovery"]>;
+type RecoveryHolds = Pick<Recovery, "holds">;
 
 const stateLabels: Record<Execution["state"], string> = {
   idle: "No active execution is reported",
@@ -34,7 +35,10 @@ const settled = new Set<Execution["state"]>([
 ]);
 
 /** The holds `execution` reports or any task record keeps, an omitted one included. */
-export function taskHolds(execution: Execution, recovery?: Recovery): Holds {
+export function taskHolds(
+  execution: Execution,
+  recovery?: RecoveryHolds,
+): Holds {
   const recorded = recovery?.holds;
   return {
     stop: execution.holds.stop || Boolean(recorded?.stop),
@@ -54,7 +58,10 @@ export const holdsUnreadable =
  * A hold the status does not show is named, so a held execution never reads as idle or queued;
  * without the task-wide recovery read the status is never presented as safe either.
  */
-export function executionStatus(execution: Execution, recovery?: Recovery) {
+export function executionStatus(
+  execution: Execution,
+  recovery?: RecoveryHolds,
+) {
   const holds = taskHolds(execution, recovery);
   const label =
     execution.state === "uncertain" &&
@@ -144,4 +151,34 @@ export function staleRevisions(a: Data["assignments"][number]): string[] {
     a.profileRevision !== a.currentProfileRevision &&
       `profile ${a.profileRevision} → ${a.currentProfileRevision}`,
   ].filter((v): v is string => Boolean(v));
+}
+
+/** Recovery displays lifecycle and revision facts without implying admission. */
+export function recoveryAssignmentFacts(a: Data["assignments"][number]) {
+  const stale = staleRevisions(a);
+  return {
+    lifecycle: `Assignment state: ${a.state}. This does not confirm admission.`,
+    destination: a.resultDestination ?? "Unavailable",
+    revisions:
+      a.started === false
+        ? "The first turn takes current revisions when admitted; there is nothing to apply yet."
+        : a.started === undefined
+          ? "Whether this assignment has started is unavailable; inspect the assignment before applying revisions."
+          : stale.length
+            ? `Captured revisions are behind: ${stale.join(", ")}. Apply takes effect on the next turn.`
+            : "Captured revisions are current.",
+    canInspectApply: a.started === true && stale.length > 0,
+  };
+}
+
+export function recoveryTaskFacts(
+  lead: Data["lead"],
+  taskHold: Data["taskHold"],
+) {
+  return {
+    lead: lead
+      ? (lead.name ?? "Name unavailable")
+      : "No project lead is configured",
+    taskHold: taskHold ? (taskHold.reason ?? "Reason unavailable") : null,
+  };
 }

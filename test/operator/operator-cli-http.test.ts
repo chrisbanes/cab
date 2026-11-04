@@ -279,7 +279,7 @@ test("bearer credentials read through the service under server-side route author
     ["GET", "/app"],
     ["GET", "/assets/main.js"],
     ["POST", "/command", {}],
-    ["POST", "/runtime/control/instruction-apply", {}],
+    ["POST", "/runtime/control/capacity", {}],
   ];
   for (const token of [read.token, write.token])
     for (const [method, path, body] of denied) {
@@ -673,7 +673,7 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
   }
   // A bearer credential reaches no retained session form route.
   for (const token of [read.token, write.token]) {
-    const r = await fetch(`${s.origin}/runtime/control/instruction-apply`, {
+    const r = await fetch(`${s.origin}/runtime/control/capacity`, {
       method: "POST",
       redirect: "manual",
       headers: {

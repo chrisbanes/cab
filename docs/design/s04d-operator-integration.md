@@ -66,10 +66,7 @@ Deterministic adapter tests use real SQLite and fake only the runtime boundary.
 The HTTP integration test registers the production adapter routes on a real
 loopback server and checks pre-login confidentiality, unauthenticated writes,
 exact Origin and CSRF refusals, malformed and duplicate field rejection, safe
-shared response headers, and idempotent capacity submission. Chromium exercises
-the production route registry with dependency, instruction-apply and Stop/Resume
-form submissions; coordination writes are covered through the operator API and
-the task view's browser tests.
+shared response headers, and idempotent capacity submission. Chromium exercises the task view and the production JSON commands for dependency, instruction Apply and Stop/Resume; coordination writes are covered through the operator API and the task view's browser tests.
 
 The opt-in [`test/operator/integration-qualification/live-operator.mjs`](../../test/operator/integration-qualification/live-operator.mjs)
 uses a disposable service with the real Codex App Server, generated local

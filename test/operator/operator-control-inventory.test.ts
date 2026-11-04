@@ -264,9 +264,7 @@ test("retained rendered form actions, fields and mounted route controls match do
     "/",
     `/app/tasks/${taskId}`,
     `/profile/${profileId}`,
-    `/assignment/${assignmentId}`,
     "/runtime",
-    `/runtime/assignment/${assignmentId}`,
   ];
   const actions = new Set<string>(),
     commands = new Set<string>(),

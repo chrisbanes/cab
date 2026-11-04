@@ -53,6 +53,13 @@ import {
 import { capacityChanges, type Values } from "./settings-changes.js";
 import { useFragmentLanding } from "./settings-sections.js";
 import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
+import {
+  evidenceWarning,
+  executionStatus,
+  recoveryAssignmentFacts,
+  recoveryTaskFacts,
+  resumeWarning,
+} from "./task-execution-model.js";
 import { Alert } from "./ui/alert.js";
 import {
   Aside,
@@ -1005,6 +1012,12 @@ export function AssignmentRecovery(
     ? `/app/tasks/${data.taskId}?assignment=${p.assignmentId}`
     : "";
   const pills = data ? holdPills(data.holds) : [];
+  const status = data ? executionStatus(data.execution, data) : null;
+  const facts = data ? recoveryAssignmentFacts(data.assignment) : null;
+  const taskFacts = data ? recoveryTaskFacts(data.lead, data.taskHold) : null;
+  const assignmentInspector = data
+    ? `/app/tasks/${data.taskId}?section=assignments&inspectAssignment=${encodeURIComponent(p.assignmentId)}`
+    : "";
   return (
     <div className="settings-page">
       <ResourceStatus
@@ -1022,9 +1035,10 @@ export function AssignmentRecovery(
             </p>
           )}
           <p className="settings-status body muted">
-            <StatusBadge tone={data.held ? "warning" : "idle"}>
-              {data.held ? "Execution held" : "No unresolved hold reported"}
+            <StatusBadge tone={status?.held ? "warning" : "idle"}>
+              {status?.held ? "Execution held" : status?.label}
             </StatusBadge>{" "}
+            {status?.held && <>{status.label} · </>}
             {data.assignment.name ?? "Profile name unavailable"} in{" "}
             {data.project.name ?? "Project name unavailable"} · Project{" "}
             {data.project.paused ? "paused" : "enabled"}
@@ -1052,6 +1066,36 @@ export function AssignmentRecovery(
           </div>
           <div className="settings-split">
             <div className="settings-column">
+              <Panel title="Execution and assignment">
+                {status?.note && <p className="body">{status.note}</p>}
+                <p className="body">
+                  Accountable project lead: {taskFacts?.lead}.
+                </p>
+                {taskFacts && taskFacts.taskHold !== null && (
+                  <p className="body">Task hold: {taskFacts.taskHold}.</p>
+                )}
+                <p className="body">{facts?.lifecycle}</p>
+                <p className="body">
+                  Result destination: {facts?.destination}.
+                </p>
+                <p className="body">{facts?.revisions}</p>
+                {facts?.canInspectApply && (
+                  <ActionLink href={assignmentInspector}>
+                    Inspect assignment to apply current instructions
+                  </ActionLink>
+                )}
+                <p className="body">{resumeWarning}</p>
+                <p className="body">{evidenceWarning}</p>
+                <ActionLink
+                  href={`/app/tasks/${data.taskId}?section=execution`}
+                >
+                  View task-wide execution evidence
+                </ActionLink>
+                <p className="metadata muted">
+                  Other advanced identities and runtime reasons are available
+                  through the CLI recovery-options read.
+                </p>
+              </Panel>
               <Panel
                 title="Task-wide holds"
                 description="Aggregated across all verified task records, including omitted generations."
@@ -1160,9 +1204,6 @@ export function AssignmentRecovery(
               <Aside
                 title="Advanced destinations · desktop-first"
                 items={[
-                  <a key="a" href={`/runtime/assignment/${p.assignmentId}`}>
-                    Advanced recovery evidence and exact Apply
-                  </a>,
                   <a
                     key="b"
                     href={`/app/tasks/${data.taskId}?section=execution`}
@@ -1177,9 +1218,6 @@ export function AssignmentRecovery(
                   </a>,
                   <a key="d" href={inspect}>
                     Task detail
-                  </a>,
-                  <a key="f" href={`/assignment/${p.assignmentId}`}>
-                    Exact captured instructions and result destination
                   </a>,
                 ]}
               />

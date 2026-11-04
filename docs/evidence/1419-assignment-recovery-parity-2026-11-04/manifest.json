@@ -1,0 +1,95 @@
+{
+  "candidate": "24c56b92958afb3c7fd8fe315a4606a4b97cb919",
+  "tree": "9c75c1f49496a7c61c3c30768242577baa88ebfc",
+  "fixture": "boundWorld codex fake runtime, real SQLite, 21 synthetic recovery records plus bound turn, stale project instructions, task hold",
+  "engines": [
+    {
+      "name": "chromium",
+      "version": "156.0.8078.4"
+    },
+    {
+      "name": "webkit",
+      "version": "27.2"
+    }
+  ],
+  "screens": [
+    {
+      "file": "chromium-recovery-desktop.png",
+      "viewport": "1366x900",
+      "sha256": "fcc93984f610f8b0ef51634a4900f0cf0012e0fa6b95ae1bfbde325b81bf765f"
+    },
+    {
+      "file": "chromium-keyboard-focus.png",
+      "viewport": "1366x900",
+      "sha256": "196ff4c4432c2ec0d6d5501bcf56fc4eb4c69c86425db1338f8f0d824f9751cc"
+    },
+    {
+      "file": "chromium-inspector.png",
+      "viewport": "1366x900",
+      "sha256": "129b451670f6a05bb7848e26e0582bfa7fdf04f744fecd1ecf48fdb74ef12aac"
+    },
+    {
+      "file": "chromium-recovery-phone.png",
+      "viewport": "390x844",
+      "sha256": "54bf1e1ab5965c815a49b45695eaa10919cbed87f122192ea504d41b80c873fb"
+    },
+    {
+      "file": "chromium-held-phone.png",
+      "viewport": "390x844",
+      "sha256": "be34889874591c0e28e0cd3abb00294a948f2b035c5e05757c6b618aeb5048f1"
+    },
+    {
+      "file": "webkit-recovery-desktop.png",
+      "viewport": "1366x900",
+      "sha256": "062429b415051dbfc9def8a924eef3e83bd5ecfb7a59e3308f3edff7abe8ecb4"
+    },
+    {
+      "file": "webkit-keyboard-focus.png",
+      "viewport": "1366x900",
+      "sha256": "c1dbc5a486e878b890e6cca278a487d104d892d1f474f89a1efd8547de209bdc"
+    },
+    {
+      "file": "webkit-inspector.png",
+      "viewport": "1366x900",
+      "sha256": "3932b4c0820aff2e588f55df913ad36bdf2a80a14c5e7450d78f3466bc9f1ffe"
+    },
+    {
+      "file": "webkit-recovery-phone.png",
+      "viewport": "390x844",
+      "sha256": "6e416bd79b102379cd7f59293883bee9f72d6f524ed2e7de602ddf47df5f2406"
+    },
+    {
+      "file": "webkit-held-phone.png",
+      "viewport": "390x844",
+      "sha256": "6e416bd79b102379cd7f59293883bee9f72d6f524ed2e7de602ddf47df5f2406"
+    }
+  ],
+  "observations": [
+    {
+      "engine": "chromium",
+      "runtimeStatus": 200,
+      "assignmentStatus": 200,
+      "runtimeForms": 2,
+      "runtimeApply": true,
+      "oldRecords": 20,
+      "omission": true,
+      "oldLifecycle": true,
+      "legacyRuntimeLink": true
+    },
+    {
+      "engine": "webkit",
+      "runtimeStatus": 200,
+      "assignmentStatus": 200,
+      "runtimeForms": 2,
+      "runtimeApply": true,
+      "oldRecords": 20,
+      "omission": true,
+      "oldLifecycle": true,
+      "legacyRuntimeLink": true
+    }
+  ],
+  "captureScriptSha256": "a73e5b8089827ccc568b20e8288d3417257851f935f9c8f5fd51aa67b657551d",
+  "mask": "Bound-turn panel and inspector fact paragraphs masked to avoid recording identity values; fixture values are synthetic.",
+  "qualification": "npm run test:built -- --suite=operator,execution --profile=all; 2534 passed, 0 failed, 1 skipped",
+  "captureScriptFile": "capture-script.txt"
+}

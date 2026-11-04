@@ -546,8 +546,8 @@ exit of the exact stored process (PID, birth identity and boot identity), exact 
 revision, request sequence, thread and turn, ended callbacks, settled effects and
 an explicit preserved/reconciled workspace assertion. Missing, redacted, live,
 unknown, conflicting or stale identity refuses recovery and retains ownership.
-CLI `recovery get|prepare|submit`, Settings → Runtime → assignment recovery, task
-detail's Recovery link, and retained `/runtime/assignment/:id` controls use the same
+CLI `recovery get|prepare|submit`, Settings → Runtime → assignment recovery,
+and task detail's Recovery link use the same
 keyed `recovery.bound-turn.recover` operation. Eligibility is advisory. Review and
 confirmation precede durable, irreversible reconciliation; cancel records nothing.
 An unknown reply freezes the original body/key: read its operation receipt before
@@ -895,8 +895,7 @@ shows its execution status, admission gates, lead, holds, task-wide recovery evi
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions
 for its next turn. These use the same receipted JSON commands as the CLI. The Runtime
-overview (`/runtime`) and each assignment's retained page (`/runtime/assignment/:id`,
-with its exact recovery evidence and Apply) remain. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
+overview (`/runtime`) remains. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and

@@ -376,7 +376,7 @@ a.task-source-chip:hover {
   margin-top: 0;
 }
 
-/* Assignments: a table on wide screens, stacked rows on a phone. */
+/* Assignments live in the narrow inspector, so stack each row at every viewport. */
 .assignment-table {
   width: 100%;
   border-collapse: collapse;
@@ -410,29 +410,27 @@ a.task-source-chip:hover {
   color: var(--fg-3);
 }
 
-@media (max-width: 759px) {
-  .assignment-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
+.assignment-table thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 
-  .assignment-table tr,
-  .assignment-table td {
-    display: block;
-  }
+.assignment-table tr,
+.assignment-table td {
+  display: block;
+}
 
-  .assignment-table td {
-    border-top: 0;
-    padding-block: var(--space-4);
-  }
+.assignment-table td {
+  border-top: 0;
+  padding-block: var(--space-4);
+}
 
-  .assignment-table tr {
-    border-top: 1px solid var(--line);
-    padding-block: var(--space-8);
-  }
+.assignment-table tr {
+  border-top: 1px solid var(--line);
+  padding-block: var(--space-8);
 }
 
 /* Inspector: grouped facts with uppercase labels, Overview only. */
