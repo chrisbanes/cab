@@ -813,6 +813,37 @@ function operatorRoutes(currentService, routeTypes) {
   return routes;
 }
 
+// The live harness and its offline regression use the same production listener.
+export async function createSleepOperatorHttp(service, auth, dataDir) {
+  const [operatorTypes, routeTypes, runtimeTypes, webTypes, apiTypes] =
+    await Promise.all([
+      import("../../../dist/src/standalone/operator.js"),
+      import("../../../dist/src/standalone/operator-routes.js"),
+      import("../../../dist/src/standalone/operator-runtime.js"),
+      import("../../../dist/src/standalone/operator-web.js"),
+      import("../../../dist/src/standalone/operator-api.js"),
+    ]);
+  return new operatorTypes.LocalOperatorHttp(
+    new operatorTypes.LocalOperatorUi(service.domain()),
+    auth,
+    {
+      routes: operatorRoutes(service, { ...routeTypes, ...runtimeTypes }),
+      web: new webTypes.OperatorWebBoundary(
+        await webTypes.OperatorWebBundle.open(
+          fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
+        ),
+        new apiTypes.OperatorApi(service, [dirname(dataDir)]),
+      ),
+    },
+  );
+}
+
+export async function readSleepExecution(request, origin, taskId) {
+  const response = await request.get(`${origin}/api/operator/tasks/${taskId}`);
+  assert.equal(response.status(), 200);
+  return (await response.json()).data;
+}
+
 async function runLiveJourney(approval) {
   const evidence = {
     source: {},
@@ -988,10 +1019,9 @@ async function runLiveJourney(approval) {
     authFile = join(root, "operator-auth.json");
     password = randomBytes(32).toString("base64url");
 
-    const [standalone, operatorTypes, authTypes, powerTypes, terminationTypes] =
+    const [standalone, authTypes, powerTypes, terminationTypes] =
       await Promise.all([
         import("../../../dist/src/standalone/index.js"),
-        import("../../../dist/src/standalone/operator.js"),
         import("../../../dist/src/standalone/operator-auth.js"),
         import("../../../dist/src/standalone/power.js"),
         import("../../../dist/src/standalone/termination.js"),
@@ -1267,19 +1297,7 @@ async function runLiveJourney(approval) {
       authTypes.OperatorAuth.open({ authFile, origin }),
       10_000,
     );
-    const routes = operatorRoutes(service, {
-      OperatorRouteRegistry: (
-        await import("../../../dist/src/standalone/operator-routes.js")
-      ).OperatorRouteRegistry,
-      runtimeOperatorRoutes: (
-        await import("../../../dist/src/standalone/operator-runtime.js")
-      ).runtimeOperatorRoutes,
-    });
-    http = new operatorTypes.LocalOperatorHttp(
-      new operatorTypes.LocalOperatorUi(service.domain()),
-      auth,
-      { routes },
-    );
+    http = await createSleepOperatorHttp(service, auth, dataDir);
     await bounded(http.start(Number(new URL(origin).port)), 10_000);
     const { chromium } = await import("playwright");
     browser = await bounded(chromium.launch({ headless: true }), 30_000);
@@ -1287,7 +1305,7 @@ async function runLiveJourney(approval) {
     page = await context.newPage();
     page.setDefaultTimeout(20_000);
     page.setDefaultNavigationTimeout(20_000);
-    await page.goto(`${origin}/login`);
+    await page.goto(`${origin}/`);
     assert.match(await page.locator("body").innerText(), /Sign in/);
     await page.locator('input[name="password"]').fill(password);
     const loginResponse = page.waitForResponse(
@@ -1311,14 +1329,9 @@ async function runLiveJourney(approval) {
         ),
     );
     evidence.operator.liveQuestionVisible = true;
-    // The retained page of the task's (lead) assignment: its status and the task's holds.
-    const activeAssignmentPage = () =>
-      `${origin}/runtime/assignment/${String(service.domain().assignments(activeTaskId)[0]?.id)}`;
-    await page.goto(activeAssignmentPage());
-    assert.match(
-      await page.locator("body").innerText(),
-      /Execution status: Running\./,
-    );
+    const readExecution = () =>
+      readSleepExecution(page.request, origin, activeTaskId);
+    assert.equal((await readExecution()).execution.state, "running");
 
     progress("owned-wake-schedule-preflight");
     const fixtureId = randomUUID();
@@ -1447,11 +1460,10 @@ async function runLiveJourney(approval) {
       throw fail("duplicate-or-replacement-execution-observed");
 
     progress("authenticated-recovery-view");
-    await page.goto(activeAssignmentPage());
-    const recoveryBody = await page.locator("body").innerText();
-    assert.match(recoveryBody, /Execution state is uncertain/);
-    assert.match(recoveryBody, /Writer ownership remains held/);
-    assert.match(recoveryBody, /Capacity remains held/);
+    const recovery = await readExecution();
+    assert.equal(recovery.execution.state, "uncertain");
+    assert.equal(recovery.executionRecovery.holds.writer, true);
+    assert.equal(recovery.executionRecovery.holds.capacity, true);
     evidence.operator.recoveryVisible = true;
   } catch (error) {
     evidence.failure = { stage, kind: failureKind(error) };

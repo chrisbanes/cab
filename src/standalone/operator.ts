@@ -153,13 +153,6 @@ export class LocalOperatorUi {
     return `<main><h1>${escapeHtml(profile.name)}</h1><p>Revision ${escapeHtml(profile.version)}; ${profile.revoked ? "revoked" : "active"}</p><p>Execution runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(profileId)))}. Change it in profile Settings; saving here keeps it.</p>${form("profile.configure", field("profileId", profileId, "hidden") + field("expectedVersion", String(profile.version), "hidden") + field("name", String(profile.name)) + textarea("instructions", String(profile.instructions)) + textarea("capabilities", String(profile.capabilities)) + field("revoked", "1", "checkbox", Boolean(profile.revoked)), undefined, csrfToken)}</main>`;
   }
 
-  assignment(assignmentId: string): string {
-    const assignment = this.store.assignment(assignmentId);
-    const task = this.store.task(String(assignment.taskId));
-    const profile = this.store.profile(String(assignment.profileId));
-    return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="/app/tasks/${escapeHtml(task.id)}?assignment=${escapeHtml(assignment.id)}">${escapeHtml(task.title)}</a>. Assignment lifecycle state: ${escapeHtml(assignment.state)}; this does not confirm runtime admission or execution.</p><p>Captured profile revision runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(String(assignment.profileId), Number(assignment.profileRevision))))}.</p><p><a href="/runtime/assignment/${escapeHtml(assignment.id)}">Runtime status, controls and recovery evidence</a></p></main>`;
-  }
-
   runtime(): string {
     return "<main><h1>Runtime</h1><p>Unavailable. This operator surface does not start or control execution.</p></main>";
   }
@@ -899,8 +892,6 @@ export class LocalOperatorHttp {
           let html: string | undefined;
           if (kind === "profile" && value)
             html = this.ui.profile(value, authorized.csrfToken);
-          else if (kind === "assignment" && value)
-            html = this.ui.assignment(value);
           else if (kind === "runtime" && parts.length === 1)
             html = this.ui.runtime();
           else if (url.pathname === "/")

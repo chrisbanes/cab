@@ -1017,7 +1017,7 @@
       "retry": "The journal key and --request-id replay once; operation get reads the assignment.apply receipt.",
       "observation": "real",
       "state": "bounded",
-      "gap": "Ran live before turn 2, after a follow-up under Stop. Adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935, test/operator/operator-cli-adopt.test.ts), not the live journey."
+      "gap": "Ran live before turn 2, after a follow-up under Stop. Adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935, test/operator/operator-cli-adopt.test.ts), not the live journey. The task inspector offers Apply on stale started assignments; recovery links to the exact row."
     },
     {
       "id": "inbox list",
@@ -1811,14 +1811,6 @@
     {
       "id": "keyless bound-turn recovery",
       "reason": "design excludes from first release: docs/design/operator-cli.md (Recovery) states there is no route for the keyless bound-turn recovery (resolveHeldExecution); CLI6 record 'Not exposed'."
-    },
-    {
-      "id": "React adoption control",
-      "reason": "design excludes from first release: the CLI3 record states the React UI has no adoption control and no design frame; adoption has the CLI command and the retained /runtime/control/instruction-apply page."
-    },
-    {
-      "id": "React Resume and recovery submission controls",
-      "reason": "design excludes from first release: the CLI5 record states the React UI has no Resume control and the CLI6 record no recovery submission control; neither has a design frame, and the CLI plus retained pages are the entry points."
     },
     {
       "id": "operation get for task, attention, delivery and placement receipts",

@@ -1715,7 +1715,7 @@ test("local review records a message without releasing held recovery; ordinary m
   }
 });
 
-test("pre-turn witness is exposed safely through operator API and both shared runtime history pages", async () => {
+test("pre-turn witness is exposed safely through operator API", async () => {
   const f = await heldFixture(true);
   try {
     const witness = required(
@@ -1729,22 +1729,6 @@ test("pre-turn witness is exposed safely through operator API and both shared ru
       ).data.records.find((r) => r.workId === f.old.workId)?.preTurnRejection,
       witness,
     );
-    for (const path of ["/runtime/assignment/:assignmentId"]) {
-      const route = required(
-        runtimeOperatorRoutes(f.service).find((r) => r.path === path),
-      );
-      const result = await route.handler({
-        params: {
-          taskId: f.taskId,
-          assignmentId: required(f.old.assignmentId),
-        },
-        fields: {},
-        csrfToken: "fixture",
-      });
-      assert.equal(result.kind, "html");
-      if (result.kind === "html")
-        assert.match(result.body, new RegExp(witness.id));
-    }
     const adoptRoute = required(
       runtimeOperatorRoutes(f.service).find(
         (r) => r.path === "/runtime/control/pre-turn/adopt",

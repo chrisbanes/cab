@@ -778,7 +778,7 @@ test("R4 late callback and known survivor retract successors and persist hold af
     });
 });
 
-test("authenticated no-turn routes acknowledge bounded witnesses on task, assignment and curated API views", async () => {
+test("authenticated no-turn routes retain bounded witnesses in the curated API", async () => {
   const f = await fixture();
   try {
     const routes = runtimeOperatorRoutes(f.service);
@@ -796,19 +796,6 @@ test("authenticated no-turn routes acknowledge bounded witnesses on task, assign
       f.service.recoveryView().find((r) => r.workId === f.old.workId)
         ?.noTurnSubmission,
     );
-    for (const path of ["/runtime/assignment/:assignmentId"]) {
-      const page = required(routes.find((r) => r.path === path));
-      const response = await page.handler({
-        params: { taskId: f.taskId, assignmentId: f.assignmentId },
-        fields: {},
-        csrfToken: "fixture",
-      } as never);
-      assert.equal(response.kind, "html");
-      if (response.kind === "html") {
-        assert.ok(response.body.includes(witness.id));
-        assert.ok(response.body.includes("idle thread may exist"));
-      }
-    }
     const curated = await new OperatorApi(f.service, [
       f.directory,
     ]).readAssignmentRecovery(f.assignmentId);

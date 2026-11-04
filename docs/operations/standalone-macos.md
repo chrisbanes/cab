@@ -638,7 +638,7 @@ file's `receipt` asserts `termination: {"kind":"process-exit"}`, `effects: "sett
 and `workspace: "preserved"` or `"reconciled"`. The read supplies the exact generation,
 thread, turn and runtime process identity; the service independently verifies exit.
 Settings → Runtime lists assignment recovery destinations; task detail's Recovery
-link and retained `/runtime/assignment/:id` expose the same reviewable operation.
+link exposes the same reviewable operation.
 Review the exact identity and permanent effect before confirming; Cancel records
 nothing. On refusal or lost reply keep the original evidence/key, check the original
 operation receipt, then retry only that exact command if no receipt is recorded.

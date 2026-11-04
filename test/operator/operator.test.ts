@@ -100,24 +100,14 @@ test("local forms submit versioned commands and render secret-safe views", async
       expectedVersion: 1,
       ready: true,
     });
-    const assignment = (await ui.submit({
+    await ui.submit({
       type: "assignment.create",
       projectId: project.id,
       taskId: task.id,
       profileId: profile.id,
       brief: "Build",
       resultDestination: "lead:task",
-    })) as { id: string };
-    assert.match(
-      ui.assignment(assignment.id),
-      /does not confirm runtime admission or execution/i,
-    );
-    assert.ok(
-      ui
-        .assignment(assignment.id)
-        .includes(`/runtime/assignment/${assignment.id}`),
-    );
-    assert.ok(!ui.assignment(assignment.id).includes("/coordination/"));
+    });
   } finally {
     db.close();
   }

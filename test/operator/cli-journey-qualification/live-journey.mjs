@@ -1147,7 +1147,7 @@ async function journey() {
     // A retained session form route: bearer credentials never reach it.
     [
       "POST",
-      "/runtime/control/instruction-apply",
+      "/runtime/control/capacity",
       `taskId=${taskId}`,
       "application/x-www-form-urlencoded",
     ],

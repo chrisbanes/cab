@@ -108,13 +108,7 @@ test("retained HTML routes share the production foundation and native interactio
       .count(),
     0,
   );
-  const destinations = [
-    "/",
-    `/profile/${profileId}`,
-    `/assignment/${assignmentId}`,
-    "/runtime",
-    `/runtime/assignment/${assignmentId}`,
-  ];
+  const destinations = ["/", `/profile/${profileId}`, "/runtime"];
   let stylesheetHref = "";
   let verifiedFonts = false;
   for (const path of destinations) {

@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import type { LocalOperatorHttp } from "../../src/standalone/operator.js";
+import type { StandaloneService } from "../../src/standalone/service.js";
+import {
+  createOperatorFixture,
+  seedOperatorRecovery,
+} from "../fixtures/operator-web.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 
 // These fixed pmset rows are London-local; pin only this isolated test file so
 // the independent literals keep matching the approved UTC window in any CI TZ.
@@ -22,6 +30,21 @@ type ScheduleEvent = {
 };
 
 type SleepHarnessModule = {
+  createSleepOperatorHttp(
+    service: StandaloneService,
+    auth: OperatorAuth,
+    dataDir: string,
+  ): Promise<LocalOperatorHttp>;
+  readSleepExecution(
+    request: {
+      get(url: string): Promise<{ status(): number; json(): Promise<unknown> }>;
+    },
+    origin: string,
+    taskId: string,
+  ): Promise<{
+    execution: { state: string };
+    executionRecovery: { holds: { writer: boolean; capacity: boolean } };
+  }>;
   parseLiveArguments(
     args: string[],
   ): { ok: true; windowPath: string } | { ok: false; reason: string };
@@ -77,6 +100,68 @@ const harness = await dynamicImport(
   pathToFileURL(resolve("test/coordination/live-qualification/live-sleep.mjs"))
     .href,
 );
+
+test("sleep listener reads authenticated execution before and after a held recovery", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const { taskId, projectId, assignmentId } = await seedReviewTask(f);
+  const password = "disposable-sleep-test-password";
+  const authFile = join(f.directory, "sleep-auth.json");
+  const authOrigin = "http://127.0.0.1:8787";
+  await OperatorAuth.initialize(authFile, password);
+  const auth = await OperatorAuth.open({ authFile, origin: authOrigin });
+  t.after(() => auth.close());
+  const http = await harness.createSleepOperatorHttp(
+    f.service,
+    auth,
+    join(f.directory, "data"),
+  );
+  const port = await http.start();
+  t.after(() => http.stop());
+  const origin = `http://127.0.0.1:${port}`;
+  const path = `${origin}/api/operator/tasks/${taskId}`;
+  assert.equal((await fetch(path)).status, 401);
+  // The web boundary serves a React shell at /login; / is the legacy sign-in.
+  const signIn = await fetch(`${origin}/`);
+  const cookie = signIn.headers.get("set-cookie")?.split(";", 1)[0];
+  const csrf = (await signIn.text()).match(
+    /name="csrfToken"[^>]*value="([^"]+)"/,
+  )?.[1];
+  assert.ok(cookie);
+  assert.ok(csrf);
+  const login = await fetch(`${origin}/login`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: authOrigin,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password, csrfToken: csrf }),
+    redirect: "manual",
+  });
+  assert.equal(login.status, 303);
+  const session = login.headers.get("set-cookie")?.split(";", 1)[0];
+  assert.ok(session);
+  const request = {
+    async get(url: string) {
+      const response = await fetch(url, { headers: { cookie: session } });
+      return { status: () => response.status, json: () => response.json() };
+    },
+  };
+  assert.equal(
+    (await harness.readSleepExecution(request, origin, taskId)).execution.state,
+    "paused",
+  );
+  // Model a retained post-wake hold in disposable SQLite; no host sleep or runtime is invoked.
+  seedOperatorRecovery(f, { projectId, taskId, assignmentId }, 1);
+  f.seedPersistedState((db) =>
+    db.prepare("DELETE FROM task_writer_holds WHERE taskId=?").run(taskId),
+  );
+  const after = await harness.readSleepExecution(request, origin, taskId);
+  assert.equal(after.execution.state, "uncertain");
+  assert.equal(after.executionRecovery.holds.writer, true);
+  assert.equal(after.executionRecovery.holds.capacity, true);
+});
 
 function windowRecord(hostname = "fixture-host") {
   return {

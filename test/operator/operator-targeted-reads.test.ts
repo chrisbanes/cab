@@ -4,10 +4,7 @@ import { test, type TestContext } from "node:test";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import type { CoordinationView } from "../../src/standalone/coordination-view.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import {
-  runtimeOperatorRoutes,
-  selectAssignmentExecution,
-} from "../../src/standalone/operator-runtime.js";
+import { selectAssignmentExecution } from "../../src/standalone/operator-runtime.js";
 import type { TurnRequest } from "../../src/standalone/scheduler.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
 import type { RecoveryRecord } from "../../src/standalone/recovery-types.js";
@@ -206,9 +203,6 @@ const normal = (value: unknown) =>
   JSON.parse(
     JSON.stringify(value, (key, v) => (key === "observedAt" ? undefined : v)),
   );
-const page = (body: string) =>
-  body.replace(/name="key" value="[0-9a-f-]{36}"/g, 'name="key" value=""');
-
 /** Every read named by the issue, keyed for comparison; failures are outcomes. */
 async function readAll(
   api: OperatorApi,
@@ -229,12 +223,6 @@ async function readAll(
       out[key] = { failed: (error as { message?: string }).message };
     }
   };
-  const routes = runtimeOperatorRoutes(service),
-    route = (path: string) => {
-      const found = routes.find((r) => r.method === "GET" && r.path === path);
-      assert.ok(found);
-      return found;
-    };
   const tasks = d.taskCatalog();
   await settle("taskList", () => api.readTaskListPage());
   await settle("inbox", () => api.readInbox());
@@ -251,14 +239,6 @@ async function readAll(
       await settle(`recovery:${assignmentId}`, () =>
         api.readAssignmentRecovery(assignmentId),
       );
-      await settle(`page:assignment:${assignmentId}`, async () => {
-        const r = await route("/runtime/assignment/:assignmentId").handler({
-          params: { assignmentId },
-          fields: {},
-          csrfToken: "token",
-        });
-        return r.kind === "html" ? page(r.body) : r;
-      });
     }
   }
   return { out, rows };

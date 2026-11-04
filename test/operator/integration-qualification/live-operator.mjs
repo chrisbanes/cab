@@ -361,22 +361,26 @@ async function run() {
     .locator("[data-execution-status]")
     .getByText("Running", { exact: true })
     .waitFor();
-  // The retained assignment page of the assignment that asked the live question.
-  const callbackAssignmentHref = `/runtime/assignment/${encodeURIComponent(question.requestingAssignmentId)}`;
+  // The app recovery view of the assignment that asked the live question.
+  const callbackAssignmentHref = `/app/assignments/${encodeURIComponent(question.requestingAssignmentId)}/recovery`;
   await page.goto(`${origin}${callbackAssignmentHref}`);
+  await page
+    .getByRole("heading", { name: "Execution and assignment" })
+    .waitFor();
   const callbackAssignmentPage = await page.locator("body").innerText();
-  assert.match(callbackAssignmentPage, /Execution status: Running\./);
+  assert.match(callbackAssignmentPage, /\bRunning\b/);
   evidence.runtimeBeforeStop = {
     taskExecutionRunning: true,
     requestingAssignmentLinked: true,
-    requestingAssignmentRunning: /Execution status: Running\./.test(
-      callbackAssignmentPage,
-    ),
+    requestingAssignmentRunning: /\bRunning\b/.test(callbackAssignmentPage),
   };
   const coordinationQuestion = openOperatorQuestion();
   assert.match(coordinationQuestion.prompt, /S04D_OPERATOR_QUESTION_V1/);
   assert.equal(coordinationQuestion.status, "open");
-  assert.equal((await page.locator('a[href="/runtime"]').count()) > 0, true);
+  assert.equal(
+    (await page.locator('a[href="/app/settings/runtime"]').count()) > 0,
+    true,
+  );
 
   progress("best-effort-stop-through-operator");
   // The task header's Stop… confirms, then sends `task.stop` through the JSON command API.
