@@ -46,6 +46,17 @@ import {
 } from "../operator/diagnostic-retention.js";
 import { CliError, connectionNameSchema } from "./connections.js";
 import {
+  checkPrivateDirectory,
+  LocalAccessError,
+} from "../operator/local-access.js";
+import {
+  readNetworkSettings,
+  validateNetworkSettings,
+  writeNetworkSettings,
+  updateNetworkSettingsForInstall,
+  type OperatorNetworkSettings,
+} from "../operator/network-access.js";
+import {
   type Configuration,
   defaultInstallationRecord,
   type InstallRecord,
@@ -54,6 +65,7 @@ import {
   STATE_DIR,
   RECORD_SCHEMA,
   recordSchema,
+  readInstallationRecord,
 } from "./installation-record.js";
 import {
   type DaemonFacts,
@@ -73,7 +85,8 @@ import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
-const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--access local|token] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
+const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--access local|token] [--token-file PATH] [--no-open] [--lan-ip IPV4|off] [--lan-origin ORIGIN] [SERVICE_OPTIONS]
+  service configure [--lan-ip IPV4|off] [--lan-origin ORIGIN] [--state-dir DIR] [--label LABEL]
   service upgrade [VERSION_DIR] [--node PATH] [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
@@ -92,6 +105,12 @@ SERVICE_OPTIONS:
   --port PORT              loopback port for install, default 8787
   --diagnostic-retention-days N|default  diagnostic retention (1-365, service default 30)
   --diagnostic-storage-mib N|default     diagnostic storage cap (16-1048576, service default 1024)
+
+configure shows desired network settings without contacting the service. Set or clear
+LAN access with --lan-ip IPV4 or --lan-ip off; --lan-origin requires an enabled IP.
+Changes require a service restart. LAN HTTP sends passwords, cookies and tokens
+without TLS; port 80 is not supported. See the macOS operations guide for restart
+and recovery. install accepts the same LAN options and retains settings when omitted.
 
 The diagnostic options (install and upgrade) are written into the LaunchAgent;
 upgrade keeps the recorded values unless an option changes them, and default
@@ -136,7 +155,13 @@ export const SERVICE_USAGE = `Local service commands (run on the service's Mac):
 ${SERVICE_COMMANDS}${SNAPSHOT_COMMANDS}${SERVICE_NOTES}`;
 
 type LocalArea = "service" | "snapshot";
-const LIFECYCLE_COMMANDS = ["install", "upgrade", "uninstall", "init-auth"];
+const LIFECYCLE_COMMANDS = [
+  "install",
+  "upgrade",
+  "uninstall",
+  "init-auth",
+  "configure",
+];
 
 /**
  * The area whose help `argv` asks for: `service --help`, `service
@@ -276,6 +301,7 @@ export type FirstRun = {
   open: boolean;
   /** Defaults to the LaunchAgent. */
   mode?: ServiceMode | undefined;
+  lan?: OperatorNetworkSettings["lan"] | undefined;
 };
 
 export type ServiceOptions = {
@@ -888,6 +914,7 @@ class Service {
     daemon = false,
     /** The bound Node.js of an npm release; a tarball release runs its bundled one. */
     nodePath = join(root, "node", "bin", "node"),
+    onActivation?: () => void,
   ): Promise<{ record: InstallRecord; logs: string[] }> {
     const { label, logDir, diagnostic } = this.options;
     const resolved = (override: number | null | undefined, kept?: number) =>
@@ -940,6 +967,7 @@ class Service {
         plistSha256: sha256(staged),
         configuration,
       };
+      onActivation?.();
       this.writeRecord(record);
       this.host.rename(staged, destination);
       return { record, logs };
@@ -1329,6 +1357,30 @@ function portIsFree(port: number): Promise<boolean> {
 
 const message = (error: unknown) =>
   error instanceof ServiceFailure ? error.message : "operation failed";
+const networkError = (error: unknown) => {
+  if (
+    error instanceof Error &&
+    error.message.includes("persistence is uncertain")
+  )
+    return "Operator network settings persistence is uncertain; inspect saved settings before retrying";
+  if (error instanceof CliError) return error.message;
+  if (
+    error instanceof LocalAccessError ||
+    (error instanceof Error &&
+      error.message === "Unsafe operator network settings")
+  )
+    return "Network settings require a safe owner-only state directory and regular file";
+  if (error instanceof SyntaxError || error instanceof z.ZodError)
+    return "Saved network settings are malformed; use --lan-ip off to recover a safely owned file";
+  if (
+    error instanceof Error &&
+    /^(Invalid operator network (address|origin|port)|LAN access does not support port 80; use another service port)$/.test(
+      error.message,
+    )
+  )
+    return error.message;
+  return message(error);
+};
 /** A CLI connection failure: its own message (never a secret) names the mode-specific remedy. */
 const connectionMessage = (error: unknown) =>
   error instanceof CliError ? error.message : message(error);
@@ -1497,11 +1549,25 @@ export async function installService(
 ): Promise<number> {
   const refused = await refusedAsRoot(host, io, "install");
   if (refused !== null) return refused;
+  if (first.lan !== undefined) {
+    try {
+      validateNetworkSettings(
+        { schema: "cab.operator-network/v1", lan: first.lan },
+        options.port,
+      );
+    } catch (error) {
+      io.stderr.write(
+        `${JSON.stringify({ ok: false, operation: "install", stage: "preflight", error: networkError(error), jobStopped: null })}\n`,
+      );
+      return 1;
+    }
+  }
   // A first install has no state directory yet; create it so the lock below covers it.
   try {
     if (
-      first.tarball &&
-      statSync(first.tarball, { throwIfNoEntry: false })?.isFile()
+      (first.tarball &&
+        statSync(first.tarball, { throwIfNoEntry: false })?.isFile()) ||
+      (!first.tarball && new Service(options, host, io).npmPackage(releaseRoot))
     )
       mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
   } catch {
@@ -1512,7 +1578,7 @@ export async function installService(
   );
 }
 
-const NO_JOB_STAGES = ["preflight", "unpack", "auth"];
+const NO_JOB_STAGES = ["preflight", "unpack", "auth", "network"];
 
 async function installServiceLocked(
   options: ServiceOptions,
@@ -1527,7 +1593,16 @@ async function installServiceLocked(
   let stage = "preflight";
   let record: InstallRecord | null = null;
   let logs: string[] = [];
+  let rollbackNetwork: (() => Promise<void>) | undefined;
+  let activationAttempted = false;
   try {
+    const network =
+      first.lan === undefined
+        ? undefined
+        : validateNetworkSettings(
+            { schema: "cab.operator-network/v1", lan: first.lan },
+            options.port,
+          );
     let root = releaseRoot;
     const found = tarball ? undefined : service.source(root);
     let version = found?.version;
@@ -1577,6 +1652,17 @@ async function installServiceLocked(
         `${options.label} is already present in ${daemon ? "agent" : "daemon"} mode; run \`cab service uninstall\` first (a daemon prints sudo steps to finish), then install in ${daemon ? "daemon" : "agent"} mode. Nothing was changed`,
       );
     if (daemon && service.recordMode() === "daemon") {
+      if (network) {
+        const installed = await readInstallationRecord(service.recordPath);
+        const current = await readNetworkSettings(
+          installed.dataDirectory,
+          Number(new URL(installed.origin).port),
+        );
+        if (JSON.stringify(current) !== JSON.stringify(network))
+          throw refuse(
+            "LAN settings differ from the installed settings; use service configure and restart",
+          );
+      }
       if (tarball)
         throw refuse(
           `${options.label} is already installed as a daemon; verify it with the install command and no TARBALL, or run \`cab service uninstall\` before installing another release`,
@@ -1644,6 +1730,15 @@ async function installServiceLocked(
     service.checkInterrupt();
     stage = "render";
     service.prepareDirectories(daemon);
+    if (network) {
+      stage = "network";
+      rollbackNetwork = await updateNetworkSettingsForInstall(
+        service.dataDir,
+        options.port,
+        network,
+      );
+    }
+    stage = "render";
     ({ record, logs } = await service.activate(
       version as string,
       root,
@@ -1655,6 +1750,9 @@ async function installServiceLocked(
       },
       daemon,
       nodePath,
+      () => {
+        activationAttempted = true;
+      },
     ));
     if (daemon) {
       // Nothing reaches launchd: the operator runs the printed steps with sudo.
@@ -1713,6 +1811,15 @@ async function installServiceLocked(
     await finishInstall(service, first, signInResult);
     return 0;
   } catch (error) {
+    let networkRollbackError: string | undefined;
+    if (rollbackNetwork && !activationAttempted) {
+      try {
+        await rollbackNetwork();
+      } catch {
+        networkRollbackError =
+          "Network settings rollback failed; inspect the saved settings before retrying";
+      }
+    }
     let jobStopped: boolean | null = null;
     if (daemon) {
       // No job was touched. A render that failed after the record was written removes the
@@ -1735,7 +1842,12 @@ async function installServiceLocked(
       ok: false,
       operation: "install",
       stage,
-      error: message(error),
+      error:
+        first.lan !== undefined &&
+        (stage === "preflight" || stage === "network")
+          ? networkError(error)
+          : message(error),
+      ...(networkRollbackError ? { networkRollbackError } : {}),
       jobStopped,
       logs,
     });
@@ -2627,6 +2739,8 @@ export const LIFECYCLE_OPTIONS = {
   "diagnostic-storage-mib": { type: "string" },
   mode: { type: "string" },
   node: { type: "string" },
+  "lan-ip": { type: "string" },
+  "lan-origin": { type: "string" },
 } as const;
 
 /**
@@ -2654,6 +2768,8 @@ export const VERIFY_OPTIONS: Record<
   node: "irrelevant",
   "diagnostic-retention-days": "irrelevant",
   "diagnostic-storage-mib": "irrelevant",
+  "lan-ip": "irrelevant",
+  "lan-origin": "irrelevant",
 };
 
 /**
@@ -2728,7 +2844,11 @@ export function lifecycleOptions(
   const { values, positionals } = parsed;
   const home = env.HOME && isAbsolute(env.HOME) ? env.HOME : undefined;
   const directory = (value: string | undefined, fallback: string) =>
-    value !== undefined ? resolve(value) : home && join(home, fallback);
+    value !== undefined
+      ? value
+        ? resolve(value)
+        : undefined
+      : home && join(home, fallback);
   const stateDir = directory(values["state-dir"], STATE_DIR);
   const logDir = directory(values["log-dir"], "Library/Logs/cab");
   const agentsDir = directory(
@@ -2784,12 +2904,121 @@ export function lifecycleOptions(
     noOpen: values["no-open"] === true,
     mode: mode as ServiceMode,
     modeGiven: values.mode !== undefined,
+    lanIp: values["lan-ip"],
+    lanOrigin: values["lan-origin"],
   };
 }
 
 /** dist/src/cli/service.js → the root of the release or package it belongs to. */
 const releaseRoot = () =>
   resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+
+async function configureService(
+  args: string[],
+  deps: CliDeps,
+  host: ServiceHost,
+): Promise<number> {
+  let values: {
+    "state-dir"?: string;
+    label?: string;
+    "lan-ip"?: string;
+    "lan-origin"?: string;
+  };
+  try {
+    const parsed = parseArgs({
+      args,
+      allowPositionals: false,
+      strict: true,
+      options: {
+        "state-dir": { type: "string" },
+        label: { type: "string" },
+        "lan-ip": { type: "string" },
+        "lan-origin": { type: "string" },
+      },
+    });
+    values = parsed.values;
+  } catch {
+    return usage(deps, "service");
+  }
+  const home =
+    deps.env.HOME && isAbsolute(deps.env.HOME) ? deps.env.HOME : undefined;
+  const stateDir =
+    values["state-dir"] !== undefined
+      ? resolve(values["state-dir"])
+      : home && join(home, STATE_DIR);
+  const label = values.label ?? "local.cab.service";
+  const ip = values["lan-ip"];
+  const origin = values["lan-origin"];
+  if (
+    !stateDir ||
+    values["state-dir"] === "" ||
+    !LABEL.test(label) ||
+    ip === "" ||
+    origin === "" ||
+    (origin !== undefined && (ip === undefined || ip === "off"))
+  )
+    return usage(deps, "service");
+  const recordPath = installationRecordPath(stateDir, label);
+  const fail = (error: unknown) => {
+    deps.stderr.write(
+      `${JSON.stringify({ ok: false, operation: "configure", error: networkError(error) })}\n`,
+    );
+    return 1;
+  };
+  try {
+    const record = await readInstallationRecord(recordPath);
+    const port = Number(new URL(record.origin).port);
+    const settings =
+      ip === undefined
+        ? undefined
+        : validateNetworkSettings(
+            {
+              schema: "cab.operator-network/v1",
+              lan:
+                ip === "off"
+                  ? null
+                  : {
+                      address: ip,
+                      ...(origin === undefined ? {} : { origin }),
+                    },
+            },
+            port,
+          );
+    if (settings) await checkPrivateDirectory(stateDir, process.getuid?.());
+    const options: ServiceOptions = {
+      stateDir,
+      label,
+      port,
+      logDir: stateDir,
+      agentsDir: stateDir,
+      daemonsDir: stateDir,
+    };
+    return await withLock(options, host, deps, "configure", async () => {
+      try {
+        const current = await readInstallationRecord(recordPath);
+        if (
+          current.dataDirectory !== record.dataDirectory ||
+          current.origin !== record.origin
+        )
+          throw refuse(
+            "The installation record changed; inspect it before retrying",
+          );
+        const saved =
+          settings === undefined
+            ? await readNetworkSettings(current.dataDirectory, port)
+            : await writeNetworkSettings(current.dataDirectory, port, settings);
+        deps.stdout.write(
+          `${JSON.stringify({ ok: true, operation: "configure", settings: saved, restartRequired: true })}\n`,
+        );
+        return 0;
+      } catch (error) {
+        return fail(error);
+      }
+    });
+  } catch (error) {
+    return fail(error);
+  }
+}
 
 /** `cab service …`: argv starts after `service`. */
 export async function serviceCommand(
@@ -2805,6 +3034,7 @@ export async function serviceCommand(
 ): Promise<number> {
   const [command, ...args] = argv;
   if (command === "init-auth") return initAuth(args, deps, host);
+  if (command === "configure") return configureService(args, deps, host());
   if (
     command === "install" ||
     command === "upgrade" ||
@@ -2825,6 +3055,13 @@ export async function serviceCommand(
           parsed.access !== undefined ||
           parsed.noOpen ||
           parsed.modeGiven)) ||
+      (command !== "install" &&
+        (parsed.lanIp !== undefined || parsed.lanOrigin !== undefined)) ||
+      (parsed.lanOrigin !== undefined &&
+        (parsed.lanIp === undefined ||
+          parsed.lanIp === "off" ||
+          parsed.lanOrigin === "")) ||
+      parsed.lanIp === "" ||
       (parsed.access !== undefined &&
         parsed.access !== "local" &&
         parsed.access !== "token") ||
@@ -2856,6 +3093,19 @@ export async function serviceCommand(
         tokenFile: parsed.tokenFile && resolve(parsed.tokenFile),
         open: !parsed.noOpen,
         mode: parsed.mode,
+        ...(parsed.lanIp === undefined
+          ? {}
+          : {
+              lan:
+                parsed.lanIp === "off"
+                  ? null
+                  : {
+                      address: parsed.lanIp,
+                      ...(parsed.lanOrigin === undefined
+                        ? {}
+                        : { origin: parsed.lanOrigin }),
+                    },
+            }),
       });
     if (command === "uninstall")
       return uninstallService(options, serviceHost, deps);
@@ -2902,7 +3152,13 @@ async function initAuth(
   host: () => ServiceHost,
 ): Promise<number> {
   const parsed = parseLifecycleArgs(args);
-  if (!parsed || parsed.positionals.length > 1 || parsed.values.mode)
+  if (
+    !parsed ||
+    parsed.positionals.length > 1 ||
+    parsed.values.mode ||
+    parsed.values["lan-ip"] !== undefined ||
+    parsed.values["lan-origin"] !== undefined
+  )
     return usage(deps, "service");
   const home = deps.env.HOME;
   const stateDir =

@@ -88,7 +88,9 @@ function safeFile(stat: Stats, uid: number | undefined) {
   );
 }
 
-async function readSafe(path: string): Promise<string | undefined> {
+type SafeFile = { bytes: Buffer; stat: Stats };
+
+async function readSafe(path: string): Promise<SafeFile | undefined> {
   const before = await existing(path);
   if (!before) return undefined;
   const uid = process.getuid?.();
@@ -123,12 +125,12 @@ async function readSafe(path: string): Promise<string | undefined> {
       length += result.bytesRead;
     }
     if (length > 4096) throw new Error("Unsafe operator network settings");
-    const text = bytes.subarray(0, length).toString("utf8");
+    const contents = Buffer.from(bytes.subarray(0, length));
     await checkPrivateDirectory(dir, uid);
     const after = await lstat(path);
     const dirAfter = await lstat(dir);
     if (
-      Buffer.byteLength(text) > 4096 ||
+      contents.length > 4096 ||
       !safeFile(after, uid) ||
       after.ino !== stat.ino ||
       after.dev !== stat.dev ||
@@ -137,7 +139,7 @@ async function readSafe(path: string): Promise<string | undefined> {
       (await realpath(dir)) !== canonical
     )
       throw new Error("Unsafe operator network settings");
-    return text;
+    return { bytes: contents, stat };
   } finally {
     await file.close();
   }
@@ -147,26 +149,32 @@ export async function readNetworkSettings(
   dataDir: string,
   port: number,
 ): Promise<OperatorNetworkSettings> {
-  const text = await readSafe(networkSettingsPath(dataDir));
-  return text === undefined
+  const file = await readSafe(networkSettingsPath(dataDir));
+  return file === undefined
     ? { schema: "cab.operator-network/v1", lan: null }
-    : validateNetworkSettings(JSON.parse(text), port);
+    : validateNetworkSettings(JSON.parse(file.bytes.toString("utf8")), port);
 }
 
-export async function writeNetworkSettings(
-  dataDir: string,
-  port: number,
-  value: unknown,
-): Promise<OperatorNetworkSettings> {
-  const settings = validateNetworkSettings(value, port);
-  const path = networkSettingsPath(dataDir);
+function sameFile(
+  left: SafeFile | undefined,
+  right: SafeFile | undefined,
+): boolean {
+  return left === undefined
+    ? right === undefined
+    : right !== undefined &&
+        left.stat.ino === right.stat.ino &&
+        left.stat.dev === right.stat.dev &&
+        left.bytes.equals(right.bytes);
+}
+
+async function replaceSettings(
+  path: string,
+  bytes: Buffer,
+  prior: SafeFile | undefined,
+): Promise<SafeFile> {
   const dir = dirname(path);
   await checkPrivateDirectory(dir, process.getuid?.());
   const initialDirectory = await lstat(dir);
-  const initialFile = await existing(path);
-  const prior = await readSafe(path);
-  if (prior !== undefined && settings.lan !== null)
-    validateNetworkSettings(JSON.parse(prior), port);
   const temporary = join(
     dir,
     `.${basename(path)}.${randomBytes(16).toString("hex")}.tmp`,
@@ -175,18 +183,16 @@ export async function writeNetworkSettings(
   const file = await open(temporary, "wx", 0o600);
   try {
     await file.chmod(0o600);
-    await file.writeFile(`${JSON.stringify(settings)}\n`);
+    await file.writeFile(bytes);
     await file.sync();
     await file.close();
     await checkPrivateDirectory(dir, process.getuid?.());
-    await readSafe(path);
+    const current = await readSafe(path);
     const currentDirectory = await lstat(dir);
-    const currentFile = await existing(path);
     if (
       currentDirectory.ino !== initialDirectory.ino ||
       currentDirectory.dev !== initialDirectory.dev ||
-      currentFile?.ino !== initialFile?.ino ||
-      currentFile?.dev !== initialFile?.dev
+      !sameFile(current, prior)
     )
       throw new Error("Operator network settings path changed");
     await rename(temporary, path);
@@ -197,9 +203,8 @@ export async function writeNetworkSettings(
     } finally {
       await directory.close();
     }
-    const result = await readNetworkSettings(dataDir, port);
-    if (JSON.stringify(result) !== JSON.stringify(settings))
-      throw new Error("Readback mismatch");
+    const result = await readSafe(path);
+    if (!result?.bytes.equals(bytes)) throw new Error("Readback mismatch");
     return result;
   } catch (error) {
     if (renamed)
@@ -212,4 +217,64 @@ export async function writeNetworkSettings(
     await file.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);
   }
+}
+
+export async function writeNetworkSettings(
+  dataDir: string,
+  port: number,
+  value: unknown,
+): Promise<OperatorNetworkSettings> {
+  const settings = validateNetworkSettings(value, port);
+  const path = networkSettingsPath(dataDir);
+  await checkPrivateDirectory(dirname(path), process.getuid?.());
+  const prior = await readSafe(path);
+  if (prior && settings.lan !== null)
+    validateNetworkSettings(JSON.parse(prior.bytes.toString("utf8")), port);
+  await replaceSettings(
+    path,
+    Buffer.from(`${JSON.stringify(settings)}\n`),
+    prior,
+  );
+  return settings;
+}
+
+/** Retains exactly what this install replaced; rollback refuses a changed path or contents. */
+export async function updateNetworkSettingsForInstall(
+  dataDir: string,
+  port: number,
+  value: unknown,
+): Promise<() => Promise<void>> {
+  const settings = validateNetworkSettings(value, port);
+  const path = networkSettingsPath(dataDir);
+  const dir = dirname(path);
+  await checkPrivateDirectory(dir, process.getuid?.());
+  const prior = await readSafe(path);
+  if (prior && settings.lan !== null)
+    validateNetworkSettings(JSON.parse(prior.bytes.toString("utf8")), port);
+  const written = await replaceSettings(
+    path,
+    Buffer.from(`${JSON.stringify(settings)}\n`),
+    prior,
+  );
+  return async () => {
+    await checkPrivateDirectory(dir, process.getuid?.());
+    if (!sameFile(await readSafe(path), written))
+      throw new Error("Operator network settings changed; rollback refused");
+    if (prior) {
+      await replaceSettings(path, prior.bytes, written);
+    } else {
+      await unlink(path);
+      const directory = await open(dir, constants.O_RDONLY);
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+      await checkPrivateDirectory(dir, process.getuid?.());
+      if (await existing(path))
+        throw new Error(
+          "Operator network settings removal could not be verified",
+        );
+    }
+  };
 }

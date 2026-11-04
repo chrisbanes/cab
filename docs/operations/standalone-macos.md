@@ -24,6 +24,7 @@ npm package under the state directory. The defaults are:
 | --- | --- |
 | State (`STATE`) | `~/Library/Application Support/cab` |
 | Data | `STATE/data` |
+| Operator network settings | `STATE/data.operator-network.json` |
 | Operator auth | `STATE/auth/operator-auth.json` |
 | Notification key | `STATE/auth/operator-push-vapid.json` |
 | Snapshots | `STATE/snapshots` |
@@ -46,6 +47,54 @@ install-record and log directories are created with mode `0700` and must stay
 private. The state directory may already hold unrelated files, such as the
 earlier pipeline implementation's `config.yaml` and `state/`; the commands read
 and change only the entries above.
+
+### Optional LAN access
+
+The operator remains on `127.0.0.1` unless you explicitly configure one IPv4
+address. LAN HTTP sends the operator password, session cookies and bearer tokens
+without TLS. Only enable it on a network you trust. Browser notifications are
+unavailable at this insecure origin. Port 80 is not supported.
+
+```sh
+cab service configure --lan-ip 192.168.1.20
+cab service configure --lan-ip 192.168.1.20 --lan-origin http://cab.example.test:8787
+cab service configure
+cab service configure --lan-ip off
+```
+
+Replace the example IP and hostname with the address actually assigned to this Mac
+and the desired hostname. `--lan-origin` is optional, must use HTTP and the installed
+port, and requires an explicit enabled IP. Without it, the IP and port form the
+origin. Changing the IP without an origin resets the previous hostname. Install also
+accepts these options; omitting them keeps saved settings. `--state-dir` and `--label`
+select a non-default installation. Configure reads the protected installation record
+and settings without contacting the service, credentials, Keychain or launchd. Its
+output reports saved desired settings and `restartRequired: true`; it does not report
+what the running job has applied.
+
+Settings are in `STATE/data.operator-network.json`, beside the data directory, in a
+same-user private file. The state directory must be owned by the service account and
+mode `0700` for this file. Settings survive upgrade, uninstall and reinstall, and are
+outside database snapshots. A securely owned malformed file can be replaced with
+`--lan-ip off`; unsafe ownership, permissions or substituted paths are refused. If a
+write reports uncertain persistence, run `cab service configure` to inspect the saved
+settings before retrying.
+
+Changes take effect after restarting the exact job. For the default label:
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/local.cab.service"
+# LaunchDaemon only:
+sudo launchctl kickstart -k system/local.cab.service
+```
+
+Use the selected label in place of `local.cab.service`. If the configured address is
+missing, startup fails rather than falling back to another interface. Run configure
+with `--lan-ip off` or the corrected address while the service is down, then restart.
+A DHCP address can change; for a daemon with `KeepAlive=false`, an address missing at
+boot needs a later explicit restart after correction. An HTTPS proxy Host that matches
+the numeric loopback Host is ambiguous when LAN is enabled; use a distinct proxy Host
+or disable LAN access. See the [operator boundary](../design/s04c-operator-ui.md).
 
 ### Install
 
