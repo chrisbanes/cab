@@ -204,7 +204,14 @@ export async function main(
       );
       if (await consumeFatalFailure()) return;
       const authFile = process.env.CAB_OPERATOR_AUTH_FILE ?? "";
-      const api = new OperatorApi(service, [dataDir, authFile]);
+      const api = new OperatorApi(
+        service,
+        [dataDir, authFile],
+        undefined,
+        undefined,
+        undefined,
+        () => readiness.read(),
+      );
       routes.registerSlot("runtime", runtimeOperatorRoutes(service, api));
       const readiness = serviceReadiness(service, api, { dataDir, authFile });
       // The VAPID key sits beside the operator auth file; an unusable one only turns push off.

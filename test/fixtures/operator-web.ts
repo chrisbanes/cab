@@ -1,3 +1,4 @@
+import type { ReadinessResult } from "../../src/operator/readiness.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
@@ -160,6 +161,7 @@ export interface OperatorFixture<R extends Runtime> {
     controlPaths?: readonly string[],
     setup?: OperatorSetupSeams,
     push?: FixturePushOptions,
+    readReadiness?: () => Promise<ReadinessResult>,
   ): Promise<{
     origin: string;
     password: string;
@@ -426,6 +428,7 @@ export async function createOperatorFixture<
       controlPaths: readonly string[] = [directory],
       setup?: OperatorSetupSeams,
       pushOptions?: FixturePushOptions,
+      readReadiness?: () => Promise<ReadinessResult>,
     ) {
       const id = ++listenerSequence;
       const owned: OwnedWeb = {
@@ -507,7 +510,12 @@ export async function createOperatorFixture<
             glabExecutable:
               setup?.glabExecutable ?? join(directory, "no-glab", "glab"),
           },
+          () => (readReadiness ? readReadiness() : readiness.read()),
         );
+        const readiness = serviceReadiness(service, api, {
+          dataDir: join(directory, "data"),
+          authFile,
+        });
         // Like the operator command, every listener has push; ticks are manual unless asked.
         const push = await OperatorPush.open({
           intervalMs: null,
@@ -530,14 +538,10 @@ export async function createOperatorFixture<
             routes,
             credentials: service.operatorCredentials(),
             push,
-            web: new OperatorWebBoundary(
-              bundle,
-              api,
-              serviceReadiness(service, api, {
-                dataDir: join(directory, "data"),
-                authFile,
-              }),
-            ),
+            web: new OperatorWebBoundary(bundle, api, {
+              read: () => (readReadiness ? readReadiness() : readiness.read()),
+              claudeToken: () => readiness.claudeToken(),
+            }),
           },
         );
         owned.http = http;
