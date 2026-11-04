@@ -457,7 +457,7 @@ for (const engine of [
             .evaluate((element) => element === document.activeElement)
         )
           break;
-        await page.keyboard.press("Tab");
+        await page.keyboard.press(engine.name === "webkit" ? "Alt+Tab" : "Tab");
       }
       assert.equal(
         await facts
@@ -466,7 +466,17 @@ for (const engine of [
         true,
       );
       assert.deepEqual(commands, []);
-      await facts.locator("summary").click();
+      await Promise.all([
+        facts.evaluate(
+          (element) =>
+            new Promise<void>((resolve) =>
+              element.addEventListener("toggle", () => resolve(), {
+                once: true,
+              }),
+            ),
+        ),
+        facts.locator(":scope > summary").click(),
+      ]);
       await page.goBack();
       await inspect.waitFor();
       await page.goForward();

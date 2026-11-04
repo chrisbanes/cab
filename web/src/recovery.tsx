@@ -999,8 +999,9 @@ export function AssignmentRecovery(
         <>
           <p className="settings-status body muted">
             <StatusBadge tone={status?.held ? "warning" : "idle"}>
-              {status?.label}
+              {status?.held ? "Execution held" : status?.label}
             </StatusBadge>{" "}
+            {status?.held && <>{status.label} · </>}
             {data.assignment.name ?? "Profile name unavailable"} in{" "}
             {data.project.name ?? "Project name unavailable"} · Project{" "}
             {data.project.paused ? "paused" : "enabled"}
