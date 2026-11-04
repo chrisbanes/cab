@@ -6,6 +6,8 @@ import {
   evidenceNotice,
   executionHoldLines,
   executionStatus,
+  recoveryAssignmentFacts,
+  recoveryTaskFacts,
   recordLine,
   staleRevisions,
 } from "../../web/src/task-execution-model.js";
@@ -206,4 +208,51 @@ test("a never-started assignment has nothing to apply: its first turn takes the 
   assert.deepEqual(staleRevisions({ ...row, started: false }), []);
   assert.equal(staleRevisions({ ...row, started: true }).length, 2);
   assert.equal(staleRevisions(row).length, 2);
+});
+
+test("recovery presents lifecycle, destination and revisions without implying admission", () => {
+  const row = {
+    state: "pending",
+    resultDestination: null,
+    instructionsRevision: 1,
+    currentInstructionsRevision: 2,
+    profileRevision: 1,
+    currentProfileRevision: 2,
+    started: true,
+  } as TaskRead["data"]["assignments"][number];
+  const stale = recoveryAssignmentFacts(row);
+  assert.match(stale.lifecycle, /pending.*does not confirm admission/);
+  assert.equal(stale.destination, "Unavailable");
+  assert.match(stale.revisions, /instructions 1 → 2.*profile 1 → 2.*next turn/);
+  assert.equal(stale.canInspectApply, true);
+  const current = recoveryAssignmentFacts({
+    ...row,
+    resultDestination: "Lead",
+    currentInstructionsRevision: 1,
+    currentProfileRevision: 1,
+  });
+  assert.equal(current.destination, "Lead");
+  assert.equal(current.revisions, "Captured revisions are current.");
+  assert.equal(current.canInspectApply, false);
+  const first = recoveryAssignmentFacts({ ...row, started: false });
+  assert.match(first.revisions, /first turn takes current revisions/);
+  assert.equal(first.canInspectApply, false);
+  const unknown = recoveryAssignmentFacts({ ...row, started: undefined });
+  assert.match(unknown.revisions, /started is unavailable/);
+  assert.equal(unknown.canInspectApply, false);
+});
+
+test("recovery distinguishes absent and withheld lead and task hold facts", () => {
+  assert.deepEqual(recoveryTaskFacts(null, null), {
+    lead: "No project lead is configured",
+    taskHold: null,
+  });
+  assert.deepEqual(
+    recoveryTaskFacts({ profileId: "lead", name: null }, { reason: null }),
+    { lead: "Name unavailable", taskHold: "Reason unavailable" },
+  );
+  assert.deepEqual(
+    recoveryTaskFacts({ profileId: "lead", name: "Lead" }, { reason: "Review" }),
+    { lead: "Lead", taskHold: "Review" },
+  );
 });

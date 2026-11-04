@@ -559,6 +559,23 @@ export function TaskWorkspace({
       loader,
     ),
     data = resource.state.data?.data;
+  const inspectedAssignment = params.get("inspectAssignment");
+  // Open an exact row only after the task read confirms it belongs to this task.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each linked row opens once; later disclosure choices belong to the operator.
+  useLayoutEffect(() => {
+    if (!data || !inspectedAssignment) return;
+    const marker = `link:inspect:${inspectedAssignment}`;
+    if (
+      state.expanded.has(marker) ||
+      !data.assignments.some((a) => a.assignmentId === inspectedAssignment)
+    )
+      return;
+    state.expanded.add(marker);
+    state.expanded.add(`c:facts:${inspectedAssignment}`);
+    state.overview.add("assignments");
+    state.inspectorOpen = true;
+    changed();
+  }, [data, inspectedAssignment, state]);
   const publishWork = data?.publication
     ? hasPublishWork(data.publication)
     : false;
@@ -2762,6 +2779,14 @@ export function TaskWorkspace({
                     </h3>
                     <span className="metadata muted">{assignmentsSummary}</span>
                   </summary>
+                  {params.has("inspectAssignment") &&
+                    !data.assignments.some(
+                      (a) => a.assignmentId === inspectedAssignment,
+                    ) && (
+                      <p role="status" className="body">
+                        The linked assignment is unavailable in this task.
+                      </p>
+                    )}
                   <AssignmentRows
                     assignments={data.assignments}
                     facts={assignmentFacts}

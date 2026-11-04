@@ -167,6 +167,11 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     holdPills(read.data.holds).map((h) => `${h.label}${h.value}`),
   );
   await page.getByText("Versions and generation in use").waitFor();
+  await page.getByRole("heading", { name: "Execution and assignment" }).waitFor();
+  await page.getByText(/This does not confirm admission/).waitFor();
+  await page.getByText(/Effects may continue while an execution is stopping/).waitFor();
+  await page.getByText(/they do not prove that a process has terminated/).waitFor();
+  await page.getByText(/through the CLI recovery-options read/).waitFor();
   assert.doesNotMatch(
     await page.locator("main").innerText(),
     /admitted generation|instruction revision|profile revision/,
