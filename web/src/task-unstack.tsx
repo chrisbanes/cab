@@ -360,8 +360,9 @@ export function TaskUnstack({
           )}
           {writeReadOnly && (
             <p>
-              {view?.readOnly ? "This project is archived. Reads and original receipt checks remain available." :
-                "This project's current write authority is unavailable. Reads and original receipt checks remain available."}
+              {view?.readOnly
+                ? "This project is archived. Reads and original receipt checks remain available."
+                : "This project's current write authority is unavailable. Reads and original receipt checks remain available."}
             </p>
           )}
           {(active.uncertain ||

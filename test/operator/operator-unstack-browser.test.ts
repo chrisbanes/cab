@@ -59,8 +59,9 @@ for (const engine of ["chromium", "webkit"] as const) {
           revision: 2,
           reason: "readback-required",
         });
-        await page.route(`**/api/operator/tasks/${taskId}`, async route => {
-          const response = await route.fetch(), body = await response.json();
+        await page.route(`**/api/operator/tasks/${taskId}`, async (route) => {
+          const response = await route.fetch(),
+            body = await response.json();
           if (parentUnknown) delete body.data.project;
           await route.fulfill({ response, json: body });
         });
@@ -138,12 +139,21 @@ for (const engine of ["chromium", "webkit"] as const) {
         );
         parentUnknown = true;
         await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
-        await page.getByText(/current write authority is unavailable/).waitFor();
-        assert.equal(await page.getByRole("button", { name: "Confirm Unstack", exact: true }).count(), 0);
+        await page
+          .getByText(/current write authority is unavailable/)
+          .waitFor();
+        assert.equal(
+          await page
+            .getByRole("button", { name: "Confirm Unstack", exact: true })
+            .count(),
+          0,
+        );
         assert.equal(posts, 0);
         parentUnknown = false;
         await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
-        await page.getByRole("button", { name: "Confirm Unstack", exact: true }).waitFor();
+        await page
+          .getByRole("button", { name: "Confirm Unstack", exact: true })
+          .waitFor();
         hidden = true;
         await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
         await page.waitForFunction(
