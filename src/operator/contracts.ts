@@ -1107,8 +1107,36 @@ export const taskSourceSummarySchema = z
   })
   .strict()
   .nullable();
+/** Recorded identities only; absence of a membership observation is distinct from no stack. */
+export const stackDeliveryFactsSchema = z
+  .object({
+    blockerPr: z
+      .object({
+        repositoryId: z.string().min(1).max(512),
+        nodeId: z.string().min(1).max(512),
+        number: z.number().int().positive(),
+      })
+      .strict()
+      .nullable(),
+    membership: z
+      .object({
+        id: z.number().int().positive(),
+        number: z.number().int().positive(),
+        position: z.number().int().positive(),
+        size: z.number().int().positive(),
+      })
+      .strict()
+      .refine((value) => value.position <= value.size)
+      .nullable(),
+    membershipKnown: z.boolean(),
+    reason: z.string().max(500).nullable(),
+  })
+  .strict();
+export type StackDeliveryFacts = z.infer<typeof stackDeliveryFactsSchema>;
+
 export const taskListSummarySchema = z
   .object({
+    stackDelivery: stackDeliveryFactsSchema.nullable().optional(),
     id: uuid,
     projectId: uuid,
     title: safeText,
@@ -1892,6 +1920,7 @@ export const taskSchema = envelope(
         })
         .strict(),
       /** Whether the task stacks on its single blocker (ADR-1023); optional so older services still parse. */
+      stackDelivery: stackDeliveryFactsSchema.nullable().optional(),
       stack: z
         .object({
           state: z.enum(["stacked", "waiting"]),

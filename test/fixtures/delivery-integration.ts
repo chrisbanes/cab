@@ -442,6 +442,7 @@ export function scriptedDeliveryProvider() {
           title: "Release PR",
           body: "Closes #1",
           merged: state.merged,
+          stack: null,
           draft: false,
           head: { sha: state.head, ref: "cb/change", repo: { node_id: "R1" } },
           base: {
@@ -1063,4 +1064,198 @@ export async function publicationWorld(
     return { interactionId: interaction.interactionId, expectedRevision: 2 };
   };
   return { f, commit, push, createPr, action, recover, approve };
+}
+
+/** Closed HTTP dispatcher for the two effects of a stacked create; never reaches GitHub. */
+export function scriptedStackDeliveryProvider(
+  headRef: string,
+  headSha: string,
+) {
+  const blockerSha = "b".repeat(40);
+  const state = {
+    prWrites: 0,
+    stackWrites: 0,
+    requests: [] as Array<{ route: string; version: string | null }>,
+    stackBodies: [] as unknown[],
+    created: null as null | {
+      title: string;
+      body: string;
+      draft: boolean;
+      base: string;
+    },
+    existing: false,
+    nonTop: false,
+    linked: false,
+    rejection: null as null | 409 | 422,
+    applyOnConflict: false,
+    losePrResponse: false,
+    loseStackResponse: false,
+    failStackReads: false,
+    missingMembership: false,
+    inconsistentMembership: false,
+    changedBlocker: false,
+    lowerMerged: false,
+    afterPrWrite: undefined as (() => void) | undefined,
+    afterStackRead: undefined as (() => void) | undefined,
+    afterStackWrite: undefined as (() => void) | undefined,
+    reason: "The pull requests cannot form a stack",
+  };
+  const membership = (position: number) => ({
+    id: 42,
+    number: 9,
+    position,
+    size: state.linked || state.nonTop ? 3 : 2,
+    base: { ref: "main", sha: "c".repeat(40) },
+  });
+  const pull = (number: number) => {
+    const blocker = number === 1;
+    const row = {
+      node_id: `P${number}`,
+      number,
+      state: blocker && state.lowerMerged ? "closed" : "open",
+      merged: blocker && state.lowerMerged,
+      title: blocker ? "Blocker" : state.created?.title,
+      body: blocker ? "Blocker" : state.created?.body,
+      draft: blocker ? false : state.created?.draft,
+      user: { node_id: "U1" },
+      head: {
+        ref: blocker ? "cab/blocker" : headRef,
+        sha: blocker
+          ? state.changedBlocker
+            ? "d".repeat(40)
+            : blockerSha
+          : headSha,
+        repo: { node_id: "R1" },
+      },
+      base: {
+        ref: blocker ? "main" : state.created?.base,
+        repo: { node_id: "R1" },
+      },
+      stack: blocker
+        ? state.existing || state.linked
+          ? membership(state.existing ? 2 : 1)
+          : null
+        : state.linked
+          ? membership(state.existing ? 3 : 2)
+          : null,
+    };
+    if (state.linked && !state.existing && row.stack) row.stack.size = 2;
+    if (state.inconsistentMembership && !blocker && row.stack)
+      row.stack.id = 99;
+    if (state.missingMembership) {
+      const { stack: _stack, ...missing } = row;
+      return missing;
+    }
+    return row;
+  };
+  const entry = (number: number, ref: string, sha: string) => ({
+    node_id: `P${number}`,
+    number,
+    head: { ref, sha },
+    state: number === 1 && state.lowerMerged ? "closed" : "open",
+    merged_at:
+      number === 1 && state.lowerMerged ? "2026-11-04T00:00:00Z" : null,
+  });
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    assert.equal(url.origin, "https://api.github.com");
+    const method = init?.method ?? "GET";
+    const route = `${method} ${url.pathname}`;
+    const version = new Headers(init?.headers).get("X-GitHub-Api-Version");
+    state.requests.push({ route, version });
+    if (route === "POST /graphql")
+      return Response.json({
+        data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+      });
+    if (route === "GET /repos/org/repo")
+      return Response.json({
+        node_id: "R1",
+        full_name: "org/repo",
+        allow_merge_commit: true,
+        allow_squash_merge: true,
+        allow_rebase_merge: true,
+      });
+    if (route.startsWith("GET /repos/org/repo/git/ref/heads/")) {
+      const ref = decodeURIComponent(
+        url.pathname.slice("/repos/org/repo/git/ref/heads/".length),
+      );
+      return Response.json({
+        ref: `refs/heads/${ref}`,
+        object: { sha: ref === headRef ? headSha : blockerSha },
+      });
+    }
+    if (route === "GET /user") return Response.json({ node_id: "U1" });
+    if (route === "PUT /repos/org/repo/pulls/2/merge-async")
+      return Response.json({
+        status: "pending",
+        details: { uuid: "stack-merge-1" },
+      });
+    if (route === "GET /repos/org/repo/pulls/2/merge-async/stack-merge-1")
+      return Response.json({
+        status: "pending",
+        details: { uuid: "stack-merge-1" },
+      });
+    if (route === "POST /repos/org/repo/pulls") {
+      state.prWrites++;
+      state.created = JSON.parse(String(init?.body));
+      state.afterPrWrite?.();
+      if (state.losePrResponse) throw Error("Lost create response");
+      return Response.json(pull(2), { status: 201 });
+    }
+    if (route === "GET /repos/org/repo/pulls")
+      return Response.json(state.created ? [pull(2)] : []);
+    if (
+      route === "GET /repos/org/repo/pulls/1" ||
+      route === "GET /repos/org/repo/pulls/2"
+    ) {
+      assert.equal(version, "2026-03-10");
+      if (state.failStackReads) throw Error("Stack read unavailable");
+      const row = pull(route.endsWith("/1") ? 1 : 2);
+      if (route.endsWith("/2")) state.afterStackRead?.();
+      return Response.json(row);
+    }
+    if (route === "GET /repos/org/repo/stacks/9") {
+      assert.equal(version, "2026-03-10");
+      if (state.failStackReads) throw Error("Stack read unavailable");
+      const entries = [
+        ...(state.existing ? [entry(10, "cab/lower", "c".repeat(40))] : []),
+        entry(1, "cab/blocker", blockerSha),
+        ...(state.linked ? [entry(2, headRef, headSha)] : []),
+        ...(state.nonTop ? [entry(11, "cab/other", "e".repeat(40))] : []),
+      ];
+      return Response.json({
+        id: 42,
+        number: 9,
+        base: { ref: "main" },
+        pull_requests: entries,
+      });
+    }
+    if (
+      route === "POST /repos/org/repo/stacks" ||
+      route === "POST /repos/org/repo/stacks/9/add"
+    ) {
+      assert.equal(version, "2026-03-10");
+      state.stackWrites++;
+      state.stackBodies.push(JSON.parse(String(init?.body)));
+      if (
+        !state.rejection ||
+        (state.rejection === 409 && state.applyOnConflict)
+      )
+        state.linked = true;
+      state.afterStackWrite?.();
+      if (state.loseStackResponse) throw Error("Lost stack response");
+      if (state.rejection)
+        return Response.json(
+          { message: state.reason },
+          { status: state.rejection },
+        );
+      return Response.json({ id: 42 }, { status: 201 });
+    }
+    throw Error(`Unexpected stack fixture request: ${route}`);
+  };
+  return {
+    state,
+    blockerSha,
+    provider: new GitHubHttpDeliveryProvider("synthetic", fetcher),
+  };
 }

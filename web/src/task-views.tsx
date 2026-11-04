@@ -53,6 +53,7 @@ import {
   rememberTaskFilters,
   capacityNotice,
   taskColumn,
+  stackedPrMarker,
   taskDetailHref,
   taskFiltersUrl,
   isUncertain,
@@ -109,6 +110,9 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
   const next = nextActor(task.attention.codes, taskColumn(task));
   return (
     <>
+      {stackedPrMarker(task) && (
+        <p className="body muted">{stackedPrMarker(task)}</p>
+      )}
       {taskReasonItems(task).map((r) => (
         <p key={r.text} className="body muted task-reason">
           <ReasonText reason={r} />

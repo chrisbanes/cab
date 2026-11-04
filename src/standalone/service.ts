@@ -1366,6 +1366,43 @@ export class StandaloneService {
             identity,
           ),
         taskWorkspace,
+        stackedPrBase: (taskId) => {
+          const stacked = domain.stackedDependency(taskId);
+          if (!stacked) return null;
+          const blocker = domain.task(stacked.blockerTaskId);
+          if (blocker.projectId !== domain.task(taskId).projectId)
+            throw new Error("Stacked blocker project changed");
+          const branch = deliveryStore.taskBranch(
+            stacked.blockerTaskId,
+            stacked.repositoryId,
+          );
+          const binding = deliveryStore.delivery(stacked.blockerTaskId);
+          const pr = binding?.observation;
+          const verified =
+            binding &&
+            branch &&
+            pr &&
+            binding.projectId === blocker.projectId &&
+            pr.repositoryId === stacked.repositoryId &&
+            pr.headRef === branch.branch &&
+            pr.headSha === branch.lastPushedSha &&
+            branch.outsideHeadSha === null &&
+            pr.state === "OPEN" &&
+            !pr.merged &&
+            !binding.readError;
+          return {
+            ...(verified && pr
+              ? {
+                  blockerPrNodeId: pr.nodeId,
+                  blockerPrNumber: pr.number,
+                  blockerHeadSha: pr.headSha,
+                }
+              : {}),
+            blockerTaskId: stacked.blockerTaskId,
+            repositoryId: stacked.repositoryId,
+            branch: branch?.branch ?? null,
+          };
+        },
         stackedBase: (taskId, repositoryId) => {
           const stacked = domain.stackedDependency(taskId);
           return stacked?.repositoryId === repositoryId
