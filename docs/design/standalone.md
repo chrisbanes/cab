@@ -52,8 +52,10 @@ do not retain writer ownership. A lower configured limit blocks new admission
 without interrupting active work. Retry is narrower than ordinary failure
 handling: only positively identified transient terminal failures with known
 shared retry usage and settled effects can release an exact old generation and
-queue a bounded, newly admitted turn. All unresolved or unsupported evidence
-retains its holds.
+queue a bounded, newly admitted turn. A draft turn cannot report an assignment
+result, so its pending result effect is settled atomically when that retry commits;
+other pending effects still block it. All unresolved or unsupported evidence retains
+its holds.
 
 ## Components and ownership
 

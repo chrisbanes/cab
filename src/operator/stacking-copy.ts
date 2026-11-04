@@ -1,3 +1,4 @@
+import type { StackDeliveryFacts } from "./contracts.js";
 import type { StackFacts, StackReason } from "../core/stacked-dependencies.js";
 
 /**
@@ -31,8 +32,22 @@ export const stackReasonLabels: Record<StackReason, string> = {
 /** A task's stack facts as one sentence; null when stacking does not apply. */
 export function stackSummary(
   stack: StackFacts | null | undefined,
+  delivery?: StackDeliveryFacts | null,
 ): string | null {
   if (!stack) return null;
+  const facts = delivery
+    ? `${delivery.blockerPr ? ` Blocker PR #${delivery.blockerPr.number}.` : " Blocker PR unknown."}${
+        delivery.membership
+          ? ` Stack #${delivery.membership.number}, position ${delivery.membership.position} of ${delivery.membership.size}.`
+          : ""
+      }${
+        !delivery.membershipKnown
+          ? " Stack membership unconfirmed."
+          : delivery.membership === null
+            ? " Plain chained PR."
+            : ""
+      }${delivery.reason ? ` ${delivery.reason}` : ""}`
+    : "";
   const base = stack.parentHead ? ` at ${stack.parentHead.slice(0, 12)}` : "";
   const restack =
     stack.restack === "pending"
@@ -40,8 +55,8 @@ export function stackSummary(
       : "";
   if (stack.state === "stacked")
     return stack.reason
-      ? `Stacked on its blocker${base}; waiting because ${stackReasonLabels[stack.reason]}${restack}.`
-      : `Stacked on its blocker${base}${restack}.`;
+      ? `Stacked on its blocker${base}; waiting because ${stackReasonLabels[stack.reason]}${restack}.${facts}`
+      : `Stacked on its blocker${base}${restack}.${facts}`;
   const reason = stack.reason ?? "stacking-off";
   return reason === "blocker-unpublished" || reason === "blocker-unknown"
     ? `Will start stacked on its blocker; waiting because ${stackReasonLabels[reason]}.`

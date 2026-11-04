@@ -5805,7 +5805,8 @@ export class ExecutionState {
         EXISTS (SELECT 1 FROM execution_stop_targets WHERE workId = ?) AS stopped,
         EXISTS (SELECT 1 FROM execution_request_refusals WHERE workId = ?) AS refused,
         EXISTS (SELECT 1 FROM execution_pending_effects
-          WHERE workId = ? AND state = 'pending') AS pendingEffect,
+          WHERE workId = ? AND state = 'pending'
+          AND NOT (? = 1 AND effectKey = 'assignment-result')) AS pendingEffect,
         EXISTS (SELECT 1 FROM task_execution_bindings binding
           JOIN task_writer_holds hold ON hold.taskId = binding.taskId
           WHERE binding.workId = ?) AS taskHold,
@@ -5829,6 +5830,7 @@ export class ExecutionState {
           value.workId,
           value.workId,
           value.workId,
+          current.draftTurn,
           value.workId,
           value.workId,
           value.workId,
@@ -6000,6 +6002,12 @@ export class ExecutionState {
         );
       if (!resolved)
         throw new Error("Failed generation changed before retry resolution");
+      if (current.draftTurn === 1)
+        this.db
+          .prepare(`UPDATE execution_pending_effects SET state = 'settled',
+          reason = 'Draft turns record no result'
+          WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'pending'`)
+          .run(value.workId);
       this.db
         .prepare(`UPDATE turn_requests SET state = 'held',
         reason = 'Confirmed transient failure resolved; retry queued'

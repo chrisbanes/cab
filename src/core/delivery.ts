@@ -591,6 +591,36 @@ export const operatorCommentReviewSchema = z
 export type OperatorCommentReview = z.output<
   typeof operatorCommentReviewSchema
 >;
+export const observedStackSchema = z
+  .object({
+    id: z.number().int().positive(),
+    number: z.number().int().positive(),
+    position: z.number().int().positive(),
+    size: z.number().int().positive(),
+  })
+  .strict()
+  .refine((value) => value.position <= value.size);
+export const stackCreateSchema = z
+  .object({
+    blockerTaskId: z.string().uuid(),
+    repositoryId: identity,
+    blockerBranch: identity,
+    blockerPrNodeId: identity,
+    blockerPrNumber: z.number().int().positive(),
+    blockerHeadSha: commitSha,
+  })
+  .strict();
+export type StackCreateIdentity = z.output<typeof stackCreateSchema>;
+export const stackLinkTargetSchema = z
+  .object({
+    id: z.number().int().positive(),
+    number: z.number().int().positive(),
+    size: z.number().int().positive(),
+  })
+  .strict()
+  .nullable();
+export type StackLinkTarget = z.output<typeof stackLinkTargetSchema>;
+
 export const actionObservationSchema = z
   .object({
     state: z.enum(["uncertain", "confirmed-success", "confirmed-failure"]),
@@ -635,6 +665,10 @@ export const actionObservationSchema = z
       .optional(),
     /** The code host's own reason for a failed merge, bounded. */
     hostReason: z.string().max(500).optional(),
+    /** Explicit null is a proved plain chain; absence means membership is unknown. */
+    stack: observedStackSchema.nullable().optional(),
+    /** A definitive stack POST validation rejection, persisted before readback. */
+    stackLinkRefused: z.boolean().optional(),
   })
   .strict();
 export type ProviderActionObservation = z.output<
@@ -652,6 +686,8 @@ export const prObservationSchema = z
     state: z.enum(["OPEN", "CLOSED", "MERGED"]),
     draft: z.boolean(),
     merged: z.boolean(),
+    /** Absent in old observations or when the host did not provide membership; null is explicit no-stack. */
+    stack: observedStackSchema.nullable().optional(),
     reviewDecision: z
       .enum(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"])
       .nullable(),
@@ -781,6 +817,27 @@ const prBindingSchema = z
   }));
 export type PrDeliveryBinding = z.output<typeof prBindingSchema>;
 export type TaskDeliveryView = ReturnType<DeliveryStore["publicTask"]>;
+/** Immutable identities for the second effect of one stacked PR create. */
+export const stackLinkIdentitySchema = z
+  .object({
+    blockerTaskId: z.string().uuid(),
+    repositoryId: identity,
+    blockerBranch: identity,
+    blockerPrNodeId: identity,
+    blockerPrNumber: z.number().int().positive(),
+    dependentPrNodeId: identity,
+    dependentPrNumber: z.number().int().positive(),
+  })
+  .strict();
+const stackLinkSchema = z
+  .object({
+    identity: stackLinkIdentitySchema,
+    phase: z.enum(["receipt-recorded", "link-attempting"]),
+    target: stackLinkTargetSchema.optional(),
+  })
+  .strict();
+export type StackLinkIdentity = z.output<typeof stackLinkIdentitySchema>;
+
 const actionRecordSchema = z
   .object({
     operationId: z.string().uuid(),
@@ -800,6 +857,8 @@ const actionRecordSchema = z
     observation: actionObservationSchema.nullable(),
     /** The delivery's accepted base when the action was prepared, moved with an accepted retarget; the request itself never changes. */
     acceptedBaseRef: identity.optional(),
+    stackCreate: stackCreateSchema.optional(),
+    stackLink: stackLinkSchema.optional(),
     createdAt: z.number(),
     updatedAt: z.number(),
   })
@@ -1969,6 +2028,166 @@ export class DeliveryStore {
       return record;
     });
   }
+  /** Offline lower-chain proof, refreshed synchronously at the merge effect boundary. */
+  stackMergeGuard(
+    taskId: string,
+    repositoryId: string,
+  ): { reason: string | null; material: string } {
+    const seen = new Set([taskId]);
+    const projectOf = (id: string) => {
+      const row = this.db
+        .prepare("SELECT projectId FROM tasks WHERE id=?")
+        .get(id);
+      return row
+        ? z.object({ projectId: identity }).parse(row).projectId
+        : null;
+    };
+    const project = projectOf(taskId);
+    const chain: unknown[] = [];
+    let current = taskId;
+    let reason: string | null = null;
+    for (;;) {
+      const row = this.db
+        .prepare(
+          "SELECT blockerTaskId,repositoryId FROM stacked_dependencies WHERE taskId=?",
+        )
+        .get(current);
+      if (!row) break;
+      const edge = z
+        .object({ blockerTaskId: identity, repositoryId: identity })
+        .parse(row);
+      const blocker = String(edge.blockerTaskId);
+      if (
+        seen.has(blocker) ||
+        edge.repositoryId !== repositoryId ||
+        projectOf(blocker) !== project
+      ) {
+        reason = "stacked-lower-pr-unproved";
+        break;
+      }
+      seen.add(blocker);
+      const bound = this.delivery(blocker),
+        branch = this.taskBranch(blocker, repositoryId);
+      const pr = bound?.observation;
+      chain.push({ blocker, edge, bound, branch });
+      if (
+        !bound ||
+        bound.projectId !== project ||
+        bound.readError ||
+        !pr ||
+        !branch ||
+        pr.repositoryId !== repositoryId ||
+        pr.headRef !== branch.branch ||
+        pr.headSha !== branch.lastPushedSha
+      ) {
+        reason = "stacked-lower-pr-unproved";
+        break;
+      }
+      if (!pr.merged || pr.state !== "MERGED") {
+        reason = "stacked-lower-pr-unmerged";
+        break;
+      }
+      current = blocker;
+    }
+    return { reason, material: materialDigest({ chain, reason }) };
+  }
+  /** Freeze the blocker before the first effect; old records remain unchanged. */
+  prepareStackCreate(
+    operationId: string,
+    input: StackCreateIdentity,
+    validate: () => void,
+  ): DeliveryActionRecord {
+    const identity = stackCreateSchema.parse(input);
+    return this.transaction(() => {
+      validate();
+      const record = this.action(operationId);
+      if (
+        record.request.action.kind !== "pr.create" ||
+        record.request.action.target.repositoryId !== identity.repositoryId ||
+        record.request.action.target.baseRef !== identity.blockerBranch ||
+        !(
+          record.state === "prepared" ||
+          (record.state === "confirmed-failure" &&
+            record.observation?.retryable)
+        )
+      )
+        throw new Error("Stack create identity does not match prepared intent");
+      if (
+        record.stackCreate &&
+        materialDigest(record.stackCreate) !== materialDigest(identity)
+      )
+        throw new Error("Stack create identity is immutable");
+      record.stackCreate = identity;
+      this.save(record);
+      return record;
+    });
+  }
+  /** Persist a verified PR receipt before allowing the stack write. Never completes the action. */
+  recordStackReceipt(
+    operationId: string,
+    input: StackLinkIdentity,
+    receipt: NonNullable<ProviderActionObservation["receipt"]>,
+    validate: () => void,
+  ): DeliveryActionRecord {
+    const identity = stackLinkIdentitySchema.parse(input);
+    return this.transaction(() => {
+      validate();
+      const record = this.action(operationId);
+      if (
+        record.request.action.kind !== "pr.create" ||
+        !["attempting", "uncertain"].includes(record.state) ||
+        record.request.action.target.repositoryId !== identity.repositoryId ||
+        record.request.action.target.baseRef !== identity.blockerBranch ||
+        !record.stackCreate ||
+        record.stackCreate.blockerTaskId !== identity.blockerTaskId ||
+        record.stackCreate.blockerPrNodeId !== identity.blockerPrNodeId ||
+        record.stackCreate.blockerPrNumber !== identity.blockerPrNumber ||
+        record.stackCreate.blockerBranch !== identity.blockerBranch ||
+        receipt.nodeId !== identity.dependentPrNodeId ||
+        receipt.number !== identity.dependentPrNumber ||
+        receipt.headSha !== record.request.action.target.expectedHeadSha
+      )
+        throw new Error("Stack receipt does not match the create intent");
+      if (record.stackLink) {
+        if (
+          materialDigest(record.stackLink.identity) !== materialDigest(identity)
+        )
+          throw new Error("Stack link identity is immutable");
+        return record;
+      }
+      record.stackLink = { identity, phase: "receipt-recorded" };
+      record.observation = actionObservationSchema.parse({
+        state: "uncertain",
+        reason: "stack-link-pending",
+        receipt,
+      });
+      record.state = "uncertain";
+      record.updatedAt = Date.now();
+      this.save(record);
+      return record;
+    });
+  }
+  /** The durable send boundary. Once crossed, recovery may only read, never send again. */
+  beginStackLink(
+    operationId: string,
+    validate: () => void,
+    target: StackLinkTarget,
+  ): DeliveryActionRecord {
+    return this.transaction(() => {
+      validate();
+      const record = this.action(operationId);
+      if (
+        record.state !== "uncertain" ||
+        record.stackLink?.phase !== "receipt-recorded"
+      )
+        throw new Error("Stack link cannot be replayed");
+      record.stackLink.phase = "link-attempting";
+      record.stackLink.target = stackLinkTargetSchema.parse(target);
+      record.updatedAt = Date.now();
+      this.save(record);
+      return record;
+    });
+  }
   /** `within` runs in the same transaction, e.g. to wake the lead with the recorded outcome. */
   recordObservation(
     operationId: string,
@@ -1989,6 +2208,44 @@ export class DeliveryStore {
         observation = {
           ...observation,
           mergeRequest: record.observation.mergeRequest,
+        };
+      if (record.stackLink) {
+        const receipt = record.observation?.receipt ?? null;
+        if (
+          observation.receipt &&
+          materialDigest(observation.receipt) !== materialDigest(receipt)
+        )
+          throw new Error("Stack PR receipt is immutable");
+        observation = { ...observation, receipt };
+      }
+      if (record.stackLink) {
+        observation = {
+          ...observation,
+          ...(record.observation?.stackLinkRefused
+            ? { stackLinkRefused: true }
+            : {}),
+          ...(record.observation?.hostReason && !observation.hostReason
+            ? { hostReason: record.observation.hostReason }
+            : {}),
+          ...(observation.state === "uncertain" &&
+          observation.stack === undefined &&
+          record.observation?.stack !== undefined
+            ? { stack: record.observation.stack }
+            : {}),
+        };
+      }
+      // The first PR receipt alone must never complete a stacked create.
+      if (
+        record.stackCreate &&
+        observation.state === "confirmed-success" &&
+        (record.stackLink?.phase !== "link-attempting" ||
+          observation.stack === undefined ||
+          (observation.stack === null && !observation.stackLinkRefused))
+      )
+        observation = {
+          ...observation,
+          state: "uncertain",
+          reason: "stack-link-pending",
         };
       const previous = record.state;
       record.state = observation.state;

@@ -655,6 +655,87 @@ test("failed-generation release is atomic, idempotent, and stale proof cannot re
   }
 });
 
+test("draft retry requires exact proof and rolls back effect settlement on failure", async () => {
+  const runtime = new RetryFixtureRuntime();
+  const f = await fixture(runtime);
+  try {
+    await f.service.submit("draft-proof", "retain ownership", f.workspace);
+    const db = (f.service as unknown as { db: DatabaseSync }).db;
+    db.prepare("UPDATE turn_requests SET draftTurn = 1 WHERE workId = ?").run(
+      "draft-proof",
+    );
+    db.prepare(
+      "INSERT INTO execution_pending_effects (workId, effectKey, state) VALUES (?, 'assignment-result', 'pending')",
+    ).run("draft-proof");
+    const recovery = f.service
+      .recoveryView()
+      .find((item) => item.workId === "draft-proof");
+    assert.ok(recovery?.intent.threadId && recovery.intent.turnId);
+    const proof = {
+      workId: "draft-proof",
+      workRevision: recovery.generation.workRevision,
+      requestSequence: recovery.generation.requestSequence,
+      threadId: recovery.intent.threadId,
+      turnId: recovery.intent.turnId,
+      terminalStatus: "failed" as const,
+      classification: "transient" as const,
+      reasonCode: "serverOverloaded" as const,
+      harness: "codex" as const,
+      source: "harness" as const,
+      harnessRetries: 0,
+      callbacksEnded: true as const,
+      noSurvivor: true as const,
+      effects: "settled" as const,
+      nextEligibleAt: Date.now() + 30_000,
+    };
+    const state = startedOf(f.service).state;
+    const pending = () =>
+      (
+        db
+          .prepare(
+            "SELECT state FROM execution_pending_effects WHERE workId = ? AND effectKey = 'assignment-result'",
+          )
+          .get(proof.workId) as { state: string }
+      ).state;
+    assert.throws(() =>
+      state.resolveFailedGeneration({ ...proof, turnId: "stale" }),
+    );
+    db.exec(
+      "CREATE TRIGGER fail_retry_resolution BEFORE INSERT ON execution_retry_resolutions BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END",
+    );
+    assert.throws(
+      () => state.resolveFailedGeneration(proof),
+      /synthetic failure/,
+    );
+    assert.equal(pending(), "pending");
+    assert.equal(f.service.turnRequests().length, 1);
+    assert.ok(
+      db
+        .prepare("SELECT 1 FROM task_writer_admissions WHERE workId = ?")
+        .get(proof.workId),
+    );
+    assert.ok(
+      db
+        .prepare(
+          "SELECT 1 FROM execution_capacity_reservations WHERE workId = ?",
+        )
+        .get(proof.workId),
+    );
+    db.exec("DROP TRIGGER fail_retry_resolution");
+    db.prepare(
+      "DELETE FROM execution_capacity_reservations WHERE workId = ?",
+    ).run(proof.workId);
+    assert.throws(
+      () => state.resolveFailedGeneration(proof),
+      /writer and capacity/,
+    );
+    assert.equal(pending(), "pending");
+    assert.equal(f.service.turnRequests().length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
 test("transport timeout cannot be upgraded into a retry by a transient-looking classification", async () => {
   const runtime = new RetryFixtureRuntime();
   runtime.failure = transientEvidence();
