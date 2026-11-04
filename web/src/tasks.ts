@@ -315,3 +315,11 @@ export function attentionCandidate(tasks: readonly TaskListSummary[]) {
   const uncertain = active.find(isUncertain);
   return uncertain ?? active.find((t) => taskColumn(t) === "Stopping") ?? null;
 }
+
+/** A list marker names only an observed, identity-bound blocker PR. */
+export function stackedPrMarker(
+  task: Pick<TaskListSummary, "stackDelivery">,
+): string | null {
+  const number = task.stackDelivery?.blockerPr?.number;
+  return number ? `stacked on #${number}` : null;
+}

@@ -1,3 +1,7 @@
+import {
+  assertOwnedTaskWritable,
+  taskAcceptsWrites,
+} from "./project-lifecycle.js";
 import { DomainConflictError } from "./domain.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -999,6 +1003,7 @@ export class LocalReviewStore {
           "Local review send key reused with different material",
         );
       if (row.state !== "prepared") return asResponse(row);
+      assertOwnedTaskWritable(this.db, String(row.taskId));
       const now = Date.now();
       this.db
         .prepare(`UPDATE coordination_local_review_operations SET state='rejected',reason=?,updatedAt=?
@@ -1184,6 +1189,7 @@ export class LocalReviewStore {
     version: number,
     accessFingerprint: string,
   ) {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.db
       .prepare(`UPDATE coordination_local_review_drafts SET accessFingerprint=?
       WHERE taskId=? AND ownerKey=? AND version=? AND state='editable'`)
@@ -1216,6 +1222,7 @@ export class LocalReviewStore {
       }
       const affected = new Map<string, number>();
       for (const draft of drafts) {
+        if (!taskAcceptsWrites(this.db, String(draft.taskId))) continue;
         const taskId = String(draft.taskId),
           currentOwner = String(draft.ownerKey);
         const groups = this.db
@@ -1258,6 +1265,7 @@ export class LocalReviewStore {
     request: LocalReviewRequest,
     beforeOperation = false,
   ): void {
+    assertOwnedTaskWritable(this.db, request.taskId);
     const lead = this.leadIdentity(
       request.taskId,
       request.recipientAssignmentId,
@@ -1289,6 +1297,7 @@ export class LocalReviewStore {
   }
 
   private discardGroup(taskId: string, group: Row) {
+    assertOwnedTaskWritable(this.db, taskId);
     const draftId = String(group.anchorDraftId);
     this.retained.discardReviewAnchorDraftWithinTransaction(
       taskId,
@@ -1375,6 +1384,7 @@ export class LocalReviewStore {
     result: unknown,
     now: number,
   ) {
+    assertOwnedTaskWritable(this.db, input.taskId);
     // Saving or clearing a draft acknowledges any earlier lost-draft notice.
     this.db
       .prepare("DELETE FROM coordination_local_review_losses WHERE taskId=?")

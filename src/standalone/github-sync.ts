@@ -109,6 +109,7 @@ export class GitHubSynchronizer {
       return reader;
     };
     for (const project of this.domain.projects()) {
+      if (project.archived) continue;
       const projectId = String(project.id);
       const config = this.domain.githubConfiguration(projectId);
       const active = new Set(this.domain.githubActiveSelectionIds(projectId));
@@ -137,6 +138,7 @@ export class GitHubSynchronizer {
           snapshot,
           {
             projectId,
+            projectVersion: Number(project.version),
             configVersion: config.version,
             credentialRef: config.credentialRef,
           },
@@ -170,6 +172,7 @@ export class GitHubSynchronizer {
             this.notePause(credentialRef, blockers);
           this.sources.reconcileBlockers(issue.nodeId, blockers, {
             projectId,
+            projectVersion: Number(project.version),
             configVersion: config.version,
             credentialRef: config.credentialRef,
             selectionId: selection.id,
@@ -206,6 +209,7 @@ export class GitHubSynchronizer {
               this.notePause(credentialRef, comments);
             this.sources.reconcileIssueBrief(issue.nodeId, comments, {
               projectId,
+              projectVersion: Number(project.version),
               configVersion: config.version,
               credentialRef: config.credentialRef,
               selectionId: selection.id,
@@ -217,6 +221,8 @@ export class GitHubSynchronizer {
     }
     for (const retained of this.sources.localBlockerReferences()) {
       if (this.stopped) return;
+      const project = this.domain.project(retained.projectId);
+      if (project.archived) continue;
       const config = this.domain.githubConfiguration(retained.projectId);
       const credentialRef = config.credentialRef;
       const reader = credentialRef ? readerFor(credentialRef) : undefined;
@@ -238,6 +244,7 @@ export class GitHubSynchronizer {
         this.notePause(credentialRef, status);
       this.sources.recordIssueStatus(retained.reference.nodeId, status, {
         projectId: retained.projectId,
+        projectVersion: Number(project.version),
         configVersion: config.version,
         credentialRef: config.credentialRef,
         reference: retained.reference,

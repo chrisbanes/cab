@@ -1,3 +1,9 @@
+import {
+  type ArchiveBlocker,
+  assertOwnedTaskWritable,
+  assertProjectWritable,
+  taskAcceptsWrites,
+} from "./project-lifecycle.js";
 import { TaskReviewStore } from "./task-review.js";
 import {
   issueBodyLimit,
@@ -586,6 +592,36 @@ export const operatorCommentReviewSchema = z
 export type OperatorCommentReview = z.output<
   typeof operatorCommentReviewSchema
 >;
+export const observedStackSchema = z
+  .object({
+    id: z.number().int().positive(),
+    number: z.number().int().positive(),
+    position: z.number().int().positive(),
+    size: z.number().int().positive(),
+  })
+  .strict()
+  .refine((value) => value.position <= value.size);
+export const stackCreateSchema = z
+  .object({
+    blockerTaskId: z.string().uuid(),
+    repositoryId: identity,
+    blockerBranch: identity,
+    blockerPrNodeId: identity,
+    blockerPrNumber: z.number().int().positive(),
+    blockerHeadSha: commitSha,
+  })
+  .strict();
+export type StackCreateIdentity = z.output<typeof stackCreateSchema>;
+export const stackLinkTargetSchema = z
+  .object({
+    id: z.number().int().positive(),
+    number: z.number().int().positive(),
+    size: z.number().int().positive(),
+  })
+  .strict()
+  .nullable();
+export type StackLinkTarget = z.output<typeof stackLinkTargetSchema>;
+
 export const actionObservationSchema = z
   .object({
     state: z.enum(["uncertain", "confirmed-success", "confirmed-failure"]),
@@ -630,6 +666,10 @@ export const actionObservationSchema = z
       .optional(),
     /** The code host's own reason for a failed merge, bounded. */
     hostReason: z.string().max(500).optional(),
+    /** Explicit null is a proved plain chain; absence means membership is unknown. */
+    stack: observedStackSchema.nullable().optional(),
+    /** A definitive stack POST validation rejection, persisted before readback. */
+    stackLinkRefused: z.boolean().optional(),
   })
   .strict();
 export type ProviderActionObservation = z.output<
@@ -647,6 +687,8 @@ export const prObservationSchema = z
     state: z.enum(["OPEN", "CLOSED", "MERGED"]),
     draft: z.boolean(),
     merged: z.boolean(),
+    /** Absent in old observations or when the host did not provide membership; null is explicit no-stack. */
+    stack: observedStackSchema.nullable().optional(),
     reviewDecision: z
       .enum(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"])
       .nullable(),
@@ -731,7 +773,7 @@ export const handbackSettlementSchema = registerPrArgumentsSchema
 export type HandbackSettlement = z.output<typeof handbackSettlementSchema>;
 /** A settlement refused because its target or material is no longer current. */
 export class HandbackSettlementRefusedError extends DomainConflictError {}
-const prBindingSchema = z
+export const prBindingSchema = z
   .object({
     taskId: z.string().uuid(),
     projectId: z.string().uuid(),
@@ -776,6 +818,27 @@ const prBindingSchema = z
   }));
 export type PrDeliveryBinding = z.output<typeof prBindingSchema>;
 export type TaskDeliveryView = ReturnType<DeliveryStore["publicTask"]>;
+/** Immutable identities for the second effect of one stacked PR create. */
+export const stackLinkIdentitySchema = z
+  .object({
+    blockerTaskId: z.string().uuid(),
+    repositoryId: identity,
+    blockerBranch: identity,
+    blockerPrNodeId: identity,
+    blockerPrNumber: z.number().int().positive(),
+    dependentPrNodeId: identity,
+    dependentPrNumber: z.number().int().positive(),
+  })
+  .strict();
+const stackLinkSchema = z
+  .object({
+    identity: stackLinkIdentitySchema,
+    phase: z.enum(["receipt-recorded", "link-attempting"]),
+    target: stackLinkTargetSchema.optional(),
+  })
+  .strict();
+export type StackLinkIdentity = z.output<typeof stackLinkIdentitySchema>;
+
 const actionRecordSchema = z
   .object({
     operationId: z.string().uuid(),
@@ -795,6 +858,8 @@ const actionRecordSchema = z
     observation: actionObservationSchema.nullable(),
     /** The delivery's accepted base when the action was prepared, moved with an accepted retarget; the request itself never changes. */
     acceptedBaseRef: identity.optional(),
+    stackCreate: stackCreateSchema.optional(),
+    stackLink: stackLinkSchema.optional(),
     createdAt: z.number(),
     updatedAt: z.number(),
   })
@@ -913,10 +978,15 @@ export class DeliveryStore {
       }
     });
   }
+  isTaskWritable(taskId: string): boolean {
+    return taskAcceptsWrites(this.db, taskId);
+  }
+
   transaction<T>(run: () => T): T {
     return transaction(this.db, run);
   }
   private save(record: DeliveryActionRecord): void {
+    assertOwnedTaskWritable(this.db, record.binding.taskId);
     this.db
       .prepare("UPDATE delivery_actions SET recordJson=? WHERE operationId=?")
       .run(
@@ -935,6 +1005,79 @@ export class DeliveryStore {
       throw new Error("Invalid persisted delivery action");
     }
   }
+  /** Nested stack sends can remain unfinished after a PR receipt was persisted. */
+  projectStackArchiveBlockers(projectId: string): ArchiveBlocker[] {
+    const rows = this.db
+      .prepare(`SELECT a.operationId,a.taskId,a.recordJson FROM delivery_actions a
+      WHERE a.taskId IN (SELECT id FROM domain_tasks WHERE projectId=? UNION SELECT id FROM tasks WHERE projectId=?)
+      AND (json_type(a.recordJson,'$.stackCreate') IS NOT NULL OR json_type(a.recordJson,'$.stackLink') IS NOT NULL)
+      LIMIT 129`)
+      .all(projectId, projectId) as {
+      operationId: string;
+      taskId: string;
+      recordJson: string;
+    }[];
+    if (rows.length > 128)
+      return [
+        {
+          kind: "unavailable",
+          reason: "Stack delivery drain exceeds its inspection bound",
+        },
+      ];
+    return rows.flatMap((row): ArchiveBlocker[] => {
+      try {
+        const record = actionRecordSchema.parse(JSON.parse(row.recordJson));
+        if (
+          record.operationId !== row.operationId ||
+          record.binding.taskId !== row.taskId ||
+          record.binding.projectId !== projectId
+        )
+          throw new Error("Stack action ownership mismatch");
+        const { stackCreate: create, stackLink: link, observation } = record;
+        // A proved refusal before creating a PR has no nested provider effect to drain.
+        const noEffect =
+          !link &&
+          !observation?.receipt &&
+          !observation?.ambiguous &&
+          ((record.state === "denied" && record.attempts === 0) ||
+            (record.state === "confirmed-failure" &&
+              observation?.state === "confirmed-failure"));
+        const receipt = observation?.receipt;
+        const settled =
+          record.state === "confirmed-success" &&
+          observation?.state === "confirmed-success" &&
+          create &&
+          link?.phase === "link-attempting" &&
+          link.target !== undefined &&
+          record.request.action.kind === "pr.create" &&
+          create.repositoryId === record.request.action.target.repositoryId &&
+          create.blockerBranch === record.request.action.target.baseRef &&
+          create.blockerTaskId === link.identity.blockerTaskId &&
+          create.repositoryId === link.identity.repositoryId &&
+          create.blockerBranch === link.identity.blockerBranch &&
+          create.blockerPrNodeId === link.identity.blockerPrNodeId &&
+          create.blockerPrNumber === link.identity.blockerPrNumber &&
+          receipt?.nodeId === link.identity.dependentPrNodeId &&
+          receipt?.number === link.identity.dependentPrNumber &&
+          receipt?.headSha === record.request.action.target.expectedHeadSha &&
+          observation.stack !== undefined &&
+          (observation.stack !== null || observation.stackLinkRefused === true);
+        if (noEffect || settled) return [];
+      } catch {
+        // Unknown phases, malformed saved values and mismatched identities cannot prove drain.
+      }
+      return [
+        {
+          kind: "delivery-action",
+          taskId: row.taskId,
+          operationId: row.operationId,
+          reason:
+            "A stack delivery remains pending or its nested outcome is unproved",
+        },
+      ];
+    });
+  }
+
   actions(taskId?: string): DeliveryActionRecord[] {
     const rows = (
       taskId
@@ -1037,6 +1180,8 @@ export class DeliveryStore {
     approved: boolean,
     policyVersion?: number,
   ): void {
+    assertProjectWritable(this.db, binding.projectId);
+    assertOwnedTaskWritable(this.db, binding.taskId);
     const policy = this.configuration(binding.projectId);
     if (isOperatorDeliveryCaller(binding)) {
       this.validateOperatorCaller(binding);
@@ -1505,6 +1650,7 @@ export class DeliveryStore {
       );
   }
   validateOperatorCaller(input: OperatorDeliveryCaller): void {
+    assertProjectWritable(this.db, input.projectId);
     const caller = operatorDeliveryCallerSchema.parse(input),
       policy = this.configuration(caller.projectId),
       source = new TaskReviewStore(this.db).sources(caller.taskId).at(-1),
@@ -1849,6 +1995,7 @@ export class DeliveryStore {
           );
         return this.action(request.operationId);
       }
+      assertOwnedTaskWritable(this.db, binding.taskId);
       let denied = false;
       try {
         admission();
@@ -1931,6 +2078,7 @@ export class DeliveryStore {
     return this.transaction(() => {
       validate();
       const record = this.action(operationId);
+      assertOwnedTaskWritable(this.db, record.binding.taskId);
       if (
         record.state !== "prepared" &&
         !(
@@ -1954,6 +2102,169 @@ export class DeliveryStore {
       return record;
     });
   }
+  /** Offline lower-chain proof, refreshed synchronously at the merge effect boundary. */
+  stackMergeGuard(
+    taskId: string,
+    repositoryId: string,
+  ): { reason: string | null; material: string } {
+    const seen = new Set([taskId]);
+    const projectOf = (id: string) => {
+      const row = this.db
+        .prepare("SELECT projectId FROM tasks WHERE id=?")
+        .get(id);
+      return row
+        ? z.object({ projectId: identity }).parse(row).projectId
+        : null;
+    };
+    const project = projectOf(taskId);
+    const chain: unknown[] = [];
+    let current = taskId;
+    let reason: string | null = null;
+    for (;;) {
+      const row = this.db
+        .prepare(
+          "SELECT blockerTaskId,repositoryId FROM stacked_dependencies WHERE taskId=?",
+        )
+        .get(current);
+      if (!row) break;
+      const edge = z
+        .object({ blockerTaskId: identity, repositoryId: identity })
+        .parse(row);
+      const blocker = String(edge.blockerTaskId);
+      if (
+        seen.has(blocker) ||
+        edge.repositoryId !== repositoryId ||
+        projectOf(blocker) !== project
+      ) {
+        reason = "stacked-lower-pr-unproved";
+        break;
+      }
+      seen.add(blocker);
+      const bound = this.delivery(blocker),
+        branch = this.taskBranch(blocker, repositoryId);
+      const pr = bound?.observation;
+      chain.push({ blocker, edge, bound, branch });
+      if (
+        !bound ||
+        bound.projectId !== project ||
+        bound.readError ||
+        !pr ||
+        !branch ||
+        pr.repositoryId !== repositoryId ||
+        pr.headRef !== branch.branch ||
+        pr.headSha !== branch.lastPushedSha
+      ) {
+        reason = "stacked-lower-pr-unproved";
+        break;
+      }
+      if (!pr.merged || pr.state !== "MERGED") {
+        reason = "stacked-lower-pr-unmerged";
+        break;
+      }
+      current = blocker;
+    }
+    return { reason, material: materialDigest({ chain, reason }) };
+  }
+  /** Freeze the blocker before the first effect; old records remain unchanged. */
+  prepareStackCreate(
+    operationId: string,
+    input: StackCreateIdentity,
+    validate: () => void,
+  ): DeliveryActionRecord {
+    const identity = stackCreateSchema.parse(input);
+    return this.transaction(() => {
+      assertOwnedTaskWritable(this.db, this.action(operationId).binding.taskId);
+      validate();
+      const record = this.action(operationId);
+      if (
+        record.request.action.kind !== "pr.create" ||
+        record.request.action.target.repositoryId !== identity.repositoryId ||
+        record.request.action.target.baseRef !== identity.blockerBranch ||
+        !(
+          record.state === "prepared" ||
+          (record.state === "confirmed-failure" &&
+            record.observation?.retryable)
+        )
+      )
+        throw new Error("Stack create identity does not match prepared intent");
+      if (
+        record.stackCreate &&
+        materialDigest(record.stackCreate) !== materialDigest(identity)
+      )
+        throw new Error("Stack create identity is immutable");
+      record.stackCreate = identity;
+      this.save(record);
+      return record;
+    });
+  }
+  /** Persist a verified PR receipt before allowing the stack write. Never completes the action. */
+  recordStackReceipt(
+    operationId: string,
+    input: StackLinkIdentity,
+    receipt: NonNullable<ProviderActionObservation["receipt"]>,
+    validate: () => void,
+  ): DeliveryActionRecord {
+    const identity = stackLinkIdentitySchema.parse(input);
+    return this.transaction(() => {
+      assertOwnedTaskWritable(this.db, this.action(operationId).binding.taskId);
+      validate();
+      const record = this.action(operationId);
+      if (
+        record.request.action.kind !== "pr.create" ||
+        !["attempting", "uncertain"].includes(record.state) ||
+        record.request.action.target.repositoryId !== identity.repositoryId ||
+        record.request.action.target.baseRef !== identity.blockerBranch ||
+        !record.stackCreate ||
+        record.stackCreate.blockerTaskId !== identity.blockerTaskId ||
+        record.stackCreate.blockerPrNodeId !== identity.blockerPrNodeId ||
+        record.stackCreate.blockerPrNumber !== identity.blockerPrNumber ||
+        record.stackCreate.blockerBranch !== identity.blockerBranch ||
+        receipt.nodeId !== identity.dependentPrNodeId ||
+        receipt.number !== identity.dependentPrNumber ||
+        receipt.headSha !== record.request.action.target.expectedHeadSha
+      )
+        throw new Error("Stack receipt does not match the create intent");
+      if (record.stackLink) {
+        if (
+          materialDigest(record.stackLink.identity) !== materialDigest(identity)
+        )
+          throw new Error("Stack link identity is immutable");
+        return record;
+      }
+      record.stackLink = { identity, phase: "receipt-recorded" };
+      record.observation = actionObservationSchema.parse({
+        state: "uncertain",
+        reason: "stack-link-pending",
+        receipt,
+      });
+      record.state = "uncertain";
+      record.updatedAt = Date.now();
+      this.save(record);
+      return record;
+    });
+  }
+  /** The durable send boundary. Once crossed, recovery may only read, never send again. */
+  beginStackLink(
+    operationId: string,
+    validate: () => void,
+    target: StackLinkTarget,
+  ): DeliveryActionRecord {
+    return this.transaction(() => {
+      assertOwnedTaskWritable(this.db, this.action(operationId).binding.taskId);
+      validate();
+      const record = this.action(operationId);
+      if (
+        record.state !== "uncertain" ||
+        record.stackLink?.phase !== "receipt-recorded"
+      )
+        throw new Error("Stack link cannot be replayed");
+      record.stackLink.phase = "link-attempting";
+      record.stackLink.target = stackLinkTargetSchema.parse(target);
+      record.updatedAt = Date.now();
+      this.save(record);
+      return record;
+    });
+  }
   /** `within` runs in the same transaction, e.g. to wake the lead with the recorded outcome. */
   recordObservation(
     operationId: string,
@@ -1964,6 +2275,7 @@ export class DeliveryStore {
     return this.transaction(() => {
       const record = this.action(operationId);
       if (record.state === "confirmed-success") return record;
+      assertOwnedTaskWritable(this.db, record.binding.taskId);
       // A read that failed or timed out must not forget the code host's merge request.
       if (
         observation.state === "uncertain" &&
@@ -1973,6 +2285,44 @@ export class DeliveryStore {
         observation = {
           ...observation,
           mergeRequest: record.observation.mergeRequest,
+        };
+      if (record.stackLink) {
+        const receipt = record.observation?.receipt ?? null;
+        if (
+          observation.receipt &&
+          materialDigest(observation.receipt) !== materialDigest(receipt)
+        )
+          throw new Error("Stack PR receipt is immutable");
+        observation = { ...observation, receipt };
+      }
+      if (record.stackLink) {
+        observation = {
+          ...observation,
+          ...(record.observation?.stackLinkRefused
+            ? { stackLinkRefused: true }
+            : {}),
+          ...(record.observation?.hostReason && !observation.hostReason
+            ? { hostReason: record.observation.hostReason }
+            : {}),
+          ...(observation.state === "uncertain" &&
+          observation.stack === undefined &&
+          record.observation?.stack !== undefined
+            ? { stack: record.observation.stack }
+            : {}),
+        };
+      }
+      // The first PR receipt alone must never complete a stacked create.
+      if (
+        record.stackCreate &&
+        observation.state === "confirmed-success" &&
+        (record.stackLink?.phase !== "link-attempting" ||
+          observation.stack === undefined ||
+          (observation.stack === null && !observation.stackLinkRefused))
+      )
+        observation = {
+          ...observation,
+          state: "uncertain",
+          reason: "stack-link-pending",
         };
       const previous = record.state;
       record.state = observation.state;
@@ -2192,6 +2542,7 @@ export class DeliveryStore {
   ): TaskBranch {
     const existing = this.taskBranch(taskId, repositoryId);
     if (existing) return existing;
+    assertOwnedTaskWritable(this.db, taskId);
     const task = z
         .object({ projectId: z.string(), title: z.string() })
         .parse(
@@ -2281,6 +2632,7 @@ export class DeliveryStore {
     });
   }
   private saveDelivery(binding: PrDeliveryBinding): void {
+    assertOwnedTaskWritable(this.db, binding.taskId);
     this.db
       .prepare(
         "INSERT INTO delivery_pr_bindings VALUES (?,?) ON CONFLICT(taskId) DO UPDATE SET recordJson=excluded.recordJson",
@@ -2293,6 +2645,7 @@ export class DeliveryStore {
     leadAssignmentId: string,
     linkRef?: string | null,
   ): PrDeliveryBinding {
+    assertOwnedTaskWritable(this.db, caller.taskId);
     const current = this.delivery(caller.taskId),
       policy = this.configuration(caller.projectId);
     this.db
@@ -2351,6 +2704,7 @@ export class DeliveryStore {
     /** Newly recorded: the PR's head is on the task branch but is no commit cab pushed. */
     outsideHead: boolean;
   } {
+    assertOwnedTaskWritable(this.db, taskId);
     // The retarget fact decides below and is not kept: it is read afresh while the base differs.
     const { retarget, ...observation } = prObservationSchema.parse(input),
       binding = this.delivery(taskId);
@@ -2434,6 +2788,7 @@ export class DeliveryStore {
     taskId: string,
     observation: PrDeliveryObservation,
   ): boolean {
+    assertOwnedTaskWritable(this.db, taskId);
     const branch = this.taskBranch(taskId, observation.repositoryId);
     if (!branch || branch.branch !== observation.headRef) return false;
     // A PR keeps its head commit after the branch is deleted: only a ref read proves the branch is back.
@@ -2461,6 +2816,8 @@ export class DeliveryStore {
   }
   /** The remote branch was read back at the commit cab last pushed: any outside record is obsolete. */
   clearOutsideHead(taskId: string, repositoryId: string): void {
+    assertOwnedTaskWritable(this.db, taskId);
+    assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
         "UPDATE delivery_task_branches SET outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
@@ -2488,6 +2845,7 @@ export class DeliveryStore {
     );
   }
   recordPrReadFailure(taskId: string): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.transaction(() => {
       const binding = this.delivery(taskId);
       if (!binding) return;
@@ -2514,6 +2872,9 @@ export class DeliveryStore {
   settleHandbackWithinTransaction(
     command: HandbackSettlement,
   ): PrDeliveryBinding {
+    const prior = this.settlementReceipt(command);
+    if (prior) return prior;
+    assertOwnedTaskWritable(this.db, command.taskId);
     const binding = this.delivery(command.taskId);
     if (!binding)
       throw new HandbackSettlementRefusedError("Unknown PR delivery");
@@ -2711,10 +3072,12 @@ export class DeliveryStore {
   }
   /** Jira select fields the last read of the task's issue left unread. */
   recordReadinessCoverage(taskId: string, unreadSelectFields: string[]): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.readiness().recordCoverage(taskId, unreadSelectFields);
   }
   /** Called after a committed source write: latches settlements whose inputs it changed. */
   observeReadinessInputs(taskId: string): void {
+    if (!taskAcceptsWrites(this.db, taskId)) return;
     this.readiness().observe(taskId, () => this.ownClose(taskId, false));
   }
   /**
@@ -2777,6 +3140,7 @@ export class DeliveryStore {
     version: number,
     change: "closed" | "reopened-read",
   ): void {
+    assertOwnedTaskWritable(this.db, taskId);
     // Most Ready flips belong to tasks that never had a cab close: skip the lookups for them.
     if (
       change === "reopened-read" &&
@@ -2941,6 +3305,7 @@ export class DeliveryStore {
     repositoryIds: readonly string[],
     credentialRef: DeliveryPolicy["credentialRef"],
   ): void {
+    assertProjectWritable(this.db, projectId);
     const policy = deliveryPolicySchema.parse({
       mode: "reviewable-pr",
       credentialRef,
@@ -3019,6 +3384,7 @@ export class DeliveryStore {
     expectedVersion: number,
     input: unknown,
   ) {
+    assertProjectWritable(this.db, projectId);
     const current = this.configuration(projectId);
     if (current.version !== expectedVersion)
       throw new DomainConflictError(

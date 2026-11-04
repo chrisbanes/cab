@@ -1,4 +1,9 @@
 import {
+  assertOwnedTaskWritable,
+  assertOwnedWorkWritable,
+  workAcceptsWrites,
+} from "./project-lifecycle.js";
+import {
   questionToolArgumentsSchema,
   questionFormSchema,
   questionAnswersSchema,
@@ -283,7 +288,7 @@ export const runtimeQuestionAnswerCommandSchema = z
     answers: z.unknown(),
   })
   .strict();
-const runtimeAnswerReceiptSchema = z
+export const runtimeAnswerReceiptSchema = z
   .object({
     interactionId: uuid,
     revision: z.number().int().positive(),
@@ -1639,6 +1644,7 @@ export class CoordinationStore {
           JSON.parse(String(prior.result)),
         );
       }
+      assertOwnedTaskWritable(this.db, command.taskId);
       const question = this.runtimeQuestionByInteractionId(
         command.interactionId,
         command.taskId,
@@ -1690,6 +1696,10 @@ export class CoordinationStore {
     });
   }
   holdRuntimeAnswer(interactionId: string, reason: string): void {
+    assertOwnedTaskWritable(
+      this.db,
+      this.requiredRuntimeQuestion(interactionId).taskId,
+    );
     this.db
       .prepare(
         `UPDATE coordination_runtime_questions SET deliveryState='held',reason=? WHERE interactionId=? AND answerJson IS NOT NULL AND replyIntentId IS NULL AND requestState='available'`,
@@ -1702,6 +1712,7 @@ export class CoordinationStore {
   ): RuntimeReplyIntent {
     return transaction(this.db, () => {
       const question = this.runtimeQuestionByInteractionId(interactionId);
+      if (question) assertOwnedTaskWritable(this.db, question.taskId);
       if (
         !question ||
         nativeEndpointKey(question.identity) !== nativeEndpointKey(identity) ||
@@ -1735,6 +1746,7 @@ export class CoordinationStore {
     return transaction(this.db, () => {
       const question = this.runtimeQuestionByEndpoint(identity);
       if (!question) throw new Error("Unknown native outcome identity");
+      assertOwnedTaskWritable(this.db, question.taskId);
       if (
         question.replyIntentId !== (outcome.replyIntentId ?? null) ||
         (question.replyIntentId !== null &&
@@ -1772,7 +1784,7 @@ export class CoordinationStore {
     transaction(this.db, () => {
       this.db
         .prepare(
-          `UPDATE coordination_runtime_questions SET requestState='unavailable',deliveryState=CASE WHEN replyIntentId IS NULL THEN 'unavailable' ELSE 'uncertain' END,reason=? WHERE deliveryState<>'confirmed'`,
+          `UPDATE coordination_runtime_questions SET requestState='unavailable',deliveryState=CASE WHEN replyIntentId IS NULL THEN 'unavailable' ELSE 'uncertain' END,reason=? WHERE deliveryState<>'confirmed' AND interactionId IN (SELECT i.interactionId FROM coordination_interactions i JOIN domain_tasks t ON t.id=i.taskId JOIN domain_projects p ON p.id=t.projectId WHERE p.archived=0)`,
         )
         .run(reason.slice(0, 1024));
     });
@@ -2409,6 +2421,7 @@ export class CoordinationStore {
     message: string,
     reference?: z.infer<typeof feedbackReferenceSchema>,
   ): { event: InboxEvent; resumedLead: boolean } {
+    assertOwnedTaskWritable(this.db, taskId);
     const assignment = this.required(
       "SELECT id, taskId, state FROM domain_assignments WHERE id = ? AND taskId = ?",
       assignmentId,
@@ -2529,6 +2542,7 @@ export class CoordinationStore {
         payloadHash,
       );
       if (replay) return replay;
+      assertOwnedTaskWritable(this.db, command.taskId);
       const task = this.required(
         "SELECT state FROM domain_tasks WHERE id = ?",
         command.taskId,
@@ -2875,6 +2889,7 @@ export class CoordinationStore {
   }
 
   recordSuccessfulTerminal(workId: string): ReportingRepair | undefined {
+    if (!workAcceptsWrites(this.db, workId)) return undefined;
     const work = z.string().min(1).max(512).parse(workId);
     return transaction(this.db, () => {
       const binding = this.one(
@@ -3063,6 +3078,8 @@ export class CoordinationStore {
         command.requestId,
       );
       const request = this.parseCompletionRequest(raw);
+      if (request.status !== "finalized")
+        assertOwnedTaskWritable(this.db, request.taskId);
       if (request.leadWorkId !== command.workId)
         throw new Error("Completion terminal work does not match the request");
       if (request.status === "finalized") {
@@ -3636,6 +3653,11 @@ export class CoordinationStore {
       }
       return batch;
     }
+    const owner = this.required(
+      "SELECT taskId FROM domain_assignments WHERE id = ?",
+      recipient,
+    );
+    assertOwnedTaskWritable(this.db, String(owner.taskId));
     const recipientState = this.required(
       "SELECT state FROM domain_assignments WHERE id = ?",
       recipient,
@@ -3693,6 +3715,7 @@ export class CoordinationStore {
   }
 
   completeDeliveryBatch(deliveryWorkId: string): InboxDelivery {
+    assertOwnedWorkWritable(this.db, deliveryWorkId);
     const workId = z.string().min(1).max(512).parse(deliveryWorkId);
     return transaction(this.db, () => {
       const row = this.required(
@@ -3982,6 +4005,7 @@ export class CoordinationStore {
    * before admission and whose assignment has since been explicitly applied
    * to the current project/profile instruction revisions. */
   withdrawStaleRefusedDelivery(deliveryWorkId: string): boolean {
+    if (!workAcceptsWrites(this.db, deliveryWorkId)) return false;
     const workId = z.string().min(1).max(512).parse(deliveryWorkId);
     return transaction(this.db, () => {
       const batch = this.one(
@@ -4105,6 +4129,7 @@ export class CoordinationStore {
    * ran, keeping its events, so they bind again to the request that replaces it.
    */
   releaseRefusedDeliveryWithinTransaction(deliveryWorkId: string): boolean {
+    if (!workAcceptsWrites(this.db, deliveryWorkId)) return false;
     const workId = z.string().min(1).max(512).parse(deliveryWorkId);
     const batch = this.one(
       `SELECT batchId, taskId, recipientAssignmentId, highWaterSequence
@@ -4125,6 +4150,7 @@ export class CoordinationStore {
    * the events stay, pending again for the next draft turn, the Ready initial turn or routing.
    */
   releaseRefusedDraftTurnDelivery(deliveryWorkId: string): boolean {
+    if (!workAcceptsWrites(this.db, deliveryWorkId)) return false;
     const workId = z.string().min(1).max(512).parse(deliveryWorkId);
     return transaction(this.db, () => {
       const batch = this.one(
@@ -4274,6 +4300,7 @@ export class CoordinationStore {
       .all(threadId, turnId) as Row[];
     if (rows.length > 1)
       throw new Error("Coordination callback matches ambiguous work");
+    if (rows[0]) assertOwnedTaskWritable(this.db, String(rows[0].taskId));
     return rows[0];
   }
 
@@ -4518,6 +4545,7 @@ export class CoordinationStore {
     identity: ReceiptIdentity,
     response: CoordinationToolResponse,
   ): void {
+    assertOwnedTaskWritable(this.db, identity.taskId);
     this.db
       .prepare(`INSERT INTO coordination_receipts
       (threadId, turnId, callId, tool, payloadHash, taskId, assignmentId,
@@ -4563,6 +4591,7 @@ export class CoordinationStore {
     interactionId: string | null = null,
     routingOperationId: string | null = null,
   ): InboxEvent {
+    assertOwnedTaskWritable(this.db, taskId);
     const eventId = randomUUID();
     this.db
       .prepare(`INSERT INTO coordination_inbox_events
@@ -4630,6 +4659,7 @@ export class CoordinationStore {
     kind: "question" | "approval",
     expectedRevision: number,
   ): void {
+    assertOwnedTaskWritable(this.db, String(interaction.taskId));
     if (interaction.kind !== kind || interaction.status !== "open")
       throw new DomainConflictError(
         "Interaction is not open for this response",

@@ -28,6 +28,7 @@ import {
   type PrDeliveryBinding,
   type PrDeliveryObservation,
   type ProviderActionObservation,
+  type StackCreateIdentity,
 } from "../core/delivery.js";
 import type { PushWorkspace } from "./push-verification.js";
 import {
@@ -125,6 +126,18 @@ export interface DeliveryCoordinatorOptions {
    * can refuse a push whose proof base moved during the awaits.
    */
   stackedBase?: (taskId: string, repositoryId: string) => string | null;
+  /** Recorded dependency and blocker branch; null only for a non-stacked task. */
+  stackedPrBase?: (
+    taskId: string,
+    repositoryId: string,
+  ) => {
+    blockerTaskId: string;
+    repositoryId: string;
+    branch: string | null;
+    blockerPrNodeId?: string;
+    blockerPrNumber?: number;
+    blockerHeadSha?: string;
+  } | null;
   /** The repository's task worktree and the base it was provisioned at; null when unavailable. */
   taskWorkspace?: (
     taskId: string,
@@ -167,6 +180,10 @@ export class DeliveryCoordinator {
   constructor(
     private readonly store: DeliveryStore,
     private readonly options: DeliveryCoordinatorOptions,
+    private readonly projectWrite?: <T>(
+      taskId: string,
+      run: () => Promise<T>,
+    ) => Promise<T>,
   ) {}
   private codeHost(
     projectId: string,
@@ -282,7 +299,12 @@ export class DeliveryCoordinator {
           .filter((p): p is Promise<unknown> => p !== undefined),
       ),
     ];
-    const promise = Promise.allSettled(prior).then(run);
+    const taskKey = keys.find((key) => /^(?:task|status):[^:]+$/.test(key));
+    const invoke = () =>
+      this.projectWrite && taskKey
+        ? this.projectWrite(taskKey.slice(taskKey.indexOf(":") + 1), run)
+        : run();
+    const promise = Promise.allSettled(prior).then(invoke);
     for (const key of keys) this.tails.set(key, promise);
     void promise
       .finally(() => {
@@ -435,6 +457,113 @@ export class DeliveryCoordinator {
       policy = this.store.configuration(caller.projectId);
     const action = record.request.action;
     const target = action.target.repositoryId;
+    const lowerChain =
+      action.kind === "pr.merge"
+        ? this.store.stackMergeGuard(caller.taskId, target)
+        : null;
+    if (lowerChain?.reason)
+      return this.store.recordObservation(record.operationId, {
+        state: "confirmed-failure",
+        reason: lowerChain.reason,
+        receipt: null,
+      });
+    const stackedPrBase = () =>
+      this.options.stackedPrBase?.(caller.taskId, target) ?? null;
+    // Only provably unsent/rejected creates may enter preparation again. Recovery with
+    // a receipt or any possibly sent attempt belongs to reconcile's readback path.
+    if (
+      action.kind === "pr.create" &&
+      (record.stackLink ||
+        record.observation?.receipt ||
+        this.store.mayHaveLanded(record.operationId))
+    )
+      return this.store.recordObservation(record.operationId, {
+        ...record.observation,
+        state: "uncertain",
+        reason: "provider-effect-unproved",
+        receipt: record.observation?.receipt ?? null,
+      });
+    let validationRefused: { error: unknown } | undefined;
+    const validatePreparation = <T>(validate: () => T): T => {
+      try {
+        return validate();
+      } catch (error) {
+        // Storage faults remain errors, including faults raised by authority reads.
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          /^(?:ERR_SQLITE|SQLITE_)/.test(String(error.code))
+        )
+          throw error;
+        validationRefused = { error };
+        throw error;
+      }
+    };
+    let createBase: ReturnType<typeof stackedPrBase> = null;
+    try {
+      createBase =
+        action.kind === "pr.create" ? validatePreparation(stackedPrBase) : null;
+      if (record.stackCreate)
+        validatePreparation(() =>
+          this.validateStackAuthority(record, record.stackCreate!),
+        );
+      if (
+        action.kind === "pr.create" &&
+        createBase &&
+        (createBase.repositoryId !== target ||
+          createBase.branch === null ||
+          action.target.baseRef !== createBase.branch)
+      )
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "stacked-pr-base-must-match-blocker-branch",
+          receipt: null,
+        });
+      if (
+        action.kind === "pr.create" &&
+        createBase &&
+        this.codeHost(caller.projectId, target).codeHost === "github"
+      ) {
+        if (
+          !createBase.branch ||
+          !createBase.blockerPrNodeId ||
+          !createBase.blockerPrNumber ||
+          !createBase.blockerHeadSha
+        )
+          return this.store.recordObservation(record.operationId, {
+            state: "confirmed-failure",
+            reason: "stacked-blocker-identity-unproved",
+            receipt: null,
+          });
+        const identity: StackCreateIdentity = {
+          blockerTaskId: createBase.blockerTaskId,
+          repositoryId: createBase.repositoryId,
+          blockerBranch: createBase.branch,
+          blockerPrNodeId: createBase.blockerPrNodeId,
+          blockerPrNumber: createBase.blockerPrNumber,
+          blockerHeadSha: createBase.blockerHeadSha,
+        };
+        record = this.store.prepareStackCreate(
+          record.operationId,
+          identity,
+          () => {
+            validatePreparation(() =>
+              this.validateStackAuthority(record, identity),
+            );
+          },
+        );
+      }
+    } catch (error) {
+      // Catch only the side-effect-free authority callbacks above, never a failed
+      // journal read/write or an unexpected prepareStackCreate persistence error.
+      if (!validationRefused || error !== validationRefused.error) throw error;
+      return this.store.recordObservation(record.operationId, {
+        state: "confirmed-failure",
+        reason: "delivery-authority-stale-or-held",
+        receipt: null,
+      });
+    }
     // Refused before any provider, preflight or Git transport runs for the target.
     // GitHub has a built-in provider; any other host or tracker needs an injected factory.
     let provider: CodeHostDeliveryProvider | IssueTrackerWriter;
@@ -477,6 +606,20 @@ export class DeliveryCoordinator {
           receipt: null,
         });
     }
+    if (
+      record.stackCreate &&
+      (!("prepareStackLink" in provider) ||
+        !provider.prepareStackLink ||
+        !("performStackLink" in provider) ||
+        !provider.performStackLink ||
+        !("inspectStackLink" in provider) ||
+        !provider.inspectStackLink)
+    )
+      return this.store.recordObservation(record.operationId, {
+        state: "confirmed-failure",
+        reason: "code-host-stacking-unavailable",
+        receipt: null,
+      });
     let publication: PublicationContext | undefined;
     let adoption: AdoptionContext | undefined;
     const assigned = action.kind.startsWith("branch.")
@@ -623,6 +766,16 @@ export class DeliveryCoordinator {
     let attempting: DeliveryActionRecord;
     try {
       attempting = this.store.beginAttempt(record.operationId, before, () => {
+        if (
+          action.kind === "pr.create" &&
+          materialDigest(stackedPrBase()) !== materialDigest(createBase)
+        )
+          throw new Error("Stacked PR dependency changed during preflight");
+        if (lowerChain) {
+          const current = this.store.stackMergeGuard(caller.taskId, target);
+          if (current.reason || current.material !== lowerChain.material)
+            throw new Error("Lower stack chain changed during merge preflight");
+        }
         if (closureGuard?.().length)
           throw new Error("PR delivery boundary held");
         if (assigned) {
@@ -685,7 +838,13 @@ export class DeliveryCoordinator {
       };
     }
     // A retryable failure waits for reconcile() once its resume time passes.
-    const recorded = this.recordPublicationAware(record, observation);
+    const recorded = record.stackCreate
+      ? await this.continueStackCreate(
+          attempting,
+          provider as CodeHostDeliveryProvider,
+          observation,
+        )
+      : this.recordPublicationAware(record, observation);
     // The PR head moved with the push: observe it now, under the task's serialization.
     if (
       assigned &&
@@ -694,6 +853,117 @@ export class DeliveryCoordinator {
     )
       await this.inspectBinding(caller.taskId).catch(() => {});
     return recorded;
+  }
+  /** All second-effect sends recheck the original authority and the frozen blocker. */
+  private validateStackAuthority(
+    record: DeliveryActionRecord,
+    identity: StackCreateIdentity,
+  ): void {
+    if (this.stopped) throw new Error("Delivery coordinator stopped");
+    const policy = this.store.configuration(record.binding.projectId);
+    if (this.options.activationAllowed?.(policy) === false)
+      throw new Error(
+        "Delivery credential activation requires safe runtime restart",
+      );
+    this.options.authorize(record.binding, record.operationId, record.request);
+    this.store.authorize(
+      record.request,
+      record.binding,
+      this.options.approved(record.request, record.binding),
+      record.policyVersion,
+    );
+    const current = this.options.stackedPrBase?.(
+      record.binding.taskId,
+      identity.repositoryId,
+    );
+    if (
+      !current ||
+      current.blockerTaskId !== identity.blockerTaskId ||
+      current.repositoryId !== identity.repositoryId ||
+      current.branch !== identity.blockerBranch ||
+      current.blockerPrNodeId !== identity.blockerPrNodeId ||
+      current.blockerPrNumber !== identity.blockerPrNumber ||
+      current.blockerHeadSha !== identity.blockerHeadSha
+    )
+      throw new Error("Stacked blocker identity changed");
+  }
+  private async continueStackCreate(
+    record: DeliveryActionRecord,
+    provider: CodeHostDeliveryProvider,
+    created?: ProviderActionObservation,
+  ): Promise<DeliveryActionRecord> {
+    const identity = record.stackCreate!;
+    try {
+      if (!record.stackLink) {
+        const observation =
+          created ??
+          (await this.bounded(record.binding, provider.inspectAction(record)));
+        if (observation.state !== "confirmed-success" || !observation.receipt)
+          return this.recordPublicationAware(record, observation);
+        const receipt = observation.receipt;
+        if (!receipt.number) throw new Error("Created PR number is unproved");
+        record = this.store.recordStackReceipt(
+          record.operationId,
+          {
+            blockerTaskId: identity.blockerTaskId,
+            repositoryId: identity.repositoryId,
+            blockerBranch: identity.blockerBranch,
+            blockerPrNodeId: identity.blockerPrNodeId,
+            blockerPrNumber: identity.blockerPrNumber,
+            dependentPrNodeId: receipt.nodeId,
+            dependentPrNumber: receipt.number,
+          },
+          receipt,
+          () => {
+            // Receipt persistence does not authorize a send. Retain it even if authority moved.
+          },
+        );
+      }
+      if (
+        !provider.prepareStackLink ||
+        !provider.performStackLink ||
+        !provider.inspectStackLink
+      )
+        throw new Error("Stack provider unavailable");
+      if (record.stackLink!.phase === "receipt-recorded") {
+        this.validateStackAuthority(record, identity);
+        const target = await this.bounded(
+          record.binding,
+          provider.prepareStackLink(record),
+        );
+        record = this.store.beginStackLink(
+          record.operationId,
+          () => this.validateStackAuthority(record, identity),
+          target,
+        );
+        // The persisted link-attempting state precedes the only POST. A crash, timeout or
+        // rejected response from this point can only lead to readback, including on restart.
+        let sent: ProviderActionObservation;
+        try {
+          sent = await this.bounded(
+            record.binding,
+            provider.performStackLink(record),
+          );
+        } catch {
+          sent = {
+            state: "uncertain",
+            reason: "stack-link-effect-unproved",
+            receipt: null,
+          };
+        }
+        record = this.recordPublicationAware(record, sent);
+      }
+      return this.recordPublicationAware(
+        record,
+        await this.bounded(record.binding, provider.inspectStackLink(record)),
+      );
+    } catch {
+      return this.recordPublicationAware(record, {
+        state: "uncertain",
+        reason: "stack-link-held-or-readback-unavailable",
+        receipt: null,
+      });
+    }
   }
   private recordPublicationAware(
     record: DeliveryActionRecord,
@@ -845,7 +1115,9 @@ export class DeliveryCoordinator {
   }
   async refresh(): Promise<void> {
     await this.reconcile();
-    for (const binding of this.store.deliveries())
+    for (const binding of this.store
+      .deliveries()
+      .filter((binding) => this.store.isTaskWritable(binding.taskId)))
       await this.serialize([`task:${binding.taskId}`], async () => {
         if (this.stopped) return;
         try {
@@ -853,6 +1125,8 @@ export class DeliveryCoordinator {
         } catch (error) {
           if (!(error instanceof DeliveryReadUnavailable)) throw error;
         }
+      }).catch((error) => {
+        if (this.store.isTaskWritable(binding.taskId)) throw error;
       });
   }
   private async inspectBinding(taskId: string) {
@@ -1005,6 +1279,7 @@ export class DeliveryCoordinator {
   async reconcile(): Promise<void> {
     if (this.stopped) return;
     for (const record of this.store.actions()) {
+      if (!this.store.isTaskWritable(record.binding.taskId)) continue;
       if (
         !["prepared", "attempting", "uncertain"].includes(record.state) &&
         !retryDue(record)
@@ -1026,6 +1301,16 @@ export class DeliveryCoordinator {
           this.store.latestSentServiceOperation(current.binding.taskId) !==
             current.operationId
         ) {
+          return;
+        }
+        if (current.stackCreate) {
+          await this.continueStackCreate(
+            current,
+            this.provider(
+              current.binding.projectId,
+              current.request.action.target.repositoryId,
+            ),
+          );
           return;
         }
         let observation: ProviderActionObservation;
@@ -1051,6 +1336,8 @@ export class DeliveryCoordinator {
           };
         }
         this.recordPublicationAware(current, observation);
+      }).catch((error) => {
+        if (this.store.isTaskWritable(record.binding.taskId)) throw error;
       });
     }
   }

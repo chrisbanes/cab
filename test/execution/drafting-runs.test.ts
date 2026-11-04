@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { DomainStore } from "../../src/core/domain.js";
+import { Store } from "../../src/core/store.js";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +11,21 @@ import {
   issueEditProposalOf,
 } from "../../src/standalone/drafting.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
+
+const fixtureProjectId = randomUUID();
+function seedProject(db: DatabaseSync) {
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: fixtureProjectId,
+    name: "Drafting",
+    leadProfileId: null,
+  });
+}
 
 const legacyTurnRequests = `CREATE TABLE turn_requests (
   sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,6 +41,7 @@ const legacyTurnRequests = `CREATE TABLE turn_requests (
 
 function legacyDatabase() {
   const db = new DatabaseSync(":memory:");
+  seedProject(db);
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(legacyTurnRequests);
   // A later state migration appended this column; the rebuild must keep it.
@@ -73,7 +91,7 @@ test("turn request migration keeps rows, sequences and links and admits drafting
     .all();
   assert.equal(indexes.length, 3);
 
-  const projectId = randomUUID();
+  const projectId = fixtureProjectId;
   const drafting = new SchedulerStore(db).ensure({
     requestKey: `drafting:${randomUUID()}`,
     workId: "drafting:one",
@@ -134,6 +152,7 @@ test("turn request migration is idempotent", () => {
 function draftingStore() {
   const clock = { now: 1_000 };
   const db = new DatabaseSync(":memory:");
+  seedProject(db);
   return {
     clock,
     store: new DraftingRunStore(db, () => clock.now),
@@ -146,7 +165,7 @@ const proposal = { title: "A title", outcome: "An outcome" };
 function newRun(store: DraftingRunStore) {
   return store.create({
     runId: randomUUID(),
-    projectId: randomUUID(),
+    projectId: fixtureProjectId,
     idea: "rough idea",
     harness: "codex",
     profileId: randomUUID(),
@@ -241,7 +260,7 @@ const issue = {
 function newIssueRun(store: DraftingRunStore, idea = "") {
   return store.create({
     runId: randomUUID(),
-    projectId: randomUUID(),
+    projectId: fixtureProjectId,
     idea,
     harness: "codex",
     profileId: randomUUID(),
@@ -253,6 +272,7 @@ function newIssueRun(store: DraftingRunStore, idea = "") {
 
 test("a table written before issue runs gains the columns and its rows read as briefs", () => {
   const db = new DatabaseSync(":memory:");
+  seedProject(db);
   db.exec(`CREATE TABLE drafting_runs (
     runId TEXT PRIMARY KEY, projectId TEXT NOT NULL, idea TEXT NOT NULL,
     harness TEXT NOT NULL, profileId TEXT NOT NULL, profileRevision INTEGER NOT NULL,
@@ -264,7 +284,7 @@ test("a table written before issue runs gains the columns and its rows read as b
     `INSERT INTO drafting_runs
     (runId, projectId, idea, harness, profileId, profileRevision, instructionsRevision, state, createdAt)
     VALUES (?, ?, 'old idea', 'codex', ?, 1, 1, 'running', 1)`,
-  ).run(runId, randomUUID(), randomUUID());
+  ).run(runId, fixtureProjectId, randomUUID());
   const store = new DraftingRunStore(db);
   new DraftingRunStore(db); // idempotent
   const run = store.require(runId);

@@ -6,7 +6,7 @@ import { seedExecutionDiagnostics } from "../fixtures/execution-diagnostics.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
-test("list, project, Inbox and composer reads traverse retained instruction revisions once per request", async (t) => {
+test("list, project, Inbox and composer reads traverse retained instruction revisions once per projection and exclusion fence", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const d = f.service.domain(),
@@ -81,7 +81,7 @@ test("list, project, Inbox and composer reads traverse retained instruction revi
     ["Inbox", () => api.readInbox()],
     ["composer", () => api.readComposerOptions(projectId)],
   ] as const)
-    assert.equal(await measure(read), revisions, name);
+    assert.equal(await measure(read), revisions * 3, name);
 
   // Each request reads current instructions: no list survives into the next request.
   const titles = async () =>

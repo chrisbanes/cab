@@ -41,6 +41,7 @@ import {
   repositoryDeliverySettings,
 } from "../core/delivery.js";
 import {
+  RedactionLimitError,
   redactionExclusionLimits,
   withinRedactionLimits,
 } from "../core/redaction-limits.js";
@@ -715,6 +716,9 @@ export class OperatorApi {
             /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key),
           ),
           references: this.referenceFence(),
+          privateRedaction: createHash("sha256")
+            .update(JSON.stringify(this.service.redactionExclusions([]).sort()))
+            .digest("hex"),
         }),
       )
       .digest("hex");
@@ -872,9 +876,23 @@ export class OperatorApi {
         if (links.length > 128) return null;
         for (const repo of links) add(repo.path, repo.gitCommonDirectory);
       }
+      const live = values.map(([, value]) => value);
+      // Existing live inputs past the per-value bound withhold text rather than fail the read.
+      if (
+        live.some(
+          (value) =>
+            Buffer.byteLength(value) > redactionExclusionLimits.valueBytes,
+        )
+      )
+        return null;
+      this.service.redactionExclusions(live);
+      for (const value of this.service.redactionExclusions([]))
+        values.push([null, value]);
       return { values, covered };
     } catch (error) {
       if (error instanceof OperatorApiError) throw error;
+      if (error instanceof RedactionLimitError)
+        throw new OperatorApiError(503, "redaction-limit");
       return null;
     }
   }
@@ -2510,10 +2528,22 @@ export class OperatorApi {
       },
     };
   }
+  private exclusionFingerprint() {
+    const base = this.exclusionBase();
+    if (!base) throw new OperatorApiError(503, "unavailable");
+    return createHash("sha256")
+      .update(
+        JSON.stringify(
+          [...new Set(base.values.map(([, value]) => value))].sort(),
+        ),
+      )
+      .digest("hex");
+  }
   /** Instruction revisions and linked repositories: the exclusion base inputs no other fence covers. */
   private exclusionFence() {
     const d = this.domain();
     return JSON.stringify({
+      exclusions: this.exclusionFingerprint(),
       profiles: d.profiles().map((p) => [p.id, p.version]),
       projects: d
         .projects()
@@ -2527,12 +2557,18 @@ export class OperatorApi {
   }
   /** Rebuild projections once if their instruction or repository exclusions changed across an await. */
   private async readWithExclusionFence<T>(read: () => Promise<T>): Promise<T> {
+    const references = this.referenceFence();
     for (let attempt = 0; attempt < 2; attempt++) {
       const fence = this.exclusionFence();
       try {
         const response = await read();
+        if (references !== this.referenceFence())
+          throw new OperatorApiError(503, "unavailable");
         if (fence === this.exclusionFence()) return response;
       } catch (error) {
+        // Credential rotation retains its refusal boundary, rather than retrying under new authority.
+        if (references !== this.referenceFence())
+          throw new OperatorApiError(503, "unavailable");
         // Nested reads can reject the same instruction or repository race before we reach the fence.
         if (
           !(error instanceof OperatorApiError) ||
@@ -3179,6 +3215,80 @@ export class OperatorApi {
     return { codes, count };
   }
   /** The summary plus the coordination view and exclusions it was derived from. */
+  /** Shared list/detail projection: joins only the recorded same-project dependency. */
+  private stackDeliveryFacts(
+    taskId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    if (excluded === undefined) return null;
+    const d = this.domain(),
+      task = d.task(taskId),
+      edge = d.stackedDependency(taskId);
+    if (!edge || d.task(edge.blockerTaskId).projectId !== task.projectId)
+      return null;
+    const store = this.service.delivery(),
+      blocker = store.delivery(edge.blockerTaskId);
+    const branch = store.taskBranch(edge.blockerTaskId, edge.repositoryId);
+    const p = blocker?.observation;
+    const repositoryId = this.exact(edge.repositoryId, excluded);
+    const nodeId = p ? this.exact(p.nodeId, excluded) : null;
+    if (!repositoryId || (p && !nodeId)) return null;
+    const blockerPr =
+      blocker?.projectId === task.projectId &&
+      p &&
+      branch &&
+      p.repositoryId === edge.repositoryId &&
+      p.headRef === branch.branch &&
+      repositoryId &&
+      nodeId
+        ? { repositoryId, nodeId, number: p.number }
+        : null;
+    const ownBranch = store.taskBranch(taskId, edge.repositoryId);
+    const bound = store.delivery(taskId);
+    const create = store
+      .actions(taskId)
+      .filter(
+        (a) =>
+          a.stackCreate?.blockerTaskId === edge.blockerTaskId &&
+          a.stackCreate.repositoryId === edge.repositoryId &&
+          a.stackCreate.blockerPrNodeId === blockerPr?.nodeId &&
+          a.stackCreate.blockerPrNumber === blockerPr?.number &&
+          (!bound ||
+            (a.stackLink?.identity.dependentPrNodeId ===
+              bound.observation.nodeId &&
+              a.stackLink.identity.dependentPrNumber ===
+                bound.observation.number)) &&
+          a.request.action.kind === "pr.create" &&
+          a.request.action.target.headRef === ownBranch?.branch,
+      )
+      .at(-1);
+    const own =
+      bound &&
+      bound.projectId === task.projectId &&
+      bound.observation.repositoryId === edge.repositoryId &&
+      bound.observation.headRef === ownBranch?.branch
+        ? bound
+        : null;
+    const membership =
+      own && own.observation.stack !== undefined
+        ? own.observation.stack
+        : (create?.observation?.stack ?? null);
+    return {
+      blockerPr,
+      membership,
+      membershipKnown: own
+        ? !own.readError && own.observation.stack !== undefined
+        : create?.state === "confirmed-success" &&
+          create.observation?.stack !== undefined,
+      reason:
+        this.safe(
+          create?.observation?.hostReason ??
+            create?.observation?.reason ??
+            null,
+          excluded,
+        )?.slice(0, 500) ?? null,
+    };
+  }
   private async taskSummaryRead(
     taskId: string,
     base?: ExclusionBase,
@@ -3194,6 +3304,7 @@ export class OperatorApi {
     const summary = {
       id: taskId,
       projectId,
+      stackDelivery: this.stackDeliveryFacts(taskId, excluded),
       title: this.safe(task.title, excluded),
       version: Number(task.version),
       state: task.state,
@@ -3561,6 +3672,9 @@ export class OperatorApi {
     );
   }
   async readInbox(params = new URLSearchParams()) {
+    return this.readWithExclusionFence(() => this.readInboxOnce(params));
+  }
+  private async readInboxOnce(params: URLSearchParams) {
     const allowed = ["cursor", "limit", "kind", "project"];
     if (
       [...params.keys()].some((k) => !allowed.includes(k)) ||
@@ -4049,6 +4163,7 @@ export class OperatorApi {
       }),
       admission,
       stack: d.stackFacts(taskId),
+      stackDelivery: this.stackDeliveryFacts(taskId, excluded),
       waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
       execution,
       taskHold: this.nonStopTaskHold(taskId, excluded),

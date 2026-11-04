@@ -431,3 +431,50 @@ test("request wording is exhaustive and links match the Inbox selection", () => 
     null,
   );
 });
+
+test("stack markers use exactly the recorded blocker PR number and invent no identity", async () => {
+  const { stackedPrMarker } = await import("../../web/src/tasks.js");
+  const { stackSummary } = await import("../../src/operator/stacking-copy.js");
+  const task = summary();
+  assert.equal(stackedPrMarker(task), null);
+  const facts = {
+    blockerPr: { repositoryId: "R1", nodeId: "P1", number: 17 },
+    membership: { id: 42, number: 9, position: 2, size: 3 },
+    membershipKnown: true,
+    reason: null,
+  };
+  assert.equal(
+    stackedPrMarker({ ...task, stackDelivery: facts }),
+    "stacked on #17",
+  );
+  assert.equal(
+    stackedPrMarker({ ...task, stackDelivery: { ...facts, blockerPr: null } }),
+    null,
+  );
+  const stack = {
+    state: "stacked" as const,
+    reason: null,
+    blockerTaskId: randomUUID(),
+    repositoryId: "R1",
+    parentHead: "a".repeat(40),
+    restack: "current" as const,
+  };
+  assert.match(
+    stackSummary(stack, facts) ?? "",
+    /Blocker PR #17.*position 2 of 3/,
+  );
+  const refused = stackSummary(stack, {
+    ...facts,
+    membership: null,
+    reason: "GitHub refused the stack (422)",
+  });
+  assert.match(refused ?? "", /Plain chained PR.*422/);
+  assert.match(
+    stackSummary(stack, {
+      ...facts,
+      membership: null,
+      membershipKnown: false,
+    }) ?? "",
+    /membership unconfirmed/,
+  );
+});

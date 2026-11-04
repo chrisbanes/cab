@@ -1,3 +1,4 @@
+import { taskAcceptsWrites } from "../core/project-lifecycle.js";
 import { z } from "zod";
 import {
   redactionExclusionLimits,
@@ -238,6 +239,7 @@ export class ConversationHistoryStore {
     event: RuntimeConversationEvent,
     exclusions: readonly string[],
   ): void {
+    if (!taskAcceptsWrites(this.db, binding.taskId)) return;
     const now = this.checkedNow();
     if (event.kind === "started") {
       this.db
@@ -282,6 +284,7 @@ export class ConversationHistoryStore {
     binding: ConversationHistoryBinding,
     deltas: ReadonlyMap<string, number>,
   ): void {
+    if (!taskAcceptsWrites(this.db, binding.taskId)) return;
     const now = this.checkedNow();
     transaction(this.db, () => {
       for (const [itemId, bytes] of deltas)
@@ -291,6 +294,7 @@ export class ConversationHistoryStore {
   }
 
   recordEarlyBufferLimit(binding: ConversationHistoryBinding): void {
+    if (!taskAcceptsWrites(this.db, binding.taskId)) return;
     this.db
       .prepare(`INSERT OR IGNORE INTO conversation_history_turn_omissions
         (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
@@ -305,10 +309,12 @@ export class ConversationHistoryStore {
     itemId: string,
     reason: ConversationHistoryOmissionReason,
   ): void {
+    if (!taskAcceptsWrites(this.db, binding.taskId)) return;
     this.recordOmission(binding, itemId, reason, this.checkedNow());
   }
 
   omitIncomplete(binding: ConversationHistoryBinding): void {
+    if (!taskAcceptsWrites(this.db, binding.taskId)) return;
     this.db
       .prepare(`UPDATE conversation_history_items
         SET lifecycle = 'omitted', text = NULL, omissionReason = 'turn-ended',

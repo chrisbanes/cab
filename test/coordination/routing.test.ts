@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { APIError } from "@typesafe-ai/sdk";
@@ -19,8 +20,23 @@ const taskId = "20000000-0000-4000-8000-000000000001";
 const profileA = "30000000-0000-4000-8000-000000000001";
 const profileB = "30000000-0000-4000-8000-000000000002";
 
+function seedProject(db: DatabaseSync) {
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Routing",
+    leadProfileId: null,
+  });
+}
+
 function fixture() {
   const db = new DatabaseSync(":memory:");
+  seedProject(db);
   const store = new RoutingAttemptStore(db);
   store.migrate();
   return { db, store, close: () => db.close() };
@@ -69,8 +85,7 @@ function selected(
 test("routing inference operations coexist with domain routing dispositions", () => {
   const db = new DatabaseSync(":memory:");
   try {
-    new Store(db).ensureHost("test");
-    new DomainStore(db).migrate();
+    seedProject(db);
     const routing = new RoutingAttemptStore(db);
     routing.migrate();
 
