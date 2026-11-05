@@ -835,9 +835,14 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
   await rows.getByText("tools · Codex").waitFor();
   // Add is disabled once its plugin is added, so focus goes to the select.
   await dialog.waitFor({ state: "detached" });
-  assert.equal(
-    await select.evaluate((e) => e === document.activeElement),
-    true,
+  // Radix restores focus after unmount, on a timer.
+  await select.evaluate(
+    (e) =>
+      new Promise<void>((done) => {
+        const check = () =>
+          e === document.activeElement ? done() : setTimeout(check, 10);
+        check();
+      }),
   );
   await rows.getByText("2 skills").waitFor();
   await page
@@ -873,7 +878,7 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
   // A saved skill the plugin no longer has is named, not kept invisibly.
   await dialog
     .getByRole("status")
-    .getByText("No longer in the plugin, removed when you update: wide.")
+    .getByText("Not offered by the plugin now, removed when you update: wide.")
     .waitFor();
   await dialog.getByText("1 of 1 selected").waitFor();
   await dialog.getByRole("button", { name: "Update skills" }).click();

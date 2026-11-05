@@ -389,8 +389,10 @@ function SkillDialog({
             </fieldset>
             {editing.dropped && editing.dropped.length > 0 && (
               <p className="metadata" role="status">
-                No longer in the plugin, removed when you update:{" "}
+                Not offered by the plugin now, removed when you update:{" "}
                 {editing.dropped.join(", ")}.
+                {editing.selected.length === 0 &&
+                  " Select a skill, or remove the plugin."}
               </p>
             )}
             {tooMany && (
