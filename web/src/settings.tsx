@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   useCallback,
   useEffect,
@@ -77,7 +78,7 @@ export function useLoadedDraft(
     wasClean.current = { d, clean };
   }, [d, clean]);
 }
-const fresh = (values: Values) => ({ ...values, key: crypto.randomUUID() });
+const fresh = (values: Values) => ({ ...values, key: randomUUID() });
 /** Discard unsaved input: start a new operation from the loaded values. */
 export const reloadDraft = (d: ConfigurationDraft, values: Values) =>
   d.startOperation(fresh(values));
@@ -808,7 +809,7 @@ export async function sendDraft(
       scope.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
     );
 }
-export const key = () => crypto.randomUUID();
+export const key = () => randomUUID();
 export function ReferenceInput({ draft }: { draft: ConfigurationDraft }) {
   return (
     <>

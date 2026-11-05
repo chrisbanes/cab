@@ -9,8 +9,8 @@ import { CliError } from "./connections.js";
 
 export const API_VERSION = 1;
 
-/** Accepts only `https://host[:port]` or the service's loopback `http://127.0.0.1:port`. */
-export function connectionOrigin(value: string): string {
+/** Remote HTTP requires explicit consent on the token connection. */
+export function connectionOrigin(value: string, allowHttp = false): string {
   let url: URL | undefined;
   try {
     url = new URL(value);
@@ -24,12 +24,14 @@ export function connectionOrigin(value: string): string {
     url.password ||
     !(
       url.protocol === "https:" ||
-      (url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port)
+      (url.protocol === "http:" &&
+        url.port &&
+        (url.hostname === "127.0.0.1" || allowHttp))
     )
   )
     throw new CliError(
       "invalid-url",
-      "Use an https:// origin or http://127.0.0.1:PORT, without a path.",
+      "Use an https:// origin or http://127.0.0.1:PORT, without a path; remote HTTP requires --allow-http at login.",
     );
   return url.origin;
 }

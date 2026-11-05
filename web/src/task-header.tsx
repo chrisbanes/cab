@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { Ellipsis } from "lucide-react";
 import {
   type KeyboardEvent,
@@ -507,7 +508,7 @@ function HoldCommand({
                 void send(
                   operatorCommandSchema.parse({
                     type: kind === "stop" ? "task.stop" : "task.resume",
-                    key: crypto.randomUUID(),
+                    key: randomUUID(),
                     taskId,
                   }),
                 )

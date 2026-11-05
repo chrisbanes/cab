@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   Fragment,
   useCallback,
@@ -169,7 +170,7 @@ function RuntimeToggle(
   const command = (enabled: boolean, confirmedBoundTasks?: number) =>
     ({
       type: "runtime.configure",
-      key: crypto.randomUUID(),
+      key: randomUUID(),
       harness,
       enabled,
       ...(confirmedBoundTasks === undefined ? {} : { confirmedBoundTasks }),
@@ -822,7 +823,7 @@ function BoundTurnForm(
       return;
     const parsed = operatorCommandSchema.safeParse({
       type: "recovery.bound-turn.recover",
-      key: crypto.randomUUID(),
+      key: randomUUID(),
       assignmentId: p.assignmentId,
       receipt: {
         kind: "bound-turn",

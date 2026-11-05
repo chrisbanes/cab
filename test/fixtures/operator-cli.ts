@@ -22,6 +22,7 @@ type After = { after(fn: () => unknown): void };
 
 type ServeOptions = {
   authOrigin?: string;
+  lan?: { address: string; origin?: string };
   controlPaths?: string[];
   previewReader?: ConstructorParameters<typeof OperatorApi>[3];
   /** Setup seams, such as the home folder the setup routes read. */
@@ -120,6 +121,7 @@ export async function serveCli<F extends Fixture>(
       },
     );
     return new LocalOperatorHttp(auth, {
+      ...(options.lan ? { lan: options.lan } : {}),
       credentials: f.service.operatorCredentials(),
       localAccess: f.service.localAccess(),
       ...(options.push ? { push: options.push } : {}),
@@ -156,7 +158,7 @@ export async function serveCli<F extends Fixture>(
       method: "POST",
       headers: {
         cookie,
-        origin: authOrigin,
+        origin: options.lan ? origin : authOrigin,
         "x-csrf-token": csrf,
         "content-type": "application/json",
         ...headers,

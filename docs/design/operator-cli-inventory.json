@@ -1674,11 +1674,12 @@
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
         "test/operator/operator-cli.test.ts",
+        "test/operator/operator-cli-http.test.ts",
         "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md"
       ],
-      "effect": "Remote origins must be HTTPS and verified by system trust or NODE_EXTRA_CA_CERTS; a redirect is rejected (exit 5) and the credential is never forwarded to another origin; the CLI imports no service or SQLite code.",
-      "denial": "Rejected without NODE_EXTRA_CA_CERTS and accepted with it for a throwaway certificate; a redirect leaves no credential at the other origin; non-loopback http:// URLs are refused by the URL rules.",
+      "effect": "Remote origins use HTTPS verified by system trust or NODE_EXTRA_CA_CERTS unless a named token connection explicitly consents to plaintext HTTP; a redirect is rejected (exit 5) and the credential is never forwarded to another origin; the CLI imports no service or SQLite code.",
+      "denial": "Rejected without NODE_EXTRA_CA_CERTS and accepted with it for a throwaway certificate; a redirect leaves no credential at the other origin; non-loopback http:// URLs are refused without saved explicit consent.",
       "revision": "n/a: transport, not a versioned operation.",
       "retry": "n/a: a transport refusal sent nothing.",
       "observation": "synthetic",

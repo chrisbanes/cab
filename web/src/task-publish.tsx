@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OperatorCommand } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
@@ -73,8 +74,8 @@ export function PublishToGitHub({
   const [abandoning, setAbandoning] = useState(false);
   // One key per review and per send, so a retry of either replays instead of repeating.
   const keys = useRef({
-    review: crypto.randomUUID(),
-    send: crypto.randomUUID(),
+    review: randomUUID(),
+    send: randomUUID(),
   });
   const view = publishView(policy, local);
   const latest = policy.latest;
@@ -121,7 +122,7 @@ export function PublishToGitHub({
         result.state === "rejected" ? result.code : undefined,
       );
     // A new review is a new request, so a changed choice never replays an old one.
-    keys.current = { review: crypto.randomUUID(), send: crypto.randomUUID() };
+    keys.current = { review: randomUUID(), send: randomUUID() };
   };
 
   const publish = async (reviewed: PublicationReview) => {
@@ -130,7 +131,7 @@ export function PublishToGitHub({
     setLocal({ ...local, sending: true });
     const confirmed = await send({
       type: "task.publish.confirm",
-      key: crypto.randomUUID(),
+      key: randomUUID(),
       taskId,
       reviewId: reviewed.reviewId,
       expectedRevision: reviewed.revision,
@@ -198,7 +199,7 @@ export function PublishToGitHub({
 
   const checkAgain = async () => {
     setBusy(true);
-    await send({ type: "delivery.refresh", key: crypto.randomUUID(), taskId });
+    await send({ type: "delivery.refresh", key: randomUUID(), taskId });
     setBusy(false);
     onChanged();
   };
@@ -327,7 +328,7 @@ export function PublishToGitHub({
                       void act(
                         {
                           type: "task.publish.link",
-                          key: crypto.randomUUID(),
+                          key: randomUUID(),
                           taskId,
                           reviewId: latest.publicationId,
                           issueNumber: Number(issue),
@@ -357,7 +358,7 @@ export function PublishToGitHub({
                         void act(
                           {
                             type: "task.publish.abandon",
-                            key: crypto.randomUUID(),
+                            key: randomUUID(),
                             taskId,
                             reviewId: latest.publicationId,
                           },

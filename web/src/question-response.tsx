@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   useCallback,
   useEffect,
@@ -202,7 +203,7 @@ export function QuestionResponse({
         data.source === "native"
           ? {
               type: "question.native.answer",
-              key: crypto.randomUUID(),
+              key: randomUUID(),
               taskId,
               interactionId,
               expectedRevision: state.revision,
@@ -211,7 +212,7 @@ export function QuestionResponse({
           : data.source === "plain"
             ? {
                 type: "question.answer",
-                key: crypto.randomUUID(),
+                key: randomUUID(),
                 taskId,
                 interactionId,
                 expectedRevision: state.revision,
@@ -219,7 +220,7 @@ export function QuestionResponse({
               }
             : {
                 type: "question.form.answer",
-                key: crypto.randomUUID(),
+                key: randomUUID(),
                 taskId,
                 interactionId,
                 expectedRevision: state.revision,

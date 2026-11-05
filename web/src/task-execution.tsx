@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { taskProjectReadOnly } from "./project-lifecycle-model.js";
 import { useRef, useState } from "react";
 import {
@@ -136,7 +137,7 @@ function Dependencies({
     void send(
       operatorCommandSchema.parse({
         type,
-        key: crypto.randomUUID(),
+        key: randomUUID(),
         projectId: data.task.projectId,
         taskId,
         blockerTaskId: id,
@@ -415,7 +416,7 @@ export function ApplyInstructions({
             void send(
               operatorCommandSchema.parse({
                 type: "assignment.apply",
-                key: crypto.randomUUID(),
+                key: randomUUID(),
                 projectId,
                 assignmentId,
                 expectedVersion: assignment.version,
