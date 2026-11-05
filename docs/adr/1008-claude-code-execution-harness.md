@@ -124,8 +124,9 @@ strict MCP configuration, `managedSettings.disableAllHooks` and a dedicated Clau
 configuration directory. cab supplies repository instructions (`CLAUDE.md`,
 `AGENTS.md`) as instruction text, so repository content cannot add permission rules,
 hooks or MCP servers. The one addition is the profile's skill plugins
-([ADR-1021](1021-profile-skill-plugins-and-subagents.md)): local plugin directories
-passed through the SDK `plugins` option, with the enabled names in `skills` and the
+([ADR-1021](1021-profile-skill-plugins-and-subagents.md)): local plugin directories,
+or plugins installed in Claude Code or Codex resolved to their install directory at each
+turn start, passed through the SDK `plugins` option as local plugins, with the enabled names in `skills` and the
 `Skill` tool allowed only when a profile enables any. A plugin contributes skills,
 instructions and scripts; the hooks and MCP servers it declares never run, and its
 scripts run through the ordinary sandboxed shell. The `Agent` tool is allowed on every

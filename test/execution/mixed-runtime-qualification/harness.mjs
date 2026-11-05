@@ -31,6 +31,10 @@ export const FACETS = {
   // #1524: a nested skill of a copy of the installed mattpocock-skills plugin, per harness.
   "claude-nested-skill": { claude: 1, codex: 0 },
   "codex-nested-skill": { claude: 0, codex: 1 },
+  // #1525: a skill of a plugin installed with the tool's own CLI, then updated; two tasks,
+  // each one turn, and a reporting repair at most once.
+  "claude-installed-plugin": { claude: 3, codex: 0 },
+  "codex-installed-plugin": { claude: 0, codex: 3 },
   "claude-subagent-stop": { claude: 1, codex: 0 },
   "claude-subagent-crash": { claude: 3, codex: 0 },
 };

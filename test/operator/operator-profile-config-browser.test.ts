@@ -13,7 +13,11 @@ import {
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
-import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
+import { installedPluginHomes } from "../fixtures/installed-plugins.js";
+import {
+  writeNestedSkillPlugin,
+  writeSkillPlugin,
+} from "../fixtures/skill-plugin.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -757,63 +761,189 @@ test("Codex profile configuration rejects a stored effort the runtime no longer 
   assert.equal(sent, 0);
 });
 
-test("Profile configuration sets two skills of a plugin, rejects a missing plugin and shows the skills on the profile", async (_t, journey) => {
+test("Profile configuration picks installed plugins' skills in a dialog, edits and removes them, and adds a local directory", async (t, journey) => {
+  const homes = installedPluginHomes(
+    mkdtempSync(join(tmpdir(), "cab-skill-ui-")),
+  );
+  for (const [key, value] of Object.entries(homes.environment)) {
+    const previous = process.env[key];
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+    process.env[key] = value;
+  }
+  homes.installClaude("demo@m", { skills: ["review", "plan"] });
+  homes.installCodex("tools@n", {
+    write: (dir) =>
+      writeNestedSkillPlugin(
+        dir,
+        { engineering: ["deep", "wide"] },
+        { name: "tools", claude: false },
+      ),
+  });
   const { f, ids, page, web } = await startSettings(journey, "/app/settings");
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
-  const plugin = writeSkillPlugin(
-    join(mkdtempSync(join(tmpdir(), "cab-skill-ui-")), "plugin"),
-    ["review", "plan"],
-  );
+  const save = () =>
+    page.getByRole("button", { name: "Save profile", exact: true }).click();
+  const select = page.getByLabel("Installed plugin", { exact: true });
+  const rows = page.getByRole("list", { name: "Enabled skill plugins" });
   await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
-  await page.getByLabel("Skill plugins", { exact: true }).waitFor();
   await page
     .getByRole("complementary", { name: "About skill plugins" })
     .getByText("not cab policy", { exact: false })
     .waitFor();
-  const field = page.getByLabel("Skill plugins", { exact: true });
-  await field.fill("not a plugin line");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
-  await page
-    .getByText("One plugin per line", { exact: false })
-    .first()
-    .waitFor();
-  assert.deepEqual(d.profileSkills(builder), { plugins: [] });
-
-  await field.fill(`${plugin}-missing: review`);
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
-  await page.getByText("not a plugin directory on the service host").waitFor();
-  assert.deepEqual(d.profileSkills(builder), { plugins: [] });
-
-  await field.fill(`${plugin}: review, plan`);
+  await page.getByText("No skills enabled.").waitFor();
+  // A Codex profile is offered both tools' plugins, grouped by tool.
+  await select.locator("option", { hasText: "tools" }).waitFor({
+    state: "attached",
+  });
+  assert.deepEqual(
+    await select
+      .locator("optgroup")
+      .evaluateAll((groups) =>
+        groups.map((g) => [
+          g.getAttribute("label"),
+          [...g.querySelectorAll("option")].map((o) => o.textContent),
+        ]),
+      ),
+    [
+      ["Claude Code", ["demo"]],
+      ["Codex", ["tools"]],
+    ],
+  );
+  await select.selectOption("codex:tools@n");
+  const add = page.getByRole("button", { name: "Add", exact: true });
+  // Escape closes the dialog and gives focus back to the control that opened it.
+  await add.click();
+  const dialog = page.getByRole("dialog");
+  await dialog.waitFor();
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(await add.evaluate((e) => e === document.activeElement), true);
+  await add.click();
+  await dialog.getByLabel("Filter skills", { exact: true }).fill("dee");
+  assert.deepEqual(await dialog.getByRole("checkbox").count(), 1);
+  // Checkboxes toggle with Space.
+  await dialog.getByRole("checkbox", { name: "deep" }).focus();
+  await page.keyboard.press("Space");
+  await dialog.getByLabel("Filter skills", { exact: true }).fill("");
+  await dialog.getByRole("checkbox", { name: "wide" }).check();
+  await dialog.getByText("2 of 2 selected").waitFor();
+  await dialog.getByRole("button", { name: "Add plugin" }).click();
+  await rows.getByText("tools · Codex").waitFor();
+  // Add is disabled once its plugin is added, so focus goes to the select.
+  await dialog.waitFor({ state: "detached" });
+  // Radix restores focus after unmount, on a timer.
+  await select.evaluate(
+    (e) =>
+      new Promise<void>((done) => {
+        const check = () =>
+          e === document.activeElement ? done() : setTimeout(check, 10);
+        check();
+      }),
+  );
+  await rows.getByText("2 skills").waitFor();
   await page
     .getByRole("region", { name: "Changes to save" })
     .getByText("Skill plugins: none → 1 plugin, 2 skills")
     .waitFor();
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await save();
   await page.getByText("Current revision 2.").waitFor();
   assert.deepEqual(d.profileSkills(builder), {
-    plugins: [{ path: plugin, skills: ["review", "plan"] }],
+    plugins: [{ plugin: "codex:tools@n", skills: ["deep", "wide"] }],
   });
-  assert.deepEqual(d.profileSkills(builder, 1), { plugins: [] });
-  // The saved skills come back on reload.
+  // An update in Codex drops a saved skill; the saved row comes back on reload.
+  homes.installCodex("tools@n", {
+    version: "2.0.0",
+    write: (dir) =>
+      writeNestedSkillPlugin(
+        dir,
+        { engineering: ["deep"] },
+        { name: "tools", claude: false },
+      ),
+  });
   await page.reload();
+  await rows.getByText("tools · Codex").waitFor();
+  assert.equal(await select.locator("option", { hasText: "tools" }).count(), 0);
+
   await page
-    .getByLabel("Skill plugins", { exact: true })
-    .evaluate(
-      (e, want) => (e as HTMLTextAreaElement).value === want,
-      `${plugin}: review, plan`,
-    )
-    .then((same) => assert.equal(same, true));
-  // The skills stay with the profile across a runtime switch.
-  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+    .getByRole("button", { name: "Edit skills of tools · Codex" })
+    .click();
+  assert.equal(
+    await dialog.getByRole("checkbox", { name: "deep" }).isChecked(),
+    true,
+  );
+  // A saved skill the plugin no longer has is named, not kept invisibly.
+  await dialog
+    .getByRole("status")
+    .getByText("Not offered by the plugin now, removed when you update: wide.")
+    .waitFor();
+  await dialog.getByText("1 of 1 selected").waitFor();
+  await dialog.getByRole("button", { name: "Update skills" }).click();
+  await rows.getByText("1 skill", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Remove tools · Codex" }).click();
+  await page.getByText("No skills enabled.").waitFor();
+
+  // A local directory: the server checks it on save, and the error sits by its row.
+  const plugin = writeSkillPlugin(
+    join(mkdtempSync(join(tmpdir(), "cab-skill-ui-local-")), "plugin"),
+    ["review", "plan"],
+  );
+  await page.getByRole("button", { name: "Add local directory" }).click();
+  await dialog.getByLabel("Plugin directory").fill(`${plugin}-missing`);
+  await dialog.getByLabel("Skills", { exact: true }).fill("review, plan");
+  await dialog.getByRole("button", { name: "Add plugin" }).click();
+  await save();
+  await rows
+    .getByText("Not a loadable plugin directory on the service host", {
+      exact: false,
+    })
+    .waitFor();
+  assert.deepEqual(d.profileSkills(builder), {
+    plugins: [{ plugin: "codex:tools@n", skills: ["deep", "wide"] }],
+  });
+  await page
+    .getByRole("button", { name: `Edit skills of ${plugin}-missing` })
+    .click();
+  await dialog.getByLabel("Plugin directory").fill(plugin);
+  await dialog.getByRole("button", { name: "Update skills" }).click();
+  await save();
   await page.getByText("Current revision 3.").waitFor();
   assert.deepEqual(d.profileSkills(builder), {
     plugins: [{ path: plugin, skills: ["review", "plan"] }],
   });
-  await page.getByLabel("Skill plugins", { exact: true }).fill("");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+
+  // A Claude profile is not offered a Codex-only plugin.
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  await select.locator("option", { hasText: "demo" }).waitFor({
+    state: "attached",
+  });
+  assert.equal(await select.locator("option", { hasText: "tools" }).count(), 0);
+  await save();
   await page.getByText("Current revision 4.").waitFor();
+  assert.deepEqual(d.profileSkills(builder), {
+    plugins: [{ path: plugin, skills: ["review", "plan"] }],
+  });
+
+  // A saved installed plugin that is disabled now is shown as unavailable and can be removed.
+  d.execute({
+    key: randomUUID(),
+    actor: "operator",
+    type: "profile.configure",
+    profileId: builder,
+    expectedVersion: 4,
+    skills: { plugins: [{ plugin: "claude:demo@m", skills: ["review"] }] },
+  } as never);
+  homes.setClaudeEnabled("demo@m", false);
+  await page.reload();
+  await rows.getByText("Unavailable").waitFor();
+  await rows.getByText("demo@m · Claude Code").waitFor();
+  await page
+    .getByRole("button", { name: "Remove demo@m · Claude Code" })
+    .click();
+  await save();
+  await page.getByText("Current revision 6.").waitFor();
   assert.deepEqual(d.profileSkills(builder), { plugins: [] });
 });

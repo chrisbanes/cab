@@ -18,12 +18,14 @@ a subagent under Stop, and a crash during a subagent; the
 [Codex journey record](../evidence/codex-skill-journeys-2026-10-30.md) show per-thread
 skills and a Codex turn running its profile's skill.
 
-The plugin layouts and load scope below are implemented for local plugin directories
+The plugin layouts and load scope below are implemented
 ([#1524](https://github.com/chrisbanes/cab/issues/1524)); the
 [layout journey record](../evidence/skill-plugin-layout-journeys-2026-11-05.md) shows a
-nested skill of `mattpocock-skills` running on each harness. Not yet implemented: installed
-plugins as a profile source (profiles still name local directories only;
-[#1525](https://github.com/chrisbanes/cab/issues/1525)).
+nested skill of `mattpocock-skills` running on each harness. Installed plugins are
+implemented too ([#1525](https://github.com/chrisbanes/cab/issues/1525)); the
+[installed-plugin journey record](../evidence/installed-plugin-journeys-2026-11-05.md)
+shows a plugin installed and then updated with each tool's own CLI, with the next turn
+running the update.
 
 ## Decision
 
@@ -113,7 +115,10 @@ No hook, MCP server, app or setting is read from the operator's configuration.
 - **Unavailable.** A plugin that cannot be resolved (uninstalled, disabled, an unknown
   record format or two Codex versions) holds the turn with a reason that names the
   plugin and no path, and readiness reports it. Installing or enabling it again
-  recovers.
+  recovers: the held work is re-checked on a timer, because a change in either tool is
+  not a cab event. Only Claude Code's user-scope install counts; project and local
+  installs belong to a repository's own settings. A profile enables a plugin once by
+  manifest name, so the same plugin from both tools, or a local copy of it, is refused.
 - **Updates.** Updating a plugin in Claude Code or Codex updates it for cab's next turn,
   and the turn's plugin digest shows the change. A turn whose install directory is
   removed while it runs, for example by an update, can fail; whether either tool does so

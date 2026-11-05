@@ -30,7 +30,9 @@ note, **Cancel** and then **Create paused project** at every width.
    including a readable Claude token, or falls back to the lead. Checked creation waits
    for readiness to settle; a failed read falls back to the lead. The three ordinary
    profiles and receipt commit together, with blank lead instructions, default models
-   and effort and no skills. The workers' copied instructions are editable; the Reviewer
+   and effort and no skills; skills are added later in the profile's settings, from
+   plugins installed in Claude Code or Codex or a local plugin directory. The workers'
+   copied instructions are editable; the Reviewer
    file-change restriction is advisory. There is no prescribed execution order.
    Unchecking preserves lead-only creation. The subsequent project receives the workers
    as candidates only while the inline lead stays selected; routing remains disabled,

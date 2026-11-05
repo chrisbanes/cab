@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type ProfileSkills,
+  profilePluginKey,
   profileRuntimeSchema,
   profileSkillsSchema,
 } from "../core/execution-runtime.js";
@@ -132,7 +133,11 @@ async function readProfile(client: ServiceClient, id: string) {
   );
 }
 
-/** The skill plugins as JSON `{"plugins":[{"path":"/abs/dir","skills":["name"]}]}`; `{"plugins":[]}` clears. */
+/**
+ * The skill plugins as JSON `{"plugins":[{"path":"/abs/dir","skills":["name"]}]}`, where an
+ * entry may instead name an installed plugin, `{"plugin":"claude:<plugin>@<marketplace>",…}`
+ * or `codex:…`; `{"plugins":[]}` clears.
+ */
 async function skillsFromFile(path: string | undefined) {
   const text = await readTextFile(path, "skills-file");
   if (text === undefined) return undefined;
@@ -146,7 +151,7 @@ async function skillsFromFile(path: string | undefined) {
   if (!parsed.success)
     throw new CliError(
       "invalid-input",
-      '--skills-file takes JSON like {"plugins":[{"path":"/absolute/plugin/dir","skills":["skill-name"]}]}; {"plugins":[]} clears them.',
+      '--skills-file takes JSON like {"plugins":[{"path":"/absolute/plugin/dir","skills":["skill-name"]},{"plugin":"claude:name@marketplace","skills":["skill-name"]}]}, where "plugin" names an installed plugin as claude:<plugin>@<marketplace> or codex:<plugin>@<marketplace>; {"plugins":[]} clears them.',
     );
   return parsed.data;
 }
@@ -155,7 +160,7 @@ const describeSkills = (skills: ProfileSkills) =>
   skills.plugins.length === 0
     ? "none"
     : skills.plugins
-        .map((p) => `${p.path} (${p.skills.join(", ")})`)
+        .map((p) => `${profilePluginKey(p)} (${p.skills.join(", ")})`)
         .join("; ");
 
 const instructionsOf = (client: ServiceClient, id: string, revision?: number) =>

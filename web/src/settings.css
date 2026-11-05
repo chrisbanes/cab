@@ -574,3 +574,46 @@
 .import-outcome:empty {
   display: none;
 }
+
+/* Profile skill plugins: one row per plugin, the add controls, and the dialog's skill list. */
+.skill-plugin-rows {
+  display: grid;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-plugin-rows > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  overflow-wrap: anywhere;
+}
+
+.skill-plugin-rows > li > .error-text {
+  flex-basis: 100%;
+}
+
+.skill-plugin-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-8);
+}
+
+.skill-plugin-add > .field {
+  flex: 1 1 14rem;
+  margin-bottom: 0;
+}
+
+.skill-plugin-choices {
+  display: grid;
+  gap: var(--space-4);
+  max-height: 18rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

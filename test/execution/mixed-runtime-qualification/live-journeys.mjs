@@ -15,6 +15,8 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -37,7 +39,10 @@ import {
   withAttempt,
 } from "./harness.mjs";
 import {
+  addJourneyTask,
   codexSkillBrief,
+  INSTALLED_PHRASES,
+  INSTALLED_SKILL,
   NESTED_SKILL,
   NESTED_SKILL_ANSWER,
   SLEEP,
@@ -328,6 +333,7 @@ async function inProcess(run) {
       throw new Error("a turn exceeded its time cap and was stopped");
   };
   let plugin;
+  if (installedFacet) installProbePlugin();
   const ids = await setupJourney(current.service, {
     facet,
     model: evidence.model.claude,
@@ -345,25 +351,34 @@ async function inProcess(run) {
             });
           },
         }
-      : nestedFacet
+      : installedFacet
         ? {
             skills: {
-              plugins: [
-                {
-                  path: join(root, "mattpocock-skills"),
-                  skills: [NESTED_SKILL],
-                },
-              ],
+              plugins: [{ plugin: installedRef, skills: [INSTALLED_SKILL] }],
             },
             onProvisioned: () => {
-              plugin = { dir: join(root, "mattpocock-skills") };
-              cpSync(installedMattpocockSkills(), plugin.dir, {
-                recursive: true,
-                verbatimSymlinks: true,
-              });
+              plugin = { repository };
             },
           }
-        : {}),
+        : nestedFacet
+          ? {
+              skills: {
+                plugins: [
+                  {
+                    path: join(root, "mattpocock-skills"),
+                    skills: [NESTED_SKILL],
+                  },
+                ],
+              },
+              onProvisioned: () => {
+                plugin = { dir: join(root, "mattpocock-skills") };
+                cpSync(installedMattpocockSkills(), plugin.dir, {
+                  recursive: true,
+                  verbatimSymlinks: true,
+                });
+              },
+            }
+          : {}),
   });
   current.taskId = ids.taskId;
   try {
@@ -372,12 +387,281 @@ async function inProcess(run) {
     recordClaudeCli([current.observed.claudeSpawns]);
   }
   // A Codex-only facet runs no Claude query.
-  if (facet !== "codex-skill" && facet !== "codex-nested-skill")
+  if (
+    facet !== "codex-skill" &&
+    facet !== "codex-nested-skill" &&
+    facet !== "codex-installed-plugin"
+  )
     assertPathClaude();
 }
 
 const nestedFacet =
   facet === "claude-nested-skill" || facet === "codex-nested-skill";
+
+const installedFacet =
+  facet === "claude-installed-plugin" || facet === "codex-installed-plugin";
+const installedTool = facet === "codex-installed-plugin" ? "codex" : "claude";
+const PROBE_MARKETPLACE = "cab-probe-mkt";
+const PROBE_PLUGIN = "cab-probe";
+const installedRef = `${installedTool}:${PROBE_PLUGIN}@${PROBE_MARKETPLACE}`;
+/** The disposable tool home the probe plugin is installed into, and what it replaces. */
+const probe = { home: null, variable: null, previous: undefined };
+const probePaths = () => ({
+  marketplace: join(root, "marketplace"),
+  hookMarker: join(root, "traces", "probe-hook-ran"),
+  mcpMarker: join(root, "traces", "probe-mcp-ran"),
+});
+
+/**
+ * A local git marketplace for both tools serving `cab-probe` at `version`: one skill whose
+ * instructions give `phrase` in bold, plus a hook and an MCP server that leave a marker if
+ * they ever run.
+ */
+function writeProbeMarketplace(version, phrase) {
+  const { marketplace, hookMarker, mcpMarker } = probePaths();
+  const plugin = join(marketplace, "plugins", PROBE_PLUGIN);
+  const file = (path, text) => {
+    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(path, text);
+  };
+  const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
+  file(
+    join(marketplace, ".claude-plugin", "marketplace.json"),
+    json({
+      name: PROBE_MARKETPLACE,
+      owner: { name: "cab qualification" },
+      plugins: [
+        { name: PROBE_PLUGIN, source: `./plugins/${PROBE_PLUGIN}`, version },
+      ],
+    }),
+  );
+  file(
+    join(marketplace, ".agents", "plugins", "marketplace.json"),
+    json({
+      name: PROBE_MARKETPLACE,
+      plugins: [
+        {
+          name: PROBE_PLUGIN,
+          source: { source: "local", path: `./plugins/${PROBE_PLUGIN}` },
+          policy: { installation: "AVAILABLE" },
+          category: "Coding",
+        },
+      ],
+    }),
+  );
+  file(
+    join(plugin, ".claude-plugin", "plugin.json"),
+    json({
+      name: PROBE_PLUGIN,
+      version,
+      description: "Throwaway probe plugin",
+    }),
+  );
+  file(
+    join(plugin, ".codex-plugin", "plugin.json"),
+    json({ name: PROBE_PLUGIN, version, skills: "./skills/" }),
+  );
+  file(
+    join(plugin, "skills", INSTALLED_SKILL, "SKILL.md"),
+    `---\nname: ${INSTALLED_SKILL}\ndescription: Gives the probe phrase. Use when asked for the probe phrase.\n---\n\nThe probe phrase is **${phrase}**.\n`,
+  );
+  const touch = (marker) => `/usr/bin/touch ${marker}`;
+  file(
+    join(plugin, "hooks", "hooks.json"),
+    json({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: "command", command: touch(hookMarker) }] },
+        ],
+        PreToolUse: [
+          {
+            matcher: "*",
+            hooks: [{ type: "command", command: touch(hookMarker) }],
+          },
+        ],
+      },
+    }),
+  );
+  file(
+    join(plugin, ".mcp.json"),
+    json({
+      mcpServers: {
+        "probe-mcp": { command: "/bin/sh", args: ["-c", touch(mcpMarker)] },
+      },
+    }),
+  );
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: marketplace, stdio: "ignore" });
+  if (!existsSync(join(marketplace, ".git"))) git("init", "-q", "-b", "main");
+  git("add", "-A");
+  git(
+    "-c",
+    "user.name=C5",
+    "-c",
+    "user.email=c5@invalid",
+    "commit",
+    "-q",
+    "-m",
+    `probe ${version}`,
+  );
+}
+
+/** Runs the tool's own plugin command against the disposable home only. */
+function pluginCommand(args) {
+  return execFileSync(
+    installedTool === "claude" ? claudeOnPath : launcher,
+    args,
+    {
+      encoding: "utf8",
+      env: { ...process.env, [probe.variable]: probe.home },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+    },
+  );
+}
+
+/**
+ * Installs the probe plugin with the tool's own CLI into a disposable home, and points the
+ * service's environment at that home so cab resolves it from there. Codex's home links
+ * the operator's login, which cab and this harness never read.
+ */
+function installProbePlugin() {
+  mkdirSync(join(root, "traces"), { recursive: true, mode: 0o700 });
+  writeProbeMarketplace("1.0.0", INSTALLED_PHRASES.v1);
+  probe.variable =
+    installedTool === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
+  probe.home = join(root, `${installedTool}-home`);
+  mkdirSync(probe.home, { mode: 0o700 });
+  if (installedTool === "codex")
+    symlinkSync(
+      join(process.env.CODEX_HOME || join(homedir(), ".codex"), "auth.json"),
+      join(probe.home, "auth.json"),
+    );
+  const id = `${PROBE_PLUGIN}@${PROBE_MARKETPLACE}`;
+  const { marketplace } = probePaths();
+  if (installedTool === "claude") {
+    pluginCommand(["plugin", "marketplace", "add", marketplace]);
+    pluginCommand(["plugin", "install", id]);
+  } else {
+    pluginCommand(["plugin", "marketplace", "add", marketplace]);
+    pluginCommand(["plugin", "add", id]);
+  }
+  probe.previous = process.env[probe.variable];
+  process.env[probe.variable] = probe.home;
+}
+
+/** Bumps the probe plugin to 1.1.0 with a new phrase and updates it with the tool's CLI. */
+function updateProbePlugin() {
+  writeProbeMarketplace("1.1.0", INSTALLED_PHRASES.v2);
+  const id = `${PROBE_PLUGIN}@${PROBE_MARKETPLACE}`;
+  if (installedTool === "claude") {
+    pluginCommand(["plugin", "marketplace", "update", PROBE_MARKETPLACE]);
+    pluginCommand(["plugin", "update", id]);
+  } else pluginCommand(["plugin", "add", id]);
+}
+
+function restoreProbeEnvironment() {
+  if (!probe.variable) return;
+  if (probe.previous === undefined) delete process.env[probe.variable];
+  else process.env[probe.variable] = probe.previous;
+  probe.variable = null;
+}
+
+/**
+ * A skill of a plugin installed in the tool reaches the turn from its install, runs no hook
+ * or MCP server, and an update made with the tool's CLI changes the next turn's content
+ * and digest.
+ */
+async function installedPlugin(current, ids, check, plugin) {
+  try {
+    const { digestPlugin, skillFieldErrors } = await import(
+      "../../../dist/src/standalone/skill-plugins.js"
+    );
+    const { resolveInstalledPlugin } = await import(
+      "../../../dist/src/standalone/installed-plugins.js"
+    );
+    const harness = installedTool;
+    const skills = {
+      plugins: [{ plugin: installedRef, skills: [INSTALLED_SKILL] }],
+    };
+    const fieldErrors = await skillFieldErrors(skills, harness);
+    const turn = async (taskId, phrase, earlier) => {
+      current.taskId = taskId;
+      const results = () =>
+        current.service.coordinationView().readTask(taskId).results;
+      await waitUntil(
+        () => {
+          check();
+          return (
+            results().length > 0 &&
+            current.service.list().every((i) => settled(i.state))
+          );
+        },
+        TURN_MS,
+        `the result for "${phrase}"`,
+        true,
+      );
+      const directory = await resolveInstalledPlugin(installedRef);
+      const digest = await digestPlugin(directory, [INSTALLED_SKILL]);
+      const recorded = current.service
+        .list()
+        .filter((i) => !earlier.has(i.workId))
+        .flatMap((i) => current.service.turnSkillPlugins(i.workId));
+      return {
+        installedVersion: directory.split("/").at(-1),
+        phraseMatched: results().some((r) =>
+          String(r.summary ?? "")
+            .toLowerCase()
+            .includes(phrase),
+        ),
+        turnPlugins: recorded,
+        digestMatchesInstall:
+          recorded.length > 0 && recorded.every((p) => p.digest === digest),
+        digest,
+      };
+    };
+    const first = await turn(ids.taskId, INSTALLED_PHRASES.v1, new Set());
+    stage("update");
+    updateProbePlugin();
+    const earlier = new Set(current.service.list().map((i) => i.workId));
+    const followUp = await addJourneyTask(current.service, ids, {
+      facet,
+      repository: plugin.repository,
+    });
+    const second = await turn(followUp, INSTALLED_PHRASES.v2, earlier);
+    const { hookMarker, mcpMarker } = probePaths();
+    evidence.observations = {
+      plugin: installedRef,
+      skill: INSTALLED_SKILL,
+      profileFieldErrors: fieldErrors,
+      turns: [first, second].map(({ digest: _digest, ...turn }) => turn),
+      digestChanged: first.digest !== second.digest,
+      hookRan: existsSync(hookMarker),
+      mcpServerRan: existsSync(mcpMarker),
+      ...(harness === "codex" ? { loginLinkIntact: loginLinkIntact() } : {}),
+    };
+    const o = evidence.observations;
+    if (o.profileFieldErrors.length > 0)
+      throw new Error("the profile's installed plugin was refused");
+    if (
+      first.installedVersion !== "1.0.0" ||
+      second.installedVersion !== "1.1.0"
+    )
+      throw new Error("the tool did not install the expected versions");
+    if (!first.digestMatchesInstall || !second.digestMatchesInstall)
+      throw new Error("a turn did not record the installed plugin's digest");
+    if (!o.digestChanged)
+      throw new Error("the update did not change the digest");
+    if (o.hookRan || o.mcpServerRan)
+      throw new Error("the installed plugin's hook or MCP server ran");
+    if (harness === "codex" && !o.loginLinkIntact)
+      throw new Error("the Codex login link is not an intact link to a file");
+    if (!first.phraseMatched || !second.phraseMatched)
+      throw new ComplianceError("a result did not report its version's phrase");
+  } finally {
+    restoreProbeEnvironment();
+  }
+}
 
 /** The one installed version of mattpocock-skills in the operator's Claude Code plugin cache. */
 function installedMattpocockSkills() {
@@ -1221,7 +1505,9 @@ async function attemptBody(attempt) {
                     ? skill(current, ids, check, plugin)
                     : nestedFacet
                       ? nestedSkill(current, ids, check, plugin)
-                      : coordination(current, ids, check),
+                      : installedFacet
+                        ? installedPlugin(current, ids, check, plugin)
+                        : coordination(current, ids, check),
           );
     work.catch(() => {});
     await Promise.race([work, aborted]);

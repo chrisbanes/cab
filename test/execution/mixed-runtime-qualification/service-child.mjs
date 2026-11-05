@@ -187,13 +187,16 @@ export const codexSkillBrief = [
 /** The nested mattpocock-skills skill the nested-skill facets run, and what only its text holds. */
 export const NESTED_SKILL = "grilling";
 export const NESTED_SKILL_ANSWER = "design tree";
+/** The installed-plugin facets' skill, and the phrase each version's instructions give. */
+export const INSTALLED_SKILL = "cab-probe-phrase";
+export const INSTALLED_PHRASES = { v1: "amber lantern", v2: "cobalt lantern" };
 /** The nested-skill brief: load the skill, then report a phrase only its instructions give. */
-export const nestedSkillBrief = (harness) =>
+export const nestedSkillBrief = (harness, skill = NESTED_SKILL) =>
   [
     "Disposable cab skill probe.",
     harness === "claude"
-      ? `Invoke the skill ${NESTED_SKILL} with the Skill tool to load its instructions, but do not follow them.`
-      : `Use the skill ${NESTED_SKILL} now: read its instructions, but do not follow them.`,
+      ? `Invoke the skill ${skill} with the Skill tool to load its instructions, but do not follow them.`
+      : `Use the skill ${skill} now: read its instructions, but do not follow them.`,
     `Then call cab_report_result exactly once with summary set to the first phrase written in bold in those instructions, and end the turn.${
       harness === "claude" ? " Use no other tool." : ""
     }`,
@@ -209,6 +212,10 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "codex-skill") return codexSkillBrief;
   if (facet === "claude-nested-skill") return nestedSkillBrief("claude");
   if (facet === "codex-nested-skill") return nestedSkillBrief("codex");
+  if (facet === "claude-installed-plugin")
+    return nestedSkillBrief("claude", INSTALLED_SKILL);
+  if (facet === "codex-installed-plugin")
+    return nestedSkillBrief("codex", INSTALLED_SKILL);
   if (facet === "crash" || facet === "claude-subagent-crash")
     return `Disposable cab qualification probe. Call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
   const brief =
@@ -246,7 +253,8 @@ export async function setupJourney(
     runtime:
       facet === "mixed" ||
       facet === "codex-skill" ||
-      facet === "codex-nested-skill"
+      facet === "codex-nested-skill" ||
+      facet === "codex-installed-plugin"
         ? { harness: "codex" }
         : claude,
     ...(skills ? { skills } : {}),
@@ -312,6 +320,32 @@ export async function setupJourney(
     nonce,
     workspace: binding.path,
   };
+}
+
+/** Another ready task for the journey's lead, on the same disposable repository. */
+export async function addJourneyTask(service, ids, { facet, repository }) {
+  const taskId = randomUUID();
+  const exec = (body) =>
+    service.domain().execute({ key: randomUUID(), actor: "operator", ...body });
+  exec({
+    type: "task.create",
+    projectId: ids.projectId,
+    taskId,
+    title: `C5 ${facet} journey, follow-up`,
+    outcome: facetOutcome(facet, ids),
+    ready: false,
+  });
+  await service.provisionTask(taskId, [
+    { repositoryId: "c5-fixture", path: repository },
+  ]);
+  exec({
+    type: "task.configure",
+    projectId: ids.projectId,
+    taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  return taskId;
 }
 
 /** What the parent may see of the child service: ids, states and holds; no payloads. */

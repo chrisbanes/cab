@@ -256,6 +256,7 @@ export function operatorRouteAuthority(
       "/api/operator/readiness",
       "/api/operator/readiness/claude-token",
       "/api/operator/discovery/repositories",
+      "/api/operator/installed-plugins",
       "/api/operator/discovery/branches",
       "/api/operator/discovery/labels",
       "/api/operator/discovery/projects",

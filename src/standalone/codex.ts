@@ -25,10 +25,7 @@ import {
 } from "./native-input.js";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
-import {
-  type ProfileSkills,
-  supportedRuntimeSettingsSchema,
-} from "../core/execution-runtime.js";
+import { supportedRuntimeSettingsSchema } from "../core/execution-runtime.js";
 import type { ExecutionHarness } from "./execution-harness.js";
 import type {
   ExactExecutionIdentity,
@@ -614,9 +611,12 @@ export function unexpectedRequest(
 export interface RuntimeTurnSettings {
   model: string | null;
   reasoningEffort: string | null;
-  /** The skill plugins the bound profile revision enables; absent when it enables none. */
+  /**
+   * The skill plugins the bound profile revision enables, each resolved for this turn to the
+   * directory it loads from (an installed plugin's current install); absent when it enables none.
+   */
   skills?: {
-    plugins: Array<ProfileSkills["plugins"][number] & { name?: string }>;
+    plugins: Array<{ path: string; skills: readonly string[]; name?: string }>;
   };
 }
 

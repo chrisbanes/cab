@@ -96,7 +96,7 @@ import {
   executionIntentStateSchema,
   noProfileSkills,
 } from "../core/execution-runtime.js";
-import { skillFieldErrors } from "./skill-plugins.js";
+import { listInstalledPlugins, skillFieldErrors } from "./skill-plugins.js";
 import {
   runtimeInboxHeadline,
   runtimeInboxReason,
@@ -152,6 +152,7 @@ import {
   operationTypeSchema,
   operatorCommandSchema,
   type savedConfigurationRowSchema,
+  installedPluginsSchema,
   profileConfigurationSchema,
   profilePrivateValuesSchema,
   profileInstructionsSchema,
@@ -6909,6 +6910,13 @@ export class OperatorApi {
       throw error;
     }
     return operationReadSchema.parse({ data, observedAt: Date.now() });
+  }
+  /** Plugins installed and enabled in Claude Code or Codex that a profile can enable; no path. */
+  async readInstalledPlugins() {
+    return installedPluginsSchema.parse({
+      data: await listInstalledPlugins(),
+      observedAt: Date.now(),
+    });
   }
   async readProfileConfiguration(profileId: string) {
     uuid.parse(profileId);
