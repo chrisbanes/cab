@@ -103,8 +103,10 @@ Use Node.js from `.nvmrc` and the package manager pinned in `package.json`.
 Run `npm ci`, then `npm run typecheck`, `npm run lint` and `npm run format:check`.
 Locally, run only the suites that cover the change after `npm run build`, for example
 `npm run test:built -- --suite=workspaces`, adding `--profile=service` when no UI
-changed, or `--profile=all` when the change affects WebKit-specific cases or
-behaviour. Run the full `npm run check` only for changes to shared test
+changed. Do not run WebKit (`--profile=all`) on a macOS host, where its startup
+intermittently crashes; when the change affects WebKit-specific cases or behaviour,
+run it in a cloud session or dispatch CI on the pushed branch with
+`gh workflow run ci.yml --ref BRANCH -f webkit=true`. Run the full `npm run check` only for changes to shared test
 infrastructure, fixtures, store migrations or cross-suite contracts. The required
 `check` CI context is the full-suite gate: it runs the static checks and build
 once, then the runtime profiles documented in `docs/development.md`, and must pass
