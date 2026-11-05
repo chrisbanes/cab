@@ -38,6 +38,10 @@ test("first run orders Readiness first and established installs keep the designe
 });
 
 test("section hrefs are the Settings path with the section fragment", () => {
+  assert.deepEqual(
+    SETTINGS_SECTIONS.find((section) => section.id === "profiles"),
+    { id: "profiles", label: "Agents" },
+  );
   for (const { id } of SETTINGS_SECTIONS)
     assert.equal(settingsSectionHref(id), `/app/settings#${id}`);
   assert.equal(

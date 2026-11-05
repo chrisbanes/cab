@@ -25,7 +25,7 @@ content. The Inbox stays the only source of truth.
 _Avoid_: Notification feed
 
 **Project**:
-A container for tasks, optional linked repositories, agent profiles, instructions, and permissions.
+A container for tasks, optional linked repositories, agents, instructions, and permissions.
 Its identity belongs to cab and is independent of the application hosting it.
 _Avoid_: Board or GitHub Project when referring to the cab container
 
@@ -190,9 +190,9 @@ The agent accountable for task outcomes across a project, including coordination
 planning and allocation exceptions. Delegating work does not transfer that accountability.
 _Avoid_: Task owner as a separate accountability role
 
-**Agent profile**:
-A reusable, operator-defined identity and instructions, selected for project leads and task assignments. Its execution settings are validated for the selected runtime. It may also list skill plugins, each a local plugin directory or a plugin installed in Claude Code or Codex, and the skills of each it enables; these are instructions to the agent, not cab policy. An assignment keeps the list of the revision it started with, while an installed plugin's content is whatever is installed when each turn starts.
-_Avoid_: Bot identity or assignment when referring to reusable configuration
+**Agent**:
+An operator-defined identity with reusable instructions and execution settings, selected for project leads and task assignments. One agent can serve multiple projects and assignments; each assignment keeps its own conversation history. Its execution settings are validated for the selected runtime. It may also list skill plugins, each a local plugin directory or a plugin installed in Claude Code or Codex, and the skills of each it enables; these are instructions to the agent, not cab policy. An assignment keeps the list of the revision it started with, while an installed plugin's content is whatever is installed when each turn starts.
+_Avoid_: Profile alone, bot identity or assignment when referring to the agent
 
 **Assignment**:
 A durable unit of work delegated to an agent within a task that can continue across agent conversations.

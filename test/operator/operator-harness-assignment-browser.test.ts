@@ -150,7 +150,7 @@ for (const [name, viewport] of [
       .waitFor();
     assert.equal(
       await worker
-        .getByRole("link", { name: "Edit profile" })
+        .getByRole("link", { name: "Edit agent" })
         .getAttribute("href"),
       `/app/profiles/${ids.claude}/settings`,
     );

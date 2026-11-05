@@ -39,32 +39,28 @@ const showsText = (page: Page, text: string) =>
     text,
   );
 
-test("Create profile saves with one message, a breadcrumb, boundary aside and Cancel", async (_t, journey) => {
+test("Create agent saves with one message, a breadcrumb, boundary aside and Cancel", async (_t, journey) => {
   const { f, page } = await startSettings(
     journey,
     "/app/settings/profiles/new",
   );
-  await page
-    .getByRole("heading", { level: 1, name: "Create profile" })
-    .waitFor();
-  assert.equal(await trail(page), "Settings / Profiles / Create profile");
-  await page.getByRole("complementary", { name: "Profile boundary" }).waitFor();
+  await page.getByRole("heading", { level: 1, name: "Create agent" }).waitFor();
+  assert.equal(await trail(page), "Settings / Agents / Create agent");
+  await page.getByRole("complementary", { name: "Agent boundary" }).waitFor();
   assert.equal(
     await page
       .getByRole("link", { name: "Cancel", exact: true })
       .getAttribute("href"),
     "/app/settings#profiles",
   );
-  await page.getByLabel("Profile name", { exact: true }).fill("Tester");
+  await page.getByLabel("Agent name", { exact: true }).fill("Tester");
   await page.getByLabel("Summary", { exact: true }).fill("Testing");
   await page
     .getByLabel("Instructions", { exact: true })
     .fill("PRIVATE TESTER INSTRUCTIONS");
   await page.getByLabel("Capabilities", { exact: true }).fill("Runs tests");
   await captureBrowserEvidence(page, "1366-profile-create");
-  await page
-    .getByRole("button", { name: "Create profile", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Create agent", exact: true }).click();
   await savedOutcome(page);
   const created = f.service
     .domain()
@@ -83,7 +79,7 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
   await page
     .getByRole("heading", {
       level: 1,
-      name: "Reviewer · profile configuration",
+      name: "Reviewer · agent configuration",
     })
     .waitFor();
   await page.locator(".settings-status").getByText("Revoked").waitFor();
@@ -114,7 +110,7 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
     await page.getByRole("textbox", { name: "Instructions" }).count(),
     0,
   );
-  const save = page.getByRole("button", { name: "Save profile", exact: true });
+  const save = page.getByRole("button", { name: "Save agent", exact: true });
   assert.equal(await save.isDisabled(), true);
   await page
     .getByLabel("Capabilities", { exact: true })
@@ -122,7 +118,7 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
   const changes = page.getByRole("region", { name: "Changes to save" });
   await changes.getByText("Capabilities edited").waitFor();
   assert.equal(await save.isEnabled(), true);
-  await page.getByRole("button", { name: "Restore profile" }).click();
+  await page.getByRole("button", { name: "Restore agent" }).click();
   await changes.getByText("Restore Reviewer").waitFor();
   await captureBrowserEvidence(page, "1366-profile-revoked");
   await save.click();
@@ -133,14 +129,14 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
     d.profile(reviewer).capabilities,
     "Reviews diffs and screenshots",
   );
-  await page.getByRole("button", { name: "Revoke profile" }).waitFor();
+  await page.getByRole("button", { name: "Revoke agent" }).waitFor();
   await savedOutcome(page);
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
-      (b) => b.textContent === "Save profile" && b.disabled,
+      (b) => b.textContent === "Save agent" && b.disabled,
     ),
   );
-  await page.getByRole("button", { name: "Revoke profile" }).click();
+  await page.getByRole("button", { name: "Revoke agent" }).click();
   await save.click();
   await page.locator(".settings-status").getByText("Revoked").waitFor();
   assert.equal(d.profile(reviewer).revoked, 1);
@@ -238,7 +234,7 @@ test("profile instructions reverted or edited keep their state after leaving the
     "/app/profiles/:reviewer/settings",
   );
   const reviewer = ids.profiles.Reviewer as string;
-  const save = page.getByRole("button", { name: "Save profile", exact: true });
+  const save = page.getByRole("button", { name: "Save agent", exact: true });
   const changes = page.getByRole("region", { name: "Changes to save" });
   const field = page.getByRole("textbox", {
     name: "Instructions",
@@ -299,7 +295,7 @@ test("a profile conflict keeps typed input until the newer version is reviewed",
     expectedVersion: Number(f.service.domain().profile(reviewer).version),
     capabilities: "Changed elsewhere",
   });
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
   // One warning holds the only way forward, and the typed input is kept.
   const warning = outcomeMessages(page);
@@ -325,7 +321,7 @@ test("a profile conflict keeps typed input until the newer version is reviewed",
   // The edit after Reveal is kept and rides on the newer version.
   assert.equal(await instructions.inputValue(), "TYPED INSTRUCTIONS");
   const sent = commandRequest(page);
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   const body = (await sent).postDataJSON() as Record<string, unknown>;
   assert.equal(body.expectedVersion, 3);
   assert.equal(body.instructions, "TYPED INSTRUCTIONS");
@@ -355,7 +351,7 @@ test("project settings highlight the project in the sidebar; phone profile pages
   await page.setViewportSize(phone);
   await page.goto(`${web.origin}/app/profiles/${ids.profiles.Mira}/settings`);
   await page
-    .getByRole("heading", { level: 1, name: "Mira · profile configuration" })
+    .getByRole("heading", { level: 1, name: "Mira · agent configuration" })
     .waitFor();
   await page.getByRole("link", { name: "Back to Settings" }).waitFor();
   assert.equal(
@@ -374,7 +370,7 @@ const controlHeights = (page: Page, labels: string[]) =>
     ),
   );
 
-test("Create profile chooses Claude with model and effort, rejecting invalid values before sending", async (_t, journey) => {
+test("Create agent chooses Claude with model and effort, rejecting invalid values before sending", async (_t, journey) => {
   const { f, page } = await startSettings(
     journey,
     "/app/settings/profiles/new",
@@ -383,7 +379,7 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) sent++;
   });
-  await page.getByLabel("Profile name", { exact: true }).fill("Claude tester");
+  await page.getByLabel("Agent name", { exact: true }).fill("Claude tester");
   await page.getByLabel("Instructions", { exact: true }).fill("Test");
   await page.getByLabel("Capabilities", { exact: true }).fill("Tests");
   assert.equal(
@@ -399,9 +395,7 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
     })
     .waitFor();
   await page.getByLabel("Model", { exact: true }).fill("a b");
-  await page
-    .getByRole("button", { name: "Create profile", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Create agent", exact: true }).click();
   await page.getByText("Model cannot contain spaces.").waitFor();
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-label") === "Model",
@@ -410,9 +404,7 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
   await page.getByLabel("Model", { exact: true }).fill("sonnet");
   await page.getByLabel("Reasoning effort", { exact: true }).fill("high");
   const request = commandRequest(page);
-  await page
-    .getByRole("button", { name: "Create profile", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Create agent", exact: true }).click();
   assert.deepEqual((await request).postDataJSON().runtime, {
     harness: "claude",
     model: "sonnet",
@@ -430,7 +422,7 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
   });
   await page.setViewportSize(phone);
   await page
-    .getByRole("button", { name: "Create another profile", exact: true })
+    .getByRole("button", { name: "Create another agent", exact: true })
     .click();
   await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
   for (const height of await controlHeights(page, [
@@ -443,7 +435,7 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
   await captureBrowserEvidence(page, "390-profile-create-runtime");
 });
 
-test("Profile configuration switches Codex to Claude and back as new revisions", async (_t, journey) => {
+test("Agent configuration switches Codex to Claude and back as new revisions", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(journey, "/app/settings");
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
@@ -458,7 +450,7 @@ test("Profile configuration switches Codex to Claude and back as new revisions",
   await page.getByLabel("Reasoning effort", { exact: true }).fill("high");
   const changes = page.getByRole("region", { name: "Changes to save" });
   await changes.getByText("Runtime: Codex → Claude · sonnet · high").waitFor();
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   await page.getByText("Current revision 2.").waitFor();
   await savedOutcome(page);
   assert.deepEqual(d.profileRuntime(builder), {
@@ -470,7 +462,7 @@ test("Profile configuration switches Codex to Claude and back as new revisions",
   await page.getByLabel("Runtime", { exact: true }).selectOption("codex");
   await changes.getByText("Runtime: Claude · sonnet · high → Codex").waitFor();
   const request = commandRequest(page);
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   assert.deepEqual((await request).postDataJSON().runtime, {
     harness: "codex",
   });
@@ -519,7 +511,7 @@ const waitForProfileRuntime = (page: Page, expected: string) =>
     expected,
   );
 
-test("New profile starts on the first enabled runtime: Claude when Codex is disabled", async (_t, journey) => {
+test("New agent starts on the first enabled runtime: Claude when Codex is disabled", async (_t, journey) => {
   const { page } = await claudeDefaultProfile(journey);
   await page.reload();
   const runtime = page.getByLabel("Runtime", { exact: true });
@@ -535,7 +527,7 @@ for (const schedule of [
   "late-choice",
   "workspace-first",
 ] as const)
-  test(`New profile runtime follows workspace without replacing edits: ${schedule}`, async (_t, journey) => {
+  test(`New agent runtime follows workspace without replacing edits: ${schedule}`, async (_t, journey) => {
     const { page } = await claudeDefaultProfile(
       journey,
       schedule === "workspace-first" ? "/app/settings" : undefined,
@@ -574,7 +566,7 @@ for (const schedule of [
         release();
         await page.getByText("Connected", { exact: true }).waitFor();
         await page
-          .getByRole("link", { name: "Create profile", exact: true })
+          .getByRole("link", { name: "Create agent", exact: true })
           .click();
       }
       const runtime = page.getByLabel("Runtime", { exact: true });
@@ -593,9 +585,7 @@ for (const schedule of [
         schedule === "workspace-first" ? "claude" : "codex",
       );
       if (schedule === "late-dirty")
-        await page
-          .getByLabel("Profile name", { exact: true })
-          .fill("Kept name");
+        await page.getByLabel("Agent name", { exact: true }).fill("Kept name");
       if (schedule === "late-choice") {
         await runtime.selectOption("claude");
         await page.getByLabel("Model", { exact: true }).fill("sonnet");
@@ -630,7 +620,7 @@ for (const schedule of [
       assert.equal(await node.evaluate((el) => el.isConnected), true);
       if (schedule === "late-dirty")
         assert.equal(
-          await page.getByLabel("Profile name", { exact: true }).inputValue(),
+          await page.getByLabel("Agent name", { exact: true }).inputValue(),
           "Kept name",
         );
       if (schedule === "late-choice")
@@ -655,7 +645,7 @@ const codexSettingsOptions = {
       : new OperatorFixtureRuntime(),
 };
 
-test("Codex profile configuration sets, shows and clears model and effort", async (_t, journey) => {
+test("Codex agent configuration sets, shows and clears model and effort", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/settings",
@@ -691,7 +681,7 @@ test("Codex profile configuration sets, shows and clears model and effort", asyn
   const changes = page.getByRole("region", { name: "Changes to save" });
   await changes.getByText("Runtime: Codex → Codex · m-alt · medium").waitFor();
   const saved = commandRequest(page);
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   assert.deepEqual((await saved).postDataJSON().runtime, {
     harness: "codex",
     model: "m-alt",
@@ -714,7 +704,7 @@ test("Codex profile configuration sets, shows and clears model and effort", asyn
   await effort.selectOption("");
   await changes.getByText("Runtime: Codex · m-alt · medium → Codex").waitFor();
   const cleared = commandRequest(page);
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   assert.deepEqual((await cleared).postDataJSON().runtime, {
     harness: "codex",
   });
@@ -728,7 +718,7 @@ test("Codex profile configuration sets, shows and clears model and effort", asyn
   });
 });
 
-test("Codex profile configuration rejects a stored effort the runtime no longer lists", async (_t, journey) => {
+test("Codex agent configuration rejects a stored effort the runtime no longer lists", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/settings",
@@ -756,12 +746,12 @@ test("Codex profile configuration rejects a stored effort the runtime no longer 
     .locator("option", { hasText: "gone (not supported)" })
     .waitFor({ state: "attached" });
   await page.getByLabel("Model", { exact: true }).selectOption("m-alt");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   await page.getByText("Reasoning effort must be one of: medium.").waitFor();
   assert.equal(sent, 0);
 });
 
-test("Profile configuration picks installed plugins' skills in a dialog, edits and removes them, and adds a local directory", async (t, journey) => {
+test("Agent configuration picks installed plugins' skills in a dialog, edits and removes them, and adds a local directory", async (t, journey) => {
   const homes = installedPluginHomes(
     mkdtempSync(join(tmpdir(), "cab-skill-ui-")),
   );
@@ -786,7 +776,7 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
   const save = () =>
-    page.getByRole("button", { name: "Save profile", exact: true }).click();
+    page.getByRole("button", { name: "Save agent", exact: true }).click();
   const select = page.getByLabel("Installed plugin", { exact: true });
   const rows = page.getByRole("list", { name: "Enabled skill plugins" });
   await page.goto(`${web.origin}/app/profiles/${builder}/settings`);

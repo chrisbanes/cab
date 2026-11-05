@@ -377,7 +377,7 @@ for (const [name, viewport] of viewports.slice(0, 1)) {
     await panel(page).getByLabel("Rough idea").fill(idea);
     await draftButton(page).click();
     const runId = await runningRun(f);
-    // Another profile's instructions pass the tool but are redacted on every read.
+    // Another agent's instructions pass the tool but are redacted on every read.
     f.service.domain().execute({
       type: "profile.create",
       actor: "operator",

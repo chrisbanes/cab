@@ -38,7 +38,7 @@ working.
 cab's design centres on a few things that become important once several
 agents are working at once:
 
-- **Projects with their own context.** Keep tasks, repositories, agent profiles,
+- **Projects with their own context.** Keep tasks, repositories, agents,
   instructions and permissions together. Coordinate multiple projects through
   one service.
 - **Assignments that outlast a chat.** Retain ownership, follow-ups and results
@@ -151,7 +151,7 @@ owns delivery scope and status.
   ([#1150](https://github.com/chrisbanes/cab/issues/1150)).
 - **Settings.** Guided paused-project setup (GitHub discovery of repositories, refs
   and Projects with a typed fallback, a service folder picker and checkout
-  verification, one create command) and profile setup, explicit private
+  verification, one create command) and agent setup, explicit private
   replacements, source observations, installation capacity and curated recovery.
 - **GitHub.** Local discovery of selected repository issues, searches and Projects,
   with provider-owned readiness and dependency holds; operators can inspect and
@@ -171,9 +171,9 @@ owns delivery scope and status.
 - **Operator CLI (authentication, browsing, configuration, diagnostics, task operation, sources, delivery and recovery).** A packaged `cab`
   executable logs in to the running service with a revocable read-only or read/write
   credential issued from Settings, manages named connections and browses projects,
-  profiles, tasks, assignments, instruction revisions, conversation history, results
+  agents (through `cab profile`), tasks, assignments, instruction revisions, conversation history, results
   and retained evidence with paged, coverage-reporting reads. It prepares reviewable
-  change documents for profile, project, routing and capacity configuration, applies
+  change documents for agent, project, routing and capacity configuration, applies
   their exact command once with a journalled request key, adopts current instructions
   for an assignment's next turn and reads receipts back. It lists task-bound
   executions, shows their captured supplied inputs, observed settings and bounded,
@@ -193,11 +193,11 @@ owns delivery scope and status.
   [CLI8 record](docs/evidence/issue-901-cli8-2026-10-12.md); use from a second
   privately connected machine is unproved because none was available. See
   [development](docs/development.md#operator-cli).
-- **Claude runtime.** Profiles may select a Claude Code runtime
+- **Claude runtime.** Agents may select a Claude Code runtime
   ([ADR-1008](docs/adr/1008-claude-code-execution-harness.md)). The operator turns
   each runtime on or off live in Settings → Runtime or with `cab runtime`, and
   no runtime is required ([ADR-1012](docs/adr/1012-operator-controlled-runtime-enablement.md));
-  new profiles default to the first enabled runtime, Codex first. Bounded live journeys qualified it with limits
+  new agents default to the first enabled runtime, Codex first. Bounded live journeys qualified it with limits
   ([evidence](docs/evidence/issue-827-claude-journeys-2026-10-12.md)): a Claude-only
   task, a Codex lead with a Claude worker, Stop and a service crash with explicit
   recovery. Its execution policy and disclosed limits differ from Codex's (see the

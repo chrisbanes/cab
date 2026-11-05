@@ -19,8 +19,8 @@ of steps.
 
 ## Product shape
 
-Center the product on projects and tasks, with reusable agent profiles and
-optional GitHub sync. Profiles supply instructions and execution settings;
+Center the product on projects and tasks, with reusable agents and
+optional GitHub sync. Agents supply instructions and execution settings;
 project leads and task assignments have conversations for their work. cab
 does not require persistent bot identities, personal bot state or a bot management
 surface. This keeps configuration reusable while work history belongs to its
@@ -30,11 +30,11 @@ its broader bot model is not part of cab.
 ## Coordination
 
 cab attaches its project configuration to BB projects, each containing tasks,
-optional linked Git repositories, agent profiles, instructions, and permissions. A project is
+optional linked Git repositories, agents, instructions, and permissions. A project is
 independent of any external tracker or GitHub Project. Project leads select work
 and delegate to concurrent task owners, which coordinate each task's implementation
-and review. Agents use operator-defined profiles and may create assignments within
-BB's configured concurrency limits; they cannot create new profiles autonomously.
+and review. Agents use operator-defined instructions and execution settings and may create assignments within
+BB's configured concurrency limits; they cannot create new agents autonomously.
 
 Enabled projects select work automatically from an explicitly Ready queue,
 defined by explicit task readiness or the source's optional readiness rule. The operator admits tasks directly or through an explicitly configured source
@@ -128,7 +128,7 @@ transient execution failures at most twice with backoff, then hold for attention
 reconcile uncertain effects before retrying. Flag inactivity for attention without
 automatically terminating or restarting an agent based on silence.
 
-Existing assignments keep their recorded instructions and profile revision.
+Existing assignments keep their recorded instructions and agent revision.
 New assignments use current configuration; the operator explicitly applies
 changes to existing assignments for their next turn. Permission revocations
 still apply to subsequent cab actions.
@@ -142,7 +142,7 @@ and project coordination settings in its plugin-owned SQLite database. Use BB
 project identities; verify repository-free and multi-repository behaviour before
 claiming those product scenarios work.
 
-An agent profile is reusable configuration. Each independently executing assignment
+An agent is reusable configuration. Each independently executing assignment
 normally gets one BB thread, reused for follow-ups. A replacement conversation
 retains the assignment identity. Project leads have project-level conversations;
 a task owner may do work itself or delegate according to instructions. A thread

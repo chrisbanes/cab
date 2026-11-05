@@ -5,7 +5,7 @@ import { readinessCheckIds } from "../../src/operator/readiness.js";
 export const SETTINGS_SECTIONS = [
   { id: "projects", label: "Projects" },
   { id: "runtime", label: "Runtime & recovery" },
-  { id: "profiles", label: "Profiles" },
+  { id: "profiles", label: "Agents" },
   { id: "routing", label: "Routing" },
   { id: "github-discovery", label: "GitHub discovery" },
   { id: "gitlab-credentials", label: "GitLab credentials" },

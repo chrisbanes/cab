@@ -83,7 +83,7 @@ export function projectChanges(
   const lead = data.project.leadProfileId ?? "";
   if (v.leadProfileId !== undefined && v.leadProfileId !== lead)
     lines.push(
-      `Lead profile: ${nameOf(data.profiles, lead)} → ${nameOf(data.profiles, String(v.leadProfileId))}`,
+      `Lead agent: ${nameOf(data.profiles, lead)} → ${nameOf(data.profiles, String(v.leadProfileId))}`,
     );
   if (v.paused !== undefined && Boolean(v.paused) !== data.project.paused)
     lines.push(v.paused ? "Pause project" : "Unpause project");
@@ -117,7 +117,7 @@ export function profileChanges(
   const lines: string[] = [];
   const name = data.profile.name ?? "";
   if (v.name !== undefined && v.name !== name)
-    lines.push(`Profile name: ${name || "Name unavailable"} → ${v.name}`);
+    lines.push(`Agent name: ${name || "Name unavailable"} → ${v.name}`);
   if (v.summary !== undefined && v.summary !== (data.profile.summary ?? ""))
     lines.push(`Summary: ${v.summary || "cleared"}`);
   if (
@@ -129,7 +129,7 @@ export function profileChanges(
   const instructions = privateEdit(v.instructions, revealed);
   if (instructions) lines.push(`Instructions ${instructions}`);
   if (v.revoked !== undefined && Boolean(v.revoked) !== data.profile.revoked)
-    lines.push(`${v.revoked ? "Revoke" : "Restore"} ${name || "profile"}`);
+    lines.push(`${v.revoked ? "Revoke" : "Restore"} ${name || "agent"}`);
   if (v.runtimeHarness !== undefined && runtimeChanged(data.runtime, v))
     lines.push(
       `Runtime: ${runtimeSummary(data.runtime)} → ${runtimeSummary(runtimeCommand(v))}`,

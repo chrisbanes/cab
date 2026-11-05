@@ -2,11 +2,11 @@
 
 **Status:** implemented on the runtime page (Settings → Runtime) and as the Fix in
 the [project setup](project-setup.md) ready check. The Getting started row,
-profile-form and first-task entry points are planned.
+agent-form and first-task entry points are planned.
 
 ## Goal
 
-An operator who wants a Claude profile can make the token available and confirm it
+An operator who wants a Claude agent can make the token available and confirm it
 works without reading the operations guide.
 
 ## Entry points
@@ -15,7 +15,7 @@ works without reading the operations guide.
 - [Project setup](project-setup.md) ready check, for a Claude lead whose token is
   unavailable (implemented).
 - [Getting started](getting-started.md) optional Claude row (planned).
-- Profile form, when Claude is chosen as the runtime and no token is readable
+- Agent form, when Claude is chosen as the runtime and no token is readable
   (planned).
 - [First task](first-task.md) Fix for "Claude token unavailable" (planned).
 

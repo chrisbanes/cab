@@ -286,7 +286,7 @@ test("Profile edit, capacity, Claude token and discovery saves each leave one me
   };
 
   await page.getByLabel("Summary", { exact: true }).fill("Edited summary");
-  await page.getByRole("button", { name: "Save profile" }).click();
+  await page.getByRole("button", { name: "Save agent" }).click();
   await savedOutcome(page);
 
   await go("/app/settings/runtime");

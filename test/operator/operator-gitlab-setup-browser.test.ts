@@ -43,7 +43,7 @@ test("Setup lists GitLab projects and creates a GitLab link from a picked checko
   await page.reload();
   await page.getByLabel("Project name", { exact: true }).fill("Forge");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Mira" });
   await page.getByRole("button", { name: "Add a repository" }).click();
   await page.getByRole("button", { name: "Add a GitLab repository" }).click();

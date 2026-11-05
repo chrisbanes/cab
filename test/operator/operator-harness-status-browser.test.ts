@@ -205,7 +205,7 @@ test("a name-only save keeps a stored Claude model the runtime no longer support
     .locator("option", { hasText: "opus (not supported)" })
     .waitFor({ state: "attached" });
   await page.getByLabel("Summary", { exact: true }).fill("Renamed summary");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   await page.getByText("Current revision 2.").waitFor();
   assert.deepEqual(d.profileRuntime(profileId), {
     harness: "claude",

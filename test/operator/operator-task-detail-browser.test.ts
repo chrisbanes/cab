@@ -1192,7 +1192,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   );
   assert.equal(
     await waits
-      .getByRole("link", { name: "Fix: Open profile" })
+      .getByRole("link", { name: "Fix: Open agent" })
       .getAttribute("href"),
     `/app/profiles/${claudeLead}/settings`,
   );
@@ -1220,13 +1220,13 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   await page.goto(`${web.origin}/app/tasks/${delegateTask}`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
-    "Assignment profile revoked",
-    "Assignment profile changed",
+    "Assignment agent revoked",
+    "Assignment agent changed",
   ]);
   const revoked = list.nth(0);
   assert.equal(
     await revoked
-      .getByRole("link", { name: "Fix: Open profile" })
+      .getByRole("link", { name: "Fix: Open agent" })
       .getAttribute("href"),
     `/app/profiles/${revokedWorker}/settings`,
   );

@@ -503,7 +503,7 @@ export function RuntimeSettings(p: SettingsProps) {
                           <a
                             href={`/app/assignments/${a.assignmentId}/recovery`}
                           >
-                            {a.name ?? "Profile name unavailable"}: recovery
+                            {a.name ?? "Agent name unavailable"}: recovery
                             evidence
                           </a>
                         </li>
@@ -565,7 +565,7 @@ function RecoveryRecord({ r }: { r: RecoveryRecordData }) {
       <p className="body">
         {`Intent ${r.intentState}; request ${r.requestState ?? "unavailable"}; binding ${
           r.binding
-            ? `assignment version ${r.binding.assignmentVersion}, instructions ${r.binding.instructionsRevision}, profile ${r.binding.profileRevision}`
+            ? `assignment version ${r.binding.assignmentVersion}, instructions ${r.binding.instructionsRevision}, agent ${r.binding.profileRevision}`
             : "unavailable"
         }.`}
       </p>
@@ -1040,7 +1040,7 @@ export function AssignmentRecovery(
               {status?.held ? "Execution held" : status?.label}
             </StatusBadge>{" "}
             {status?.held && <>{status.label} · </>}
-            {data.assignment.name ?? "Profile name unavailable"} in{" "}
+            {data.assignment.name ?? "Agent name unavailable"} in{" "}
             {data.project.name ?? "Project name unavailable"} · Project{" "}
             {data.project.paused ? "paused" : "enabled"}
           </p>
@@ -1119,9 +1119,9 @@ export function AssignmentRecovery(
               <Panel title="Versions and generation in use">
                 <p className="body">
                   {`Configured assignment version ${data.assignment.version}; captured instructions version `}
-                  {data.assignment.instructionsRevision}, profile version{" "}
+                  {data.assignment.instructionsRevision}, agent version{" "}
                   {data.assignment.profileRevision}. Next-turn instructions
-                  version {data.assignment.currentInstructionsRevision}, profile
+                  version {data.assignment.currentInstructionsRevision}, agent
                   version {data.assignment.currentProfileRevision}.
                 </p>
                 {data.assignment.executionGeneration ? (
@@ -1132,7 +1132,7 @@ export function AssignmentRecovery(
                     {data.assignment.executionGeneration.requestSequence},
                     instructions version{" "}
                     {data.assignment.executionGeneration.instructionsRevision},
-                    profile version{" "}
+                    agent version{" "}
                     {data.assignment.executionGeneration.profileRevision}.
                   </p>
                 ) : (

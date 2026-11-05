@@ -31,7 +31,7 @@ export const waitCodes = [
   "capacity",
 ] as const;
 export type WaitCode = (typeof waitCodes)[number];
-/** Waits that come from the executing profile's runtime rather than the project or task. */
+/** Waits that come from the executing agent's runtime rather than the project or task. */
 export const runtimeWaitCodes: readonly WaitCode[] = [
   "runtime-unavailable",
   "claude-token-unavailable",
@@ -86,13 +86,13 @@ export const waitLabels: Record<WaitCode, string> = {
   "project-lead-revoked": "Project lead revoked",
   "runtime-unavailable": "Runtime unavailable",
   "claude-token-unavailable": "Claude token unavailable",
-  "profile-runtime-not-configured": "Lead profile runtime not configured",
+  "profile-runtime-not-configured": "Lead agent runtime not configured",
   "power-held": "Held by power supervision",
   "repository-access-revoked": "Repository access revoked",
-  "assignment-profile-revoked": "Assignment profile revoked",
-  "assignment-profile-stale": "Assignment profile changed",
+  "assignment-profile-revoked": "Assignment agent revoked",
+  "assignment-profile-stale": "Assignment agent changed",
   "assignment-instructions-stale": "Assignment instructions changed",
-  "assignment-profile-not-permitted": "Assignment profile not permitted",
+  "assignment-profile-not-permitted": "Assignment agent not permitted",
   "assignment-held": "Assignment held",
   "assignment-recovery-unresolved": "Assignment recovery unresolved",
   "local-dependency": "Blocked by a task dependency",
@@ -111,7 +111,7 @@ export const fixLabels: Record<WaitFix["kind"], string> = {
   "choose-lead": "Choose a lead",
   readiness: "Open readiness check",
   "add-claude": "Add Claude",
-  "open-profile": "Open profile",
+  "open-profile": "Open agent",
   "open-repositories": "Open repositories",
 };
 
@@ -384,7 +384,7 @@ export function cliFix(fix: WaitFix): string[] {
     case "add-claude":
       return ["Settings → Add Claude"];
     case "open-profile":
-      return [`Settings → Profiles → ${fix.profileId}`];
+      return [`Settings → Agents → ${fix.profileId}`];
     case "open-repositories":
       return [
         `cab project get ${fix.projectId}`,

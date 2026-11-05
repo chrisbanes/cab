@@ -77,8 +77,8 @@ export function settingsHeader(
     };
   if (pathname === "/app/settings/profiles/new")
     return {
-      title: "Create profile",
-      trail: [settings, { label: "Profiles" }, { label: "Create profile" }],
+      title: "Create agent",
+      trail: [settings, { label: "Agents" }, { label: "Create agent" }],
     };
   if (/^\/app\/assignments\/[^/]+\/recovery$/.test(pathname))
     return {
@@ -93,10 +93,10 @@ export function settingsHeader(
   const profile = /^\/app\/profiles\/([^/]+)\/settings$/.exec(pathname)?.[1];
   if (profile) {
     const name =
-      workspace?.data.profiles.find((p) => p.id === profile)?.name ?? "Profile";
+      workspace?.data.profiles.find((p) => p.id === profile)?.name ?? "Agent";
     return {
-      title: `${name} · profile configuration`,
-      trail: [settings, { label: "Profiles" }, { label: name }],
+      title: `${name} · agent configuration`,
+      trail: [settings, { label: "Agents" }, { label: name }],
     };
   }
   const project = /^\/app\/projects\/([^/]+)\/settings$/.exec(pathname)?.[1];

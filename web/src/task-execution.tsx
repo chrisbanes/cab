@@ -409,7 +409,7 @@ export function ApplyInstructions({
         <ConfirmCommand
           trigger="Apply current instructions for the next turn…"
           title="Apply current instructions for the next turn?"
-          description="The next turn captures the current project instructions and profile revision. A turn already running keeps the revisions it started with."
+          description="The next turn captures the current project instructions and agent revision. A turn already running keeps the revisions it started with."
           confirm="Apply"
           disabled={readOnly || Boolean(sending)}
           onConfirm={() =>
@@ -428,7 +428,7 @@ export function ApplyInstructions({
       <SendFeedback
         entry={entry}
         outcome={outcome}
-        recorded="Applied. The next turn uses the current instructions and profile."
+        recorded="Applied. The next turn uses the current instructions and agent settings."
         conflict="Not applied: the assignment changed since it was read."
         check={() => void send()}
         review={{ label: "Review current revisions", onClick: clear }}

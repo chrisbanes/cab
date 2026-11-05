@@ -33,7 +33,7 @@ export function FinishedTurn({
       <p>
         Agent {agentName(assignments, snapshot.assignmentId)} ·{" "}
         <span className="identifier">
-          profile {snapshot.profileId} · work {snapshot.workId} · assignment{" "}
+          agent {snapshot.profileId} · work {snapshot.workId} · assignment{" "}
           {snapshot.assignmentId}
         </span>
       </p>
@@ -86,8 +86,8 @@ export function PendingTurn({
       <p>
         Agent {agent} ·{" "}
         <span className="identifier">
-          profile {pending.identity.profileId} · work {pending.identity.workId}{" "}
-          · assignment {pending.identity.assignmentId}
+          agent {pending.identity.profileId} · work {pending.identity.workId} ·
+          assignment {pending.identity.assignmentId}
         </span>
       </p>
       <p className="identifier">

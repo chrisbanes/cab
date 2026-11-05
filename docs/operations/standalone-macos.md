@@ -922,7 +922,7 @@ and a fresh bound preparation.
 
 ### Claude executable
 
-Claude profiles run the `claude` command (Claude Code) that resolves on the
+Claude agents run the `claude` command (Claude Code) that resolves on the
 service's fixed `PATH`; cab does not redistribute it. Install it so it
 resolves there (Homebrew puts it in `/opt/homebrew/bin`), then turn Claude off and
 on in Settings → Runtime (or restart the service) after installing or upgrading it:
@@ -935,7 +935,7 @@ service are unaffected. The Claude switch can already be on: after installing
 `claude`, turn Claude off and on in Settings → Runtime (or restart the service) to
 start it. A `claude` that resolves but whose runtime fails shows as unavailable
 instead. Readiness shows the Claude executable as Not configured while `claude` is
-missing or Claude is disabled in Settings → Runtime; an active Claude profile then
+missing or Claude is disabled in Settings → Runtime; an active Claude agent then
 fails Runtime harness instead.
 
 cab reports the version `claude --version` prints and never compares it. Only
@@ -946,7 +946,7 @@ That is a disclosed limit, not a fail-closed boundary
 
 ### Claude subscription token
 
-Claude profiles need the operator's own subscription token from
+Claude agents need the operator's own subscription token from
 `claude setup-token`. The installed service reads it from an owner-only file, so
 the plist and its environment need no Claude variable. Settings → Runtime → Add
 Claude shows these commands and a suggested path. Create a private real directory

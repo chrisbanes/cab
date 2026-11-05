@@ -377,11 +377,11 @@ export function SettingsWorkspace(
     profiles: (
       <Panel
         id="profiles"
-        title="Profiles"
-        description={`${plural(profiles.length, "profile")} · ${revoked} revoked`}
+        title="Agents"
+        description={`${plural(profiles.length, "agent")} · ${revoked} revoked`}
         action={
           <ActionLink variant="secondary" href="/app/settings/profiles/new">
-            Create profile
+            Create agent
           </ActionLink>
         }
       >
@@ -501,8 +501,8 @@ export function SettingsWorkspace(
   return (
     <div className="settings-page">
       <p className="introduction muted">
-        Configure paused projects, reusable profiles, routing, GitHub sources
-        and installation capacity. Each change is saved separately. Saving never
+        Configure paused projects, reusable agents, routing, GitHub sources and
+        installation capacity. Each change is saved separately. Saving never
         resumes work, clears holds or grants repository access.
       </p>
       <div className="settings-layout">

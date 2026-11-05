@@ -237,7 +237,7 @@ test("a draft turn is refused with its reason and records nothing", async (t) =>
     expectedVersion: Number(domain.profile(profileId).version),
     revoked: true,
   });
-  await refuse(revoked, "lead-revoked", /profile is revoked/);
+  await refuse(revoked, "lead-revoked", /project lead is revoked/);
 
   const held = await draftTask(f, "Held draft");
   f.seedPersistedState((db) =>

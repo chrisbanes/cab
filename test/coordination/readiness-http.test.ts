@@ -165,7 +165,7 @@ for await (const line of createInterface({input: process.stdin})) {
   assert.equal(await service.verifyCodexLogin(), "unavailable");
 });
 
-test("a rejected profile's name never reaches readiness output", async (t) => {
+test("a rejected agent's name never reaches readiness output", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-ready-name-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const tokenPath = join(root, "claude-token");
@@ -223,7 +223,7 @@ test("a rejected profile's name never reaches readiness output", async (t) => {
   assert.equal(harnessCheck?.status, "fail");
   assert.equal(
     harnessCheck?.reason,
-    "1 profile uses a model or reasoning effort the runtime does not accept",
+    "1 agent uses a model or reasoning effort the runtime does not accept",
   );
   const everything = [api, doctor.out, doctor.err, human.out, human.err].join(
     "\n",

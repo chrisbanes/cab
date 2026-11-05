@@ -139,7 +139,7 @@ Rules:
 - Use a navigation row for anything that only opens another view. Keep buttons for
   actions, with one primary action per view. Desktop buttons hug their label.
 - Stop uses the destructive treatment and confirms first; reversible states show
-  their counterpart (for example Restore profile).
+  their counterpart (for example Restore agent).
 - Task lead names and accountability remain visible wherever a task appears.
 
 ## Operator refinement brief

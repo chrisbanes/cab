@@ -221,7 +221,7 @@ test("the panel never shows the name of a profile the runtime rejects", async (_
   await panel.getByRole("button", { name: "Run again" }).click();
   await panel
     .getByText(
-      "1 profile uses a model or reasoning effort the runtime does not accept",
+      "1 agent uses a model or reasoning effort the runtime does not accept",
     )
     .waitFor();
   const text = await panel.innerText();

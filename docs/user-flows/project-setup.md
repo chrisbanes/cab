@@ -20,17 +20,17 @@ Steps 1, 2 and 3 read in one column, in that order. "What creation does" (two
 bullets) sits beside them from 1121px and after them below it. A sticky bar holds a
 note, **Cancel** and then **Create paused project** at every width.
 
-1. **Lead.** Choose a lead profile. With no profiles, the step shows an inline
-   profile form (name and runtime with Codex preselected) in place of the list, with
-   the line "Add a summary and instructions later in Settings → Profiles." Creating
-   it selects it and keeps every other setup value. The profile and the project are
-   two separate submissions. With zero profiles (including revoked ones), a prechecked
+1. **Lead.** Choose a lead agent. With no agents, the step shows an inline
+   agent form (name and runtime with Codex preselected) in place of the list, with
+   the line "Add a summary and instructions later in Settings → Agents." Creating
+   it selects it and keeps every other setup value. The agent and the project are
+   two separate submissions. With zero agents (including revoked ones), a prechecked
    option names the resolved Implementer and Reviewer runtimes. Implementer uses the
    lead runtime; Reviewer uses the other enabled, available and authenticated runtime,
    including a readable Claude token, or falls back to the lead. Checked creation waits
    for readiness to settle; a failed read falls back to the lead. The three ordinary
-   profiles and receipt commit together, with blank lead instructions, default models
-   and effort and no skills; skills are added later in the profile's settings, from
+   agents and receipt commit together, with blank lead instructions, default models
+   and effort and no skills; skills are added later in the agent's settings, from
    plugins installed in Claude Code or Codex or a local plugin directory. The workers'
    copied instructions are editable; the Reviewer
    file-change restriction is advisory. There is no prescribed execution order.
@@ -39,7 +39,7 @@ note, **Cancel** and then **Create paused project** at every width.
    with blank guidance and no credential. Later projects choose candidates normally.
    If a worker is revoked before project creation, setup offers **Continue without
    starter candidates**, preserving the lead and every other field; it does not
-   silently remove candidates or restore the revoked profile.
+   silently remove candidates or restore the revoked agent.
 2. **Instructions.** Unchanged.
 3. **Repositories.** Discovered repository and ref, folder picker, checkout
    verification, typed fallback. While discovery is unconfigured the step starts
@@ -60,9 +60,9 @@ note, **Cancel** and then **Create paused project** at every width.
 4. **Create.** Creates the project paused, as today. A rejection or an unknown
    outcome appears at the top of the form (116, 116b) and keeps every value. Create
    is always drawn. It is focusable but inactive, with its reason, while the project
-   or the inline profile is being saved or its outcome is unknown, and while a profile
+   or the inline agent is being saved or its outcome is unknown, and while an agent
    name is typed that has not been recorded, whether or not the service refused it.
-   Clearing the name or recording the profile releases it. A repeated click or Enter
+   Clearing the name or recording the agent releases it. A repeated click or Enter
    sends nothing more.
 5. **Ready check.** Replaces the form and takes focus; the heading "Set up your
    first project" stays for the visit. It replaces the "Recorded … as a paused
@@ -73,9 +73,9 @@ note, **Cancel** and then **Create paused project** at every width.
      credential line, with its **Check again**, appears only when the project has a
      repository: setup records the credential only then.
    - Lists any item that would make the lead's work wait, from the workspace and
-     readiness reads: no lead profile, the lead's runtime unavailable or not enabled,
+     readiness reads: no lead agent, the lead's runtime unavailable or not enabled,
      a model or reasoning effort the lead's runtime does not accept (Fix opens the
-     lead profile), Codex executable or sign-in unavailable for a Codex lead, Claude
+     lead agent), Codex executable or sign-in unavailable for a Codex lead, Claude
      executable not on the service `PATH` or Claude token unavailable for a Claude
      lead (the token's Fix opens [Add Claude](claude-runtime.md)).
      An unreadable readiness check counts as a wait item, so the check fails closed.
@@ -101,7 +101,7 @@ note, **Cancel** and then **Create paused project** at every width.
 
 ## States
 
-- Profile create fails: the inline form keeps its input and shows the error; setup
+- Agent create fails: the inline form keeps its input and shows the error; setup
   values are untouched. An unknown starter create keeps its stable IDs, key and frozen
   command; Check re-reads the original operation and never sends another create. A
   missing or unreadable receipt keeps the hold, including while a commit is in flight.
@@ -120,8 +120,8 @@ note, **Cancel** and then **Create paused project** at every width.
 
 - The ready check is shown once, right after creation. Later, Resume is the Pause
   project switch in project configuration, and Resume is reversible there.
-- A profile created inline is an ordinary profile, edited or kept in Settings →
-  Profiles. Setup never deletes it, even when setup is abandoned.
+- An agent created inline is an ordinary agent, edited or kept in Settings →
+  Agents. Setup never deletes it, even when setup is abandoned.
 
 ## Unchanged guarantees
 

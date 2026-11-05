@@ -67,7 +67,7 @@ export function pickableRecipients(
 }
 
 /**
- * The name to show: the profile's name, with the short assignment ID when another assignment in
+ * The name to show: the agent's name, with the short assignment ID when another assignment in
  * the task shares it, so two same-named delegates are never confused. Names never address anyone.
  */
 export function recipientLabel(

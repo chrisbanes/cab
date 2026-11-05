@@ -55,7 +55,7 @@ import {
 import type { ConfigurationDraft } from "./settings-state.js";
 import { settingsSectionHref } from "./settings-sections.js";
 
-/** New profiles start on the first enabled runtime (Codex, then Claude), else Codex. */
+/** New agents start on the first enabled runtime (Codex, then Claude), else Codex. */
 export const defaultHarness = (workspace: SettingsProps["workspace"]) =>
   (["codex", "claude"] as const).find((harness) =>
     workspace?.data.harnesses.some((h) => h.harness === harness && h.enabled),
@@ -93,7 +93,7 @@ export const profileCreateCommand = (v: Values) => ({
 });
 
 const runtimeChangeNote =
-  "A runtime change saves a new profile revision and affects new conversations only; existing conversations keep their runtime.";
+  "A runtime change saves a new agent revision and affects new conversations only; existing conversations keep their runtime.";
 
 /** The selected harness's effective execution policy, as an Aside. */
 function PolicyAside({
@@ -140,7 +140,7 @@ function SettingOptions({
 
 /**
  * Runtime selector, plus model and effort (blank uses the harness default). Guided setup
- * keeps its first screen short by leaving a Codex profile's settings to Settings → Profiles.
+ * keeps its first screen short by leaving a Codex agent's settings to Settings → Agents.
  */
 export function RuntimeFields({
   draft,
@@ -208,12 +208,13 @@ export function ProfileCreate(p: SettingsProps) {
   return (
     <div className="settings-page">
       <p className="introduction muted">
-        Profiles are reusable descriptions that leads and routing can select. A
-        profile grants no repository access.
+        Agents have reusable identities, instructions and execution settings.
+        Choose them to lead projects or carry out assignments. Creating an agent
+        grants no repository access.
       </p>
       <div className="settings-split">
         <Panel
-          title="New profile"
+          title="New agent"
           description="New assignments use the current revision."
         >
           <form
@@ -229,7 +230,7 @@ export function ProfileCreate(p: SettingsProps) {
               )
             }
           >
-            <DraftField draft={d} field="name" label="Profile name" />
+            <DraftField draft={d} field="name" label="Agent name" />
             <DraftField draft={d} field="summary" label="Summary" />
             <DraftField
               draft={d}
@@ -252,7 +253,7 @@ export function ProfileCreate(p: SettingsProps) {
               draft={d}
               client={p.client}
               session={p.session}
-              label="Create profile"
+              label="Create agent"
               refresh={p.refresh}
             />
             <div className="settings-actions">
@@ -262,7 +263,7 @@ export function ProfileCreate(p: SettingsProps) {
                   variant="secondary"
                   onClick={() => d.startOperation(emptyProfile(p.workspace))}
                 >
-                  Create another profile
+                  Create another agent
                 </Button>
               ) : (
                 <ActionLink
@@ -277,7 +278,7 @@ export function ProfileCreate(p: SettingsProps) {
         </Panel>
         <div className="settings-column">
           <Aside
-            title="Profile boundary"
+            title="Agent boundary"
             items={[
               "Saving creates revision 1. Existing assignments are unaffected.",
               "Capabilities guide suitability; project guidance still applies.",
@@ -349,7 +350,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
   const lines = data ? profileChanges(data, d.values, revealed) : [];
   const holdSave =
     typeof d.values.instructions === "string" && revealed === undefined;
-  const name = data?.profile.name ?? "this profile";
+  const name = data?.profile.name ?? "this agent";
   const command = () => {
     if (!data) return {};
     const v = d.values;
@@ -385,16 +386,16 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
   const toggleLabel = data
     ? data.profile.revoked
       ? revoked
-        ? "Restore profile"
+        ? "Restore agent"
         : "Undo restore"
       : revoked
         ? "Undo revoke"
-        : "Revoke profile"
+        : "Revoke agent"
     : "";
   return (
     <div className="settings-page">
       <ResourceStatus
-        label="Profile configuration"
+        label="Agent configuration"
         state={resource.state}
         retry={resource.refresh}
       />
@@ -411,13 +412,13 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
             {data.profile.revoked
               ? "Revoked: subsequent actions are denied."
               : "Available for permitted selection."}{" "}
-            Existing assignments keep their captured profile revision until
+            Existing assignments keep their captured agent revision until
             explicit Apply.
           </p>
           <div className="settings-split">
             <div className="settings-column">
               <Panel
-                title="Profile"
+                title="Agent"
                 description="Name, summary, capabilities and instructions are edited in place. Instructions stay kept until you reveal them."
               >
                 <form
@@ -452,13 +453,13 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     )
                   }
                 >
-                  <DraftField draft={d} field="name" label="Profile name" />
+                  <DraftField draft={d} field="name" label="Agent name" />
                   <DraftField draft={d} field="summary" label="Summary" />
                   <div>
                     <Button
                       type="button"
                       variant={
-                        toggleLabel === "Revoke profile"
+                        toggleLabel === "Revoke agent"
                           ? "destructive"
                           : "secondary"
                       }
@@ -517,7 +518,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     draft={d}
                     client={p.client}
                     session={p.session}
-                    label="Save profile"
+                    label="Save agent"
                     saveDisabled={lines.length === 0}
                     hold={holdSave ? textHold : undefined}
                     discard={() => initial && reloadDraft(d, initial)}

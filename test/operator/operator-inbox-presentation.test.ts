@@ -394,7 +394,7 @@ test("assignment waits are hold notices in the waits' order, worded from their l
     [
       {
         id: "assignment-profile-revoked",
-        title: "Execution held (assignment profile revoked)",
+        title: "Execution held (assignment agent revoked)",
         items: [],
       },
       {

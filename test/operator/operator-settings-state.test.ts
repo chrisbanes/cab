@@ -1082,7 +1082,7 @@ test("schema rejections name each field's fix and keep project override keys", a
     capabilities: "",
   });
   assert.deepEqual(profile.errors, {
-    name: "Enter a profile name.",
+    name: "Enter an agent name.",
     summary: "Keep the summary to 120 characters or fewer. It has 128.",
   });
   assert.equal(

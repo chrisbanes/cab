@@ -57,9 +57,9 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
     )
     .waitFor();
   const profiles = main.locator(".settings-panel", {
-    has: page.getByRole("heading", { name: "Profiles", exact: true }),
+    has: page.getByRole("heading", { name: "Agents", exact: true }),
   });
-  await profiles.getByText("7 profiles · 1 revoked").waitFor();
+  await profiles.getByText("7 agents · 1 revoked").waitFor();
   assert.equal(await profiles.locator(".settings-row").count(), 7);
   await profiles.getByText("Review · revision 2").waitFor();
   assert.equal(
@@ -143,7 +143,7 @@ test("a failed project configuration read marks only that row unavailable", asyn
 test("Settings index is one column with 44px targets on a phone", async (_t, journey) => {
   const { page } = await startSettings(journey, "/app/settings", phone);
   await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
-  await page.getByText("7 profiles · 1 revoked").waitFor();
+  await page.getByText("7 agents · 1 revoked").waitFor();
   await page.getByText("Lead: Mira").waitFor();
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await noPageOverflow(page);

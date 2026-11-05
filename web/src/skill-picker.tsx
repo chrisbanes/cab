@@ -50,7 +50,7 @@ type Editing =
   | { kind: "local"; index?: number; path: string; skills: string };
 
 /**
- * A profile's skill plugins as rows, with a select of the plugins installed in Claude Code
+ * An agent's skill plugins as rows, with a select of the plugins installed in Claude Code
  * and Codex and a dialog to choose their skills; both runtimes load them.
  */
 export function SkillFields({
@@ -427,7 +427,7 @@ function SkillDialog({
             )}
             {tooMany && (
               <span className="error-text" role="alert">
-                A profile can enable at most {maxEnabledSkills} skills of one
+                An agent can enable at most {maxEnabledSkills} skills of one
                 plugin.
               </span>
             )}

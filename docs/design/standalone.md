@@ -84,7 +84,7 @@ plugin system without a concrete need.
 | --- | --- |
 | Core | Projects, tasks, assignments, instructions, permissions, command receipts, results and human requests |
 | Scheduler | Durable pending turns, eligibility, capacity, retry allowances and wakeups |
-| Assignment routing | Direct TypeSafe calls for unspecified assignees, eligible profile candidates, revision-bound recommendations and lead fallback |
+| Assignment routing | Direct TypeSafe calls for unspecified assignees, eligible agent candidates, revision-bound recommendations and lead fallback |
 | Execution supervisor | Runtime process/session identity, launch admission, observation, cancellation and restart reconciliation |
 | Workspace manager | Task worktrees, provisioning recovery, writer ownership, preservation and cleanup |
 | Runtime integration | Validated execution settings, agent tool calls, transcripts, provider events and conversation resume where supported |
@@ -99,7 +99,7 @@ S01 rather than assuming documented operations satisfy cab's guarantees.
 ## Accountability and assignment routing
 
 The project lead is accountable for task outcomes, with separate per-task
-conversations using the same lead profile. Assignees perform assignments; there
+conversations using the same lead agent. Assignees perform assignments; there
 is no separate task-owner role. Lead task conversations need durable, task-scoped
 execution identities, recipients and control bindings without an operator-managed
 owner record. Lead turns must take part in normal capacity, stop, recovery and writer
@@ -117,7 +117,7 @@ an agent-driven PA workflow.
 ## Dispatch and failure boundary
 
 Persist an execution intent with a stable operation identity, assignment/work
-revision and instruction/profile revision before any launch. Recheck readiness,
+revision and instruction/agent revision before any launch. Recheck readiness,
 dependencies, all holds and current permissions at effective admission. Reserve
 capacity and writer ownership consistently with that admission. A launch refusal
 known to occur before submission can remain pending; ambiguous submission stays

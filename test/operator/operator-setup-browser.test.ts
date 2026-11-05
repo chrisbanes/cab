@@ -69,7 +69,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
   );
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Mira" });
   await page
     .getByLabel("Instructions", { exact: true })
@@ -186,7 +186,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
   // Repository-free: no repository and no Project.
   await page.getByLabel("Project name", { exact: true }).fill("Fieldnotes");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Nora" });
   await captureBrowserEvidence(page, "1366-setup-repository-free");
   const second = commandRequest(page);
@@ -204,7 +204,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
 async function enterMismatchedCheckout(page: Page) {
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Mira" });
   await page.getByLabel("Instructions", { exact: true }).fill("Keep me");
   await chooseRepository(page, "acme/atlas");
@@ -366,11 +366,8 @@ test("Setup falls back to typed entry without discovery and on first run", async
     "/app/settings#github-discovery",
   );
   // With no profiles the lead is chosen by creating one in place, never by leaving setup.
-  await page.getByRole("group", { name: "New lead profile" }).waitFor();
-  assert.equal(
-    await page.getByLabel("Lead profile", { exact: true }).count(),
-    0,
-  );
+  await page.getByRole("group", { name: "New lead agent" }).waitFor();
+  assert.equal(await page.getByLabel("Lead agent", { exact: true }).count(), 0);
   const repo = page.getByLabel("Repository (owner/name)");
   await repo.fill("Acme/Atlas");
   await page.getByText("Typed · not listed from GitHub").waitFor();
@@ -728,7 +725,7 @@ test("Setup lists GitHub Projects linked to every chosen repository once", async
 
 test("Setup keeps a revoked lead visible instead of sending a hidden one", async (_t, journey) => {
   const { f, page, profiles } = await setupJourney(journey);
-  const lead = page.getByLabel("Lead profile", { exact: true });
+  const lead = page.getByLabel("Lead agent", { exact: true });
   await lead.selectOption({ label: "Mira" });
   f.service.domain().execute({
     type: "profile.configure",
@@ -750,7 +747,7 @@ test("Setup keeps a revoked lead visible instead of sending a hidden one", async
     .getByRole("link", { name: "New project", exact: true })
     .click();
   await lead
-    .locator("option:checked", { hasText: "Lead profile unavailable" })
+    .locator("option:checked", { hasText: "Lead agent unavailable" })
     .waitFor({ state: "attached" });
   assert.equal(await lead.inputValue(), profiles.Mira);
 });
@@ -801,9 +798,9 @@ test("Setup validates a typed row holding only a ref instead of dropping it", as
   );
 });
 const profileGroup = (page: Page) =>
-  page.getByRole("group", { name: "New lead profile" });
+  page.getByRole("group", { name: "New lead agent" });
 
-test("Setup creates the lead profile inline and keeps every other setup value", async (_t, journey) => {
+test("Setup creates the lead agent inline and keeps every other setup value", async (_t, journey) => {
   const { f, page } = await setupJourney(journey, {
     profiles: false,
     discovery: false,
@@ -818,26 +815,26 @@ test("Setup creates the lead profile inline and keeps every other setup value", 
   await page.getByLabel("Repository (owner/name)").fill("acme/atlas");
   await page.getByLabel("Ref", { exact: true }).fill("main");
   await page.getByLabel("Local repository path").fill("~/src/atlas");
-  await inline.getByLabel("Profile name", { exact: true }).waitFor();
+  await inline.getByLabel("Agent name", { exact: true }).waitFor();
   for (const field of ["Summary", "Profile instructions"])
     assert.equal(await inline.getByLabel(field, { exact: true }).count(), 0);
   assert.equal(await inline.getByLabel("Runtime").inputValue(), "codex");
   await captureBrowserEvidence(page, "1366-setup-inline-profile");
   const sent = sentCommands(page);
   // Enter with the name empty checks the profile only; it never submits the project.
-  await inline.getByLabel("Profile name", { exact: true }).press("Enter");
+  await inline.getByLabel("Agent name", { exact: true }).press("Enter");
   await page.getByText(fixFields).waitFor();
   assert.equal(
     await inline
-      .getByLabel("Profile name", { exact: true })
+      .getByLabel("Agent name", { exact: true })
       .getAttribute("aria-invalid"),
     "true",
   );
   assert.equal(await outcomeMessages(page).count(), 1);
   assert.equal(sent.length, 0);
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
-  await inline.getByLabel("Profile name", { exact: true }).press("Enter");
-  await savedOutcome(page, /^Profile created\. Other setup values kept\./);
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
+  await inline.getByLabel("Agent name", { exact: true }).press("Enter");
+  await savedOutcome(page, /^Agent created\. Other setup values kept\./);
   assert.deepEqual(
     sent.map((c) => c.type),
     ["profile.create"],
@@ -849,7 +846,7 @@ test("Setup creates the lead profile inline and keeps every other setup value", 
   }[];
   assert.deepEqual(created?.runtime, { harness: "codex" });
   assert.equal(created?.capabilities, "");
-  const lead = page.getByLabel("Lead profile", { exact: true });
+  const lead = page.getByLabel("Lead agent", { exact: true });
   await lead.waitFor();
   assert.equal(await lead.inputValue(), created?.profileId);
   await inline.waitFor({ state: "detached" });
@@ -886,10 +883,10 @@ test("Setup keeps its input when the inline profile is rejected", async (_t, jou
   const { page } = await setupJourney(journey, { profiles: false });
   const inline = profileGroup(page);
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
-  const name = inline.getByLabel("Profile name", { exact: true });
+  const name = inline.getByLabel("Agent name", { exact: true });
   await name.fill("x".repeat(513));
   const sent = sentCommands(page);
-  await inline.getByRole("button", { name: "Create profile" }).click();
+  await inline.getByRole("button", { name: "Create agent" }).click();
   await page.getByText(fixFields).waitFor();
   assert.equal(await outcomeMessages(page).count(), 1);
   assert.equal(await name.inputValue(), "x".repeat(513));
@@ -1089,26 +1086,26 @@ test("Setup keeps Create in a sticky bar that never covers the focused control o
   assert.equal(new Set(buttons.map((b) => b.top)).size, 1);
 });
 
-test("Setup's inline lead profile asks only for a name and runtime, and Settings → Profiles offers the rest", async (_t, journey) => {
+test("Setup's inline lead agent asks only for a name and runtime, and Settings → Agents offers the rest", async (_t, journey) => {
   const { web, page } = await setupJourney(journey, { profiles: false });
   await stubReadiness(page);
   const inline = profileGroup(page);
   await inline.waitFor();
-  await inline.getByLabel("Profile name", { exact: true }).waitFor();
+  await inline.getByLabel("Agent name", { exact: true }).waitFor();
   assert.equal(await inline.getByLabel("Runtime").inputValue(), "codex");
   for (const absent of ["Summary", "Profile instructions"])
     assert.equal(await inline.getByLabel(absent, { exact: true }).count(), 0);
   await inline
-    .getByText("Add a summary and instructions later in Settings → Profiles.")
+    .getByText("Add a summary and instructions later in Settings → Agents.")
     .waitFor();
   assert.equal(
     await page.getByLabel("Instructions", { exact: true }).count(),
     1,
   );
   const sent = sentCommands(page);
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
-  await inline.getByRole("button", { name: "Create profile" }).click();
-  const lead = page.getByLabel("Lead profile", { exact: true });
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: "Create agent" }).click();
+  const lead = page.getByLabel("Lead agent", { exact: true });
   await lead.waitFor();
   assert.equal(
     await lead.evaluate(
@@ -1331,7 +1328,7 @@ test("Setup replaces the form with the ready check, focuses it and keeps the fir
   const sent = sentCommands(page);
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Mira" });
   const create = page.getByRole("button", {
     name: "Create paused project",
@@ -1490,7 +1487,7 @@ test("Setup keeps the form and every value when Create is refused, and sends one
   assert.equal(f.service.domain().projects().length, 1);
 });
 
-test("Setup keeps Create focusable with its reason while the lead profile is being created", async (_t, journey) => {
+test("Setup keeps Create focusable with its reason while the lead agent is being created", async (_t, journey) => {
   const { page } = await setupJourney(journey, { profiles: false });
   const inline = profileGroup(page);
   await inline.waitFor();
@@ -1504,8 +1501,8 @@ test("Setup keeps Create focusable with its reason while the lead profile is bei
     await route.continue();
   });
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
-  await inline.getByRole("button", { name: /Create profile|Creating/ }).click();
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: /Create agent|Creating/ }).click();
   const create = page.getByRole("button", {
     name: "Create paused project",
     exact: true,
@@ -1524,7 +1521,7 @@ test("Setup keeps Create focusable with its reason while the lead profile is bei
         document.getElementById(el.getAttribute("aria-describedby") ?? "")
           ?.textContent,
     ),
-    "Wait for the lead profile to be created.",
+    "Wait for the lead agent to be created.",
   );
   await page.keyboard.press("Enter");
   await page.evaluate(
@@ -1532,17 +1529,17 @@ test("Setup keeps Create focusable with its reason while the lead profile is bei
   );
   assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
   release();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   await create.waitFor();
   assert.equal(await create.getAttribute("aria-disabled"), null);
   assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
 });
 
-test("Setup keeps Create held after a refused lead profile is edited, until the profile is recorded", async (_t, journey) => {
+test("Setup keeps Create held after a refused lead agent is edited, until the profile is recorded", async (_t, journey) => {
   const { f, page } = await setupJourney(journey, { profiles: false });
   const inline = profileGroup(page);
   await inline.waitFor();
-  const name = inline.getByLabel("Profile name", { exact: true });
+  const name = inline.getByLabel("Agent name", { exact: true });
   const create = page.getByRole("button", {
     name: "Create paused project",
     exact: true,
@@ -1556,14 +1553,14 @@ test("Setup keeps Create held after a refused lead profile is edited, until the 
   const sent = sentCommands(page);
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   await name.fill("x".repeat(513));
-  await inline.getByRole("button", { name: "Create profile" }).click();
+  await inline.getByRole("button", { name: "Create agent" }).click();
   await page.getByText(fixFields).waitFor();
   // Refused, then corrected without sending it again: the phase stays rejected, the content decides.
   await name.fill("Ada");
   assert.equal(await create.getAttribute("aria-disabled"), "true");
   assert.equal(
     await reason(),
-    "Create the lead profile first, or clear its name.",
+    "Create the lead agent first, or clear its name.",
   );
   await create.focus();
   await page.keyboard.press("Enter");
@@ -1578,8 +1575,8 @@ test("Setup keeps Create held after a refused lead profile is edited, until the 
     "Atlas",
   );
   // Recording the profile releases Create, and the project then has that lead.
-  await inline.getByRole("button", { name: "Create profile" }).click();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await inline.getByRole("button", { name: "Create agent" }).click();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   assert.equal(await create.getAttribute("aria-disabled"), null);
   await create.click();
   await page.getByRole("region", { name: "Ready check" }).waitFor();
@@ -1591,14 +1588,14 @@ test("Setup keeps Create held after a refused lead profile is edited, until the 
   assert.equal(f.service.domain().projects().length, 1);
 });
 
-test("Setup holds Create with the profile reason while the lead profile outcome is unknown", async (_t, journey) => {
+test("Setup holds Create with the profile reason while the lead agent outcome is unknown", async (_t, journey) => {
   const { page } = await setupJourney(journey, { profiles: false });
   const inline = profileGroup(page);
   await inline.waitFor();
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
   await page.route("**/api/operator/commands", (route) => route.abort());
-  await inline.getByRole("button", { name: "Create profile" }).click();
+  await inline.getByRole("button", { name: "Create agent" }).click();
   await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
   const create = page.getByRole("button", {
     name: "Create paused project",
@@ -1611,12 +1608,12 @@ test("Setup holds Create with the profile reason while the lead profile outcome 
         document.getElementById(el.getAttribute("aria-describedby") ?? "")
           ?.textContent,
     ),
-    "Check whether the lead profile was saved first.",
+    "Check whether the lead agent was saved first.",
   );
   await page.unroute("**/api/operator/commands");
 });
 
-test("Setup keeps Create inactive with its reason while a typed lead profile has not been created", async (_t, journey) => {
+test("Setup keeps Create inactive with its reason while a typed lead agent has not been created", async (_t, journey) => {
   const { f, page } = await setupJourney(journey, { profiles: false });
   const inline = profileGroup(page);
   await inline.waitFor();
@@ -1631,20 +1628,20 @@ test("Setup keeps Create inactive with its reason while a typed lead profile has
           ?.textContent,
     );
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
   assert.equal(await create.getAttribute("aria-disabled"), "true");
   assert.equal(
     await reason(),
-    "Create the lead profile first, or clear its name.",
+    "Create the lead agent first, or clear its name.",
   );
   await create.click({ force: true });
   assert.equal(f.service.domain().projects().length, 0);
   assert.equal(
-    await inline.getByLabel("Profile name", { exact: true }).inputValue(),
+    await inline.getByLabel("Agent name", { exact: true }).inputValue(),
     "Ada",
   );
   // Clearing the name is the other way forward.
-  await inline.getByLabel("Profile name", { exact: true }).fill("");
+  await inline.getByLabel("Agent name", { exact: true }).fill("");
   assert.equal(await create.getAttribute("aria-disabled"), null);
   await create.click();
   await page.getByRole("region", { name: "Ready check" }).waitFor();
@@ -1720,20 +1717,20 @@ test("Setup freezes starter identity through an unknown committed create and gra
   await page
     .getByLabel("Instructions", { exact: true })
     .fill("Kept private project instructions");
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
   await page.route("**/api/operator/commands", async (route) => {
     if (route.request().postDataJSON().type === "profile.create") {
       await route.fetch();
       await route.abort();
     } else await route.continue();
   });
-  await inline.getByRole("button", { name: "Create profile" }).click();
+  await inline.getByRole("button", { name: "Create agent" }).click();
   const check = page.getByRole("button", { name: "Check whether it saved" });
   await check.waitFor();
   assert.equal(await option.isDisabled(), true);
   assert.equal(f.service.domain().profiles().length, 3);
   await check.click();
-  const lead = page.getByLabel("Lead profile", { exact: true });
+  const lead = page.getByLabel("Lead agent", { exact: true });
   await lead.waitFor();
   assert.equal(sent.filter((c) => c.type === "profile.create").length, 1);
   assert.equal(
@@ -1783,12 +1780,12 @@ test("Setup holds checked creation for readiness, resolves both runtime labels, 
     })
     .waitFor();
   await inline.getByLabel("Runtime", { exact: true }).selectOption("codex");
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
   await page
     .getByLabel("Project name", { exact: true })
     .fill("Retained project");
   tokenReady = false;
-  await inline.getByRole("button", { name: "Create profile" }).click();
+  await inline.getByRole("button", { name: "Create agent" }).click();
   const refresh = inline.getByRole("button", {
     name: "Refresh starter runtimes",
   });
@@ -1801,11 +1798,11 @@ test("Setup holds checked creation for readiness, resolves both runtime labels, 
   await option.waitFor();
   assert.equal(await option.isChecked(), true);
   assert.equal(
-    await inline.getByLabel("Profile name", { exact: true }).inputValue(),
+    await inline.getByLabel("Agent name", { exact: true }).inputValue(),
     "Ada",
   );
-  await inline.getByRole("button", { name: "Create profile" }).click();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await inline.getByRole("button", { name: "Create agent" }).click();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   const attempts = sent.filter((c) => c.type === "profile.create");
   assert.equal(attempts.length, 2);
   assert.ok(attempts[1]);
@@ -1836,14 +1833,14 @@ test("Setup waits for a pending readiness read only while the starter option is 
   }, "readiness.settle");
   const inline = profileGroup(page);
   const option = inline.getByRole("checkbox", { name: /Adds Implementer/ });
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
-  const create = inline.getByRole("button", { name: "Create profile" });
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
+  const create = inline.getByRole("button", { name: "Create agent" });
   assert.equal(await option.isChecked(), true);
   assert.equal(await create.isDisabled(), true);
   await option.uncheck();
   assert.equal(await create.isEnabled(), true);
   await create.click();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   assert.equal(f.service.domain().profiles().length, 1);
   settle(JSON.parse(readinessBody()));
 });
@@ -1861,9 +1858,9 @@ test("Setup recovers explicitly from a revoked starter candidate while preservin
   await page
     .getByLabel("Instructions", { exact: true })
     .fill("Preserved instructions");
-  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
-  await inline.getByRole("button", { name: "Create profile" }).click();
-  const lead = page.getByLabel("Lead profile", { exact: true });
+  await inline.getByLabel("Agent name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: "Create agent" }).click();
+  const lead = page.getByLabel("Lead agent", { exact: true });
   await lead.waitFor();
   const created = sent.find((c) => c.type === "profile.create")!;
   const reviewerId = (created.starter as { reviewerId: string }).reviewerId;

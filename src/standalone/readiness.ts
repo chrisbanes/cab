@@ -48,7 +48,7 @@ type Discovery = Pick<
   "configured" | "available"
 >;
 
-/** An active-or-revoked profile's execution runtime; its name never enters readiness. */
+/** An active-or-revoked agent's execution runtime; its name never enters readiness. */
 export type ReadinessProfile = {
   revoked: boolean;
   runtime: ProfileRuntime;
@@ -164,13 +164,12 @@ const fixes = {
     "Make the token file a private regular file you own (mode 600), or clear the reference in Add Claude",
   codexPolicy:
     "Set Codex's approval policy to never and its sandbox mode to workspace-write, then restart the service",
-  harness:
-    "Restart the service, or edit the profile's model or reasoning effort",
+  harness: "Restart the service, or edit the agent's model or reasoning effort",
   harnessSettings:
     "Run a Claude task; supported models are read before its first turn, then run the check again",
   unknown: "Run the check again, or restart the service",
   skillPlugins:
-    "Install or enable the named plugin in Claude Code or Codex as the service user, or edit the profile's skill plugins",
+    "Install or enable the named plugin in Claude Code or Codex as the service user, or edit the agent's skill plugins",
   runtimeEnabled: "Enable a runtime in Settings → Runtime",
   runtimeBinary:
     "Install Codex or Claude Code into the fixed PATH, then turn it off and on in Settings → Runtime",
@@ -557,8 +556,8 @@ export class Readiness {
       return outcome(
         id,
         "not-configured",
-        "No active profile uses a runtime",
-        "Add a profile in Settings",
+        "No active agent uses a runtime",
+        "Add an agent in Settings",
       );
     const statuses = this.deps.harnessStatuses();
     const states = new Map(statuses.map((s) => [s.harness, s.state]));
@@ -615,7 +614,7 @@ export class Readiness {
     // covers; readiness only counts, so no profile name can reach its output.
     if (rejected > 0)
       reasons.push(
-        `${rejected} ${rejected === 1 ? "profile uses" : "profiles use"} a model or reasoning effort the runtime does not accept`,
+        `${rejected} ${rejected === 1 ? "agent uses" : "agents use"} a model or reasoning effort the runtime does not accept`,
       );
     for (const harness of unknown)
       reasons.push(
@@ -629,7 +628,7 @@ export class Readiness {
       other
         ? unavailableFix
           ? rejected > 0
-            ? `${unavailableFix}; or edit the profile's model or reasoning effort`
+            ? `${unavailableFix}; or edit the agent's model or reasoning effort`
             : unavailableFix
           : fixes.harness
         : (notEnabledFix ??
@@ -642,9 +641,9 @@ export class Readiness {
   }
 
   /**
-   * Whether every active profile's skill plugins load now, as its next turn would: an
+   * Whether every active agent's skill plugins load now, as its next turn would: an
    * installed plugin that is uninstalled, disabled, ambiguous or in an unknown record
-   * format holds that profile's work. Reasons name the plugin, never a path.
+   * format holds that agent's work. Reasons name the plugin, never a path.
    */
   private async skillPlugins(): Promise<ReadinessCheck> {
     const id = "skill-plugins";

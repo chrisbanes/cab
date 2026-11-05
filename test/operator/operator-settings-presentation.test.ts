@@ -151,7 +151,7 @@ test("project and profile change lists name each change without private values",
     }),
     [
       "Project name: Atlas → Atlas II",
-      "Lead profile: Mira → Jonas",
+      "Lead agent: Mira → Jonas",
       "Pause project",
       "Instructions edited",
     ],
@@ -930,7 +930,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   );
   assert.equal(
     settingsHeader(`/app/profiles/${mira}/settings`, "", workspace)?.title,
-    "Mira · profile configuration",
+    "Mira · agent configuration",
   );
   assert.equal(
     settingsHeader(`/app/assignments/${id()}/recovery`, "", null)?.shortTitle,

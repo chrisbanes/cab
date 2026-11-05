@@ -12,7 +12,7 @@ export type InstalledPlugin = InstalledPlugins["plugins"][number];
 /** A profile enables at most this many skills of one plugin. */
 export const maxEnabledSkills = 32;
 
-/** The draft holds the profile's entries as JSON. */
+/** The draft holds the agent's entries as JSON. */
 export const skillsDraft = (skills: ProfileSkills): string =>
   JSON.stringify(skills);
 
@@ -154,11 +154,11 @@ export function entryErrors(
     if (!match || Number(match[1]) !== index) continue;
     if (match[2] === "path")
       messages.push(
-        "Not a loadable plugin directory on the service host, without a Claude manifest on a Claude profile, or the same plugin as another entry.",
+        "Not a loadable plugin directory on the service host, without a Claude manifest for a Claude agent, or the same plugin as another entry.",
       );
     else if (match[2] === "plugin")
       messages.push(
-        "Not installed and enabled for the service user now, not loadable, without a Claude manifest on a Claude profile, or the same plugin as another entry.",
+        "Not installed and enabled for the service user now, not loadable, without a Claude manifest for a Claude agent, or the same plugin as another entry.",
       );
     else
       messages.push(

@@ -3,7 +3,7 @@
 **Status:** implemented. The screens exist ([getting started](getting-started.md),
 [project setup](project-setup.md), [first task](first-task.md)) and the one-command
 install is implemented ([operations](../operations/standalone-macos.md#install)).
-Keeping or unchecking the starter profiles option is part of the same setup form
+Keeping or unchecking the starter agents option is part of the same setup form
 fill. Both option states retain the seven-interaction repository-free journey and
 eight-interaction linked-project journey; checked setup adds ordinary workers as
 candidates with routing disabled and leaves the lead instructions blank.
@@ -49,7 +49,7 @@ each screen leading to the next and nothing to look up.
 
 | Entry point | Interactions to a created task | First screen must show |
 | --- | --- | --- |
-| Fresh sign-in, no project | 7 (Create project, fill setup, Create profile, Create paused project, Resume and create first task, fill, Create and start) | the getting-started card with Create project in the first view |
+| Fresh sign-in, no project | 7 (Create project, fill setup, Create agent, Create paused project, Resume and create first task, fill, Create and start) | the getting-started card with Create project in the first view |
 | Fresh sign-in, no project, with a repository and linked GitHub Project | 8 (as above, plus Preview and import now before Resume) | the ready check's Preview and import now in the first view; after the press, the activation line, the read line and View imported tasks |
 
 Count clicks and key presses after sign-in; one screen's form fill (one or more

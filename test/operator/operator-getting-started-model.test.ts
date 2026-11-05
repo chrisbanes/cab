@@ -133,10 +133,10 @@ test("a fresh installation counts three required rows and makes Project the one 
   });
 });
 
-test("Project is not Done with a lead profile but no project", () => {
+test("Project is not Done with a lead agent but no project", () => {
   const project = byId(rows(workspace({ profile: true }))).project;
   assert.equal(project?.status, "next");
-  assert.equal(project?.detail, "No projects yet. Lead profile Ada is ready.");
+  assert.equal(project?.detail, "No projects yet. Lead agent Ada is ready.");
   assert.deepEqual(project?.action, {
     kind: "link",
     label: "Create project",
@@ -152,7 +152,7 @@ test("Project is not Done when the enabled project has no lead", () => {
   assert.equal(all.project?.primary, true);
   assert.equal(
     all.project?.detail,
-    "fixture-app has no lead profile. Tasks wait for a lead.",
+    "fixture-app has no lead agent. Tasks wait for a lead.",
   );
   assert.deepEqual(all.project?.action, {
     kind: "link",
@@ -166,18 +166,18 @@ test("Project is not Done when the enabled project has no lead", () => {
   });
 });
 
-test("Project is not Done when the lead profile is revoked", () => {
+test("Project is not Done when the lead agent is revoked", () => {
   const all = byId(
     rows(workspace({ profile: true, revoked: true, project: "enabled" })),
   );
   assert.equal(all.project?.status, "next");
-  assert.match(all.project?.detail ?? "", /has no usable lead profile/);
+  assert.match(all.project?.detail ?? "", /has no usable lead agent/);
   assert.deepEqual(all.project?.action, {
     kind: "link",
     label: "Choose a lead",
     href: `/app/projects/${projectId}/settings`,
   });
-  assert.doesNotMatch(all.project?.detail ?? "", /Lead profile Ada/);
+  assert.doesNotMatch(all.project?.detail ?? "", /Lead agent Ada/);
 });
 
 test("Project is Done with an enabled project and a usable lead", () => {

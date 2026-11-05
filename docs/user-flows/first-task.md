@@ -34,15 +34,15 @@ waits, led by the reason to clear first and a link that fixes it.
    | Project lead revoked                | Open project configuration to choose another lead        |
    | Runtime unavailable                 | Open [readiness check](readiness-check.md)               |
    | Claude token unavailable            | Open [Add Claude](claude-runtime.md)                     |
-   | Lead profile runtime not configured | Open the profile                                         |
+   | Lead agent runtime not configured | Open the agent                                         |
    | Held by power supervision           | No Fix; shows the power supervisor's hold reason         |
    | Repository access revoked           | Open the project's GitHub settings; grants nothing       |
-   | Assignment profile revoked          | Open the assignment's profile; does not re-bind it       |
-   | Assignment profile changed          | Open the assignment's profile; does not re-bind it       |
-   | Assignment instructions changed     | No Fix; names the assignment's profile                   |
-   | Assignment profile not permitted    | No Fix; names the assignment's profile                   |
-   | Assignment held                     | No Fix; names the assignment's profile                   |
-   | Assignment recovery unresolved      | No Fix; names the profile and links to its recovery      |
+   | Assignment agent revoked          | Open the assignment's agent; does not re-bind it       |
+   | Assignment agent changed          | Open the assignment's agent; does not re-bind it       |
+   | Assignment instructions changed     | No Fix; names the assignment's agent                   |
+   | Assignment agent not permitted    | No Fix; names the assignment's agent                   |
+   | Assignment held                     | No Fix; names the assignment's agent                   |
+   | Assignment recovery unresolved      | No Fix; names the agent and links to its recovery      |
    | Dependency, approval or source hold | No Fix; link to the blocking task, request or source     |
    | Capacity                            | No Fix; shows what is using capacity                     |
 

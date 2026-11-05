@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Load profile skill plugins and allow in-turn subagents
+# Load agent skill plugins and allow in-turn subagents
 
 This amends [ADR-1008](1008-claude-code-execution-harness.md), whose agents load no
 plugin configuration and cannot start subagents. The operator's development workflow
@@ -10,13 +10,13 @@ depends on skills, most of them distributed as plugins, and several of those ski
 delegate work to subagents. Delivery scope lives in
 [#1336](https://github.com/chrisbanes/cab/issues/1336).
 
-All of this is implemented: the Codex home, login link and previous-home refusal, profile
+All of this is implemented: the Codex home, login link and previous-home refusal, agent
 skill plugins for both harnesses, and in-turn subagents for Claude. The Claude
 [journey record](../evidence/skill-plugin-journeys-2026-10-30.md) shows a skill running,
 a subagent under Stop, and a crash during a subagent; the
 [Codex skill proof](../evidence/codex-skill-scope-probes-2026-10-30.md) and
 [Codex journey record](../evidence/codex-skill-journeys-2026-10-30.md) show per-thread
-skills and a Codex turn running its profile's skill.
+skills and a Codex turn running its agent's skill.
 
 The plugin layouts and load scope below are implemented
 ([#1524](https://github.com/chrisbanes/cab/issues/1524)); the
@@ -29,18 +29,18 @@ running the update.
 
 ## Decision
 
-- An agent profile lists skill plugins and which of their skills are enabled. A plugin
+- An agent lists skill plugins and which of their skills are enabled. A plugin
   is either one the operator installed and enabled in Claude Code or Codex, named by
   tool and plugin id (see Installed plugins below), or a local plugin directory on the
-  service host. Like other profile settings, an assignment keeps the profile revision
+  service host. Like other agent settings, an assignment keeps the agent revision
   it started with; an installed plugin's content is whatever is installed when each
   turn starts.
 - Both harnesses receive the same skill set from the same directory. Claude receives the
   plugins through the Agent SDK's local `plugins` option and the enabled names through
   its `skills` option. Codex receives each plugin's skill directories as extra skills
-  roots of its App Server and scopes each thread to its profile's enabled skills (see
+  roots of its App Server and scopes each thread to its agent's enabled skills (see
   Codex skills below). A plugin with a Claude plugin manifest serves both runtimes; one
-  with only a Codex manifest serves Codex profiles only (see Plugin layout below).
+  with only a Codex manifest serves Codex agents only (see Plugin layout below).
 - Plugins contribute skills, their instructions and their scripts only. Hooks and
   MCP servers a plugin declares do not run, so repository and plugin content still
   cannot change cab's tool policy. Claude keeps `strictMcpConfig` and adds
@@ -71,7 +71,7 @@ running the update.
 - Codex subagents stay disabled (`features.multi_agent=false`). Enabling them needs a
   later decision backed by a sandbox and Stop proof; the Codex skill proof only records
   what was observed.
-- The profile settings show the plugins and enabled skills, and the effective policy
+- The agent settings show the plugins and enabled skills, and the effective policy
   states that skills are instructions to the agent rather than cab policy.
 
 ## Plugin layout
@@ -93,21 +93,21 @@ in Claude Code and Codex:
   the agent. A symbolic link that resolves inside the plugin directory is allowed; one
   that resolves outside it is refused.
 - **Codex-only plugins.** A plugin without a Claude manifest can be enabled only on a
-  Codex profile: the Claude CLI would name it after its directory, which for an
-  installed plugin is a version. A profile change to the Claude harness that keeps one
-  is refused, and a Claude conversation whose profile enables one is held with a reason
+  Codex agent: the Claude CLI would name it after its directory, which for an
+  installed plugin is a version. An agent change to the Claude harness that keeps one
+  is refused, and a Claude conversation whose agent enables one is held with a reason
   naming the plugin.
 
 ## Installed plugins
 
-A profile can name a plugin the operator installed and enabled in Claude Code
+An agent can name a plugin the operator installed and enabled in Claude Code
 (`claude:<plugin>@<marketplace>`) or Codex (`codex:<plugin>@<marketplace>`). cab takes
 only that plugin's skill directories from the install; the isolation above is unchanged:
 cab's own Codex home, plugin hooks off, `strictMcpConfig` and `features.plugins=false`.
 No hook, MCP server, app or setting is read from the operator's configuration.
 
 - **Resolution.** Each turn start resolves the plugin to its install directory, and both
-  harnesses load from that directory, so a profile never sees two versions of a plugin.
+  harnesses load from that directory, so an agent never sees two versions of a plugin.
   Claude Code: the plugin is enabled in `~/.claude/settings.json` and resolved through
   `installed_plugins.json`. Codex: the plugin is enabled in `config.toml` and has exactly
   one version directory in its plugin cache. Neither format is a documented interface:
@@ -117,7 +117,7 @@ No hook, MCP server, app or setting is read from the operator's configuration.
   plugin and no path, and readiness reports it. Installing or enabling it again
   recovers: the held work is re-checked on a timer, because a change in either tool is
   not a cab event. Only Claude Code's user-scope install counts; project and local
-  installs belong to a repository's own settings. A profile enables a plugin once by
+  installs belong to a repository's own settings. An agent enables a plugin once by
   manifest name, so the same plugin from both tools, or a local copy of it, is refused.
 - **Updates.** Updating a plugin in Claude Code or Codex updates it for cab's next turn,
   and the turn's plugin digest shows the change. A turn whose install directory is
@@ -167,11 +167,11 @@ loaded ([probe record](../evidence/skill-plugin-probes-2026-10-29.md)).
 ## Codex skills
 
 One Codex App Server process serves every Codex conversation, and its extra skills roots
-are process-wide, so the roots are the union of every profile's plugin skill
+are process-wide, so the roots are the union of every agent's plugin skill
 directories and each thread is scoped by `skills.config` entries in its `thread/start`
-and `thread/resume` config. A thread whose profile enables skills disables every other
+and `thread/resume` config. A thread whose agent enables skills disables every other
 listed skill (the plugins' other skills, the bundled skills and repository skills). A
-thread whose profile enables none disables the skills of cab's plugin roots only and
+thread whose agent enables none disables the skills of cab's plugin roots only and
 keeps what it saw before; a process that never loaded plugins sends no skills config at all.
 The [proof](../evidence/codex-skill-scope-probes-2026-10-30.md) on Codex 0.164.0 shows:
 
@@ -202,7 +202,7 @@ the feature stays off.
   behaviour depend on unrelated interactive setup. Installed plugins take only skill
   directories from it.
 - Local plugin directories only. Rejected: the operator's plugins are installed in
-  Claude Code and Codex at versioned paths, so each update broke the profile or needed
+  Claude Code and Codex at versioned paths, so each update broke the agent or needed
   a second checkout to maintain.
 - cab-managed marketplaces, fetched, pinned and updated by cab. Rejected: a second place
   to install and update the same plugins, with its own fetching, credentials for private
@@ -211,10 +211,10 @@ the feature stays off.
   Rejected: an import is another update step to manage, and a per-assignment copy adds
   storage and collection to keep a version the operator has already replaced.
 - Each harness loading its own tool's install of a plugin. Rejected: the two tools hold
-  different versions of the same plugin, so a profile's skills would differ by harness.
+  different versions of the same plugin, so an agent's skills would differ by harness.
 - Skill directories only, without plugins. Rejected: most of the operator's skills
   are distributed as plugins, and copying them out would drift from their updates.
-- Service-wide skills. Rejected: profiles already carry instructions and execution
+- Service-wide skills. Rejected: agents already carry instructions and execution
   settings, and different agent roles need different skills.
 - Loading plugin hooks with disclosure. Rejected: plugin hooks run outside the
   sandbox and could weaken cab's tool policy.

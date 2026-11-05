@@ -15,7 +15,7 @@ task, and Draft (unready) tasks never run turns. Delivery scope lives in
   kind beside direct and assignment turns, so it uses the same scheduler, admission
   transaction, runtime waits and capacity reservations. It counts against the global
   and project active-turn limits.
-- It runs on the project lead's profile and runtime with a fixed drafting instruction
+- It runs on the project lead's agent and runtime with a fixed drafting instruction
   and one result tool. It has no coordination, delivery or GitHub tools. It works in a
   disposable detached worktree of the project's linked repositories with network off,
   deleted when the run ends. Because neither runtime has a read-only mode, the
@@ -39,8 +39,8 @@ task, and Draft (unready) tasks never run turns. Delivery scope lives in
   assignments and results, but Draft tasks are not Ready and so never run. Running
   them would bend admission, or mean marking a rough idea Ready, which contradicts
   what Ready means. It would also create a task before the operator chose to.
-- A dedicated drafting profile or a read-only runtime mode. Rejected as out of scope:
-  the lead's profile already carries the project's context, and neither runtime can
+- A dedicated drafting agent or a read-only runtime mode. Rejected as out of scope:
+  the lead's agent already carries the project's context, and neither runtime can
   enforce read-only access today.
 - Releasing capacity when Stop is acknowledged or the cap expires. Rejected: only an
   observed end shows the runtime has stopped acting, as for every other execution.

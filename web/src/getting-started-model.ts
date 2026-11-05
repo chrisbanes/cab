@@ -184,13 +184,13 @@ export function checklistRows(input: {
         : leadless
           ? `${leadless.name ?? "Project"} has no ${
               leadless.leadProfileId === null
-                ? "lead profile"
-                : "usable lead profile"
+                ? "lead agent"
+                : "usable lead agent"
             }. Tasks wait for a lead.`
           : paused
             ? `${paused.name ?? "Project"} is paused. Nothing runs until you resume it.`
             : `No projects yet.${
-                profiles[0] ? ` Lead profile ${profiles[0].name} is ready.` : ""
+                profiles[0] ? ` Lead agent ${profiles[0].name} is ready.` : ""
               }`,
       ready
         ? {

@@ -482,7 +482,7 @@ test("the CLI Fix is the command or Settings path", () => {
   assert.deepEqual(cliFix({ kind: "readiness" }), ["cab doctor"]);
   assert.deepEqual(cliFix({ kind: "add-claude" }), ["Settings → Add Claude"]);
   assert.deepEqual(cliFix({ kind: "open-profile", profileId }), [
-    `Settings → Profiles → ${profileId}`,
+    `Settings → Agents → ${profileId}`,
   ]);
   assert.deepEqual(cliFix({ kind: "open-repositories", projectId }), [
     `cab project get ${projectId}`,
@@ -556,9 +556,9 @@ test("the CLI names the assignment's profile under its wait and the Settings pat
       projectId,
     ),
     [
-      "Waiting: Assignment profile revoked",
+      "Waiting: Assignment agent revoked",
       "  Worker",
-      `  Fix: Settings → Profiles → ${profileId}`,
+      `  Fix: Settings → Agents → ${profileId}`,
     ],
   );
   assert.deepEqual(

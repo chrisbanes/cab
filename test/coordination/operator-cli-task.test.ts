@@ -745,15 +745,15 @@ test("task get names the next assignment's revoked profile and prints its Settin
   const human = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
   assert.equal(human.code, 0, human.err);
   const lines = human.out.split("\n");
-  const at = lines.indexOf("Waiting: Assignment profile revoked");
+  const at = lines.indexOf("Waiting: Assignment agent revoked");
   assert.ok(at > 0, human.out);
   assert.deepEqual(lines.slice(at, at + 6), [
-    "Waiting: Assignment profile revoked",
+    "Waiting: Assignment agent revoked",
     "  Worker",
-    `  Fix: Settings → Profiles → ${worker}`,
-    "Waiting: Assignment profile changed",
+    `  Fix: Settings → Agents → ${worker}`,
+    "Waiting: Assignment agent changed",
     "  Worker",
-    `  Fix: Settings → Profiles → ${worker}`,
+    `  Fix: Settings → Agents → ${worker}`,
   ]);
   const json = await cli("ro", ["task", "get", taskId]);
   assert.deepEqual(

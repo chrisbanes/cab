@@ -44,7 +44,7 @@ storage technology, with cab owning its schema and migrations and hosting
 supplying database access without a dependency on BB. Multiple database engines
 are not required.
 
-Agent profiles retain portable identity and instructions. Execution settings
+Agents retain portable identity and instructions. Execution settings
 belong to a versioned host binding, validated by that adapter; changing hosts
 requires remapping and validating these settings. Do not pretend that provider,
 model, reasoning, permission, or environment choices have universal equivalents.

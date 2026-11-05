@@ -22,7 +22,7 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
 | ----------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Runtime           | The Codex login is readable by the service ([readiness check](readiness-check.md)) | Open readiness check                                                                                          |
 | GitHub            | A discovery credential is configured and readable                                  | Set discovery credential, or Discovery settings when done                                                     |
-| Project           | An enabled project has a lead profile that is not revoked                          | Create project; **Choose a lead** for an enabled project without one; **Resume** when every project is paused |
+| Project           | An enabled project has a lead agent that is not revoked                          | Create project; **Choose a lead** for an enabled project without one; **Resume** when every project is paused |
 | First task        | A task has started a turn                                                          | Create task ([first task](first-task.md)); unavailable until a project exists                                 |
 | Claude (optional) | A Claude token reference is readable and `claude` is on the service `PATH`         | [Add Claude](claude-runtime.md); Open readiness check when `claude` is not runnable                           |
 

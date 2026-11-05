@@ -111,8 +111,8 @@ export function StartAgainAction({
       <p className="small-heading">Your decision · not started</p>
       <p>
         This request was refused before it ran, so nothing ran. Start again
-        queues it at the current task, profile and instructions revisions, in
-        the same workspace. Nothing is sent to the lead.
+        queues it at the current task, agent and instructions revisions, in the
+        same workspace. Nothing is sent to the lead.
       </p>
       {offer?.available && offer.workId
         ? sent?.kind !== "recorded" &&
