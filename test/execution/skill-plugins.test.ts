@@ -234,6 +234,25 @@ test("skill fields name missing, duplicate and Claude-incompatible plugins, and 
       ),
       /more than one skill named tdd/,
     );
+    // A nested skill reached only through the Codex manifest is not one the Claude CLI loads.
+    const codexReached = writeNestedSkillPlugin(
+      join(s.root, "codex-reached"),
+      { engineering: ["deep"] },
+      { name: "both" },
+    );
+    writeFileSync(
+      join(codexReached, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "both" }),
+    );
+    const reached = { plugins: [{ path: codexReached, skills: ["deep"] }] };
+    assert.deepEqual(await skillFieldErrors(reached, "codex"), []);
+    assert.deepEqual(await skillFieldErrors(reached, "claude"), [
+      "skills.plugins.0.skills.0",
+    ]);
+    await assert.rejects(
+      loadProfilePlugins(reached, "claude"),
+      /Skill plugin 1 cannot be loaded: has no skill named deep/,
+    );
     // A Codex-only plugin serves Codex profiles only.
     const codexOnly = writeNestedSkillPlugin(
       join(s.root, "codex-only"),

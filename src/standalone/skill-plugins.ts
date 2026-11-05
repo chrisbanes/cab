@@ -149,6 +149,8 @@ async function frontmatterName(file: string): Promise<string | undefined> {
 export interface PluginSkill {
   directory: string;
   file: string;
+  /** Found by the Claude manifest's list or the flat scan, so the Claude CLI loads it too. */
+  claude: boolean;
 }
 
 /** A plugin directory as both runtimes read it. */
@@ -203,15 +205,23 @@ export async function readPlugin(
     return undefined;
   const found = new Map<string, PluginSkill>();
   let visited = 0;
-  const candidate = async (directory: string) => {
+  const candidate = async (directory: string, claude: boolean) => {
     const file = await realInside(root, join(directory, "SKILL.md"), "file");
     const real = await realInside(root, directory, "directory");
-    if (file && real && !found.has(file))
-      found.set(file, { directory: real, file });
+    if (file && real)
+      found.set(file, {
+        directory: real,
+        file,
+        claude: claude || found.get(file)?.claude === true,
+      });
     return file !== undefined;
   };
   /** Skill directories up to `depth` levels below `directory`, not descending into a skill. */
-  const scan = async (directory: string, depth: number): Promise<void> => {
+  const scan = async (
+    directory: string,
+    depth: number,
+    claude: boolean,
+  ): Promise<void> => {
     if (depth === 0) return;
     const entries = await readdir(directory, { withFileTypes: true }).catch(
       () => [],
@@ -221,7 +231,8 @@ export async function readPlugin(
       if (++visited > maxPluginFiles)
         throw new SkillPluginError("tree too large");
       const child = join(directory, entry.name);
-      if (!(await candidate(child))) await scan(child, depth - 1);
+      if (!(await candidate(child, claude)))
+        await scan(child, depth - 1, claude);
     }
   };
   const listed = (entry: string) => {
@@ -233,13 +244,14 @@ export async function readPlugin(
   // A listed path is a skill directory, or a directory of skills as in the flat scan.
   for (const entry of paths(claude?.skills)) {
     const directory = listed(entry);
-    if (directory && !(await candidate(directory))) await scan(directory, 1);
+    if (directory && !(await candidate(directory, true)))
+      await scan(directory, 1, true);
   }
   for (const entry of paths(codex?.skills)) {
     const directory = listed(entry);
-    if (directory) await scan(directory, codexSkillDepth);
+    if (directory) await scan(directory, codexSkillDepth, false);
   }
-  await scan(join(root, "skills"), 1);
+  await scan(join(root, "skills"), 1, true);
   const skills = new Map<string, PluginSkill[]>();
   for (const skill of found.values()) {
     const name =
@@ -259,13 +271,20 @@ export async function readPlugin(
   };
 }
 
-/** The directory of each enabled skill, or a `SkillPluginError` naming the first that is missing or ambiguous. */
+/**
+ * The directory of each enabled skill, or a `SkillPluginError` naming the first that is
+ * missing or ambiguous. For Claude, only skills the Claude CLI loads count: a nested skill
+ * reached only through the Codex manifest is missing.
+ */
 export function enabledSkills(
   layout: PluginLayout,
   skills: readonly string[],
+  harness?: ExecutionHarness,
 ): PluginSkill[] {
   return skills.map((name) => {
-    const found = layout.skills.get(name) ?? [];
+    const found = (layout.skills.get(name) ?? []).filter(
+      (skill) => harness !== "claude" || skill.claude,
+    );
     if (found.length !== 1)
       throw new SkillPluginError(
         found.length === 0
@@ -362,25 +381,28 @@ async function fieldErrors(
   const fields: string[] = [];
   for (const [index, plugin] of skills.plugins.entries()) {
     const layout = await readPlugin(plugin.path).catch(() => undefined);
-    const unavailable = layout
-      ? plugin.skills.flatMap((name, skill) =>
-          layout.skills.get(name)?.length === 1
-            ? []
-            : [`skills.plugins.${index}.skills.${skill}`],
-        )
-      : [];
+    // The Claude CLI would name a manifest-less plugin after its directory.
+    if (!layout || (harness === "claude" && !layout.claude)) {
+      fields.push(`skills.plugins.${index}.path`);
+      continue;
+    }
+    const unavailable = plugin.skills.flatMap((name, skill) => {
+      try {
+        enabledSkills(layout, [name], harness);
+        return [];
+      } catch {
+        return [`skills.plugins.${index}.skills.${skill}`];
+      }
+    });
     if (unavailable.length > 0) {
       fields.push(...unavailable);
       continue;
     }
     // A tree that could never be digested is refused now, not when its work waits.
-    const loadable =
-      layout !== undefined &&
-      (harness !== "claude" || layout.claude) &&
-      (await digestPlugin(plugin.path, plugin.skills).then(
-        () => true,
-        () => false,
-      ));
+    const loadable = await digestPlugin(plugin.path, plugin.skills).then(
+      () => true,
+      () => false,
+    );
     if (!loadable) fields.push(`skills.plugins.${index}.path`);
   }
   return fields;
@@ -402,7 +424,13 @@ async function loadPlugins(
 ): Promise<LoadedPlugin[]> {
   const loaded: LoadedPlugin[] = [];
   for (const [index, plugin] of skills.plugins.entries()) {
-    const layout = await readPlugin(plugin.path).catch(() => undefined);
+    const layout = await readPlugin(plugin.path).catch((error: unknown) => {
+      throw new SkillPluginError(
+        `Skill plugin ${index + 1} cannot be loaded: ${
+          error instanceof SkillPluginError ? error.message : "unreadable"
+        }`,
+      );
+    });
     if (!layout)
       throw new SkillPluginError(
         `Skill plugin ${index + 1} is missing or has no plugin manifest`,
@@ -413,6 +441,7 @@ async function loadPlugins(
         `Skill plugin ${layout.name} has no Claude plugin manifest`,
       );
     try {
+      enabledSkills(layout, plugin.skills, harness);
       loaded.push({
         path: plugin.path,
         name: layout.name,

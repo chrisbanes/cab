@@ -1322,10 +1322,13 @@ absolute plugin directories on the service host, each with the names of its skil
 profile enables, set in the profile settings or with `cab profile prepare --skills-file`.
 The directory needs a Claude (`.claude-plugin/plugin.json`) or Codex
 (`.codex-plugin/plugin.json`) manifest. cab finds skills as the runtimes do: the
-directories the Claude manifest's `skills` array lists, `SKILL.md` files up to six
+directories the Claude manifest's `skills` array lists (or, for a listed directory without
+a `SKILL.md`, its subdirectories), `SKILL.md` files up to six
 directories below the directory the Codex manifest's `skills` field names, and the
 one-level `skills/*/` scan. Each skill is named by its `SKILL.md` frontmatter `name`,
-else its directory, and each enabled name must be exactly one skill of its plugin. A
+else its directory, and each enabled name must be exactly one skill of its plugin; a
+Claude profile counts only the skills the Claude CLI loads, not those reached only through
+the Codex manifest. A
 plugin with only a Codex manifest can be enabled on Codex profiles only: creating a
 Claude profile with one, or switching a profile that has one to Claude, is refused. A
 change that fails any of these is refused with the failing fields. Each profile revision

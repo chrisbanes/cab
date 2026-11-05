@@ -29,9 +29,7 @@
       "turnPlugins": [
         {
           "name": "mattpocock-skills",
-          "skills": [
-            "grilling"
-          ],
+          "skills": ["grilling"],
           "digest": "63115930ce563141745f20d4d6e0ddeedc2bf0b6be13595ca090db7797a6580f"
         }
       ],
@@ -61,9 +59,7 @@
     "trace": [],
     "cleanup": {
       "serviceStopped": true,
-      "temporaryBases": [
-        "removed"
-      ],
+      "temporaryBases": ["removed"],
       "rootRemoved": true
     },
     "claudeCli": {
@@ -122,9 +118,7 @@
       "turnPlugins": [
         {
           "name": "mattpocock-skills",
-          "skills": [
-            "grilling"
-          ],
+          "skills": ["grilling"],
           "digest": "63115930ce563141745f20d4d6e0ddeedc2bf0b6be13595ca090db7797a6580f"
         }
       ],
@@ -150,9 +144,7 @@
     "trace": [],
     "cleanup": {
       "serviceStopped": true,
-      "temporaryBases": [
-        "removed"
-      ],
+      "temporaryBases": ["removed"],
       "rootRemoved": true
     },
     "claudeCli": {

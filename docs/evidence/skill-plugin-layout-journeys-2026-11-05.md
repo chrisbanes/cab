@@ -8,7 +8,7 @@ cab on each harness ([ADR-1021](../adr/1021-profile-skill-plugins-and-subagents.
 with the real Claude CLI or Codex App Server, on a disposable repository and temporary
 data. Redacted output:
 [`skill-plugin-layout-journeys-2026-11-05.json`](skill-plugin-layout-journeys-2026-11-05.json)
-(SHA-256 `034fd0334e20756412a414f82510e305dc89b032453dcf710242653117a4a119`).
+(SHA-256 `11bb5195643a63ffd7301a0360f67b1258fd594b77726b4cfe6e6d9ad38656c6`).
 
 The plugin is a copy of the operator's installed `mattpocock-skills` 1.3.1 (Claude Code
 cache), copied with its symbolic links. That tree is what cab refused before: 1825 files
@@ -27,7 +27,11 @@ Every recorded process was verified exited by exact identity.
 
 ## Versions and limits
 
-- Candidate `79355e0f`. Agent SDK 0.3.316 with Claude Code 2.1.318 on `PATH`, the approved
+- Candidate `79355e0f`. A review repair made after these runs only narrows which skills
+  a Claude profile may enable (not those reached only through a Codex manifest) and how
+  a discovery failure is reported; `grilling` is listed in the Claude manifest, so the
+  path these runs exercise is unchanged.
+- Agent SDK 0.3.316 with Claude Code 2.1.318 on `PATH`, the approved
   Codex launcher `codex-cli 0.166.0-alpha.6`, model `haiku` at low effort for Claude.
 - The reported phrase shows that the skill's instructions reached the agent. It does not
   show how: the Codex agent may read the `SKILL.md` through its shell, and the scope is a
