@@ -18,7 +18,7 @@ import {
   type ProfileSkills,
   readinessCommandValue,
 } from "../../src/operator/contracts.js";
-import { parseSkills, skillsSummary } from "./skill-plugins.js";
+import { parseSkillsDraft, skillsSummary } from "./skill-plugins.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { repositoryLabel } from "./presentation.js";
 import { diagnosticCaptureLabels, plural } from "./settings-view.js";
@@ -136,14 +136,14 @@ export function profileChanges(
     );
   if (v.skills !== undefined && skillsChanged(data.skills, v))
     lines.push(
-      `Skill plugins: ${skillsSummary(data.skills)} → ${skillsSummary(parseSkills(String(v.skills)) ?? data.skills)}`,
+      `Skill plugins: ${skillsSummary(data.skills)} → ${skillsSummary(parseSkillsDraft(String(v.skills)) ?? data.skills)}`,
     );
   return lines;
 }
-/** Whether the draft's skill text differs from the stored skills (an unreadable draft counts as changed). */
+/** Whether the draft's skill entries differ from the stored skills (an unreadable draft counts as changed). */
 export const skillsChanged = (skills: ProfileSkills, v: Values) =>
   v.skills !== undefined &&
-  JSON.stringify(parseSkills(String(v.skills))) !== JSON.stringify(skills);
+  JSON.stringify(parseSkillsDraft(String(v.skills))) !== JSON.stringify(skills);
 export const runtimeChanged = (runtime: ProfileRuntime, v: Values) =>
   JSON.stringify(runtimeCommand(v)) !== JSON.stringify(runtime);
 

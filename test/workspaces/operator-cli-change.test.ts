@@ -376,9 +376,31 @@ test("profile prepare sets, shows and clears skill plugins from a file", async (
     (await prepare(file("same.json", JSON.stringify(skills)), same)).code,
     2,
   );
+  // An installed plugin is named by tool and id; the service checks it when applied.
+  const installed = await prepare(
+    file(
+      "installed.json",
+      JSON.stringify({
+        plugins: [
+          { path: plugin, skills: ["probe-skill"] },
+          { plugin: "claude:demo@m", skills: ["review", "plan"] },
+        ],
+      }),
+    ),
+  );
+  assert.equal(installed.code, 0, installed.err + installed.out);
+  assert.deepEqual(installed.json().data.document.preview.changes, [
+    {
+      field: "skills",
+      from: `${plugin} (probe-skill)`,
+      to: `${plugin} (probe-skill); claude:demo@m (review, plan)`,
+    },
+  ]);
   for (const bad of [
     "not json",
     '{"plugins":[{"path":"relative","skills":["a"]}]}',
+    '{"plugins":[{"plugin":"claude:demo","skills":["a"]}]}',
+    '{"plugins":[{"plugin":"gemini:demo@m","skills":["a"]}]}',
   ]) {
     const target = out();
     const refused = await prepare(file("bad.json", bad), target);

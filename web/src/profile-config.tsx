@@ -18,12 +18,8 @@ import {
   skillsChanged,
   type Values,
 } from "./settings-changes.js";
-import {
-  parseSkills,
-  skillErrorMessages,
-  skillsFormat,
-  skillsToText,
-} from "./skill-plugins.js";
+import { parseSkillsDraft, skillsDraft } from "./skill-plugins.js";
+import { SkillFields } from "./skill-picker.js";
 import {
   harnessNote,
   runtimeCommand,
@@ -204,29 +200,6 @@ export function RuntimeFields({
   );
 }
 
-/** Skill plugins, one per line; both runtimes load them. */
-function SkillFields({ draft }: { draft: ConfigurationDraft }) {
-  const messages = skillErrorMessages(draft.errors);
-  return (
-    <>
-      <DraftField
-        draft={draft}
-        field="skills"
-        label="Skill plugins"
-        multiline
-      />
-      <p className="metadata muted">
-        {skillsFormat}. Leave empty to enable no skills.
-      </p>
-      {messages.map((message) => (
-        <span key={message} className="error-text" role="alert">
-          {message}
-        </span>
-      ))}
-    </>
-  );
-}
-
 export function ProfileCreate(p: SettingsProps) {
   const d = useDraft(p.drafts, "profile.create");
   const harness = defaultHarness(p.workspace);
@@ -346,7 +319,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         replaceCapabilities: false,
         revoked: data.profile.revoked,
         ...runtimeValues(data.runtime),
-        skills: skillsToText(data.skills),
+        skills: skillsDraft(data.skills),
         expectedVersion: String(data.profile.version),
       }
     : null;
@@ -403,8 +376,8 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
       ...(runtimeChanged(data.runtime, v)
         ? { runtime: runtimeCommand(v) }
         : {}),
-      ...(skillsChanged(data.skills, v) && parseSkills(String(v.skills))
-        ? { skills: parseSkills(String(v.skills)) }
+      ...(skillsChanged(data.skills, v) && parseSkillsDraft(String(v.skills))
+        ? { skills: parseSkillsDraft(String(v.skills)) }
         : {}),
     };
   };
@@ -467,8 +440,12 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                               harnessSettings(p.workspace, d.values),
                             )
                           : {}),
-                        ...(parseSkills(String(d.values.skills ?? "")) === null
-                          ? { skills: skillsFormat }
+                        ...(parseSkillsDraft(String(d.values.skills ?? "")) ===
+                        null
+                          ? {
+                              skills:
+                                "The skill plugins in this draft are not valid",
+                            }
                           : {}),
                       },
                       holdSave,
@@ -527,7 +504,14 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     />
                   )}
                   <RuntimeFields draft={d} workspace={p.workspace} />
-                  <SkillFields draft={d} />
+                  <SkillFields
+                    draft={d}
+                    harness={
+                      d.values.runtimeHarness === "claude" ? "claude" : "codex"
+                    }
+                    client={p.client}
+                    session={p.session}
+                  />
                   <ChangeList lines={lines} />
                   <DraftOutcome
                     draft={d}
@@ -561,7 +545,8 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
               <Aside
                 title="About skill plugins"
                 items={[
-                  "Skills are instructions to the agent, not cab policy. A plugin contributes skills, instructions and scripts only; its hooks and MCP servers never run.",
+                  "Skills are instructions to the agent, not cab policy. A plugin contributes skills, instructions and scripts only; its hooks, MCP servers and apps never run, including for an installed plugin.",
+                  "An installed plugin is used as installed when each turn starts: an update applies to the next turn, and a plugin that is disabled or uninstalled makes the work wait.",
                   "Skill scripts run through the shell tool under the same sandbox and network policy. A skills change affects new conversations only.",
                 ]}
               />
