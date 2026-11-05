@@ -195,6 +195,9 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+/** Bound on the skill-plugins check, which reads and digests plugins like a turn start. */
+const skillPluginReadMs = 30_000;
+
 /** A release number such as `2.1.296`, possibly with a suffix; short enough to fit the label. */
 const versionToken = /^\d{1,4}\.\d{1,4}\.\d{1,6}[0-9A-Za-z.+-]{0,32}$/;
 
@@ -648,20 +651,36 @@ export class Readiness {
    */
   private async skillPlugins(): Promise<ReadinessCheck> {
     const id = "skill-plugins";
+    // Profiles with the same plugins on the same harness are loaded once.
+    const unique = new Map<
+      string,
+      { skills: ProfileSkills; harness: ExecutionHarness }
+    >();
+    for (const profile of this.deps.profiles())
+      if (!profile.revoked && profile.skills?.plugins.length)
+        unique.set(
+          `${profile.runtime.harness}:${JSON.stringify(profile.skills)}`,
+          { skills: profile.skills, harness: profile.runtime.harness },
+        );
     const reasons = new Set<string>();
-    for (const profile of this.deps.profiles()) {
-      if (profile.revoked || !profile.skills?.plugins.length) continue;
-      await loadProfilePlugins(
-        profile.skills,
-        profile.runtime.harness,
-        this.deps.env,
-      ).catch((error: unknown) =>
-        reasons.add(
-          error instanceof SkillPluginError
-            ? error.message
-            : "Skill plugins could not be read",
+    try {
+      await bounded(
+        Promise.all(
+          [...unique.values()].map(({ skills, harness }) =>
+            loadProfilePlugins(skills, harness, this.deps.env).catch(
+              (error: unknown) =>
+                reasons.add(
+                  error instanceof SkillPluginError
+                    ? error.message
+                    : "Skill plugins could not be read",
+                ),
+            ),
+          ),
         ),
+        skillPluginReadMs,
       );
+    } catch {
+      reasons.add("Skill plugins could not be read in time");
     }
     return reasons.size === 0
       ? pass(id)

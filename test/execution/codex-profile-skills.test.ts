@@ -47,6 +47,7 @@ function fixture() {
     `#!${process.execPath}
 import{createInterface}from'node:readline';import{appendFileSync,readFileSync}from'node:fs';
 if(process.argv[2]!=='app-server')process.exit(0);
+appendFileSync(${JSON.stringify(join(root, "argv.jsonl"))},JSON.stringify(process.argv.slice(2))+'\\n');
 let next=0;
 for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);if(m.id===undefined)continue;appendFileSync(${JSON.stringify(requests)},JSON.stringify({method:m.method,params:m.params})+'\\n');
 let result={};if(m.method==='account/read')result={account:{type:'chatgpt'}};
@@ -101,6 +102,13 @@ process.stdout.write(JSON.stringify({id:m.id,result})+'\\n');}`,
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as Request),
+    argv: (): string[] =>
+      JSON.parse(
+        readFileSync(join(root, "argv.jsonl"), "utf8")
+          .trim()
+          .split("\n")
+          .at(-1)!,
+      ),
     runtime: () =>
       new CodexRuntime(executable, {
         safety: runtimeSafetyFixture().safety,
@@ -403,7 +411,26 @@ test("an installed Codex plugin is scoped from its current version directory, an
   try {
     const homes = installedPluginHomes(join(f.root, "installs"));
     const skills = ["probe-skill", "other-skill"];
-    homes.installCodex("demo@m", { skills });
+    // The installed plugin also declares a hook and an MCP server; neither reaches Codex.
+    const hooked = (dir: string) => {
+      writeSkillPlugin(dir, skills, "demo");
+      mkdirSync(join(dir, "hooks"));
+      writeFileSync(
+        join(dir, "hooks", "hooks.json"),
+        JSON.stringify({
+          hooks: {
+            SessionStart: [
+              { hooks: [{ type: "command", command: "/usr/bin/true" }] },
+            ],
+          },
+        }),
+      );
+      writeFileSync(
+        join(dir, ".mcp.json"),
+        JSON.stringify({ mcpServers: { probe: { command: "/usr/bin/true" } } }),
+      );
+    };
+    homes.installCodex("demo@m", { skills, write: hooked });
     const first = await resolveInstalledPlugin(
       "codex:demo@m",
       homes.environment,
@@ -419,8 +446,18 @@ test("an installed Codex plugin is scoped from its current version directory, an
       f.sent().find((r) => r.method === "skills/extraRoots/set")?.params,
       { extraRoots: [join(first, "skills")] },
     );
+    // Plugins stay off, and nothing but skill roots and SKILL.md paths reaches App Server.
+    assert.ok(f.argv().includes("features.plugins=false"));
+    const sent = JSON.stringify(f.sent());
+    for (const declared of [
+      "hooks.json",
+      ".mcp.json",
+      "mcpServers",
+      join(first, "hooks"),
+    ])
+      assert.equal(sent.includes(declared), false, declared);
     // Codex replaces the version directory on update; the old root is gone from disk.
-    homes.installCodex("demo@m", { version: "1.1.0", skills });
+    homes.installCodex("demo@m", { version: "1.1.0", skills, write: hooked });
     const second = await resolveInstalledPlugin(
       "codex:demo@m",
       homes.environment,

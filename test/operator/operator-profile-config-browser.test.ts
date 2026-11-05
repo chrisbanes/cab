@@ -833,6 +833,12 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
   await dialog.getByText("2 of 2 selected").waitFor();
   await dialog.getByRole("button", { name: "Add plugin" }).click();
   await rows.getByText("tools · Codex").waitFor();
+  // Add is disabled once its plugin is added, so focus goes to the select.
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(
+    await select.evaluate((e) => e === document.activeElement),
+    true,
+  );
   await rows.getByText("2 skills").waitFor();
   await page
     .getByRole("region", { name: "Changes to save" })
@@ -843,7 +849,16 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
   assert.deepEqual(d.profileSkills(builder), {
     plugins: [{ plugin: "codex:tools@n", skills: ["deep", "wide"] }],
   });
-  // An added plugin is no longer offered; the saved row comes back on reload.
+  // An update in Codex drops a saved skill; the saved row comes back on reload.
+  homes.installCodex("tools@n", {
+    version: "2.0.0",
+    write: (dir) =>
+      writeNestedSkillPlugin(
+        dir,
+        { engineering: ["deep"] },
+        { name: "tools", claude: false },
+      ),
+  });
   await page.reload();
   await rows.getByText("tools · Codex").waitFor();
   assert.equal(await select.locator("option", { hasText: "tools" }).count(), 0);
@@ -855,7 +870,12 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
     await dialog.getByRole("checkbox", { name: "deep" }).isChecked(),
     true,
   );
-  await dialog.getByRole("checkbox", { name: "wide" }).uncheck();
+  // A saved skill the plugin no longer has is named, not kept invisibly.
+  await dialog
+    .getByRole("status")
+    .getByText("No longer in the plugin, removed when you update: wide.")
+    .waitFor();
+  await dialog.getByText("1 of 1 selected").waitFor();
   await dialog.getByRole("button", { name: "Update skills" }).click();
   await rows.getByText("1 skill", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Remove tools · Codex" }).click();

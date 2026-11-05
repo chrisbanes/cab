@@ -41,6 +41,8 @@ type Editing =
       index?: number;
       plugin: InstalledPlugin;
       selected: string[];
+      /** Saved skills the plugin no longer offers; saving the dialog drops them. */
+      dropped?: string[];
       query: string;
     }
   | { kind: "local"; index?: number; path: string; skills: string };
@@ -78,6 +80,7 @@ export function SkillFields({
   const [dialogError, setDialogError] = useState<string | null>(null);
   // The control that opened the dialog gets focus back when it closes.
   const opener = useRef<HTMLElement | null>(null);
+  const localButton = useRef<HTMLButtonElement | null>(null);
   const setEditing = (next: Editing | null) => {
     if (next && !editing)
       opener.current =
@@ -103,14 +106,16 @@ export function SkillFields({
       return;
     }
     const plugin = listing?.plugins.find((p) => p.plugin === entry.plugin);
-    if (plugin)
-      setEditing({
-        kind: "installed",
-        index,
-        plugin,
-        selected: [...entry.skills],
-        query: "",
-      });
+    if (!plugin) return;
+    const offered = selectableSkills(plugin, harness);
+    setEditing({
+      kind: "installed",
+      index,
+      plugin,
+      selected: entry.skills.filter((name) => offered.includes(name)),
+      dropped: entry.skills.filter((name) => !offered.includes(name)),
+      query: "",
+    });
   };
   return (
     <fieldset className="field body" aria-describedby={`${selectId}-help`}>
@@ -148,7 +153,8 @@ export function SkillFields({
                   <Button
                     type="button"
                     variant="secondary"
-                    disabled={disabled}
+                    // An installed plugin's skills come from the listing.
+                    disabled={disabled || (!("path" in entry) && !listing)}
                     aria-label={`Edit skills of ${label}`}
                     onClick={() => editEntry(entry, index)}
                   >
@@ -216,6 +222,7 @@ export function SkillFields({
         </label>
         <Button
           type="button"
+          variant="secondary"
           disabled={disabled || !offered.some((p) => p.plugin === choice)}
           onClick={() => {
             const plugin = offered.find((p) => p.plugin === choice);
@@ -231,6 +238,7 @@ export function SkillFields({
           Add
         </Button>{" "}
         <Button
+          ref={localButton}
           type="button"
           variant="secondary"
           disabled={disabled}
@@ -244,6 +252,13 @@ export function SkillFields({
         harness={harness}
         error={dialogError}
         opener={opener}
+        fallbackFocus={() => {
+          // The opener may be gone or disabled after an add: the select, else Add local directory.
+          const select = document.getElementById(selectId);
+          return select instanceof HTMLSelectElement && !select.disabled
+            ? select
+            : localButton.current;
+        }}
         onChange={(next) => {
           setDialogError(null);
           setEditing(next);
@@ -272,6 +287,7 @@ function SkillDialog({
   harness,
   error,
   opener,
+  fallbackFocus,
   onChange,
   onDone,
 }: {
@@ -279,6 +295,7 @@ function SkillDialog({
   harness: ExecutionHarness;
   error: string | null;
   opener: { current: HTMLElement | null };
+  fallbackFocus: () => HTMLElement | null;
   onChange: (editing: Editing | null) => void;
   onDone: (entry: ProfilePlugin, index?: number) => void;
 }) {
@@ -317,7 +334,13 @@ function SkillDialog({
       <DialogContent
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          opener.current?.focus();
+          const target = opener.current;
+          if (
+            target?.isConnected &&
+            !(target instanceof HTMLButtonElement && target.disabled)
+          )
+            target.focus();
+          else fallbackFocus()?.focus();
         }}
       >
         <DialogTitle>{title}</DialogTitle>
@@ -364,6 +387,12 @@ function SkillDialog({
                 <p className="metadata muted">No skill matches the filter.</p>
               )}
             </fieldset>
+            {editing.dropped && editing.dropped.length > 0 && (
+              <p className="metadata" role="status">
+                No longer in the plugin, removed when you update:{" "}
+                {editing.dropped.join(", ")}.
+              </p>
+            )}
             {tooMany && (
               <span className="error-text" role="alert">
                 A profile can enable at most {maxEnabledSkills} skills of one

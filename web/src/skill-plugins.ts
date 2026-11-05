@@ -136,11 +136,11 @@ export function entryErrors(
     if (!match || Number(match[1]) !== index) continue;
     if (match[2] === "path")
       messages.push(
-        "Not a loadable plugin directory on the service host, or the same plugin as another entry.",
+        "Not a loadable plugin directory on the service host, without a Claude manifest on a Claude profile, or the same plugin as another entry.",
       );
     else if (match[2] === "plugin")
       messages.push(
-        "Not installed and enabled for the service user now, or the same plugin as another entry.",
+        "Not installed and enabled for the service user now, not loadable, without a Claude manifest on a Claude profile, or the same plugin as another entry.",
       );
     else
       messages.push(

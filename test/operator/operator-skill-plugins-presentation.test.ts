@@ -138,11 +138,11 @@ test("server field errors are worded for their row, and unreadable tool records 
     "skills.plugins.0.path": "invalid",
   };
   assert.deepEqual(entryErrors(errors, 1, entry), [
-    "Not installed and enabled for the service user now, or the same plugin as another entry.",
+    "Not installed and enabled for the service user now, not loadable, without a Claude manifest on a Claude profile, or the same plugin as another entry.",
     "Skill plan is not in the plugin.",
   ]);
   assert.deepEqual(entryErrors(errors, 0, { path: "/p", skills: ["a"] }), [
-    "Not a loadable plugin directory on the service host, or the same plugin as another entry.",
+    "Not a loadable plugin directory on the service host, without a Claude manifest on a Claude profile, or the same plugin as another entry.",
   ]);
   assert.deepEqual(
     installedStatusNotes({ claude: "unreadable", codex: "none" }),

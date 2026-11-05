@@ -51,7 +51,10 @@ task ran normally regardless.
 
 ## Versions and limits
 
-- Candidate `29f963c8`.
+- Candidate `29f963c8`. Review repairs made after these runs change the profile editor
+  and the readiness check, and make Codex refuse an unreadable (rather than missing)
+  plugin cache directory as an unrecognised record. None of them changes the resolution,
+  loading or digest path these runs exercise.
 - Agent SDK 0.3.316 with Claude Code 2.1.318 on `PATH`, which also ran the Claude plugin
   commands.
 - The approved Codex launcher `codex-cli 0.166.0-alpha.6`, which also ran the Codex

@@ -29,9 +29,7 @@
             "turnPlugins": [
               {
                 "name": "cab-probe",
-                "skills": [
-                  "cab-probe-phrase"
-                ],
+                "skills": ["cab-probe-phrase"],
                 "digest": "ba8dd55d3dde6028182d8792b0b891b23174038445daf8cda2b9c212c67e2d79"
               }
             ],
@@ -43,9 +41,7 @@
             "turnPlugins": [
               {
                 "name": "cab-probe",
-                "skills": [
-                  "cab-probe-phrase"
-                ],
+                "skills": ["cab-probe-phrase"],
                 "digest": "fc0854172961fb95c07e54c2e8cb308d427c75e97d4dd27638eb1373ff8c9734"
               }
             ],
@@ -80,10 +76,7 @@
       "trace": [],
       "cleanup": {
         "serviceStopped": true,
-        "temporaryBases": [
-          "removed",
-          "removed"
-        ],
+        "temporaryBases": ["removed", "removed"],
         "rootRemoved": true
       },
       "claudeCli": {
@@ -141,9 +134,7 @@
             "turnPlugins": [
               {
                 "name": "cab-probe",
-                "skills": [
-                  "cab-probe-phrase"
-                ],
+                "skills": ["cab-probe-phrase"],
                 "digest": "ba8dd55d3dde6028182d8792b0b891b23174038445daf8cda2b9c212c67e2d79"
               }
             ],
@@ -155,9 +146,7 @@
             "turnPlugins": [
               {
                 "name": "cab-probe",
-                "skills": [
-                  "cab-probe-phrase"
-                ],
+                "skills": ["cab-probe-phrase"],
                 "digest": "fc0854172961fb95c07e54c2e8cb308d427c75e97d4dd27638eb1373ff8c9734"
               }
             ],
@@ -188,10 +177,7 @@
       "trace": [],
       "cleanup": {
         "serviceStopped": true,
-        "temporaryBases": [
-          "removed",
-          "removed"
-        ],
+        "temporaryBases": ["removed", "removed"],
         "rootRemoved": true
       },
       "claudeCli": {

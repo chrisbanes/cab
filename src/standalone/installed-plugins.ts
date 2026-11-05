@@ -136,8 +136,12 @@ async function codexVersions(
     marketplace,
     plugin,
   );
+  // No directory is not installed; any other failure is an unreadable record.
   const entries = await readdir(directory, { withFileTypes: true }).catch(
-    () => [],
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw new Unrecognised();
+    },
   );
   return entries
     .filter(

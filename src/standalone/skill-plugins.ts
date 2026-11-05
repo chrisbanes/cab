@@ -565,9 +565,9 @@ export const listInstalledPlugins = (
             ([name, found]) =>
               found.length === 1 && skillNameSchema.safeParse(name).success,
           )
-          .slice(0, 256)
           .map(([name, [skill]]) => ({ name, claude: skill!.claude }))
-          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+          .slice(0, 256);
         if (skills.length === 0 || plugins.length >= 256) continue;
         plugins.push({
           plugin: ref,
