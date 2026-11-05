@@ -608,9 +608,22 @@
   margin-bottom: 0;
 }
 
+.skill-plugin-choices > .check-field {
+  padding: 0 var(--space-8);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.skill-plugin-choices > .check-field:last-of-type {
+  border-bottom: 0;
+}
+
+.skill-plugin-choices > .check-field:hover {
+  background: var(--raised);
+}
+
 .skill-plugin-choices {
   display: grid;
-  gap: var(--space-4);
   max-height: 18rem;
   overflow-y: auto;
   margin: 0;

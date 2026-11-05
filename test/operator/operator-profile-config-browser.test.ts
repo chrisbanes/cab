@@ -829,8 +829,9 @@ test("Profile configuration picks installed plugins' skills in a dialog, edits a
   await dialog.getByRole("checkbox", { name: "deep" }).focus();
   await page.keyboard.press("Space");
   await dialog.getByLabel("Filter skills", { exact: true }).fill("");
-  await dialog.getByRole("checkbox", { name: "wide" }).check();
+  await dialog.getByRole("button", { name: "Select all" }).click();
   await dialog.getByText("2 of 2 selected").waitFor();
+  await dialog.getByRole("button", { name: "Clear selection" }).waitFor();
   await dialog.getByRole("button", { name: "Add plugin" }).click();
   await rows.getByText("tools · Codex").waitFor();
   // Add is disabled once its plugin is added, so focus goes to the select.
