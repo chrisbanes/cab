@@ -1108,7 +1108,9 @@ export function App() {
               )
             }
           />
-          <DocumentTitle title={project ? "Project" : title} />
+          <DocumentTitle
+            title={settingsPage?.documentTitle ?? (project ? "Project" : title)}
+          />
           <main className={onInboxRoute ? "page page-inbox" : "page"}>
             {!inboxOwnsHeader && (
               <PageHeader

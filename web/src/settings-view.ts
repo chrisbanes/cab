@@ -31,6 +31,8 @@ export interface SettingsHeader {
   title: string;
   trail: Crumb[];
   shortTitle?: string;
+  /** Static label for the tab and history: saved names stay out of it. */
+  documentTitle?: string;
 }
 export const projectTabs = [
   { id: "general", label: "General" },
@@ -96,6 +98,7 @@ export function settingsHeader(
       workspace?.data.profiles.find((p) => p.id === profile)?.name ?? "Agent";
     return {
       title: `${name} · agent configuration`,
+      documentTitle: "Agent configuration",
       trail: [settings, { label: "Agents" }, { label: name }],
     };
   }
@@ -107,6 +110,7 @@ export function settingsHeader(
     const page = `/app/projects/${project}/settings`;
     return {
       title: `${name} · project configuration`,
+      documentTitle: "Project configuration",
       trail: [
         settings,
         { label: "Projects" },

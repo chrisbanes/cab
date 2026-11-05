@@ -49,6 +49,7 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
     .getByRole("heading", { level: 1, name: "Atlas · project configuration" })
     .waitFor();
   assert.equal(await trail(page), "Settings / Projects / Atlas");
+  assert.equal(await page.title(), "Project configuration · cab");
   const status = page.locator(".settings-status");
   await status.getByText("Enabled").waitFor();
   await status.getByText("Existing start rules still apply.").waitFor();
