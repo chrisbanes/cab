@@ -19,6 +19,12 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
   [join("src", "standalone", "execution-policy.ts")]: {
     reason: "Codex-specific execution policy disclosure",
   },
+  [join("src", "standalone", "claude.ts")]: {
+    reason: "Claude disclosure naming where installed skill plugins come from",
+    lines: [
+      `"Skill plugins come from the profile, from local plugin directories or plugins installed in Claude Code or Codex, and contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy.",`,
+    ],
+  },
   [join("src", "operator", "command-network-copy.ts")]: {
     reason: "the setting applies only to Codex turns",
     lines: [

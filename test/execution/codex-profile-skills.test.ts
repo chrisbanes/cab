@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -16,6 +17,8 @@ import { afterEach, test } from "node:test";
 import { CodexRuntime } from "../../src/standalone/codex.js";
 import { codexHomeFor } from "../../src/standalone/codex-home.js";
 import { SkillScopeError } from "../../src/standalone/codex-skills.js";
+import { resolveInstalledPlugin } from "../../src/standalone/installed-plugins.js";
+import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import {
   closeRuntimeSafetyFixtures,
   runtimeSafetyFixture,
@@ -388,6 +391,61 @@ test("an enabled skill that Codex does not list stops the thread instead of runn
       /could not be loaded by Codex/,
     );
     assert.ok(!f.sent().some((r) => r.method === "thread/start"));
+  } finally {
+    await runtime.stop();
+    f.cleanup();
+  }
+});
+
+test("an installed Codex plugin is scoped from its current version directory, and an update that replaces it rescopes the next turn", async () => {
+  const f = fixture();
+  const runtime = f.runtime();
+  try {
+    const homes = installedPluginHomes(join(f.root, "installs"));
+    const skills = ["probe-skill", "other-skill"];
+    homes.installCodex("demo@m", { skills });
+    const first = await resolveInstalledPlugin(
+      "codex:demo@m",
+      homes.environment,
+    );
+    f.list(first);
+    await runtime.start();
+    const threadId = await runtime.startThread(
+      f.workspace,
+      [],
+      settings(first, ["probe-skill"]),
+    );
+    assert.deepEqual(
+      f.sent().find((r) => r.method === "skills/extraRoots/set")?.params,
+      { extraRoots: [join(first, "skills")] },
+    );
+    // Codex replaces the version directory on update; the old root is gone from disk.
+    homes.installCodex("demo@m", { version: "1.1.0", skills });
+    const second = await resolveInstalledPlugin(
+      "codex:demo@m",
+      homes.environment,
+    );
+    assert.notEqual(second, first);
+    assert.equal(existsSync(first), false);
+    f.list(second);
+    await runtime.resumeThread(
+      threadId,
+      [],
+      settings(second, ["probe-skill"]),
+      f.workspace,
+    );
+    const roots = f
+      .sent()
+      .filter((r) => r.method === "skills/extraRoots/set")
+      .at(-1)?.params;
+    // Process-wide roots only grow: the removed one stays listed but contributes nothing.
+    assert.deepEqual(roots, {
+      extraRoots: [join(first, "skills"), join(second, "skills")].sort(),
+    });
+    assert.deepEqual(
+      disabledPaths(f.sent().findLast((r) => r.method === "thread/resume")),
+      [skillFile(second, "other-skill"), ...f.system.map((s) => s.path)].sort(),
+    );
   } finally {
     await runtime.stop();
     f.cleanup();

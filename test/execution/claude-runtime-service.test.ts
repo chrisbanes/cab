@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   renameSync,
@@ -34,6 +35,7 @@ import {
   writeSkillPlugin,
 } from "../fixtures/skill-plugin.js";
 import { digestPlugin } from "../../src/standalone/skill-plugins.js";
+import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { failureNotice } from "../../web/src/execution-runtime.js";
@@ -551,6 +553,8 @@ interface ClaudeHarnessControls {
   hangIdentity?: boolean;
   /** The `claude` the runtime finds; `null` is none on the PATH. Defaults to a fixture path. */
   executable?: string | null;
+  /** How long work waiting on a skill plugin waits before it is re-checked. */
+  skillPluginRetryMs?: number;
 }
 
 /** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
@@ -618,6 +622,9 @@ function claudeHarness(
       routingClient: null,
       terminationVerifier: verifier,
       supervisor: { observationMs: 3000 },
+      ...(controls.skillPluginRetryMs === undefined
+        ? {}
+        : { retry: { skillPluginMs: controls.skillPluginRetryMs } }),
     },
   );
   const execute = (command: Record<string, unknown>) =>
@@ -920,6 +927,135 @@ test("a Claude turn whose profile enables a Codex-only plugin waits with a reaso
   );
   const base = run.intent(workId)?.workspace;
   t.after(() => releaseTemporaryBase(base));
+});
+
+/** A Claude-manifest plugin with one skill that also declares a hook and an MCP server. */
+function writeHookedPlugin(directory: string, name: string, body = "v1") {
+  writeSkillPlugin(directory, ["review"], name);
+  writeFileSync(
+    join(directory, "skills", "review", "SKILL.md"),
+    `---\nname: review\n---\n${body}\n`,
+  );
+  mkdirSync(join(directory, "hooks"), { recursive: true });
+  writeFileSync(
+    join(directory, "hooks", "hooks.json"),
+    JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: "command", command: "touch /tmp/never" }] },
+        ],
+      },
+    }),
+  );
+  writeFileSync(
+    join(directory, ".mcp.json"),
+    JSON.stringify({ mcpServers: { probe: { command: "/bin/false" } } }),
+  );
+}
+
+test("a Claude turn loads a plugin installed in Claude Code from its install, without its hooks or MCP servers, and a disabled one waits until it is enabled again", async (t) => {
+  const run = await claudeServiceRun(
+    t,
+    [1, 2, 3, 4].map(
+      () =>
+        async function* (session: Parameters<Script>[0]) {
+          yield init(sessionOf(session));
+          yield result(sessionOf(session));
+        },
+    ),
+    { selfTest: true, verified: true, skillPluginRetryMs: 50 },
+  );
+  const homes = installedPluginHomes(join(run.root, "operator"));
+  withEnvironment(t, { CLAUDE_CONFIG_DIR: homes.claudeHome });
+  const install = homes.installClaude("demo@m", {
+    write: (dir) => writeHookedPlugin(dir, "demo"),
+  });
+  const { projectId, worker } = run.setup();
+  run.execute({
+    type: "profile.configure",
+    profileId: worker,
+    expectedVersion: 1,
+    skills: { plugins: [{ plugin: "claude:demo@m", skills: ["review"] }] },
+  });
+  const first = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(first.workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(first.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const options = run.sessions[0]?.options;
+  assert.deepEqual(options?.plugins, [
+    { type: "local", path: install, skipMcpDiscovery: true },
+  ]);
+  assert.deepEqual(options?.skills, ["demo:review"]);
+  // The plugin's hook and MCP server are never handed to the CLI.
+  assert.deepEqual(options?.managedSettings, { disableAllHooks: true });
+  assert.equal(options?.strictMcpConfig, true);
+  assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["cab"]);
+  assert.deepEqual(options?.settingSources, []);
+  const firstDigest = await digestPlugin(install, ["review"]);
+  assert.deepEqual(run.service.turnSkillPlugins(first.workId), [
+    { name: "demo", skills: ["review"], digest: firstDigest },
+  ]);
+
+  // Every earlier turn (the first task's repair included) has settled, so no wake but the
+  // timed re-check is left to run the waiting work.
+  await waitUntil(
+    () =>
+      run.service.turnRequests().every((r) => r.state === "completed") &&
+      run.service.list().every((i) => i.state === "completed"),
+    run.describe,
+  );
+  // Disabled in Claude Code: the next turn waits, naming the plugin and no path.
+  homes.setClaudeEnabled("demo@m", false);
+  // An update while disabled: the next turn loads the new install.
+  const updated = homes.installClaude("demo@m", {
+    version: "1.1.0",
+    enabled: false,
+    write: (dir) => writeHookedPlugin(dir, "demo", "v2"),
+  });
+  const second = await run.claudeTask(projectId, worker);
+  const request = () =>
+    run.service.turnRequests().find((r) => r.workId === second.workId);
+  await waitUntil(
+    () =>
+      request()?.reason ===
+      "Skill plugin claude:demo@m is disabled in Claude Code",
+    run.describe,
+  );
+  assert.equal(request()?.state, "queued");
+  assert.notEqual(run.intent(second.workId)?.state, "held");
+  const sessionsBefore = run.sessions.length;
+  // Enabling it again is not a cab event: the timed re-check runs the work.
+  homes.setClaudeEnabled("demo@m", true);
+  await waitUntil(
+    () => run.intent(second.workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(second.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  // The first task's repair turn may also have run since; one session loaded the update.
+  assert.ok(
+    run.sessions
+      .slice(sessionsBefore)
+      .some((session) => session.options.plugins?.[0]?.path === updated),
+  );
+  const secondDigest = await digestPlugin(updated, ["review"]);
+  assert.notEqual(secondDigest, firstDigest);
+  assert.deepEqual(run.service.turnSkillPlugins(second.workId), [
+    { name: "demo", skills: ["review"], digest: secondDigest },
+  ]);
+  assert.equal(
+    JSON.stringify(run.service.turnRequests().map((r) => r.reason)).includes(
+      run.root,
+    ),
+    false,
+  );
 });
 
 test("a Claude turn records its commands as runtime items with exit status and redacted output", async (t) => {

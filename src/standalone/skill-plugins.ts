@@ -3,10 +3,20 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import type {
-  ExecutionHarness,
-  ProfileSkills,
+import {
+  type ExecutionHarness,
+  type InstalledPluginRef,
+  type ProfilePlugin,
+  type ProfileSkills,
+  skillNameSchema,
 } from "../core/execution-runtime.js";
+import {
+  enabledInstalledPlugins,
+  InstalledPluginError,
+  type InstalledToolStatus,
+  type PluginTool,
+  resolveInstalledPlugin,
+} from "./installed-plugins.js";
 
 /**
  * Bounds of a plugin's load scope (its manifests and enabled skills' directories), stated in
@@ -16,6 +26,9 @@ export const maxPluginFiles = 2000;
 export const maxPluginBytes = 16 * 1024 * 1024;
 export const maxPluginDepth = 12;
 const maxManifestBytes = 64 * 1024;
+
+/** How long work waiting on an unavailable skill plugin waits before it is re-checked. */
+export const skillPluginRetryMs = 30_000;
 
 /** A plugin that cannot be loaded. The reason never contains a path. */
 export class SkillPluginError extends Error {}
@@ -365,31 +378,60 @@ export async function digestPlugin(
   return hash.digest("hex");
 }
 
+/** The directory an entry loads from now: its own path, or its tool's current install. */
+const pluginDirectory = (
+  plugin: ProfilePlugin,
+  environment: NodeJS.ProcessEnv,
+): Promise<string> =>
+  "path" in plugin
+    ? Promise.resolve(plugin.path)
+    : resolveInstalledPlugin(plugin.plugin, environment);
+
+/** The field a whole entry fails on. */
+const entryField = (plugin: ProfilePlugin, index: number) =>
+  `skills.plugins.${index}.${"path" in plugin ? "path" : "plugin"}`;
+
 /**
- * Field paths a profile's skills fail on, empty when every plugin and enabled skill
- * exists, each enabled name is one skill, and a Claude profile's plugins have a Claude
- * manifest. Used to reject a profile change before it is recorded.
+ * Field paths a profile's skills fail on, empty when every plugin resolves and exists,
+ * every enabled skill is one skill, no two entries are the same plugin (by manifest name)
+ * and a Claude profile's plugins have a Claude manifest. Used to reject a profile change
+ * before it is recorded.
  */
 export const skillFieldErrors = (
   skills: ProfileSkills,
   harness: ExecutionHarness,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string[]> =>
-  withTimeout(fieldErrors(skills, harness)).catch(() =>
-    skills.plugins.map((_, index) => `skills.plugins.${index}.path`),
+  withTimeout(fieldErrors(skills, harness, environment)).catch(() =>
+    skills.plugins.map(entryField),
   );
 
 async function fieldErrors(
   skills: ProfileSkills,
   harness: ExecutionHarness,
+  environment: NodeJS.ProcessEnv,
 ): Promise<string[]> {
   const fields: string[] = [];
+  const names = new Set<string>();
   for (const [index, plugin] of skills.plugins.entries()) {
-    const layout = await readPlugin(plugin.path).catch(() => undefined);
+    const directory = await pluginDirectory(plugin, environment).catch(
+      () => undefined,
+    );
+    const layout =
+      directory === undefined
+        ? undefined
+        : await readPlugin(directory).catch(() => undefined);
     // The Claude CLI would name a manifest-less plugin after its directory.
-    if (!layout || (harness === "claude" && !layout.claude)) {
-      fields.push(`skills.plugins.${index}.path`);
+    if (
+      !directory ||
+      !layout ||
+      (harness === "claude" && !layout.claude) ||
+      names.has(layout.name)
+    ) {
+      fields.push(entryField(plugin, index));
       continue;
     }
+    names.add(layout.name);
     const unavailable = plugin.skills.flatMap((name, skill) => {
       try {
         enabledSkills(layout, [name], harness);
@@ -403,58 +445,76 @@ async function fieldErrors(
       continue;
     }
     // A tree that could never be digested is refused now, not when its work waits.
-    const loadable = await digestPlugin(plugin.path, plugin.skills).then(
+    const loadable = await digestPlugin(directory, plugin.skills).then(
       () => true,
       () => false,
     );
-    if (!loadable) fields.push(`skills.plugins.${index}.path`);
+    if (!loadable) fields.push(entryField(plugin, index));
   }
   return fields;
 }
 
 /**
- * Loads the plugins a turn on `harness` runs with and digests them. Throws a
- * `SkillPluginError` whose message is safe to show: a missing or unreadable plugin makes
- * work wait, never fall back.
+ * Loads the plugins a turn on `harness` runs with, resolving installed plugins to their
+ * current install, and digests them. Throws a `SkillPluginError` whose message is safe to
+ * show: a missing, disabled or unreadable plugin makes work wait, never fall back.
  */
 export const loadProfilePlugins = (
   skills: ProfileSkills,
   harness: ExecutionHarness,
-): Promise<LoadedPlugin[]> => withTimeout(loadPlugins(skills, harness));
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<LoadedPlugin[]> =>
+  withTimeout(loadPlugins(skills, harness, environment));
 
 async function loadPlugins(
   skills: ProfileSkills,
   harness: ExecutionHarness,
+  environment: NodeJS.ProcessEnv,
 ): Promise<LoadedPlugin[]> {
   const loaded: LoadedPlugin[] = [];
   for (const [index, plugin] of skills.plugins.entries()) {
-    const layout = await readPlugin(plugin.path).catch((error: unknown) => {
+    const label = "path" in plugin ? String(index + 1) : plugin.plugin;
+    const directory = await pluginDirectory(plugin, environment).catch(
+      (error: unknown) => {
+        throw new SkillPluginError(
+          error instanceof InstalledPluginError
+            ? error.message
+            : `Skill plugin ${label} cannot be resolved`,
+        );
+      },
+    );
+    const layout = await readPlugin(directory).catch((error: unknown) => {
       throw new SkillPluginError(
-        `Skill plugin ${index + 1} cannot be loaded: ${
+        `Skill plugin ${label} cannot be loaded: ${
           error instanceof SkillPluginError ? error.message : "unreadable"
         }`,
       );
     });
     if (!layout)
       throw new SkillPluginError(
-        `Skill plugin ${index + 1} is missing or has no plugin manifest`,
+        `Skill plugin ${label} is missing or has no plugin manifest`,
       );
     // The Claude CLI would name a manifest-less plugin after its directory.
     if (harness === "claude" && !layout.claude)
       throw new SkillPluginError(
         `Skill plugin ${layout.name} has no Claude plugin manifest`,
       );
+    // Two plugins of one name would collide in the runtimes' skill names.
+    if (loaded.some((other) => other.name === layout.name))
+      throw new SkillPluginError(
+        `Skill plugin ${layout.name} is enabled more than once`,
+      );
     try {
       enabledSkills(layout, plugin.skills, harness);
       loaded.push({
-        path: plugin.path,
+        path: directory,
         name: layout.name,
         skills: [...plugin.skills],
-        digest: await digestPlugin(plugin.path, plugin.skills),
+        digest: await digestPlugin(directory, plugin.skills),
       });
     } catch (error) {
       throw new SkillPluginError(
-        `Skill plugin ${index + 1} cannot be loaded: ${
+        `Skill plugin ${label} cannot be loaded: ${
           error instanceof SkillPluginError ? error.message : "unreadable"
         }`,
       );
@@ -465,3 +525,58 @@ async function loadPlugins(
 
 export const turnPlugins = (loaded: readonly LoadedPlugin[]): TurnPlugin[] =>
   loaded.map(({ name, skills, digest }) => ({ name, skills, digest }));
+
+/** An installed plugin as the profile editor offers it: no path. */
+export interface InstalledPlugin {
+  plugin: InstalledPluginRef;
+  tool: PluginTool;
+  name: string;
+  /** Whether it has a Claude manifest, so a Claude profile can enable it. */
+  claude: boolean;
+  /** Its skills with exactly one directory; `claude` when the Claude CLI loads it too. */
+  skills: Array<{ name: string; claude: boolean }>;
+}
+
+/**
+ * Every plugin installed and enabled in Claude Code or Codex that resolves now and has at
+ * least one skill, with each tool's record status. Bounded like a profile's inspection.
+ */
+export const listInstalledPlugins = (
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<{
+  plugins: InstalledPlugin[];
+  status: Record<PluginTool, InstalledToolStatus>;
+}> =>
+  withTimeout(
+    (async () => {
+      const { refs, status } = await enabledInstalledPlugins(environment);
+      const plugins: InstalledPlugin[] = [];
+      for (const ref of refs) {
+        const directory = await resolveInstalledPlugin(ref, environment).catch(
+          () => undefined,
+        );
+        const layout = directory
+          ? await readPlugin(directory).catch(() => undefined)
+          : undefined;
+        if (!layout) continue;
+        // Only names a profile can enable: one skill each, in the profile's name grammar.
+        const skills = [...layout.skills.entries()]
+          .filter(
+            ([name, found]) =>
+              found.length === 1 && skillNameSchema.safeParse(name).success,
+          )
+          .slice(0, 256)
+          .map(([name, [skill]]) => ({ name, claude: skill!.claude }))
+          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        if (skills.length === 0 || plugins.length >= 256) continue;
+        plugins.push({
+          plugin: ref,
+          tool: ref.startsWith("claude:") ? "claude" : "codex",
+          name: layout.name,
+          claude: layout.claude,
+          skills,
+        });
+      }
+      return { plugins, status };
+    })(),
+  );

@@ -5,6 +5,7 @@ import {
   type ExecutionHarness,
   executionHarnessLabels,
   type ProfileRuntime,
+  type ProfileSkills,
   type SupportedRuntimeSettings,
   unsupportedRuntimeField,
 } from "../core/execution-runtime.js";
@@ -30,6 +31,7 @@ import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
 import { printVersion, resolveOnPath } from "./executable-path.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
+import { loadProfilePlugins, SkillPluginError } from "./skill-plugins.js";
 
 export type CodexLoginResult =
   | "verified"
@@ -50,6 +52,8 @@ type Discovery = Pick<
 export type ReadinessProfile = {
   revoked: boolean;
   runtime: ProfileRuntime;
+  /** The current revision's skill plugins; none when absent. */
+  skills?: ProfileSkills;
 };
 
 export type ReadinessDeps = {
@@ -106,6 +110,7 @@ const labels: Record<ReadinessCheckId, string> = {
   "claude-executable": "Claude executable",
   "claude-token": "Claude token",
   "runtime-harness": "Runtime harness",
+  "skill-plugins": "Skill plugins",
   "data-paths": "Data and auth paths",
   "gitlab-credentials": "GitLab credentials",
 };
@@ -164,6 +169,8 @@ const fixes = {
   harnessSettings:
     "Run a Claude task; supported models are read before its first turn, then run the check again",
   unknown: "Run the check again, or restart the service",
+  skillPlugins:
+    "Install or enable the named plugin in Claude Code or Codex as the service user, or edit the profile's skill plugins",
   runtimeEnabled: "Enable a runtime in Settings → Runtime",
   runtimeBinary:
     "Install Codex or Claude Code into the fixed PATH, then turn it off and on in Settings → Runtime",
@@ -275,6 +282,8 @@ export class Readiness {
         return this.notEnabled(id, "claude") ?? this.claudeTokenCheck();
       case "runtime-harness":
         return this.runtimeHarness();
+      case "skill-plugins":
+        return this.skillPlugins();
       case "data-paths":
         return this.dataPaths();
       case "gitlab-credentials":
@@ -632,6 +641,33 @@ export class Readiness {
     );
   }
 
+  /**
+   * Whether every active profile's skill plugins load now, as its next turn would: an
+   * installed plugin that is uninstalled, disabled, ambiguous or in an unknown record
+   * format holds that profile's work. Reasons name the plugin, never a path.
+   */
+  private async skillPlugins(): Promise<ReadinessCheck> {
+    const id = "skill-plugins";
+    const reasons = new Set<string>();
+    for (const profile of this.deps.profiles()) {
+      if (profile.revoked || !profile.skills?.plugins.length) continue;
+      await loadProfilePlugins(
+        profile.skills,
+        profile.runtime.harness,
+        this.deps.env,
+      ).catch((error: unknown) =>
+        reasons.add(
+          error instanceof SkillPluginError
+            ? error.message
+            : "Skill plugins could not be read",
+        ),
+      );
+    }
+    return reasons.size === 0
+      ? pass(id)
+      : outcome(id, "fail", [...reasons].join("; "), fixes.skillPlugins);
+  }
+
   private async dataPaths(): Promise<ReadinessCheck> {
     const id = "data-paths";
     const { uid, dataDir, authFile } = this.deps;
@@ -754,6 +790,7 @@ export function serviceReadiness(
         .map((row) => ({
           revoked: Number(row.revoked) !== 0,
           runtime: service.domain().profileRuntime(String(row.id)),
+          skills: service.domain().profileSkills(String(row.id)),
         })),
   });
 }

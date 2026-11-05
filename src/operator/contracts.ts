@@ -92,8 +92,10 @@ import {
 import {
   executionHarnessSchema,
   executionIntentStateSchema,
+  installedPluginRefSchema,
   profileRuntimeSchema,
   profileSkillsSchema,
+  skillNameSchema,
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
 export {
@@ -3919,6 +3921,46 @@ export const sourceObservationSchema = envelope(
     })
     .strict(),
 );
+/**
+ * Plugins installed and enabled in Claude Code or Codex on the service host, as the profile
+ * editor offers them: no path. `status` says whether each tool's records were read.
+ */
+const installedToolStatusSchema = z.enum(["available", "none", "unreadable"]);
+export const installedPluginsSchema = envelope(
+  z
+    .object({
+      plugins: z
+        .array(
+          z
+            .object({
+              plugin: installedPluginRefSchema,
+              tool: z.enum(["claude", "codex"]),
+              name: z.string().min(1).max(128),
+              /** Whether it has a Claude manifest, so a Claude profile can enable it. */
+              claude: z.boolean(),
+              /** `claude` when the Claude CLI loads that skill too. */
+              skills: z
+                .array(
+                  z
+                    .object({ name: skillNameSchema, claude: z.boolean() })
+                    .strict(),
+                )
+                .min(1)
+                .max(256),
+            })
+            .strict(),
+        )
+        .max(256),
+      status: z
+        .object({
+          claude: installedToolStatusSchema,
+          codex: installedToolStatusSchema,
+        })
+        .strict(),
+    })
+    .strict(),
+);
+export type InstalledPlugins = z.infer<typeof installedPluginsSchema>["data"];
 export const profileConfigurationSchema = envelope(
   z
     .object({

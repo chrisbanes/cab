@@ -1,11 +1,14 @@
 import {
   type ProfileSkills,
+  profilePluginKey,
   profileSkillsSchema,
 } from "../../src/core/execution-runtime.js";
 
 /** One plugin per line: `/absolute/plugin/dir: skill-a, skill-b`. */
 export const skillsToText = (skills: ProfileSkills): string =>
-  skills.plugins.map((p) => `${p.path}: ${p.skills.join(", ")}`).join("\n");
+  skills.plugins
+    .map((p) => `${profilePluginKey(p)}: ${p.skills.join(", ")}`)
+    .join("\n");
 
 export const skillsFormat =
   "One plugin per line: /absolute/plugin/dir: skill-a, skill-b";

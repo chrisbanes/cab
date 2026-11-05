@@ -60,6 +60,7 @@ import {
   writeNestedSkillPlugin,
   writeSkillPlugin,
 } from "../fixtures/skill-plugin.js";
+import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 import {
   createNativeWork,
@@ -3130,6 +3131,85 @@ test("profile skills reject missing plugins and unknown skills, and follow the p
     "skills.plugins.0.path",
   ]);
   assert.equal(f.service.domain().profile(ids.profileId).version, 5);
+});
+test("installed plugins are listed by tool with their skills and no path, saved as profile entries, and refused while unavailable", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-installed-api-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const homes = installedPluginHomes(root);
+  for (const [key, value] of Object.entries(homes.environment)) {
+    const previous = process.env[key];
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+    process.env[key] = value;
+  }
+  homes.installClaude("demo@m", { skills: ["probe-skill"] });
+  homes.installCodex("tools@n", {
+    write: (dir) =>
+      writeNestedSkillPlugin(
+        dir,
+        { engineering: ["deep"] },
+        { name: "tools", claude: false },
+      ),
+  });
+  const listing = await api.readInstalledPlugins();
+  assert.deepEqual(listing.data, {
+    plugins: [
+      {
+        plugin: "claude:demo@m",
+        tool: "claude",
+        name: "demo",
+        claude: true,
+        skills: [{ name: "probe-skill", claude: true }],
+      },
+      {
+        plugin: "codex:tools@n",
+        tool: "codex",
+        name: "tools",
+        claude: false,
+        skills: [{ name: "deep", claude: false }],
+      },
+    ],
+    status: { claude: "available", codex: "available" },
+  });
+  assert.equal(JSON.stringify(listing).includes(root), false);
+  const configure = (skills: object, expectedVersion: number) =>
+    ({
+      type: "profile.configure",
+      key: randomUUID(),
+      profileId: ids.profileId,
+      expectedVersion,
+      skills,
+    }) as never;
+  const skills = {
+    plugins: [
+      { plugin: "claude:demo@m", skills: ["probe-skill"] },
+      { plugin: "codex:tools@n", skills: ["deep"] },
+    ],
+  };
+  await api.execute(configure(skills, 1));
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    skills,
+  );
+  homes.setClaudeEnabled("demo@m", false);
+  const error = await api.execute(configure(skills, 2)).then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  assert.ok(error instanceof OperatorApiError && error.status === 400);
+  assert.deepEqual(error.fieldPaths, ["skills.plugins.0.plugin"]);
+  assert.equal(f.service.domain().profile(ids.profileId).version, 2);
+  // The effective policy names where plugin skills come from.
+  assert.match(
+    codexPolicyDisclosure().limits.join(" "),
+    /local plugin directories or plugins installed in Claude Code or Codex/,
+  );
 });
 test("task reads report the persisted binding harness of each execution generation", async (t) => {
   const f = await createOperatorFixture();

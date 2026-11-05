@@ -1,3 +1,4 @@
+import { profilePluginKey } from "../core/execution-runtime.js";
 import {
   projectExternalRetention,
   retainedProjectLine,
@@ -292,7 +293,7 @@ const profileGet: BrowseCommand = {
           d.skills.plugins.length === 0
             ? "none"
             : d.skills.plugins
-                .map((p) => `${p.path} (${p.skills.join(", ")})`)
+                .map((p) => `${profilePluginKey(p)} (${p.skills.join(", ")})`)
                 .join("; "),
         ],
         ["Capabilities", unavailable(d.capabilities)],

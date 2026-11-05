@@ -486,6 +486,8 @@ export class OperatorWebBoundary {
       return this.readiness?.claudeToken();
     if (path === "/api/operator/discovery/repositories")
       return this.api.readDiscoveryRepositories();
+    if (path === "/api/operator/installed-plugins")
+      return this.api.readInstalledPlugins();
     const recovery = path.match(
       /^\/api\/operator\/assignments\/([^/]+)\/recovery$/,
     );

@@ -161,6 +161,7 @@ import {
   type LoadedPlugin,
   loadProfilePlugins,
   SkillPluginError,
+  skillPluginRetryMs,
   turnPlugins,
 } from "./skill-plugins.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
@@ -616,6 +617,8 @@ export interface StandaloneServiceOptions {
     now?: () => number;
     fallbackBackoffMs?: number;
     maxFallbackBackoffMs?: number;
+    /** Test-only: how long work waiting on a skill plugin waits before it is re-checked. */
+    skillPluginMs?: number;
   };
   /** Execution diagnostic retention; `cli.ts` passes the environment limits. */
   diagnostics?: {
@@ -638,6 +641,8 @@ export type BackgroundFailureOperation =
   | "power-poll"
   | "domain-wake"
   | "post-turn-wake"
+  /** The timed re-check of work waiting on an unavailable skill plugin. */
+  | "skill-plugin-retry"
   | "scheduler-drain"
   /** Not fatal: the failing stacked dependency is retried on the next wake. */
   | "restack-reconcile"
@@ -869,6 +874,9 @@ export class StandaloneService {
   /** Keyed like conversation captures; finished ones stay to count late events. */
   /** Plugins loaded at admission, recorded with the turn once it exists; dropped when the execution ends. */
   private readonly turnPlugins = new Map<string, LoadedPlugin[]>();
+  private skillPluginRetry:
+    | { generation: ServiceGeneration; timer: NodeJS.Timeout }
+    | undefined;
   private readonly diagnosticCaptures = new Map<
     string,
     ExecutionDiagnosticsCapture
@@ -8660,7 +8668,7 @@ export class StandaloneService {
         const reason = await this.untilFailure(
           runtime,
           (async () => {
-            const settings = this.turnSettings(request);
+            const settings = this.turnSettings(request, true);
             return preflight({
               workspace: workspaceKey,
               ...(settings ? { settings } : {}),
@@ -8691,6 +8699,7 @@ export class StandaloneService {
       if (pluginWait !== undefined) {
         state.wait(intent.id, pluginWait);
         store.wait(request.workId, pluginWait);
+        this.retrySkillPluginWait(generation);
         return;
       }
       // A sleep/wake during a turn that ended before now must be observed
@@ -8775,41 +8784,61 @@ export class StandaloneService {
     this.startExecution(request, intent, workspaceKey, previous);
   }
 
-  /**
-   * Model settings of the bound profile revision. Claude always carries them; Codex only
-   * when a value is set, so a Codex profile without settings keeps today's call shapes.
-   */
-  private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
+  /** The bound profile revision and its id, or undefined for work without a profile. */
+  private boundProfile(
+    request: TurnRequest,
+  ): { profileId: string; revision: number } | undefined {
     if (request.profileRevision === null) return undefined;
-    const domain = this.domain();
     const profileId =
       request.kind === "drafting"
         ? this.started().drafting.require(this.draftingRunIdOf(request))
             .profileId
         : request.assignmentId
-          ? String(domain.assignment(request.assignmentId).profileId)
+          ? String(this.domain().assignment(request.assignmentId).profileId)
           : undefined;
-    if (!profileId) return undefined;
-    const runtime = domain.profileRuntime(profileId, request.profileRevision);
+    return profileId
+      ? { profileId, revision: request.profileRevision }
+      : undefined;
+  }
+
+  /**
+   * Model settings of the bound profile revision. Claude always carries them; Codex only
+   * when a value is set, so a Codex profile without settings keeps today's call shapes.
+   * Skills are the plugins `skillPluginWait` resolved for this turn, never the profile's
+   * entries: a turn whose profile enables plugins and has none resolved throws, except for
+   * `preflight`, which reads no skills.
+   */
+  private turnSettings(
+    request: TurnRequest,
+    preflight = false,
+  ): RuntimeTurnSettings | undefined {
+    const bound = this.boundProfile(request);
+    if (!bound) return undefined;
+    const domain = this.domain();
+    const runtime = domain.profileRuntime(bound.profileId, bound.revision);
     const model = runtime.model ?? null,
       reasoningEffort = runtime.reasoningEffort ?? null;
-    const skills = domain.profileSkills(profileId, request.profileRevision);
+    const enabled =
+      domain.profileSkills(bound.profileId, bound.revision).plugins.length > 0;
+    const loaded = this.turnPlugins.get(request.workId);
+    if (enabled && !loaded && !preflight)
+      throw new Error("Skill plugins were not loaded for this turn");
     return runtime.harness === "claude" ||
       model !== null ||
       reasoningEffort !== null ||
-      skills.plugins.length > 0
+      enabled
       ? {
           model,
           reasoningEffort,
-          ...(skills.plugins.length > 0
+          ...(enabled && loaded
             ? {
                 skills: {
                   // Manifest names qualify each skill, so overlapping names across plugins stay distinct.
-                  plugins: skills.plugins.map((plugin, index) => {
-                    const name = this.turnPlugins.get(request.workId)?.[index]
-                      ?.name;
-                    return name === undefined ? plugin : { ...plugin, name };
-                  }),
+                  plugins: loaded.map(({ path, skills, name }) => ({
+                    path,
+                    skills,
+                    name,
+                  })),
                 },
               }
             : {}),
@@ -8818,9 +8847,10 @@ export class StandaloneService {
   }
 
   /**
-   * Loads and digests the turn's skill plugins before admission. A reason keeps the work
-   * waiting, with no hold taken: a missing or unreadable plugin never falls back to running
-   * without it. The reason never contains a path.
+   * Resolves (an installed plugin to its current install), loads and digests the turn's
+   * skill plugins before admission. A reason keeps the work waiting, with no hold taken:
+   * a missing, disabled or unreadable plugin never falls back to running without it. The
+   * reason never contains a path.
    */
   private async skillPluginWait(
     request: TurnRequest,
@@ -8828,8 +8858,11 @@ export class StandaloneService {
   ): Promise<string | undefined> {
     this.turnPlugins.delete(request.workId);
     try {
-      const skills = this.turnSettings(request)?.skills;
-      if (skills)
+      const bound = this.boundProfile(request);
+      const skills = bound
+        ? this.domain().profileSkills(bound.profileId, bound.revision)
+        : undefined;
+      if (skills && skills.plugins.length > 0)
         this.turnPlugins.set(
           request.workId,
           await loadProfilePlugins(skills, harness),
@@ -8840,6 +8873,25 @@ export class StandaloneService {
         ? error.message
         : "Skill plugins could not be read";
     }
+  }
+
+  /**
+   * Wakes the scheduler once `skillPluginRetryMs` after work waits on a skill plugin:
+   * installing or enabling a plugin is not a cab event, so nothing else would re-check it.
+   * One timer per generation; other wakes still re-check the work at once.
+   */
+  private retrySkillPluginWait(generation: ServiceGeneration): void {
+    if (this.skillPluginRetry?.generation === generation) return;
+    if (this.skillPluginRetry) clearTimeout(this.skillPluginRetry.timer);
+    const timer = setTimeout(() => {
+      if (this.skillPluginRetry?.timer === timer)
+        this.skillPluginRetry = undefined;
+      void this.observeBackgroundFailure(generation, "skill-plugin-retry", () =>
+        this.wakeScheduler(0, generation),
+      );
+    }, this.options.retry?.skillPluginMs ?? skillPluginRetryMs);
+    timer.unref();
+    this.skillPluginRetry = { generation, timer };
   }
 
   /** Never awaited by admission: admissionResumed wakes the scheduler drain. */

@@ -31,6 +31,7 @@ import {
   assertCanonicalDirectoryPath,
   assertExistingCanonicalDirectoryPath,
 } from "../../src/standalone/data-directory.js";
+import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const TOKEN = "canary-readiness-token-4417";
@@ -1215,4 +1216,38 @@ test("the data path check keeps the canonical-path semantics without blocking th
     "utf8",
   );
   assert.doesNotMatch(source, /[A-Za-z]Sync\(|assertCanonicalDirectoryPath/);
+});
+
+test("skill plugins fail while an active profile's installed plugin is unavailable, naming it and no path, and pass once it is enabled", async (t) => {
+  const f = fixture(t);
+  const homes = installedPluginHomes(join(f.root, "operator"));
+  homes.installCodex("demo@m", { enabled: false });
+  const env = { PATH: f.bin, ...homes.environment };
+  const skills = {
+    plugins: [{ plugin: "codex:demo@m" as const, skills: ["probe-skill"] }],
+  };
+  const over = {
+    env,
+    ...profiles(
+      { ...codexProfile(), skills },
+      // A revoked profile's plugins hold no work.
+      {
+        revoked: true,
+        runtime: { harness: "codex" },
+        skills: {
+          plugins: [{ plugin: "codex:gone@m" as const, skills: ["x"] }],
+        },
+      },
+      codexProfile(),
+    ),
+  };
+  const failed = await check(f, "skill-plugins", over);
+  assert.equal(failed.status, "fail");
+  assert.equal(failed.reason, "Skill plugin codex:demo@m is disabled in Codex");
+  assert.match(failed.fix ?? "", /Install or enable the named plugin/);
+  assert.ok(!JSON.stringify(failed).includes(f.root));
+  homes.setCodexEnabled("demo@m", true);
+  assert.equal((await check(f, "skill-plugins", over)).status, "pass");
+  // No profile enables a plugin: nothing can be held.
+  assert.equal((await check(f, "skill-plugins")).status, "pass");
 });

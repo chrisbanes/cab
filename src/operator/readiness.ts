@@ -10,6 +10,7 @@ export const readinessCheckIds = [
   "claude-executable",
   "claude-token",
   "runtime-harness",
+  "skill-plugins",
   "data-paths",
   "gitlab-credentials",
 ] as const;
