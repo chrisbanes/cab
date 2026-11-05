@@ -93,6 +93,24 @@ export const filterSkills = (names: readonly string[], query: string) => {
   return q ? names.filter((n) => n.toLowerCase().includes(q)) : [...names];
 };
 
+/** Whether every shown skill is selected. */
+export const allSelected = (
+  shown: readonly string[],
+  selected: readonly string[],
+) => shown.every((n) => selected.includes(n));
+
+/** Selects the shown skills, or clears them when all are selected; hidden selections stay, in offered order. */
+export const toggleShown = (
+  names: readonly string[],
+  shown: readonly string[],
+  selected: readonly string[],
+) => {
+  const clear = allSelected(shown, selected);
+  return names.filter((n) =>
+    shown.includes(n) ? !clear : selected.includes(n),
+  );
+};
+
 /** Skill names typed for a local directory, comma separated. */
 export const typedSkills = (text: string): string[] => [
   ...new Set(

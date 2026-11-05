@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  allSelected,
   entryErrors,
   entryLabel,
   entryUnavailable,
@@ -12,6 +13,7 @@ import {
   selectableSkills,
   skillsDraft,
   skillsSummary,
+  toggleShown,
   typedSkills,
   withEntry,
   withoutEntry,
@@ -95,6 +97,16 @@ test("skills filter by name, typed names split on commas, and entries are added,
     "Review",
   ]);
   assert.deepEqual(filterSkills(["a", "b"], ""), ["a", "b"]);
+  // Select all and Clear selection act on the shown skills, keeping offered order.
+  assert.deepEqual(toggleShown(["a", "b", "c"], ["a", "c"], ["c", "b"]), [
+    "a",
+    "b",
+    "c",
+  ]);
+  assert.equal(allSelected(["a", "c"], ["c", "b", "a"]), true);
+  assert.deepEqual(toggleShown(["a", "b", "c"], ["a", "c"], ["c", "b", "a"]), [
+    "b",
+  ]);
   assert.deepEqual(typedSkills(" review, plan,,review "), ["review", "plan"]);
   const one = withEntry({ plugins: [] }, { path: "/p", skills: ["a"] });
   const two = withEntry(one, { plugin: "claude:demo@m", skills: ["review"] });

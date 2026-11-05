@@ -10,6 +10,7 @@ import { useOperatorResource } from "./resource.js";
 import { locked, type SettingsProps } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 import {
+  allSelected,
   entryErrors,
   entryLabel,
   entryUnavailable,
@@ -21,6 +22,7 @@ import {
   parseSkillsDraft,
   selectableSkills,
   skillsDraft,
+  toggleShown,
   typedSkills,
   withEntry,
   withoutEntry,
@@ -300,6 +302,7 @@ function SkillDialog({
   onDone: (entry: ProfilePlugin, index?: number) => void;
 }) {
   const filterId = useId(),
+    countId = useId(),
     pathId = useId(),
     namesId = useId();
   const title =
@@ -362,14 +365,41 @@ function SkillDialog({
                 }
               />
             </label>
-            <fieldset className="skill-plugin-choices">
-              <legend className="metadata muted">
+            <div className="settings-row-heading">
+              <span id={countId} className="metadata muted">
                 {editing.selected.length} of {names.length} selected
-              </legend>
+              </span>
+              {shown.length > 0 && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    onChange({
+                      ...editing,
+                      selected: toggleShown(names, shown, editing.selected),
+                    })
+                  }
+                >
+                  {allSelected(shown, editing.selected)
+                    ? "Clear selection"
+                    : "Select all"}
+                </Button>
+              )}
+            </div>
+            <fieldset
+              className="skill-plugin-choices"
+              aria-labelledby={countId}
+            >
               {shown.map((name) => (
-                <label key={name} className="metadata">
-                  <input
+                <label
+                  key={name}
+                  className="metadata check-field"
+                  htmlFor={`${countId}-${name}`}
+                >
+                  <Input
+                    id={`${countId}-${name}`}
                     type="checkbox"
+                    className="native-check size-5 shrink-0 p-0 accent-foreground"
                     checked={editing.selected.includes(name)}
                     onChange={(e) =>
                       onChange({
