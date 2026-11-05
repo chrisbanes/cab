@@ -508,7 +508,11 @@ export function Inbox({
             )}
           </div>
         </div>
-        <ResourceStatus state={resource.state} retry={resource.refresh} />
+        <ResourceStatus
+          state={resource.state}
+          retry={resource.refresh}
+          label="Inbox"
+        />
         {resource.state.data && !resource.state.data.complete && (
           <p role="alert">
             Queue coverage is incomplete. Unavailable requests may remain.

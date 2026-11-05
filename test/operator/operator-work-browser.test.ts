@@ -384,6 +384,28 @@ test("active filters are counted, reset in one step and undone by Back", async (
   await page.goto(`${web.origin}/app/projects/${emptyProject}`);
   await page.getByText("No tasks", { exact: true }).waitFor();
   assert.equal(await reset.count(), 0);
+  // The default view hides drafts; an empty page offers the whole list instead of a dead end.
+  const showAll = page.getByRole("button", { name: "Show all tasks" });
+  assert.equal(await showAll.count(), 0);
+  f.service.domain().execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: emptyProject,
+    taskId: randomUUID(),
+    title: "Draft only",
+    outcome: "Work",
+    ready: false,
+  });
+  await page.goto(`${web.origin}/app/projects/${emptyProject}`);
+  await page
+    .getByText("No tasks match these filters", { exact: true })
+    .waitFor();
+  assert.equal(await reset.count(), 0);
+  await showAll.click();
+  await page.waitForURL((u) => u.search === "?state=all&ready=any");
+  await page.getByRole("link", { name: "Draft only", exact: true }).waitFor();
+  assert.equal(await showAll.count(), 0);
   await page.goto(`${web.origin}/app/projects/${ids.pausedProject}?state=Done`);
   await page
     .getByText("No tasks match these filters", { exact: true })

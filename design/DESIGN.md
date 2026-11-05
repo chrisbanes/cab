@@ -125,7 +125,7 @@ fixed application dimensions.
 | Compact progress | Task progress across Overview, List, Board and Inbox entry points |
 | Review components | Criterion rows and local-feedback context |
 | Inspection components | Observation strip, selectable code line, editor row with separate gutter, marker and source |
-| Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view, tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, docked composer, Jump to latest |
+| Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view, tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, composer, Jump to latest |
 
 Rules:
 

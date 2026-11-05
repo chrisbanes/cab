@@ -655,6 +655,26 @@ async function openFixture(
   return { f, s, web, page };
 }
 
+test("the conversation and the composer heading are readable on first load when the header fills the first screen", async (_t, j) => {
+  const { s, web, page } = await openFixture(j, earlier, {
+    width: 1280,
+    height: 800,
+  });
+  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  await page.getByRole("log", { name: "Task conversation" }).waitFor();
+  for (const name of ["Conversation", "Reply"]) {
+    const heading = page.getByRole("heading", { name, exact: true });
+    await heading.scrollIntoViewIfNeeded();
+    const uncovered = await heading.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + 4, box.y + box.height / 2);
+      return hit === element || element.contains(hit);
+    });
+    assert.equal(uncovered, true, `${name} heading is not covered`);
+  }
+  assert.equal(await page.title(), "Task · cab");
+});
+
 test("every former History link lands at its place in the conversation", async (_t, j) => {
   const { f, s, web, page } = await openFixture(j);
   await signIn(page, web, `/app/tasks/${s.taskId}`);

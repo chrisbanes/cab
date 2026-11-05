@@ -881,16 +881,13 @@ a.task-source-chip:hover {
   }
 }
 
-/* The composer docks under the viewport bottom beside the inspector; on a phone it simply ends
-   the page after the conversation. */
-@media (min-width: 1024px) {
-  .task-workspace .task-columns > section.reply-card {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    max-height: 50vh;
-    overflow-y: auto;
-  }
+/* The composer ends the column after the conversation at every width. Docking it to the
+   viewport bottom hid the conversation and the composer's own heading under the pinned
+   attention card whenever the page header filled the first screen. The browser must not
+   anchor scrolling to it: a linked inspector record would otherwise leave the view when the
+   conversation loads above the composer. */
+.task-workspace .task-columns > section.reply-card {
+  overflow-anchor: none;
 }
 
 /* The conversation is a plain column, not a card. */

@@ -10,7 +10,6 @@ import {
 } from "../../src/standalone/operator-routes.js";
 
 const removed: Array<[string, string]> = [
-  ["GET", "/"],
   ["GET", "/runtime"],
   ["GET", `/profile/${randomUUID()}`],
   ["POST", "/login"],
@@ -75,6 +74,19 @@ test("removed operator paths return ordinary not-found before session, Origin or
     req.end();
   });
   assert.equal(forged, 403);
+});
+
+test("the site root sends the browser to the app without minting a session", async (t) => {
+  const s = await startCliService(t);
+  for (const headers of [{}, { cookie: s.cookie }]) {
+    const response = await fetch(s.origin + "/", {
+      redirect: "manual",
+      headers,
+    });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "/app");
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
 });
 
 test("old command and capacity form payloads replay original receipts through JSON without another effect", async (t) => {

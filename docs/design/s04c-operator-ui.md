@@ -59,11 +59,12 @@ credential reference or submitted value, and the adapter logs no request data.
 
 ## Routes and command ownership
 
-`/`, `/runtime`, `/profile/:id`, legacy POST `/login` and `/logout`, `/command`,
-capacity forms and all recovery form POSTs return ordinary not-found without
-redirects or session creation. The app remains at `/app`; moving it is separate
-scope. No route registry, server HTML wrapper or form allowlist remains. Shared URL
-decoding still rejects separators, dot segments and control characters.
+`/` redirects to `/app` without reading or creating a session. `/runtime`,
+`/profile/:id`, legacy POST `/login` and `/logout`, `/command`, capacity forms and
+all recovery form POSTs return ordinary not-found without redirects or session
+creation. The app remains at `/app`; moving it is separate scope. No route
+registry, server HTML wrapper or form allowlist remains. Shared URL decoding still
+rejects separators, dot segments and control characters.
 
 React settings and task views submit the existing domain and coordination commands
 through `/api/operator/commands`; CLI recovery remains supported. Original keys and

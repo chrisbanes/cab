@@ -265,7 +265,11 @@ export function QuestionResponse({
       aria-label="Exact question response"
       data-record-id={interactionId}
     >
-      <ResourceStatus state={resource.state} retry={resource.refresh} />
+      <ResourceStatus
+        state={resource.state}
+        retry={resource.refresh}
+        label="Question"
+      />
       {data && (
         <>
           {(data.status !== "pending" || (state && total > 1)) && (

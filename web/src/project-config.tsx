@@ -154,15 +154,6 @@ export function ProjectConfiguration(
       />
       {data && (
         <>
-          {lifecycle.state.data?.data.state === "live" && (
-            <ProjectLifecyclePanel
-              {...p}
-              data={lifecycle.state.data.data}
-              loadedAt={lifecycle.state.fetchedAt}
-              reload={refreshConfiguration}
-            />
-          )}
-
           <p className="settings-status body muted">
             <StatusBadge
               tone="idle"
@@ -258,6 +249,14 @@ export function ProjectConfiguration(
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
+            />
+          )}
+          {lifecycle.state.data?.data.state === "live" && (
+            <ProjectLifecyclePanel
+              {...p}
+              data={lifecycle.state.data.data}
+              loadedAt={lifecycle.state.fetchedAt}
+              reload={refreshConfiguration}
             />
           )}
         </>

@@ -397,6 +397,12 @@ export class LocalOperatorHttp {
             writeText(response, 404, "Not found");
             return;
           }
+          if (url.pathname === "/") {
+            request.resume();
+            response.writeHead(302, { ...RESPONSE_HEADERS, location: "/app" });
+            response.end();
+            return;
+          }
           // Retired and unknown paths are rejected before looking up or creating a session.
           if (
             (!this.web.owns(url.pathname) && url.pathname !== "/favicon.svg") ||
