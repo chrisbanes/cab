@@ -334,7 +334,7 @@ for (const fault of [
   "changedBlocker",
   "failStackReads",
 ] as const) {
-  test(`stack preparation holds ${fault} without losing the created PR or sending a stack write`, async () => {
+  test(`stack preparation preserves the PR receipt and refuses replay after ${fault}`, async () => {
     const w = stackWorld();
     try {
       w.scripted.state.existing = true;
@@ -342,9 +342,15 @@ for (const fault of [
       const result = await w.submit();
       assert.equal(result.state, "uncertain");
       assert.equal(result.observation?.receipt?.nodeId, "P2");
-      assert.equal(result.stackLink?.phase, "receipt-recorded");
+      assert.equal(
+        result.stackLink?.phase,
+        fault === "missingMembership" ? "link-attempting" : "receipt-recorded",
+      );
       await w.restart();
-      assert.equal(w.scripted.state.stackWrites, 0);
+      assert.equal(
+        w.scripted.state.stackWrites,
+        fault === "missingMembership" ? 1 : 0,
+      );
       assert.equal(w.scripted.state.prWrites, 1);
     } finally {
       await w.close();
@@ -733,7 +739,7 @@ for (const fault of [
   "inconsistentMembership",
   "failStackReads",
 ] as const) {
-  test(`fresh provider merge guard holds ${fault} without a merge write`, async () => {
+  test(`fresh provider merge guard ${fault === "missingMembership" ? "accepts omitted membership" : `holds ${fault}`}`, async () => {
     const w = stackWorld();
     try {
       const created = await w.submit();
@@ -762,7 +768,7 @@ for (const fault of [
       assert.notEqual(result.state, "confirmed-success");
       assert.equal(
         w.scripted.state.requests.some((r) => r.route.includes("merge-async")),
-        false,
+        fault === "missingMembership",
       );
     } finally {
       await w.close();

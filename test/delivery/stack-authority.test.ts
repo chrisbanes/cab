@@ -1013,6 +1013,12 @@ test("static direct Git grant accepts only response-captured future SHAs before 
         variables: { id: r.upperPrId, after: null },
       }),
     },
+    {
+      url: `${repo}/pulls/${r.lowerPr}`,
+      method: "GET" as const,
+      body: "",
+      version: "2026-03-10" as const,
+    },
     ...[r.upperRef, r.base].map((ref) => ({
       url: `${repo}/git/ref/heads/${ref.split("/").map(encodeURIComponent).join("/")}`,
       method: "GET" as const,
@@ -1023,7 +1029,7 @@ test("static direct Git grant accepts only response-captured future SHAs before 
   requests.forEach((request, i) => {
     manifest.authority.reads.push({ id: `fresh-${i}`, request, maxCalls: 1 });
   });
-  manifest.authority.limits.reads = 5;
+  manifest.authority.limits.reads = 6;
   const ready = stackV2ReadinessSchema.parse(JSON.parse(f.readiness));
   ready.authoritySha256 = materialHash(manifest.authority);
   const readiness = JSON.stringify(ready);
@@ -1051,7 +1057,6 @@ test("static direct Git grant accepts only response-captured future SHAs before 
     {
       node_id: r.upperPrId,
       number: r.upperPr,
-      stack: null,
       head: {
         ref: r.upperRef,
         sha: request.newHead,
@@ -1079,6 +1084,16 @@ test("static direct Git grant accepts only response-captured future SHAs before 
           reviewThreads: { pageInfo: { hasNextPage: false } },
         },
       },
+    },
+    {
+      node_id: r.lowerPrId,
+      number: r.lowerPr,
+      head: {
+        ref: r.lowerRef,
+        sha: r.lowerHead,
+        repo: { node_id: r.repositoryNodeId },
+      },
+      base: { ref: r.base, repo: { node_id: r.repositoryNodeId } },
     },
     { ref: `refs/heads/${r.upperRef}`, object: { sha: request.newHead } },
     { ref: `refs/heads/${r.base}`, object: { sha: request.newBase } },

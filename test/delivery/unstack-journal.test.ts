@@ -697,6 +697,7 @@ test("GitHub transport with synthetic HTTP200 partial membership is never succes
     i = f.identity;
   let selectedRemoved = false,
     siblingRemoved = false,
+    omitMembership = false,
     posts = 0;
   const membership = {
     id: i.stack.id,
@@ -757,7 +758,9 @@ test("GitHub transport with synthetic HTTP200 partial membership is never succes
           head: { ref: m.headRef, sha: m.headSha, repo: { node_id: "R" } },
           base: { ref: own ? "lower" : "main", repo: { node_id: "R" } },
           stack: (own ? selectedRemoved : siblingRemoved)
-            ? null
+            ? omitMembership
+              ? undefined
+              : null
             : { ...membership, position: own ? 2 : 1 },
         };
       }
@@ -809,6 +812,8 @@ test("GitHub transport with synthetic HTTP200 partial membership is never succes
     f.db.prepare("SELECT COUNT(*) AS n FROM restack_events").get()!.n,
     0,
   );
+  omitMembership = true;
+  assert.deepEqual(await provider.read(i), { state: "changed" });
   siblingRemoved = true;
   assert.equal(
     (await coordinator().reconcile(f.command.key)).phase,

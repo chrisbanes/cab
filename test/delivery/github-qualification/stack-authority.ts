@@ -1476,7 +1476,8 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
                 id: z.number(),
                 number: z.literal(resource.stackNumber),
               })
-              .nullable(),
+              .nullable()
+              .default(null),
           })
           .parse(body);
         if (pr.stack && String(pr.stack.id) !== resource.stackId)
@@ -1554,7 +1555,8 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
                 id: z.number(),
                 number: z.literal(resource.stackNumber),
               })
-              .nullable(),
+              .nullable()
+              .default(null),
             head: z.object({
               ref: text,
               sha,

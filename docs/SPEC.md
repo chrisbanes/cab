@@ -356,7 +356,8 @@ blocker's task, branch and PR identity before creating the dependent PR. The mar
 verified by readback and its receipt is persisted before stack linking. cab creates an ordered
 `[blocker, dependent]` stack, or appends only the dependent when an ordered stack read proves
 that the blocker is its current top. Stack calls and stack-bearing PR reads use GitHub API
-version `2026-03-10`. Missing or inconsistent membership is unknown and holds the action.
+version `2026-03-10`. An omitted or null `stack` field on a successful PR read means no
+stack membership. Malformed or inconsistent membership is unknown and holds the action.
 
 The stack link has its own durable send boundary inside that journal. Before that boundary,
 recovery may resume after rechecking the original authority and identities; at or after it,

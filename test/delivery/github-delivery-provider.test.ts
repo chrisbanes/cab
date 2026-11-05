@@ -375,6 +375,22 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     },
   };
 }
+test("GitHub PR inspection normalizes omitted and null stack membership but rejects malformed membership", async () => {
+  const f = prProviderFixture();
+  for (const stack of [null, undefined]) {
+    Reflect.set(f.raw, "stack", stack);
+    assert.equal(
+      (await f.provider.inspectPr(f.identity, f.policy)).stack,
+      null,
+    );
+  }
+  for (const stack of [false, {}, { id: 1, number: 1 }]) {
+    Reflect.set(f.raw, "stack", stack);
+    await assert.rejects(f.provider.inspectPr(f.identity, f.policy));
+  }
+  assert.equal(f.getWrites(), 0);
+});
+
 test("HTTP provider holds actual classic queue/strict/deployment and unsupported effective update rules", async () => {
   for (const [change, reason] of [
     [{ isMergeQueueEnabled: true }, "merge-queue-required"],

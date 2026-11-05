@@ -159,7 +159,8 @@ const githubStackMembership = z
     base: z.object({ ref: name, sha }),
   })
   .refine((value) => value.position <= value.size)
-  .nullable();
+  .nullable()
+  .default(null);
 const page = z.object({
   hasNextPage: z.boolean(),
   endCursor: z.string().nullable(),
@@ -1175,7 +1176,7 @@ export class GitHubHttpDeliveryProvider
         body: z.string().nullable(),
         head: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
         base: z.object({ ref: name, repo: z.object({ node_id: name }) }),
-        // Missing is unknown, never the same as an explicit null.
+        // GitHub omits stack after Unstack; both omission and null mean no membership.
         stack: githubStackMembership,
       })
       .parse(
@@ -1368,7 +1369,7 @@ export class GitHubHttpDeliveryProvider
       },
     };
   }
-  /** An identity-bound read never treats missing membership as null. */
+  /** Prove full removal while retaining every captured member identity. */
   async readUnstack(
     identity: UnstackIdentity,
     policy: DeliveryPolicy,
@@ -1641,7 +1642,7 @@ export class GitHubHttpDeliveryProvider
       .object({
         node_id: name,
         number: z.number().int().positive(),
-        stack: githubStackMembership.optional(),
+        stack: githubStackMembership,
         head: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
         base: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
       })
@@ -1962,19 +1963,15 @@ export class GitHubHttpDeliveryProvider
           }
         : undefined;
     return prObservationSchema.parse({
-      ...(raw.stack === undefined
-        ? {}
-        : {
-            stack:
-              raw.stack === null
-                ? null
-                : {
-                    id: raw.stack.id,
-                    number: raw.stack.number,
-                    position: raw.stack.position,
-                    size: raw.stack.size,
-                  },
-          }),
+      stack:
+        raw.stack === null
+          ? null
+          : {
+              id: raw.stack.id,
+              number: raw.stack.number,
+              position: raw.stack.position,
+              size: raw.stack.size,
+            },
       repositoryId: identity.repositoryId,
       nodeId: raw.node_id,
       number: raw.number,
