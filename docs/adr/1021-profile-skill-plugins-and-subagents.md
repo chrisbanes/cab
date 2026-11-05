@@ -19,8 +19,10 @@ a subagent under Stop, and a crash during a subagent; the
 skills and a Codex turn running its profile's skill.
 
 Not yet implemented: the plugin layouts and load scope below (cab still requires
-`skills/<name>/SKILL.md`, refuses any symbolic link and bounds the whole tree), and
-installed plugins as a profile source (profiles still name local directories only).
+`skills/<name>/SKILL.md`, refuses any symbolic link and bounds the whole tree;
+[#1524](https://github.com/chrisbanes/cab/issues/1524)), and installed plugins as a
+profile source (profiles still name local directories only;
+[#1525](https://github.com/chrisbanes/cab/issues/1525)).
 
 ## Decision
 
