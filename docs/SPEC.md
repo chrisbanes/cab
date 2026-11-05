@@ -1320,20 +1320,33 @@ without showing it.
 A profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
 absolute plugin directories on the service host, each with the names of its skills the
 profile enables, set in the profile settings or with `cab profile prepare --skills-file`.
-The directory needs a `.claude-plugin/plugin.json` manifest and a `SKILL.md` for each
-enabled skill, or the change is refused with the failing fields. Each profile revision
+The directory needs a Claude (`.claude-plugin/plugin.json`) or Codex
+(`.codex-plugin/plugin.json`) manifest. cab finds skills as the runtimes do: the
+directories the Claude manifest's `skills` array lists, `SKILL.md` files up to six
+directories below the directory the Codex manifest's `skills` field names, and the
+one-level `skills/*/` scan. Each skill is named by its `SKILL.md` frontmatter `name`,
+else its directory, and each enabled name must be exactly one skill of its plugin. A
+plugin with only a Codex manifest can be enabled on Codex profiles only: creating a
+Claude profile with one, or switching a profile that has one to Claude, is refused. A
+change that fails any of these is refused with the failing fields. Each profile revision
 stores the list, and an assignment keeps the one it started with. The profile settings show the plugins and
 skills, and each runtime's effective policy states that skills are instructions to the
 agent, not cab policy. A plugin contributes skills, instructions and
 scripts only; the hooks and MCP servers it declares never run. At each Claude turn start
-cab digests every plugin (SHA-256 over the sorted relative paths and contents of its
-regular files, read off the coordinating event loop) and records the digests with the
-turn, readable in the execution detail without paths. A plugin tree that is missing,
-unreadable, holds a symbolic link or special file, or exceeds 2000 files, 16 MiB or 12
-levels of depth makes the work wait visibly with a reason that names no path, and never
-runs without it. The same list serves a Codex profile: the digests are recorded the same
-way, Codex receives each plugin's `skills/` directory as a skills root, and each Codex
-thread runs with only its profile's enabled skills (other profiles' plugins, the plugin's
+cab digests every plugin's load scope, its manifests and its enabled skills' directories,
+since nothing else reaches the agent (SHA-256 over the sorted relative paths and contents of
+their regular files, read off the coordinating event loop), and records the digests with the
+turn, readable in the execution detail without paths; a change elsewhere in the plugin, such
+as under `node_modules`, does not change it. A symbolic link in the load scope that resolves
+inside the plugin directory is followed and hashed as its target; one that resolves outside
+it is refused. A plugin that is missing or unreadable, whose load scope holds an escaping
+link or a special file or exceeds 2000 files, 16 MiB or 12 levels of depth below a skill
+directory, or, for a Claude turn, that has no Claude manifest, makes the work wait visibly
+with a reason that names no path (the plugin's manifest name for a missing Claude
+manifest), and never runs without it. The same list serves a Codex profile: the digests are
+recorded the same way, Codex receives the parent directory of each enabled skill as a skills
+root, and each Codex thread runs with only its profile's enabled skills, matched by their
+discovered `SKILL.md` paths (other profiles' plugins, the plugin's
 other skills, the bundled skills and repository skills are disabled for it; a profile that enables none sees no plugin skills). cab re-sends the scope before each later
 turn of a conversation, but a plugin directory that joins the process during a running
 turn can reach that turn; skills are instructions to the agent, not a boundary, and a

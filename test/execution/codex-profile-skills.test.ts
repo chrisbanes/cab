@@ -18,7 +18,10 @@ import {
   closeRuntimeSafetyFixtures,
   runtimeSafetyFixture,
 } from "../fixtures/runtime-safety.js";
-import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
+import {
+  writeNestedSkillPlugin,
+  writeSkillPlugin,
+} from "../fixtures/skill-plugin.js";
 
 afterEach(closeRuntimeSafetyFixtures);
 
@@ -169,6 +172,43 @@ test("a thread enabling one skill of a plugin disables the plugin's other skills
     const resumeAt = methods.indexOf("thread/resume");
     assert.equal(methods[resumeAt - 1], "thread/unsubscribe");
     assert.equal(f.sent()[resumeAt - 1]?.params.threadId, threadId);
+  } finally {
+    await runtime.stop();
+    f.cleanup();
+  }
+});
+
+test("a nested skill is scoped by its discovered SKILL.md path, with its category directory as the root", async () => {
+  const f = fixture();
+  const runtime = f.runtime();
+  try {
+    const plugin = writeNestedSkillPlugin(join(f.root, "nested"), {
+      engineering: ["tdd", "review"],
+    });
+    const nested = (name: string) =>
+      join(plugin, "skills", "engineering", name, "SKILL.md");
+    writeFileSync(
+      join(f.root, "skills.json"),
+      JSON.stringify([
+        ...f.system,
+        ...["tdd", "review"].map((name) => ({
+          name,
+          path: nested(name),
+          scope: "user",
+        })),
+      ]),
+    );
+    await runtime.start();
+    await runtime.startThread(f.workspace, [], settings(plugin, ["tdd"]));
+    const sent = f.sent();
+    assert.deepEqual(
+      sent.find((r) => r.method === "skills/extraRoots/set")?.params,
+      { extraRoots: [join(plugin, "skills", "engineering")] },
+    );
+    assert.deepEqual(
+      disabledPaths(sent.find((r) => r.method === "thread/start")),
+      [nested("review"), ...f.system.map((s) => s.path)].sort(),
+    );
   } finally {
     await runtime.stop();
     f.cleanup();

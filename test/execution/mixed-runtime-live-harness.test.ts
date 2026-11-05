@@ -295,6 +295,19 @@ test("the skill and subagent facets are accepted, and their briefs name the tool
     facetOutcome("codex-skill", { workerProfileId: "w", nonce: "n" }),
     /skill probe-skill/,
   );
+  // The nested-skill facets run one turn on their own harness and name the nested skill.
+  for (const [facet, own, other] of [
+    ["claude-nested-skill", "claude", "codex"],
+    ["codex-nested-skill", "codex", "claude"],
+  ] as const) {
+    assert.equal(parseArgs(["--live", "--facet", facet]), facet);
+    assert.equal(FACETS[facet][own], 1);
+    assert.equal(FACETS[facet][other], 0);
+    assert.match(
+      facetOutcome(facet, { workerProfileId: "w", nonce: "n" }),
+      /skill grilling/,
+    );
+  }
   assert.match(subagentSleep, /Agent tool/);
   assert.match(subagentSleep, new RegExp(`\n${SLEEP}\n`));
   assert.doesNotMatch(subagentSleep, /verbatim: sleep\s+\d/);

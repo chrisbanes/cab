@@ -1,5 +1,10 @@
 import { realpath } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { dirname, sep } from "node:path";
+import {
+  enabledSkills as enabledPluginSkills,
+  type PluginSkill,
+  readPlugin,
+} from "./skill-plugins.js";
 
 /** A plugin as the Codex runtime receives it: an absolute directory and its enabled skills. */
 export interface SkillPluginSettings {
@@ -20,33 +25,41 @@ export class SkillScopeError extends Error {
   }
 }
 
-const resolved = (path: string) =>
-  realpath(path).catch(() => {
-    throw new SkillScopeError();
-  });
+/** Each plugin's enabled skills as discovered from its layout, or a `SkillScopeError`. */
+async function enabledSkills(
+  plugins: readonly SkillPluginSettings[],
+): Promise<PluginSkill[]> {
+  const found = await Promise.all(
+    plugins.map(async (plugin) => {
+      const layout = await readPlugin(plugin.path).catch(() => undefined);
+      if (!layout) throw new SkillScopeError();
+      try {
+        return enabledPluginSkills(layout, plugin.skills);
+      } catch {
+        throw new SkillScopeError();
+      }
+    }),
+  );
+  return found.flat();
+}
 
-/** The `skills/` directory of each plugin, resolved, deduplicated and sorted. */
+/**
+ * The extra skills roots for a profile: the parent of each enabled skill's directory, so
+ * App Server lists that skill one level down whatever the plugin's layout. Resolved,
+ * deduplicated and sorted.
+ */
 export async function pluginSkillRoots(
   plugins: readonly SkillPluginSettings[],
 ): Promise<string[]> {
-  const roots = await Promise.all(
-    plugins.map((plugin) => resolved(join(plugin.path, "skills"))),
-  );
-  return [...new Set(roots)].sort();
+  const skills = await enabledSkills(plugins);
+  return [...new Set(skills.map((skill) => dirname(skill.directory)))].sort();
 }
 
 /** The resolved `SKILL.md` paths of every skill the profile enables. */
 export async function enabledSkillFiles(
   plugins: readonly SkillPluginSettings[],
 ): Promise<Set<string>> {
-  const files = await Promise.all(
-    plugins.flatMap((plugin) =>
-      plugin.skills.map((skill) =>
-        resolved(join(plugin.path, "skills", skill, "SKILL.md")),
-      ),
-    ),
-  );
-  return new Set(files);
+  return new Set((await enabledSkills(plugins)).map((skill) => skill.file));
 }
 
 /**

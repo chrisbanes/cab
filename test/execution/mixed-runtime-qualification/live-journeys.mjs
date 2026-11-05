@@ -6,6 +6,7 @@ import { execFileSync, fork } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -37,6 +38,8 @@ import {
 } from "./harness.mjs";
 import {
   codexSkillBrief,
+  NESTED_SKILL,
+  NESTED_SKILL_ANSWER,
   SLEEP,
   setupJourney,
   shellOnly,
@@ -342,7 +345,25 @@ async function inProcess(run) {
             });
           },
         }
-      : {}),
+      : nestedFacet
+        ? {
+            skills: {
+              plugins: [
+                {
+                  path: join(root, "mattpocock-skills"),
+                  skills: [NESTED_SKILL],
+                },
+              ],
+            },
+            onProvisioned: () => {
+              plugin = { dir: join(root, "mattpocock-skills") };
+              cpSync(installedMattpocockSkills(), plugin.dir, {
+                recursive: true,
+                verbatimSymlinks: true,
+              });
+            },
+          }
+        : {}),
   });
   current.taskId = ids.taskId;
   try {
@@ -351,7 +372,114 @@ async function inProcess(run) {
     recordClaudeCli([current.observed.claudeSpawns]);
   }
   // A Codex-only facet runs no Claude query.
-  if (facet !== "codex-skill") assertPathClaude();
+  if (facet !== "codex-skill" && facet !== "codex-nested-skill")
+    assertPathClaude();
+}
+
+const nestedFacet =
+  facet === "claude-nested-skill" || facet === "codex-nested-skill";
+
+/** The one installed version of mattpocock-skills in the operator's Claude Code plugin cache. */
+function installedMattpocockSkills() {
+  const cache = join(homedir(), ".claude", "plugins", "cache");
+  const found = readdirSync(cache).flatMap((marketplace) => {
+    const dir = join(cache, marketplace, "mattpocock-skills");
+    return existsSync(dir)
+      ? readdirSync(dir).map((version) => join(dir, version))
+      : [];
+  });
+  if (found.length !== 1)
+    throw new Error(
+      `expected one installed mattpocock-skills version, found ${found.length}`,
+    );
+  return found[0];
+}
+
+/** Bytes, files and symbolic links of a tree, without following links. */
+function treeShape(dir) {
+  const shape = { bytes: 0, files: 0, links: 0 };
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isSymbolicLink()) shape.links++;
+    else if (entry.isDirectory()) {
+      const inner = treeShape(path);
+      shape.bytes += inner.bytes;
+      shape.files += inner.files;
+      shape.links += inner.links;
+    } else if (entry.isFile()) {
+      shape.files++;
+      shape.bytes += lstatSync(path).size;
+    }
+  }
+  return shape;
+}
+
+/**
+ * A nested skill of the operator's mattpocock-skills plugin, copied with its links and
+ * `node_modules`, reaches the turn: the profile saves it, the runtime loads it by name and
+ * the agent reports a phrase only its instructions give.
+ */
+async function nestedSkill(current, ids, check, plugin) {
+  const results = () =>
+    current.service.coordinationView().readTask(ids.taskId).results;
+  await waitUntil(
+    () => {
+      check();
+      return (
+        results().length > 0 &&
+        current.service.list().every((i) => settled(i.state))
+      );
+    },
+    TURN_MS,
+    "the nested skill's result",
+    true,
+  );
+  const { digestPlugin, skillFieldErrors } = await import(
+    "../../../dist/src/standalone/skill-plugins.js"
+  );
+  const skills = { plugins: [{ path: plugin.dir, skills: [NESTED_SKILL] }] };
+  const harness = facet === "codex-nested-skill" ? "codex" : "claude";
+  const recorded = current.service
+    .list()
+    .flatMap((i) => current.service.turnSkillPlugins(i.workId));
+  const digest = await digestPlugin(plugin.dir, [NESTED_SKILL]);
+  const shape = treeShape(plugin.dir);
+  evidence.observations = {
+    skill: NESTED_SKILL,
+    skillDirectory: `skills/productivity/${NESTED_SKILL}`,
+    nested: existsSync(
+      join(plugin.dir, "skills", "productivity", NESTED_SKILL, "SKILL.md"),
+    ),
+    treeOverWholeTreeLimit: shape.bytes > 16 * 1024 * 1024,
+    treeFiles: shape.files,
+    treeLinks: shape.links,
+    profileFieldErrors: await skillFieldErrors(skills, harness),
+    reportedPhraseMatched: results().some((r) =>
+      String(r.summary ?? "")
+        .toLowerCase()
+        .includes(NESTED_SKILL_ANSWER),
+    ),
+    turnPlugins: recorded.map(({ name, skills: s, digest: d }) => ({
+      name,
+      skills: s,
+      digest: d,
+    })),
+    digestMatchesDirectory: recorded.some((p) => p.digest === digest),
+    ...(harness === "codex" ? { loginLinkIntact: loginLinkIntact() } : {}),
+  };
+  const o = evidence.observations;
+  if (!o.nested || !o.treeOverWholeTreeLimit || o.treeLinks === 0)
+    throw new Error("the copied plugin is not the nested, linked, large tree");
+  if (o.profileFieldErrors.length > 0)
+    throw new Error("the profile's nested skill was refused");
+  if (harness === "codex" && !o.loginLinkIntact)
+    throw new Error("the Codex login link is not an intact link to a file");
+  if (!o.digestMatchesDirectory)
+    throw new Error("no turn recorded the plugin's digest");
+  if (!recorded.some((p) => p.name === "mattpocock-skills"))
+    throw new Error("the turn did not record mattpocock-skills");
+  if (!o.reportedPhraseMatched)
+    throw new ComplianceError("the result did not report the skill's phrase");
 }
 
 /** Pass or fail, the evidence shows which `claude` each service generation's queries ran. */
@@ -663,7 +791,7 @@ async function skill(current, ids, check, plugin) {
     .list()
     .flatMap((i) => current.service.turnSkillPlugins(i.workId));
   const profile = (await api.readProfileConfiguration(ids.leadProfileId)).data;
-  const digest = await digestPlugin(plugin.dir);
+  const digest = await digestPlugin(plugin.dir, ["probe-skill"]);
   evidence.observations = {
     skillScriptRan: existsSync(plugin.skillMarker),
     outsideWriteDenied: !existsSync(plugin.skillEscape),
@@ -1091,7 +1219,9 @@ async function attemptBody(attempt) {
                   ? stop(current, ids, check, true)
                   : facet === "claude-skill" || facet === "codex-skill"
                     ? skill(current, ids, check, plugin)
-                    : coordination(current, ids, check),
+                    : nestedFacet
+                      ? nestedSkill(current, ids, check, plugin)
+                      : coordination(current, ids, check),
           );
     work.catch(() => {});
     await Promise.race([work, aborted]);
