@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
@@ -12,6 +18,7 @@ import { databaseDigest } from "../fixtures/database-digest.js";
 import { harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { testLanAddress } from "../fixtures/operator-network.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -779,4 +786,133 @@ test("review commands need a browser review session: a bearer write token is for
       "forbidden",
     );
   }
+});
+
+test("explicit HTTP consent persists for a named LAN token connection", async (t) => {
+  const address = testLanAddress();
+  const s = await startCliService(t, { lan: { address } });
+  const h = harness(t);
+  const token = await s.issue("read", "lan", 1);
+  const origin = `http://${address}:${new URL(s.origin).port}`;
+  const login = await h.run([
+    "auth",
+    "login",
+    "--connection",
+    "lan",
+    "--url",
+    origin,
+    "--allow-http",
+    "--token-file",
+    h.tokenFile(token.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const status = await h.run([
+    "auth",
+    "status",
+    "--connection",
+    "lan",
+    "--output",
+    "json",
+  ]);
+  assert.equal(status.code, 0, status.err);
+  assert.equal(status.json().service.url, origin);
+  assert.equal(status.json().service.origin, "http://127.0.0.1:8787");
+});
+
+test("remote HTTP requires saved consent before reading credentials or sending requests", async (t) => {
+  const h = harness(t);
+  const url = "http://192.0.2.1:8787";
+  const login = await h.run([
+    "auth",
+    "login",
+    "--connection",
+    "lan",
+    "--url",
+    url,
+    "--token-file",
+    join(h.dir, "missing"),
+  ]);
+  assert.match(login.err, /invalid-url/);
+  mkdirSync(h.configDir, { recursive: true });
+  const file = join(h.configDir, "connections.json");
+  for (const consent of [undefined, false, "true"]) {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        connections: {
+          lan: {
+            url,
+            installationId: randomUUID(),
+            credential: { kind: "token-file", path: join(h.dir, "missing") },
+            ...(consent === undefined ? {} : { allowHttp: consent }),
+          },
+        },
+      }),
+    );
+    const status = await h.run(["auth", "status", "--connection", "lan"]);
+    assert.match(
+      status.err,
+      consent === undefined ? /invalid-url/ : /invalid-configuration/,
+    );
+  }
+  let keychainReads = 0;
+  h.keychain.get = async () => {
+    keychainReads++;
+    throw new Error("unexpected Keychain read");
+  };
+  for (const credential of [
+    { kind: "keychain", account: "lan" },
+    { kind: "local", state: join(h.dir, "missing") },
+  ]) {
+    const saved = JSON.stringify({
+      connections: { lan: { url, installationId: randomUUID(), credential } },
+    });
+    writeFileSync(file, saved);
+    assert.match(
+      (await h.run(["auth", "status", "--connection", "lan"])).err,
+      /invalid-url/,
+    );
+    assert.match(
+      (
+        await h.run([
+          "auth",
+          "login",
+          "--connection",
+          "lan",
+          "--url",
+          url,
+          "--token-file",
+          join(h.dir, "missing"),
+        ])
+      ).err,
+      /invalid-url/,
+    );
+    assert.equal(readFileSync(file, "utf8"), saved);
+  }
+  assert.equal(keychainReads, 0);
+  assert.equal(h.fetches.length, 0);
+  for (const args of [
+    ["auth", "status", "--allow-http"],
+    ["auth", "login", "--local", "--allow-http"],
+    ["auth", "login", "--allow-http"],
+  ]) {
+    assert.match((await h.run(args)).err, /usage/);
+  }
+  writeFileSync(
+    file,
+    JSON.stringify({
+      connections: {
+        lan: {
+          url,
+          installationId: randomUUID(),
+          credential: { kind: "local", state: join(h.dir, "missing") },
+          allowHttp: true,
+        },
+      },
+    }),
+  );
+  assert.match(
+    (await h.run(["auth", "status", "--connection", "lan"])).err,
+    /invalid-configuration/,
+  );
 });

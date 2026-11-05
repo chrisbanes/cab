@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   draftingRunReadSchema,
@@ -201,7 +202,7 @@ export function useDrafting({
   const settle = async (disposition: "accept" | "discard") => {
     const result = await send({
       type: "drafting.settle",
-      key: crypto.randomUUID(),
+      key: randomUUID(),
       runId,
       disposition,
     });
@@ -215,8 +216,8 @@ export function useDrafting({
   const start = async () => {
     const idea = input.idea ?? "";
     if (locked || !input.projectId || idea.trim() === "") return;
-    const next = crypto.randomUUID();
-    const key = crypto.randomUUID();
+    const next = randomUUID();
+    const key = randomUUID();
     // Stored with its key before it is sent, so a reload reattaches to a run that did
     // start and can send the same start again if it never arrived.
     state.edit({
@@ -265,7 +266,7 @@ export function useDrafting({
   const stop = async () => {
     const result = await send({
       type: "drafting.stop",
-      key: crypto.randomUUID(),
+      key: randomUUID(),
       runId,
     });
     if (result.state === "recorded") void refresh.current();

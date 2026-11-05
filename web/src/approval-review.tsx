@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   operatorCommandSchema,
   type JsonValue,
@@ -84,7 +85,7 @@ export function ApprovalReview({
     send(
       operatorCommandSchema.parse({
         type: "approval.decide",
-        key: crypto.randomUUID(),
+        key: randomUUID(),
         taskId,
         interactionId: approval.interactionId,
         expectedRevision: approval.revision,

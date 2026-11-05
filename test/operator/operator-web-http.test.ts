@@ -12,6 +12,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { LocalOperatorHttp } from "../../src/standalone/operator.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { testLanAddress } from "../fixtures/operator-network.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { createControlledPasswordDeriver } from "../fixtures/operator-auth-concurrency.js";
 test("one guarded listener serves shell and authenticated JSON with rotated CSRF", async (t) => {
@@ -833,4 +834,391 @@ test("source refresh acknowledgement rechecks exact session after completed actu
       OperatorApi.prototype.refreshSources = original;
     }
   }
+});
+
+test("HTTP rejects a session bound to another origin without deleting it", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Origin-bound review");
+  const web = await f.startWeb();
+  const other = "http://192.0.2.10:8787";
+  const anonymous = web.auth.createAnonymousSession(other);
+  const deniedLogin = await fetch(`${web.origin}/api/operator/login`, {
+    method: "POST",
+    headers: {
+      cookie: `cab_operator_session=${anonymous.id}`,
+      origin: web.origin,
+      "x-csrf-token": anonymous.csrfToken,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ password: web.password }),
+  });
+  assert.equal(deniedLogin.status, 403);
+  assert.equal(web.auth.getSession(anonymous.id, other)?.authenticated, false);
+  const session = await web.auth.authenticate(
+    anonymous.id,
+    web.password,
+    other,
+  );
+  assert.ok(session);
+  const cookie = `cab_operator_session=${session.id}`;
+  const ownerKey = web.auth.reviewOwnerKey(session.id, other);
+  assert.ok(ownerKey);
+  const owner = {
+    ownerKey,
+    current: () => web.auth.reviewOwnerKey(session.id, other) === ownerKey,
+  };
+  const api = new OperatorApi(f.service, []);
+  await api.execute(
+    {
+      type: "review.draft.save",
+      key: randomUUID(),
+      taskId: task.taskId,
+      expectedDraftVersion: 0,
+      draft: { summary: "Private origin draft", comments: [] },
+    },
+    owner,
+  );
+  const deniedDraft = await fetch(
+    `${web.origin}/api/operator/tasks/${task.taskId}/review-draft`,
+    { headers: { cookie } },
+  );
+  assert.equal(deniedDraft.status, 401);
+  assert.equal(
+    (
+      await fetch(`${web.origin}/api/operator/workspace`, {
+        headers: { cookie },
+      })
+    ).status,
+    401,
+  );
+  const replacement = await fetch(`${web.origin}/api/operator/session`, {
+    headers: { cookie },
+  });
+  assert.equal(
+    ((await replacement.json()) as { authenticated: boolean }).authenticated,
+    false,
+  );
+  assert.notEqual(replacement.headers.get("set-cookie")?.split(";")[0], cookie);
+  const logout = await fetch(`${web.origin}/api/operator/logout`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: web.origin,
+      "x-csrf-token": session.csrfToken,
+      "content-type": "application/json",
+    },
+    body: "{}",
+  });
+  assert.equal(logout.status, 401);
+  assert.equal(web.auth.getSession(session.id, other)?.authenticated, true);
+  const retained = await api.readLocalReviewDraft(task.taskId, owner);
+  assert.equal(retained.data.draft.summary, "Private origin draft");
+});
+
+test("explicit LAN listener shares the port and isolates browser sessions", async (t) => {
+  const address = testLanAddress();
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const bundlePath = join(f.directory, "lan-bundle");
+  await mkdir(join(bundlePath, "assets"), { recursive: true });
+  await writeFile(join(bundlePath, "index.html"), "<html></html>");
+  const authFile = join(f.directory, "lan-auth");
+  await OperatorAuth.initialize(authFile, "fixture-password");
+  const auth = await OperatorAuth.open({
+    authFile,
+    origin: "https://127.0.0.1",
+  });
+  t.after(() => auth.close());
+  const web = new OperatorWebBoundary(
+    await OperatorWebBundle.open(bundlePath),
+    new OperatorApi(f.service, [f.directory]),
+  );
+  const http = new LocalOperatorHttp(auth, { web, lan: { address } });
+  t.after(() => http.stop());
+  const port = await http.start();
+  const loopback = `http://127.0.0.1:${port}`;
+  const lan = `http://${address}:${port}`;
+  const request = (
+    url: string,
+    headers: Record<string, string> = {},
+    body?: string,
+  ) =>
+    new Promise<{
+      status: number;
+      headers: import("node:http").IncomingHttpHeaders;
+      body: string;
+    }>((resolve, reject) => {
+      const req = httpRequest(
+        url,
+        { headers, method: body === undefined ? "GET" : "POST" },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk: string) => {
+            body += chunk;
+          });
+          response.on("end", () =>
+            resolve({
+              status: response.statusCode ?? 0,
+              headers: response.headers,
+              body,
+            }),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.end(body);
+    });
+  const local = await request(`${loopback}/api/operator/session`);
+  const remote = await request(`${lan}/api/operator/session`);
+  assert.equal(local.status, 200);
+  assert.equal(remote.status, 200);
+  const proxy = await request(`${loopback}/api/operator/session`, {
+    host: "127.0.0.1",
+  });
+  assert.match(proxy.headers["set-cookie"]?.[0] ?? "", /Secure/);
+  const remoteCookie = remote.headers["set-cookie"]?.[0]?.split(";")[0];
+  assert.ok(remoteCookie);
+  const remoteToken = (JSON.parse(remote.body) as { csrfToken: string })
+    .csrfToken;
+  const remoteLogin = await request(
+    `${lan}/api/operator/login`,
+    {
+      cookie: remoteCookie,
+      origin: lan,
+      "x-csrf-token": remoteToken,
+      "content-type": "application/json",
+    },
+    JSON.stringify({ password: "fixture-password" }),
+  );
+  assert.equal(remoteLogin.status, 200);
+  const localCookie = local.headers["set-cookie"]?.[0]?.split(";")[0];
+  assert.ok(localCookie);
+  const proxyCookie = proxy.headers["set-cookie"]?.[0]?.split(";")[0];
+  assert.ok(proxyCookie);
+  assert.notEqual(localCookie.split("=")[0], proxyCookie.split("=")[0]);
+  const token = (JSON.parse(local.body) as { csrfToken: string }).csrfToken;
+  const signedIn = await request(
+    `${loopback}/api/operator/login`,
+    {
+      cookie: localCookie,
+      origin: loopback,
+      "x-csrf-token": token,
+      "content-type": "application/json",
+    },
+    JSON.stringify({ password: "fixture-password" }),
+  );
+  assert.equal(signedIn.status, 200);
+  const signedCookie = signedIn.headers["set-cookie"]?.[0]?.split(";")[0];
+  assert.ok(signedCookie);
+  const proxyToken = (JSON.parse(proxy.body) as { csrfToken: string })
+    .csrfToken;
+  const proxyLogin = await request(
+    `${loopback}/api/operator/login`,
+    {
+      host: "127.0.0.1",
+      cookie: proxyCookie,
+      origin: "https://127.0.0.1",
+      "x-csrf-token": proxyToken,
+      "content-type": "application/json",
+    },
+    JSON.stringify({ password: "fixture-password" }),
+  );
+  assert.equal(proxyLogin.status, 200);
+  assert.match(proxyLogin.headers["set-cookie"]?.[0] ?? "", /Secure/);
+  const proxySignedCookie =
+    proxyLogin.headers["set-cookie"]?.[0]?.split(";")[0];
+  assert.ok(proxySignedCookie);
+  const bothCookies = `${signedCookie}; ${proxySignedCookie}`;
+  const localAgain = await request(`${loopback}/api/operator/session`, {
+    cookie: bothCookies,
+  });
+  const proxyAgain = await request(`${loopback}/api/operator/session`, {
+    host: "127.0.0.1",
+    cookie: bothCookies,
+  });
+  assert.equal(
+    (JSON.parse(localAgain.body) as { authenticated: boolean }).authenticated,
+    true,
+  );
+  assert.equal(
+    (JSON.parse(proxyAgain.body) as { authenticated: boolean }).authenticated,
+    true,
+  );
+  const crossed = await request(`${lan}/api/operator/session`, {
+    cookie: signedCookie,
+  });
+  assert.notEqual(
+    crossed.headers["set-cookie"]?.[0]?.split(";")[0],
+    signedCookie,
+  );
+  assert.equal(
+    (JSON.parse(crossed.body) as { authenticated: boolean }).authenticated,
+    false,
+  );
+  const signedToken = (JSON.parse(signedIn.body) as { csrfToken: string })
+    .csrfToken;
+  const deniedLogout = await request(
+    `${lan}/api/operator/logout`,
+    {
+      cookie: signedCookie,
+      origin: lan,
+      "x-csrf-token": signedToken,
+      "content-type": "application/json",
+    },
+    "{}",
+  );
+  assert.equal(deniedLogout.status, 401);
+  const retained = await request(`${loopback}/api/operator/session`, {
+    cookie: signedCookie,
+  });
+  assert.equal(
+    (JSON.parse(retained.body) as { authenticated: boolean }).authenticated,
+    true,
+  );
+  assert.equal(
+    (
+      await request(`${lan}/api/operator/session`, {
+        host: `127.0.0.1:${port}`,
+      })
+    ).status,
+    403,
+  );
+  await http.stop();
+  const { createServer } = await import("node:net");
+  const { LocalAccess, readLocalAccess } = await import(
+    "../../src/operator/local-access.js"
+  );
+  const dataDir = join(f.directory, "failure-state");
+  const localAccess = await LocalAccess.create(dataDir, randomUUID());
+  const blocker = createServer();
+  await new Promise<void>((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen(port, address, resolve);
+  });
+  t.after(() => new Promise<void>((resolve) => blocker.close(() => resolve())));
+  let pushStarts = 0;
+  let pushStops = 0;
+  let failStop = false;
+  const push = {
+    start() {
+      pushStarts++;
+    },
+    async stop() {
+      pushStops++;
+      if (failStop) throw new Error("fixture push stop");
+    },
+  } as unknown as import("../../src/standalone/operator-push.js").OperatorPush;
+  const retry = new LocalOperatorHttp(auth, {
+    web,
+    lan: { address },
+    localAccess,
+    push,
+  });
+  t.after(() => retry.stop());
+  await assert.rejects(
+    retry.start(port),
+    /Could not bind configured operator LAN address/,
+  );
+  await assert.rejects(readLocalAccess(dataDir), /not published/);
+  assert.equal(pushStarts, 0);
+  const probe = createServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(port, "127.0.0.1", resolve);
+  });
+  await new Promise<void>((resolve, reject) =>
+    probe.close((error) => (error ? reject(error) : resolve())),
+  );
+  await new Promise<void>((resolve, reject) =>
+    blocker.close((error) => (error ? reject(error) : resolve())),
+  );
+  assert.equal(await retry.start(port), port);
+  assert.equal((await readLocalAccess(dataDir)).origin, loopback);
+  assert.equal(pushStarts, 1);
+  failStop = true;
+  await assert.rejects(retry.stop(), /fixture push stop/);
+  assert.equal(pushStops, 2);
+  for (const host of ["127.0.0.1", address]) {
+    const after = createServer();
+    await new Promise<void>((resolve, reject) => {
+      after.once("error", reject);
+      after.listen(port, host, resolve);
+    });
+    await new Promise<void>((resolve, reject) =>
+      after.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+  failStop = false;
+  assert.equal(await retry.start(port), port);
+  const loopbackServer = (
+    retry as unknown as { server: import("node:http").Server }
+  ).server;
+  const close = loopbackServer.close.bind(loopbackServer);
+  loopbackServer.close = ((callback?: (error?: Error) => void) =>
+    close(() =>
+      callback?.(new Error("fixture close failure")),
+    )) as typeof loopbackServer.close;
+  await assert.rejects(retry.stop(), /fixture close failure/);
+  for (const host of ["127.0.0.1", address]) {
+    const after = createServer();
+    await new Promise<void>((resolve, reject) => {
+      after.once("error", reject);
+      after.listen(port, host, resolve);
+    });
+    await new Promise<void>((resolve, reject) =>
+      after.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+  const collisionAuth = await OperatorAuth.open({
+    authFile,
+    origin: `https://127.0.0.1:${port}`,
+  });
+  t.after(() => collisionAuth.close());
+  const collision = new LocalOperatorHttp(collisionAuth, {
+    web,
+    lan: { address },
+  });
+  t.after(() => collision.stop());
+  await assert.rejects(
+    collision.start(port),
+    /distinct HTTPS proxy Host or disable LAN/,
+  );
+  const afterCollision = createServer();
+  await new Promise<void>((resolve, reject) => {
+    afterCollision.once("error", reject);
+    afterCollision.listen(port, "127.0.0.1", resolve);
+  });
+  await new Promise<void>((resolve, reject) =>
+    afterCollision.close((error) => (error ? reject(error) : resolve())),
+  );
+  const namedOrigin = `http://cab.example.test:${port}`;
+  const named = new LocalOperatorHttp(auth, {
+    web,
+    lan: { address, origin: namedOrigin },
+  });
+  t.after(() => named.stop());
+  assert.equal(await named.start(port), port);
+  assert.equal((await request(`${lan}/api/operator/session`)).status, 403);
+  const namedSession = await request(`${lan}/api/operator/session`, {
+    host: `cab.example.test:${port}`,
+  });
+  assert.equal(namedSession.status, 200);
+  const namedCookie = namedSession.headers["set-cookie"]?.[0]?.split(";")[0];
+  assert.ok(namedCookie);
+  const namedToken = (JSON.parse(namedSession.body) as { csrfToken: string })
+    .csrfToken;
+  const namedLogin = await request(
+    `${lan}/api/operator/login`,
+    {
+      host: `cab.example.test:${port}`,
+      cookie: namedCookie,
+      origin: namedOrigin,
+      "x-csrf-token": namedToken,
+      "content-type": "application/json",
+    },
+    JSON.stringify({ password: "fixture-password" }),
+  );
+  assert.equal(namedLogin.status, 200);
 });

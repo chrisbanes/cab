@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { startCliService } from "../fixtures/operator-cli.js";
+import { testLanAddress } from "../fixtures/operator-network.js";
 import { installPacked } from "../fixtures/packed-cli.js";
 
 const run = promisify(execFile);
@@ -91,9 +92,33 @@ test("the packed CLI installs offline and works against a real service over loop
   );
 
   // Loopback.
-  const s = await startCliService(t);
+  const address = testLanAddress();
+  const s = await startCliService(t, { lan: { address } });
   const read = await s.issue("read", "packed");
   const file = tokenFile(read.token, "loopback.token");
+  const lanOrigin = `http://${address}:${new URL(s.origin).port}`;
+  const lanLogin = await cli([
+    "auth",
+    "login",
+    "--connection",
+    "lan",
+    "--url",
+    lanOrigin,
+    "--allow-http",
+    "--token-file",
+    file,
+  ]);
+  assert.equal(lanLogin.code, 0, lanLogin.detail);
+  const lanStatus = await cli([
+    "auth",
+    "status",
+    "--connection",
+    "lan",
+    "--output",
+    "json",
+  ]);
+  assert.equal(lanStatus.code, 0, lanStatus.detail);
+  assert.equal(JSON.parse(lanStatus.out).service.url, lanOrigin);
   let r = await cli([
     "auth",
     "login",
@@ -105,7 +130,9 @@ test("the packed CLI installs offline and works against a real service over loop
     file,
   ]);
   assert.equal(r.code, 0, r.detail);
-  r = await cli(["auth", "status"]);
+  r = await cli(["auth", "status", "--connection", "local"]);
+  assert.equal(r.code, 0, r.detail);
+  r = await cli(["connection", "use", "local"]);
   assert.equal(r.code, 0, r.detail);
   r = await cli(["task", "get", s.taskId, "--output", "json"]);
   assert.equal(r.code, 0, r.detail);

@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { z } from "zod";
 import type { projectSchema } from "../../src/operator/contracts.js";
@@ -83,7 +84,7 @@ export function ProjectLifecyclePanel(
       !locked(deletion)
     ) {
       deletion.startOperation({
-        key: crypto.randomUUID(),
+        key: randomUUID(),
         confirmationName: String(deletion.values.confirmationName ?? ""),
         expectedVersion: String(value.version),
         previewDigest: value.previewDigest,

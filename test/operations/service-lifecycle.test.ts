@@ -40,6 +40,8 @@ import {
   installService,
   LIFECYCLE_OPTIONS,
   lifecycleOptions,
+  localHelpArea,
+  serviceHelp,
   type OperatorConnection,
   type SavedSelection,
   SERVICE_USAGE,
@@ -4362,4 +4364,543 @@ test("a staged npm package never replaces a complete tarball release of the same
     /already holds a different release/,
   );
   assert.ok(existsSync(bundled));
+});
+
+test("service configure persists a LAN address offline and reports restart required", async (t) => {
+  const f = await setup(t);
+  const installed = await f.install();
+  assert.equal(installed.code, 0, installed.stderr);
+  chmodSync(f.stateDir, 0o700);
+  f.launchd.calls.length = 0;
+  f.launchd.fetched.length = 0;
+  const { out, io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const code = await serviceCommand(
+    [
+      "configure",
+      "--state-dir",
+      f.stateDir,
+      "--label",
+      f.options.label,
+      "--lan-ip",
+      "192.0.2.10",
+    ],
+    deps,
+    () => {
+      throw new Error("configure must not open a connection");
+    },
+    () => f.launchd.host(),
+  );
+  assert.equal(code, 0, out.stderr);
+  const result = JSON.parse(out.stdout) as {
+    restartRequired: boolean;
+    settings: { lan: { address: string } };
+  };
+  assert.equal(result.restartRequired, true);
+  assert.equal(result.settings.lan.address, "192.0.2.10");
+  assert.deepEqual(f.launchd.calls, []);
+  assert.deepEqual(f.launchd.fetched, []);
+});
+
+test("install applies explicit LAN settings before activation", async (t) => {
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const { out, io } = capture();
+  let settingsAtBootstrap: unknown;
+  f.launchd.onBootstrap = () => {
+    settingsAtBootstrap = JSON.parse(
+      readFileSync(`${join(f.stateDir, "data")}.operator-network.json`, "utf8"),
+    );
+  };
+  const first = {
+    open: false,
+    lan: {
+      address: "192.0.2.10",
+      origin: `http://lan.example.test:${f.options.port}`,
+    },
+  } as FirstRun;
+  const code = await installService(
+    f.options,
+    f.releaseA,
+    f.launchd.host(),
+    io,
+    first,
+  );
+  assert.equal(code, 0, out.stderr);
+  assert.deepEqual(settingsAtBootstrap, {
+    schema: "cab.operator-network/v1",
+    lan: {
+      address: "192.0.2.10",
+      origin: `http://lan.example.test:${f.options.port}`,
+    },
+  });
+});
+
+test("offline configure shows, changes and disables saved settings without contacting the job", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.install()).code, 0);
+  chmodSync(f.stateDir, 0o700);
+  f.launchd.calls.length = 0;
+  f.launchd.fetched.length = 0;
+  const run = async (...args: string[]) => {
+    const { out, io } = capture();
+    const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+    const code = await serviceCommand(
+      [
+        "configure",
+        "--state-dir",
+        f.stateDir,
+        "--label",
+        f.options.label,
+        ...args,
+      ],
+      deps,
+      () => {
+        throw new Error("unexpected credential access");
+      },
+      () => f.launchd.host(),
+    );
+    return { code, ...out };
+  };
+  const file = `${join(f.stateDir, "data")}.operator-network.json`;
+  let r = await run();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).settings.lan, null);
+  r = await run(
+    "--lan-ip",
+    "192.0.2.10",
+    "--lan-origin",
+    `http://cab.example.test:${f.options.port}`,
+  );
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(
+    JSON.parse(r.stdout).settings.lan.origin,
+    `http://cab.example.test:${f.options.port}`,
+  );
+  r = await run("--lan-ip", "192.0.2.11");
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).settings.lan, {
+    address: "192.0.2.11",
+  });
+  const before = readFileSync(file, "utf8");
+  for (const args of [
+    ["--lan-origin", `http://cab.example.test:${f.options.port}`],
+    [
+      "--lan-ip",
+      "off",
+      "--lan-origin",
+      `http://cab.example.test:${f.options.port}`,
+    ],
+    ["--lan-ip", "127.0.0.1"],
+    ["--port", "8787"],
+    ["--state-dir", ""],
+  ]) {
+    assert.notEqual((await run(...args)).code, 0, args.join(" "));
+    assert.equal(readFileSync(file, "utf8"), before);
+  }
+  writeFileSync(file, "{broken");
+  assert.equal((await run()).code, 1);
+  writeFileSync(file, "{}");
+  r = await run();
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /malformed.*--lan-ip off/);
+  r = await run("--lan-ip", "off");
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).settings.lan, null);
+  assert.equal(JSON.parse(r.stdout).restartRequired, true);
+  assert.deepEqual(f.launchd.calls, []);
+  assert.deepEqual(f.launchd.fetched, []);
+});
+
+test("offline configure refuses an existing lifecycle lock without changing settings", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.install()).code, 0);
+  chmodSync(f.stateDir, 0o700);
+  const lock = join(f.stateDir, `.${f.options.label}.lock`);
+  writeFileSync(lock, JSON.stringify({ pid: 99 }), { mode: 0o600 });
+  const { out, io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const code = await serviceCommand(
+    [
+      "configure",
+      "--state-dir",
+      f.stateDir,
+      "--label",
+      f.options.label,
+      "--lan-ip",
+      "192.0.2.10",
+    ],
+    deps,
+    () => {
+      throw new Error("unexpected connection");
+    },
+    () => f.launchd.host(),
+  );
+  assert.equal(code, 1);
+  assert.match(out.stderr, /Another service command holds/);
+  assert.equal(
+    existsSync(`${join(f.stateDir, "data")}.operator-network.json`),
+    false,
+  );
+  assert.equal(existsSync(lock), true);
+});
+
+test("failed pre-activation install restores only its own network update", async (t) => {
+  for (const scenario of ["absent", "malformed", "replaced"] as const) {
+    const f = await setup(t);
+    chmodSync(f.stateDir, 0o700);
+    const path = `${join(f.stateDir, "data")}.operator-network.json`;
+    const prior = Buffer.from([0x7b, 0xff, 0x7d]);
+    if (scenario === "malformed") writeFileSync(path, prior, { mode: 0o600 });
+    f.launchd.overrides.lint = async () => {
+      if (scenario === "replaced") {
+        const replacement = join(f.stateDir, "replacement");
+        writeFileSync(replacement, "concurrent replacement", { mode: 0o600 });
+        renameSync(replacement, path);
+      }
+      return false;
+    };
+    const { out, io } = capture();
+    const code = await installService(
+      f.options,
+      f.releaseA,
+      f.launchd.host(),
+      io,
+      { open: false, lan: null },
+    );
+    assert.equal(code, 1);
+    if (scenario === "absent") assert.equal(existsSync(path), false);
+    if (scenario === "malformed") assert.deepEqual(readFileSync(path), prior);
+    if (scenario === "replaced") {
+      assert.equal(readFileSync(path, "utf8"), "concurrent replacement");
+      assert.match(out.stderr, /Network settings rollback failed/);
+    }
+  }
+});
+
+test("failed install after activation retains its network setting", async (t) => {
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  f.launchd.failBootstrap = true;
+  const { io } = capture();
+  assert.equal(
+    await installService(f.options, f.releaseA, f.launchd.host(), io, {
+      open: false,
+      lan: { address: "192.0.2.10" },
+    }),
+    1,
+  );
+  assert.equal(
+    JSON.parse(
+      readFileSync(`${join(f.stateDir, "data")}.operator-network.json`, "utf8"),
+    ).lan.address,
+    "192.0.2.10",
+  );
+});
+
+test("daemon network configuration is offline and leaves its record and plist unchanged", async (t) => {
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const installed = await f.installDaemon();
+  assert.equal(installed.code, 0, installed.stderr);
+  const record = readFileSync(f.recordPath);
+  const plist = readFileSync(f.staged);
+  f.launchd.calls.length = 0;
+  f.launchd.fetched.length = 0;
+  const { out, io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const code = await serviceCommand(
+    [
+      "configure",
+      "--state-dir",
+      f.stateDir,
+      "--label",
+      f.options.label,
+      "--lan-ip",
+      "192.0.2.10",
+    ],
+    deps,
+    () => {
+      throw new Error("unexpected connection");
+    },
+    () => f.launchd.host(),
+  );
+  assert.equal(code, 0, out.stderr);
+  assert.deepEqual(readFileSync(f.recordPath), record);
+  assert.deepEqual(readFileSync(f.staged), plist);
+  assert.deepEqual(f.launchd.calls, []);
+  assert.deepEqual(f.launchd.fetched, []);
+});
+
+test("configure reports uncertain persistence after post-rename sync fails", async (t) => {
+  const { open } = await import("node:fs/promises");
+  const f = await setup(t);
+  assert.equal((await f.install()).code, 0);
+  chmodSync(f.stateDir, 0o700);
+  const probe = await open(join(f.stateDir, "probe"), "w", 0o600);
+  const prototype = Object.getPrototypeOf(probe) as typeof probe;
+  const sync = prototype.sync;
+  await probe.close();
+  let calls = 0;
+  const mocked = t.mock.method(
+    prototype,
+    "sync",
+    async function (this: typeof probe) {
+      if (++calls === 2) throw new Error("fixture directory sync");
+      await sync.call(this);
+    },
+  );
+  const { out, io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const code = await serviceCommand(
+    [
+      "configure",
+      "--state-dir",
+      f.stateDir,
+      "--label",
+      f.options.label,
+      "--lan-ip",
+      "192.0.2.10",
+    ],
+    deps,
+    () => {
+      throw new Error("unexpected connection");
+    },
+    () => f.launchd.host(),
+  );
+  mocked.mock.restore();
+  assert.equal(code, 1);
+  assert.match(
+    out.stderr,
+    /persistence is uncertain; inspect saved settings before retrying/,
+  );
+  assert.equal(
+    JSON.parse(
+      readFileSync(`${join(f.stateDir, "data")}.operator-network.json`, "utf8"),
+    ).lan.address,
+    "192.0.2.10",
+  );
+});
+
+test("install CLI accepts LAN options and retains settings when reinstall omits them", async (t) => {
+  const f = await tarballSetup(t);
+  chmodSync(f.stateDir, 0o700);
+  const { out, io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const args = [
+    "install",
+    f.tarball,
+    "--state-dir",
+    f.stateDir,
+    "--log-dir",
+    f.options.logDir,
+    "--launch-agents-dir",
+    f.options.agentsDir,
+    "--label",
+    f.options.label,
+    "--port",
+    String(f.options.port),
+    "--no-open",
+  ];
+  const run = (...extra: string[]) =>
+    serviceCommand(
+      [...args, ...extra],
+      deps,
+      () => {
+        throw new Error("unexpected connection");
+      },
+      () => f.launchd.host(),
+    );
+  assert.equal(
+    await run(
+      "--lan-ip",
+      "192.0.2.10",
+      "--lan-origin",
+      `http://cab.example.test:${f.options.port}`,
+    ),
+    0,
+    out.stderr,
+  );
+  const path = `${join(f.stateDir, "data")}.operator-network.json`;
+  const saved = readFileSync(path);
+  assert.equal(JSON.parse(saved.toString()).lan.address, "192.0.2.10");
+  assert.equal(
+    JSON.parse(saved.toString()).lan.origin,
+    `http://cab.example.test:${f.options.port}`,
+  );
+  assert.equal((await f.uninstall()).code, 0);
+  assert.deepEqual(readFileSync(path), saved);
+  assert.equal(await run(), 0, out.stderr);
+  assert.deepEqual(readFileSync(path), saved);
+});
+
+test("bundled and npm upgrades retain network settings outside the version and snapshot trees", async (t) => {
+  const { writeNetworkSettings } = await import(
+    "../../src/operator/network-access.js"
+  );
+  for (const kind of ["bundled", "npm"] as const) {
+    const pkg = kind === "npm" ? npmPackage(t) : undefined;
+    const f = await installed(t, undefined, pkg);
+    chmodSync(f.stateDir, 0o700);
+    const path = `${join(f.stateDir, "data")}.operator-network.json`;
+    await writeNetworkSettings(join(f.stateDir, "data"), f.options.port, {
+      schema: "cab.operator-network/v1",
+      lan: { address: "192.0.2.10" },
+    });
+    const saved = readFileSync(path);
+    const result = await f.upgrade();
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(readFileSync(path), saved);
+    assert.equal((await f.uninstall()).code, 0);
+    assert.deepEqual(readFileSync(path), saved);
+  }
+});
+
+test("configure refuses missing or unsafe records before creating a lock or settings", async (t) => {
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const { out, io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const run = () =>
+    serviceCommand(
+      [
+        "configure",
+        "--state-dir",
+        f.stateDir,
+        "--label",
+        f.options.label,
+        "--lan-ip",
+        "192.0.2.10",
+      ],
+      deps,
+      () => {
+        throw new Error("unexpected connection");
+      },
+      () => f.launchd.host(),
+    );
+  assert.equal(await run(), 1);
+  assert.equal(existsSync(join(f.stateDir, `.${f.options.label}.lock`)), false);
+  assert.equal(
+    existsSync(`${join(f.stateDir, "data")}.operator-network.json`),
+    false,
+  );
+  assert.equal((await f.install()).code, 0);
+  chmodSync(f.recordPath, 0o644);
+  assert.equal(await run(), 1);
+  assert.match(out.stderr, /installation record/i);
+  assert.equal(existsSync(join(f.stateDir, `.${f.options.label}.lock`)), false);
+  assert.equal(
+    existsSync(`${join(f.stateDir, "data")}.operator-network.json`),
+    false,
+  );
+});
+
+test("service configure help describes offline settings and restart", () => {
+  assert.equal(localHelpArea(["service", "configure", "--help"]), "service");
+  assert.match(serviceHelp("service"), /service configure/);
+  assert.match(serviceHelp("service"), /--lan-ip IPV4\|off/);
+  assert.match(serviceHelp("service"), /restart/);
+});
+
+test("install reports uncertain network persistence without activating a job", async (t) => {
+  const { open } = await import("node:fs/promises");
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const probe = await open(join(f.stateDir, "probe"), "w", 0o600);
+  const prototype = Object.getPrototypeOf(probe) as typeof probe;
+  const sync = prototype.sync;
+  await probe.close();
+  let calls = 0;
+  const mocked = t.mock.method(
+    prototype,
+    "sync",
+    async function (this: typeof probe) {
+      if (++calls === 2) throw new Error("fixture sync failure");
+      await sync.call(this);
+    },
+  );
+  const { out, io } = capture();
+  const code = await installService(
+    f.options,
+    f.releaseA,
+    f.launchd.host(),
+    io,
+    { open: false, lan: { address: "192.0.2.10" } },
+  );
+  mocked.mock.restore();
+  assert.equal(code, 1);
+  assert.match(
+    out.stderr,
+    /persistence is uncertain; inspect saved settings before retrying/,
+  );
+  assert.equal(existsSync(f.recordPath), false);
+  assert.equal(f.launchd.mutations().length, 0);
+  assert.equal(
+    JSON.parse(
+      readFileSync(`${join(f.stateDir, "data")}.operator-network.json`, "utf8"),
+    ).lan.address,
+    "192.0.2.10",
+  );
+});
+
+test("first npm install creates private state and applies LAN settings under the lifecycle lock", async (t) => {
+  const f = await setup(t, false, { bare: true, auth: false, unpacked: false });
+  const pkg = npmPackage(t);
+  const cli = new FakeCli();
+  let locked = false;
+  f.launchd.onBootstrap = () => {
+    locked = existsSync(join(f.stateDir, `.${f.options.label}.lock`));
+  };
+  const { out, io } = capture();
+  const code = await installService(f.options, pkg.root, f.launchd.host(), io, {
+    open: false,
+    cli,
+    lan: { address: "192.0.2.10" },
+  });
+  assert.equal(code, 0, out.stderr);
+  assert.equal(locked, true);
+  assert.equal(statSync(f.stateDir).mode & 0o777, 0o700);
+  assert.equal(
+    JSON.parse(
+      readFileSync(`${join(f.stateDir, "data")}.operator-network.json`, "utf8"),
+    ).lan.address,
+    "192.0.2.10",
+  );
+});
+
+test("LAN install options are rejected by init-auth", async () => {
+  const { out, io } = capture();
+  const deps = {
+    env: { HOME: "/tmp" },
+    ...io,
+    stdin: { isTTY: false },
+  } as unknown as CliDeps;
+  const code = await serviceCommand(
+    ["init-auth", "--lan-ip", "192.0.2.10"],
+    deps,
+    () => {
+      throw new Error("unexpected connection");
+    },
+    () => {
+      throw new Error("unexpected host");
+    },
+  );
+  assert.equal(code, 2, out.stderr);
+});
+
+test("invalid install LAN settings do not create a state directory", async (t) => {
+  const f = await tarballSetup(t, { bare: true, auth: false });
+  assert.equal(existsSync(f.stateDir), false);
+  const { out, io } = capture();
+  const code = await installService(
+    f.options,
+    f.releaseA,
+    f.launchd.host(),
+    io,
+    { open: false, tarball: f.tarball, lan: { address: "127.0.0.1" } },
+  );
+  assert.equal(code, 1);
+  assert.match(out.stderr, /Invalid operator network address/);
+  assert.equal(existsSync(f.stateDir), false);
+  assert.deepEqual(f.launchd.calls, []);
 });

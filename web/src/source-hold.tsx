@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   operatorCommandSchema,
   type Session,
@@ -90,7 +91,7 @@ export function SourceHoldCard({
                 void send(
                   operatorCommandSchema.parse({
                     type: "source.review",
-                    key: crypto.randomUUID(),
+                    key: randomUUID(),
                     projectId: task.task.projectId,
                     taskId,
                     expectedVersion: task.task.version,

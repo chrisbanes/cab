@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   operatorCommandSchema,
   type Session,
@@ -163,7 +164,7 @@ function HandbackSettlementCard({
       send(
         operatorCommandSchema.parse({
           type: "delivery.settle",
-          key: crypto.randomUUID(),
+          key: randomUUID(),
           taskId: task.task.id,
           expectedTaskVersion: task.task.version,
           expectedDeliveryRevision: b.revision,
@@ -306,7 +307,7 @@ export function ResultDestination({
               void send(
                 operatorCommandSchema.parse({
                   type: "result.recipient",
-                  key: crypto.randomUUID(),
+                  key: randomUUID(),
                   taskId: task.task.id,
                   resultId: item.resultId,
                   expectedRevision: item.revision,

@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   type ReactNode,
   useEffect,
@@ -205,7 +206,7 @@ export function ImportPanel(
             if (d.phase === "rejected" || d.phase === "conflict") d.purge();
             if (!d.values.key)
               d.initialize({
-                key: crypto.randomUUID(),
+                key: randomUUID(),
                 expectedVersion: String(at),
                 selectionId: id,
               });

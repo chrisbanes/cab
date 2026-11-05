@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CommandReceipt,
@@ -219,7 +220,7 @@ export function TaskUnstack({
       mode === "cancel" && view.cancelAvailable && cancelVersion === taskVersion
         ? {
             type: "task.cancel",
-            key: crypto.randomUUID(),
+            key: randomUUID(),
             taskId,
             expectedVersion: cancelVersion,
           }
@@ -229,7 +230,7 @@ export function TaskUnstack({
             view.preview?.materialHash === captured.materialHash
           ? {
               type: "task.unstack",
-              key: crypto.randomUUID(),
+              key: randomUUID(),
               taskId,
               expectedVersion: captured.expectedVersion,
               materialHash: captured.materialHash,

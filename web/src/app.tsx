@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { visibleProjects } from "./project-lifecycle-model.js";
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
@@ -482,7 +483,7 @@ function pushAppEntry(href: string, navigationScope: string) {
         ? history.state?.workspaceOrigin
         : location.pathname + location.search,
       navigationScope,
-      navKey: crypto.randomUUID(),
+      navKey: randomUUID(),
       entryUrl: absoluteUrl(href),
       entryIndex: (history.state?.entryIndex ?? 0) + 1,
       workspaceIndex: fromSearch
@@ -498,7 +499,7 @@ export function App() {
   // Re-renders the shell, so the open page re-binds a draft the shell started.
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const acceptedIdentity = useRef<string | null>(null);
-  const navigationScope = useRef(crypto.randomUUID());
+  const navigationScope = useRef(randomUUID());
   const clearPrivateNavigation = () => {
     // The fragment names a section on the page, not private state, so it stays.
     const next =
@@ -508,7 +509,7 @@ export function App() {
     history.replaceState(
       {
         navigationScope: navigationScope.current,
-        navKey: crypto.randomUUID(),
+        navKey: randomUUID(),
         entryUrl: absoluteUrl(next),
       },
       "",
@@ -538,7 +539,7 @@ export function App() {
   const inboxState = useRef(new InboxState());
   // biome-ignore lint/correctness/useExhaustiveDependencies: navigation purge uses current browser entry and stable scope ref.
   const expired = useCallback(() => {
-    navigationScope.current = crypto.randomUUID();
+    navigationScope.current = randomUUID();
     clearPrivateNavigation();
     clientRef.current?.invalidateAuthentication();
     acceptedIdentity.current = null;
@@ -566,7 +567,7 @@ export function App() {
       const identity = next.authenticated ? next.csrfToken : null;
       if (identity !== acceptedIdentity.current) {
         if (!identity && acceptedIdentity.current) {
-          navigationScope.current = crypto.randomUUID();
+          navigationScope.current = randomUUID();
           clearPrivateNavigation();
         }
         client.invalidateAuthentication();
@@ -590,7 +591,7 @@ export function App() {
                 ? history.state
                 : null),
               navigationScope: navigationScope.current,
-              navKey: history.state?.navKey ?? crypto.randomUUID(),
+              navKey: history.state?.navKey ?? randomUUID(),
               entryUrl: location.href,
             },
             "",
@@ -972,7 +973,7 @@ export function App() {
       }
     : {};
   async function logout() {
-    navigationScope.current = crypto.randomUUID();
+    navigationScope.current = randomUUID();
     clearPrivateNavigation();
     client.invalidateAuthentication();
     acceptedIdentity.current = null;

@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useState } from "react";
 import {
   operatorCommandSchema,
@@ -124,7 +125,7 @@ export function StartAgainAction({
                 void send(
                   operatorCommandSchema.parse({
                     type: "task.start-again",
-                    key: crypto.randomUUID(),
+                    key: randomUUID(),
                     taskId,
                     expectedVersion: task.task.version,
                     workId: offer.workId,
@@ -254,7 +255,7 @@ export function ResetTask({
                 void send(
                   operatorCommandSchema.parse({
                     type: "task.reset",
-                    key: crypto.randomUUID(),
+                    key: randomUUID(),
                     taskId,
                     expectedVersion: version,
                   }),

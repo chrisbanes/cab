@@ -1,0 +1,17 @@
+# LAN operator browser qualification
+
+The tested source was the joined candidate based on `f88cd36e2fcb21898bf4b107c6268789b238a0e2`, with source and test tree `844155e6603d550631667f770c458dd537ae5af7` before this evidence and the accompanying contract wording. The tests ran on macOS arm64 with Node 26.13.0, npm 12.2.1 and Playwright 1.64.1. Chromium cache revision 1248 reported 156.0.8078.4; WebKit revision 2370 reported 27.2. OpenSSL reported 4.1.0.
+
+The fixtures used a disposable service, a real SQLite store, fixture runtimes, throwaway credentials and ephemeral ports. The focused direct-LAN runs bound the test host's `192.168.50.245` address and numeric loopback on the same port: Chromium used 58792 and WebKit used 58815. These are same-host connections, not evidence of routing from a second device.
+
+Before the compatibility change, Chromium on the direct LAN HTTP origin reported `isSecureContext: false`; `crypto.randomUUID`, `crypto.subtle` and `navigator.clipboard` were unavailable, while `crypto.getRandomValues` existed. The page body was empty and the page error was `crypto.randomUUID is not a function`. The pre-fix token-copy case subsequently reported an exception reading `writeText` from an absent clipboard. The UI now uses native UUID and digest APIs where available, with `getRandomValues` and the already locked `fast-sha256` 1.3.0 implementation for the HTTP fallback. A failed clipboard copy offers the existing manual-copy instruction.
+
+Validation on the tested source and test tree:
+
+- `npm ci`, `npm run typecheck`, `npm run lint`, `npm run format:check` and `npm run build` passed. Lint reported six informational notices and no warnings.
+- The focused LAN browser file passed all seven cases with `CAB_TEST_BROWSER_ENGINE=all node --test --test-force-exit dist/test/operator/operator-lan-access-browser.test.js`. Chromium and WebKit signed in over LAN and loopback, sent a UUID-keyed task comment and settled its receipt, used the keyboard, observed the unsupported notification state on actual insecure HTTP, signed out independently and required sign-in again after a disposable service restart. Both engines showed the manual-copy fallback without a page exception.
+- Both engines also signed in over loopback HTTP and a same-host HTTPS proxy in one browser context; both cookies coexisted, the HTTPS cookie was Secure, and signing out either session left the other usable. The proxy used a generated one-day self-signed certificate, accepted only by that test browser context; no system trust was changed.
+- Nine affected model files passed 123 tests, including the existing comment payload/receipt seam and notification endpoint digest without `crypto.subtle`. The packed CLI installed offline and passed its loopback and verified HTTPS test.
+- `npm run test:built -- --suite=operator,operations --profile=all --browser-files-only` passed 731 tests, with no failures or skips. The sandbox denied loopback binds, so the exact browser commands were retried outside it. Full execution logs are retained under `/private/tmp/cab-lan-t5-*` for this run.
+
+This qualifies the recorded fixture journeys on one host. It does not qualify physical-network or second-device access, a Tailscale deployment, a live model, an installed service or a release/cutover. The HTTP listener transmits credentials without TLS, and these tests do not establish an independent same-account sandbox.

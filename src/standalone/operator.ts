@@ -1,3 +1,4 @@
+import { validateNetworkSettings } from "../operator/network-access.js";
 import type { LocalAccess } from "../operator/local-access.js";
 import { cabFaviconSvg } from "../operator/brand.js";
 import {
@@ -42,6 +43,7 @@ import { containsControlCharacters, decodeSegment } from "./operator-routes.js";
 
 type OperatorHttpOptions = {
   web: OperatorWebBoundary;
+  lan?: { address: string; origin?: string | undefined };
   credentials?: OperatorCredentialStore;
   localAccess?: LocalAccess | undefined;
   /** Opt-in browser push; absent, notification routes answer 404. */
@@ -67,24 +69,24 @@ class OperatorHttpError extends Error {
   }
 }
 
-function cookieId(request: IncomingMessage): string | undefined {
+function cookieId(request: IncomingMessage, name: string): string | undefined {
   const header = request.headers.cookie;
   if (typeof header !== "string") return undefined;
   const values = header
     .split(";")
     .map((part) => part.trim())
-    .filter((part) => part.startsWith(`${SESSION_COOKIE}=`));
+    .filter((part) => part.startsWith(`${name}=`));
   if (values.length !== 1) return undefined;
-  const value = values[0]?.slice(SESSION_COOKIE.length + 1);
+  const value = values[0]?.slice(name.length + 1);
   return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : undefined;
 }
 
-function cookieHeader(id: string, secure: boolean): string {
-  return `${SESSION_COOKIE}=${id}; Path=/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
+function cookieHeader(id: string, secure: boolean, name: string): string {
+  return `${name}=${id}; Path=/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
 }
 
-function clearedCookie(secure: boolean): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`;
+function clearedCookie(secure: boolean, name: string): string {
+  return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
 function publicMessage(code: string): string {
@@ -296,7 +298,15 @@ function writeText(
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
   private server: Server | undefined;
-  private readonly secureCookie: boolean;
+  private lanServer: Server | undefined;
+  private readonly lan:
+    | { address: string; origin?: string | undefined }
+    | undefined;
+  private readonly browserContext: Readonly<{
+    origin: string;
+    secureCookie: boolean;
+    cookieName: string;
+  }>;
   private readonly web: OperatorWebBoundary;
   private readonly credentials: OperatorCredentialStore | undefined;
   private readonly localAccess: LocalAccess | undefined;
@@ -309,100 +319,135 @@ export class LocalOperatorHttp {
     if (!options?.web)
       throw new Error("operator web UI not built; run npm run build:web");
     this.web = options.web;
+    this.lan = options.lan ? Object.freeze({ ...options.lan }) : undefined;
     this.localAccess = options.localAccess;
     this.credentials = options.credentials;
     this.push = options.push;
-    this.secureCookie = new URL(auth.origin).protocol === "https:";
+    this.browserContext = Object.freeze({
+      origin: auth.origin,
+      secureCookie: new URL(auth.origin).protocol === "https:",
+      cookieName: SESSION_COOKIE,
+    });
   }
 
   async start(port = 0): Promise<number> {
     if (this.server) throw new Error("Operator UI already started");
-    const server = createServer(async (request, response) => {
-      let session: OperatorSession | undefined;
-      try {
-        const address = server.address();
-        const localOrigin =
-          address && typeof address !== "string"
-            ? `http://127.0.0.1:${address.port}`
-            : "";
-        const loopbackHost = localOrigin.slice("http://".length);
-        const expectedHost = new URL(this.auth.origin).host;
-        if (
-          request.headers.host !== expectedHost &&
-          request.headers.host !== loopbackHost
-        ) {
-          request.resume();
-          writeText(response, 403, "Request denied");
-          return;
-        }
-        const requestTarget = request.url ?? "/";
-        if (
-          !requestTarget.startsWith("/") ||
-          requestTarget.startsWith("//") ||
-          requestTarget.includes("\\") ||
-          containsControlCharacters(requestTarget) ||
-          requestTarget.includes("#")
-        ) {
-          request.resume();
-          writeText(response, 400, "Request rejected");
-          return;
-        }
-        const url = new URL(requestTarget, localOrigin || "http://127.0.0.1");
-        if (
-          url.pathname
-            .split("/")
-            .slice(1)
-            .some((part) => part && decodeSegment(part) === undefined)
-        ) {
-          writeText(response, 404, "Not found");
-          return;
-        }
-        // Retired and unknown paths are rejected before looking up or creating a session.
-        if (
-          (!this.web.owns(url.pathname) && url.pathname !== "/favicon.svg") ||
-          (url.pathname === "/login" &&
-            request.method !== "GET" &&
-            request.method !== "HEAD")
-        ) {
-          request.resume();
-          writeText(response, 404, "Not found");
-          return;
-        }
-        // Bearer requests never read or upgrade a cookie session.
-        if (request.headers.authorization !== undefined) {
-          await this.handleBearer(request, response, url);
-          return;
-        }
-        if (url.pathname === "/favicon.svg") {
-          request.resume();
-          const allowed = request.method === "GET" || request.method === "HEAD";
-          response.writeHead(allowed ? 200 : 405, {
-            ...RESPONSE_HEADERS,
-            "content-type": "image/svg+xml",
-            ...(!allowed ? { allow: "GET, HEAD" } : {}),
+    if (this.lan)
+      validateNetworkSettings(
+        { schema: "cab.operator-network/v1", lan: this.lan },
+        port,
+      );
+    const makeServer = (lan: boolean) => {
+      const server = createServer(async (request, response) => {
+        let session: OperatorSession | undefined;
+        try {
+          const address = server.address();
+          const localOrigin =
+            address && typeof address !== "string"
+              ? `http://127.0.0.1:${address.port}`
+              : "";
+          const loopbackHost = localOrigin.slice("http://".length);
+          const expectedHost = new URL(this.auth.origin).host;
+          const lanOrigin =
+            this.lan &&
+            (this.lan.origin ??
+              `http://${this.lan.address}:${address && typeof address !== "string" ? address.port : port}`);
+          const allowed = lan
+            ? !!lanOrigin && request.headers.host === new URL(lanOrigin).host
+            : request.headers.host === loopbackHost ||
+              ((!this.lan || this.browserContext.secureCookie) &&
+                request.headers.host === expectedHost);
+          if (!allowed) {
+            request.resume();
+            writeText(response, 403, "Request denied");
+            return;
+          }
+          const origin = lan
+            ? lanOrigin!
+            : this.lan && request.headers.host === loopbackHost
+              ? localOrigin
+              : this.browserContext.origin;
+          const context = Object.freeze({
+            origin,
+            secureCookie: new URL(origin).protocol === "https:",
+            cookieName: this.lan
+              ? `${SESSION_COOKIE}_${lan ? "lan" : origin === localOrigin ? "loopback" : "proxy"}`
+              : SESSION_COOKIE,
+            loopback: !lan && request.socket.remoteAddress === "127.0.0.1",
           });
-          response.end(
-            allowed && request.method === "GET" ? cabFaviconSvg : undefined,
-          );
-          return;
-        }
-        const id = cookieId(request);
-        session = id ? this.auth.getSession(id) : undefined;
-        this.purgeExpiredReviewOwners();
+          const requestTarget = request.url ?? "/";
+          if (
+            !requestTarget.startsWith("/") ||
+            requestTarget.startsWith("//") ||
+            requestTarget.includes("\\") ||
+            containsControlCharacters(requestTarget) ||
+            requestTarget.includes("#")
+          ) {
+            request.resume();
+            writeText(response, 400, "Request rejected");
+            return;
+          }
+          const url = new URL(requestTarget, localOrigin || "http://127.0.0.1");
+          if (
+            url.pathname
+              .split("/")
+              .slice(1)
+              .some((part) => part && decodeSegment(part) === undefined)
+          ) {
+            writeText(response, 404, "Not found");
+            return;
+          }
+          // Retired and unknown paths are rejected before looking up or creating a session.
+          if (
+            (!this.web.owns(url.pathname) && url.pathname !== "/favicon.svg") ||
+            (url.pathname === "/login" &&
+              request.method !== "GET" &&
+              request.method !== "HEAD")
+          ) {
+            request.resume();
+            writeText(response, 404, "Not found");
+            return;
+          }
+          // Bearer requests never read or upgrade a cookie session.
+          if (request.headers.authorization !== undefined) {
+            await this.handleBearer(request, response, url, context);
+            return;
+          }
+          if (url.pathname === "/favicon.svg") {
+            request.resume();
+            const allowed =
+              request.method === "GET" || request.method === "HEAD";
+            response.writeHead(allowed ? 200 : 405, {
+              ...RESPONSE_HEADERS,
+              "content-type": "image/svg+xml",
+              ...(!allowed ? { allow: "GET, HEAD" } : {}),
+            });
+            response.end(
+              allowed && request.method === "GET" ? cabFaviconSvg : undefined,
+            );
+            return;
+          }
+          const id = cookieId(request, context.cookieName);
+          session = id ? this.auth.getSession(id, context.origin) : undefined;
+          this.purgeExpiredReviewOwners();
 
-        if (await this.handleWeb(request, response, url, session)) return;
-        request.resume();
-        writeText(response, 404, "Not found");
-      } catch (error) {
-        if (!response.headersSent) {
-          writeText(
-            response,
-            error instanceof OperatorHttpError ? error.status : 400,
-            "Request rejected",
-          );
-        } else if (!response.writableEnded) response.end();
-      }
-    });
+          if (await this.handleWeb(request, response, url, session, context))
+            return;
+          request.resume();
+          writeText(response, 404, "Not found");
+        } catch (error) {
+          if (!response.headersSent) {
+            writeText(
+              response,
+              error instanceof OperatorHttpError ? error.status : 400,
+              "Request rejected",
+            );
+          } else if (!response.writableEnded) response.end();
+        }
+      });
+      return server;
+    };
+    const server = makeServer(false);
     this.server = server;
     try {
       await new Promise<void>((resolve, reject) => {
@@ -417,42 +462,82 @@ export class LocalOperatorHttp {
     if (!address || typeof address === "string")
       throw new Error("Unexpected operator UI address");
     try {
+      if (this.lan) {
+        validateNetworkSettings(
+          { schema: "cab.operator-network/v1", lan: this.lan },
+          address.port,
+        );
+        if (
+          this.browserContext.secureCookie &&
+          new URL(this.auth.origin).host ===
+            new URL(`http://127.0.0.1:${address.port}`).host
+        )
+          throw new Error(
+            "Use a distinct HTTPS proxy Host or disable LAN access",
+          );
+        const lanServer = makeServer(true);
+        this.lanServer = lanServer;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            lanServer.once("error", reject);
+            lanServer.listen(address.port, this.lan!.address, resolve);
+          });
+        } catch (error) {
+          throw new Error("Could not bind configured operator LAN address", {
+            cause: error,
+          });
+        }
+      }
       await this.localAccess?.publish(`http://127.0.0.1:${address.port}`);
+      this.push?.start();
     } catch (error) {
       await this.stop();
       throw error;
     }
-    this.push?.start();
     return address.port;
   }
 
   async stop(): Promise<void> {
-    const server = this.server;
+    const servers = [this.server, this.lanServer];
     this.server = undefined;
-    await this.push?.stop();
-    if (server)
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+    this.lanServer = undefined;
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => this.push?.stop()),
+      ...servers
+        .filter((server): server is Server => !!server?.listening)
+        .map(
+          (server) =>
+            new Promise<void>((resolve, reject) =>
+              server.close((error) => (error ? reject(error) : resolve())),
+            ),
+        ),
+    ]);
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
   }
 
-  private currentSession(session: OperatorSession | undefined): boolean {
-    const current = session && this.auth.getSession(session.id);
+  private currentSession(
+    session: OperatorSession | undefined,
+    context: typeof this.browserContext,
+  ): boolean {
+    const current = session && this.auth.getSession(session.id, context.origin);
     this.purgeExpiredReviewOwners();
     return !!current?.authenticated && current.csrfToken === session?.csrfToken;
   }
   private reviewSession(
     session: OperatorSession | undefined,
+    context: typeof this.browserContext,
   ): OperatorReviewSessionContext | undefined {
     if (!session?.authenticated) return undefined;
-    const ownerKey = this.auth.reviewOwnerKey(session.id);
+    const ownerKey = this.auth.reviewOwnerKey(session.id, context.origin);
     if (!ownerKey) {
       this.purgeExpiredReviewOwners();
       return undefined;
     }
     return {
       ownerKey,
-      current: () => this.auth.reviewOwnerKey(session.id) === ownerKey,
+      current: () =>
+        this.auth.reviewOwnerKey(session.id, context.origin) === ownerKey,
     };
   }
   private purgeExpiredReviewOwners(): void {
@@ -465,6 +550,7 @@ export class LocalOperatorHttp {
     response: ServerResponse,
     url: URL,
     session: OperatorSession | undefined,
+    context: typeof this.browserContext,
   ): Promise<boolean> {
     const web = this.web;
     if (!web.owns(url.pathname)) return false;
@@ -529,14 +615,21 @@ export class LocalOperatorHttp {
         return true;
       }
       if (path === "/api/operator/session") {
-        const current = session ?? this.auth.createAnonymousSession();
+        const current =
+          session ?? this.auth.createAnonymousSession(context.origin);
         json(
           200,
           sessionSchema.parse({
             authenticated: current.authenticated,
             csrfToken: current.csrfToken,
           }),
-          { "set-cookie": cookieHeader(current.id, this.secureCookie) },
+          {
+            "set-cookie": cookieHeader(
+              current.id,
+              context.secureCookie,
+              context.cookieName,
+            ),
+          },
         );
         return true;
       }
@@ -547,17 +640,21 @@ export class LocalOperatorHttp {
       if (method === "POST") {
         if (
           !session ||
-          request.headers.origin !== this.auth.origin ||
+          request.headers.origin !== context.origin ||
           !this.auth.validateCsrf(
             session.id,
             String(request.headers["x-csrf-token"] ?? ""),
+            context.origin,
           )
         ) {
           deny(403, "forbidden");
           return true;
         }
         const body = await readJson(request, path === "/api/operator/commands");
-        if (path !== "/api/operator/login" && !this.currentSession(session)) {
+        if (
+          path !== "/api/operator/login" &&
+          !this.currentSession(session, context)
+        ) {
           deny(401, "unauthenticated");
           return true;
         }
@@ -573,6 +670,7 @@ export class LocalOperatorHttp {
           const current = await this.auth.authenticate(
             session.id,
             input.password,
+            context.origin,
           );
           if (!current) {
             deny(401, "unauthenticated");
@@ -584,18 +682,29 @@ export class LocalOperatorHttp {
               authenticated: true,
               csrfToken: current.csrfToken,
             }),
-            { "set-cookie": cookieHeader(current.id, this.secureCookie) },
+            {
+              "set-cookie": cookieHeader(
+                current.id,
+                context.secureCookie,
+                context.cookieName,
+              ),
+            },
           );
           return true;
         }
         if (path === "/api/operator/logout") {
           z.object({}).strict().parse(body);
-          const ownerKey = this.auth.logout(session.id);
+          const ownerKey = this.auth.logout(session.id, context.origin);
           if (ownerKey) web.api.purgeLocalReviewDrafts(ownerKey);
           json(
             200,
             { authenticated: false },
-            { "set-cookie": clearedCookie(this.secureCookie) },
+            {
+              "set-cookie": clearedCookie(
+                context.secureCookie,
+                context.cookieName,
+              ),
+            },
           );
           return true;
         }
@@ -653,7 +762,7 @@ export class LocalOperatorHttp {
           } else {
             z.object({}).strict().parse(body);
             const outcome = await push.test(id);
-            if (!this.currentSession(session)) {
+            if (!this.currentSession(session, context)) {
               deny(401, "unauthenticated");
               return true;
             }
@@ -665,7 +774,7 @@ export class LocalOperatorHttp {
         if (path === "/api/operator/source-refresh") {
           z.object({}).strict().parse(body);
           const data = await web.api.refreshSources();
-          if (!this.currentSession(session)) {
+          if (!this.currentSession(session, context)) {
             deny(401, "unauthenticated");
             return true;
           }
@@ -677,8 +786,11 @@ export class LocalOperatorHttp {
             ? await web.api.listFolders(body)
             : path === "/api/operator/setup/verify-checkout"
               ? await web.api.verifyCheckout(body)
-              : await web.api.execute(body, this.reviewSession(session));
-        if (!this.currentSession(session)) {
+              : await web.api.execute(
+                  body,
+                  this.reviewSession(session, context),
+                );
+        if (!this.currentSession(session, context)) {
           deny(401, "unauthenticated");
           return true;
         }
@@ -725,7 +837,7 @@ export class LocalOperatorHttp {
           artifact[1] ?? "",
           artifact[2] ?? "",
         );
-        if (!this.currentSession(session)) {
+        if (!this.currentSession(session, context)) {
           deny(401, "unauthenticated");
           return true;
         }
@@ -743,16 +855,16 @@ export class LocalOperatorHttp {
         path,
         url.searchParams,
         url.search,
-        this.reviewSession(session),
+        this.reviewSession(session, context),
       );
-      if (!this.currentSession(session)) {
+      if (!this.currentSession(session, context)) {
         deny(401, "unauthenticated");
         return true;
       }
       if (data === undefined) deny(404, "not-found");
       else json(200, data);
     } catch (error) {
-      if (session?.authenticated && !this.currentSession(session)) {
+      if (session?.authenticated && !this.currentSession(session, context)) {
         deny(401, "unauthenticated");
         return true;
       }
@@ -767,6 +879,7 @@ export class LocalOperatorHttp {
     request: IncomingMessage,
     response: ServerResponse,
     url: URL,
+    context: { readonly loopback: boolean },
   ): Promise<void> {
     const path = url.pathname,
       method = request.method;
@@ -791,7 +904,7 @@ export class LocalOperatorHttp {
       token === undefined
         ? undefined
         : token.startsWith("cab_local_")
-          ? this.localAccess?.verify(token)
+          ? context.loopback && this.localAccess?.verify(token)
             ? this.localAccess.credential()
             : undefined
           : credentials.verify(token);

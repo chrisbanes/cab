@@ -148,3 +148,38 @@ test("the receipt settles only the exact frozen command", async () => {
   ])
     assert.equal(await receiptSettles(command, wrong), false);
 });
+
+test("comment receipts settle when browser subtle crypto is unavailable", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  const native = globalThis.crypto;
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { getRandomValues: native.getRandomValues.bind(native) },
+  });
+  try {
+    const command = {
+      taskId: "task-a",
+      key: "key-a",
+      body: 'Check "é"',
+      recipients: [],
+    };
+    const hash = materialDigest({
+      taskId: command.taskId,
+      body: command.body,
+      recipients: [],
+    });
+    assert.equal(await commentPayloadHash(command), hash);
+    assert.equal(
+      await receiptSettles(command, {
+        key: command.key,
+        taskId: command.taskId,
+        payloadHash: hash,
+        deliveries: [],
+      }),
+      true,
+    );
+  } finally {
+    if (original) Object.defineProperty(globalThis, "crypto", original);
+    else Reflect.deleteProperty(globalThis, "crypto");
+  }
+});

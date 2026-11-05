@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type CommandReceipt,
@@ -125,9 +126,9 @@ const labels: Record<
 };
 
 const newKeys = () => ({
-  reviewKey: crypto.randomUUID(),
-  operationId: crypto.randomUUID(),
-  confirmKey: crypto.randomUUID(),
+  reviewKey: randomUUID(),
+  operationId: randomUUID(),
+  confirmKey: randomUUID(),
 });
 
 /** Hands a run on to the app's durable release; see `useDraftReleases`. */
@@ -364,8 +365,8 @@ export function useIssueImprove({
   }, [run, runId, stored.edit, reset]);
 
   const start = async () => {
-    const id = crypto.randomUUID();
-    const key = crypto.randomUUID();
+    const id = randomUUID();
+    const key = randomUUID();
     const note = stored.note;
     setMessage("");
     setRun(null);
@@ -1101,15 +1102,12 @@ export function createIssueImprovePort(
     startRun: (input) =>
       send({ type: "issue.draft.start", ...input }, drafting),
     stopRun: (runId) =>
-      send(
-        { type: "drafting.stop", key: crypto.randomUUID(), runId },
-        drafting,
-      ),
+      send({ type: "drafting.stop", key: randomUUID(), runId }, drafting),
     settleRun: (runId, disposition) =>
       send(
         {
           type: "drafting.settle",
-          key: crypto.randomUUID(),
+          key: randomUUID(),
           runId,
           disposition,
         },

@@ -1,4 +1,5 @@
 import { TaskUnstack } from "./task-unstack.js";
+import { randomUUID } from "./browser-crypto.js";
 import { taskProjectReadOnly } from "./project-lifecycle-model.js";
 import { ApprovalReview } from "./approval-review.js";
 import { IssueChangedSinceHandback } from "./issue-change-notice.js";
@@ -1748,7 +1749,7 @@ export function TaskWorkspace({
       await command(state.frozen);
       return;
     }
-    const key = crypto.randomUUID();
+    const key = randomUUID();
     let input: OperatorCommand;
     if (destination === "comment") {
       if (commentBlocked) return;
@@ -2024,8 +2025,8 @@ export function TaskWorkspace({
             onClick={() =>
               void command({
                 type: "comment.review",
-                key: crypto.randomUUID(),
-                operationId: crypto.randomUUID(),
+                key: randomUUID(),
+                operationId: randomUUID(),
                 taskId,
                 expectedTaskVersion: data.task.version,
                 body: state.draft,
@@ -2043,7 +2044,7 @@ export function TaskWorkspace({
                 if (!review) return;
                 void command({
                   type: "comment.confirm",
-                  key: crypto.randomUUID(),
+                  key: randomUUID(),
                   taskId,
                   reviewId: review.reviewId,
                   expectedRevision: review.revision,
@@ -2624,7 +2625,7 @@ export function TaskWorkspace({
                           onClick={() =>
                             void command({
                               type: "review.view",
-                              key: crypto.randomUUID(),
+                              key: randomUUID(),
                               taskId,
                               sourceId: state.selectedSource
                                 ? (source?.sourceId ?? null)
@@ -2948,7 +2949,7 @@ export function TaskWorkspace({
             refresh={() =>
               void command({
                 type: "delivery.refresh",
-                key: crypto.randomUUID(),
+                key: randomUUID(),
                 taskId,
               })
             }

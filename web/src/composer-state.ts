@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import { z } from "zod";
 import {
   operatorCommandSchema,
@@ -337,9 +338,9 @@ export class ComposerState {
       }
       const command = creationSchema.parse({
         type: "task.create",
-        key: crypto.randomUUID(),
+        key: randomUUID(),
         projectId: this.input.projectId,
-        taskId: crypto.randomUUID(),
+        taskId: randomUUID(),
         title: validated.data.title,
         outcome,
         ready,
@@ -349,7 +350,7 @@ export class ComposerState {
         ...(this.input.profileId
           ? {
               initialAssignment: {
-                assignmentId: crypto.randomUUID(),
+                assignmentId: randomUUID(),
                 profileId: this.input.profileId,
               },
             }

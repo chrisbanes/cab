@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import type { z } from "zod";
 import {
   genericInvalidInputMessage,
@@ -435,7 +436,7 @@ export class ConfigurationDraft {
     this.values = {
       ...this.values,
       expectedVersion: String(version),
-      key: crypto.randomUUID(),
+      key: randomUUID(),
     };
     this.changed();
   }

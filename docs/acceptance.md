@@ -117,7 +117,7 @@ routing and accountability.
 | R01 | Codex App Server uses the existing operator login on macOS, including restart. Expired/unavailable login visibly holds affected work; no silent switch of agent execution to API credentials or billing. TypeSafe routing credentials are a separate opt-in integration. |
 | R02 | Defaults are four active turns globally and two per project; concurrent admission respects both. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
 | R03 | Sleep assertion exists only during active execution and releases when idle or supervision ends. Forced sleep/wake reconciles execution before more dispatch, without duplicates. |
-| R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. |
+| R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. Explicit LAN HTTP access retains those checks and sends credentials without TLS. |
 | R05 | Conversation history and durable operator messages survive restart. Duplicate submission does not duplicate delivery; the next eligible turn receives the message without bypassing holds. No live steering is exposed. |
 | R06 | Fresh standalone startup never reads or mutates the prototype database. Backup/restore preserves standalone records. Cutover records old active-work disposition before enabling competing work. |
 | R07 | Routing-enabled eligible task supplies its initial brief without a lead turn. Explicit permitted assignee bypasses TypeSafe; disabled projects allocate through the lead without API calls. Profile capabilities and project routing guidance are used; ineligible profiles cannot be selected and full transcripts/credentials are excluded. |
@@ -187,6 +187,18 @@ release or cutover gates. Preserve the task workspace behaviour. Recorded eviden
 | WI12 | Inspect a draft and send, retry a confirmed failure, or reconcile an uncertain submission | One logical review containing the exact comments and summary reaches the named accountable lead with a receipt. Confirmed failures preserve editable drafts; unknown outcomes retain the original operation for reconciliation without duplicate delivery. No GitHub call, approval, readiness/completion change, merge authority or hold release occurs. |
 | WI13 | Navigate among files, diffs and exact result evidence while drafting on desktop, phone and keyboard | Draft content and anchors survive navigation/refresh under session privacy rules. Sent feedback remains inspectable with its original context. Existing contextual feedback is preserved; no unrelated thread-resolution or retraction workflow is introduced. |
 
+### LAN operator access acceptance
+
+A disposable service with an explicitly configured non-loopback IPv4 address
+binds it and numeric loopback on one port. Browser sessions are origin-bound;
+scoped tokens retain their permissions and the local OS-account capability is
+rejected on LAN. A failed second bind releases the loopback listener and publishes
+no ready endpoint. Chromium and WebKit journeys exercise LAN sign-in, a comment,
+keyboard interaction, notification availability, independent sessions and restart;
+a same-host TLS proxy checks the shared-host cookie boundary. Offline host
+configuration has separate lifecycle coverage. These tests do not establish
+second-device routing.
+
 ### Local operator access acceptance
 
 Foreground qualification uses the real HTTP service and SQLite: no saved token
@@ -248,7 +260,7 @@ implementation and evidence remain unproved until the delivery slices qualify it
 
 | ID | Scenario | Required outcome |
 | --- | --- | --- |
-| CLI01 | Authenticate from the host and another privately connected machine; investigate a failed task | Packaged CLI uses the live service, exposes bound instructions and available runtime evidence, compares current settings and prepares a configuration diff. Remote transport verifies HTTPS; no direct database access or cross-origin credential forwarding. |
+| CLI01 | Authenticate from the host and another privately connected machine; investigate a failed task | Packaged CLI uses the live service, exposes bound instructions and available runtime evidence, compares current settings and prepares a configuration diff. Remote transport verifies HTTPS by default; a named token connection can explicitly consent to plaintext LAN HTTP. No direct database access or cross-origin credential forwarding. |
 | CLI02 | Provision credentials through the authenticated web UI, investigate with read-only credentials, attempt writes directly and through CLI, and expire/revoke credentials during follow | The browser/service journey creates and lists named credentials with scope, creation, expiry and last-use metadata, reveals the token once, rotates by issuing a replacement before revoking the old credential, and verifies revocation. Stored-token redisclosure is unavailable; the server retains only verification material. Every write route rejects read-only credentials, including legacy routes and reads with side effects. Expiry/revocation ends access during follow. Browser Origin/CSRF protections remain enforced; credentials cannot mint, extend or broaden authority. |
 | CLI03 | Apply reviewed configuration, race with an edit or assignment creation, lose the response, reuse a UUID in another command scope, restore old content and adopt current instructions | Exact material applies once; stale revisions and changed material conflict. The affected-assignment preview is labelled with its preparation-time observation; assignment creation alone does not invalidate apply, and a newly created assignment retains its bound revisions and may become stale or held. Persisted service/scope/UUID identity selects the intended receipt and exact retry without duplicate effects. Restoration creates a new revision; adoption is explicit for the next turn, never an active-turn rewrite. |
 | CLI04 | Answer questions, decide approvals, Stop/Resume and submit recovery through CLI and existing UI entry points | Shared material, version, policy and hold checks remain effective. Resume clears only operator Stop. Recovery rejects omitted or fabricated required assertions; staged external-comment operations retain review/confirm/send semantics. |

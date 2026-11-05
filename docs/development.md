@@ -220,8 +220,9 @@ Initialize a separate operator password with
 `CAB_OPERATOR_AUTH_FILE` and `CAB_OPERATOR_ORIGIN` before starting the
 `operator` command. Use the exact loopback origin (including port) for local
 access or an HTTPS origin for a separately managed private transport. Use a
-canonical origin without a trailing slash. The server still binds only to
-`127.0.0.1`; it does not configure Tailscale Serve.
+canonical origin without a trailing slash. The server binds to `127.0.0.1` by
+default; see [the macOS guide](operations/standalone-macos.md) for host service
+configuration. It does not configure Tailscale Serve.
 After starting `operator`, use the live service as the same OS account:
 
 ```sh
@@ -811,8 +812,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
    receipts remain durable and can be read back through the operation endpoint.
 
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
-`https://` origin for a separately managed private transport. Other `http:` URLs are
-rejected. Certificates are always verified; for a private CA set
+`https://` origin for a separately managed private transport. For a configured LAN
+listener, a token login can use `http://HOST:PORT` with `--allow-http`. Consent is
+saved only for that named connection. HTTP sends tokens without TLS; LAN browser
+passwords and cookies are also unencrypted. Certificates are always verified; for a private CA set
 `NODE_EXTRA_CA_CERTS`. Redirects are never followed, so a credential cannot reach
 another origin. Connections live in `connections.json` under
 `$CAB_CLI_CONFIG_DIR` (default `~/.config/cab`, directory `0700`, file
@@ -835,12 +838,13 @@ Troubleshooting:
   failing.
 - `managed-assignment` (exit 3): the command runs inside an agent turn, which must
   not use operator credentials.
-- For another machine, reach the service only through a private HTTPS route (for
-  example a tailnet-only route to the loopback port), log in there with the `https://`
-  origin and a token file, and trust a private CA with `NODE_EXTRA_CA_CERTS`.
+- For another machine, use a private HTTPS route and trust a private CA with
+  `NODE_EXTRA_CA_CERTS`, or explicitly opt a token connection into plaintext LAN
+  HTTP with `cab auth login --connection NAME --url http://HOST:PORT --allow-http --token-file PATH`.
+  See [the macOS guide](operations/standalone-macos.md) for host configuration.
 
 `npm run check` covers the CLI with injected fakes and a packed offline install
-against a real service over loopback and verified HTTPS. The Keychain test is
+against a real service over loopback, configured LAN HTTP and verified HTTPS. The Keychain test is
 opt-in on macOS: `npm run build && CAB_KEYCHAIN_LIVE=1 node --test
 dist/test/operations/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
 `cab-cli-test-<uuid>` item.

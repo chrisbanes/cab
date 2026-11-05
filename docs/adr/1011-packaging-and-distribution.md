@@ -85,6 +85,12 @@ and with no saved connection the CLI finds the installed service from its protec
 install record; `--access token` or `--token-file` keeps the explicit token setup, and
 upgrade readiness uses the selected connection's mode.
 
+Operator network settings live in `STATE/data.operator-network.json`, outside data
+snapshots and version trees. `cab service configure` reads and changes the saved
+setting offline; install accepts the same LAN options and preserves the file when
+omitted. Upgrade and uninstall retain it. Applying changes requires a restart; LAN
+HTTP carries credentials without TLS. See the [macOS operations guide](../operations/standalone-macos.md#optional-lan-access).
+
 Data, auth and snapshots stay under `~/Library/Application Support/cab/`, logs
 under `~/Library/Logs/cab/`, separate from the npm installation and development
 builds. `cab service uninstall` stops and removes the service while keeping that

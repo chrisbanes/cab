@@ -28,6 +28,9 @@ for (const engine of ["chromium", "webkit"] as const) {
           (engine === "webkit" ? webkit : chromium).launch(),
         );
         const page = await browser.newPage();
+        await page.addInitScript(() => {
+          Object.defineProperty(crypto, "randomUUID", { value: undefined });
+        });
         j.observe(page);
         const preview = {
           taskId,
@@ -338,6 +341,9 @@ for (const engine of ["chromium", "webkit"] as const) {
         (engine === "webkit" ? webkit : chromium).launch(),
       );
       const page = await browser.newPage();
+      await page.addInitScript(() => {
+        Object.defineProperty(crypto, "randomUUID", { value: undefined });
+      });
       j.observe(page);
       const pending = { command: null as { key: string } | null };
       let posts = 0;

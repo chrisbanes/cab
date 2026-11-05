@@ -269,3 +269,24 @@ test("a worker message opens only a same-origin /app/ address from this origin",
       JSON.stringify(event),
     );
 });
+
+test("endpoint digest remains available without subtle crypto", async () => {
+  const { createHash } = await import("node:crypto");
+  const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: {},
+  });
+  try {
+    const endpoint = "https://FCM.googleapis.com/fcm/send/abc";
+    assert.equal(
+      await endpointDigestOf(endpoint),
+      createHash("sha256")
+        .update("https://fcm.googleapis.com/fcm/send/abc")
+        .digest("hex"),
+    );
+  } finally {
+    if (original) Object.defineProperty(globalThis, "crypto", original);
+    else Reflect.deleteProperty(globalThis, "crypto");
+  }
+});

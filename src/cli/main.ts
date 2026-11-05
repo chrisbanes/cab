@@ -105,7 +105,7 @@ export const EXIT: Record<string, [number, string]> = {
 
 /** Login copy and defaults, kept together so the help layout can move them. */
 const AUTH_LOGIN_USAGE =
-  "auth login [--url ORIGIN] [--connection NAME] [--token-file PATH]";
+  "auth login [--url ORIGIN] [--connection NAME] [--allow-http] [--token-file PATH]";
 const DEFAULT_CONNECTION = "local";
 /** The loopback origin `service install` serves on by default. */
 const DEFAULT_ORIGIN = "http://127.0.0.1:8787";
@@ -246,7 +246,7 @@ const AREA_NOTES: Record<string, string[]> = {
 };
 
 const ORIGIN_NOTE =
-  "ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.";
+  "ORIGIN is https://HOST[:PORT], http://127.0.0.1:PORT, or http://HOST:PORT with --allow-http at token login. HTTP sends tokens without TLS.";
 
 const areasLine = () => `Areas: ${areaNames().join(", ")}`;
 /** What a usage error shows when no command or area could be recognised. */
@@ -331,6 +331,7 @@ export const OPTIONS = {
   connection: { type: "string" },
   url: { type: "string" },
   "token-file": { type: "string" },
+  "allow-http": { type: "boolean" },
   output: { type: "string" },
   help: { type: "boolean" },
   all: { type: "boolean" },
@@ -501,6 +502,15 @@ export async function main(
       deps.stdout.write(help);
       return 0;
     }
+    if (
+      values["allow-http"] &&
+      positionals.slice(0, 2).join(" ") === "auth login" &&
+      (values.local || !values.url)
+    )
+      throw new CliError(
+        "usage",
+        "--allow-http requires a token login with --url.",
+      );
     if (
       values.local &&
       (values.url !== undefined || values["token-file"] !== undefined)
@@ -989,8 +999,12 @@ export function operatorConnection(
     async origin() {
       rejectManaged(deps.env);
       const { name, connection } = await select();
+      const origin = connectionOrigin(
+        connection.url,
+        "allowHttp" in connection && connection.allowHttp,
+      );
       await loadToken(name, connection, deps);
-      return connection.url;
+      return origin;
     },
     async readiness(signal) {
       // Every request of this read, identity included, aborts with the lifecycle wait.
@@ -1084,6 +1098,7 @@ async function selectConnection(
   if (deps.forceLocal || fallback) return localSelection(deps, managed);
   const selected = config.select(current, requested);
   if (selected.connection.credential?.kind === "local") {
+    connectionOrigin(selected.connection.url, selected.connection.allowHttp);
     const material = await localMaterial(
       selected.connection.credential.state,
       deps,
@@ -1120,15 +1135,11 @@ async function connectSelected(
   deps: CliDeps,
   capabilities: readonly string[],
 ) {
+  const origin = connectionOrigin(connection.url, connection.allowHttp);
   const token = await loadToken(name, connection, deps);
   const accessMode =
     connection.credential?.kind === "local" ? "local" : "token";
-  const client = new ServiceClient(
-    connectionOrigin(connection.url),
-    token,
-    deps.fetch,
-    deps.signal,
-  );
+  const client = new ServiceClient(origin, token, deps.fetch, deps.signal);
   let identity: CliIdentity;
   try {
     identity = await client.identity(capabilities);
@@ -1242,8 +1253,10 @@ export async function saveLogin(
   token: string,
   tokenFile: string | undefined,
   signal?: AbortSignal,
+  allowHttp?: true,
 ) {
   // Validate before storing anything.
+  connectionOrigin(origin, allowHttp);
   const identity = await new ServiceClient(
     origin,
     token,
@@ -1268,6 +1281,7 @@ export async function saveLogin(
   current.connections[name] = {
     url: origin,
     installationId: identity.service.installationId,
+    ...(allowHttp ? { allowHttp } : {}),
     credential: tokenFile
       ? { kind: "token-file", path: tokenFile }
       : { kind: "keychain", account: name },
@@ -1380,7 +1394,7 @@ export function installCli(deps: CliDeps): InstallCli {
 
 async function login(
   config: ConnectionConfig,
-  values: Values,
+  values: Values & { "allow-http"?: boolean },
   deps: CliDeps,
 ): Promise<Result> {
   const requested = values.connection ?? deps.env.CAB_CONNECTION;
@@ -1394,7 +1408,7 @@ async function login(
     );
   if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
-  const origin = connectionOrigin(values.url);
+  const origin = connectionOrigin(values.url, values["allow-http"]);
   // A name nobody chose must not quietly re-point a connection that exists, add a second
   // connection for a service that already has one, or leave several connections with no
   // default (every later command would then fail `connection-ambiguous`). It never
@@ -1460,6 +1474,8 @@ async function login(
     origin,
     token,
     tokenFile,
+    undefined,
+    values["allow-http"] || undefined,
   );
   return {
     connection: name,

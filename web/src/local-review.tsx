@@ -1,3 +1,4 @@
+import { randomUUID } from "./browser-crypto.js";
 import {
   createContext,
   useCallback,
@@ -393,7 +394,7 @@ function useLocalReviewController({
     expectedDraftVersion: number,
   ) => ({
     type: "review.draft.save" as const,
-    key: crypto.randomUUID(),
+    key: randomUUID(),
     taskId,
     expectedDraftVersion,
     draft: content,
@@ -474,7 +475,7 @@ function useLocalReviewController({
                 comments: [
                   ...draft.draft.comments,
                   {
-                    commentId: crypto.randomUUID(),
+                    commentId: randomUUID(),
                     body: intent.body,
                     anchorGroupIds: [result.receipt.groupId],
                   },
@@ -650,7 +651,7 @@ function useLocalReviewController({
       await write(
         {
           type: "review.anchor.stage",
-          key: crypto.randomUUID(),
+          key: randomUUID(),
           taskId,
           expectedDraftVersion: draft.version,
           anchors: [composer.anchor],
@@ -745,7 +746,7 @@ function useLocalReviewController({
         return;
       state.notice = null;
       const send: LocalReviewSend = {
-        key: crypto.randomUUID(),
+        key: randomUUID(),
         expectedDraftVersion: draft.version,
         recipientAssignmentId: lead.assignmentId,
         expectedAssignmentVersion: lead.version,
@@ -799,7 +800,7 @@ function useLocalReviewController({
       await write(
         {
           type: "review.draft.discard",
-          key: crypto.randomUUID(),
+          key: randomUUID(),
           taskId,
           expectedDraftVersion: draft.version,
         },
