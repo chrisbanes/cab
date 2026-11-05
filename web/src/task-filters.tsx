@@ -104,11 +104,25 @@ export function TaskToolbar({
           : `${count} task${count === 1 ? "" : "s"}`}
     </p>
   );
-  const resetButton = activeFilterCount(filters, projectId) > 0 && (
-    <Button variant="secondary" className="work-reset" onClick={reset}>
-      Reset filters
-    </Button>
-  );
+  const resetButton =
+    activeFilterCount(filters, projectId) > 0 ? (
+      <Button variant="secondary" className="work-reset" onClick={reset}>
+        Reset filters
+      </Button>
+    ) : (
+      // The default view hides drafts and finished work; an empty one would otherwise dead-end.
+      loaded &&
+      count === 0 &&
+      total > 0 && (
+        <Button
+          variant="secondary"
+          className="work-reset"
+          onClick={() => update({ state: "all", ready: "any" })}
+        >
+          Show all tasks
+        </Button>
+      )
+    );
   const refreshButton = (
     <Button
       variant="secondary"

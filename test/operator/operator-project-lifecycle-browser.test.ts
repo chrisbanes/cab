@@ -61,6 +61,20 @@ for (const engine of ["chromium", "webkit"] as const) {
       await panel
         .getByRole("button", { name: "Restore project", exact: true })
         .waitFor();
+      // The danger zone ends the page; configuration comes first.
+      assert.equal(
+        await panel.evaluate((element) => {
+          const general = [...document.querySelectorAll("main h2")].find(
+            (h) => h.textContent?.trim() === "General",
+          );
+          return Boolean(
+            general &&
+              general.compareDocumentPosition(element) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        }),
+        true,
+      );
       await panel
         .getByRole("button", { name: "Restore project", exact: true })
         .click();

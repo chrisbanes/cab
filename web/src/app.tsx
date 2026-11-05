@@ -494,6 +494,14 @@ function pushAppEntry(href: string, navigationScope: string) {
     href,
   );
 }
+/** Names the tab and history entry by route; task and project names stay out of the title. */
+function DocumentTitle({ title }: { title: string }) {
+  useEffect(() => {
+    document.title = `${title} · cab`;
+  }, [title]);
+  return null;
+}
+
 export function App() {
   const drafts = useRef(new ConfigurationDrafts());
   // Re-renders the shell, so the open page re-binds a draft the shell started.
@@ -1099,6 +1107,9 @@ export function App() {
                 </ActionLink>
               )
             }
+          />
+          <DocumentTitle
+            title={settingsPage?.documentTitle ?? (project ? "Project" : title)}
           />
           <main className={onInboxRoute ? "page page-inbox" : "page"}>
             {!inboxOwnsHeader && (

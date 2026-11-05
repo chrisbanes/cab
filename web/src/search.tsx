@@ -277,7 +277,11 @@ export function Search({
         Searches saved excerpts, not full agent transcripts.
       </p>
       {query && (
-        <ResourceStatus state={resource.state} retry={resource.refresh} />
+        <ResourceStatus
+          state={resource.state}
+          retry={resource.refresh}
+          label="Search results"
+        />
       )}
       {!query && <p>Enter a phrase to search across projects.</p>}
       {query && resource.state.error && data && (

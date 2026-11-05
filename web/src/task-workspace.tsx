@@ -680,18 +680,14 @@ export function TaskWorkspace({
   }, [resource.state.data, resource.state.error, resource.state.status]);
 
   /**
-   * On Overview the bottom is the newest conversation entry with the composer beneath it: the
-   * composer is docked on a wide screen and ends the page on a phone. How far the page must
-   * scroll to get there is positive when the newest entry or the composer is below the view.
+   * On Overview the bottom is the newest conversation entry in view; the composer follows it in
+   * the page. How far the page must scroll to get there is positive when the newest entry is
+   * below the view.
    */
   const toBottom = () => {
-    const end = document.getElementById("conversation-end"),
-      composer = document.getElementById("reply");
-    if (state.tab === "overview" && end && composer) {
-      const e = end.getBoundingClientRect(),
-        c = composer.getBoundingClientRect();
-      return Math.max(e.bottom - c.top, c.bottom - innerHeight);
-    }
+    const end = document.getElementById("conversation-end");
+    if (state.tab === "overview" && end)
+      return end.getBoundingClientRect().bottom - innerHeight;
     return document.documentElement.scrollHeight - innerHeight - scrollY;
   };
   // Scrolled past the conversation, into the inspector, the operator is reading elsewhere.
@@ -1422,7 +1418,11 @@ export function TaskWorkspace({
   if (!data)
     return (
       <section>
-        <ResourceStatus state={resource.state} retry={refreshAll} />
+        <ResourceStatus
+          state={resource.state}
+          retry={refreshAll}
+          label="Task"
+        />
         <p>
           Task material is unavailable. Exact historical targets are not
           replaced with current records.
@@ -2141,7 +2141,11 @@ export function TaskWorkspace({
       }
     >
       <article className="task-workspace" aria-label="Task workspace">
-        <ResourceStatus state={resource.state} retry={refreshAll} />
+        <ResourceStatus
+          state={resource.state}
+          retry={refreshAll}
+          label="Task"
+        />
         {projectReadOnly && (
           <p role="status">
             {data.project?.archived

@@ -293,6 +293,12 @@ for (const viewport of viewports)
       .getByRole("heading", { name: "Overview", exact: true })
       .waitFor();
     assert.equal(new URL(page.url()).pathname, "/app");
+    assert.equal(await page.title(), "Overview · cab");
+
+    // A well-formed address for a task that does not exist names the task, not projects.
+    await page.goto(`${web.origin}/app/tasks/${randomUUID()}`);
+    await page.getByText("Task not found.", { exact: true }).waitFor();
+    assert.equal(await page.title(), "Task · cab");
 
     // Signed in, /login lands on Overview.
     await page.goto(`${web.origin}/login`);

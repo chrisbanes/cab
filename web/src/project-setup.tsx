@@ -750,9 +750,10 @@ export function ProjectSetup(
                 {(starterOffered ||
                   (inline.frozen?.type === "profile.create" &&
                     inline.frozen.starter)) && (
-                  <label className="metadata">
+                  <label className="metadata check-field">
                     <input
                       type="checkbox"
+                      className="native-check"
                       checked={inline.values.starter === true}
                       disabled={locked(inline)}
                       onChange={(e) => inline.set("starter", e.target.checked)}
