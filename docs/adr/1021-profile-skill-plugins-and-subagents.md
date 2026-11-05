@@ -19,7 +19,9 @@ a subagent under Stop, and a crash during a subagent; the
 skills and a Codex turn running its profile's skill.
 
 The plugin layouts and load scope below are implemented for local plugin directories
-([#1524](https://github.com/chrisbanes/cab/issues/1524)). Not yet implemented: installed
+([#1524](https://github.com/chrisbanes/cab/issues/1524)); the
+[layout journey record](../evidence/skill-plugin-layout-journeys-2026-11-05.md) shows a
+nested skill of `mattpocock-skills` running on each harness. Not yet implemented: installed
 plugins as a profile source (profiles still name local directories only;
 [#1525](https://github.com/chrisbanes/cab/issues/1525)).
 

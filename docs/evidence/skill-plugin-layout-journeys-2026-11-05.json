@@ -1,0 +1,184 @@
+[
+  {
+    "facet": "claude-nested-skill",
+    "attempt": 1,
+    "candidate": "79355e0f0aa5132394ef91cd628c56b7e1c0200e",
+    "node": "v26.13.0",
+    "sdk": "0.3.316",
+    "claudeCode": "2.1.316",
+    "codex": {
+      "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+      "version": "codex-cli 0.166.0-alpha.6"
+    },
+    "model": {
+      "claude": "haiku",
+      "reasoningEffort": "low"
+    },
+    "stage": "run",
+    "outcome": "passed",
+    "failure": null,
+    "observations": {
+      "skill": "grilling",
+      "skillDirectory": "skills/productivity/grilling",
+      "nested": true,
+      "treeOverWholeTreeLimit": true,
+      "treeFiles": 1825,
+      "treeLinks": 10,
+      "profileFieldErrors": [],
+      "reportedPhraseMatched": true,
+      "turnPlugins": [
+        {
+          "name": "mattpocock-skills",
+          "skills": [
+            "grilling"
+          ],
+          "digest": "63115930ce563141745f20d4d6e0ddeedc2bf0b6be13595ca090db7797a6580f"
+        }
+      ],
+      "digestMatchesDirectory": true
+    },
+    "startTurn": {
+      "turns": 1,
+      "refused": []
+    },
+    "processes": [
+      {
+        "label": "codex-app-server (before token)",
+        "exitedByItself": true,
+        "verification": "verified"
+      },
+      {
+        "label": "claude-cli",
+        "exitedByItself": true,
+        "verification": "verified"
+      },
+      {
+        "label": "codex-app-server",
+        "exitedByItself": true,
+        "verification": "verified"
+      }
+    ],
+    "trace": [],
+    "cleanup": {
+      "serviceStopped": true,
+      "temporaryBases": [
+        "removed"
+      ],
+      "rootRemoved": true
+    },
+    "claudeCli": {
+      "services": 1,
+      "spawns": 2,
+      "version": "2.1.318 (Claude Code)",
+      "fromPath": true,
+      "bundled": false,
+      "executableDirectory": "/opt/homebrew/bin"
+    },
+    "budget": {
+      "attempt": {
+        "number": 1,
+        "model": "haiku",
+        "startedAt": 1793886411133,
+        "turns": {
+          "claude": 1,
+          "codex": 0
+        },
+        "outcome": "passed",
+        "failureKind": null
+      },
+      "totals": {
+        "claude": 1,
+        "codex": 0
+      }
+    }
+  },
+  {
+    "facet": "codex-nested-skill",
+    "attempt": 1,
+    "candidate": "79355e0f0aa5132394ef91cd628c56b7e1c0200e",
+    "node": "v26.13.0",
+    "sdk": "0.3.316",
+    "claudeCode": "2.1.316",
+    "codex": {
+      "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+      "version": "codex-cli 0.166.0-alpha.6"
+    },
+    "model": {
+      "claude": "haiku",
+      "reasoningEffort": "low"
+    },
+    "stage": "run",
+    "outcome": "passed",
+    "failure": null,
+    "observations": {
+      "skill": "grilling",
+      "skillDirectory": "skills/productivity/grilling",
+      "nested": true,
+      "treeOverWholeTreeLimit": true,
+      "treeFiles": 1825,
+      "treeLinks": 10,
+      "profileFieldErrors": [],
+      "reportedPhraseMatched": true,
+      "turnPlugins": [
+        {
+          "name": "mattpocock-skills",
+          "skills": [
+            "grilling"
+          ],
+          "digest": "63115930ce563141745f20d4d6e0ddeedc2bf0b6be13595ca090db7797a6580f"
+        }
+      ],
+      "digestMatchesDirectory": true,
+      "loginLinkIntact": true
+    },
+    "startTurn": {
+      "turns": 1,
+      "refused": []
+    },
+    "processes": [
+      {
+        "label": "codex-app-server (before token)",
+        "exitedByItself": true,
+        "verification": "verified"
+      },
+      {
+        "label": "claude-cli",
+        "exitedByItself": true,
+        "verification": "verified"
+      }
+    ],
+    "trace": [],
+    "cleanup": {
+      "serviceStopped": true,
+      "temporaryBases": [
+        "removed"
+      ],
+      "rootRemoved": true
+    },
+    "claudeCli": {
+      "services": 1,
+      "spawns": 0,
+      "version": null,
+      "fromPath": false,
+      "bundled": false,
+      "executableDirectory": null
+    },
+    "budget": {
+      "attempt": {
+        "number": 1,
+        "model": "haiku",
+        "startedAt": 1793886435234,
+        "turns": {
+          "claude": 0,
+          "codex": 1
+        },
+        "outcome": "passed",
+        "failureKind": null
+      },
+      "totals": {
+        "claude": 1,
+        "codex": 1
+      }
+    }
+  }
+]
