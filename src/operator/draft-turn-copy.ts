@@ -5,7 +5,7 @@ export const draftTurnUnavailableMessages: Record<DraftTurnReason, string> = {
   "task-not-open": "task is Done or Cancelled",
   "task-ready": "task is Ready",
   "lead-unconfigured": "the project has no project lead",
-  "lead-revoked": "the project lead's profile is revoked",
+  "lead-revoked": "the project lead is revoked",
   "lead-unavailable": "the project lead has started, is held or has completed",
   "draft-turn-active":
     "a draft turn for this task is already queued, held or running",

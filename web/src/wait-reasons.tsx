@@ -145,7 +145,7 @@ function HoldList({
                 >
                   {assignments.length === 1
                     ? "Recovery evidence"
-                    : `${a.name ?? "Profile name unavailable"}: recovery evidence`}
+                    : `${a.name ?? "Agent name unavailable"}: recovery evidence`}
                 </a>
               ))
             )}

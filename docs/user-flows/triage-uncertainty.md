@@ -31,7 +31,7 @@ Recovery that releases a generation needs the evidence-bearing operations whose
    held and offers Inspect execution. It shows no last-observed time.
 2. Inspect execution opens the task's decision card, where each hold line links
    the assignment recovery page: "Recovery evidence" for one assignment,
-   "<profile>: recovery evidence" for each of several, or "Execution details"
+   "<agent>: recovery evidence" for each of several, or "Execution details"
    for a task with no assignment. The page shows the holds grid, the held
    generation with its last observation, and the next supported step.
 3. Older generations in the same state are collapsed under one line with a count.
@@ -50,7 +50,7 @@ beside the state:
 - Home "Needs you" card: **Start again** in the card.
 - `cab task start-again TASK_ID --expected-version N`.
 
-Start again re-captures the request at the current task, profile and instructions
+Start again re-captures the request at the current task, agent and instructions
 revisions and queues it under every current admission check, in the same workspace.
 The refused request and its refusal stay in the history, and nothing is sent to the
 lead. It is one interaction at each entry point and sends exactly one command.

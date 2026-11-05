@@ -53,7 +53,7 @@ export const draftTurnUnavailableNotice = (
       "This task is Ready, so the ordinary Message lead reply is shown instead.",
     "task-not-open": `Draft turns need an open task.${taskState === "done" ? " This task is Done." : taskState === "cancelled" ? " This task is Cancelled." : ""}`,
     "lead-unconfigured": "Draft turns need a project lead.",
-    "lead-revoked": `${name}’s profile is revoked.`,
+    "lead-revoked": `${name} is revoked.`,
     "lead-unavailable": `${name} has started, is held or has completed, so a draft turn can’t start.`,
     "draft-turn-active":
       "A draft turn is already queued, held or running. Start another when it ends.",

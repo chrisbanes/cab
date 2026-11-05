@@ -167,7 +167,7 @@ test("admission and revision staleness wording", () => {
   } as TaskRead["data"]["assignments"][number];
   assert.deepEqual(staleRevisions(row), []);
   assert.deepEqual(staleRevisions({ ...row, currentProfileRevision: 3 }), [
-    "profile 2 → 3",
+    "agent 2 → 3",
   ]);
   assert.deepEqual(staleRevisions({ ...row, currentInstructionsRevision: 2 }), [
     "instructions 1 → 2",
@@ -223,7 +223,7 @@ test("recovery presents lifecycle, destination and revisions without implying ad
   const stale = recoveryAssignmentFacts(row);
   assert.match(stale.lifecycle, /pending.*does not confirm admission/);
   assert.equal(stale.destination, "Unavailable");
-  assert.match(stale.revisions, /instructions 1 → 2.*profile 1 → 2.*next turn/);
+  assert.match(stale.revisions, /instructions 1 → 2.*agent 1 → 2.*next turn/);
   assert.equal(stale.canInspectApply, true);
   const current = recoveryAssignmentFacts({
     ...row,

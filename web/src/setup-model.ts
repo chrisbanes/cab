@@ -305,7 +305,7 @@ export function readyCheckItems(input: {
     );
     if (!lead)
       items.push({
-        text: "No lead profile. Tasks wait for a lead before starting.",
+        text: "No lead agent. Tasks wait for a lead before starting.",
       });
     else {
       const harness = lead.runtime.harness;
@@ -334,9 +334,9 @@ export function readyCheckItems(input: {
         unsupportedRuntimeField(lead.runtime, status.settings)
       )
         items.push({
-          text: `${executionHarnessLabels[harness]} runtime doesn't accept the lead profile's model or reasoning effort.`,
+          text: `${executionHarnessLabels[harness]} runtime doesn't accept the lead agent's model or reasoning effort.`,
           link: {
-            label: "Edit profile",
+            label: "Edit agent",
             href: `/app/profiles/${lead.id}/settings`,
           },
         });
@@ -513,7 +513,7 @@ export function sourceCredentialLine(
   };
 }
 
-/** The phases a setup draft (the project or the inline lead profile) moves through. */
+/** The phases a setup draft (the project or the inline lead agent) moves through. */
 export type SetupDraftPhase =
   | "editing"
   | "pending"
@@ -527,7 +527,7 @@ export type SetupDraftPhase =
  * what the form shows. Create is always drawn; a hold only makes it `aria-disabled` with
  * this reason. The first row that applies wins:
  *
- * | project draft | inline lead profile                           | Create                        |
+ * | project draft | inline lead agent                           | Create                        |
  * | ------------- | --------------------------------------------- | ----------------------------- |
  * | pending       | any                                           | held: creating the project    |
  * | unknown       | any                                           | held: check the project first |
@@ -546,7 +546,7 @@ export type SetupDraftPhase =
  */
 export function createHold(state: {
   project: SetupDraftPhase;
-  /** The inline lead profile form is on the page. */
+  /** The inline lead agent form is on the page. */
   profileForm: boolean;
   profile: SetupDraftPhase;
   profileName: string;
@@ -557,11 +557,11 @@ export function createHold(state: {
   if (state.project === "recorded") return "The project is already created.";
   if (!state.profileForm) return null;
   if (state.profile === "pending")
-    return "Wait for the lead profile to be created.";
+    return "Wait for the lead agent to be created.";
   if (state.profile === "unknown")
-    return "Check whether the lead profile was saved first.";
+    return "Check whether the lead agent was saved first.";
   if (state.profile !== "recorded" && state.profileName.trim())
-    return "Create the lead profile first, or clear its name.";
+    return "Create the lead agent first, or clear its name.";
   return null;
 }
 

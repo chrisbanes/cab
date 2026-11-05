@@ -1,6 +1,6 @@
 # Action feedback
 
-**Status:** implemented for configuration saves in Settings (projects, profiles,
+**Status:** implemented for configuration saves in Settings (projects, agents,
 routing, GitHub source, sync preview and placement, discovery credential, Claude
 token, capacity and project setup) and for the task-side writes: the task composer,
 question answers, replies, comment review, local review, sign-out, CLI credentials
@@ -17,7 +17,7 @@ that says what happened and what, if anything, to do next.
 
 ## Applies to
 
-Every write in the operator UI: configuration saves (projects, profiles, routing,
+Every write in the operator UI: configuration saves (projects, agents, routing,
 sources, sync preview and placement, discovery credential, Claude token, CLI
 credentials, capacity, recovery), project setup, the task composer, task Stop and
 Resume, question answers, approvals, replies, comment review, local review and
@@ -79,7 +79,7 @@ means.
 
 ## Wording
 
-- Name what changed in the operator's terms: project, profile, repository, task.
+- Name what changed in the operator's terms: project, agent, repository, task.
 - Avoid service vocabulary in messages: recorded, receipt, observation, admission,
   reconcile, submission, revision. Numeric versions, IDs, command names and codes
   appear only in Details; plain "version" is fine ("A newer version was saved

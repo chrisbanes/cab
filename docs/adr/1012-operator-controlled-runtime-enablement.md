@@ -5,7 +5,7 @@ status: accepted
 # Let the operator enable and disable each execution runtime
 
 The service ran every production runtime and required Codex: it refused to start
-without Codex, and profiles defaulted to it. An operator who uses only one runtime
+without Codex, and agents defaulted to it. An operator who uses only one runtime
 still saw the other's readiness checks and alerts. Delivery scope lives in
 [#989](https://github.com/chrisbanes/cab/issues/989).
 
@@ -13,7 +13,7 @@ still saw the other's readiness checks and alerts. Delivery scope lives in
 
 - Each execution runtime (Codex, Claude) has an installation-wide enabled setting,
   persisted with the installation's other settings. A missing setting means enabled,
-  so upgrades keep their behaviour. Profiles still choose their runtime; this setting
+  so upgrades keep their behaviour. Agents still choose their runtime; this setting
   decides whether the installation runs it at all.
 - Any runtime may be disabled, including all of them. No runtime is required: the
   service starts with none enabled, and a runtime that fails to start, Codex included,
@@ -25,7 +25,7 @@ still saw the other's readiness checks and alerts. Delivery scope lives in
 - Enabling is refused while the runtime's binary does not resolve on the service
   `PATH`. A binary that resolves but fails to start is saved as enabled and reported
   unavailable.
-- New profiles default to the first enabled runtime in the order Codex, Claude, and
+- New agents default to the first enabled runtime in the order Codex, Claude, and
   to Codex when none is enabled.
 - Readiness fails when no runtime is enabled. A disabled runtime's own checks report
   not configured, never fail, and raise no destructive alert.

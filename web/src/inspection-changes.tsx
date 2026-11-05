@@ -915,7 +915,7 @@ export function TaskWorkspaceChanges({
                 )}
                 <p className="changes-provenance">
                   {snapshot.target === "turn"
-                    ? `Last turn · work ${snapshot.workId} · assignment ${snapshot.assignmentId} · profile ${snapshot.profileId}`
+                    ? `Last turn · work ${snapshot.workId} · assignment ${snapshot.assignmentId} · agent ${snapshot.profileId}`
                     : `Current workspace · repository ${snapshot.repositoryId ? repositoryName(snapshot.repositoryId) : snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline ? shortId(snapshot.baseline.commit) : ""}`}
                 </p>
                 {state.selection && (

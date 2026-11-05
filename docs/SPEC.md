@@ -39,11 +39,11 @@ historical BB record import is outside the first release.
 
 Agent instructions determine how to plan, implement, review and revise work.
 Those activities are not required stages or assignment types. Projects contain
-optional linked repositories, reusable profiles, instructions and permissions.
+optional linked repositories, reusable agents, instructions and permissions.
 The project lead is accountable for every task outcome, using a separate
-conversation per task with the same lead profile. There is no separate task-owner
+conversation per task with the same lead agent. There is no separate task-owner
 role. Assignees execute work and may delegate concurrent assignments. Agents may
-select permitted profiles but cannot create profiles or expand project authority.
+select permitted agents but cannot create agents or expand project authority.
 
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
@@ -103,9 +103,9 @@ other installation. `cab service install` uses local access by default, minting 
 token, and keeps an explicit `--access token` / `--token-file` setup; doctor and
 upgrade readiness use the selected connection's mode. Settings issues, lists, rotates and revokes CLI credentials,
 and the packaged `cab` executable supports `auth login|status|logout`,
-`connection list|use|remove`, project and profile list/get/instructions/revisions,
+`connection list|use|remove`, project and `profile` list/get/instructions/revisions,
 task list/search/get/messages, assignment get/history/instructions, result
-list/get/evidence and artifact get. Supported profile, project, routing and
+list/get/evidence and artifact get. Supported agent, project, routing and
 capacity configuration is changed through prepared, digest-bound change documents
 applied once by request key; `assignment apply-current` adopts current instructions
 for the next turn, and `operation get` reads configuration and adoption receipts
@@ -152,7 +152,7 @@ lifecycle, command semantics and required acceptance evidence.
 ## First local-task journey
 
 The operator opens cab, creates a project, links optional repositories,
-configures profiles and permissions, and creates a task with an expected outcome.
+configures agents and permissions, and creates a task with an expected outcome.
 New projects start paused; new tasks start unready. Create and start may mark a
 task Ready, but cannot bypass project pause. Enablement admits eligible work.
 
@@ -176,15 +176,15 @@ Routing is optional per project and part of the first standalone release. It
 requires explicit project opt-in and configured TypeSafe credentials. The service
 calls TypeSafe directly, with no PA agent turn. Supply the assignment brief,
 relevant supplied findings, candidate descriptions and operator-written project
-routing guidance; exclude credentials and full transcripts. Profile capabilities
+routing guidance; exclude credentials and full transcripts. Agent capabilities
 and project guidance define suitability, not required development stages.
 
 The service filters candidates by explicit eligibility and permissions. Route a
-new assignment when no assignee was specified; honor an explicit permitted profile
+new assignment when no assignee was specified; honor an explicit permitted agent
 selection without invoking TypeSafe. Routing does not authorize execution or grant
 readiness. Recheck all admission controls before starting work. Select for fit,
-then queue for capacity; do not substitute another profile merely because the
-selected profile is busy. An in-scope repair retains its assignee and profile;
+then queue for capacity; do not substitute another agent merely because the
+selected agent is busy. An in-scope repair retains its assignee and agent;
 reassignment is explicit, rather than automatic routing on every follow-up.
 
 Missing routing context, uncertain recommendations, no suitable candidate or
@@ -223,7 +223,7 @@ record its own membership without rewriting the archived owner's task or brief.
 
 Deletion is archived-only, irreversible and addressed by project ID. It requires the
 exact current display name and a version/digest-bound ownership and cleanup preview.
-Remove all owned records atomically while preserving shared profiles, installation
+Remove all owned records atomically while preserving shared agents, installation
 and authentication state, provider identity exceptions and private redaction values.
 Capture minimal worktree, Claude temporary-directory and qualified cab-home Codex
 thread cleanup identities before removing their source rows. Postcommit cleanup is
@@ -539,7 +539,7 @@ inbox event, wakes no assignment and does not block `cab_report_result`: the lea
 on its next turn, whatever starts that turn. A routed or delegated assignment keeps the
 brief its lead wrote and is not told, and does not receive the issue brief. An Improve draft turn queued before an edit is
 refused, and `issue.edit` keeps its expected-text guard. An assignment that has never
-started a turn shows no instructions or profile staleness wait, since its first turn takes
+started a turn shows no instructions or agent staleness wait, since its first turn takes
 both as they are then.
 
 After the lead hands work back (a completion request, or a reported result settled by its
@@ -646,7 +646,7 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. Codex gets plugin skills only from its profile's plugins, as
+installation are disabled. Codex gets plugin skills only from its agent's plugins, as
 skill directories, including plugins installed in Claude Code or Codex. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
@@ -689,12 +689,12 @@ Silence flags attention, not automatic restart or termination.
 
 Each assignment has durable identity independent of its conversation. Follow-up
 retains history with a new work revision; stale results cannot complete newer work.
-An assignment takes the current instructions and profile revisions when its first
+An assignment takes the current instructions and agent revisions when its first
 turn is admitted. Once any turn has started for it, it retains those revisions until
 an explicit apply for its next turn. Permission
 revocations apply to subsequent actions regardless of snapshots.
 
-A turn's input carries the project and profile instructions only when its thread has
+A turn's input carries the project and agent instructions only when its thread has
 not received that revision: the first turn on a thread, including a new thread after
 conversation replacement or recovery, or a resumed turn whose bound revision differs
 from the one the predecessor turn ran with. A changed revision is sent once, stated
@@ -704,7 +704,7 @@ instruction segment not sent. A turn that resumes an interrupted predecessor, wh
 prompt, sends both again as replacements. Instructions travel as user input on both harnesses, not as Codex
 developer instructions or Claude's system prompt: Codex native-input qualification
 pins the thread's developer instructions, so changing them disqualifies the thread,
-and a conversation keeps its harness across a profile switch. Limit: a runtime's own
+and a conversation keeps its harness across an agent switch. Limit: a runtime's own
 history compaction may summarise earlier instructions; cab resends them only when
 a revision changes or a conversation gets a new thread.
 
@@ -720,7 +720,7 @@ work, inbox deliveries and PR waits to settle. A result addressed to its own
 assignment creates no redundant inbox event. Task completion still goes through the
 lead's separate completion request and all its gates. Failed or uncertain turns
 keep their ownership holds regardless of a saved result. Each assignment turn
-receives its current cab identities, permitted profile IDs and summaries, and public
+receives its current cab identities, permitted agent IDs and summaries, and public
 delivery policy; that context grants no additional permission and tool admission
 rechecks the current policy.
 
@@ -740,7 +740,7 @@ fresh operator message through the existing task inbox. The original held reques
 intent and refusal remain immutable history; no replacement initial request is created
 automatically. The fresh inbox work captures the current task revision and includes its
 current title/outcome (a lead's turn carries it in place of its brief; a delegated
-assignment's alongside its preserved brief) and instruction/profile snapshots. Current admission, permissions, dependency, Stop and execution/effect holds
+assignment's alongside its preserved brief) and instruction/agent snapshots. Current admission, permissions, dependency, Stop and execution/effect holds
 still apply. Runtime identity, writer admission, capacity reservation, recovery
 identity, pending effects or a Stop target disqualify the historical refusal exemption.
 Any initial inbox batch stays bound unless the existing narrow stale-delivery withdrawal
@@ -757,7 +757,7 @@ batch without replaying its events; task and assignment message views identify t
 as `operator-reconciled`, distinct from successful runtime delivery. Message replay,
 provider feedback and settlement cannot create or retarget that authority. Every
 admission, completion and external completion action rechecks the audit and exact
-recovered-generation proof, while current project/profile/dependency/permission and
+recovered-generation proof, while current project/agent/dependency/permission and
 Stop gates remain in force. Late callbacks or known survivors after a recorded
 continuation persist an uncertainty hold and retract admitted successors; ending the
 callback or restarting does not clear that hold. The recovery receipt, old intent and
@@ -1070,15 +1070,15 @@ reasons for any wait after submission; creation does not imply running. Task
 detail, Inbox and the operator CLI list the same wait reasons in one fixed order,
 the first primary. Where the operator can clear a wait (paused project, missing or
 revoked project lead, unavailable runtime, unreadable Claude token, unconfigured
-profile runtime), the reason carries a Fix that performs that one action: Resume
+agent runtime), the reason carries a Fix that performs that one action: Resume
 project confirms and sends only the project resume, and every other Fix opens the
 screen that clears it (the CLI prints the command or Settings path). Dependency,
 approval, source and capacity waits link to what blocks them and have no Fix. A power
 supervision hold, which applies to every task while the supervisor holds admission, has
 no Fix and shows the supervisor's hold reason. An assignment that is waiting to run
-but is not admissible for its own reasons shows its own wait, named for its profile.
-A revoked or changed profile opens that profile, which does not re-bind the
-assignment; changed instructions, a profile that project routing does not permit and
+but is not admissible for its own reasons shows its own wait, named for its agent.
+A revoked or changed agent opens that agent, which does not re-bind the
+assignment; changed instructions, an agent that project routing does not permit and
 a held assignment have no Fix; a held assignment is explained whether or not a turn
 is queued for it. Revoked repository access (an imported task's ready workspace uses a
 repository the project no longer links) opens the project's repository settings, names no
@@ -1092,14 +1092,14 @@ holds or grants access by implication. These controls must preserve existing
 readiness and admission rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
-from current service state: runtime readiness, GitHub discovery, lead profile,
+from current service state: runtime readiness, GitHub discovery, lead agent,
 an enabled project and the first task, with Claude optional. Afterwards Home shows
 only rows that need attention. The account menu opens the checklist until the
 operator dismisses it for the installation; Show getting started undoes that. A readiness check,
 shared by Settings and the operator CLI, reports what the running service can use
 and one fix per problem. The [user flows](user-flows/) define these journeys.
 
-Use a short guided project setup: project name, lead profile, instructions and
+Use a short guided project setup: project name, lead agent, instructions and
 optional repository access. Choose each repository and ref from lists discovered
 on GitHub, with the default branch preselected, and choose its local checkout with
 a folder picker. The service verifies that the folder is a checkout of the chosen
@@ -1121,20 +1121,20 @@ first eight characters of the project ID when the leads match or are missing
 (longer only when two IDs start alike); no two projects ever show the same label,
 and a unique name stays plain (except when it equals another project's full-ID label); IDs that differ only in letter
 case get " #1", " #2" after the full ID.
-When no profile exists, including revoked profiles, setup offers an inline lead
-profile form with a prechecked option to add Implementer and Reviewer. The option
+When no agent exists, including revoked agents, setup offers an inline lead
+agent form with a prechecked option to add Implementer and Reviewer. The option
 names their resolved runtimes: Implementer uses the lead runtime; Reviewer uses the
 other runtime only when enabled, available and its executable and authentication
 checks pass (including a readable Claude token), otherwise the lead runtime. A
 pending readiness read holds checked creation; an unreadable read uses the lead.
-The lead instructions remain blank; workers use ordinary editable/revocable profile
+The lead instructions remain blank; workers use ordinary editable/revocable agent
 revisions with default model and effort and no skills. Reviewer instructions to
 avoid file changes are advisory, not an enforced restriction. cab prescribes no
 worker order. Unchecking preserves ordinary lead creation.
-The three profiles and the original keyed receipt commit atomically. An unknown
+The three agents and the original keyed receipt commit atomically. An unknown
 bundle outcome retains the frozen IDs and command and re-reads its operation;
 missing or unreadable receipts retain the hold without resending creation. Creating
-the lead selects it without losing other setup values. Profile and project creation
+the lead selects it without losing other setup values. Agent and project creation
 remain separate submissions. Only the subsequent project using that inline lead
 receives both workers as candidates, with routing disabled, blank guidance and no
 routing credential; its coordination context permits them. Changing the selected
@@ -1302,37 +1302,43 @@ action as `provider-preflight-held`, with no request and no Git. Saving the
 GitHub source neither changes nor needs repository links, and saving links neither
 deactivates a selection nor changes the source version.
 
-An agent profile has a name, an optional short summary, private instructions and
+Agents are reusable identities; assignments and their conversations remain distinct.
+The UI calls them agents. For compatibility, CLI commands retain `cab profile`,
+API routes and fields retain names such as `/api/operator/profiles` and `profileId`,
+and command types, reason codes, stored IDs and revision records retain their existing
+names and meanings. Existing web routes and Settings fragments also remain valid.
+
+An agent has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary
 (for example "Eli · Repairs"). Like capabilities, the summary describes
-suitability; it grants no permission or repository access. A profile also selects
+suitability; it grants no permission or repository access. An agent also selects
 its execution runtime, by default the first enabled runtime (Codex, then Claude;
 Codex when none is enabled), with a model and reasoning effort for either runtime
 (blank uses the runtime's default). Each runtime reports the values it supports (Codex
 from its App Server model list), a value outside them waits visibly and never falls
-back to another model, effort or runtime, and a profile without settings runs on the
+back to another model, effort or runtime, and an agent without settings runs on the
 runtime's default exactly as before. An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
-falls back to another. The operator UI selects and shows each profile's runtime,
+falls back to another. The operator UI selects and shows each agent's runtime,
 the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
 without showing it.
 
-A profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
-each with the names of its skills the profile enables (at most 16 plugins and 32 skills
-each), set in the profile settings or with `cab profile prepare --skills-file`. An entry is
+An agent may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
+each with the names of its skills the agent enables (at most 16 plugins and 32 skills
+each), set in the agent settings or with `cab profile prepare --skills-file`. An entry is
 an absolute plugin directory on the service host (`{"path":…}`) or a plugin the operator
 installed and enabled in Claude Code or Codex for the service user
-(`{"plugin":"claude:<plugin>@<marketplace>"}` or `codex:…`). The profile settings list
+(`{"plugin":"claude:<plugin>@<marketplace>"}` or `codex:…`). The agent settings list
 each entry as a row, with its tool or directory and skill count. An installed plugin is
 added from a select of the plugins both tools have installed and enabled, grouped by tool,
 and its skills are chosen in a dialog with a filter. The select leaves out plugins already
-added and, on a Claude profile, plugins without a Claude manifest. A local directory is
+added and, on a Claude agent, plugins without a Claude manifest. A local directory is
 added in the same dialog by path and skill names. The listing
 (`GET /api/operator/installed-plugins`) names plugins, tools and skills, never paths.
 
 An installed plugin is resolved to its install directory at each turn start, and both
-harnesses load that directory, so a profile never sees two versions of a plugin; no hook,
+harnesses load that directory, so an agent never sees two versions of a plugin; no hook,
 MCP server, app or setting is read from the operator's configuration. For Claude Code,
 `enabledPlugins` in `settings.json` must enable it and `plugins/installed_plugins.json`
 must hold exactly one user-scope install of it, under `$CLAUDE_CONFIG_DIR` from the
@@ -1343,9 +1349,9 @@ service environment, else `~/.claude`; project and local installs are ignored. F
 environment, else `~/.codex`. Neither format is documented, so cab validates both and
 fails closed. A plugin that is uninstalled, disabled, ambiguous or in an unrecognised record
 format makes the work wait, with a reason that names the plugin and its tool and no path.
-The `skill-plugins` readiness check reports the same reasons for every active profile.
+The `skill-plugins` readiness check reports the same reasons for every active agent.
 Plugin waits of either kind are re-checked every 30 s, so installing or enabling the plugin
-again lets the next attempt run. An assignment keeps its profile revision, but not the
+again lets the next attempt run. An assignment keeps its agent revision, but not the
 plugin content: each turn runs the current install, and the turn's digest shows an update.
 A turn whose install directory is removed while it runs, for example by an update, can fail.
 
@@ -1356,15 +1362,15 @@ a `SKILL.md`, its subdirectories), `SKILL.md` files up to six
 directories below the directory the Codex manifest's `skills` field names, and the
 one-level `skills/*/` scan. Each skill is named by its `SKILL.md` frontmatter `name`,
 else its directory, and each enabled name must be exactly one skill of its plugin; a
-Claude profile counts only the skills the Claude CLI loads, not those reached only through
+Claude agent counts only the skills the Claude CLI loads, not those reached only through
 the Codex manifest. A
-plugin with only a Codex manifest can be enabled on Codex profiles only: creating a
-Claude profile with one, or switching a profile that has one to Claude, is refused. A
+plugin with only a Codex manifest can be enabled on Codex agents only: creating a
+Claude agent with one, or switching an agent that has one to Claude, is refused. A
 change that fails any of these is refused with the failing fields. A change is also
 refused when an installed plugin it names is unavailable now, or when two entries are the
-same plugin by manifest name, such as one plugin from both tools; a turn whose profile
-has such a pair waits. Each profile revision
-stores the list, and an assignment keeps the one it started with. The profile settings show the plugins and
+same plugin by manifest name, such as one plugin from both tools; a turn whose agent
+has such a pair waits. Each agent revision
+stores the list, and an assignment keeps the one it started with. The agent settings show the plugins and
 skills, and each runtime's effective policy states that skills are instructions to the
 agent, not cab policy. A plugin contributes skills, instructions and
 scripts only; the hooks and MCP servers it declares never run. At each Claude turn start
@@ -1378,11 +1384,11 @@ it is refused. A plugin that is missing or unreadable, whose load scope holds an
 link or a special file or exceeds 2000 files, 16 MiB or 12 levels of depth below a skill
 directory, or, for a Claude turn, that has no Claude manifest, makes the work wait visibly
 with a reason that names no path (the plugin's manifest name for a missing Claude
-manifest), and never runs without it. The same list serves a Codex profile: the digests are
+manifest), and never runs without it. The same list serves a Codex agent: the digests are
 recorded the same way, Codex receives the parent directory of each enabled skill as a skills
-root, and each Codex thread runs with only its profile's enabled skills, matched by their
-discovered `SKILL.md` paths (other profiles' plugins, the plugin's
-other skills, the bundled skills and repository skills are disabled for it; a profile that enables none sees no plugin skills). cab re-sends the scope before each later
+root, and each Codex thread runs with only its agent's enabled skills, matched by their
+discovered `SKILL.md` paths (other agents' plugins, the plugin's
+other skills, the bundled skills and repository skills are disabled for it; an agent that enables none sees no plugin skills). cab re-sends the scope before each later
 turn of a conversation, but a plugin directory that joins the process during a running
 turn can reach that turn; skills are instructions to the agent, not a boundary, and a
 disabled skill's file stays readable. Claude may start subagents with its `Agent` tool: their tool calls
@@ -1497,7 +1503,7 @@ unsupported-media or redaction-limit rejection); an authentication, session, ava
 or transport failure keeps it unconfirmed. See [action feedback](user-flows/feedback.md).
 
 Project, task list, composer, runtime settings and assignment recovery reads
-rebuild once if project or profile instruction revisions or a project's linked
+rebuild once if project or agent instruction revisions or a project's linked
 repositories change while the read is in flight; a second change makes the read
 unavailable. Project, task list,
 composer, runtime settings, Inbox, search and execution list reads capture their
@@ -1505,7 +1511,7 @@ redaction exclusions once per attempt and derive every task's list from them; a
 rebuild captures them afresh, and no exclusion list outlives its read. A task's prose is
 withheld when its own retained turn requests or recovery identities exceed 128
 (each counted separately); other tasks' history never counts. Operator reads redact
-with every project's and profile's retained instruction revisions, every declared
+with every project's and agent's retained instruction revisions, every declared
 credential and every repository path, not only the task's own, so one project's private
 material never appears unredacted in another's prose. The installation bound is 4096
 distinct values and 16 MiB; past it, reads and actions fail with `503 redaction-limit`
@@ -1527,7 +1533,7 @@ assignment, task workspace, result, delivery or GitHub write. It is not a Draft 
 whose first assignment writes its own brief: Draft tasks still never run and Ready
 keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
 
-- **Profile.** The run uses the project lead's profile and runtime, Codex or Claude,
+- **Agent.** The run uses the project lead's agent and runtime, Codex or Claude,
   with a fixed drafting instruction added to the lead's own instructions. A project
   with no active lead cannot draft: the composer says so without starting a run and
   the service refuses the start.
@@ -1583,7 +1589,7 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   belongs to the project it was started for: changing the composer's project, or
   discarding recovered input, stops or discards it, and the composer says so.
 - **Issue runs.** Improve with lead is a second kind of drafting run with the same
-  profile, access, capacity, Stop, cap, restart and reattach rules. `issue.draft.start`
+  agent, access, capacity, Stop, cap, restart and reattach rules. `issue.draft.start`
   names an open imported task and an optional operator note (up to 16,000 characters). The
   run records the synced title and body it starts from, which the lead is shown with the
   note, and it may run while the task has work running. Its own result tool, not the
@@ -1722,7 +1728,7 @@ assignment takes a durable message from its sub-conversation header.
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
 each delegated assignment appears where the lead delegated it as a collapsible
-sub-conversation with its assignment, profile and harness. Do not invent narrative
+sub-conversation with its assignment, agent and harness. Do not invent narrative
 summaries, recommendations or ownership when the evidence is absent. Unavailable or
 stale evidence remains explicit: omitted items, expired tool activity and activity a
 harness does not capture are inline gaps, and an absent tool row is not evidence
@@ -1809,7 +1815,7 @@ submitting and held work stays with the `recovery` commands.
   read the refusal's reasons; every current admission check applies again to the new
   request. The refused request and its refusal stay in the history, linked to the new
   request by a restart record, so the restarted work is historically resolved. The new
-  request is captured at the current task, profile and instructions revisions, takes the
+  request is captured at the current task, agent and instructions revisions, takes the
   assignment's inbox batch and any waiting events in order, and runs in the task's
   workspace. A conversation that has not seen the brief gets the task's current title and
   outcome with it. Nothing is sent to the lead. Replay returns the same receipt; another
@@ -1859,7 +1865,7 @@ evidence together:
   Keep earlier results accessible without presenting them as the current outcome.
 - **Readable delegation.** Show each assignment's responsibility, assignee,
   requester, known reason for waiting and result destination. Keep the accountable
-  project lead identifiable and distinguish assignments sharing a profile. Use
+  project lead identifiable and distinguish assignments sharing an agent. Use
   durable coordination and runtime observations rather than inferring ownership,
   waiting or completion from conversation text. Unknown state stays explicit.
 - **Compact progress across tasks.** Summarize the current work state, known wait
@@ -1895,7 +1901,7 @@ evidence together:
   or unknown source comparison explicitly; a failed refresh cannot establish
   that requirements are unchanged.
 - **Captured assignment context.** Show who supplied the brief, its captured
-  version, recorded instruction/profile revisions and source references, with
+  version, recorded instruction/agent revisions and source references, with
   unavailable or incomplete capture explicit. Distinguish that assignment's
   captured context from current requirements. A reference being available does
   not establish that an agent read it. Do not expose secrets or imply complete
@@ -2048,7 +2054,7 @@ phone shows only the unified diff.
 
 The durable SQLite turn slots keep the latest finished capture and a separate
 pending or unsettled capture. A capture records the admitted task/work revision,
-request sequence, assignment and profile revisions/IDs, exact runtime thread
+request sequence, assignment and agent revisions/IDs, exact runtime thread
 and turn IDs when bound, outcome, timestamps, before/after observations, and
 immutable comparison sides. Capture or store failure remains an explicit gap;
 it does not determine runtime completion, clear a hold, or replace the previous
@@ -2087,7 +2093,7 @@ with no eligible file links records an empty manifest. Exact callback replay
 returns the committed result and original manifest without rereading the workspace.
 
 Each manifest binds its result, task, assignment and work revisions, request
-sequence, profile/instructions revisions, runtime thread and turn, capture
+sequence, agent/instructions revisions, runtime thread and turn, capture
 time, and comparison observation identity. `taskVersion` is the exact revision
 admitted by the turn request; `captureTaskVersion` is the current task revision
 used for workspace and access-policy checks. A metadata edit after admission but
@@ -2191,7 +2197,7 @@ are reported as unknown or unavailable without retargeting to newer bytes.
   kept and rebound when still permitted, and removed only when something is
   now excluded. A "removed unsent draft" notice appears only when the removed
   draft had text or anchors, and clears on the next draft save. Unrelated task,
-  profile or configuration version changes do not remove a draft.
+  agent or configuration version changes do not remove a draft.
 - `review.send` freezes one operation for the named project lead, who must be
   the task's current lead assignment: pending or running, or completed on an
   open task, which the review resumes as an operator follow-up. Any outcome
@@ -2323,12 +2329,12 @@ explicit draft turn, which keep their single-recipient contracts, and contextual
 exact references and anchors.
 
 - The composer starts with the lead as a visible, removable `@lead` recipient. Other
-  assignments are added from a task-scoped picker; two assignments of one profile are
+  assignments are added from a task-scoped picker; two assignments of one agent are
   told apart by their short assignment ID. Removing every recipient is a deliberate
   record-only comment that wakes nobody, and a refresh never restores a removed
   recipient. An assignment's Reply action selects exactly that assignment.
 - Recipients are chosen by assignment identity and expected version. A name, `@name` or
-  profile in the text, whoever wrote it, resolves nothing and wakes nothing; agents
+  agent in the text, whoever wrote it, resolves nothing and wakes nothing; agents
   keep using explicit delegation and follow-up tools. A comment never creates an
   assignment, grants a permission, reopens a task or changes the lead binding.
 - Before Send the composer previews each selected recipient from the task read's
@@ -2351,7 +2357,7 @@ exact references and anchors.
   assignment outside the task (403) and `invalid-input` (400).
 - Recording a comment starts nothing. Delivery rides the existing inbox and
   scheduler admission: pause, Stop, capacity, readiness, permissions, approval,
-  instruction and profile revisions, execution ownership and terminal or callback
+  instruction and agent revisions, execution ownership and terminal or callback
   uncertainty keep their authority, and a running turn is never overlapped. Later
   comments to a running assignment are input for its next turn.
 - The `task-comment` receipt carries the comment ID, the canonical payload hash and
@@ -3008,7 +3014,7 @@ first proof.
 On startup, after complete provider/source reconciliation and before scheduler
 admission, a queued inbox request may receive one durable fresh generation when
 only provider-derived task versions changed. The exact ready intent must never
-have been admitted; captured source identity/digest, assignment/instruction/profile
+have been admitted; captured source identity/digest, assignment/instruction/agent
 revisions, immutable task-control command receipts and nonderived policy/repository snapshots must match. Independent
 Stop/ownership, unfinished execution, effect or recovery evidence prevents this
 supersession. The old captured request/context material remains immutable and historical, with an

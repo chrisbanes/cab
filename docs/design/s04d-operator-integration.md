@@ -14,7 +14,7 @@ React Runtime settings report configured global/default/effective project
 capacity and current reservations, and submit the keyed `capacity.configure` JSON
 command for the global limit and optional project overrides. Task and assignment views show selected, queued, admitted,
 running, stopping, held and completed evidence, local task dependencies,
-captured profile/instruction revisions and the explicit apply-for-next-turn
+captured agent/instruction revisions and the explicit apply-for-next-turn
 action. Task controls add/remove local dependency edges, request current
 instructions for a later turn, request bounded best-effort Stop, and Resume.
 Stop may be acknowledged without proving that effects ended; the view retains
@@ -52,7 +52,7 @@ material or a target it cannot show.
 
 Project routing configuration shows that project's guidance and
 configured candidates with their capabilities and current routing eligibility;
-revoked configured profiles remain visible as unavailable. It distinguishes a
+revoked configured agents remain visible as unavailable. It distinguishes a
 stored credential reference from an available routing client and gives only
 bounded effective-availability reasons (disabled, missing client credentials,
 or no eligible candidates). It exposes neither references nor environment names

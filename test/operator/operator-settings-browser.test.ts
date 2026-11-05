@@ -56,21 +56,17 @@ test("Settings guides empty workspace through profile and paused project creatio
   await page.goto(`${web.origin}/app/settings`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page
-    .getByRole("link", { name: "Create profile", exact: true })
-    .waitFor();
+  await page.getByRole("link", { name: "Create agent", exact: true }).waitFor();
   await capture(page, "1366-empty-settings");
-  await page.getByRole("link", { name: "Create profile", exact: true }).click();
-  await page.getByLabel("Profile name", { exact: true }).waitFor();
+  await page.getByRole("link", { name: "Create agent", exact: true }).click();
+  await page.getByLabel("Agent name", { exact: true }).waitFor();
   await capture(page, "1366-first-profile-setup");
-  await page.getByLabel("Profile name", { exact: true }).fill("Setup lead");
+  await page.getByLabel("Agent name", { exact: true }).fill("Setup lead");
   await page
     .getByLabel("Instructions", { exact: true })
     .fill("PRIVATE SETUP INPUT");
   await page.getByLabel("Capabilities", { exact: true }).fill("Coordinate");
-  await page
-    .getByRole("button", { name: "Create profile", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Create agent", exact: true }).click();
   await savedOutcome(page);
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
@@ -79,7 +75,7 @@ test("Settings guides empty workspace through profile and paused project creatio
   await page.getByRole("link", { name: "Create project", exact: true }).click();
   await page.getByLabel("Project name", { exact: true }).fill("Setup project");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Setup lead" });
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
@@ -530,7 +526,7 @@ test("configuration inline validation stale revision and revoked lead failures r
   await page
     .getByRole("navigation", { name: "Project configuration sections" })
     .waitFor();
-  await page.getByLabel("Lead profile", { exact: true }).selectOption(other);
+  await page.getByLabel("Lead agent", { exact: true }).selectOption(other);
   await page
     .getByLabel("Project name", { exact: true })
     .fill("Permission denied input");
@@ -862,7 +858,7 @@ for (const layout of [
     await page.keyboard.press("Tab");
     assert.equal(
       await page
-        .getByLabel("Lead profile", { exact: true })
+        .getByLabel("Lead agent", { exact: true })
         .evaluate((e) => e === document.activeElement),
       true,
     );
@@ -2040,7 +2036,7 @@ test("initial placement conflict requires explicit loaded revision adoption whil
   await capture(page, "1366-placement-adopted-revision-recorded");
 });
 
-test("profile configuration reload observes its current revision without replacing dirty input", async (_t, journey) => {
+test("agent configuration reload observes its current revision without replacing dirty input", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
   );
@@ -2060,7 +2056,7 @@ test("profile configuration reload observes its current revision without replaci
   page.setDefaultTimeout(5000);
   await signIn(page, web, `/app/profiles/${ids.profileId}/settings`);
   await page
-    .getByLabel("Profile name", { exact: true })
+    .getByLabel("Agent name", { exact: true })
     .fill("Retained profile edit");
   f.service.domain().execute({
     type: "profile.configure",
@@ -2078,14 +2074,14 @@ test("profile configuration reload observes its current revision without replaci
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page.getByText("Current revision 2.", { exact: false }).waitFor();
   assert.equal(
-    await page.getByLabel("Profile name", { exact: true }).inputValue(),
+    await page.getByLabel("Agent name", { exact: true }).inputValue(),
     "Retained profile edit",
   );
   assert.equal(posts.length, 0, "configuration reload performs no command");
   const rejected = page.waitForResponse((r) =>
     r.url().endsWith("/api/operator/commands"),
   );
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   assert.equal((await rejected).status(), 409);
   await page.getByText("A newer version was saved elsewhere.").waitFor();
   const original = JSON.parse(posts[0] ?? "null");
@@ -2108,7 +2104,7 @@ test("profile configuration reload observes its current revision without replaci
   const saved = page.waitForResponse((r) =>
     r.url().endsWith("/api/operator/commands"),
   );
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   assert.equal((await saved).status(), 200);
   const adopted = JSON.parse(posts[1] ?? "null");
   assert.equal(adopted.expectedVersion, 2);

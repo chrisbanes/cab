@@ -19,7 +19,7 @@ const test = browserSuite("operator-settings-sections-browser");
 const sections = [
   ["Projects", "projects", "Projects"],
   ["Runtime & recovery", "runtime", "Runtime and recovery"],
-  ["Profiles", "profiles", "Profiles"],
+  ["Agents", "profiles", "Agents"],
   ["Routing", "routing", "Routing"],
   ["GitHub discovery", "github-discovery", "GitHub discovery"],
   ["GitLab credentials", "gitlab-credentials", "GitLab credentials"],
@@ -90,9 +90,9 @@ test("Settings section links land on each section with its heading focused", asy
   }
   // Reduced motion has no animation to wait for: landing is instant.
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await nav(page).getByRole("link", { name: "Profiles", exact: true }).click();
-  onScreen(await landed(page, "H2", "Profiles"));
-  assert.deepEqual(await current(page), ["Profiles"]);
+  await nav(page).getByRole("link", { name: "Agents", exact: true }).click();
+  onScreen(await landed(page, "H2", "Agents"));
+  assert.deepEqual(await current(page), ["Agents"]);
   await captureBrowserEvidence(page, "1366-settings-landed");
 });
 
@@ -127,7 +127,7 @@ test("a landed section holds while the content above it grows, until the reader 
   // Grow as soon as the heading has focus: the settle window is a few seconds, so the
   // first growth must not wait on anything else.
   await page.waitForFunction(
-    () => document.activeElement?.textContent === "Profiles",
+    () => document.activeElement?.textContent === "Agents",
   );
   const grow = () =>
     page.evaluate(() => {
@@ -136,7 +136,7 @@ test("a landed section holds while the content above it grows, until the reader 
       document.querySelector(".settings-index")?.prepend(spacer);
     });
   await grow();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   // Once the reader scrolls, later growth no longer pulls the page back.
   await page.mouse.wheel(0, 1);
   await grow();
@@ -145,7 +145,7 @@ test("a landed section holds while the content above it grows, until the reader 
   );
   assert.ok(
     await page
-      .getByRole("heading", { name: "Profiles", level: 2 })
+      .getByRole("heading", { name: "Agents", level: 2 })
       .evaluate((h) => h.getBoundingClientRect().top > innerHeight),
   );
 });
@@ -154,8 +154,8 @@ test("Back and Forward restore Settings sections", async (_t, journey) => {
   const { page } = await startSettings(journey, "/app/settings");
   const link = (name: string) =>
     nav(page).getByRole("link", { name, exact: true });
-  await link("Profiles").click();
-  await landed(page, "H2", "Profiles");
+  await link("Agents").click();
+  await landed(page, "H2", "Agents");
   const landedAt = await page.evaluate(() => scrollY);
   // The navigation is not sticky: the position saved on leaving is where the link was used.
   const leftAt = 60;
@@ -345,8 +345,8 @@ test("a check anchor marks Readiness current and a hash-only change lands with f
   assert.deepEqual(await current(page), ["Readiness"]);
   // Typing a new fragment into the address bar is a hash-only navigation.
   await page.goto(`${web.origin}/app/settings#profiles`);
-  onScreen(await landed(page, "H2", "Profiles"));
-  assert.deepEqual(await current(page), ["Profiles"]);
+  onScreen(await landed(page, "H2", "Agents"));
+  assert.deepEqual(await current(page), ["Agents"]);
 });
 
 /**
@@ -398,7 +398,7 @@ test("Back or Forward into a Settings fragment skips the top restore only for a 
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   // A section on this page: the page lands on it and the shell leaves the scroll alone.
   assert.deepEqual(await forwardInto(page, "/app/settings#profiles"), []);
-  assert.equal(await focusedHeading(page), "Profiles");
+  assert.equal(await focusedHeading(page), "Agents");
   // A check anchor whose article is drawn is a target too.
   assert.deepEqual(
     await forwardInto(page, "/app/settings#readiness-codex-login"),
@@ -485,10 +485,10 @@ test("native hash-only navigation lands, switches targets and leaves unsupported
   await trackFocus(page);
   // A script assigning the hash, then another while the first landing is still settling.
   await setHash(page, "profiles");
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   await setHash(page, "routing");
   onScreen(await landed(page, "H2", "Routing"));
-  assert.deepEqual(await focusLog(page), ["Profiles", "Routing"]);
+  assert.deepEqual(await focusLog(page), ["Agents", "Routing"]);
   // Supported to unsupported: nothing scrolls and nothing takes focus.
   await page.evaluate(() => {
     const calls: unknown[] = [];
@@ -508,10 +508,10 @@ test("native hash-only navigation lands, switches targets and leaves unsupported
     ),
     [],
   );
-  assert.deepEqual(await focusLog(page), ["Profiles", "Routing"]);
+  assert.deepEqual(await focusLog(page), ["Agents", "Routing"]);
   // Unsupported to supported lands.
   await setHash(page, "profiles");
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   // A link the shell does not intercept (a bare fragment) is the same navigation.
   await page.evaluate(() => {
     const a = document.createElement("a");
@@ -525,7 +525,7 @@ test("native hash-only navigation lands, switches targets and leaves unsupported
   onScreen(await landed(page, "H2", "CLI credentials"));
   // Back and Forward between these hash-only entries land each one again.
   await page.goBack();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   await page.goForward();
   onScreen(await landed(page, "H2", "CLI credentials"));
 });
@@ -541,11 +541,11 @@ test("traversal between entries that share one entry key lands each fragment", a
     history.pushState(state, "", "#routing");
   });
   await page.goBack();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   await page.goBack();
   await page.waitForURL(/\/app\/settings$/);
   await page.goForward();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   await page.goForward();
   onScreen(await landed(page, "H2", "Routing"));
 });
@@ -564,13 +564,13 @@ test("leaving Settings and coming back to the same entry lands again, and a re-r
   });
   await page.waitForURL(/\/app\/tasks$/);
   await page.goForward();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   await page.goBack();
   await page.waitForURL(/\/app\/tasks$/);
   await page.goForward();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   // A re-render of the same landing leaves the reader's focus where they put it.
-  await page.getByRole("link", { name: "Create profile" }).focus();
+  await page.getByRole("link", { name: "Create agent" }).focus();
   await page.evaluate(() =>
     [...document.querySelectorAll("button")]
       .find((b) => b.textContent?.trim() === "Refresh")
@@ -580,7 +580,7 @@ test("leaving Settings and coming back to the same entry lands again, and a re-r
   await nextFrames(page);
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
-    "Create profile",
+    "Create agent",
   );
 });
 
@@ -593,13 +593,13 @@ test("a second hook becoming ready later does not land again or take focus from 
     await route.continue();
   });
   await coldGoto(page, `${web.origin}/app/settings#profiles`);
-  onScreen(await landed(page, "H2", "Profiles"));
-  await page.getByRole("link", { name: "Create profile" }).focus();
+  onScreen(await landed(page, "H2", "Agents"));
+  await page.getByRole("link", { name: "Create agent" }).focus();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   await nextFrames(page);
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
-    "Create profile",
+    "Create agent",
   );
 });
 
@@ -610,8 +610,8 @@ test("a second hook becoming ready later does not land again or take focus from 
 async function backToSavedEntry(page: Page) {
   const link = (name: string) =>
     nav(page).getByRole("link", { name, exact: true });
-  await link("Profiles").click();
-  await landed(page, "H2", "Profiles");
+  await link("Agents").click();
+  await landed(page, "H2", "Agents");
   await page.evaluate(() => scrollTo(0, 60));
   await link("Readiness").click();
   await landed(page, "H2", "Readiness");
@@ -721,7 +721,7 @@ test("Forward to an entry the page landed on lands again after passing an entry 
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   await setHash(page, "profiles");
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   await page.goBack();
   await page.waitForURL(/\/app\/settings$/);
   await nextFrames(page);
@@ -729,8 +729,8 @@ test("Forward to an entry the page landed on lands again after passing an entry 
   await page.getByRole("link", { name: "Create project" }).focus();
   await trackFocus(page);
   await page.goForward();
-  onScreen(await landed(page, "H2", "Profiles"));
-  assert.deepEqual(await focusLog(page), ["Profiles"]);
+  onScreen(await landed(page, "H2", "Agents"));
+  assert.deepEqual(await focusLog(page), ["Agents"]);
 });
 
 test("the first entry and a natively made entry restore their own saved positions", async (_t, journey) => {
@@ -743,8 +743,8 @@ test("the first entry and a natively made entry restore their own saved position
       .evaluate((a) => (a as HTMLElement).click());
   // The entry the page was opened on: leave it through a link from 300px down.
   await page.evaluate(() => scrollTo(0, 300));
-  await click("Profiles");
-  await landed(page, "H2", "Profiles");
+  await click("Agents");
+  await landed(page, "H2", "Agents");
   await page.goBack();
   await page.waitForURL(/\/app\/settings$/);
   await nextFrames(page);
@@ -774,8 +774,8 @@ test("entries made before a reload start clean in the new document and land thei
       .getByRole("link", { name, exact: true })
       .evaluate((a) => (a as HTMLElement).click());
   await page.evaluate(() => scrollTo(0, 300));
-  await click("Profiles");
-  await landed(page, "H2", "Profiles");
+  await click("Agents");
+  await landed(page, "H2", "Agents");
   await page.evaluate(() => scrollTo(0, 120));
   await click("Readiness");
   await landed(page, "H2", "Readiness");
@@ -785,7 +785,7 @@ test("entries made before a reload start clean in the new document and land thei
   // no saved state (the privacy guard); it lands its fragment like a new entry.
   await page.goBack();
   await page.waitForURL(/#profiles$/);
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   assert.equal(
     await page.evaluate(() => (history.state as { scrollY?: number }).scrollY),
     undefined,
@@ -827,7 +827,7 @@ test("a state without this load's scope is not adopted as an owned entry", async
     history.replaceState({ scrollY: 500 }, "", "/app/settings#profiles");
   });
   await page.reload();
-  onScreen(await landed(page, "H2", "Profiles"));
+  onScreen(await landed(page, "H2", "Agents"));
   assert.equal(
     await page.evaluate(() => (history.state as { scrollY?: number }).scrollY),
     undefined,

@@ -445,7 +445,7 @@ function GeneralTab(p: TabProps) {
           >
             <div className="settings-fields">
               <DraftField draft={d} field="name" label="Project name" />
-              <DraftField draft={d} field="leadProfileId" label="Lead profile">
+              <DraftField draft={d} field="leadProfileId" label="Lead agent">
                 <option value="">Unconfigured</option>
                 {data.profiles
                   .filter(

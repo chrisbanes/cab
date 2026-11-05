@@ -82,7 +82,7 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
   } as never);
   await stubReadiness(page, { "claude-token": "not-configured" });
   await page.reload();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   const sent = sentCommands(page);
   const { ready, projectId, resume } = await createProject(
     page,
@@ -139,7 +139,7 @@ test("Setup shows a missing claude's fix for a Claude lead, without an Add Claud
   } as never);
   await stubReadiness(page, { "claude-executable": "fail" });
   await page.reload();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   const { ready, resume } = await createProject(
     page,
     sentCommands(page),
@@ -202,18 +202,18 @@ test("Setup blocks Resume for a Claude lead whose model or effort the runtime re
   // The token is readable, so only the lead's own settings can block.
   await stubReadiness(page);
   await page.reload();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   const sent = sentCommands(page);
   const { ready, resume } = await createProject(page, sent, "Claude lead");
   await ready
     .getByText(
-      "Claude runtime doesn't accept the lead profile's model or reasoning effort.",
+      "Claude runtime doesn't accept the lead agent's model or reasoning effort.",
     )
     .waitFor();
   assert.equal(await resume.isDisabled(), true);
   assert.equal(
     await ready
-      .getByRole("link", { name: "Edit profile", exact: true })
+      .getByRole("link", { name: "Edit agent", exact: true })
       .getAttribute("href"),
     `/app/profiles/${profileId}/settings`,
   );
@@ -232,7 +232,7 @@ test("Setup blocks Resume for a Claude lead whose model or effort the runtime re
   } as never);
   await ready.getByRole("button", { name: "Check again", exact: true }).click();
   await ready
-    .getByRole("link", { name: "Edit profile", exact: true })
+    .getByRole("link", { name: "Edit agent", exact: true })
     .waitFor({ state: "detached" });
   await resume.click({ trial: true });
 });
@@ -416,7 +416,7 @@ test("Setup blocks Resume for a project created without a lead", async (_t, jour
   const sent = sentCommands(page);
   const { ready, resume } = await createProject(page, sent, "Unconfigured");
   await ready
-    .getByText("No lead profile. Tasks wait for a lead before starting.")
+    .getByText("No lead agent. Tasks wait for a lead before starting.")
     .waitFor();
   assert.equal(await resume.isDisabled(), true);
   assert.equal(
@@ -524,7 +524,7 @@ async function leadChangedElsewhere(
     });
   });
   await page.reload();
-  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await page.getByLabel("Lead agent", { exact: true }).waitFor();
   const sent = sentCommands(page);
   const created = await createProject(page, sent);
   await created.ready
@@ -575,7 +575,7 @@ test("Setup blocks Resume after a conflict review finds the lead removed", async
     await leadChangedElsewhere(journey, () => null);
   await review();
   await ready
-    .getByText("No lead profile. Tasks wait for a lead before starting.")
+    .getByText("No lead agent. Tasks wait for a lead before starting.")
     .waitFor();
   assert.equal(await resume.isDisabled(), true);
   assert.equal(domain.project(projectId).paused, 1);

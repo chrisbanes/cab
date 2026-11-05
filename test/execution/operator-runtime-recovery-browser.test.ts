@@ -186,7 +186,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
   await page.getByText(/through the CLI recovery-options read/).waitFor();
   assert.doesNotMatch(
     await page.locator("main").innerText(),
-    /admitted generation|instruction revision|profile revision/,
+    /admitted generation|instruction revision|agent revision/,
   );
   await page.getByRole("heading", { name: "Task-wide holds" }).waitFor();
   await page

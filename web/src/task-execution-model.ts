@@ -149,7 +149,7 @@ export function staleRevisions(a: Data["assignments"][number]): string[] {
     a.instructionsRevision !== a.currentInstructionsRevision &&
       `instructions ${a.instructionsRevision} → ${a.currentInstructionsRevision}`,
     a.profileRevision !== a.currentProfileRevision &&
-      `profile ${a.profileRevision} → ${a.currentProfileRevision}`,
+      `agent ${a.profileRevision} → ${a.currentProfileRevision}`,
   ].filter((v): v is string => Boolean(v));
 }
 

@@ -285,7 +285,7 @@ test("the profile runtime note names the recovery for each cause", () => {
   assert.doesNotMatch(missing ?? "", /Turn it on/);
   assert.equal(
     harnessNote({ ...base("codex"), state: "unavailable", since: 1 }),
-    "The Codex runtime is unavailable. cab restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.",
+    "The Codex runtime is unavailable. cab restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Assignments using this agent wait meanwhile and never fall back to another runtime.",
   );
 });
 

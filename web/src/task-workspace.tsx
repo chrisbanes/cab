@@ -1527,7 +1527,7 @@ export function TaskWorkspace({
     return (
       <>
         <p>
-          Assignment {a.assignmentId} · profile revision {a.profileRevision} ·
+          Assignment {a.assignmentId} · agent revision {a.profileRevision} ·
           instructions revision {a.instructionsRevision}
         </p>
         <p>Supplied responsibility / brief</p>
@@ -1538,7 +1538,7 @@ export function TaskWorkspace({
         <p>
           Execution: {execution.line}
           {a.executionGeneration
-            ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · profile revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
+            ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · agent revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
             : " · not yet admitted"}
           .
         </p>
@@ -2897,7 +2897,7 @@ export function TaskWorkspace({
                           {date(c.createdAt)}
                         </p>
                         <p>
-                          Profile revision {c.profileRevision}; instructions
+                          Agent revision {c.profileRevision}; instructions
                           revision {c.instructionsRevision}; source{" "}
                           {c.sourceId ?? "unavailable"}
                         </p>
@@ -2918,7 +2918,7 @@ export function TaskWorkspace({
                   )}
                   {data.assignments.map((a) => (
                     <p key={a.assignmentId}>
-                      Current assignment {a.assignmentId}: profile revision{" "}
+                      Current assignment {a.assignmentId}: agent revision{" "}
                       {a.currentProfileRevision}, instructions revision{" "}
                       {a.currentInstructionsRevision}
                     </p>

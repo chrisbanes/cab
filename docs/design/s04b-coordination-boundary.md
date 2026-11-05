@@ -40,7 +40,7 @@ interaction revision, action, target, and material digest; denial or stale or
 changed material never authorizes the action. Durable operator messages are
 assignment inbox events and use the same admission path.
 
-Follow-up retains the existing assignment and profile, advances its revision,
+Follow-up retains the existing assignment and agent, advances its revision,
 and binds the request to the exact prior result. It does not create a replacement
 assignment or accept a stale result as current.
 

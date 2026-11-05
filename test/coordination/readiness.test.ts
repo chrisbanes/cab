@@ -102,7 +102,7 @@ async function check(
 }
 
 const REJECTED = (n: number) =>
-  `${n} ${n === 1 ? "profile uses" : "profiles use"} a model or reasoning effort the runtime does not accept`;
+  `${n} ${n === 1 ? "agent uses" : "agents use"} a model or reasoning effort the runtime does not accept`;
 const profiles = (...p: ReadinessProfile[]) => ({ profiles: () => p });
 const codexProfile = (): ReadinessProfile => ({
   revoked: false,
@@ -832,7 +832,7 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   assert.equal(notRunning.reason, "Claude runtime is not running");
   assert.equal(
     notRunning.fix,
-    "Restart the service, or edit the profile's model or reasoning effort",
+    "Restart the service, or edit the agent's model or reasoning effort",
   );
   const notEnabled = await harness(states("not-configured"));
   assert.equal(notEnabled.status, "fail");
@@ -891,7 +891,7 @@ test("readiness checks Codex profile settings against the runtime catalogue", as
   const bad = await harness(true, codexWith("x"));
   assert.equal(bad.status, "fail");
   assert.equal(bad.reason, REJECTED(1));
-  assert.match(bad.fix ?? "", /edit the profile's model or reasoning effort/);
+  assert.match(bad.fix ?? "", /edit the agent's model or reasoning effort/);
   assert.equal(
     (await harness(true, codexWith("m-alt", "high"))).reason,
     REJECTED(1),
@@ -961,7 +961,7 @@ test("readiness names the automatic restart while pending and the toggle once ex
       harness.fix,
       restart
         ? expected
-        : "Restart the service, or edit the profile's model or reasoning effort",
+        : "Restart the service, or edit the agent's model or reasoning effort",
       "runtime-harness",
     );
   }
@@ -1218,7 +1218,7 @@ test("the data path check keeps the canonical-path semantics without blocking th
   assert.doesNotMatch(source, /[A-Za-z]Sync\(|assertCanonicalDirectoryPath/);
 });
 
-test("skill plugins fail while an active profile's installed plugin is unavailable, naming it and no path, and pass once it is enabled", async (t) => {
+test("skill plugins fail while an active agent's installed plugin is unavailable, naming it and no path, and pass once it is enabled", async (t) => {
   const f = fixture(t);
   const homes = installedPluginHomes(join(f.root, "operator"));
   homes.installCodex("demo@m", { enabled: false });
@@ -1230,7 +1230,7 @@ test("skill plugins fail while an active profile's installed plugin is unavailab
     env,
     ...profiles(
       { ...codexProfile(), skills },
-      // A revoked profile's plugins hold no work.
+      // A revoked agent's plugins hold no work.
       {
         revoked: true,
         runtime: { harness: "codex" },

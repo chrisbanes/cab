@@ -77,10 +77,10 @@ async function firstRun(
   await firstScreen(page, "Home", [card, create]);
   await click(create);
 
-  const profile = page.getByRole("group", { name: "New lead profile" });
+  const profile = page.getByRole("group", { name: "New lead agent" });
   const projectName = page.getByLabel("Project name", { exact: true });
-  const profileName = profile.getByLabel("Profile name", { exact: true });
-  const createProfile = profile.getByRole("button", { name: "Create profile" });
+  const profileName = profile.getByLabel("Agent name", { exact: true });
+  const createProfile = profile.getByRole("button", { name: "Create agent" });
   const createProject = button("Create paused project");
   await profile.waitFor();
   // One screen's form fill counts as one interaction.
@@ -110,7 +110,7 @@ async function firstRun(
       .waitFor();
   }
   await click(createProfile);
-  const lead = page.getByLabel("Lead profile", { exact: true });
+  const lead = page.getByLabel("Lead agent", { exact: true });
   await lead.waitFor();
   assert.equal(
     await lead.evaluate(

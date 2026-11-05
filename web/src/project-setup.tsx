@@ -122,7 +122,7 @@ export function ProjectSetup(
   },
 ) {
   const d = useDraft(p.drafts, "project.create");
-  // The lead profile created inline when none exists; its own draft never meets Settings'.
+  // The lead agent created inline when none exists; its own draft never meets Settings'.
   const inline = useDraft(p.drafts, "profile.create:setup");
   // A create already recorded on arrival belongs to the earlier visit: this one starts
   // clean, without showing its ready check. Unsaved input from an earlier visit is kept.
@@ -674,11 +674,7 @@ export function ProjectSetup(
             <div className="settings-fields">
               <DraftField draft={d} field="name" label="Project name" />
               {!inlineProfile && (
-                <DraftField
-                  draft={d}
-                  field="leadProfileId"
-                  label="Lead profile"
-                >
+                <DraftField draft={d} field="leadProfileId" label="Lead agent">
                   <option value="">Unconfigured</option>
                   {profiles.map((r) => (
                     <option key={r.id} value={r.id}>
@@ -690,8 +686,8 @@ export function ProjectSetup(
                     !profiles.some((r) => r.id === values.leadProfileId) && (
                       <option value={values.leadProfileId}>
                         {p.workspace
-                          ? "Lead profile unavailable"
-                          : "Chosen lead (loading profiles)"}
+                          ? "Lead agent unavailable"
+                          : "Chosen lead (loading agents)"}
                       </option>
                     )}
                 </DraftField>
@@ -709,7 +705,7 @@ export function ProjectSetup(
                 aria-label="Starter candidates unavailable"
               >
                 <p className="metadata muted">
-                  A starter profile is unavailable. Keep this lead and choose
+                  A starter agent is unavailable. Keep this lead and choose
                   worker candidates later.
                 </p>
                 <Button
@@ -726,7 +722,7 @@ export function ProjectSetup(
               <fieldset
                 ref={profileBox}
                 className="setup-profile"
-                aria-label="New lead profile"
+                aria-label="New lead agent"
                 disabled={disabled}
                 onKeyDown={(e) => {
                   if (
@@ -740,15 +736,11 @@ export function ProjectSetup(
                 }}
               >
                 <p className="metadata muted">
-                  No lead profiles yet. Create one here, or leave this blank and
+                  No lead agents yet. Create one here, or leave this blank and
                   choose a lead later; tasks wait for a lead before starting.
                 </p>
                 <div className="settings-fields">
-                  <DraftField
-                    draft={inline}
-                    field="name"
-                    label="Profile name"
-                  />
+                  <DraftField draft={inline} field="name" label="Agent name" />
                 </div>
                 <RuntimeFields
                   draft={inline}
@@ -793,7 +785,7 @@ export function ProjectSetup(
                   </div>
                 )}
                 <p className="metadata muted">
-                  Add a summary and instructions later in Settings → Profiles.
+                  Add a summary and instructions later in Settings → Agents.
                 </p>
                 {inline.phase !== "unknown" && (
                   <div>
@@ -809,7 +801,7 @@ export function ProjectSetup(
                     >
                       {inline.phase === "pending"
                         ? "Creating…"
-                        : "Create profile"}
+                        : "Create agent"}
                     </Button>
                   </div>
                 )}
@@ -820,7 +812,7 @@ export function ProjectSetup(
               (inline.phase !== "recorded" || d.phase === "editing") && (
                 <DraftMessage
                   draft={inline}
-                  success="Profile created. Other setup values kept."
+                  success="Agent created. Other setup values kept."
                   check={async () => {
                     await inline.reconcile(p.client, csrf);
                     if (

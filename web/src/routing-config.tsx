@@ -68,8 +68,7 @@ function AvailabilityNotice({ data }: { data: ProjectConfigurationData }) {
         </p>
       ) : availability === "no-eligible-candidates" ? (
         <p className="body">
-          No candidate profile can be chosen. Add an available profile.{" "}
-          {allocate}
+          No candidate agent can be chosen. Add an available agent. {allocate}
         </p>
       ) : (
         <p className="body">
@@ -167,7 +166,7 @@ export function RoutingTab(p: TabProps) {
               </p>
             </PrivateTextField>
             <fieldset className="settings-candidates" disabled={locked(d)}>
-              <legend className="small-heading">Candidate profiles</legend>
+              <legend className="small-heading">Candidate agents</legend>
               {data.profiles.map((r) => (
                 <label
                   key={r.id}
@@ -225,9 +224,9 @@ export function RoutingTab(p: TabProps) {
         <Aside
           title="How routing decides"
           items={[
-            "Runs only for new assignments without an explicit assignee. An explicit permitted profile is honoured without TypeSafe.",
+            "Runs only for new assignments without an explicit assignee. An explicit permitted agent is honoured without TypeSafe.",
             "Missing context, an uncertain recommendation, no suitable candidate or TypeSafe unavailability wakes the lead with the brief and evidence.",
-            "Selects for fit, then queues for capacity. A busy profile is not swapped.",
+            "Selects for fit, then queues for capacity. A busy agent is not swapped.",
             "In-scope repairs keep their assignee. Routing never grants readiness or authorises execution.",
           ]}
         />

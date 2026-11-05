@@ -77,16 +77,16 @@ The optional tarball and deferred desktop/Homebrew channel do not gate it.
 | ID | Given / when | Required observable result | Layer |
 | --- | --- | --- | --- |
 | A01 | Install standalone service; restart | Service, migrations, tools and UI operate; failed initialization does not release pending work | Service + UI |
-| A02 | Operator configures two projects and profiles | Shared profile can be selected by both projects with distinct project instructions; configuration is validated and retained; both initially paused | UI + runtime |
+| A02 | Operator configures two projects and agents | Shared agent can be selected by both projects with distinct project instructions; configuration is validated and retained; both initially paused | UI + runtime |
 | A03 | Create/edit a local task in the UI; restart | Content and stable identity survive; unready by default; Create and start marks Ready without bypassing pause; no external issue is created | UI + SQLite |
 | A04 | Enable a project with eligible tasks | Routing-enabled project starts a selected assignee without a preliminary lead turn; disabled routing uses explicit lead allocation; no chat setup ritual | Service + UI |
-| A05 | Lead requests two bounded assignments | Independent conversations use selected profiles; project lead retains accountability with separate task conversation histories | Service + runtime |
+| A05 | Lead requests two bounded assignments | Independent conversations use selected agents; project lead retains accountability with separate task conversation histories | Service + runtime |
 | A06 | Worker reports while parent is idle | Result persists; one logical inbox event wakes parent; acknowledgement survives restart | Service + runtime |
 | A07 | Repeat claim/delegate/report/response commands | Same operation returns same outcome; changed payload conflicts; no second worker/effect | SQLite + runtime |
 | A08 | Lose spawn response after the runtime creates a worker | Restart reattaches only if the same live execution is uniquely identified; otherwise visible uncertainty and operator recovery retain holds; no blind retry or inference from historical resume | Runtime fault injection |
 | A09 | Crash before/after result commit, send acceptance or acknowledgement | Durable result/inbox retained; accepted sends reconciled; no duplicate work | Runtime fault injection |
 | A10 | Lead delegates implementation and review; review finds a defect | Lead chooses revision and follow-up from instructions; findings refer to artifact revision | Service scripted journey |
-| A11 | Edit instructions/profile during existing work, then explicitly apply | Existing assignments retain recorded revisions until explicit apply for their next turn; new assignments use current revisions; process changes need no new stages or schema; permission revocations still apply | Service + UI |
+| A11 | Edit instructions/agent during existing work, then explicitly apply | Existing assignments retain recorded revisions until explicit apply for their next turn; new assignments use current revisions; process changes need no new stages or schema; permission revocations still apply | Service + UI |
 | A12 | Agent asks a plain-text or structured question; operator answers during restart | Question appears in inbox and task detail beside a link to the requesting conversation; response is durable and bound to the originating task, assignment and runtime request; one eligible continuation receives it, respecting pause, Stop, dependency and ownership holds; see UI01–UI02 | UI + runtime |
 | A13 | Approval denied or reviewed material changes | Action cannot execute using denied/stale approval; reason visible | Service + access integration |
 | A14 | Pause project A while B has work | Current turns in A may finish; no new turns or follow-ups in A; B continues; results retained; resume revalidates | Service + UI |
@@ -120,10 +120,10 @@ routing and accountability.
 | R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. Explicit LAN HTTP access retains those checks and sends credentials without TLS. |
 | R05 | Conversation history and durable operator messages survive restart. Duplicate submission does not duplicate delivery; the next eligible turn receives the message without bypassing holds. No live steering is exposed. |
 | R06 | Fresh standalone startup never reads or mutates the prototype database. Backup/restore preserves standalone records. Cutover records old active-work disposition before enabling competing work. |
-| R07 | Routing-enabled eligible task supplies its initial brief without a lead turn. Explicit permitted assignee bypasses TypeSafe; disabled projects allocate through the lead without API calls. Profile capabilities and project routing guidance are used; ineligible profiles cannot be selected and full transcripts/credentials are excluded. |
-| R08 | Uncertain/no-fit/missing-context/API-failure outcomes wake the lead once with the brief and evidence. Lead can allocate without TypeSafe. Busy selected profile waits for capacity; repairs retain assignee. All dispatch rechecks current permissions and holds. |
-| R09 | Nested results resume their delegator, initial results resume the task-scoped lead, including restart and capacity-one cases. Two tasks using the lead profile keep separate histories. Worker success alone cannot complete a task; lead completion requests satisfy service gates. |
-| R10 | Duplicate requests, delayed responses, timeout, restart, task/brief/profile changes, opt-out and permission revocation cannot cause duplicate or stale dispatch. Persist routing provenance and disposition; rejected stale recommendations do not grant authority. Representative routing evidence records mistakes, fallback, latency and cost without assuming calibrated thresholds or savings. |
+| R07 | Routing-enabled eligible task supplies its initial brief without a lead turn. Explicit permitted assignee bypasses TypeSafe; disabled projects allocate through the lead without API calls. Agent capabilities and project routing guidance are used; ineligible agents cannot be selected and full transcripts/credentials are excluded. |
+| R08 | Uncertain/no-fit/missing-context/API-failure outcomes wake the lead once with the brief and evidence. Lead can allocate without TypeSafe. Busy selected agent waits for capacity; repairs retain assignee. All dispatch rechecks current permissions and holds. |
+| R09 | Nested results resume their delegator, initial results resume the task-scoped lead, including restart and capacity-one cases. Two tasks using the lead agent keep separate histories. Worker success alone cannot complete a task; lead completion requests satisfy service gates. |
+| R10 | Duplicate requests, delayed responses, timeout, restart, task/brief/agent changes, opt-out and permission revocation cannot cause duplicate or stale dispatch. Persist routing provenance and disposition; rejected stale recommendations do not grant authority. Representative routing evidence records mistakes, fallback, latency and cost without assuming calibrated thresholds or savings. |
 
 ### Operator UI scenarios
 
@@ -524,7 +524,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   setup, picker and the credential row with WebKit smokes for setup and the picker
   (`operator-setup-browser`, `operator-setup-picker-browser`,
   `operator-discovery-credential-browser`), including the atomic inline lead and optional
-  starter profiles, runtime selection/readiness, frozen unknown-outcome receipt readback,
+  starter agents, runtime selection/readiness, frozen unknown-outcome receipt readback,
   disabled-routing candidate permissions, ordinary revocation and later-project defaults, the
   leave prompt and the ready check's Resume, Keep paused, blocked, full-capacity and
   unknown-outcome journeys and its Import issues recovery for a linked GitHub Project, with
@@ -654,7 +654,7 @@ expose the behaviour:
 - **Brief provenance:** local and imported examples show the desired outcome,
   supplied criteria and recorded decisions without inventing missing content.
   GitHub requirements stay source-owned; agent plans and decisions are distinct.
-- **Delegation:** parallel assignments, including two using the same profile,
+- **Delegation:** parallel assignments, including two using the same agent,
   have distinguishable responsibilities, requesters and result destinations.
   The project lead remains identifiable; known waits and unknown state are clear.
 - **Results and evidence:** show current and earlier results with reporting
@@ -688,7 +688,7 @@ them:
   requirements are distinguishable from the viewed revision. No baseline,
   unknown comparison and failed refresh are explicit. Viewing alone never
   records approval or clears an independent hold.
-- **Assignment context:** captured supplier/brief/instruction/profile/source
+- **Assignment context:** captured supplier/brief/instruction/agent/source
   references are distinct from current requirements, with omissions visible.
   Available references are not labelled read without evidence; secrets and
   unavailable runtime history are not exposed.
@@ -825,7 +825,7 @@ and operator UI are covered by deterministic suites.
 
 | Criteria | Evidence |
 | --- | --- |
-| Start again requeues a refused first turn at the current task, profile and instructions revisions in the same workspace, leaves the refused request, intent and refusal unchanged, sends nothing to the lead, reads as Not started (not Uncertain) with an Inbox intervention, and lets the task complete | `task-restart.test.ts` |
+| Start again requeues a refused first turn at the current task, agent and instructions revisions in the same workspace, leaves the refused request, intent and refusal unchanged, sends nothing to the lead, reads as Not started (not Uncertain) with an Inbox intervention, and lets the task complete | `task-restart.test.ts` |
 | A refused follow-up's inbox batch moves to the new request with its events delivered once, and a refused restart stays eligible across a service restart | `task-restart.test.ts` |
 | Replay returns the same receipt; another request under the key, a stale version and a stale `workId` conflict and record nothing | `task-restart.test.ts` |
 | Start again is refused with its reason and records nothing for a recorded thread, turn, writer admission, capacity reservation, pending effect, stop target, recovery identity, submitting intent, held assignment, writer hold or closed task; the availability rules are unit tested | `task-restart.test.ts`, `task-restart-rules.test.ts` |

@@ -12,17 +12,17 @@ Delivery scope and status live under
 
 ## Selection
 
-The execution runtime is an agent profile setting. The operator can enable or disable
-each runtime, and new profiles default to the first enabled one
+The execution runtime is an agent setting. The operator can enable or disable
+each runtime, and new agents default to the first enabled one
 ([ADR-1012](1012-operator-controlled-runtime-enablement.md)).
 An assignment conversation stays bound to the harness that started it; changing a
-profile's harness affects new conversations only and never migrates a live session.
+agent's harness affects new conversations only and never migrates a live session.
 One task may therefore mix Codex and Claude assignments. cab keeps admission,
 ownership, coordination, policy and task completion for every harness.
 
-Claude profiles expose model and reasoning effort, validated against the values the
+Claude agents expose model and reasoning effort, validated against the values the
 installed integration supports. Permission mode, tools, sandbox and configuration
-sources are cab policy, not profile settings.
+sources are cab policy, not agent settings.
 
 ## Integration
 
@@ -123,11 +123,11 @@ Agents load no user, project or plugin Claude configuration: no setting sources,
 strict MCP configuration, `managedSettings.disableAllHooks` and a dedicated Claude
 configuration directory. cab supplies repository instructions (`CLAUDE.md`,
 `AGENTS.md`) as instruction text, so repository content cannot add permission rules,
-hooks or MCP servers. The one addition is the profile's skill plugins
+hooks or MCP servers. The one addition is the agent's skill plugins
 ([ADR-1021](1021-profile-skill-plugins-and-subagents.md)): local plugin directories,
 or plugins installed in Claude Code or Codex resolved to their install directory at each
 turn start, passed through the SDK `plugins` option as local plugins, with the enabled names in `skills` and the
-`Skill` tool allowed only when a profile enables any. A plugin contributes skills,
+`Skill` tool allowed only when an agent enables any. A plugin contributes skills,
 instructions and scripts; the hooks and MCP servers it declares never run, and its
 scripts run through the ordinary sandboxed shell. The `Agent` tool is allowed on every
 turn: a subagent's tool calls pass the same `PreToolUse` hook (which sees `agent_id`),

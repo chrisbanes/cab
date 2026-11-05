@@ -19,24 +19,24 @@ command key stable for a logical retry.
 
 ## Authority and configuration
 
-Operator-only commands create and configure projects, tasks, and profiles; change
-project routing settings; apply current instruction/profile revisions to an
+Operator-only commands create and configure projects, tasks, and agents; change
+project routing settings; apply current instruction/agent revisions to an
 assignment; and edit local dependencies. Assignment creation may come from a
-scoped agent, but its task and project identities must match and its profile must
+scoped agent, but its task and project identities must match and its agent must
 be the project lead or an operator-configured permitted candidate. A nested
 assignment must remain on its requester's task; an explicit lead allocation may
 omit the requester. Local tasks start unready, projects start paused, and neither
-routing opt-in nor an assignment record grants execution admission. Profile
-revocation is checked against current profile state even when an assignment
+routing opt-in nor an assignment record grants execution admission. Agent
+revocation is checked against current agent state even when an assignment
 retains older revision snapshots. A draft project may have no lead, but it cannot
-admit work until its configured lead profile exists and is active; the
+admit work until its configured lead agent exists and is active; the
 existing-project form can set or replace it.
 
 ## Admission eligibility
 
 `admission(taskId)` returns a structured eligibility result with project pause,
 active project lead, task readiness/state, imported-blocker state, and unfinished
-local dependencies. `assignmentAdmission(assignmentId)` adds current profile
+local dependencies. `assignmentAdmission(assignmentId)` adds current agent
 revocation and assignment hold state. These are read-side inputs to the
 scheduler; the scheduler also checks its own writer, runtime, capacity, and
 permission holds at effective admission. Imported-blocker `unknown` is persisted
@@ -46,7 +46,7 @@ source integration.
 ## Routing operations
 
 `recordRouting` persists one operation per project/task work version. The
-identity, candidate/profile revisions, guidance revision, model/question,
+identity, candidate/agent revisions, guidance revision, model/question,
 judgment, disposition, assignment identity, and result destination remain
 readable after restart. Same-payload retries replay; competing operation IDs or
 changed payloads conflict. An `assigned` disposition requires assignment details;
@@ -63,7 +63,7 @@ without a routing operation.
 
 ## Operator forms
 
-`LocalOperatorUi` supplies project, task, profile and routing forms plus HTML read
+`LocalOperatorUi` supplies project, task, agent and routing forms plus HTML read
 views over the same commands. The authenticated `LocalOperatorHttp` mounts on
 `127.0.0.1` only; the `operator` CLI mode starts it while the standalone runtime
 is active. Its web allowlist does not expose assignment, dependency or

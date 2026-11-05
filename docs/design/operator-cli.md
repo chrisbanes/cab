@@ -6,13 +6,13 @@ or a delivery plan. Design confirmation does not itself dispatch implementation.
 ## Purpose
 
 Give the operator and external agents a command-line interface for inspecting
-and managing cab, including diagnosing agent-profile instructions and
+and managing cab, including diagnosing agent instructions and
 task execution. Use the domain vocabulary in [CONTEXT.md](../../CONTEXT.md).
 
 ## Scope
 
 The first release covers everyday operator work and debugging: project and
-agent-profile configuration, tasks, questions, approvals, execution history and
+agent configuration, tasks, questions, approvals, execution history and
 existing recovery actions. Ancillary UI features such as composing line-by-line
 code reviews are deferred; this release does not require complete web UI parity.
 
@@ -33,7 +33,7 @@ expiry. Credential and transport details are specified below.
 Reuse existing configuration controls. Enabling and disabling each execution
 runtime for the installation is a supported mutation (`runtime enable|disable`,
 ADR-1012). Expose other runtime and model settings read-only where cab has no
-supported edit operation. Adding profile-level model or effort controls is outside
+supported edit operation. Adding agent-level model or effort controls is outside
 this release.
 
 Service process management and offline backup/restore remain host-local.
@@ -49,7 +49,7 @@ The operator API already provides task, configuration, assignment history and
 recovery reads and revision-aware, receipted commands. Its authentication uses
 browser sessions and CSRF checks; a CLI authentication contract is needed.
 
-Project and profile instruction revisions are retained and execution bindings
+Project and agent instruction revisions are retained and execution bindings
 identify their revisions. JSON configuration reads expose revision numbers and
 instruction presence, but not instruction bodies. Captured conversation history
 contains bounded, sanitized assistant text and omission records; it is not a
@@ -89,7 +89,7 @@ the underlying stable identifiers visible instead of inventing a second run
 identity. Record an instruction snapshot before submitting the turn; a failed
 capture is an explicit gap and cannot change execution admission or recovery.
 
-Instruction views deliberately disclose authorized project/profile instructions
+Instruction views deliberately disclose authorized project/agent instructions
 to both credential scopes. They still redact credentials and excluded private
 paths. General history/log views retain instruction redaction. Neither surface
 offers an unredacted switch, exports credential files, or promises detection of
@@ -100,9 +100,9 @@ The dedicated views are `GET /api/operator/profiles/ID/instructions` and
 `GET /api/operator/projects/ID/instructions`, each listing retained revisions and
 selecting the current one or `?revision=N`, and
 `GET /api/operator/assignments/ID/instructions`, which shows the assignment's bound
-profile/project revisions beside the current ones, whether revision numbers and
+agent/project revisions beside the current ones, whether revision numbers and
 stored content match, and the revisions of the latest execution request when one
-exists. Only these views leave the disclosed profile's or project's instruction text
+exists. Only these views leave the disclosed agent's or project's instruction text
 unredacted; other instruction revisions, credential references and values, control,
 workspace and repository paths and credential patterns stay redacted. Each body is
 `available` (with `redacted` when sanitization changed it) or `omitted` with reason
@@ -118,12 +118,12 @@ absence is not evidence that no tool ran. Do not collect provider-private reason
 
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
-captured supplied segment (request, role, review references, project and profile
+captured supplied segment (request, role, review references, project and agent
 instructions with their revisions) and the submitted byte count and SHA-256. An
 instruction segment the resumed thread already held is listed with its revision and
 `sent: false`, with no text and no gap. Provenance is `{source: "captured-submission" |
 "not-captured", effectivePrompt: "not-captured"}`. Only this projection leaves the
-execution's own profile and project instruction text readable; when no instruction segment was captured it adds a
+execution's own agent and project instruction text readable; when no instruction segment was captured it adds a
 labelled `reconstructed` block from retained revisions. `GET
 /api/operator/executions?task|assignment|project=ID`, `GET
 /api/operator/executions/WORK_ID` and `GET
@@ -313,7 +313,7 @@ its auth status or forget its local token, but cannot create credentials, extend
 expiry or broaden authority. Logout is local removal, not server revocation.
 
 Use named **connections** for service URL and credential references, avoiding
-confusion with agent profiles. Require explicit connection selection when the
+confusion with agents. Require explicit connection selection when the
 target is ambiguous and expose the resolved service/project in write previews.
 Use the macOS credential store by default. Support protected token-file input
 for unattended callers; do not accept literal token flags or fall back silently
@@ -356,8 +356,9 @@ explicitly available host credential.
 The [command inventory](operator-cli-inventory.json) records each command's
 qualification state and evidence; a test keeps it equal to the command registry.
 
-Command names follow cab's domain: task, assignment, agent profile and
-execution. There is no workflow graph or new assignment-stage system.
+Command names follow cab's domain: task, assignment, agent and
+execution. Agent commands retain the `profile` namespace for compatibility.
+There is no workflow graph or new assignment-stage system.
 Provide a packaged `cab` executable usable outside this repository, keeping
 the existing local operations CLI compatible. Reuse the repository's supported
 Node.js version and package tooling; distribution follows
@@ -379,7 +380,7 @@ Node.js version and package tooling; distribution follows
 
 Service administration remains the separate host-local surface. Full setup
 discovery, line-comment review composition, MCP packaging, remote process control
-and runtime setting mutations other than runtime enablement and a profile's model
+and runtime setting mutations other than runtime enablement and an agent's model
 and reasoning effort are outside the first release. Existing
 configuration operations such as source activation retain their staged previews.
 No generic command bypasses the typed operation contracts.

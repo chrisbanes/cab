@@ -271,7 +271,7 @@ export async function createProject(
 ) {
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: lead });
   await page
     .getByRole("button", { name: "Create paused project", exact: true })

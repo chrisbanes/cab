@@ -395,7 +395,7 @@ test("the ready check lists only what would make this lead's work wait", () => {
     const result = readyCheckItems(missing);
     assert.deepEqual(
       result.items.map((i) => i.text),
-      ["No lead profile. Tasks wait for a lead before starting."],
+      ["No lead agent. Tasks wait for a lead before starting."],
     );
     assert.equal(result.blocked, true);
   }
@@ -563,8 +563,8 @@ test("the ready check judges the lead's own model and effort against the support
     });
   };
   const edit = {
-    text: "Claude runtime doesn't accept the lead profile's model or reasoning effort.",
-    link: { label: "Edit profile", href: `/app/profiles/${leadId}/settings` },
+    text: "Claude runtime doesn't accept the lead agent's model or reasoning effort.",
+    link: { label: "Edit agent", href: `/app/profiles/${leadId}/settings` },
   };
   // A model the runtime lacks, and an effort its model lacks: the lead cannot run.
   for (const rejected of [
@@ -890,7 +890,7 @@ test("the ready check reports missing delivery authority and credential with a D
   );
 });
 
-test("Create is held or actionable by one function of the project and the lead profile", () => {
+test("Create is held or actionable by one function of the project and the lead agent", () => {
   const phases: SetupDraftPhase[] = [
     "editing",
     "pending",
@@ -909,11 +909,11 @@ test("Create is held or actionable by one function of the project and the lead p
   };
   const profileHold = (phase: SetupDraftPhase, name: string) =>
     phase === "pending"
-      ? "Wait for the lead profile to be created."
+      ? "Wait for the lead agent to be created."
       : phase === "unknown"
-        ? "Check whether the lead profile was saved first."
+        ? "Check whether the lead agent was saved first."
         : phase !== "recorded" && name.trim()
-          ? "Create the lead profile first, or clear its name."
+          ? "Create the lead agent first, or clear its name."
           : null;
   for (const project of phases)
     for (const profile of phases)
@@ -938,11 +938,11 @@ test("Create is held or actionable by one function of the project and the lead p
   // `rejected` in both, so only the typed content can decide.
   assert.match(
     held("editing", "rejected", "x".repeat(513)) ?? "",
-    /Create the lead profile first/,
+    /Create the lead agent first/,
   );
   assert.match(
     held("editing", "rejected", "Ada") ?? "",
-    /Create the lead profile first/,
+    /Create the lead agent first/,
   );
   assert.equal(held("editing", "rejected", ""), null);
   assert.equal(held("editing", "recorded", "Ada"), null);

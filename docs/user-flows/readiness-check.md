@@ -36,13 +36,13 @@ service sees rather than the operator's interactive shell.
 | GitHub discovery    | Configured and readable, or not configured                                                         | Run `gh auth login`, or Settings → discovery credential                                                                                                                                                                                                              |
 | Claude executable   | Not configured, or `claude` resolves on the service `PATH` and reports a version                   | Install Claude Code into the fixed `PATH`, then restart the service. If `claude --version` fails, run it as the service user or reinstall Claude Code.                                                                                                               |
 | Claude token        | Not configured, or the reference is readable and safe                                              | Not configured: add a token in [Add Claude](claude-runtime.md). A `file:` problem: make it a private regular file you own (mode 600), or clear the reference. An `env:` variable: set it and restart the service, or clear the reference. Restart required: restart. |
-| Runtime harness     | Each runtime a profile uses is running, and each profile's model and reasoning effort are accepted | While cab is restarting the runtime the fix names the attempt and time ("Restarting · attempt 1 of 3 · next at 14:30"); once retries are exhausted, or if none are scheduled, turn the runtime off and on in Settings → Runtime, or restart the service, or edit the profile's model or reasoning effort. A runtime that is not enabled needs its executable installed into the fixed `PATH` instead, as for Claude executable.                                                                          |
-| Skill plugins       | Every active profile's skill plugins load now: an installed plugin is installed once and enabled in its tool, and a local directory is loadable | Install or enable the named plugin in Claude Code or Codex as the service user, or edit the profile's skill plugins. The reason names the plugin and its tool, never a path. |
+| Runtime harness     | Each runtime an agent uses is running, and each agent's model and reasoning effort are accepted | While cab is restarting the runtime the fix names the attempt and time ("Restarting · attempt 1 of 3 · next at 14:30"); once retries are exhausted, or if none are scheduled, turn the runtime off and on in Settings → Runtime, or restart the service, or edit the agent's model or reasoning effort. A runtime that is not enabled needs its executable installed into the fixed `PATH` instead, as for Claude executable.                                                                          |
+| Skill plugins       | Every active agent's skill plugins load now: an installed plugin is installed once and enabled in its tool, and a local directory is loadable | Install or enable the named plugin in Claude Code or Codex as the service user, or edit the agent's skill plugins. The reason names the plugin and its tool, never a path. |
 | Data and auth paths | Private, canonical, owned by the service user                                                      | Named path rule, without the path value in shared output                                                                                                                                                                                                             |
 
 - A check that is not configured is reported as such, not as a failure. A missing
   `claude`, or Claude disabled in Settings → Runtime, leaves Claude executable not
-  configured; an active Claude profile then fails Runtime harness instead
+  configured; an active Claude agent then fails Runtime harness instead
   ([ADR-1012](../adr/1012-operator-controlled-runtime-enablement.md)).
 - Claude executable shows the version that `claude --version` prints, as in
   `Claude executable (2.1.296)`. cab reports it and never compares it. Only the
@@ -51,19 +51,19 @@ service sees rather than the operator's interactive shell.
 - Every row that is not a pass shows its fix line, in the CLI and in Settings. A
   failed re-run keeps the last results visible, marked as the last fetched, with a
   warning; Run again is never disabled, so keyboard focus stays on it.
-- Output never includes token values or paths, and never a profile name: Runtime
-  harness counts the profiles whose model or reasoning effort the runtime does not
-  accept; each profile's runtime is on its Settings page.
+- Output never includes token values or paths, and never an agent name: Runtime
+  harness counts the agents whose model or reasoning effort the runtime does not
+  accept; each agent's runtime is on its Settings page.
 - The Claude sandbox self-test needs a task workspace and admits exactly one turn,
   so it runs before each turn and a failure shows on the waiting task, not here.
 - Claude's supported models are read from its runtime before the first Claude turn.
-  Until then a Claude profile cannot be confirmed, and Runtime harness fails with
+  Until then a Claude agent cannot be confirmed, and Runtime harness fails with
   "Claude's supported models are not known yet"; run a Claude task, then run the
   check again.
 - Codex's supported models are read from its App Server when the runtime starts. A
-  Codex profile that sets a model or reasoning effort cannot be confirmed until then,
+  Codex agent that sets a model or reasoning effort cannot be confirmed until then,
   and Runtime harness fails with "Codex's supported models are not known yet"; run the
-  check again, or restart the service if the read keeps failing. A Codex profile
+  check again, or restart the service if the read keeps failing. A Codex agent
   without a model or reasoning effort runs on the Codex default and is not held to
   the catalogue.
 - `cab doctor` exits 0 whenever the read succeeds, whatever the checks report;

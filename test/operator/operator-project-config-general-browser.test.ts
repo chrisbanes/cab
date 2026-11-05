@@ -1345,15 +1345,15 @@ test("routing and profile saves wait for the comparison read after Review change
   });
   const profilePosts = watchPosts(page);
   const releaseProfile = await holdReads(page);
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Save agent", exact: true }).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
   await outcomeMessages(page)
     .getByRole("button", { name: "Review changes" })
     .click();
-  await assertOnHold(page, "Save profile", profilePosts);
+  await assertOnHold(page, "Save agent", profilePosts);
   assert.equal(d.profile(reviewer).instructions, "THEIR INSTRUCTIONS");
   releaseProfile();
-  await assertOffHold(page, "Save profile");
+  await assertOffHold(page, "Save agent");
 });
 
 test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
@@ -1950,7 +1950,7 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
     revoked: true,
   });
   await page
-    .getByLabel("Lead profile", { exact: true })
+    .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Jonas" });
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await page.getByText("Couldn't save. Your changes are still here.").waitFor();

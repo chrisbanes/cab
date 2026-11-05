@@ -6,7 +6,7 @@ allocation decision. The [specification](../SPEC.md) owns behavior; R07–R10 in
 
 ## Accountability and execution
 
-The project lead is accountable for task outcomes. Use the same lead profile with
+The project lead is accountable for task outcomes. Use the same lead agent with
 separate conversations for each task; project-wide coordination uses project
 context. There is no independently configurable task-owner role. Task-scoped lead
 turns need durable execution identities and inbox destinations and obey the same
@@ -23,7 +23,7 @@ the result for reconciliation rather than guessing a destination.
 The lead assesses initial results and requests further work or task completion.
 The service enforces completion conditions and permissions; worker success alone
 cannot complete a task. In-scope repairs retain their assignment assignee and
-profile. Reassignment is explicit, with old execution and writer ownership
+agent. Reassignment is explicit, with old execution and writer ownership
 reconciled before replacement. Task-scoped lead history remains available for
 later CI/review feedback and operator messages.
 
@@ -36,15 +36,15 @@ Explicit permitted assignee selections bypass TypeSafe, including nested delegat
 For projects without routing enabled, the lead allocates work explicitly.
 
 The service filters candidates using explicit eligibility and permissions.
-Operator-written profile capabilities and project routing guidance supply semantic
+Operator-written agent capabilities and project routing guidance supply semantic
 suitability criteria. They must not encode a required development-stage graph.
 Use the brief, relevant supplied findings, candidate descriptions and routing
 guidance as the bounded input. Do not send credentials or full transcripts.
 External content remains data, not authority to change the policy or candidates.
 Validate model responses at runtime against the candidate set and question contract.
 
-Select for fit, then queue for capacity. A busy profile is not automatically
-substituted. Existing global/project caps and any explicitly configured profile
+Select for fit, then queue for capacity. A busy agent is not automatically
+substituted. Existing global/project caps and any explicitly configured agent
 limits apply at admission. Routing recommendations neither reserve writer access
 nor authorize execution. Recheck readiness, dependencies, holds, permissions and
 current execution ownership before launch.
@@ -65,13 +65,13 @@ disabling routing leaves lead allocation available. Show routing availability an
 fallback outcomes without exposing secrets or claiming an assignment has started
 before execution admission succeeds.
 
-Bind each routing decision to its assignment/task work revision, candidate/profile
+Bind each routing decision to its assignment/task work revision, candidate/agent
 revisions and routing guidance revision. Retain model/question identity, returned
 judgments and disposition with enough provenance to diagnose the choice. Check
 freshness when consuming responses: changed briefs, revoked permissions, opt-out,
 obsolete candidates or superseded revisions cannot silently dispatch stale work.
 Record-time stale classification uses a typed domain error, not message text; a
-selected profile outside an unchanged candidate set is an invalid disposition that
+selected agent outside an unchanged candidate set is an invalid disposition that
 fails loudly instead of retrying.
 
 Persist the logical routing operation and chosen disposition so retries, duplicate
@@ -91,9 +91,9 @@ from this design discussion.
 ## Evidence
 
 Qualification covers enabled and disabled local-task journeys, explicit bypass,
-fallback, nested result return, retained repair assignees, busy-profile queuing, lead completion,
+fallback, nested result return, retained repair assignees, busy-agent queuing, lead completion,
 revision races and crash recovery. Include separate histories for simultaneous tasks
-using the lead profile and capacity-one delegation/return behavior.
+using the lead agent and capacity-one delegation/return behavior.
 
 Use deterministic responses and service failures for control-flow coverage, plus
 representative bounded live routing validation after credentials and project access

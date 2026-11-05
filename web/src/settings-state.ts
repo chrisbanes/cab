@@ -154,7 +154,9 @@ function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
     issue.code === "too_small" &&
     (noun === "profile" || noun === "project")
   )
-    return `Enter a ${noun} name.`;
+    return noun === "profile"
+      ? "Enter an agent name."
+      : "Enter a project name.";
   if (
     namedLengths.has(field) &&
     issue.code === "too_big" &&

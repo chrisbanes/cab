@@ -173,7 +173,7 @@ physical sleep/wake behavior, operational host-restart recovery or private remot
 Tailscale access.
 
 The production service runs the Claude runtime
-([ADR-1008](adr/1008-claude-code-execution-harness.md)) beside Codex; profiles
+([ADR-1008](adr/1008-claude-code-execution-harness.md)) beside Codex; agents
 select it explicitly. Its token is the operator's own subscription token from `claude setup-token`,
 configured in Settings as a `file:/absolute/path` or `env:NAME` reference. The
 installed LaunchAgent service uses an owner-only token file
@@ -381,7 +381,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
    takes: `task list` is `Title`, `Project` (the name, and omitted under `--project`),
    `State` and `Next` (the web UI's column and who acts next), `Lead` and `Task id`;
    `task search` is `Title`, `Project` (omitted under `--project`), `Type`, `Created`, `Excerpt` and `Task id`;
-   `project list` is `Name`, `Lead` (the profile's name), `Paused`, `Version` and
+   `project list` is `Name`, `Lead` (the agent's name), `Paused`, `Version` and
    `Project id`; `--archived` adds an `Archived` column. `profile list` is `Name`, `Revoked`, `Version`, `Summary` and
    `Profile id`. `project list` and `profile list` end with a `Runtime:` line only when
    the runtime is unavailable.
@@ -428,7 +428,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      (no request, no journal line; `data` is `{file, document}`). It does not check
      staleness or the installation, and says so; `apply` still refuses both. It takes no
      `--request-id`.
-   - Profile and project instructions are `--instructions TEXT|-` (`-` reads standard
+   - Agent and project instructions are `--instructions TEXT|-` (`-` reads standard
      input, text only, as for `task create --outcome -`) or `--instructions-file PATH`
      on `profile|project prepare-create` and `profile|project prepare`; give one, and
      neither with `--restore-revision`. Instruction text is at most 16,000 Unicode
@@ -440,10 +440,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
      revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
      `--enabled`, `--candidates`, `--credential-ref env:NAME|none` and
      `--project-limit PROJECT_ID=N|default` are the reverse paths. Creation is not
-     reversible: revoke a profile or pause a project instead. Routing guidance is
+     reversible: revoke an agent or pause a project instead. Routing guidance is
      replace-only. Runtime, model, repository and GitHub settings are not offered.
    - `assignment apply-current ASSIGNMENT_ID --expected-version N` rebinds the
-     assignment to the current profile and project revisions for its next turn; an
+     assignment to the current agent and project revisions for its next turn; an
      active turn is not rewritten. Adoption is one-way: restore older text as a new
      revision and adopt again. A completed lead stays resumable: a later
      `task follow-up` resumes it under the adopted revisions.
@@ -478,7 +478,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
 
    The `--expected-*` flags check different records, so each command's help prints one
    line under its usage naming the record its flag refers to and the command that shows
-   it (the task, an assignment, a profile, a project or its routing, the source
+   it (the task, an assignment, an agent, a project or its routing, the source
    configuration, a placement conflict, a question, an approval or a comment review). No flag is renamed:
    `--expected-version`, `--expected-revision`, `--expected-task-version` and
    `--expected-conversation-revision` keep their meaning, and `task configure` keeps
@@ -493,7 +493,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      `runtime-reported` or `unknown`), counts and capture health.
    - `execution inputs WORK_ID [--compare-current]` shows the captured submission
      of cab-supplied inputs (request, role, review references, project and
-     profile instructions) with the submitted byte count and SHA-256. It is not
+     agent instructions) with the submitted byte count and SHA-256. It is not
      the runtime's effective prompt. It is the only diagnostic view that leaves the
      execution's own instruction text readable; credentials, patterns and private
      paths stay redacted, and `logs` shows instruction segments only as
@@ -502,7 +502,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      A segment the resumed thread already held is listed with its revision and
      marked not sent, not as a gap; a turn normally carries each instruction
      revision once per thread. `--compare-current` compares bound and current instruction
-     revisions and profile runtime settings.
+     revisions and agent runtime settings.
    - `logs --execution WORK_ID [--kind input|setting|runtime|tool|service]
      [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor
      TOKEN]` reads one ascending page; `data.resumeCursor` always resumes after it.
