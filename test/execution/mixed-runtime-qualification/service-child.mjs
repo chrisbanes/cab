@@ -184,6 +184,21 @@ export const codexSkillBrief = [
   `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
 ].join("\n");
 
+/** The nested mattpocock-skills skill the nested-skill facets run, and what only its text holds. */
+export const NESTED_SKILL = "grilling";
+export const NESTED_SKILL_ANSWER = "design tree";
+/** The nested-skill brief: load the skill, then report a phrase only its instructions give. */
+export const nestedSkillBrief = (harness) =>
+  [
+    "Disposable cab skill probe.",
+    harness === "claude"
+      ? `Invoke the skill ${NESTED_SKILL} with the Skill tool to load its instructions, but do not follow them.`
+      : `Use the skill ${NESTED_SKILL} now: read its instructions, but do not follow them.`,
+    `Then call cab_report_result exactly once with summary set to the first phrase written in bold in those instructions, and end the turn.${
+      harness === "claude" ? " Use no other tool." : ""
+    }`,
+  ].join("\n");
+
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
 export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "scrub") return shellOnly(PROBE);
@@ -192,6 +207,8 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "claude-subagent-stop") return subagentSleep;
   if (facet === "claude-skill") return skillBrief;
   if (facet === "codex-skill") return codexSkillBrief;
+  if (facet === "claude-nested-skill") return nestedSkillBrief("claude");
+  if (facet === "codex-nested-skill") return nestedSkillBrief("codex");
   if (facet === "crash" || facet === "claude-subagent-crash")
     return `Disposable cab qualification probe. Call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
   const brief =
@@ -227,7 +244,9 @@ export async function setupJourney(
     instructions: "Follow the task instructions exactly and briefly.",
     capabilities: "task coordination, shell",
     runtime:
-      facet === "mixed" || facet === "codex-skill"
+      facet === "mixed" ||
+      facet === "codex-skill" ||
+      facet === "codex-nested-skill"
         ? { harness: "codex" }
         : claude,
     ...(skills ? { skills } : {}),

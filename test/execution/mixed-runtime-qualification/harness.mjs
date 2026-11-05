@@ -28,6 +28,9 @@ export const FACETS = {
   "claude-skill": { claude: 2, codex: 0 },
   // #1336: a Codex lead runs a skill of its profile's plugin; no Claude turn.
   "codex-skill": { claude: 0, codex: 2 },
+  // #1524: a nested skill of a copy of the installed mattpocock-skills plugin, per harness.
+  "claude-nested-skill": { claude: 1, codex: 0 },
+  "codex-nested-skill": { claude: 0, codex: 1 },
   "claude-subagent-stop": { claude: 1, codex: 0 },
   "claude-subagent-crash": { claude: 3, codex: 0 },
 };

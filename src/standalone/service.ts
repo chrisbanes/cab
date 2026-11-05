@@ -8681,7 +8681,7 @@ export class StandaloneService {
           return;
         }
       }
-      const pluginWait = await this.skillPluginWait(request);
+      const pluginWait = await this.skillPluginWait(request, harness);
       if (
         this.runtimes.get(harness) !== runtime ||
         this.generation !== generation ||
@@ -8824,12 +8824,16 @@ export class StandaloneService {
    */
   private async skillPluginWait(
     request: TurnRequest,
+    harness: ExecutionHarness,
   ): Promise<string | undefined> {
     this.turnPlugins.delete(request.workId);
     try {
       const skills = this.turnSettings(request)?.skills;
       if (skills)
-        this.turnPlugins.set(request.workId, await loadProfilePlugins(skills));
+        this.turnPlugins.set(
+          request.workId,
+          await loadProfilePlugins(skills, harness),
+        );
       return undefined;
     } catch (error) {
       return error instanceof SkillPluginError

@@ -56,7 +56,10 @@ import {
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
-import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
+import {
+  writeNestedSkillPlugin,
+  writeSkillPlugin,
+} from "../fixtures/skill-plugin.js";
 import { tmpdir } from "../fixtures/temp.js";
 import {
   createNativeWork,
@@ -3082,7 +3085,7 @@ test("profile skills reject missing plugins and unknown skills, and follow the p
   );
   // A tree that could never be digested is refused when saved, not when its work waits.
   const linked = writeSkillPlugin(join(root, "linked"), ["probe-skill"]);
-  symlinkSync(root, join(linked, "loop"));
+  symlinkSync(root, join(linked, "skills", "probe-skill", "loop"));
   assert.deepEqual(
     await fieldsOf(
       configure({
@@ -3109,6 +3112,24 @@ test("profile skills reject missing plugins and unknown skills, and follow the p
     (await api.readProfileConfiguration(ids.profileId)).data.skills,
     skills,
   );
+  // A Codex-only plugin is saved on a Codex profile, and refused once the profile is or becomes Claude.
+  const codexOnly = writeNestedSkillPlugin(
+    join(root, "codex-only"),
+    { engineering: ["probe-skill"] },
+    { claude: false },
+  );
+  const codexSkills = {
+    plugins: [{ path: codexOnly, skills: ["probe-skill"] }],
+  };
+  assert.deepEqual(
+    await fieldsOf(configure({ runtime: claude, skills: codexSkills }, 4)),
+    ["skills.plugins.0.path"],
+  );
+  await api.execute(configure({ skills: codexSkills }, 4) as never);
+  assert.deepEqual(await fieldsOf(configure({ runtime: claude }, 5)), [
+    "skills.plugins.0.path",
+  ]);
+  assert.equal(f.service.domain().profile(ids.profileId).version, 5);
 });
 test("task reads report the persisted binding harness of each execution generation", async (t) => {
   const f = await createOperatorFixture();

@@ -91,8 +91,10 @@ import {
   questionFormSchema,
 } from "../core/question-forms.js";
 import {
+  defaultProfileRuntime,
   executionHarnessLabels,
   executionIntentStateSchema,
+  noProfileSkills,
 } from "../core/execution-runtime.js";
 import { skillFieldErrors } from "./skill-plugins.js";
 import {
@@ -9955,14 +9957,26 @@ export class OperatorApi {
               ]);
           }
         }
-        // Skill plugins must exist and be loadable; both harnesses receive them.
+        // Skill plugins must exist and be loadable by the profile's harness, including when
+        // a change switches an existing profile to Claude.
         if (
           (c.type === "profile.create" || c.type === "profile.configure") &&
-          c.skills &&
+          (c.skills || c.runtime?.harness === "claude") &&
           this.domain().recordedCommand({ ...c, actor: "operator" }) ===
             undefined
         ) {
-          const fields = await skillFieldErrors(c.skills);
+          const d = this.domain();
+          const harness =
+            c.runtime?.harness ??
+            (c.type === "profile.configure"
+              ? d.profileRuntime(c.profileId).harness
+              : defaultProfileRuntime(d.enabledRuntimes()).harness);
+          const skills =
+            c.skills ??
+            (c.type === "profile.configure"
+              ? d.profileSkills(c.profileId)
+              : noProfileSkills);
+          const fields = await skillFieldErrors(skills, harness);
           if (fields.length > 0)
             throw new OperatorApiError(400, "invalid-input", fields);
         }

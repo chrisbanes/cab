@@ -29,7 +29,10 @@ import {
   sessionOf,
 } from "../fixtures/claude-sdk.js";
 import { stopWithoutDrain } from "../fixtures/service-internals.js";
-import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
+import {
+  writeNestedSkillPlugin,
+  writeSkillPlugin,
+} from "../fixtures/skill-plugin.js";
 import { digestPlugin } from "../../src/standalone/skill-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -797,7 +800,12 @@ test("a Claude turn loads its profile's skill plugins and records their digests 
       yield result(sessionOf(session));
     },
   ]);
-  const plugin = writeSkillPlugin(join(run.root, "plugin"), ["review", "plan"]);
+  // Nested skills listed in the manifest are named as the CLI names them: plugin and frontmatter name.
+  const plugin = writeNestedSkillPlugin(
+    join(run.root, "plugin"),
+    { engineering: ["review"], productivity: ["plan"] },
+    { name: "unit-plugin" },
+  );
   const { projectId, worker } = run.setup();
   run.execute({
     type: "profile.configure",
@@ -819,7 +827,7 @@ test("a Claude turn loads its profile's skill plugins and records their digests 
     { type: "local", path: plugin, skipMcpDiscovery: true },
   ]);
   assert.deepEqual(options?.skills, ["unit-plugin:review", "unit-plugin:plan"]);
-  const digest = await digestPlugin(plugin);
+  const digest = await digestPlugin(plugin, ["review", "plan"]);
   assert.deepEqual(
     (await new OperatorApi(run.service).readExecution(workId)).data
       .skillPlugins,
@@ -859,6 +867,52 @@ test("a missing skill plugin keeps the work waiting with a reason that names no 
   assert.notEqual(run.intent(workId)?.state, "held");
   assert.equal(run.queries.includes("turn"), false);
   writeSkillPlugin(plugin, ["review"]);
+  await run.wake();
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  const base = run.intent(workId)?.workspace;
+  t.after(() => releaseTemporaryBase(base));
+});
+
+test("a Claude turn whose profile enables a Codex-only plugin waits with a reason naming the plugin, then runs once it has a Claude manifest", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      yield result(sessionOf(session));
+    },
+  ]);
+  const plugin = writeNestedSkillPlugin(
+    join(run.root, "codex-plugin"),
+    { engineering: ["review"] },
+    { name: "codex-only", claude: false },
+  );
+  const { projectId, worker } = run.setup();
+  // Recorded directly: the operator API refuses this profile change.
+  run.execute({
+    type: "profile.configure",
+    profileId: worker,
+    expectedVersion: 1,
+    skills: { plugins: [{ path: plugin, skills: ["review"] }] },
+  });
+  const { workId } = await run.claudeTask(projectId, worker);
+  const request = () =>
+    run.service.turnRequests().find((r) => r.workId === workId);
+  await waitUntil(
+    () =>
+      /Skill plugin codex-only has no Claude plugin manifest/.test(
+        request()?.reason ?? "",
+      ),
+    run.describe,
+  );
+  assert.equal(`${request()?.reason}`.includes(run.root), false);
+  assert.equal(run.queries.includes("turn"), false);
+  writeNestedSkillPlugin(
+    plugin,
+    { engineering: ["review"] },
+    { name: "codex-only" },
+  );
   await run.wake();
   await waitUntil(
     () => run.intent(workId)?.state === "completed",

@@ -18,10 +18,11 @@ a subagent under Stop, and a crash during a subagent; the
 [Codex journey record](../evidence/codex-skill-journeys-2026-10-30.md) show per-thread
 skills and a Codex turn running its profile's skill.
 
-Not yet implemented: the plugin layouts and load scope below (cab still requires
-`skills/<name>/SKILL.md`, refuses any symbolic link and bounds the whole tree;
-[#1524](https://github.com/chrisbanes/cab/issues/1524)), and installed plugins as a
-profile source (profiles still name local directories only;
+The plugin layouts and load scope below are implemented for local plugin directories
+([#1524](https://github.com/chrisbanes/cab/issues/1524)); the
+[layout journey record](../evidence/skill-plugin-layout-journeys-2026-11-05.md) shows a
+nested skill of `mattpocock-skills` running on each harness. Not yet implemented: installed
+plugins as a profile source (profiles still name local directories only;
 [#1525](https://github.com/chrisbanes/cab/issues/1525)).
 
 ## Decision
