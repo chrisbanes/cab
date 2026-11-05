@@ -142,7 +142,9 @@ async function frontmatterName(file: string): Promise<string | undefined> {
   const value = block && /^name:[ \t]*(.*?)[ \t]*$/m.exec(block)?.[1];
   if (!value) return undefined;
   const quoted = /^(['"])(.*?)\1(?:[ \t]+#.*)?$/.exec(value);
-  return (quoted ? quoted[2] : value.replace(/[ \t]+#.*$/, "")) || undefined;
+  return (
+    (quoted ? quoted[2] : value.replace(/(?:^|[ \t]+)#.*$/, "")) || undefined
+  );
 }
 
 /** One skill of a plugin: its real directory and real `SKILL.md`. */

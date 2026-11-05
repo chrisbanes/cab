@@ -192,6 +192,12 @@ test("skills are discovered from the Claude manifest, the Codex manifest and the
     const commented = await readPlugin(nested);
     assert.ok(commented?.skills.has("review-a"));
     assert.ok(commented?.skills.has("tdd-b"));
+    // A name that is only a comment is null in YAML: the directory names the skill.
+    writeFileSync(
+      join(nested, "skills", "engineering", "tdd", "SKILL.md"),
+      "---\nname: # none\n---\n",
+    );
+    assert.ok((await readPlugin(nested))?.skills.has("tdd"));
     assert.equal(await readPlugin(join(s.root, "absent")), undefined);
   } finally {
     s.done();
