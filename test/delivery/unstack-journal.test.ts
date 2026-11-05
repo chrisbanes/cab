@@ -855,3 +855,56 @@ test("a final dispatch guard storage failure remains visible with durable attemp
   assert.equal(f.counts().unstackSends, 0);
   assert.equal(f.counts().leases, 0);
 });
+
+for (const valid of [true, false]) {
+  test(`advancing target base ${valid ? "renews evidence and needs a later matching read" : "cannot bypass changed authority"}`, async (t) => {
+    const f = fixture(t),
+      read = f.provider.read,
+      nextBase = "e".repeat(40);
+    let advanced = false;
+    f.provider.read = async (identity) => {
+      if (
+        !advanced &&
+        f.journal.get(f.command.key)?.phase === "retarget-confirmed"
+      ) {
+        advanced = true;
+        f.setRead({ state: "removed", baseRef: "main", baseSha: nextBase });
+        f.setValid(valid);
+      }
+      return read(identity);
+    };
+    const renewed = await f.coordinator().execute(f.command, f.identity);
+    assert.equal(renewed.phase, "retarget-confirmed");
+    assert.equal(
+      renewed.reason,
+      valid ? "readback-required" : "authority-changed",
+    );
+    assert.equal(renewed.newBaseSha, valid ? nextBase : "d".repeat(40));
+    assert.deepEqual(renewed.identity, f.identity);
+    assert.equal(f.journal.pending(f.command.taskId).length, 1);
+    assert.equal(f.counts().confirms, 0);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) AS n FROM restack_events").get()!.n,
+      0,
+    );
+    f.setValid(true);
+    if (!valid) {
+      const refreshed = await f.coordinator().reconcile(f.command.key);
+      assert.equal(refreshed.phase, "retarget-confirmed");
+      assert.equal(refreshed.newBaseSha, nextBase);
+      assert.equal(f.counts().confirms, 0);
+    }
+    const confirmed = await f.coordinator().reconcile(f.command.key);
+    assert.equal(confirmed.phase, "confirmed");
+    assert.equal(confirmed.newBaseSha, nextBase);
+    assert.deepEqual(confirmed.command, f.command);
+    assert.deepEqual(f.counts(), {
+      leases: 0,
+      unstackSends: 1,
+      retargetSends: 1,
+      confirms: 1,
+    });
+    assert.deepEqual(await f.coordinator().reconcile(f.command.key), confirmed);
+    assert.equal(f.counts().confirms, 1);
+  });
+}

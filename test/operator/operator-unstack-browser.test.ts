@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { UnstackReceipt } from "../../src/operator/unstack-contracts.js";
 import { chromium, webkit, type Browser } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -210,6 +211,113 @@ for (const engine of ["chromium", "webkit"] as const) {
       },
     );
   }
+
+  test(
+    `a retained unfinished send follows the newer operation without another lookup or POST (${engine})`,
+    { browserEngine: engine },
+    async (_t, j) => {
+      const f = await j.start("fixture.create", () =>
+        createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+      );
+      let browser: Browser | undefined;
+      j.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      const { taskId } = await seedReviewTask(
+        f,
+        "Stack project",
+        "Stack status",
+      );
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start("browser.launch", () =>
+        (engine === "webkit" ? webkit : chromium).launch(),
+      );
+      const page = await browser.newPage();
+      j.observe(page);
+      const pending = { operation: null as UnstackReceipt | null };
+      let posts = 0,
+        lookups = 0;
+      const preview = {
+        taskId,
+        expectedVersion: 1,
+        materialHash: "a".repeat(64),
+        repository: "fixture/private",
+        selectedPr: 2,
+        stackNumber: 1,
+        targetBase: "main",
+        members: [
+          { number: 1, state: "OPEN" },
+          { number: 2, state: "OPEN" },
+        ],
+      };
+      await page.route(`**/api/operator/tasks/${taskId}/unstack`, (r) =>
+        r.fulfill({
+          json: {
+            data: {
+              taskId,
+              readOnly: false,
+              failedBlocker: false,
+              cancelAvailable: false,
+              preview: pending.operation ? null : preview,
+              operation: pending.operation,
+              cancelOperation: null,
+              available: !pending.operation,
+              unavailable: pending.operation ? "pending" : null,
+            },
+            observedAt: 1,
+          },
+        }),
+      );
+      await page.route("**/api/operator/commands", async (r) => {
+        const command = r.request().postDataJSON();
+        if (command.type !== "task.unstack") return r.continue();
+        posts++;
+        pending.operation = {
+          kind: "task-unstack",
+          key: command.key,
+          taskId,
+          recorded: true,
+          expectedVersion: 1,
+          materialHash: preview.materialHash,
+          phase: "unstack-attempting",
+          revision: 2,
+          reason: "readback-required",
+        };
+        await r.fulfill({ json: pending.operation });
+      });
+      await page.route("**/api/operator/operations?**", async (r) => {
+        lookups++;
+        await r.abort("failed");
+      });
+      await page.goto(`${web.origin}/app/tasks/${taskId}`);
+      await page.getByLabel("Password").fill(web.password);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.getByRole("button", { name: "Unstack…", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Confirm Unstack", exact: true })
+        .click();
+      await page.getByText(/Unstack unfinished/).waitFor();
+      assert.equal(await page.getByText(/Outcome unknown/).count(), 0);
+      assert.ok(pending.operation);
+      const originalKey = pending.operation.key;
+      pending.operation = {
+        ...pending.operation,
+        phase: "confirmed",
+        revision: 3,
+        reason: "confirmed",
+      };
+      await page.evaluate(() => dispatchEvent(new Event("cab-task-changed")));
+      await page
+        .getByText(/Unstack and retarget confirmed/)
+        .waitFor({ timeout: 5000 });
+      assert.equal(await page.getByText(/Unstack unfinished/).count(), 0);
+      assert.equal(posts, 1);
+      assert.equal(lookups, 0);
+      assert.equal(pending.operation.key, originalKey);
+    },
+  );
 
   test(
     `Cancel is separate from Stop and retains an unknown original key for GET-only recovery (${engine})`,

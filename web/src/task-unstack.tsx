@@ -242,7 +242,14 @@ export function TaskUnstack({
   };
   const receipt = active.entry.lifecycle.receipt;
   const operation =
-    receipt?.kind === "task-unstack" ? receipt : view?.operation;
+    receipt?.kind === "task-unstack" &&
+    (!view?.operation ||
+      view.operation.key !== receipt.key ||
+      view.operation.materialHash !== receipt.materialHash ||
+      view.operation.expectedVersion !== receipt.expectedVersion ||
+      view.operation.revision <= receipt.revision)
+      ? receipt
+      : view?.operation;
   const hasStatus = Boolean(operation || unstack.uncertain);
   const hasCancelStatus = Boolean(view?.cancelOperation || cancel.uncertain);
   if (

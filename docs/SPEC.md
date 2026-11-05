@@ -410,6 +410,9 @@ identity-bound readback phases. Unknown sends are read back after restart and ne
 resent. Every unfinished or unproved phase holds work, archive and deletion, including
 an observed removal whose retarget is still unknown or refused. A definite no-effect
 failure retains a terminal receipt; partial success cannot become failed to release drain.
+If the target branch advances after retarget was observed, fresh complete-removal and
+target-ref readback renews the base SHA under the original identity fences. A later
+matching read is required before confirmation; no provider effect is resent.
 Only confirmed removal and exact target base/SHA permit one transaction to accept the
 base, retire the selected former dependency generation and queue one restack notice.
 The retained workspace HEAD, index and files are not changed. Independent native/local

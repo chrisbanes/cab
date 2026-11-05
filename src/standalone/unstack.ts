@@ -291,8 +291,7 @@ export class UnstackCoordinator {
         return this.journal.update(r, { reason: "readback-unavailable" });
       if (
         observed.state !== "removed" ||
-        observed.baseRef !== r.identity.targetBaseRef ||
-        observed.baseSha !== r.newBaseSha
+        observed.baseRef !== r.identity.targetBaseRef
       )
         return this.journal.update(r, { reason: "identity-changed" });
       try {
@@ -301,6 +300,12 @@ export class UnstackCoordinator {
         if (!(error instanceof UnstackAuthorityChangedError)) throw error;
         return this.journal.update(r, { reason: "authority-changed" });
       }
+      if (observed.baseSha !== r.newBaseSha)
+        return this.journal.update(
+          r,
+          { newBaseSha: observed.baseSha, reason: "readback-required" },
+          () => this.guard(r),
+        );
       const confirmed = this.authority.confirm(r);
       if (
         confirmed.phase !== "confirmed" ||

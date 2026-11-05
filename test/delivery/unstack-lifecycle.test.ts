@@ -731,3 +731,51 @@ for (const changed of [
     assert.ok(f.current().domain().activeStackedDependency(f.dependent));
   });
 }
+
+test("restart renews an advanced retarget base under the original key before accepting and restacking once", async (t) => {
+  const f = await prepared(t),
+    identity = await f.current().previewTaskUnstack(f.dependent),
+    command = f.command(identity),
+    before = f.image(),
+    nextBase = "e".repeat(40);
+  f.readAs({ state: "removed", baseRef: "main", baseSha: nextBase });
+  await f.restart((db) => {
+    const journal = new UnstackStore(db);
+    let r = journal.prepare(command, identity, () => {});
+    r = journal.update(r, { phase: "unstack-attempting" });
+    r = journal.update(r, { phase: "unstack-confirmed", removed: true });
+    journal.update(r, { phase: "retarget-confirmed", newBaseSha: f.base });
+  });
+  const result = f.journal()[0]!;
+  assert.equal(result.phase, "confirmed");
+  assert.deepEqual(result.identity, identity);
+  assert.equal(result.newBaseSha, nextBase);
+  assert.equal(
+    f.current().delivery().delivery(f.dependent)?.observation.baseSha,
+    nextBase,
+  );
+  assert.equal(
+    f.current().domain().stackedDependency(f.dependent)?.parentHead,
+    nextBase,
+  );
+  f.readDb((db) => {
+    assert.equal(
+      db
+        .prepare("SELECT restackSeq FROM stacked_dependencies WHERE taskId=?")
+        .get(f.dependent)?.restackSeq,
+      1,
+    );
+    assert.equal(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM coordination_external_delivery_notices WHERE taskId=? AND identity=?",
+        )
+        .get(f.dependent, `unstack-restack:${command.key}`)?.n,
+      1,
+    );
+  });
+  assert.deepEqual(await f.current().unstackTask(command), result);
+  assert.deepEqual(f.counts(), { unstackSends: 0, retargetSends: 0 });
+  assert.equal(f.journal().length, 1);
+  assert.deepEqual(f.image(), before);
+});
