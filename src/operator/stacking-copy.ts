@@ -26,6 +26,8 @@ export const stackReasonLabels: Record<StackReason, string> = {
   "dependent-started": "it started before it could stack",
   "blocker-unpublished":
     "its blocker has no open change request at its last push",
+  "blocker-failed":
+    "The blocker was cancelled or its change request closed without merging; Unstack or Cancel this task",
   "blocker-unknown": "its blocker's change request or state is unknown",
 };
 

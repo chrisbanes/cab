@@ -564,14 +564,17 @@ browserTest(
   async () => {
     const fixture = await createOperatorFixture(null, undefined, undefined, {
       cleanupTimeoutMs: 1000,
+      operation: async (name, operation) => {
+        if (name === "browser.close") await new Promise<void>(() => {});
+        else await operation();
+      },
     });
     const web = await fixture.startWeb();
     const browser = await chromium.launch();
     const child = launchedBrowserProcess(browser);
     try {
       assert.ok(child?.pid);
-      // A stopped browser never answers close, as in the stalled WebKit runs.
-      process.kill(-child.pid, "SIGSTOP");
+      // Stall the close boundary itself; Playwright may force-close a stopped browser.
       await assert.rejects(
         fixture.close(browser),
         /browser.close: timed-out after \d+ ms/,

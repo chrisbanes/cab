@@ -1,3 +1,9 @@
+import type {
+  UnstackMaterial,
+  UnstackProvider,
+} from "../../src/standalone/unstack.js";
+import { proveUnchangedRebase } from "../../src/standalone/rebase-proof.js";
+import { verifierGit } from "../../src/standalone/push-verification.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -38,6 +44,13 @@ export async function stackedDeliveryFixture(
     forcePush?: "allow" | "approval";
     stacking?: boolean;
     backgroundDiagnosticSink?: StandaloneServiceOptions["backgroundDiagnosticSink"];
+    unstack?: {
+      prepare: (
+        repositoryId: string,
+        number: number,
+      ) => Promise<UnstackMaterial>;
+      provider: UnstackProvider;
+    };
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-stacked-")));
@@ -98,8 +111,33 @@ export async function stackedDeliveryFixture(
   /** The next branch push fails with a retryable no-effect failure. */
   let failNext = false;
   const prs = new Map<string, PrDeliveryObservation>();
+  let afterRebaseProof: (() => void | Promise<void>) | undefined;
+  let rebaseProofs = 0;
   const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
     ...unusedIssueInspection,
+    ...(options.unstack
+      ? {
+          prepareUnstack: options.unstack.prepare,
+          unstackProvider: () => options.unstack!.provider,
+        }
+      : {}),
+    async readRebaseHead(_repositoryId, branch) {
+      return remote[branch] ?? null;
+    },
+    async proveRebase(input) {
+      rebaseProofs++;
+      const proof = await proveUnchangedRebase(
+        verifierGit(input.workspacePath),
+        input.oldBase,
+        input.oldHead,
+        input.newBase,
+        input.newHead,
+      );
+      const hook = afterRebaseProof;
+      afterRebaseProof = undefined;
+      await hook?.();
+      return proof;
+    },
     async preflight(action, _policy, publication) {
       if (publication && nextPreflight) {
         const hook = nextPreflight;
@@ -270,10 +308,17 @@ export async function stackedDeliveryFixture(
         .some((b) => b.taskId === taskId)
     )
       return [];
-    const binding = await service.taskWorkspace(taskId);
-    if (!binding) return [];
-    const path = realpathSync(binding.path);
-    return turns.filter((turn) => turn.workspace === path);
+    // Observe persisted task/turn bindings without taking provisioning's task lock or running Git.
+    const workIds = new Set(
+      service.turnRequestsForTask(taskId).map((work) => work.workId),
+    );
+    const turnIds = new Set(
+      service
+        .list()
+        .filter((intent) => workIds.has(intent.workId))
+        .map((intent) => intent.turnId),
+    );
+    return turns.filter((turn) => turnIds.has(turn.turnId));
   };
   /** The task's `count`th turn, once it runs. */
   const waitTurn = async (taskId: string, count = 1) => {
@@ -343,7 +388,10 @@ export async function stackedDeliveryFixture(
   const branchOf = (taskId: string) =>
     service.delivery().taskBranch(taskId, repositoryId);
   /** The task's PR at its branch's last push, as GitHub shows it; registered on first use. */
-  const showPr = async (taskId: string) => {
+  const showPr = async (
+    taskId: string,
+    overrides: Partial<PrDeliveryObservation> = {},
+  ) => {
     const branch = branchOf(taskId);
     assert.ok(branch?.lastPushedSha);
     const nodeId = `PR-${taskId}`;
@@ -363,6 +411,7 @@ export async function stackedDeliveryFixture(
       closedIssueNodeIds: [],
       mergeBlockers: [],
       allowedMethods: ["squash"],
+      ...overrides,
     });
     if (service.delivery().delivery(taskId)) await service.refreshGitHub();
     else {
@@ -438,6 +487,12 @@ export async function stackedDeliveryFixture(
     return turn;
   };
   return {
+    provider,
+    prs,
+    onRebaseProof: (hook: () => void | Promise<void>) => {
+      afterRebaseProof = hook;
+    },
+    rebaseProofCount: () => rebaseProofs,
     onNextPreflight: (hook: () => void) => {
       nextPreflight = hook;
     },

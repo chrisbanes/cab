@@ -243,6 +243,13 @@ test("read-only bearer tokens are refused for every task and execution command t
       decision: "denied",
       action: "a",
     },
+    {
+      type: "task.unstack",
+      taskId: s.taskId,
+      expectedVersion: 1,
+      materialHash: "a".repeat(64),
+    },
+    { type: "task.cancel", taskId: s.taskId, expectedVersion: 1 },
     { type: "task.stop", taskId: s.taskId },
     { type: "task.resume", taskId: s.taskId },
     // CLI6 recovery types are refused by scope before any validation.

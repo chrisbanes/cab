@@ -1,3 +1,5 @@
+import { unstackReceiptSchema } from "./unstack-contracts.js";
+import { rebaseProofSchema } from "../core/rebase-proof.js";
 import {
   projectLifecycleReadSchema,
   projectTombstoneSchema,
@@ -1125,6 +1127,9 @@ export const taskSourceSummarySchema = z
 /** Recorded identities only; absence of a membership observation is distinct from no stack. */
 export const stackDeliveryFactsSchema = z
   .object({
+    rebaseProofs: z.array(rebaseProofSchema).max(256).nullable().optional(),
+    rebaseProofState: z.enum(["none", "adopted", "withheld"]).optional(),
+    failedBlocker: z.boolean().optional(),
     blockerPr: z
       .object({
         repositoryId: z.string().min(1).max(512),
@@ -3418,6 +3423,23 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision,
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.cancel"),
+      taskId: uuid,
+      expectedVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.unstack"),
+      taskId: uuid,
+      expectedVersion: revision,
+      materialHash: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   // Optional fence: Stop and Resume act on a hold, so an unrelated edit must not block them.
   z
     .object({
@@ -4449,6 +4471,16 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       ),
     })
     .strict(),
+  unstackReceiptSchema,
+  z
+    .object({
+      kind: z.literal("task-cancel"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      cancellationRequested: z.number().int().nonnegative().safe(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("task-stop"),
@@ -5087,6 +5119,8 @@ export const configurationImpactSchema = envelope(
 );
 /** Commands whose receipts `GET /api/operator/operations` reads back. */
 export const operationTypeSchema = z.enum([
+  "task.unstack",
+  "task.cancel",
   "profile.create",
   "profile.configure",
   "project.create",

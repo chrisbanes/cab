@@ -528,6 +528,35 @@ the same command with its key and checked with `task get`, `question get` or
 applied before paging; a cursor from other parameters is `409`. A `runtime` item is
 derived on each read and carries `harness` and `since` instead of task fields.
 
+Stack recovery uses the existing operator authority and journal. `task unstack-preview
+TASK_ID` is a read of the current filtered full-stack preview and its exact task version
+and material hash. `task unstack TASK_ID --expected-version N --material-hash SHA256
+--yes [--request-id UUID]` confirms that material; it never silently refreshes consent.
+GitHub removes all removable unmerged members of the captured provider stack, not just
+the selected PR. Only the selected PR is retargeted to the link's base, and a restack is
+queued only after complete removal and exact retarget are confirmed. Merged layers stay
+unaffected; cab cannot undo merges or automatic adoption.
+
+A typed `task-unstack` receipt records the intent and phase, not unconditional success.
+For an unknown response or unfinished phase use `operation get REQUEST_ID --scope
+task:TASK_ID --type task.unstack`; this is GET-only, including from a read-only connection
+or after archive. Repeating the CLI's exact frozen request checks that receipt instead of
+another POST. If any captured unmerged member remains after HTTP200, even when the
+selected PR was removed, the ORIGINAL operation stays unfinished/readback-only. No new
+key, repeated Unstack, inferred queue/lock reason, automatic queue cancellation,
+retarget, accepted-base advance, edge retirement or restack is allowed. Later validated
+complete-removal readback may continue under the original identity fences. This partial
+result is not successful live acceptance.
+
+`task cancel TASK_ID --expected-version N --yes [--request-id UUID]` is a separate
+operator recovery for a failed stacked blocker. It prevents future task work, requests
+best-effort interruption, preserves unknown ownership/history/workspace and closes no
+external issue or PR. It adds no Stop hold and cannot reopen the task. Its typed
+`task-cancel` receipt is readable with `operation get REQUEST_ID --scope task:TASK_ID
+--type task.cancel`. Unstack/Cancel are exceptions to the older generic task-command
+lookup limitation above; they carry explicit typed identities. Both preserve the
+existing CLI exit-code and fsynced request-journal rules.
+
 Sources, repository links and delivery drive the operator commands; the CLI adds no
 route of its own. `project prepare-source` writes a `github.configure`
 change document from a strict edit file: kept selections are sent as `{id, keep: true}`,

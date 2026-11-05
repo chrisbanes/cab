@@ -1,3 +1,11 @@
+import { commandReceiptSchema } from "../operator/contracts.js";
+import { TaskUnstack } from "./task-unstack.js";
+import {
+  type UnstackCommand,
+  UnstackStore,
+  unstackPrivateValues,
+} from "../core/unstack.js";
+import { adoptMergedStackRebase } from "./stack-rebase.js";
 import { ProjectDeletionCleanup } from "./project-deletion-cleanup.js";
 import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
 import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
@@ -5,6 +13,8 @@ import type { ProjectDeleteCommand } from "../core/project-lifecycle.js";
 import { ProjectWrites } from "./project-writes.js";
 import {
   assertOwnedWorkWritable,
+  assertTaskProjectWritable,
+  projectLifecycleMatches,
   projectAcceptsWrites,
   taskAcceptsWrites,
   workAcceptsWrites,
@@ -672,6 +682,7 @@ interface Started {
   coordination: CoordinationStore;
   deliveryStore: DeliveryStore;
   deliveryCoordinator: DeliveryCoordinator;
+  taskUnstack: TaskUnstack;
   statusMappingWriter: StatusMappingWriter;
   statusMappings: StatusMappingStore;
   taskPublications: TaskPublicationStore;
@@ -1417,8 +1428,33 @@ export class StandaloneService {
               identity,
             ),
           taskWorkspace,
+          projectWrite: (taskId, run) =>
+            this.withProjectWrite(
+              taskProjectId(db, taskId),
+              "provider-write",
+              async () => {
+                const lifecycle = assertTaskProjectWritable(db, taskId);
+                return run(() => projectLifecycleMatches(db, lifecycle));
+              },
+            ),
+          postMergeRebase: async (taskId, provider) => {
+            await adoptMergedStackRebase({
+              db,
+              domain,
+              delivery: deliveryStore,
+              workspaces: workspaceBindings,
+              taskId,
+              provider,
+              notify: () =>
+                coordination.ensureDeliveryEventWithinTransaction(
+                  taskId,
+                  "The provider rebased the dependent without changing its patches or messages. The outside head was adopted; integrate it in the retained workspace before publishing.",
+                  `stack-rebase:${deliveryStore.delivery(taskId)?.observation.headSha}`,
+                ),
+            });
+          },
           stackedPrBase: (taskId) => {
-            const stacked = domain.stackedDependency(taskId);
+            const stacked = domain.activeStackedDependency(taskId);
             if (!stacked) return null;
             const blocker = domain.task(stacked.blockerTaskId);
             if (blocker.projectId !== domain.task(taskId).projectId)
@@ -1521,6 +1557,23 @@ export class StandaloneService {
           ),
       );
       acquire("deliveryCoordinator", deliveryCoordinator);
+      const taskUnstack = acquire(
+        "taskUnstack",
+        new TaskUnstack({
+          db,
+          domain,
+          delivery: deliveryStore,
+          coordination,
+          workspaces: workspaceBindings,
+          provider: (taskId) => deliveryCoordinator.unstackProviderFor(taskId),
+          projectWrite: (taskId, run) =>
+            this.withProjectWrite(
+              taskProjectId(db, taskId),
+              "provider-write",
+              run,
+            ),
+        }),
+      );
       const publicationDriver = new TaskPublicationDriver(
         taskPublications,
         deliveryStore,
@@ -1772,6 +1825,7 @@ export class StandaloneService {
         state,
         supervisor,
       });
+      await taskUnstack.reconcileAll();
       await deliveryCoordinator.refresh();
       await publicationDriver.advanceAll();
       await this.reconcileOwnDeliveryClosures({
@@ -1869,6 +1923,7 @@ export class StandaloneService {
         coordination,
         deliveryStore,
         deliveryCoordinator,
+        taskUnstack,
         statusMappingWriter,
         statusMappings,
         taskPublications,
@@ -1956,6 +2011,7 @@ export class StandaloneService {
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
           await this.acquired?.jiraSynchronizer?.stop().catch(() => {});
           await this.acquired?.statusMappingWriter?.stop().catch(() => {});
+          await this.acquired?.taskUnstack?.stop().catch(() => {});
           await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
           // An attempt may be mid-start: let it land in `runtimes` so it is stopped below.
           await Promise.all([...this.runtimeToggles.values()]);
@@ -2653,6 +2709,9 @@ export class StandaloneService {
         ...providerCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...this.claudeTokensHandedOut,
+        ...new UnstackStore(this.cache!)
+          .records()
+          .flatMap(unstackPrivateValues),
         // Copies still in use keep their grant's paths private even once it is unlinked.
         ...(this.current?.draftingBindings
           .unarchived()
@@ -2764,6 +2823,7 @@ export class StandaloneService {
       supervisor,
       githubSynchronizer: synchronizer,
       jiraSynchronizer: jiraSynchronizerStop,
+      taskUnstack,
       deliveryCoordinator: delivery,
       statusMappingWriter: statusMapping,
       power,
@@ -2812,6 +2872,7 @@ export class StandaloneService {
       jiraSynchronizerStop?.stop(),
     );
     await attempt("status mapping stop", () => statusMapping?.stop());
+    await attempt("Unstack stop", () => taskUnstack?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
       if (this.db?.isOpen && this.cache?.isOpen)
@@ -3971,6 +4032,13 @@ export class StandaloneService {
     exceptOperationId?: string,
     kind?: ExternalAction["kind"],
   ): void {
+    if (
+      !isServiceDeliveryCaller(caller) &&
+      domain.failedStackedBlocker(caller.taskId)
+    )
+      throw new DomainConflictError(
+        "Stacked blocker failed; Unstack or Cancel the dependent",
+      );
     if (domain.project(caller.projectId).archived)
       throw new DomainConflictError("Archived projects are read-only");
     if (isOperatorDeliveryCaller(caller)) {
@@ -4546,8 +4614,35 @@ export class StandaloneService {
     if (record.observation?.reason === issueChangedReason)
       await this.refreshGitHub().catch(() => {});
   }
+  previewTaskUnstack(taskId: string) {
+    return this.started().taskUnstack.preview(taskId);
+  }
+  unstackTask(command: UnstackCommand) {
+    return this.started().taskUnstack.execute(command);
+  }
+  reconcileTaskUnstack(operationId: string) {
+    return this.started().taskUnstack.reconcile(operationId);
+  }
+  taskUnstackOperations(taskId: string) {
+    this.domain().task(taskId);
+    return new UnstackStore(this.cache!).records(taskId);
+  }
+  taskUnstackOperation(taskId: string, key: string) {
+    this.domain().task(taskId);
+    const record = new UnstackStore(this.cache!).get(key);
+    if (record && record.identity.taskId !== taskId)
+      throw new DomainConflictError(
+        "Unstack operation belongs to another task",
+      );
+    return record;
+  }
+  taskUnstackReceipt(command: UnstackCommand) {
+    return new UnstackStore(this.cache!).replay(command);
+  }
+
   async refreshGitHub(): Promise<void> {
     const started = this.started();
+    await started.taskUnstack.reconcileAll();
     await started.deliveryCoordinator.refresh();
     // A create the refresh just proved converts its task before the sync, which then matches it.
     await started.publicationDriver.advanceAll();
@@ -5147,6 +5242,60 @@ export class StandaloneService {
     );
   }
 
+  latestTaskCancelReceipt(taskId: string) {
+    this.domain().task(taskId);
+    const row = this.cache!.prepare(
+      "SELECT key FROM task_control_receipts WHERE taskId=? AND json_extract(receiptJson,'$.kind')='task-cancel' ORDER BY createdAt DESC,rowid DESC LIMIT 1",
+    ).get(taskId) as { key: string } | undefined;
+    return row ? this.taskCancelReceipt(taskId, row.key) : null;
+  }
+  taskCancelReceipt(taskId: string, key: string) {
+    this.domain().task(taskId);
+    const row = this.cache!.prepare(
+      "SELECT payloadHash,receiptJson FROM task_control_receipts WHERE taskId=? AND key=?",
+    ).get(taskId, key) as
+      | { payloadHash: string; receiptJson: string }
+      | undefined;
+    if (!row) return null;
+    z.string()
+      .regex(/^[0-9a-f]{64}$/)
+      .parse(row.payloadHash);
+    const receipt = commandReceiptSchema.parse(JSON.parse(row.receiptJson));
+    if (
+      receipt.kind !== "task-cancel" ||
+      receipt.taskId !== taskId ||
+      receipt.key !== key
+    )
+      throw new DomainConflictError("Cancel receipt identity mismatch");
+    return receipt;
+  }
+  cancelStackedTask(command: {
+    key: string;
+    taskId: string;
+    expectedVersion: number;
+  }) {
+    return this.withProjectWrite(
+      this.taskProject(command.taskId),
+      "callback",
+      async () => {
+        const state = this.started().state;
+        const { receipt, replayed } = state.cancelTask(command, () => {
+          if (!this.domain().failedStackedBlocker(command.taskId))
+            throw new DomainConflictError(
+              "Cancel requires a failed stacked blocker",
+            );
+        });
+        if (!replayed)
+          await this.afterStop(
+            command.taskId,
+            state.stopTargets(command.taskId),
+            "Task cancelled before native receipt",
+          );
+        return receipt;
+      },
+    );
+  }
+
   /** Receipted Stop or Resume; a replayed receipt repeats no post-commit work. */
   async controlTask(command: {
     type: "task.stop" | "task.resume";
@@ -5537,6 +5686,7 @@ export class StandaloneService {
   private afterStop(
     taskId: string,
     targets: StopTarget[],
+    inputCancellationReason = "Task stopped before native receipt",
   ): Promise<StopObservation> {
     const { state, coordination, supervisor } = this.started();
     for (const target of targets) {
@@ -5548,10 +5698,7 @@ export class StandaloneService {
         true,
         runtimeGeneration,
       ))
-        runtime?.cancelUserInput?.(
-          question.identity,
-          "Task stopped before native receipt",
-        );
+        runtime?.cancelUserInput?.(question.identity, inputCancellationReason);
     }
     return supervisor.observeStop(taskId, targets);
   }
@@ -7145,6 +7292,8 @@ export class StandaloneService {
       inboxStartup,
       workspaceBindings,
     } = this.current;
+    if (this.current.taskUnstack.hasPending())
+      await this.current.taskUnstack.reconcileAll();
     this.flushRuntimeAnswers();
     // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
     // fails is reported and retried on the next wake; the others and the wake go on.

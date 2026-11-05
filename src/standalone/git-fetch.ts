@@ -18,7 +18,14 @@ import {
   pushCredentialHelper,
   transportUsername,
 } from "./git-push.js";
-import { runGit } from "./git-process.js";
+import {
+  runGit,
+  gitChildExited,
+  type GitChildObserver,
+  type GitRunOptions,
+} from "./git-process.js";
+import { proveUnchangedRebase } from "./rebase-proof.js";
+import type { RebaseProof } from "../core/rebase-proof.js";
 import { type Git, provedAncestor } from "./push-verification.js";
 
 export type AdoptOutcome =
@@ -34,6 +41,21 @@ export type AdoptOutcome =
   | "not-on-base"
   /** Git could not prove the head's ancestry, or could not import it. */
   | "unproved";
+
+export interface FixtureGitFetchBoundary extends GitChildObserver {
+  scratchParent: string;
+  commonDirectory: string;
+  beforeEffect(
+    phase:
+      | "locate"
+      | "scratch"
+      | "fetch"
+      | "proof"
+      | "import"
+      | "retain"
+      | "teardown",
+  ): Promise<void>;
+}
 
 export interface AdoptRequest {
   /** The task worktree; only its object store and cab's own ref namespace are touched. */
@@ -54,6 +76,7 @@ export interface AdoptRequest {
   executable?: string;
   /** Test-only override of the size bound. */
   maxFetchBytes?: number;
+  fixtureBoundary?: FixtureGitFetchBoundary;
 }
 export type AdoptFunction = (request: AdoptRequest) => Promise<AdoptOutcome>;
 
@@ -109,6 +132,48 @@ async function storedBytes(dir: string): Promise<number> {
 export async function adoptOutsideHead(
   request: AdoptRequest,
 ): Promise<AdoptOutcome> {
+  return fetchAndProveOutsideHead(request);
+}
+
+export async function proveOutsideRebase(
+  request: AdoptRequest & { oldBase: string; oldHead: string },
+): Promise<RebaseProof | null> {
+  if (!oid.test(request.oldBase) || !oid.test(request.oldHead)) return null;
+  let proof: RebaseProof | null = null;
+  const outcome = await fetchAndProveOutsideHead(
+    request,
+    async (git) => {
+      proof = await proveUnchangedRebase(
+        git,
+        request.oldBase,
+        request.oldHead,
+        request.baseCommit!,
+        request.commitSha,
+        request.signal,
+        request.fixtureBoundary && request.executable
+          ? {
+              scratchParent: request.fixtureBoundary.scratchParent,
+              executable: request.executable,
+              beforeEffect: (teardown) =>
+                request.fixtureBoundary!.beforeEffect(
+                  teardown ? "teardown" : "proof",
+                ),
+              children: request.fixtureBoundary,
+            }
+          : undefined,
+      );
+      return proof !== null;
+    },
+    request.oldBase,
+  );
+  return outcome === "adopted" ? proof : null;
+}
+
+async function fetchAndProveOutsideHead(
+  request: AdoptRequest,
+  prove?: (git: Git) => Promise<boolean>,
+  negotiationBase = request.baseCommit,
+): Promise<AdoptOutcome> {
   const {
     workspacePath,
     baseCommit,
@@ -129,11 +194,37 @@ export async function adoptOutsideHead(
     !safeBranchName(branch)
   )
     return "not-attempted";
+  let unsettledChild = false;
+  const observer = request.fixtureBoundary
+    ? {
+        beforeChild: () => request.fixtureBoundary!.beforeChild(),
+        afterChild: async (
+          sequence: number,
+          result: Awaited<ReturnType<typeof runGit>>,
+        ) => {
+          if (!gitChildExited(result)) unsettledChild = true;
+          await request.fixtureBoundary!.afterChild(sequence, result);
+        },
+      }
+    : undefined;
+  const gitRun = observer
+    ? async (options: GitRunOptions) => {
+        const sequence = observer ? await observer.beforeChild() : undefined;
+        const result = await runGit({
+          ...options,
+          ...(observer ? { observeSettlement: true } : {}),
+        });
+        if (observer) await observer.afterChild(sequence!, result);
+        return result;
+      }
+    : runGit;
   const common = {
     ...(request.executable ? { executable: request.executable } : {}),
     ...(request.signal ? { signal: request.signal } : {}),
   };
-  const located = await runGit({
+  if (request.fixtureBoundary)
+    await request.fixtureBoundary.beforeEffect("locate");
+  const located = await gitRun({
     ...common,
     ...bounds,
     args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -143,17 +234,26 @@ export async function adoptOutsideHead(
   });
   if (located.status !== "ok") return "not-attempted";
   const commonDir = located.stdout.toString("utf8").trim();
+  if (
+    request.fixtureBoundary &&
+    commonDir !== request.fixtureBoundary.commonDirectory
+  )
+    throw Error("fixture-git-common-directory");
   const objects = join(commonDir, "objects");
   let scratch: string | undefined;
   try {
-    scratch = await mkdtemp(join(tmpdir(), "cab-adopt-"));
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("scratch");
+    scratch = await mkdtemp(
+      join(request.fixtureBoundary?.scratchParent ?? tmpdir(), "cab-adopt-"),
+    );
     const dir = scratch;
     await mkdir(join(dir, "objects"));
     await mkdir(join(dir, "refs", "cab"), { recursive: true });
     await writeFile(join(dir, "HEAD"), "ref: refs/heads/main\n");
     await writeFile(join(dir, "config"), "");
     // The base is a negotiation "have", so only what the worktree lacks is sent.
-    await writeFile(join(dir, "refs", "cab", "base"), `${baseCommit}\n`);
+    await writeFile(join(dir, "refs", "cab", "base"), `${negotiationBase}\n`);
     const scratchEnvironment = {
       GIT_DIR: dir,
       // Quoted as in git-push.ts: Git splits an unquoted value on `:`.
@@ -183,57 +283,64 @@ export async function adoptOutsideHead(
           measuring = false;
         });
     }, sizeCheckMs);
-    const fetched = await runGit({
-      ...common,
-      ...bounds,
-      signal: request.signal
-        ? AbortSignal.any([request.signal, stop.signal])
-        : stop.signal,
-      args: [
-        "-c",
-        "credential.helper=",
-        "-c",
-        `credential.helper=${pushCredentialHelper}`,
-        "-c",
-        "credential.useHttpPath=true",
-        "-c",
-        "protocol.allow=never",
-        "-c",
-        "protocol.https.allow=always",
-        "-c",
-        "http.followRedirects=false",
-        "-c",
-        "http.proxy=",
-        // Git never spawns a command in the agent-writable alternate to list its refs.
-        "-c",
-        "core.alternateRefsCommand=true",
-        "-c",
-        "transfer.fsckObjects=true",
-        // Keep the objects as one pack, which is what is imported.
-        "-c",
-        "fetch.unpackLimit=1",
-        "-c",
-        "gc.auto=0",
-        "-c",
-        "maintenance.auto=false",
-        "fetch",
-        "--quiet",
-        "--no-tags",
-        "--no-write-fetch-head",
-        "--no-recurse-submodules",
-        `https://${host}/${nameWithOwner}.git`,
-        `+${commitSha}:refs/cab/adopt`,
-      ],
-      cwd: dir,
-      environmentOverrides: {
-        ...scratchEnvironment,
-        GIT_ALLOW_PROTOCOL: "https",
-        CAB_PUSH_HOST: host,
-        CAB_PUSH_PATH: `${nameWithOwner}.git`,
-        CAB_PUSH_USERNAME: username,
-        CAB_PUSH_TOKEN: token,
-      },
-    }).finally(() => clearInterval(watcher));
+    let fetched: Awaited<ReturnType<typeof gitRun>>;
+    try {
+      if (request.fixtureBoundary)
+        await request.fixtureBoundary.beforeEffect("fetch");
+      fetched = await gitRun({
+        ...common,
+        ...bounds,
+        signal: request.signal
+          ? AbortSignal.any([request.signal, stop.signal])
+          : stop.signal,
+        args: [
+          "-c",
+          "credential.helper=",
+          "-c",
+          `credential.helper=${pushCredentialHelper}`,
+          "-c",
+          "credential.useHttpPath=true",
+          "-c",
+          "protocol.allow=never",
+          "-c",
+          "protocol.https.allow=always",
+          "-c",
+          "http.followRedirects=false",
+          "-c",
+          "http.proxy=",
+          // Git never spawns a command in the agent-writable alternate to list its refs.
+          "-c",
+          "core.alternateRefsCommand=true",
+          "-c",
+          "transfer.fsckObjects=true",
+          // Keep the objects as one pack, which is what is imported.
+          "-c",
+          "fetch.unpackLimit=1",
+          "-c",
+          "gc.auto=0",
+          "-c",
+          "maintenance.auto=false",
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "--no-write-fetch-head",
+          "--no-recurse-submodules",
+          `https://${host}/${nameWithOwner}.git`,
+          `+${commitSha}:refs/cab/adopt`,
+        ],
+        cwd: dir,
+        environmentOverrides: {
+          ...scratchEnvironment,
+          GIT_ALLOW_PROTOCOL: "https",
+          CAB_PUSH_HOST: host,
+          CAB_PUSH_PATH: `${nameWithOwner}.git`,
+          CAB_PUSH_USERNAME: username,
+          CAB_PUSH_TOKEN: token,
+        },
+      });
+    } finally {
+      clearInterval(watcher);
+    }
     // A fetch that finished between polls is measured once more; nothing is proved or imported.
     if (
       oversize ||
@@ -246,8 +353,10 @@ export async function adoptOutsideHead(
 
     // The proof reads only the scratch (with the worktree's objects as an alternate), with no
     // transport and no credential; every commit on the walk is rehashed.
-    const scratchGit: Git = (args, options) =>
-      runGit({
+    const scratchGit: Git = async (args, options) => {
+      if (request.fixtureBoundary)
+        await request.fixtureBoundary.beforeEffect("proof");
+      return gitRun({
         ...common,
         ...proofBounds,
         args: ["-c", "core.commitGraph=false", ...args],
@@ -258,9 +367,13 @@ export async function adoptOutsideHead(
         ...(options?.input ? { input: options.input } : {}),
         environmentOverrides: scratchEnvironment,
       });
+    };
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("proof");
     const onBase = await provedAncestor(scratchGit, baseCommit, commitSha);
     if (onBase === false) return "not-on-base";
     if (onBase !== true) return "unproved";
+    if (prove && !(await prove(scratchGit))) return "unproved";
 
     // Packs go in whole and atomically (copied aside, then renamed), `.pack` before the `.idx` that
     // makes Git find it, so a crash or a concurrent Git never sees half a file. Same name, same content.
@@ -269,11 +382,15 @@ export async function adoptOutsideHead(
     const names = (await readdir(packs).catch(() => [])).filter(
       (n) => n.endsWith(".pack") || n.endsWith(".idx"),
     );
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("import");
     const target = join(objects, "pack");
     await mkdir(target, { recursive: true });
     for (const extension of [".pack", ".idx"])
       for (const name of names.filter((n) => n.endsWith(extension))) {
         // A unique aside name: a leftover read-only file or a concurrent import never collides.
+        if (request.fixtureBoundary)
+          await request.fixtureBoundary.beforeEffect("import");
         const aside = join(target, `tmp_cab_${randomUUID()}_${name}`);
         try {
           await copyFile(join(packs, name), aside);
@@ -285,7 +402,9 @@ export async function adoptOutsideHead(
       }
     // A ref keeps the imported objects from being pruned. Git runs without the worktree's hooks and
     // without a credential.
-    const kept = await runGit({
+    if (request.fixtureBoundary)
+      await request.fixtureBoundary.beforeEffect("retain");
+    const kept = await gitRun({
       ...common,
       ...proofBounds,
       args: [
@@ -302,6 +421,10 @@ export async function adoptOutsideHead(
   } catch {
     return "unproved";
   } finally {
-    if (scratch) await rm(scratch, { recursive: true, force: true });
+    if (scratch && !unsettledChild) {
+      if (request.fixtureBoundary)
+        await request.fixtureBoundary.beforeEffect("teardown");
+      await rm(scratch, { recursive: true, force: true });
+    }
   }
 }

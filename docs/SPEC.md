@@ -358,7 +358,8 @@ blocker's task, branch and PR identity before creating the dependent PR. The mar
 verified by readback and its receipt is persisted before stack linking. cab creates an ordered
 `[blocker, dependent]` stack, or appends only the dependent when an ordered stack read proves
 that the blocker is its current top. Stack calls and stack-bearing PR reads use GitHub API
-version `2026-03-10`. Missing or inconsistent membership is unknown and holds the action.
+version `2026-03-10`. An omitted or null `stack` field on a successful PR read means no
+stack membership. Malformed or inconsistent membership is unknown and holds the action.
 
 The stack link has its own durable send boundary inside that journal. Before that boundary,
 recovery may resume after rechecking the original authority and identities; at or after it,
@@ -371,6 +372,76 @@ absence on a later read does not prove that a possibly sent request cannot land.
 
 Task detail, list and the operator API expose the same recorded blocker PR identity, nullable
 observed stack id/number/position/size, membership-known flag and bounded link reason.
+
+For a bound GitHub stacked dependent, a refresh can adopt an outside head after the
+exact lower PR is freshly proven merged and the dependent's retarget to the linked base
+is accepted. Cab fetches that head under the existing bounded isolated fetch, proves
+ancestry from the provider's fresh base object, and compares the ordered commit ranges:
+equal nonzero counts, equal stable patch IDs and exact raw commit-message bytes.
+Rehashed commit/tree/blob objects feed deterministic isolated diffs. The durable proof
+contains only object IDs, patch IDs and message digests. Missing, changed, unsupported,
+oversized or stale evidence leaves the outside-change hold and approval-only adoption.
+After fresh PR/ref readback, one lifecycle- and identity-fenced transaction records the
+proof, advances last-pushed and matching edge/workspace base metadata, and queues a
+notice. The workspace HEAD, index and files stay where they are; the lead integrates
+those commits before publishing. The task API's filtered stack facts and CLI task read
+show the accepted proof. This path has offline qualification requirements; the real
+platform journey remains a separate live acceptance gate.
+
+A recorded stacked blocker whose PR is known closed without merging, or whose task is
+cancelled, holds admission and delivery as `stacked-blocker-failed`. A merged PR is not a
+failed blocker; a failed read remains unknown. The operator's `task.cancel` command is
+available for the failed-blocker hold: it records a terminal cancelled task and a
+replayable receipt, requests best-effort interruption through the existing cancellation
+targets, retains unresolved execution ownership and workspace/history, and closes no
+provider issue or PR. Cancel adds no Stop hold.
+
+The service's operator Unstack continuation freezes the selected task, linked repository,
+PR/head/base and full ordered provider stack into one durable command. GitHub's Unstack
+endpoint removes all removable unmerged members of that provider stack, not just the
+selected PR; merged layers remain unaffected. The local recovery retargets only the
+selected PR to its repository link's base. An HTTP 200 can leave members in the stack.
+If any captured unmerged member remains, even after the selected PR was removed, the
+original operation stays unfinished and readback-only: no repeat Unstack, replacement
+operation key, queue cancellation, retarget, accepted-base advancement, edge retirement
+or restack follows. Cab does not infer a queue/lock reason from that partial result.
+Only later validated complete-removal readback under the original identity fences can
+continue. This partial outcome is not successful live acceptance.
+
+Both effects have separate intent and fresh
+identity-bound readback phases. Unknown sends are read back after restart and never
+resent. Every unfinished or unproved phase holds work, archive and deletion, including
+an observed removal whose retarget is still unknown or refused. A definite no-effect
+failure retains a terminal receipt; partial success cannot become failed to release drain.
+If the target branch advances after retarget was observed, fresh complete-removal and
+target-ref readback renews the base SHA under the original identity fences. A later
+matching read is required before confirmation; no provider effect is resent.
+Only confirmed removal and exact target base/SHA permit one transaction to accept the
+base, retire the selected former dependency generation and queue one restack notice.
+The retained workspace HEAD, index and files are not changed. Independent native/local
+blockers, Ready, pause, capacity, ownership and delivery holds remain. Ordinary source
+refresh cannot recreate the retired generation; a deliberate new dependency is separate.
+The journal is explicitly task/project owned, included in private-material traversal and
+captured-task deletion, and retained as audit history until deletion. Terminal receipt
+replay after archive makes no provider request.
+
+The operator API validates `task.unstack {key, taskId, expectedVersion, materialHash}`
+against a freshly fenced preview. `GET /api/operator/tasks/:id/unstack` provides the
+filtered preview, archive/write availability and typed current operation status; raw proof,
+head and member material are not exposed outside the exclusion fences. A `task-unstack`
+receipt means the intent is recorded, not that the provider effects succeeded. The phase
+states whether it remains unfinished, was definitely refused without effect, or confirmed.
+`GET /api/operator/operations?scope=task:ID&type=task.unstack&key=UUID` checks the original
+receipt without sending or reconciling provider effects; Cancel has the same typed lookup
+under `task.cancel`. Unknown receipt checks never pick a new key or POST again.
+The CLI reads `task unstack-preview TASK_ID`, then `task unstack TASK_ID
+--expected-version N --material-hash SHA256 --yes`; its existing request journal binds
+the exact body and key before sending. Both normal-stack and failed-blocker task-detail
+entry points use one captured confirmation/status/recovery dialog. Cancel is a separate
+explicit confirmation from Stop. Archived views disable new writes while preserving
+original receipt checks; private/unavailable member details remain withheld without
+throwing away the retained command. The live acceptance journey remains separately gated.
+
 Unknown membership is distinct from a proved plain chain. The CLI and task detail show the
 blocker and observed position; list rows and cards use `stacked on #N` only for a known
 bound blocker PR. Exclusion handling applies to these facts and host reasons too.

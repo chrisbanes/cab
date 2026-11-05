@@ -111,6 +111,14 @@ export interface DeliveryCoordinatorOptions {
     caller: DeliveryCaller,
   ) => boolean;
   taskVersion?: (taskId: string) => number;
+  postMergeRebase?: (
+    taskId: string,
+    provider: CodeHostDeliveryProvider,
+  ) => Promise<void>;
+  projectWrite?: <T>(
+    taskId: string,
+    run: (current: () => boolean) => Promise<T>,
+  ) => Promise<T>;
   leadAssignmentId?: (taskId: string) => string;
   feedback?: (taskId: string, reason: string, identity: string) => void;
   /** Offline check of a push's commit in the task worktree; null when it cannot be verified. */
@@ -226,6 +234,12 @@ export class DeliveryCoordinator {
       this.options.adopt,
       host,
     );
+  }
+  /** Internal service wiring; the operator journal owns Unstack authority and every send. */
+  unstackProviderFor(taskId: string): CodeHostDeliveryProvider {
+    const binding = this.store.delivery(taskId);
+    if (!binding) throw new DomainConflictError("Unstack delivery unavailable");
+    return this.provider(binding.projectId, binding.observation.repositoryId);
   }
   private issueTrackerFor(projectId: string): {
     issueTracker: IssueTracker;
@@ -490,10 +504,14 @@ export class DeliveryCoordinator {
       } catch (error) {
         // Storage faults remain errors, including faults raised by authority reads.
         if (
-          error &&
-          typeof error === "object" &&
-          "code" in error &&
-          /^(?:ERR_SQLITE|SQLITE_)/.test(String(error.code))
+          (error &&
+            typeof error === "object" &&
+            "code" in error &&
+            /^(?:ERR_SQLITE|SQLITE_)/.test(String(error.code))) ||
+          (error instanceof Error &&
+            /^(?:Invalid persisted|Missing persisted column)/.test(
+              error.message,
+            ))
         )
           throw error;
         validationRefused = { error };
@@ -502,6 +520,10 @@ export class DeliveryCoordinator {
     };
     let createBase: ReturnType<typeof stackedPrBase> = null;
     try {
+      if (action.kind !== "pr.create")
+        validatePreparation(() => {
+          this.options.authorize(caller, record.operationId, record.request);
+        });
       createBase =
         action.kind === "pr.create" ? validatePreparation(stackedPrBase) : null;
       if (record.stackCreate)
@@ -765,48 +787,56 @@ export class DeliveryCoordinator {
     // All new authority is checked synchronously after the final provider await.
     let attempting: DeliveryActionRecord;
     try {
-      attempting = this.store.beginAttempt(record.operationId, before, () => {
-        if (
-          action.kind === "pr.create" &&
-          materialDigest(stackedPrBase()) !== materialDigest(createBase)
-        )
-          throw new Error("Stacked PR dependency changed during preflight");
-        if (lowerChain) {
-          const current = this.store.stackMergeGuard(caller.taskId, target);
-          if (current.reason || current.material !== lowerChain.material)
-            throw new Error("Lower stack chain changed during merge preflight");
-        }
-        if (closureGuard?.().length)
-          throw new Error("PR delivery boundary held");
-        if (assigned) {
-          // The branch and the last push must be what preflight saw after the final await.
-          const current = this.store.taskBranch(
-            caller.taskId,
-            assigned.repositoryId,
-          );
+      attempting = this.store.beginAttempt(record.operationId, before, () =>
+        validatePreparation(() => {
           if (
-            current?.branch !== assigned.branch ||
-            current.lastPushedSha !== assigned.lastPushedSha
+            action.kind === "pr.create" &&
+            materialDigest(stackedPrBase()) !== materialDigest(createBase)
           )
-            throw new Error("Task branch changed during publication");
-          if (stackedBase() !== provedBase) {
-            baseMoved = true;
-            throw new Error("Stacked parent head moved during publication");
+            throw new Error("Stacked PR dependency changed during preflight");
+          if (lowerChain) {
+            const current = this.store.stackMergeGuard(caller.taskId, target);
+            if (current.reason || current.material !== lowerChain.material)
+              throw new Error(
+                "Lower stack chain changed during merge preflight",
+              );
           }
-        }
-        if (this.stopped || this.options.activationAllowed?.(policy) === false)
-          throw new Error(
-            "Delivery credential activation requires safe runtime restart",
+          if (closureGuard?.().length)
+            throw new Error("PR delivery boundary held");
+          if (assigned) {
+            // The branch and the last push must be what preflight saw after the final await.
+            const current = this.store.taskBranch(
+              caller.taskId,
+              assigned.repositoryId,
+            );
+            if (
+              current?.branch !== assigned.branch ||
+              current.lastPushedSha !== assigned.lastPushedSha
+            )
+              throw new Error("Task branch changed during publication");
+            if (stackedBase() !== provedBase) {
+              baseMoved = true;
+              throw new Error("Stacked parent head moved during publication");
+            }
+          }
+          if (
+            this.stopped ||
+            this.options.activationAllowed?.(policy) === false
+          )
+            throw new Error(
+              "Delivery credential activation requires safe runtime restart",
+            );
+          this.options.authorize(caller, record.operationId, record.request);
+          this.store.authorize(
+            record.request,
+            caller,
+            this.options.approved(record.request, caller),
+            record.policyVersion,
           );
-        this.options.authorize(caller, record.operationId, record.request);
-        this.store.authorize(
-          record.request,
-          caller,
-          this.options.approved(record.request, caller),
-          record.policyVersion,
-        );
-      });
-    } catch {
+        }),
+      );
+    } catch (error) {
+      if (!validationRefused || validationRefused.error !== error) throw error;
       // Nothing was sent; a retry proves the commit against the new parent head.
       return this.store.recordObservation(
         record.operationId,
@@ -1123,18 +1153,46 @@ export class DeliveryCoordinator {
         try {
           await this.inspectBinding(binding.taskId);
         } catch (error) {
-          if (!(error instanceof DeliveryReadUnavailable)) throw error;
+          if (
+            !(error instanceof DeliveryReadUnavailable) &&
+            !(error instanceof DomainConflictError)
+          )
+            throw error;
         }
       }).catch((error) => {
         if (this.store.isTaskWritable(binding.taskId)) throw error;
       });
   }
-  private async inspectBinding(taskId: string) {
+  private inspectBinding(taskId: string): Promise<PrDeliveryBinding> {
+    const run = (current: () => boolean) =>
+      this.inspectBindingWithinLease(taskId, current);
+    return this.options.projectWrite
+      ? this.options.projectWrite(taskId, run)
+      : run(() => true);
+  }
+  private async inspectBindingWithinLease(
+    taskId: string,
+    lifecycleCurrent: () => boolean,
+  ) {
     const binding = this.store.delivery(taskId);
     if (!binding) throw new Error("Unknown PR delivery");
+    if (this.store.unstackPending(taskId)) return binding;
     const policy = this.store.configuration(binding.projectId),
       p = binding.observation,
       provider = this.provider(binding.projectId, p.repositoryId, policy);
+    // ProjectWrites tracks lifetime; it does not serialize an Unstack against
+    // this provider await. Renew the journal and CAS fences in each write transaction.
+    const inspectionCurrent = () => {
+      const current = this.store.delivery(taskId);
+      if (!current)
+        throw new DomainConflictError(
+          "PR delivery disappeared during inspection",
+        );
+      if (this.store.unstackPending(taskId)) return null;
+      if (!lifecycleCurrent() || current.revision !== binding.revision)
+        throw new DomainConflictError("PR delivery changed during inspection");
+      return current;
+    };
     let observation: PrDeliveryObservation;
     try {
       observation = await provider.inspectPr(
@@ -1148,13 +1206,17 @@ export class DeliveryCoordinator {
         policy,
       );
     } catch {
-      this.store.recordPrReadFailure(taskId);
+      const failed = this.store.transaction(() => {
+        if (!inspectionCurrent()) return false;
+        this.store.recordPrReadFailureWithinTransaction(taskId);
+        return true;
+      });
+      if (!failed) return this.store.delivery(taskId) ?? binding;
       throw new DeliveryReadUnavailable();
     }
-    return this.store.transaction(() => {
-      const current = this.store.delivery(taskId);
-      if (!current || current.revision !== binding.revision)
-        throw new Error("PR delivery changed during inspection");
+    const updated = this.store.transaction(() => {
+      const current = inspectionCurrent();
+      if (!current) return null;
       const result = this.store.observePrWithinTransaction(
         taskId,
         observation,
@@ -1178,6 +1240,9 @@ export class DeliveryCoordinator {
         );
       return result.binding;
     });
+    if (!updated) return this.store.delivery(taskId) ?? binding;
+    await this.options.postMergeRebase?.(taskId, provider);
+    return this.store.delivery(taskId) ?? updated;
   }
   async settleHandback(input: unknown) {
     const command = handbackSettlementSchema.parse(input);

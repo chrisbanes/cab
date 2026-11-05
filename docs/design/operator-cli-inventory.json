@@ -35,6 +35,57 @@
   },
   "rows": [
     {
+      "id": "task unstack-preview",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI05"],
+      "evidence": [
+        "test/operator/operator-cli-inventory.test.ts",
+        "test/operator/operator-unstack.test.ts"
+      ],
+      "effect": "Reads the filtered captured provider-stack preview, task version/material hash, write availability and original typed status; sends no provider mutation.",
+      "denial": "Malformed task identity is rejected; existing private exclusions withhold unproved member material; read-only credentials may read.",
+      "revision": "Reports the freshly fenced task version and immutable full-stack material hash for explicit consent.",
+      "retry": "Read again for current availability; an unfinished operation retains its original identity and offers no replacement command.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Offline assembled API and CLI inventory coverage only. No installed CLI or live provider journey is established; the separately authorized complete live stack-recovery gate remains pending."
+    },
+    {
+      "id": "task unstack",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator/operator-cli-unstack.test.ts",
+        "test/operator/operator-unstack.test.ts"
+      ],
+      "effect": "Records the exact full-stack Unstack intent; only confirmed complete removal and exact selected-PR retarget can retire the selected local edge and queue one restack.",
+      "denial": "Explicit --yes, exact version/hash and write scope are required; stale, excluded, malformed or unproved material is refused.",
+      "revision": "--expected-version and --material-hash bind the captured task/full-stack material under the actual service lifecycle registry.",
+      "retry": "The fsynced journal preserves the original body/key. A reached command is checked by GET-only typed operation lookup; any retained captured unmerged member keeps the original operation unfinished, with no resend, new key, queue cancellation, retarget or restack.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Synthetic CLI journal/rendering and assembled fake-provider evidence only. No installed/live Unstack consumption or successful complete live journey is claimed."
+    },
+    {
+      "id": "task cancel",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator/operator-cli-unstack.test.ts",
+        "test/operator/operator-unstack.test.ts"
+      ],
+      "effect": "Separately cancels a task held by a failed stacked blocker, prevents future work and requests best-effort active cancellation while retaining unresolved ownership/history/workspace; closes no external item.",
+      "denial": "Separate --yes, exact task version and write scope are required; it is distinct from Stop and cannot clear an unfinished Unstack.",
+      "revision": "--expected-version checks the task version; the existing task-control receipt binds command material.",
+      "retry": "Preserves the original journal body/key; a reached request uses only its typed task.cancel original receipt GET, including after a lost reply.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Synthetic CLI/API cases only, with no installed runtime, provider closure or live recovery acceptance claimed."
+    },
+    {
       "id": "auth login",
       "kind": "command",
       "area": "auth/connection",
@@ -1764,7 +1815,7 @@
     },
     {
       "id": "operation get for task, attention, delivery and placement receipts",
-      "reason": "design excludes from first release: docs/design/operator-cli.md (Writes and execution effects, Sources and delivery) states operation get does not read task or attention receipts, delivery.refresh, comment receipts or github.place; they are settled by a same-key rerun."
+      "reason": "design excludes from first release: docs/design/operator-cli.md (Writes and execution effects, Sources and delivery) states operation get does not read generic task or attention receipts (the typed task.unstack/task.cancel receipts are exceptions), delivery.refresh, comment receipts or github.place; they are settled by a same-key rerun."
     },
     {
       "id": "service administration, setup discovery, line-comment review composition, MCP packaging, remote process control and runtime or model-setting mutations",

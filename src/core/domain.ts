@@ -1,3 +1,4 @@
+import { UnstackStore } from "./unstack.js";
 import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
 import { projectDeleteCommandSchema } from "./project-lifecycle.js";
 import {
@@ -2252,6 +2253,25 @@ export class DomainStore {
           reasons.push("source-placement-conflict");
       }
     }
+    if (imported && reasons.includes("imported-blockers-blocked")) {
+      const natives = this.db
+        .prepare(`SELECT n.status,bi.taskId,bt.projectId FROM imported_tasks d
+        JOIN source_native_blockers n ON n.provider=d.provider AND n.instance=d.instance AND n.externalId=d.externalId
+        LEFT JOIN imported_tasks bi ON bi.provider=n.provider AND bi.instance=n.instance AND bi.externalId=n.blockerExternalId
+        LEFT JOIN domain_tasks bt ON bt.id=bi.taskId WHERE d.taskId=? AND n.status<>'closed'`)
+        .all(taskId) as Row[];
+      if (
+        natives.length > 0 &&
+        natives.every(
+          (n) =>
+            n.status === "open" &&
+            n.projectId === task.projectId &&
+            typeof n.taskId === "string" &&
+            new UnstackStore(this.db).retired(taskId, n.taskId),
+        )
+      )
+        reasons.splice(reasons.indexOf("imported-blockers-blocked"), 1);
+    }
     const gate = this.stackDecision(taskId).gate;
     if (gate) {
       // A stacked dependency's blocker gate is its open change request at its last push. It
@@ -2263,6 +2283,11 @@ export class DomainStore {
       if (gate !== "ok") reasons.push(`stacked-blocker-${gate}`);
     } else if (this.blockingDependencies(taskId).length)
       reasons.push("local-dependency");
+    if (
+      this.failedStackedBlocker(taskId) &&
+      !reasons.includes("stacked-blocker-failed")
+    )
+      reasons.push("stacked-blocker-failed");
     return { eligible: reasons.length === 0, reasons };
   }
 
@@ -2295,6 +2320,25 @@ export class DomainStore {
           restack: row.restack === "pending" ? "pending" : "current",
         }
       : null;
+  }
+
+  /** Audit edges remain recorded; only a confirmed retirement of this exact generation leaves admission. */
+  activeStackedDependency(
+    taskId: string,
+  ): ReturnType<DomainStore["stackedDependency"]> {
+    const edge = this.stackedDependency(taskId);
+    return edge &&
+      !new UnstackStore(this.db).retiredSelected(taskId, edge.blockerTaskId)
+      ? edge
+      : null;
+  }
+  /** The selected failed edge remains actionable even while independent dependencies also hold. */
+  failedStackedBlocker(taskId: string): boolean {
+    const edge = this.activeStackedDependency(taskId);
+    return (
+      !!edge &&
+      this.blockerGate(edge.blockerTaskId, edge.repositoryId, true) === "failed"
+    );
   }
 
   /** Whether the task stacks or waits on a single blocker, and why; null when that does not apply. */
@@ -2386,9 +2430,14 @@ export class DomainStore {
       // head moves, and one that lands while pending settles it first.
       const settled = landed ? parentHead : row.settledHead;
       const blocker = String(row.blockerTaskId);
-      const head = this.blocksDependents(blocker)
-        ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
-        : null;
+      const lowerPr = delivery.delivery(blocker);
+      // A merged/closed layer no longer publishes a parent head, even while its task remains open.
+      const head =
+        !new UnstackStore(this.db).retiredSelected(taskId, blocker) &&
+        this.blocksDependents(blocker) &&
+        (!lowerPr || lowerPr.observation.state === "OPEN")
+          ? delivery.taskBranch(blocker, repositoryId)?.lastPushedSha
+          : null;
       // A push prepared, in flight or unresolved was proved against the current parent head;
       // the head moves only once it settles, so a landed push is never mistaken for the restack.
       const moved =
@@ -2457,7 +2506,32 @@ export class DomainStore {
   private blockerGate(
     blockerTaskId: string,
     repositoryId: string | null,
-  ): "ok" | "unpublished" | "unknown" {
+    recorded = false,
+  ): "ok" | "unpublished" | "unknown" | "failed" {
+    const known = new DeliveryStore(this.db).delivery(blockerTaskId);
+    if (known?.readError) return "unknown";
+    if (
+      known &&
+      repositoryId !== null &&
+      known.observation.repositoryId !== repositoryId
+    )
+      return "unknown";
+    if (
+      known &&
+      !known.readError &&
+      known.observation.state === "MERGED" &&
+      known.observation.merged
+    )
+      return recorded ? "ok" : "unpublished";
+    if (this.task(blockerTaskId).state === "cancelled")
+      return recorded ? "failed" : "unpublished";
+    if (
+      known &&
+      !known.readError &&
+      known.observation.state === "CLOSED" &&
+      !known.observation.merged
+    )
+      return recorded ? "failed" : "unpublished";
     const imported = this.importedTask(blockerTaskId);
     if (
       imported &&
@@ -2499,9 +2573,14 @@ export class DomainStore {
     siblings = true,
   ): {
     facts: StackFacts | null;
-    gate: "ok" | "unpublished" | "unknown" | null;
+    gate: "ok" | "unpublished" | "unknown" | "failed" | null;
   } {
     const recorded = this.stackedDependency(taskId);
+    if (
+      recorded &&
+      new UnstackStore(this.db).retiredSelected(taskId, recorded.blockerTaskId)
+    )
+      return { facts: null, gate: null };
     if (recorded) {
       // A blocker added after recording is not stacked: it holds as an ordinary dependency.
       const others =
@@ -2518,10 +2597,9 @@ export class DomainStore {
           taskId,
           recorded.blockerTaskId,
         );
-      const gate =
-        !others && this.blocksDependents(recorded.blockerTaskId)
-          ? this.blockerGate(recorded.blockerTaskId, recorded.repositoryId)
-          : null;
+      const gate = !others
+        ? this.blockerGate(recorded.blockerTaskId, recorded.repositoryId, true)
+        : null;
       return {
         facts: {
           state: "stacked",
@@ -2668,7 +2746,9 @@ export class DomainStore {
       WHERE d.taskId = ? AND ${blocks} ORDER BY d.blockerTaskId`,
         )
         .all(taskId) as Row[]
-    ).map((row) => String(row.id));
+    )
+      .map((row) => String(row.id))
+      .filter((blocker) => !new UnstackStore(this.db).retired(taskId, blocker));
   }
 
   /** Whether `taskId` would block a task that depends on it, by the same rule. */
@@ -2845,7 +2925,10 @@ export class DomainStore {
   }
 
   projectArchiveBlockersWithinTransaction(projectId: string) {
-    const blockers = archiveBlockers(this.db, projectId, this.lifecycleFacts);
+    const blockers = [
+      ...archiveBlockers(this.db, projectId, this.lifecycleFacts),
+      ...new UnstackStore(this.db).projectBlockers(projectId),
+    ];
     try {
       blockers.push(
         ...new DeliveryStore(this.db).projectStackArchiveBlockers(projectId),
@@ -3802,7 +3885,13 @@ export class DomainStore {
               "DELETE FROM local_dependencies WHERE taskId = ? AND blockerTaskId = ?",
             )
             .run(command.taskId, command.blockerTaskId);
-        syncDependencyRecords(this.db, command.taskId);
+        syncDependencyRecords(
+          this.db,
+          command.taskId,
+          command.type === "dependency.remove"
+            ? command.blockerTaskId
+            : undefined,
+        );
         this.db
           .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
           .run(command.taskId);

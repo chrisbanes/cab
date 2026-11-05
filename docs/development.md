@@ -281,6 +281,11 @@ real-runtime signal/recovery qualification remains separate from browser coverag
 
 ## Operator CLI
 
+The stack-recovery CLI inventory includes `task unstack-preview` (filtered read),
+`task unstack` (exact version/hash confirmation), and `task cancel` (separate failed-blocker
+recovery). Their original typed receipts are read through `operation get` under a task
+scope; unknown Unstack recovery never resends a command or chooses a replacement key.
+
 The packaged `cab` executable (`package.json` `bin`, built to
 `dist/src/cli/main.js`) talks only to a running `operator` service. Install it from
 a checkout with `npm run build && npm pack`, then `npm install -g ./cab-*.tgz`,

@@ -10,6 +10,7 @@ import {
 import { hasLabelName } from "../core/github-source-contracts.js";
 import { publicationMarker } from "../core/task-publication-contracts.js";
 import { DomainPolicyError } from "../core/domain.js";
+import { DomainConflictError } from "../core/domain-errors.js";
 import { z } from "zod";
 import {
   githubApi as api,
@@ -19,6 +20,14 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import type { UnstackIdentity, UnstackRecord } from "../core/unstack.js";
+import {
+  type UnstackProvider,
+  type UnstackReadback,
+  UnstackDispatchFailure,
+  unstackDispatchGuard,
+} from "./unstack.js";
+import { proveOutsideRebase } from "./git-fetch.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import type {
@@ -150,7 +159,8 @@ const githubStackMembership = z
     base: z.object({ ref: name, sha }),
   })
   .refine((value) => value.position <= value.size)
-  .nullable();
+  .nullable()
+  .default(null);
 const page = z.object({
   hasNextPage: z.boolean(),
   endCursor: z.string().nullable(),
@@ -269,6 +279,44 @@ export function requiredCheckSources(
   ];
 }
 
+export interface GitHubDeliveryRequest {
+  readonly url: string;
+  readonly method: string;
+  readonly body: string;
+  readonly version: string;
+}
+
+/** Qualification hooks run before secrets and again at each actual dispatch. */
+export interface GitHubDeliveryRequestBoundary {
+  readonly fixtureRole?: "script" | "service";
+  assertCurrent?(request?: GitHubDeliveryRequest): void;
+  readonly fixtureMergeApiVersion?: "2026-03-10" | undefined;
+  afterGit?(
+    operation: "prove" | "adopt",
+    request: Readonly<Record<string, unknown>>,
+    result: unknown,
+  ): Promise<void>;
+  beforeGit?(
+    operation: "prove" | "adopt",
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<{
+    executable: string;
+    maxFetchBytes: number;
+    signal: AbortSignal;
+    fixtureBoundary: import("./git-fetch.js").FixtureGitFetchBoundary;
+  }>;
+  afterResponse?(
+    request: GitHubDeliveryRequest,
+    response: Response,
+  ): Promise<void>;
+  beforeCredential(request: GitHubDeliveryRequest): Promise<void>;
+  beforeCredentialLookup(): Promise<void>;
+  beforeCredentialAccess?(): Promise<void>;
+  afterCredentialLookup?(): Promise<void>;
+  transportInvoked?(request: GitHubDeliveryRequest): Promise<void>;
+  beforeDispatch(request: GitHubDeliveryRequest): Promise<void>;
+}
+
 /** Narrow GitHub.com transport; every effect is settled by an independent read. */
 export class GitHubHttpDeliveryProvider
   implements CodeHostDeliveryProvider, IssueTrackerWriter
@@ -279,6 +327,7 @@ export class GitHubHttpDeliveryProvider
     private readonly push: PushFunction = pushTaskCommit,
     private readonly adopt: AdoptFunction = adoptOutsideHead,
     private readonly host = "github.com",
+    private readonly requestBoundary?: GitHubDeliveryRequestBoundary,
   ) {
     this.resolveCredential =
       typeof credential === "string" ? async () => credential : credential;
@@ -287,7 +336,25 @@ export class GitHubHttpDeliveryProvider
   private resolved?: Promise<string | undefined>;
   /** Resolved on first use and kept for this instance only; every delivery action builds its own provider. */
   private credential(): Promise<string | undefined> {
+    if (this.requestBoundary) return this.fixtureCredential();
     this.resolved ??= this.resolveCredential().catch(() => undefined);
+    return this.resolved;
+  }
+  private async fixtureCredential(): Promise<string | undefined> {
+    await this.requestBoundary!.beforeCredentialAccess?.();
+    this.requestBoundary!.assertCurrent?.();
+    this.resolved ??= (async () => {
+      await this.requestBoundary!.beforeCredentialLookup();
+      this.requestBoundary!.assertCurrent?.();
+      let pending: Promise<string | undefined>;
+      try {
+        pending = this.resolveCredential();
+        void pending.catch(() => {});
+      } finally {
+        await this.requestBoundary!.afterCredentialLookup?.();
+      }
+      return pending;
+    })().catch(() => undefined);
     return this.resolved;
   }
   private async request(
@@ -295,13 +362,88 @@ export class GitHubHttpDeliveryProvider
     method = "GET",
     body?: unknown,
     version = "2022-11-28",
+    beforeSend?: () => void,
   ): Promise<{ json: unknown; response: Response }> {
     const url = new URL(path, api);
     if (url.origin !== api) throw new Error("provider-origin-mismatch");
+    const request = Object.freeze({
+      url: url.href,
+      method,
+      body: body === undefined ? "" : JSON.stringify(body),
+      version,
+    });
+    if (this.requestBoundary)
+      await this.requestBoundary.beforeCredential(request);
     const credential = await this.credential();
     if (!credential) throw new Error("provider-credential-unavailable");
+    beforeSend?.();
     const response = await githubFetch(
-      this.fetcher,
+      this.requestBoundary
+        ? async (target, init) => {
+            await this.requestBoundary!.beforeDispatch(
+              Object.freeze({
+                ...request,
+                url: String(target),
+              }),
+            );
+            this.requestBoundary!.assertCurrent?.(
+              Object.freeze({ ...request, url: String(target) }),
+            );
+            beforeSend?.();
+            let pending: Promise<Response>;
+            try {
+              pending = this.fetcher(target, init);
+              void pending.catch(() => {});
+            } finally {
+              await this.requestBoundary!.transportInvoked?.(
+                Object.freeze({ ...request, url: String(target) }),
+              );
+            }
+            const response = await pending;
+            if (
+              response.redirected ||
+              [301, 302, 303, 307, 308].includes(response.status) ||
+              (response.url && response.url !== String(target))
+            ) {
+              await response.body?.cancel();
+              throw Error("fixture-provider-redirect");
+            }
+            const reader = response.body?.getReader();
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            if (reader) {
+              try {
+                for (;;) {
+                  const part = await reader.read();
+                  if (part.done) break;
+                  size += part.value.byteLength;
+                  if (size > 65536)
+                    throw Error("fixture-provider-output-bound");
+                  chunks.push(part.value);
+                }
+              } finally {
+                await reader.cancel().catch(() => {});
+                reader.releaseLock();
+              }
+            }
+            const bytes = Buffer.concat(chunks, size);
+            const checked = new Response(
+              [204, 205, 304].includes(response.status)
+                ? null
+                : new Uint8Array(bytes),
+              {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+              },
+            );
+            await this.requestBoundary!.afterResponse?.(
+              Object.freeze({ ...request, url: String(target) }),
+              checked.clone(),
+            );
+            return checked;
+          }
+        : this.fetcher,
       url.href,
       {
         method,
@@ -312,7 +454,7 @@ export class GitHubHttpDeliveryProvider
           "X-GitHub-Api-Version": version,
           "Content-Type": "application/json",
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined ? {} : { body: request.body }),
       },
       () => new Error("provider-origin-mismatch"),
     );
@@ -906,6 +1048,103 @@ export class GitHubHttpDeliveryProvider
       environments,
     };
   }
+  async readFixtureIdentity(repositoryId: string): Promise<void> {
+    if (!this.requestBoundary) throw Error("fixture-boundary-required");
+    await this.request("/user");
+    await this.repository(repositoryId);
+  }
+  /** Fixture-only observation establishes literal SHA provenance before dependent checks. */
+  async observeFixturePr(repositoryId: string, number: number, nodeId: string) {
+    if (!this.requestBoundary) throw Error("fixture-boundary-required");
+    const repo = await this.repository(repositoryId);
+    const pr = await this.stackPr(repo.path, number);
+    if (
+      pr.node_id !== nodeId ||
+      pr.head.repo.node_id !== repositoryId ||
+      pr.base.repo.node_id !== repositoryId
+    )
+      throw Error("fixture-pr-identity");
+    await this.graph(deliveryDocuments.CabDeliveryPr, {
+      id: nodeId,
+      after: null,
+    });
+    await this.ref(repo.path, pr.head.ref);
+    const baseSha = await this.ref(repo.path, pr.base.ref);
+    return {
+      merged: pr.merged,
+      state: pr.state,
+      headSha: pr.head.sha,
+      baseSha,
+    };
+  }
+  async mergeFixtureLower(
+    action: Extract<ExternalAction, { kind: "pr.merge" }>,
+    policy: DeliveryPolicy,
+  ) {
+    if (this.requestBoundary?.fixtureRole !== "script")
+      throw Error("fixture-merge-script-required");
+    await this.preflight(action, policy);
+    const repo = await this.repository(action.target.repositoryId);
+    await this.qualifyStackMerge(action, repo.path);
+    return this.mergeAsync(repo.path, action);
+  }
+  async pollFixtureMerge(repositoryId: string, number: number, uuid: string) {
+    if (this.requestBoundary?.fixtureRole !== "script")
+      throw Error("fixture-merge-script-required");
+    const repo = await this.repository(repositoryId);
+    return asyncMergeSchema.parse(
+      (
+        await this.request(
+          `${repo.path}/pulls/${number}/merge-async/${encodeURIComponent(uuid)}`,
+        )
+      ).json,
+    );
+  }
+  async readRebaseHead(repositoryId: string, branch: string) {
+    return this.optionalRef((await this.repository(repositoryId)).path, branch);
+  }
+  async proveRebase(input: {
+    repositoryId: string;
+    branch: string;
+    workspacePath: string;
+    oldBase: string;
+    oldHead: string;
+    newBase: string;
+    newHead: string;
+  }) {
+    if (this.requestBoundary && !this.requestBoundary.beforeGit)
+      throw Error("fixture-git-scope-missing");
+    const gitMaterial = Object.freeze({ ...input, host: this.host });
+    const gitScope = this.requestBoundary
+      ? await this.requestBoundary.beforeGit!("prove", gitMaterial)
+      : undefined;
+    const repo = await this.repository(input.repositoryId);
+    if ((await this.optionalRef(repo.path, input.branch)) !== input.newHead)
+      return null;
+    const proof = await proveOutsideRebase({
+      ...gitScope,
+      workspacePath: input.workspacePath,
+      baseCommit: input.newBase,
+      oldBase: input.oldBase,
+      oldHead: input.oldHead,
+      commitSha: input.newHead,
+      branch: input.branch,
+      host: this.host,
+      nameWithOwner: repo.path
+        .slice("/repos/".length)
+        .split("/")
+        .map(decodeURIComponent)
+        .join("/"),
+      token: (await this.credential()) ?? "",
+    });
+    if (
+      !proof ||
+      (await this.optionalRef(repo.path, input.branch)) !== input.newHead
+    )
+      return null;
+    await this.requestBoundary?.afterGit?.("prove", gitMaterial, proof);
+    return proof;
+  }
   async repositoryRequirements(
     repositoryId: string,
   ): Promise<RepositoryRequirements> {
@@ -937,7 +1176,7 @@ export class GitHubHttpDeliveryProvider
         body: z.string().nullable(),
         head: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
         base: z.object({ ref: name, repo: z.object({ node_id: name }) }),
-        // Missing is unknown, never the same as an explicit null.
+        // GitHub omits stack after Unstack; both omission and null mean no membership.
         stack: githubStackMembership,
       })
       .parse(
@@ -1078,6 +1317,178 @@ export class GitHubHttpDeliveryProvider
         pr.state !== "closed"
       )
         throw new Error("provider-stack-lower-pr-unproved");
+    }
+  }
+  /** Fresh material for an operator preview; this does not confer send authority. */
+  async prepareUnstack(repositoryId: string, prNumber: number) {
+    const repo = await this.repository(repositoryId);
+    const own = await this.stackPr(repo.path, prNumber);
+    if (
+      own.head.repo.node_id !== repositoryId ||
+      own.base.repo.node_id !== repositoryId ||
+      own.state !== "open" ||
+      own.merged ||
+      !own.stack
+    )
+      throw new Error("Unstack PR membership unproved");
+    const stack = await this.orderedStack(repo.path, own.stack);
+    const entry = stack.pull_requests[own.stack.position - 1];
+    if (
+      !entry ||
+      entry.node_id !== own.node_id ||
+      entry.number !== own.number ||
+      entry.head.sha !== own.head.sha ||
+      entry.head.ref !== own.head.ref
+    )
+      throw new Error("Unstack ordered membership unproved");
+    return {
+      repositoryPath: repo.path,
+      pr: {
+        nodeId: own.node_id,
+        number: own.number,
+        headRef: own.head.ref,
+        headSha: own.head.sha,
+        baseRef: own.base.ref,
+      },
+      stack: {
+        id: stack.id,
+        number: stack.number,
+        baseRef: stack.base.ref,
+        members: stack.pull_requests.map((p) => ({
+          nodeId: p.node_id,
+          number: p.number,
+          headRef: p.head.ref,
+          headSha: p.head.sha,
+          state:
+            p.merged_at !== null
+              ? ("MERGED" as const)
+              : p.state === "open"
+                ? ("OPEN" as const)
+                : ("CLOSED" as const),
+        })),
+      },
+    };
+  }
+  /** Prove full removal while retaining every captured member identity. */
+  async readUnstack(
+    identity: UnstackIdentity,
+    policy: DeliveryPolicy,
+  ): Promise<UnstackReadback> {
+    const repo = await this.repository(identity.repositoryId);
+    if (repo.path !== identity.repositoryPath)
+      throw new Error("Unstack repository moved");
+    const own = await this.stackPr(repo.path, identity.pr.number);
+    if (
+      own.node_id !== identity.pr.nodeId ||
+      own.number !== identity.pr.number ||
+      own.head.repo.node_id !== identity.repositoryId ||
+      own.base.repo.node_id !== identity.repositoryId ||
+      own.head.sha !== identity.pr.headSha ||
+      own.head.ref !== identity.pr.headRef ||
+      own.state !== "open" ||
+      own.merged
+    )
+      return { state: "changed" };
+    if (own.stack !== null) {
+      const prepared = await this.prepareUnstack(
+        identity.repositoryId,
+        identity.pr.number,
+      );
+      return { state: "member", material: prepared };
+    }
+    // Unstack acts on the full frozen membership, including closed unmerged layers.
+    for (const member of identity.stack.members) {
+      if (member.nodeId === identity.pr.nodeId || member.state === "MERGED")
+        continue;
+      const current = await this.stackPr(repo.path, member.number);
+      if (
+        current.node_id !== member.nodeId ||
+        current.number !== member.number ||
+        current.head.repo.node_id !== identity.repositoryId ||
+        current.base.repo.node_id !== identity.repositoryId ||
+        current.head.ref !== member.headRef ||
+        current.head.sha !== member.headSha ||
+        current.merged ||
+        (current.state === "open" ? "OPEN" : "CLOSED") !== member.state ||
+        current.stack !== null
+      )
+        return { state: "changed" };
+    }
+    // REST base.sha and GraphQL baseRefOid are checked together by inspectPr.
+    const observed = await this.inspectPr(
+      {
+        repositoryId: identity.repositoryId,
+        prNumber: identity.pr.number,
+        expectedPrNodeId: identity.pr.nodeId,
+        expectedHeadSha: identity.pr.headSha,
+      },
+      policy,
+    );
+    if (
+      observed.headSha !== identity.pr.headSha ||
+      observed.headRef !== identity.pr.headRef ||
+      observed.state !== "OPEN" ||
+      observed.merged ||
+      observed.stack !== null
+    )
+      return { state: "changed" };
+    return {
+      state: "removed",
+      baseRef: observed.baseRef,
+      baseSha: observed.baseSha,
+    };
+  }
+  unstackProvider(policy: DeliveryPolicy): UnstackProvider {
+    return {
+      read: (i) => this.readUnstack(i, policy),
+      sendUnstack: (r, guard) => this.sendUnstack(r, guard),
+      sendRetarget: (r, guard) => this.sendUnstackRetarget(r, guard),
+    };
+  }
+  private async sendUnstack(record: UnstackRecord, guard: () => void) {
+    if (record.phase !== "unstack-attempting")
+      throw new Error("Unstack send intent missing");
+    try {
+      await this.request(
+        `${record.identity.repositoryPath}/stacks/${record.identity.stack.number}/unstack`,
+        "POST",
+        undefined,
+        "2026-03-10",
+        unstackDispatchGuard(guard),
+      );
+      return "unknown" as const;
+    } catch (error) {
+      if (
+        error instanceof UnstackDispatchFailure &&
+        !(error.failure instanceof DomainConflictError)
+      )
+        throw error;
+      return error instanceof ProviderFailure && error.status === 422
+        ? ("refused" as const)
+        : ("unknown" as const);
+    }
+  }
+  private async sendUnstackRetarget(record: UnstackRecord, guard: () => void) {
+    if (record.phase !== "retarget-attempting" || !record.removed)
+      throw new Error("Retarget send intent missing");
+    try {
+      await this.request(
+        `${record.identity.repositoryPath}/pulls/${record.identity.pr.number}`,
+        "PATCH",
+        { base: record.identity.targetBaseRef },
+        "2026-03-10",
+        unstackDispatchGuard(guard),
+      );
+      return "unknown" as const;
+    } catch (error) {
+      if (
+        error instanceof UnstackDispatchFailure &&
+        !(error.failure instanceof DomainConflictError)
+      )
+        throw error;
+      return error instanceof ProviderFailure && error.status === 422
+        ? ("refused" as const)
+        : ("unknown" as const);
     }
   }
   async prepareStackLink(
@@ -1231,7 +1642,7 @@ export class GitHubHttpDeliveryProvider
       .object({
         node_id: name,
         number: z.number().int().positive(),
-        stack: githubStackMembership.optional(),
+        stack: githubStackMembership,
         head: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
         base: z.object({ sha, ref: name, repo: z.object({ node_id: name }) }),
       })
@@ -1552,19 +1963,15 @@ export class GitHubHttpDeliveryProvider
           }
         : undefined;
     return prObservationSchema.parse({
-      ...(raw.stack === undefined
-        ? {}
-        : {
-            stack:
-              raw.stack === null
-                ? null
-                : {
-                    id: raw.stack.id,
-                    number: raw.stack.number,
-                    position: raw.stack.position,
-                    size: raw.stack.size,
-                  },
-          }),
+      stack:
+        raw.stack === null
+          ? null
+          : {
+              id: raw.stack.id,
+              number: raw.stack.number,
+              position: raw.stack.position,
+              size: raw.stack.size,
+            },
       repositoryId: identity.repositoryId,
       nodeId: raw.node_id,
       number: raw.number,
@@ -1948,20 +2355,38 @@ export class GitHubHttpDeliveryProvider
       .join("/");
     return {
       readRef: (branch) => this.optionalRef(path, branch),
-      push: async (request) =>
-        this.push({
+      push: async (request) => {
+        if (this.requestBoundary) throw Error("fixture-git-publication-denied");
+        return this.push({
           ...request,
           host: this.host,
           nameWithOwner,
           token: (await this.credential()) ?? "",
-        }),
-      adopt: async (request) =>
-        this.adopt({
+        });
+      },
+      adopt: async (request) => {
+        if (this.requestBoundary && !this.requestBoundary.beforeGit)
+          throw Error("fixture-git-scope-missing");
+        const material = Object.freeze({
+          ...request,
+          host: this.host,
+          nameWithOwner,
+        });
+        const scope = this.requestBoundary
+          ? await this.requestBoundary.beforeGit!("adopt", material)
+          : undefined;
+        const pending = this.adopt({
+          ...scope,
           ...request,
           host: this.host,
           nameWithOwner,
           token: (await this.credential()) ?? "",
-        }),
+        });
+        if (!this.requestBoundary) return pending;
+        const result = await pending;
+        await this.requestBoundary.afterGit?.("adopt", material, result);
+        return result;
+      },
     };
   }
   private readonly branchRemotes: BranchRemotes = {
@@ -1982,14 +2407,24 @@ export class GitHubHttpDeliveryProvider
     a: Extract<ExternalAction, { kind: "pr.merge" }>,
   ) {
     const url = `${path}/pulls/${a.target.number}/merge-async`;
+    const version =
+      this.requestBoundary?.fixtureMergeApiVersion ?? "2022-11-28";
     try {
       const sent = asyncMergeSchema.parse(
         (
-          await this.request(url, "PUT", {
-            sha: a.target.expectedHeadSha,
-            merge_method: a.method,
-            bypass_rules: false,
-          })
+          await this.request(
+            url,
+            "PUT",
+            {
+              sha: a.target.expectedHeadSha,
+              merge_method: a.method,
+              bypass_rules: false,
+              ...(version === "2026-03-10"
+                ? { merge_action: "direct_merge" }
+                : {}),
+            },
+            version,
+          )
         ).json,
       );
       return {

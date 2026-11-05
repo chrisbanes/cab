@@ -900,3 +900,35 @@ then; deferring it from local qualification does not waive that gate or the cuto
 evidence. Technical readiness does not establish deployed operation or a completed
 cutover, and a cutover is not a prerequisite for building or testing the release
 candidate.
+
+### GitHub stack recovery
+
+Offline acceptance requires verified-object unchanged-rebase proof and preserved
+workspace HEAD/index/files; assembled service holds for failed/unknown blockers; durable
+Unstack intent/send/readback/retarget/atomic acceptance and one restack; all unfinished
+states block admission and archive/deletion. The nine-column task/project-owned journal,
+explicit structured private traversal and captured-task deletion must pass populated
+shared-project isolation and every rollback boundary.
+
+Operator evidence must exercise runtime-validated filtered preview/material, typed
+command receipt and GET-only original-key lookup, CLI parsing/journal/rendering, and
+both task-detail entry points through the same confirmation. The confirmation must name
+the captured stack's removable unmerged members, selected-only retarget, conditional
+restack, unaffected merged layers and inability to undo merges/adoption. Cancel remains
+separate from Stop. Browser cases must cover safe focus, retained frozen confirmation,
+unknown response/navigation, no duplicate POST, readonly/archive transitions and Cancel.
+Excluded proof/member material must remain withheld under existing exclusion fences.
+
+A partial HTTP200 with a captured unmerged sibling remaining is unfinished, even if the
+selected PR was removed. Offline cases must prove no repeated Unstack/new operation key,
+queue cancellation, retarget, local acceptance/retirement or restack, including after
+restart, and prove later complete-removal convergence only under original identity
+fences. Receipt/status GET itself sends no provider effect. This limit is not a waiver
+of the complete live journey.
+
+Whole-issue acceptance still requires separately authorized bounded live evidence for
+two-layer bottom-up asynchronous merge, retarget, observed platform-rebase behaviour,
+verified adoption and complete Unstack. Guard primitives, offline passes or a partial
+result do not constitute live acceptance. Required integrated full check, browser engines,
+independent integrated review and final-head CI remain gates; no live success is claimed
+by these offline contracts.

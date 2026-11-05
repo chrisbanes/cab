@@ -449,7 +449,8 @@ export const projectDeletionInventory = {
   },
   delivery_pr_bindings: {
     columns: ["taskId", "recordJson"],
-    ownership: "taskId in T",
+    ownership:
+      "taskId in T; recordJson.acceptedRetarget binds prior/accepted refs; recordJson.rebaseProofs contains only validated object/patch/message digests, removed with this task row",
   },
   delivery_readiness_coverage: {
     columns: ["taskId", "unreadSelectFields"],
@@ -474,6 +475,21 @@ export const projectDeletionInventory = {
       "assignedAt",
     ],
     ownership: "taskId in T",
+  },
+  delivery_unstack_operations: {
+    columns: [
+      "operationId",
+      "taskId",
+      "projectId",
+      "blockerTaskId",
+      "edgeSequence",
+      "payloadHash",
+      "phase",
+      "revision",
+      "recordJson",
+    ],
+    ownership:
+      "taskId in T; projectId and selected blockerTaskId must agree with captured task ownership; immutable command/PR/full ordered stack/base/head/edge generation in strict recordJson; every identity/ref/object traversed explicitly into private ledger; phase/revision duplicated and checked; all unfinished or unproved states block drain",
   },
   delivery_waiting_work: {
     columns: ["workId", "taskId", "assignmentId"],
@@ -1397,7 +1413,8 @@ export const projectDeletionInventory = {
   },
   task_control_receipts: {
     columns: ["taskId", "key", "payloadHash", "receiptJson", "createdAt"],
-    ownership: "taskId in T",
+    ownership:
+      "taskId in T; task-cancel receipt binds taskId/key and cancellation count, no external ownership",
   },
   task_dependency_records: {
     columns: ["seq", "taskId", "blockerTaskId"],

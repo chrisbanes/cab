@@ -15,7 +15,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { forgeCommitGraphParent } from "../fixtures/forged-commit-graph.js";
-import { adoptOutsideHead } from "../../src/standalone/git-fetch.js";
+import {
+  adoptOutsideHead,
+  proveOutsideRebase,
+} from "../../src/standalone/git-fetch.js";
 
 const token = "ghp_fetch_credential_0123456789abcdef";
 const branch = "cab/abcd1234-task";
@@ -191,6 +194,49 @@ const adoptedRef = (repo: ReturnType<typeof repository>) => {
   );
   return read.status === 0 ? read.stdout.trim() : null;
 };
+
+test("a rejected pre-fetch guard clears its size watcher without dispatching fetch", async (t) => {
+  const repo = repository(t);
+  const outside = repo.commitOutside();
+  const fake = shim(t, repo.remote);
+  const intervals = t.mock.method(globalThis, "setInterval");
+  const cleared = t.mock.method(globalThis, "clearInterval");
+  t.after(() => {
+    for (const call of intervals.mock.calls) clearInterval(call.result);
+  });
+  const phases: string[] = [];
+  const result = await adoptOutsideHead({
+    ...request(repo, fake.executable, outside),
+    fixtureBoundary: {
+      scratchParent: repo.root,
+      commonDirectory: git(
+        repo.workspace,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ),
+      async beforeEffect(phase) {
+        phases.push(phase);
+        if (phase === "fetch") throw new Error("fixture authority expired");
+      },
+      async beforeChild() {
+        return 1;
+      },
+      async afterChild() {},
+    },
+  });
+  assert.equal(result, "unproved");
+  assert.equal(existsSync(fake.started), false);
+  assert.equal(intervals.mock.callCount(), 1);
+  const watcher = intervals.mock.calls[0]!.result;
+  assert.ok(cleared.mock.calls.some((call) => call.arguments[0] === watcher));
+  assert.deepEqual(phases, ["locate", "scratch", "fetch", "teardown"]);
+  assert.equal(
+    readdirSync(repo.root).some((name) => name.startsWith("cab-adopt-")),
+    false,
+  );
+  assert.equal(adoptedRef(repo), null);
+});
 
 test("a checkout path containing a colon still adopts through quoted alternates", async (t) => {
   const repo = repository(t, "cab-git-fetch-a:b-");
@@ -526,4 +572,77 @@ test("a fetch that grows past the size bound is stopped", async (t) => {
     "scratch removed",
   );
   assert.equal(adoptedRef(repo), null);
+});
+
+test("unchanged rebase fetch imports only a proved outside head and preserves task checkout", async (t) => {
+  const repo = repository(t);
+  const remoteBase = repo.commitOutside();
+  // The outside writer copies precisely the task patch onto the new base.
+  const writer = join(repo.root, "rebased");
+  git(repo.root, "clone", "-q", repo.remote, writer);
+  git(writer, "checkout", "-q", "--detach", remoteBase);
+  git(writer, "fetch", "-q", repo.source, repo.mine);
+  git(writer, "cherry-pick", repo.mine);
+  const head = git(writer, "rev-parse", "HEAD");
+  git(writer, "push", "-q", repo.remote, `${head}:refs/heads/rebased`);
+  const fake = shim(t, repo.remote);
+  const before = {
+    head: git(repo.workspace, "rev-parse", "HEAD"),
+    status: git(repo.workspace, "status", "--porcelain"),
+    index: readFileSync(
+      git(
+        repo.workspace,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        "index",
+      ),
+    ),
+    file: readFileSync(join(repo.workspace, "mine.txt")),
+  };
+  const proof = await proveOutsideRebase({
+    ...request(repo, fake.executable, head),
+    oldBase: repo.base,
+    oldHead: repo.mine,
+    baseCommit: remoteBase,
+  });
+  assert.equal(proof?.newHead, head);
+  assert.equal(proof?.pairs[0]?.oldCommit, repo.mine);
+  assert.deepEqual(
+    {
+      head: git(repo.workspace, "rev-parse", "HEAD"),
+      status: git(repo.workspace, "status", "--porcelain"),
+      index: readFileSync(
+        git(
+          repo.workspace,
+          "rev-parse",
+          "--path-format=absolute",
+          "--git-path",
+          "index",
+        ),
+      ),
+      file: readFileSync(join(repo.workspace, "mine.txt")),
+    },
+    before,
+  );
+  assert.equal(
+    git(repo.workspace, "rev-parse", `refs/cab/adopted/${branch}`),
+    head,
+  );
+  git(writer, "commit", "--amend", "-qm", "reworded");
+  const reworded = git(writer, "rev-parse", "HEAD");
+  git(writer, "push", "-q", repo.remote, `${reworded}:refs/heads/reworded`);
+  assert.equal(
+    await proveOutsideRebase({
+      ...request(repo, fake.executable, reworded),
+      oldBase: repo.base,
+      oldHead: repo.mine,
+      baseCommit: remoteBase,
+    }),
+    null,
+  );
+  assert.equal(
+    git(repo.workspace, "rev-parse", `refs/cab/adopted/${branch}`),
+    head,
+  );
 });

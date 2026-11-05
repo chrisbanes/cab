@@ -54,6 +54,20 @@ export type GitRunResult =
       settlement?: Promise<void>;
     };
 
+/** Opt-in qualification observation; ordinary Git callers retain their existing result and timing. */
+export interface GitChildObserver {
+  beforeChild(): Promise<number>;
+  afterChild(sequence: number, result: GitRunResult): Promise<void>;
+}
+export function gitChildExited(result: GitRunResult): boolean {
+  return (
+    result.status === "ok" ||
+    (result.status === "exit" && result.childExitObserved) ||
+    (result.status === "interrupted" &&
+      (!result.spawned || result.childExitObserved))
+  );
+}
+
 /** Kept separate so the late listener retains no command, environment or output buffers. */
 function observeSettlement(child: ChildProcess) {
   let done!: () => void;

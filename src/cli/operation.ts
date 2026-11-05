@@ -1,3 +1,4 @@
+import { unstackStatus } from "../operator/unstack-copy.js";
 import {
   type CommandReceipt,
   operationReadSchema,
@@ -26,6 +27,19 @@ export function receiptLines(receipt: CommandReceipt): [string, string][] {
     return Object.entries(receipt)
       .filter(([k]) => !["kind", "key", "recorded"].includes(k))
       .map(([k, v]): [string, string] => [k, String(v)]);
+  if (receipt.kind === "task-unstack")
+    return [
+      ["Outcome", unstackStatus(receipt)],
+      ["Task", receipt.taskId],
+      ["Phase", receipt.phase],
+      ["Reason", receipt.reason],
+      ["Material hash", receipt.materialHash],
+    ];
+  if (receipt.kind === "task-cancel")
+    return [
+      ["Task", receipt.taskId],
+      ["Cancellation requested", String(receipt.cancellationRequested)],
+    ];
   if (receipt.kind !== "configuration") return [];
   const r = receipt.result;
   return [
@@ -52,7 +66,7 @@ export const operationCommands = new Map<string, WriteCommand>([
         if (!scope.success)
           throw new CliError(
             "invalid-input",
-            "--scope must be project:ID, profile:ID, assignment:ID, system:capacity or system:runtime:HARNESS.",
+            "--scope must be project:ID, profile:ID, assignment:ID, task:ID, system:capacity or system:runtime:HARNESS.",
           );
         const type = operationTypeSchema.safeParse(ctx.values.type);
         if (!type.success)

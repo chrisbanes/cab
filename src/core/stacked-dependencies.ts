@@ -1,3 +1,4 @@
+import { UnstackStore } from "./unstack.js";
 import type { Database } from "./store.js";
 
 /** Why a dependent does not, or does not yet, start on its blocker's head (ADR-1023). */
@@ -10,6 +11,7 @@ export const stackReasons = [
   "dependent-started",
   "blocker-unpublished",
   "blocker-unknown",
+  "blocker-failed",
 ] as const;
 export type StackReason = (typeof stackReasons)[number];
 
@@ -58,9 +60,13 @@ const nativeEdges = `SELECT bi.taskId AS blockerTaskId FROM imported_tasks d
 /**
  * Brings a dependent's edge records in line with its local and native edges, in their
  * order, keeping the sequence of edges that remain. A stacked dependency whose edge is
- * gone is no longer recorded. Run inside the caller's transaction.
+ * gone is no longer recorded, except retired Unstack audit/generation records. Run inside the caller's transaction.
  */
-export function syncDependencyRecords(db: Database, taskId: string): void {
+export function syncDependencyRecords(
+  db: Database,
+  taskId: string,
+  explicitlyRemovedBlocker?: string,
+): void {
   db.prepare(
     `INSERT OR IGNORE INTO task_dependency_records (taskId, blockerTaskId)
       SELECT ?, blockerTaskId FROM (${localEdges} ORDER BY rowid)`,
@@ -69,10 +75,26 @@ export function syncDependencyRecords(db: Database, taskId: string): void {
     `INSERT OR IGNORE INTO task_dependency_records (taskId, blockerTaskId)
       SELECT ?, blockerTaskId FROM (${nativeEdges} ORDER BY n.blockerExternalId)`,
   ).run(taskId, taskId);
-  for (const table of ["task_dependency_records", "stacked_dependencies"])
-    db.prepare(
-      `DELETE FROM ${table} WHERE taskId = ? AND blockerTaskId NOT IN (${localEdges} UNION ${nativeEdges})`,
-    ).run(taskId, taskId, taskId);
+  const journal = new UnstackStore(db);
+  for (const table of ["task_dependency_records", "stacked_dependencies"]) {
+    const gone = db
+      .prepare(
+        `SELECT blockerTaskId FROM ${table} WHERE taskId=? AND blockerTaskId NOT IN (${localEdges} UNION ${nativeEdges})`,
+      )
+      .all(taskId, taskId, taskId) as { blockerTaskId: string }[];
+    for (const { blockerTaskId } of gone) {
+      // Source refresh never forgets a retired generation; a deliberate operator removal may end it.
+      const retain =
+        table === "stacked_dependencies"
+          ? journal.retiredSelected(taskId, blockerTaskId)
+          : blockerTaskId !== explicitlyRemovedBlocker &&
+            journal.retired(taskId, blockerTaskId);
+      if (!retain)
+        db.prepare(
+          `DELETE FROM ${table} WHERE taskId=? AND blockerTaskId=?`,
+        ).run(taskId, blockerTaskId);
+    }
+  }
 }
 
 /**

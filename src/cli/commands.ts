@@ -1,3 +1,4 @@
+import { unstackBrowseCommands, unstackWriteCommands } from "./task-unstack.js";
 import { projectLifecycleCommands } from "./project-lifecycle.js";
 import { adoptCommands } from "./adopt.js";
 import {
@@ -29,6 +30,7 @@ import type { WriteCommand } from "./write.js";
 
 /** Read-only browse commands, keyed "area action". */
 export const browseCommands = new Map<string, BrowseCommand>([
+  ...unstackBrowseCommands,
   ...workspaceCommands,
   ...assignmentCommands,
   ...evidenceCommands,
@@ -44,6 +46,7 @@ export const browseCommands = new Map<string, BrowseCommand>([
 
 /** Configuration, adoption and receipt commands, keyed "area action". */
 export const writeCommands = new Map<string, WriteCommand>([
+  ...unstackWriteCommands,
   ...profileWriteCommands,
   ...projectWriteCommands,
   ...projectLifecycleCommands,
