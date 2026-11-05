@@ -107,10 +107,13 @@ jobs:
       - name: Install selected browsers
         if: matrix.profile != 'service'
         run: |
+          # WebKit needs GTK 4, libsoup and GStreamer from apt. The runner image already
+          # has Chromium's libraries; --with-deps would only add fonts, whose mirror
+          # fetches sometimes stall for minutes.
           if [ "$TEST_PROFILE" = all ]; then
             npx playwright install --with-deps chromium webkit
           else
-            npx playwright install --with-deps chromium
+            npx playwright install chromium
           fi
       - name: Fixture preflight
         if: matrix.preflight == true
