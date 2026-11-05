@@ -916,6 +916,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
     ),
     {
       title: "Atlas · project configuration",
+      documentTitle: "Project configuration",
       trail: [
         { label: "Settings", href: "/app/settings" },
         { label: "Projects" },
@@ -931,6 +932,11 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   assert.equal(
     settingsHeader(`/app/profiles/${mira}/settings`, "", workspace)?.title,
     "Mira · agent configuration",
+  );
+  assert.equal(
+    settingsHeader(`/app/profiles/${mira}/settings`, "", workspace)
+      ?.documentTitle,
+    "Agent configuration",
   );
   assert.equal(
     settingsHeader(`/app/assignments/${id()}/recovery`, "", null)?.shortTitle,
