@@ -25,41 +25,55 @@ export class SkillScopeError extends Error {
   }
 }
 
-/** Each plugin's enabled skills as discovered from its layout, or a `SkillScopeError`. */
-async function enabledSkills(
+/** Each plugin's enabled skills and every discovered skill, from its layout, or a `SkillScopeError`. */
+async function discoveredSkills(
   plugins: readonly SkillPluginSettings[],
-): Promise<PluginSkill[]> {
+): Promise<{ enabled: PluginSkill[]; all: PluginSkill[] }> {
   const found = await Promise.all(
     plugins.map(async (plugin) => {
       const layout = await readPlugin(plugin.path).catch(() => undefined);
       if (!layout) throw new SkillScopeError();
       try {
-        return enabledPluginSkills(layout, plugin.skills);
+        return {
+          enabled: enabledPluginSkills(layout, plugin.skills),
+          all: [...layout.skills.values()].flat(),
+        };
       } catch {
         throw new SkillScopeError();
       }
     }),
   );
-  return found.flat();
+  return {
+    enabled: found.flatMap((f) => f.enabled),
+    all: found.flatMap((f) => f.all),
+  };
 }
 
 /**
- * The extra skills roots for a profile: the parent of each enabled skill's directory, so
- * App Server lists that skill one level down whatever the plugin's layout. Resolved,
- * deduplicated and sorted.
+ * The extra skills roots for a profile, the parent of each enabled skill's directory so
+ * App Server lists that skill one level down whatever the plugin's layout, and the resolved
+ * `SKILL.md` of every skill its plugins have, which a link can place outside those roots.
+ * Resolved, deduplicated and sorted.
  */
-export async function pluginSkillRoots(
+export async function pluginSkillScope(
   plugins: readonly SkillPluginSettings[],
-): Promise<string[]> {
-  const skills = await enabledSkills(plugins);
-  return [...new Set(skills.map((skill) => dirname(skill.directory)))].sort();
+): Promise<{ roots: string[]; files: string[] }> {
+  const { enabled, all } = await discoveredSkills(plugins);
+  return {
+    roots: [
+      ...new Set(enabled.map((skill) => dirname(skill.directory))),
+    ].sort(),
+    files: [...new Set(all.map((skill) => skill.file))].sort(),
+  };
 }
 
 /** The resolved `SKILL.md` paths of every skill the profile enables. */
 export async function enabledSkillFiles(
   plugins: readonly SkillPluginSettings[],
 ): Promise<Set<string>> {
-  return new Set((await enabledSkills(plugins)).map((skill) => skill.file));
+  return new Set(
+    (await discoveredSkills(plugins)).enabled.map((skill) => skill.file),
+  );
 }
 
 /**
@@ -72,6 +86,8 @@ export async function enabledSkillFiles(
 export async function skillScopeConfig(input: {
   listed: readonly ListedSkill[];
   knownRoots: ReadonlySet<string>;
+  /** Resolved `SKILL.md` of every skill of cab's plugins, including linked ones outside a root. */
+  knownFiles: ReadonlySet<string>;
   plugins: readonly SkillPluginSettings[];
 }): Promise<
   { skills: { config: Array<{ path: string; enabled: false }> } } | undefined
@@ -85,11 +101,13 @@ export async function skillScopeConfig(input: {
   for (const skill of input.listed) {
     const file = await realpath(skill.path).catch(() => skill.path);
     found.add(file);
-    const underKnownRoot = [...input.knownRoots].some((root) =>
-      file.startsWith(root + sep),
-    );
-    if (enabled ? !enabled.has(file) : underKnownRoot)
-      disabled.push(skill.path);
+    const fromPlugin =
+      input.knownFiles.has(file) ||
+      [...input.knownRoots].some(
+        (root) =>
+          file.startsWith(root + sep) || skill.path.startsWith(root + sep),
+      );
+    if (enabled ? !enabled.has(file) : fromPlugin) disabled.push(skill.path);
   }
   // Claude accepts a skill Codex may reject (for instance without frontmatter); never run without it.
   if (enabled && [...enabled].some((file) => !found.has(file)))

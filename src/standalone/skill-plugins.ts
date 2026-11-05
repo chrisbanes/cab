@@ -101,9 +101,6 @@ async function readRegular(
   }
 }
 
-const isRegular = async (path: string): Promise<boolean> =>
-  (await lstat(path).catch(() => undefined))?.isFile() === true;
-
 /** Where both runtimes look for a plugin's manifests, relative to its directory. */
 const claudeManifest = join(".claude-plugin", "plugin.json");
 const codexManifest = join(".codex-plugin", "plugin.json");
@@ -139,10 +136,13 @@ async function frontmatterName(file: string): Promise<string | undefined> {
   } finally {
     await handle.close();
   }
-  // shortcut: reads a plain `name:` line rather than full YAML; enough for the runtimes' own skills.
+  // shortcut: reads a single-line `name:` scalar (plain, or quoted, with an optional comment)
+  // rather than full YAML; enough for skill names, which `skillNameSchema` limits anyway.
   const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1];
   const value = block && /^name:[ \t]*(.*?)[ \t]*$/m.exec(block)?.[1];
-  return value ? value.replace(/^(['"])(.*)\1$/, "$2") || undefined : undefined;
+  if (!value) return undefined;
+  const quoted = /^(['"])(.*?)\1(?:[ \t]+#.*)?$/.exec(value);
+  return (quoted ? quoted[2] : value.replace(/[ \t]+#.*$/, "")) || undefined;
 }
 
 /** One skill of a plugin: its real directory and real `SKILL.md`. */
@@ -161,8 +161,8 @@ export interface PluginLayout {
   name: string;
   /** Whether it has a Claude manifest, so the Claude CLI names it by that name. */
   claude: boolean;
-  /** The manifests that exist, relative to the root. */
-  manifests: string[];
+  /** The manifests that exist: their names relative to the root and the real files read. */
+  manifests: Array<{ name: string; real: string }>;
   /** Every discovered skill by name; more than one entry is an ambiguous name. */
   skills: Map<string, PluginSkill[]>;
 }
@@ -178,11 +178,16 @@ export async function readPlugin(
 ): Promise<PluginLayout | undefined> {
   const root = await realpath(path).catch(() => undefined);
   if (root === undefined || !(await stat(root)).isDirectory()) return undefined;
+  const manifests: Array<{ name: string; real: string }> = [];
   const manifest = async (relativePath: string) => {
     const file = join(root, relativePath);
-    if (!(await isRegular(file))) return undefined;
+    if (!(await lstat(file).catch(() => undefined))) return undefined;
+    // A manifest reached through a link is read only if it resolves inside the plugin.
+    const real = await realInside(root, file, "file");
+    if (!real) return null;
+    manifests.push({ name: relativePath, real });
     const chunks: Buffer[] = [];
-    const read = await readRegular(file, undefined, maxManifestBytes, (c) =>
+    const read = await readRegular(real, undefined, maxManifestBytes, (c) =>
       chunks.push(Buffer.from(c)),
     ).then(
       () => true,
@@ -263,10 +268,7 @@ export async function readPlugin(
     root,
     name: (claude ?? codex)!.name,
     claude: claude !== undefined,
-    manifests: [
-      ...(claude ? [claudeManifest] : []),
-      ...(codex ? [codexManifest] : []),
-    ],
+    manifests,
     skills,
   };
 }
@@ -344,7 +346,7 @@ export async function digestPlugin(
     }
   };
   for (const manifest of layout.manifests)
-    await add(manifest, join(root, manifest));
+    await add(manifest.name, manifest.real);
   for (const skill of enabledSkills(layout, skills))
     await walk(skill.directory, 0);
   const hash = createHash("sha256");

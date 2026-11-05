@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -179,7 +180,44 @@ test("skills are discovered from the Claude manifest, the Codex manifest and the
       "---\nname: 'code-review'\n---\n",
     );
     assert.ok((await readPlugin(nested))?.skills.has("code-review"));
+    // YAML scalar rules: an inline comment is not part of a plain or quoted name.
+    writeFileSync(
+      join(nested, "skills", "engineering", "review", "SKILL.md"),
+      "---\nname: review-a # renamed\n---\n",
+    );
+    writeFileSync(
+      join(nested, "skills", "engineering", "tdd", "SKILL.md"),
+      '---\nname: "tdd-b" # quoted\n---\n',
+    );
+    const commented = await readPlugin(nested);
+    assert.ok(commented?.skills.has("review-a"));
+    assert.ok(commented?.skills.has("tdd-b"));
     assert.equal(await readPlugin(join(s.root, "absent")), undefined);
+  } finally {
+    s.done();
+  }
+});
+
+test("a manifest reached through a link is read only when the link stays inside the plugin", async () => {
+  const s = sandbox();
+  try {
+    const plugin = writeSkillPlugin(join(s.root, "p"), ["a"]);
+    const outside = join(s.root, "outside-manifest");
+    renameSync(join(plugin, ".claude-plugin"), outside);
+    symlinkSync(outside, join(plugin, ".claude-plugin"));
+    assert.equal(await readPlugin(plugin), undefined);
+    assert.deepEqual(
+      await skillFieldErrors(
+        { plugins: [{ path: plugin, skills: ["a"] }] },
+        "claude",
+      ),
+      ["skills.plugins.0.path"],
+    );
+    rmSync(join(plugin, ".claude-plugin"));
+    renameSync(outside, join(plugin, "meta"));
+    symlinkSync("meta", join(plugin, ".claude-plugin"));
+    assert.equal((await readPlugin(plugin))?.name, "unit-plugin");
+    assert.match(await digestPlugin(plugin, ["a"]), /^[a-f0-9]{64}$/);
   } finally {
     s.done();
   }

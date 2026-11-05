@@ -5,7 +5,9 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -209,6 +211,43 @@ test("a nested skill is scoped by its discovered SKILL.md path, with its categor
       disabledPaths(sent.find((r) => r.method === "thread/start")),
       [nested("review"), ...f.system.map((s) => s.path)].sort(),
     );
+  } finally {
+    await runtime.stop();
+    f.cleanup();
+  }
+});
+
+test("a linked skill file outside its root is still disabled for a profile that enables no plugins", async () => {
+  const f = fixture();
+  const runtime = f.runtime();
+  try {
+    const plugin = f.plugin("plugin-a", ["probe-skill"]);
+    const linked = skillFile(plugin, "probe-skill");
+    mkdirSync(join(plugin, "shared"));
+    const target = join(plugin, "shared", "probe.md");
+    renameSync(linked, target);
+    symlinkSync("../../shared/probe.md", linked);
+    // App Server may report either the scanned path or the link's target.
+    for (const path of [linked, target]) {
+      writeFileSync(
+        join(f.root, "skills.json"),
+        JSON.stringify([
+          ...f.system,
+          { name: "probe-skill", path, scope: "user" },
+        ]),
+      );
+      if (path === linked) {
+        await runtime.start();
+        await runtime.startThread(
+          f.workspace,
+          [],
+          settings(plugin, ["probe-skill"]),
+        );
+      }
+      await runtime.startThread(f.workspace, []);
+      const starts = f.sent().filter((r) => r.method === "thread/start");
+      assert.deepEqual(disabledPaths(starts.at(-1)), [path]);
+    }
   } finally {
     await runtime.stop();
     f.cleanup();

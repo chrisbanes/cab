@@ -7,7 +7,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { isAbsolute } from "node:path";
-import { pluginSkillRoots, skillScopeConfig } from "./codex-skills.js";
+import { pluginSkillScope, skillScopeConfig } from "./codex-skills.js";
 import { resolveOnPath } from "./executable-path.js";
 import {
   encodeNativeInputReply,
@@ -803,6 +803,8 @@ export class CodexRuntime implements Runtime {
   private nativeGeneration: string | undefined;
   /** Plugin `skills/` roots set on this App Server process; it holds the union for all threads. */
   private skillRoots = new Set<string>();
+  /** Every skill file of the plugins whose roots were sent, so a linked one is still recognised. */
+  private skillFiles = new Set<string>();
   private scopeQueue: Promise<void> = Promise.resolve();
   private nativeExecutable:
     | { codexVersion: string; executableHash: string }
@@ -1869,6 +1871,7 @@ export class CodexRuntime implements Runtime {
     this.failure = undefined;
     this.clearConversationCaptures();
     this.skillRoots = new Set();
+    this.skillFiles = new Set();
     this.nativeGeneration = randomUUID();
     this.resetSupportedSettings();
     this.nativeEndpoints.clear();
@@ -2070,7 +2073,8 @@ export class CodexRuntime implements Runtime {
     settings: RuntimeTurnSettings | undefined,
   ) {
     const plugins = settings?.skills?.plugins ?? [];
-    const wanted = await pluginSkillRoots(plugins);
+    const { roots: wanted, files } = await pluginSkillScope(plugins);
+    for (const file of files) this.skillFiles.add(file);
     if (wanted.some((root) => !this.skillRoots.has(root))) {
       const next = new Set([...this.skillRoots, ...wanted]);
       emptyResponseSchema.parse(
@@ -2091,6 +2095,7 @@ export class CodexRuntime implements Runtime {
     return skillScopeConfig({
       listed: listed.data.flatMap((entry) => entry.skills),
       knownRoots: this.skillRoots,
+      knownFiles: this.skillFiles,
       plugins,
     });
   }
