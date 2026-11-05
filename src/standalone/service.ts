@@ -367,7 +367,9 @@ import {
   type WorkspaceInspectionCurrent,
 } from "./workspace-inspection.js";
 import {
+  repositoryBindingPaths,
   SqliteWorkspaceBindingStore,
+  taskGitWritableRoots,
   type TaskWorkspaceBinding,
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupEvidence,
@@ -1014,6 +1016,7 @@ export class StandaloneService {
       databasePath: database,
       workspacePath,
       draftingWorkspacePath,
+      repositoryPath,
     } = dataDirectory;
     // Re-created if stop() releases it mid-start, so the catch path still sees later parts.
     const acquire = <K extends keyof Started>(key: K, value: Started[K]) => {
@@ -1124,11 +1127,17 @@ export class StandaloneService {
       );
       const workspaces = acquire(
         "workspaces",
-        new WorkspaceManager(
-          workspaceBindings,
-          workspacePath,
-          this.options.workspaceManager,
-        ),
+        new WorkspaceManager(workspaceBindings, workspacePath, {
+          ...this.options.workspaceManager,
+          managedRepositories: {
+            root: repositoryPath,
+            scopeOf: (taskId) => {
+              const projectId = taskProjectId(db, taskId);
+              if (!projectId) throw new Error(`Task ${taskId} has no project`);
+              return projectId;
+            },
+          },
+        }),
       );
       await workspaces.recover();
       workspaces.assertNotCancelled();
@@ -4948,9 +4957,7 @@ export class StandaloneService {
                 path: binding.path,
                 repositories: binding.repositories.map((r) => [
                   r.repositoryId,
-                  r.sourcePath,
-                  r.workspacePath,
-                  r.gitCommonDir,
+                  ...repositoryBindingPaths(r),
                 ]),
               }
             : null,
@@ -4969,11 +4976,7 @@ export class StandaloneService {
     return [
       ...new Set([
         binding.path,
-        ...binding.repositories.flatMap((r) => [
-          r.sourcePath,
-          r.workspacePath,
-          ...(r.gitCommonDir ? [r.gitCommonDir] : []),
-        ]),
+        ...binding.repositories.flatMap(repositoryBindingPaths),
       ]),
     ];
   }
@@ -6580,11 +6583,7 @@ export class StandaloneService {
     return binding
       ? [
           binding.path,
-          ...binding.repositories.flatMap((repository) => [
-            repository.sourcePath,
-            repository.workspacePath,
-            ...(repository.gitCommonDir ? [repository.gitCommonDir] : []),
-          ]),
+          ...binding.repositories.flatMap(repositoryBindingPaths),
         ].filter((path) => path.length > 0)
       : [];
   }
@@ -8197,7 +8196,8 @@ export class StandaloneService {
             link.repositoryId === repository.repositoryId &&
             link.path === repository.sourcePath &&
             link.ref === repository.ref &&
-            link.gitCommonDirectory === repository.gitCommonDir,
+            link.gitCommonDirectory ===
+              (repository.sourceGitCommonDir ?? repository.gitCommonDir),
         ),
     );
   }
@@ -9133,12 +9133,23 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
-      // Passed only when enabled at this turn's admission, so off keeps today's call shapes.
+      // Passed only when network access or Git roots apply, so otherwise keeps today's call shapes.
       // A draft turn is always read-only with network off, whatever the project sets.
+      const binding = request.taskId
+        ? this.started().workspaceBindings.get(request.taskId)
+        : undefined;
+      const gitWritableRoots =
+        binding?.state === "ready" && binding.path === workspace
+          ? taskGitWritableRoots(binding)
+          : [];
+      const networkAccess = state.commandNetworkAccess(intent.id) === true;
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
-        : state.commandNetworkAccess(intent.id)
-          ? { networkAccess: true }
+        : networkAccess || gitWritableRoots.length > 0
+          ? {
+              networkAccess,
+              ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
+            }
           : undefined;
       const turnId = await guard(
         policy
@@ -9930,11 +9941,7 @@ export class StandaloneService {
       const managedPaths = workspace
         ? [
             workspace.path,
-            ...workspace.repositories.flatMap((repository) => [
-              repository.sourcePath,
-              repository.workspacePath,
-              ...(repository.gitCommonDir ? [repository.gitCommonDir] : []),
-            ]),
+            ...workspace.repositories.flatMap(repositoryBindingPaths),
           ]
         : [];
       this.canonicalDataDir ??= existsSync(this.dataDir)

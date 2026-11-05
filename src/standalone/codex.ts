@@ -545,9 +545,13 @@ function makeFailureClassification(
   };
 }
 
-export const executionPolicy = (workspace: string, networkAccess = false) => ({
+export const executionPolicy = (
+  workspace: string,
+  networkAccess = false,
+  gitWritableRoots: readonly string[] = [],
+) => ({
   type: "workspaceWrite" as const,
-  writableRoots: [workspace],
+  writableRoots: [workspace, ...gitWritableRoots],
   networkAccess,
   excludeSlashTmp: true,
   excludeTmpdirEnvVar: true,
@@ -627,6 +631,8 @@ export interface RuntimeTurnSettings {
 export interface RuntimeTurnPolicy {
   networkAccess: boolean;
   access?: "read-only";
+  /** A task turn's writable Git roots (`taskGitWritableRoots`); a read-only turn ignores them. */
+  gitWritableRoots?: readonly string[];
 }
 
 /** Per-turn read-only policy of a draft turn; proven on a workspace-write thread. */
@@ -2287,7 +2293,11 @@ export class CodexRuntime implements Runtime {
         sandboxPolicy:
           policy?.access === "read-only"
             ? readOnlyPolicy()
-            : executionPolicy(workspace, policy?.networkAccess === true),
+            : executionPolicy(
+                workspace,
+                policy?.networkAccess === true,
+                policy?.gitWritableRoots,
+              ),
         // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
         ...(settings?.model ? { model: settings.model } : {}),
         ...(settings?.reasoningEffort

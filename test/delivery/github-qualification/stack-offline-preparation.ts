@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { TestContext } from "node:test";
 import { StandaloneService } from "../../../src/standalone/service.js";
 import { git } from "../../fixtures/publication.js";
+import { shareTaskObjects } from "../../fixtures/stacked-delivery.js";
 import { tmpdir } from "../../fixtures/temp.js";
 
 /** Fresh prepared data, never a reset of previously executed work. */
@@ -97,6 +98,7 @@ export async function freshOfflineStack(t: TestContext) {
   const workspaceOf = async (taskId: string) => {
     const binding = await service.taskWorkspace(taskId);
     assert.ok(binding?.repositories[0]);
+    shareTaskObjects(source, binding.repositories[0].gitCommonDir);
     return { root: binding.path, path: binding.repositories[0].workspacePath };
   };
   for (const [index, taskId] of tasks.entries()) {

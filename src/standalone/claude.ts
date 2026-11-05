@@ -1002,6 +1002,11 @@ export class ClaudeRuntime implements Runtime {
     // A read-only turn writes only the per-task temporary base, in the sandbox and the hook.
     const writable =
       policy?.access === "read-only" ? [base] : [workspace, base];
+    // Git metadata roots are for sandboxed Git only; file-editing tools keep `writable`.
+    const sandboxWritable =
+      policy?.access === "read-only"
+        ? writable
+        : [...writable, ...(policy?.gitWritableRoots ?? [])];
     const temporary = await ensureTemporaryBase(base);
     if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
     const plugins = settings?.skills?.plugins ?? [];
@@ -1103,7 +1108,7 @@ export class ClaudeRuntime implements Runtime {
         allowUnsandboxedCommands: false,
         autoAllowBashIfSandboxed: true,
         network: { allowedDomains: [] },
-        filesystem: { allowWrite: writable },
+        filesystem: { allowWrite: sandboxWritable },
       },
       mcpServers: {
         [mcpServerName]: sdk.createSdkMcpServer({

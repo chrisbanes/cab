@@ -395,7 +395,8 @@ export async function verifyPreparedStackResources(
     host.dataDirectory,
     host.scratchParent,
     join(m.authority.gitFetch.commonDirectory, "objects"),
-    join(m.authority.gitFetch.commonDirectory, "refs", "cab", "adopted"),
+    // Adopted refs live in the managed repository's reftable.
+    join(m.authority.gitFetch.commonDirectory, "reftable"),
   ];
   if (
     !requiredWrites.every((path) => host.writes.includes(path)) ||

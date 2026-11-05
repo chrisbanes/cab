@@ -20,7 +20,7 @@ import {
   type ChildProcess,
 } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../../src/core/store.js";
@@ -41,6 +41,7 @@ import {
   type WorkspaceCleanupEvidence,
   type WorkspaceBindingStore,
   type WorkspaceManagerOptions,
+  taskGitWritableRoots,
 } from "../../src/standalone/workspaces.js";
 
 function fixture(options: WorkspaceManagerOptions = {}) {
@@ -1106,6 +1107,7 @@ test("restored managed bindings reject source-root identity before path access",
     get: () => binding,
     list: () => [binding],
     bindRepository: () => binding,
+    recordGitDirectory: () => binding,
     update: (_taskId, state, reason) => {
       binding = { ...binding, state, reason };
       return binding;
@@ -1208,5 +1210,215 @@ test("repeated readiness checks reuse an unchanged worktree identity only briefl
     );
   } finally {
     f.close();
+  }
+});
+
+/** Task IDs name their scope before a colon, as a project would. */
+function managedFixture() {
+  const f = fixture({
+    managedRepositories: {
+      root: join(realpathSync(tmpdir()), `cab-managed-${randomUUID()}`),
+      scopeOf: (taskId) => taskId.split(":")[0] ?? taskId,
+    },
+  });
+  // biome-ignore lint/complexity/useLiteralKeys: the canonical root the manager resolved
+  const repositories = f.manager["repositoryRoot"] as string;
+  return {
+    f,
+    repositories,
+    close() {
+      f.close();
+      rmSync(repositories, { recursive: true, force: true });
+    },
+  };
+}
+
+function commitIn(cwd: string, file: string, message: string): string {
+  writeFileSync(join(cwd, file), `${message}\n`);
+  git(cwd, "add", file);
+  git(
+    cwd,
+    "-c",
+    "user.name=Workspace Test",
+    "-c",
+    "user.email=workspace-test@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    message,
+  );
+  return git(cwd, "rev-parse", "HEAD");
+}
+
+test("task worktrees come from a cab-owned reftable repository that reads the source's objects", async () => {
+  const { f, repositories, close } = managedFixture();
+  try {
+    const source = repository(f.root, "source");
+    const sourceCommon = realpathSync(join(source, ".git"));
+    const refs = git(source, "for-each-ref");
+    const binding = await f.manager.provision("project-a:task-1", [
+      { repositoryId: "repo", path: source },
+    ]);
+    assert.equal(binding.state, "ready", binding.reason ?? "");
+    const repo = binding.repositories[0]!;
+    const managed = repo.gitCommonDir!;
+    assert.equal(dirname(managed), repositories);
+    assert.match(basename(managed), /^[0-9a-f]{32}$/);
+    assert.equal(repo.sourceGitCommonDir, sourceCommon);
+    assert.equal(
+      repo.gitDirectory?.startsWith(`${join(managed, "worktrees")}/`),
+      true,
+    );
+    assert.equal(git(managed, "rev-parse", "--is-bare-repository"), "true");
+    assert.equal(git(managed, "rev-parse", "--show-ref-format"), "reftable");
+    assert.equal(exists(join(managed, "hooks")), false);
+    assert.equal(
+      readFileSync(join(managed, "objects", "info", "alternates"), "utf8"),
+      `${join(sourceCommon, "objects")}\n`,
+    );
+    assert.equal(git(managed, "config", "gc.auto"), "0");
+    assert.equal(git(managed, "config", "maintenance.auto"), "false");
+    assert.equal(
+      git(repo.workspacePath, "rev-parse", "HEAD"),
+      git(source, "rev-parse", "HEAD"),
+    );
+    assert.equal(
+      git(source, "worktree", "list", "--porcelain").includes(
+        repo.workspacePath,
+      ),
+      false,
+    );
+    assert.deepEqual(taskGitWritableRoots(binding), [
+      join(managed, "objects"),
+      join(managed, "reftable"),
+      repo.gitDirectory,
+    ]);
+
+    // One repository per scope and source; a requested commit resolves in it.
+    const taskCommit = commitIn(repo.workspacePath, "task.txt", "task work");
+    const same = await f.manager.provision("project-a:task-2", [
+      { repositoryId: "repo", path: source, commit: taskCommit },
+    ]);
+    assert.equal(same.state, "ready", same.reason ?? "");
+    assert.equal(same.repositories[0]!.gitCommonDir, managed);
+    assert.equal(
+      git(same.repositories[0]!.workspacePath, "rev-parse", "HEAD"),
+      taskCommit,
+    );
+    assert.notEqual(same.repositories[0]!.gitDirectory, repo.gitDirectory);
+    const other = await f.manager.provision("project-b:task-1", [
+      { repositoryId: "repo", path: source },
+    ]);
+    assert.equal(other.state, "ready", other.reason ?? "");
+    assert.notEqual(other.repositories[0]!.gitCommonDir, managed);
+    assert.equal(git(source, "for-each-ref"), refs);
+
+    // Cleanup removes the worktree from the managed repository's list, not the source's.
+    git(
+      repo.workspacePath,
+      "switch",
+      "--quiet",
+      "--detach",
+      git(source, "rev-parse", "HEAD"),
+    );
+    const cleaned = await f.manager.archiveAndCleanup(
+      "project-a:task-1",
+      approvedCleanup,
+    );
+    assert.equal(cleaned.outcome, "cleaned");
+    assert.equal(
+      git(managed, "worktree", "list", "--porcelain").includes(
+        repo.workspacePath,
+      ),
+      false,
+    );
+    assert.equal(exists(managed), true);
+    // The admin directory is identity: a worktree redirected to another task's is held.
+    const third = await f.manager.provision("project-a:task-3", [
+      { repositoryId: "repo", path: source },
+    ]);
+    const redirected = same.repositories[0]!.workspacePath;
+    writeFileSync(
+      join(redirected, ".git"),
+      `gitdir: ${third.repositories[0]!.gitDirectory}\n`,
+    );
+    const held = await f.reopen().get("project-a:task-2");
+    assert.equal(held?.state, "held");
+    assert.match(held?.reason ?? "", /belongs to another repository/);
+  } finally {
+    close();
+  }
+});
+
+for (const tamper of ["alternates", "files-backend"] as const) {
+  test(`a managed repository that no longer matches (${tamper}) is refused before any worktree`, async () => {
+    const { f, close } = managedFixture();
+    try {
+      const source = repository(f.root, "source");
+      const first = await f.manager.provision("project-a:task-1", [
+        { repositoryId: "repo", path: source },
+      ]);
+      const managed = first.repositories[0]!.gitCommonDir!;
+      if (tamper === "alternates")
+        writeFileSync(
+          join(managed, "objects", "info", "alternates"),
+          `${f.root}\n`,
+        );
+      else {
+        rmSync(managed, { recursive: true, force: true });
+        execFileSync("git", [
+          "init",
+          "--quiet",
+          "--bare",
+          "--ref-format=files",
+          managed,
+        ]);
+      }
+      const second = await f.manager.provision("project-a:task-2", [
+        { repositoryId: "repo", path: source },
+      ]);
+      assert.equal(second.state, "provisioning");
+      assert.match(second.reason ?? "", /Managed repository does not match/);
+      assert.equal(exists(second.repositories[0]!.workspacePath), false);
+    } finally {
+      close();
+    }
+  });
+}
+
+test("a legacy binding made from the source checkout still validates and cleans up", async () => {
+  const { f, close } = managedFixture();
+  try {
+    const source = repository(f.root, "source");
+    const legacy = new WorkspaceManager(
+      // biome-ignore lint/complexity/useLiteralKeys: the fixture's own store
+      f.manager["store"] as WorkspaceBindingStore,
+      f.workspaceRoot,
+    );
+    const binding = await legacy.provision("project-a:legacy", [
+      { repositoryId: "repo", path: source },
+    ]);
+    const repo = binding.repositories[0]!;
+    assert.equal(repo.gitCommonDir, realpathSync(join(source, ".git")));
+    assert.equal(repo.sourceGitCommonDir, undefined);
+    assert.deepEqual(taskGitWritableRoots(binding), []);
+    const reopened = f.reopen();
+    assert.equal(
+      (await reopened.forExecution("project-a:legacy")).state,
+      "ready",
+    );
+    const cleaned = await reopened.archiveAndCleanup(
+      "project-a:legacy",
+      approvedCleanup,
+    );
+    assert.equal(cleaned.outcome, "cleaned");
+    assert.equal(
+      git(source, "worktree", "list", "--porcelain").includes(
+        repo.workspacePath,
+      ),
+      false,
+    );
+  } finally {
+    close();
   }
 });

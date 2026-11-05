@@ -293,6 +293,7 @@ export function bindStackRuntime(
       .object({
         networkAccess: z.boolean(),
         access: z.literal("read-only").optional(),
+        gitWritableRoots: z.array(z.string()).optional(),
       })
       .strict()
       .optional()
@@ -300,6 +301,9 @@ export function bindStackRuntime(
     const effectivePolicy = {
       networkAccess: argumentPolicy?.networkAccess === true,
       ...(argumentPolicy?.access ? { access: argumentPolicy.access } : {}),
+      ...(argumentPolicy?.gitWritableRoots
+        ? { gitWritableRoots: argumentPolicy.gitWritableRoots }
+        : {}),
     };
     if (
       request.taskVersion === null ||

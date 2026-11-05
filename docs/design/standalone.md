@@ -307,6 +307,12 @@ reaches only later admissions and a running turn keeps its policy. Claude Code t
 drafting runs and requests without a task binding always run with command network access
 denied. The setting is not an allow-list, proxy or host filter: it enables whatever the
 runtime then permits, including the credentials and logins the host exposes.
+A task turn's writable roots are its workspace plus, for each repository of a workspace
+made from cab's managed repository, that repository's `objects/` and `reftable/` and the
+worktree's admin directory `worktrees/<name>/` ([ADR-1026](../adr/1026-cab-owned-task-repositories.md)).
+Codex receives them in `sandboxPolicy.writableRoots`; Claude Code receives them in its
+sandbox `allowWrite`, while its file-editing tools stay confined to the workspace and the
+per-task temporary directory. A draft turn and a legacy workspace get none.
 Retain full read access: use `readOnlyAccess: { type: "fullAccess" }` where supported,
 or the verified broad-read default on versions without that field. Do not send an
 unsupported field or require a named profile for equivalent default read behavior.

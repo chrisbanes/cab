@@ -162,6 +162,7 @@ function fixture(
     threadId: string,
     access?: "read-only",
     skills?: RuntimeTurnSettings["skills"],
+    gitWritableRoots?: string[],
   ) => {
     const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
@@ -173,7 +174,13 @@ function fixture(
       workspace,
       "Do the work",
       turnSettings,
-      access ? { networkAccess: false, access } : undefined,
+      access || gitWritableRoots
+        ? {
+            networkAccess: false,
+            ...(access ? { access } : {}),
+            ...(gitWritableRoots ? { gitWritableRoots } : {}),
+          }
+        : undefined,
     );
     const generation = runtime.currentUserInputGeneration();
     assert.ok(generation);
@@ -851,6 +858,48 @@ test("the PreToolUse hook allows calls inside policy and denies the rest", async
       assert.equal(denied(index)?.permissionDecision, "deny");
       assert.ok(denied(index)?.permissionDecisionReason);
     }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a task turn's Git roots are writable to sandboxed commands but not to file-editing tools", async () => {
+  const decisions: unknown[] = [];
+  let gitRoot = "";
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        decisions.push(
+          await session.hook(
+            "Edit",
+            { file_path: join(gitRoot, "config") },
+            "toolu_0",
+          ),
+        );
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    gitRoot = join(f.root, "repositories", "managed", "worktrees", "repo-1");
+    const roots = [
+      join(f.root, "repositories", "managed", "objects"),
+      join(f.root, "repositories", "managed", "reftable"),
+      gitRoot,
+    ];
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId, undefined, undefined, roots);
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.deepEqual(f.sessions[0]?.options.sandbox?.filesystem, {
+      allowWrite: [f.workspace, claudeTemporaryBase(f.workspace), ...roots],
+    });
+    assert.equal(
+      (decisions[0] as { hookSpecificOutput?: { permissionDecision: string } })
+        .hookSpecificOutput?.permissionDecision,
+      "deny",
+    );
   } finally {
     await f.cleanup();
   }

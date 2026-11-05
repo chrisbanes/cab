@@ -3409,6 +3409,45 @@ test("a turn sends network access only when its admission policy enables it", as
   }
 });
 
+test("a task turn's Git roots join the workspace in its writable roots, never a read-only turn's", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  const gitWritableRoots = [
+    "/repo/objects",
+    "/repo/reftable",
+    "/repo/worktrees/repo-1",
+  ];
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "write", undefined, {
+        networkAccess: false,
+        gitWritableRoots,
+      }),
+      3000,
+    );
+    await bounded(
+      runtime.startTurn("thread-1", root, "draft", undefined, {
+        networkAccess: false,
+        access: "read-only",
+        gitWritableRoots,
+      }),
+      3000,
+    );
+    const turns = requests("turn/start") as { sandboxPolicy: unknown }[];
+    assert.deepEqual(turns[0]?.sandboxPolicy, {
+      ...executionPolicy(root),
+      writableRoots: [root, ...gitWritableRoots],
+    });
+    assert.deepEqual(turns[1]?.sandboxPolicy, {
+      type: "readOnly",
+      networkAccess: false,
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
 test("a read-only turn sends the read-only policy without network and the next turn writes again", async () => {
   const { root, runtime, requests, cleanup } = settingsFakeRuntime();
   try {

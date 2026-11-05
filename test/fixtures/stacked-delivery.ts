@@ -6,7 +6,15 @@ import { proveUnchangedRebase } from "../../src/standalone/rebase-proof.js";
 import { verifierGit } from "../../src/standalone/push-verification.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { TestContext } from "node:test";
@@ -31,6 +39,23 @@ import { tmpdir } from "./temp.js";
 import { until } from "./until.js";
 
 export const repositoryId = "R1";
+
+/**
+ * The fixture's source plays the outside writer and the remote, so it reads the objects of the
+ * tasks' managed repository too. Git skips the alternate cycle back to the source's own objects.
+ */
+export function shareTaskObjects(source: string, gitCommonDir: string | null) {
+  if (!gitCommonDir || gitCommonDir === realpathSync(join(source, ".git")))
+    return;
+  const file = join(source, ".git", "objects", "info", "alternates");
+  const line = join(gitCommonDir, "objects");
+  if (
+    !(existsSync(file) ? readFileSync(file, "utf8") : "")
+      .split("\n")
+      .includes(line)
+  )
+    appendFileSync(file, `${line}\n`);
+}
 
 /**
  * The assembled service over a real Git repository linked as R1, in a stacking project, with a
@@ -298,6 +323,7 @@ export async function stackedDeliveryFixture(
     const binding = await service.taskWorkspace(taskId);
     const repository = binding?.repositories[0];
     assert.ok(binding && repository, `workspace of ${taskId}`);
+    shareTaskObjects(source, repository.gitCommonDir);
     return { root: realpathSync(binding.path), path: repository.workspacePath };
   };
   const turnsOf = async (taskId: string) => {

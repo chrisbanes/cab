@@ -527,8 +527,14 @@ export async function offlineStackResources(
   await mkdir(home.userHome, { recursive: true });
   await symlink(authTarget, join(home.home, "auth.json"));
   const auth = await lstat(authTarget),
-    common = await realpath(join(f.source, ".git"));
-  await mkdir(join(common, "refs", "cab", "adopted"), { recursive: true });
+    common = await realpath(
+      git(
+        upperWorkspace.path,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ),
+    );
   const offlineGit = join(f.root, "OFFLINE-git.cjs");
   await writeFile(
     offlineGit,
@@ -795,7 +801,7 @@ process.exit(r.status ?? 1);
         data,
         scratch,
         join(common, "objects"),
-        join(common, "refs", "cab", "adopted"),
+        join(common, "reftable"),
         authTarget,
       ],
       workspaceImage: { maxFiles: 100, maxBytes: 1048576 },
@@ -832,7 +838,21 @@ process.exit(r.status ?? 1);
         model: "offline-model",
         effort: "medium",
         settingsSha256: settings.settingsSha256,
-        policySha256: materialHash({ networkAccess: false }),
+        // A task turn carries its managed repository's Git roots.
+        policySha256: materialHash({
+          networkAccess: false,
+          gitWritableRoots: [
+            join(common, "objects"),
+            join(common, "reftable"),
+            git(
+              assignment.taskId === lowerTask
+                ? lowerWorkspace.path
+                : upperWorkspace.path,
+              "rev-parse",
+              "--absolute-git-dir",
+            ),
+          ],
+        }),
         taskVersions: [
           observed.tasks.find((task) => task.id === assignment.taskId)!.version,
         ],

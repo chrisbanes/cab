@@ -54,6 +54,8 @@ function repositoryPaths(value: unknown): string[] {
       row.sourcePath,
       row.workspacePath,
       row.gitCommonDir,
+      row.sourceGitCommonDir,
+      row.gitDirectory,
     ].filter((v) => v !== undefined && v !== null);
     if (values.some((v) => typeof v !== "string"))
       throw new Error("Private repository inputs unavailable");

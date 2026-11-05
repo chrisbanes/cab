@@ -9,7 +9,11 @@ import { z } from "zod";
 import { runGit } from "./git-process.js";
 import { assertCanonicalDirectoryPath } from "./data-directory.js";
 import { claudeTemporaryBase } from "./claude.js";
-import { repositoryBindingSchema, taskWorkspaceSchema } from "./workspaces.js";
+import {
+  repositoryBindingPaths,
+  repositoryBindingSchema,
+  taskWorkspaceSchema,
+} from "./workspaces.js";
 import {
   projectCleanupSchema,
   type ProjectCleanup,
@@ -155,22 +159,12 @@ export async function captureDeletionCleanup(
         if (!work.has(live.workId))
           throw new Error("Workspace execution has another owner");
       boundPaths.add(binding.path);
-      retiring.push(
+      const paths = [
         binding.path,
-        ...binding.repositories.flatMap((r) => [
-          r.sourcePath,
-          r.workspacePath,
-          ...(r.gitCommonDir ? [r.gitCommonDir] : []),
-        ]),
-      );
-      for (const path of [
-        binding.path,
-        ...binding.repositories.flatMap((r) => [
-          r.sourcePath,
-          r.workspacePath,
-          ...(r.gitCommonDir ? [r.gitCommonDir] : []),
-        ]),
-      ])
+        ...binding.repositories.flatMap(repositoryBindingPaths),
+      ];
+      retiring.push(...paths);
+      for (const path of paths)
         try {
           retiring.push(await realpath(path));
         } catch {

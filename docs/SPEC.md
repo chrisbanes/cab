@@ -879,6 +879,27 @@ linked path and ref, and only once the turn is otherwise admissible, so a held o
 not-Ready task gets no checkout. An imported task whose source repository the
 project does not link waits, without a workspace, until it is linked.
 
+A task worktree is made from cab's managed repository for its project and source
+checkout, not from the operator's checkout ([ADR-1026](adr/1026-cab-owned-task-repositories.md)).
+The managed repository is a bare repository with Git's reftable ref backend under
+`<data>/repositories/`. It reads the operator's objects through an alternate, so creating
+it runs no transport, and nothing is ever written to the operator's checkout. A task turn
+can write, besides its workspace, the managed repository's `objects/` and `reftable/`
+directories and the worktree's own `worktrees/<name>/` admin directory. The repository's
+root, `config`, `info/` and hooks stay read-only, so agents branch, commit, amend and
+rebase with normal Git, and cab's [task commit publication](#github-and-completion)
+pushes the worktree's commits as before. The limits:
+
+- Tasks of one project share the repository's objects and refs: an agent can move
+  another task's branches, but not another worktree's checked-out commit.
+- If the operator prunes objects a task's base needs, that task's repository loses them.
+- `git fetch`, `pull`, `gc` and `worktree add` fail in a task workspace, because they
+  write the repository root. Git LFS and submodule metadata are not writable.
+- Workspaces created before managed repositories keep their worktree of the operator's
+  checkout, with no Git write access. Drafting runs keep a disposable worktree of the
+  operator's checkout, also with no Git write access.
+- cab keeps a project's managed repositories after the project is deleted.
+
 Normal successful completion trusts Codex's successful terminal status for the
 bound thread/turn. After every cab-owned callback has ended, with no known
 unfinished execution or other hold, persist completion and serialize ownership

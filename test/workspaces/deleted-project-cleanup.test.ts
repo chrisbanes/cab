@@ -38,11 +38,25 @@ test("postcommit cleanup force-discards captured dirty task/draft worktrees and 
     temp: true,
   });
   const before = await f.contents(),
-    refs = await cleanupGit(f.sources[0]!, "show-ref");
+    refs = await cleanupGit(f.sources[0]!, "show-ref"),
+    repository = f.binding!.repositories[0]!;
+  assert.ok(repository.sourceGitCommonDir, "a managed task worktree");
   const result = await f.service.deleteProject(f.command);
   assert.equal(result.kind, "project-deleted");
   f.assertDeleted();
   await absent(f.binding!.path);
+  // The worktree leaves its managed repository's list; the repository itself is kept.
+  assert.equal(
+    (
+      await cleanupGit(
+        repository.gitCommonDir!,
+        "worktree",
+        "list",
+        "--porcelain",
+      )
+    ).includes(repository.workspacePath),
+    false,
+  );
   await absent(f.draftBinding!.path);
   await absent(f.temp!);
   assert.deepEqual(await f.contents(), before);
@@ -250,7 +264,7 @@ test("missing worktrees/temp converge and duplicate sweeps share one bounded pas
   await f.commit();
   for (const repository of f.binding!.repositories)
     await cleanupGit(
-      repository.sourcePath,
+      repository.gitCommonDir!,
       "worktree",
       "remove",
       "--force",
@@ -354,11 +368,16 @@ test("a Git-locked worktree remains pending until its existing lock is released"
   const f = await deletedCleanupFixture(t, { workspaces: true });
   await f.commit();
   const repo = f.binding!.repositories[0]!;
-  await cleanupGit(repo.sourcePath, "worktree", "lock", repo.workspacePath);
+  await cleanupGit(repo.gitCommonDir!, "worktree", "lock", repo.workspacePath);
   await f.runner().sweep();
   assert.ok(await lstat(repo.workspacePath));
   assert.ok(f.store().pendingCleanup().length);
-  await cleanupGit(repo.sourcePath, "worktree", "unlock", repo.workspacePath);
+  await cleanupGit(
+    repo.gitCommonDir!,
+    "worktree",
+    "unlock",
+    repo.workspacePath,
+  );
   await f.runner().sweep();
   await absent(f.binding!.path);
   assert.equal(f.store().pendingCleanup().length, 0);
@@ -660,7 +679,7 @@ test("unobserved destructive Git retains its lock across repeated sweeps until p
   );
   // Fake child applies its effect in this disposable tree, then supplies positive exit.
   await cleanupGit(
-    repo.sourcePath,
+    repo.gitCommonDir!,
     "worktree",
     "remove",
     "--force",
@@ -773,7 +792,7 @@ test("restart without child proof remains read-only even when the captured remov
   const operation = f.manager["inFlight"].get(f.taskId)!;
   const repo = f.binding!.repositories[0]!;
   await cleanupGit(
-    repo.sourcePath,
+    repo.gitCommonDir!,
     "worktree",
     "remove",
     "--force",

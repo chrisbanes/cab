@@ -4,7 +4,10 @@ import {
   profileRuntimeSchema,
   unsupportedRuntimeField,
 } from "../../src/core/execution-runtime.js";
-import { claudePolicyDisclosure } from "../../src/standalone/execution-policy.js";
+import {
+  claudePolicyDisclosure,
+  codexPolicyDisclosure,
+} from "../../src/standalone/execution-policy.js";
 import {
   executionSummary,
   failureNotice,
@@ -337,7 +340,7 @@ test("Claude policy disclosure names roots by category and keeps the runtime's l
       /cab's hook, not by the operating system/.test(l),
     ),
   );
-  assert.deepEqual(redirected.limits, base.limits);
+  assert.deepEqual(redirected.limits.slice(0, 1), base.limits);
   assert.equal(JSON.stringify(redirected).includes("/tmp/ens-"), false);
   const shared = claudePolicyDisclosure(
     { ...base, writableRoots: ["/w"], sharedWriteRoots: ["/tmp/claude-501"] },
@@ -355,6 +358,39 @@ test("Claude policy disclosure names roots by category and keeps the runtime's l
     { ...base, extra: true },
   ])
     assert.throws(() => claudePolicyDisclosure(malformed, "/w"));
+});
+
+test("both harnesses' disclosures name the writable Git paths and their limits", () => {
+  const claude = claudePolicyDisclosure(
+    {
+      writableRoots: ["/w", "/tmp/ens-0123"],
+      sharedWriteRoots: [],
+      network: "denied",
+      fileToolConfinement: "hook",
+      limits: [],
+    },
+    "/w",
+  );
+  for (const disclosure of [codexPolicyDisclosure(), claude]) {
+    const git = disclosure.lines.find((line) => line.includes("Git commands"));
+    assert.match(
+      git ?? "",
+      /objects\/ and reftable\/ and the worktree's own worktrees\/<name>\/ directory/,
+    );
+    assert.match(git ?? "", /config, info\/ and hooks stay read-only/);
+    assert.ok(
+      disclosure.limits.some((limit) =>
+        /share their repository's objects and refs/.test(limit),
+      ),
+    );
+    assert.ok(
+      disclosure.limits.some((limit) =>
+        /keeps a project's repositories after the project is deleted/.test(
+          limit,
+        ),
+      ),
+    );
+  }
 });
 
 test("supported settings narrow runtime errors to listed values", () => {
