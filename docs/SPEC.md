@@ -646,7 +646,8 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. Codex gets plugin skills only from its profile's plugins. A Codex conversation started under the previous home is not
+installation are disabled. Codex gets plugin skills only from its profile's plugins, as
+skill directories, including plugins installed in Claude Code or Codex. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
 state, and the runtime refuses the resume before any App Server request.
@@ -1317,10 +1318,38 @@ the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
 without showing it.
 
-A profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
-absolute plugin directories on the service host, each with the names of its skills the
-profile enables, set in the profile settings or with `cab profile prepare --skills-file`.
-The directory needs a Claude (`.claude-plugin/plugin.json`) or Codex
+A profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
+each with the names of its skills the profile enables (at most 16 plugins and 32 skills
+each), set in the profile settings or with `cab profile prepare --skills-file`. An entry is
+an absolute plugin directory on the service host (`{"path":…}`) or a plugin the operator
+installed and enabled in Claude Code or Codex for the service user
+(`{"plugin":"claude:<plugin>@<marketplace>"}` or `codex:…`). The profile settings list
+each entry as a row, with its tool or directory and skill count. An installed plugin is
+added from a select of the plugins both tools have installed and enabled, grouped by tool,
+and its skills are chosen in a dialog with a filter. The select leaves out plugins already
+added and, on a Claude profile, plugins without a Claude manifest. A local directory is
+added in the same dialog by path and skill names. The listing
+(`GET /api/operator/installed-plugins`) names plugins, tools and skills, never paths.
+
+An installed plugin is resolved to its install directory at each turn start, and both
+harnesses load that directory, so a profile never sees two versions of a plugin; no hook,
+MCP server, app or setting is read from the operator's configuration. For Claude Code,
+`enabledPlugins` in `settings.json` must enable it and `plugins/installed_plugins.json`
+must hold exactly one user-scope install of it, under `$CLAUDE_CONFIG_DIR` from the
+service environment, else `~/.claude`; project and local installs are ignored. For Codex,
+`config.toml` must have `[plugins."<plugin>@<marketplace>"] enabled = true`, and
+`plugins/cache/<marketplace>/<plugin>/` must hold exactly one version directory
+(`plugin-install-*` and dot entries are ignored), under `$CODEX_HOME` from the service
+environment, else `~/.codex`. Neither format is documented, so cab validates both and
+fails closed. A plugin that is uninstalled, disabled, ambiguous or in an unrecognised record
+format makes the work wait, with a reason that names the plugin and its tool and no path.
+The `skill-plugins` readiness check reports the same reasons for every active profile.
+Plugin waits of either kind are re-checked every 30 s, so installing or enabling the plugin
+again lets the next attempt run. An assignment keeps its profile revision, but not the
+plugin content: each turn runs the current install, and the turn's digest shows an update.
+A turn whose install directory is removed while it runs, for example by an update, can fail.
+
+A directory needs a Claude (`.claude-plugin/plugin.json`) or Codex
 (`.codex-plugin/plugin.json`) manifest. cab finds skills as the runtimes do: the
 directories the Claude manifest's `skills` array lists (or, for a listed directory without
 a `SKILL.md`, its subdirectories), `SKILL.md` files up to six
@@ -1331,7 +1360,10 @@ Claude profile counts only the skills the Claude CLI loads, not those reached on
 the Codex manifest. A
 plugin with only a Codex manifest can be enabled on Codex profiles only: creating a
 Claude profile with one, or switching a profile that has one to Claude, is refused. A
-change that fails any of these is refused with the failing fields. Each profile revision
+change that fails any of these is refused with the failing fields. A change is also
+refused when an installed plugin it names is unavailable now, or when two entries are the
+same plugin by manifest name, such as one plugin from both tools; a turn whose profile
+has such a pair waits. Each profile revision
 stores the list, and an assignment keeps the one it started with. The profile settings show the plugins and
 skills, and each runtime's effective policy states that skills are instructions to the
 agent, not cab policy. A plugin contributes skills, instructions and
@@ -1364,7 +1396,9 @@ subagents are untested against Stop and resume, and a turn resumed after a crash
 subagent did not complete in two attempts (not diagnosed). Codex subagents stay
 disabled. The journeys are recorded in
 [Claude](evidence/skill-plugin-journeys-2026-10-30.md) and
-[Codex](evidence/codex-skill-journeys-2026-10-30.md), and the Codex scoping proof in
+[Codex](evidence/codex-skill-journeys-2026-10-30.md), the installed-plugin journeys in
+[docs/evidence/installed-plugin-journeys-2026-11-05.md](evidence/installed-plugin-journeys-2026-11-05.md),
+and the Codex scoping proof in
 [docs/evidence/codex-skill-scope-probes-2026-10-30.md](evidence/codex-skill-scope-probes-2026-10-30.md).
 
 The operator enables or disables each execution runtime for the installation in

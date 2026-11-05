@@ -191,7 +191,7 @@ planning and allocation exceptions. Delegating work does not transfer that accou
 _Avoid_: Task owner as a separate accountability role
 
 **Agent profile**:
-A reusable, operator-defined identity and instructions, selected for project leads and task assignments. Its execution settings are validated for the selected runtime. It may also list skill plugins and the skills of each it enables; these are instructions to the agent, not cab policy, and an assignment keeps the list of the revision it started with.
+A reusable, operator-defined identity and instructions, selected for project leads and task assignments. Its execution settings are validated for the selected runtime. It may also list skill plugins, each a local plugin directory or a plugin installed in Claude Code or Codex, and the skills of each it enables; these are instructions to the agent, not cab policy. An assignment keeps the list of the revision it started with, while an installed plugin's content is whatever is installed when each turn starts.
 _Avoid_: Bot identity or assignment when referring to reusable configuration
 
 **Assignment**:

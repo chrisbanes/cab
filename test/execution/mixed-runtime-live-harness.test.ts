@@ -308,6 +308,18 @@ test("the skill and subagent facets are accepted, and their briefs name the tool
       /skill grilling/,
     );
   }
+  // The installed-plugin facets run two tasks on their own harness and name the probe skill.
+  for (const [facet, own, other, tool] of [
+    ["claude-installed-plugin", "claude", "codex", /Skill tool/],
+    ["codex-installed-plugin", "codex", "claude", /Use the skill/],
+  ] as const) {
+    assert.equal(parseArgs(["--live", "--facet", facet]), facet);
+    assert.equal(FACETS[facet][own], 3);
+    assert.equal(FACETS[facet][other], 0);
+    const brief = facetOutcome(facet, { workerProfileId: "w", nonce: "n" });
+    assert.match(brief, /skill cab-probe-phrase/);
+    assert.match(brief, tool);
+  }
   assert.match(subagentSleep, /Agent tool/);
   assert.match(subagentSleep, new RegExp(`\n${SLEEP}\n`));
   assert.doesNotMatch(subagentSleep, /verbatim: sleep\s+\d/);
