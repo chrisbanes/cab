@@ -179,13 +179,15 @@ test("hold lines name each assignment's recovery page when the task has several"
   const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
   const taskUrl = `**/api/operator/tasks/${s.taskId}`;
   let served: TaskRead["data"]["assignments"] = [];
+  // One identity for every read, including a change-stream refetch.
+  const graceId = randomUUID();
   await s.page.route(taskUrl, async (route) => {
     const response = await route.fetch(),
       body = (await response.json()) as TaskRead,
       first = body.data.assignments[0]!;
     body.data.assignments.push({
       ...first,
-      assignmentId: randomUUID(),
+      assignmentId: graceId,
       name: "Grace",
     });
     taskSchema.parse(body);

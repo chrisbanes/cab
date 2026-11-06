@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { withoutChangeStream } from "../fixtures/background-refresh.js";
 import {
   chromium,
   errors,
@@ -1880,6 +1881,8 @@ test("a lead that completes after the page loaded is resumed; a held lead is a d
     consoleErrors,
     pageErrors,
   } = await startReview(j);
+  // The page keeps the task read it loaded with: it has not seen the lead complete.
+  await withoutChangeStream(page);
   await signIn(
     page,
     web.origin,
