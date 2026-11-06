@@ -516,6 +516,10 @@ nav {
   flex: none;
 }
 
+.account-menu-item .account-menu-check {
+  margin-left: auto;
+}
+
 .account-menu-item:hover,
 .account-menu-item:focus-visible,
 .account-menu-item[aria-current="page"] {
@@ -534,6 +538,12 @@ nav {
   margin-top: auto;
   padding-top: var(--space-8);
   border-top: 1px solid var(--border);
+}
+
+.account-theme {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .account-rows p {
@@ -1899,8 +1909,11 @@ textarea[data-auto-grow="true"] {
   border-color: var(--foreground);
   background:
     var(--foreground)
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230a0a0a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E")
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fafafa' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E")
     center / 12px no-repeat;
+}
+.dark .question-option input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230a0a0a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
 }
 .question-option input:focus-visible {
   outline: none;

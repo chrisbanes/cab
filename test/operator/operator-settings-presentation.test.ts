@@ -14,8 +14,8 @@ import {
   diagnosticCaptureLine,
   sourceCredentialCopy,
 } from "../../web/src/settings-view.js";
+import { themeBlocks } from "../fixtures/theme-tokens.js";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
@@ -1202,18 +1202,8 @@ test("source failure copy matches JSON and advanced HTML without provider detail
     );
 });
 
-test("the warning colours stay legible on the page and on a warning alert", () => {
-  const css = readFileSync(
-    new URL("../../../web/src/tokens.css", import.meta.url),
-    "utf8",
-  );
-  // Follows one var() alias, as the shadcn names map onto the workbench tokens.
-  const token = (name: string): RegExpExecArray | null => {
-    const alias = new RegExp(`${name}:\\s*var\\((--[\\w-]+)\\);`).exec(css);
-    return alias?.[1]
-      ? token(alias[1])
-      : new RegExp(`${name}:\\s*#([0-9a-f]{6})([0-9a-f]{2})?;`, "i").exec(css);
-  };
+test("the state colours stay legible on every ground in both themes", () => {
+  const blocks = themeBlocks();
   const rgb = (hex: string) =>
     [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
   const luminance = ([r, g, b]: number[]) => {
@@ -1227,17 +1217,37 @@ test("the warning colours stay legible on the page and on a warning alert", () =
     const [hi = 0, lo = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
     return (hi + 0.05) / (lo + 0.05);
   };
-  const fg = token("--nova-warning-fg"),
-    bg = token("--nova-warning-bg"),
-    page = token("--background"),
-    card = token("--card");
-  assert.ok(fg?.[1] && bg?.[1] && bg[2] && page?.[1] && card?.[1]);
-  const alpha = Number.parseInt(bg[2], 16) / 255;
-  const surface = rgb(card[1]).map((c, i) =>
-    Math.round(alpha * (rgb(bg[1] as string)[i] ?? 0) + (1 - alpha) * c),
-  );
-  assert.ok(contrast(rgb(fg[1]), rgb(page[1])) >= 4.5, "text on the page");
-  assert.ok(contrast(rgb(fg[1]), surface) >= 4.5, "text on a warning alert");
+  for (const [theme, tokens] of Object.entries(blocks)) {
+    const hex = (name: string) => {
+      const value = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(
+        tokens.get(name) ?? "",
+      );
+      assert.ok(value?.[1], `${theme} ${name}`);
+      return {
+        rgb: rgb(value[1]),
+        alpha: value[2] ? Number.parseInt(value[2], 16) / 255 : 1,
+      };
+    };
+    const grounds = ["--bg", "--surface", "--raised", "--overlay"];
+    for (const state of ["attn", "risk", "run", "ok", "idle"]) {
+      const text = hex(`--${state}`).rgb;
+      const soft = hex(`--${state}-soft`);
+      for (const ground of grounds) {
+        const base = hex(ground).rgb;
+        const tinted = base.map((c, i) =>
+          Math.round(soft.alpha * (soft.rgb[i] ?? 0) + (1 - soft.alpha) * c),
+        );
+        assert.ok(
+          contrast(text, base) >= 4.5,
+          `${theme} ${state} on ${ground}`,
+        );
+        assert.ok(
+          contrast(text, tinted) >= 4.5,
+          `${theme} ${state} badge on ${ground}`,
+        );
+      }
+    }
+  }
 });
 
 test("the phone summary appends stored counts and points to readiness when nothing matches", () => {

@@ -77,7 +77,7 @@ async function openInbox<T = undefined>(
   const more = (await extra?.(f)) as T;
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, colorScheme: "dark" });
   j.observe(page);
   page.setDefaultTimeout(5000);
   // Installed before the page loads, so the Inbox's 15-second poll runs on the fake clock.

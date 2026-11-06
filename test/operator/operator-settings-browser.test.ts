@@ -225,6 +225,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
     web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
+    colorScheme: "dark",
     viewport: { width: 1366, height: 820 },
   });
   journey.observe(page);
@@ -629,6 +630,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
+    colorScheme: "dark",
     viewport: { width: 1366, height: 820 },
   });
   journey.observe(page);
@@ -1471,6 +1473,7 @@ test("readiness validation focuses the exact invalid row with a real description
     web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
+    colorScheme: "dark",
     viewport: { width: 1366, height: 820 },
   });
   journey.observe(page);

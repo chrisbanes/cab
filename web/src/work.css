@@ -605,8 +605,8 @@
 
 .task-state[data-column="Not started"] {
   --state: var(--accent-text);
-  --state-soft: #e4e4e71f;
-  --state-border: #e4e4e759;
+  --state-soft: var(--accent-soft);
+  --state-border: var(--accent-soft-border);
 }
 
 .task-state[data-column="Done"] {
