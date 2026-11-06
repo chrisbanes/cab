@@ -35,7 +35,7 @@ why meant reassembling it across tabs, so the task view was hard to read.
 - Tool activity reaches the browser only through a curated projection: the tool
   kind, a one-line summary (for a command, the command and exit status) and, on
   request, its bounded, redacted output. Runs of consecutive tool calls are grouped
-  with a failure count. File changes open the Changes tab. cab's own coordination
+  with a failure count. File changes open Changes: in a side pane at 1024px and wider, otherwise the tab. cab's own coordination
   tool calls appear as the records they produce, not as tool rows. Working
   directories, absolute workspace paths, raw payloads and service or severity rows still do not
   cross the operator UI boundary. [ADR-1025](1025-conversation-activity-plans-and-change-notifications.md)

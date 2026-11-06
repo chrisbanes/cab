@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
   browserSuite,
@@ -18,19 +15,13 @@ import {
 import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import { seedChangedTask } from "../fixtures/changed-task.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 
 setFixtureGitIdentity();
 
 // The budget is the table under "Budget" in docs/user-flows/inspect-changes.md.
 const test = browserSuite("inspect-changes-budget");
-
-function git(root: string, ...args: string[]) {
-  return execFileSync("git", ["-C", root, ...args], {
-    encoding: "utf8",
-  }).trim();
-}
 
 type Viewport = { width: number; height: number };
 
@@ -71,37 +62,7 @@ async function start(
     "fixture.close",
     () => f.lifecycle.steps,
   );
-  const source = join(f.directory, "src-alpha");
-  mkdirSync(source, { recursive: true });
-  execFileSync("git", ["init", "--quiet", "--initial-branch=main", source]);
-  git(source, "config", "user.name", "Inspect Changes Test");
-  git(source, "config", "user.email", "inspect-changes@example.invalid");
-  writeFileSync(join(source, "guide.md"), "one\ntwo\nthree\n");
-  git(source, "add", "-A");
-  git(source, "commit", "--quiet", "-m", "base");
-  const task = await seedReviewTask(
-    f,
-    "Inspect project",
-    "Inspect task",
-    "Body",
-    [{ repositoryId: "repo-alpha", path: source, ref: "main" }],
-  );
-  const binding = await f.service.taskWorkspace(task.taskId);
-  const workspace = binding?.repositories[0]?.workspacePath;
-  assert.ok(workspace);
-  writeFileSync(join(workspace, "guide.md"), "one\nTWO\nthree\nfour\n");
-  writeFileSync(join(workspace, "notes.md"), "new\n");
-  git(workspace, "add", "-A");
-  git(workspace, "commit", "--quiet", "-m", "change");
-  task.result("Inspect result summary", {
-    sourceId: task.source.sourceId,
-    changes: {
-      files: ["guide.md", "notes.md"],
-      commits: [],
-      findings: [],
-      diff: "",
-    },
-  });
+  const task = await seedChangedTask(f);
   const { web, page } = await launch(journey, viewport, f, (b) => {
     browser = b;
   });
@@ -217,13 +178,21 @@ for (const [label, viewport] of [
       (await link.getAttribute("href")) ?? "",
       /\?section=changes&result=[0-9a-f-]{36}$/,
     );
+    const url = s.page.url();
     await link.click();
     interactions++;
-    await s.page.waitForURL(/section=changes&result=[0-9a-f-]{36}$/);
     const tab = s.page
       .getByRole("tablist", { name: "Task sections" })
       .getByRole("tab", { name: "Changes" });
-    assert.equal(await tab.getAttribute("aria-selected"), "true");
+    if (viewport === desktop) {
+      // Wide screens open the pane beside the conversation; the page does not move.
+      await s.page.locator("aside[aria-label='Changes']").waitFor();
+      assert.equal(s.page.url(), url);
+      assert.equal(await tab.getAttribute("aria-selected"), "false");
+    } else {
+      await s.page.waitForURL(/section=changes&result=[0-9a-f-]{36}$/);
+      assert.equal(await tab.getAttribute("aria-selected"), "true");
+    }
     const guide = entry(s.page, /guide\.md/);
     await guide.waitFor();
     await guide.click();

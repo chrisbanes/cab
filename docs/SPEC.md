@@ -1750,7 +1750,7 @@ results, delegations and curated tool activity, from one paged service timeline 
 A question or approval is answerable from the attention card or from its place in the
 conversation, with one shared request state. Tool activity shows each command's
 summary and exit status, with bounded redacted output on request; consecutive calls
-are grouped with a failure count, file changes open the Changes tab, and cab's own
+are grouped with a failure count, file changes open Changes (in a side pane at 1024px and wider, otherwise the tab), and cab's own
 coordination calls appear as the records they produce. A pending or running delegated
 assignment takes a durable message from its sub-conversation header.
 
@@ -1978,7 +1978,12 @@ release or cutover gate. The Files, Changes and Review entries under the latest
 result scroll in place and keep the entry's origin for "Back to originating view". Exact links accept `path` with optional
 `repository`, comparison `target`/`repository`/`base`, `result` with `evidence`,
 and a sent `review` operation; missing or unauthorised targets explain their
-state and never substitute other bytes.
+state and never substitute other bytes. At 1024px and wider the Overview's Changes
+actions (a conversation's "Open in Changes" and the latest result's Changes link) open
+the same Changes view in a resizable side pane beside the conversation, in place of
+the inspector, with Close and Open full width; below 1024px, and for every deep link,
+they select the Changes tab. The pane is page state only: it is not in the URL, nothing
+is stored on the server, and a reload opens the normal layout.
 
 - Give reviewing code changes and inspecting generated outputs equal weight,
   including repository-free task outputs.

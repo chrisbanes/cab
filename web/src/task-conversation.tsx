@@ -279,7 +279,7 @@ export function TaskConversation({
   requests: RequestPlaces;
   /** True while the page is at the bottom, so the log announces what arrives. */
   following: boolean;
-  openChanges: () => void;
+  openChanges: (opener: HTMLElement) => void;
   /** The form that sends a message to a pending or running delegated assignment. */
   messageAssignment: (assignment: Assignment) => ReactNode;
 }) {
@@ -399,7 +399,7 @@ interface Context {
   expanded: (key: string) => boolean;
   toggle: (key: string) => void;
   requests: RequestPlaces;
-  openChanges: () => void;
+  openChanges: (opener: HTMLElement) => void;
   messageAssignment: (assignment: Assignment) => ReactNode;
   /** Older pages exist, so an assignment with nothing loaded may still have entries there. */
   earlier: boolean;
@@ -423,7 +423,10 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
       return (
         <div className="conv-tools" data-record-id={`c:${item.id}`}>
           <span>{changesLabel(item.entries.length)}</span>
-          <Button variant="secondary" onClick={ctx.openChanges}>
+          <Button
+            variant="secondary"
+            onClick={(event) => ctx.openChanges(event.currentTarget)}
+          >
             Open in Changes
           </Button>
         </div>

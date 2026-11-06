@@ -421,13 +421,38 @@ for (const [label, viewport] of [
     assert.equal(await group.getAttribute("aria-expanded"), "false");
     await group.click();
     assert.equal(await group.getAttribute("aria-expanded"), "true");
-    await log.getByRole("button", { name: "Open in Changes" }).click();
-    assert.equal(
-      await page
-        .getByRole("tab", { name: "Changes", exact: true })
-        .getAttribute("aria-selected"),
-      "true",
-    );
+    const opener = log.getByRole("button", { name: "Open in Changes" });
+    const changesTab = page.getByRole("tab", { name: "Changes", exact: true });
+    const pane = page.locator("aside[aria-label='Changes']");
+    const url = page.url();
+    await opener.click();
+    if (viewport === desktop) {
+      // Wide screens open the pane beside the conversation, with focus inside it.
+      await pane.waitFor();
+      assert.equal(page.url(), url);
+      assert.equal(await changesTab.getAttribute("aria-selected"), "false");
+      assert.equal(
+        await pane.evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await pane.getByRole("button", { name: "Close", exact: true }).click();
+      await pane.waitFor({ state: "detached" });
+      await opener.waitFor();
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.textContent === "Open in Changes" &&
+          document.activeElement.closest("[data-record-id]") !== null,
+      );
+      await opener.click();
+      await pane
+        .getByRole("button", { name: "Open full width", exact: true })
+        .click();
+      await pane.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        () => document.activeElement?.id === "task-tab-changes",
+      );
+    }
+    assert.equal(await changesTab.getAttribute("aria-selected"), "true");
     await openTaskTab(page, "Overview");
     const gap = log.locator(".conv-gap", { hasText: "Older items" });
     await gap.getByRole("button", { name: "Details" }).click();

@@ -1,0 +1,65 @@
+/* The Overview's Changes side pane: the conversation and the pane share the row, split by a
+   resizable handle. The pane stays under the page top while the conversation scrolls. */
+.task-workspace:has(.changes-split) {
+  max-width: none;
+}
+
+.changes-split {
+  align-items: stretch;
+  gap: 0;
+}
+
+.changes-pane {
+  position: sticky;
+  top: 0;
+  max-height: 100dvh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+  padding: var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.changes-pane:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.changes-pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
+/* A 1px hairline with a wider hit target; the focus ring is the visible keyboard cue. */
+.changes-split-handle {
+  position: relative;
+  flex: 0 0 var(--space-16);
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+}
+
+.changes-split-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line);
+}
+
+.changes-split-handle:hover::after,
+.changes-split-handle[data-separator="active"]::after {
+  background: var(--line-strong);
+}
+
+.changes-split-handle:focus-visible::after {
+  width: 2px;
+  background: var(--focus);
+}
