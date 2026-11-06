@@ -3393,6 +3393,15 @@ test("a turn sends network access only when its admission policy enables it", as
       }),
       3000,
     );
+    // Codex has no loopback-only control: local listening never changes its policy.
+    for (const networkAccess of [false, true])
+      await bounded(
+        runtime.startTurn("thread-1", root, "listening", undefined, {
+          networkAccess,
+          localListening: true,
+        }),
+        3000,
+      );
     const turns = requests("turn/start") as {
       sandboxPolicy: unknown;
       input: unknown;
@@ -3404,6 +3413,8 @@ test("a turn sends network access only when its admission policy enables it", as
     });
     assert.deepEqual(turns[2]?.sandboxPolicy, executionPolicy(root));
     assert.equal(executionPolicy(root).networkAccess, false);
+    assert.deepEqual(turns[3]?.sandboxPolicy, executionPolicy(root));
+    assert.deepEqual(turns[4]?.sandboxPolicy, executionPolicy(root, true));
   } finally {
     await cleanup();
   }

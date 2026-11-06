@@ -137,3 +137,100 @@ test("command network access is operator-only through the API and the CLI", asyn
 test("no coordination tool can read or change a project's command network setting", () => {
   assert.doesNotMatch(JSON.stringify(coordinationTools), /network/i);
 });
+
+test("local listening is operator-only through the API and the CLI", async (t) => {
+  const s = await startCliService(t);
+  const d = s.f.service.domain();
+  const configure = (enabled: boolean) => ({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId: s.projectId,
+    expectedVersion: Number(d.project(s.projectId).version),
+    localListening: enabled,
+  });
+  const config = async (token: string) => {
+    const r = await s.bearer(
+      token,
+      `/api/operator/projects/${s.projectId}/configuration`,
+    );
+    assert.equal(r.status, 200);
+    return ((await r.json()) as { data: { localListening?: boolean } }).data;
+  };
+  const read = await s.issue("read", "listen-ro");
+  const write = await s.issue("read-write", "listen-rw");
+  assert.equal((await config(read.token)).localListening, false);
+
+  const denied = await s.bearer(read.token, "/api/operator/commands", {
+    method: "POST",
+    body: configure(true),
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(d.localListening(s.projectId), false);
+  const set = await s.bearer(write.token, "/api/operator/commands", {
+    method: "POST",
+    body: configure(true),
+  });
+  assert.equal(set.status, 200);
+  assert.equal((await config(read.token)).localListening, true);
+  // The two settings are independent.
+  assert.equal(d.commandNetworkAccess(s.projectId), false);
+
+  const h = harness(t);
+  for (const [name, token] of [
+    ["ro", read.token],
+    ["rw", write.token],
+  ] as const) {
+    const login = await h.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(token),
+    ]);
+    assert.equal(login.code, 0, login.err);
+  }
+  const cli = (connection: "ro" | "rw", args: string[]) =>
+    h.run([...args, "--connection", connection, "--output", "json"]);
+  const human = await h.run([
+    "project",
+    "get",
+    s.projectId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /Local listening:\s+enabled/);
+
+  const out = join(h.dir, `${randomUUID()}.json`);
+  let r = await cli("ro", [
+    "project",
+    "prepare",
+    s.projectId,
+    "--local-listening",
+    "false",
+    "--out",
+    out,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const doc = JSON.parse(readFileSync(out, "utf8")) as Json;
+  assert.deepEqual(doc.preview.changes, [
+    { field: "localListening", from: "true", to: "false" },
+  ]);
+  assert.match(
+    JSON.stringify(doc.preview.notes),
+    /Claude Code task turns admitted after the change/,
+  );
+  assert.match(JSON.stringify(doc.preview.notes), /connect to a listening/);
+  r = await cli("rw", ["project", "apply", "--file", out]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.localListening(s.projectId), false);
+});
+
+test("no coordination tool can read or change a project's local listening setting", () => {
+  assert.doesNotMatch(
+    JSON.stringify(coordinationTools),
+    /listen|localBinding/i,
+  );
+});

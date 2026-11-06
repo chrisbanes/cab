@@ -2119,6 +2119,47 @@ test("command network access is a switch with its disclosure that saves as a ver
   assert.equal(d.commandNetworkAccess(ids.atlas), false);
 });
 
+test("local listening is a switch with its disclosure that saves as a versioned change", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const listening = page.getByRole("switch", { name: "Local listening" });
+  await listening.waitFor();
+  assert.equal(await listening.isChecked(), false);
+  await page
+    .getByText("Local listening is disabled for this project.")
+    .waitFor();
+  await page
+    .getByText(/Other processes on the host can connect to a listening port/)
+    .waitFor();
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+
+  await listening.click();
+  await changes(page).getByText("Local listening enabled").waitFor();
+  const sent = commandBody(page);
+  await save.click();
+  const body = await sent;
+  assert.equal(body.type, "project.configure");
+  assert.equal(body.localListening, true);
+  assert.equal("commandNetworkAccess" in body, false);
+  await savedOutcome(page);
+  assert.equal(d.localListening(ids.atlas), true);
+  await page
+    .getByText(
+      "Local listening is enabled for this project's Claude Code task turns; Codex turns can listen only with command network access.",
+    )
+    .waitFor();
+
+  await listening.click();
+  const back = commandBody(page);
+  await save.click();
+  assert.equal((await back).localListening, false);
+  await savedOutcome(page);
+  assert.equal(d.localListening(ids.atlas), false);
+});
+
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

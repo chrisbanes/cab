@@ -221,7 +221,7 @@ for (const [name, viewport] of [
     await captureBrowserEvidence(page, `${name}-recovery-harness`);
   });
 
-test("Codex assignment facts state the command network access each turn was admitted with", async (_t, journey) => {
+test("assignment facts state the command network access or local listening each turn was admitted with", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
   );
@@ -261,7 +261,7 @@ test("Codex assignment facts state the command network access each turn was admi
   // A turn recorded as admitted with network access reads as enabled.
   f.seedPersistedState((db) =>
     db.exec(
-      "INSERT OR REPLACE INTO execution_intent_network_access (intentId, enabled) SELECT id, 1 FROM execution_intents",
+      "INSERT OR REPLACE INTO execution_intent_network_access (intentId, enabled) SELECT id, 1 FROM execution_intents; INSERT OR REPLACE INTO execution_intent_local_listening (intentId, enabled) SELECT id, 1 FROM execution_intents",
     ),
   );
   await page.reload();
@@ -275,5 +275,16 @@ test("Codex assignment facts state the command network access each turn was admi
   assert.equal(
     await claude.getByText(/Admitted with command network access/).count(),
     0,
+  );
+  // Local listening is the Claude turn's line; Codex turns never show it.
+  await claude
+    .getByText("Admitted with local listening enabled.", { exact: true })
+    .waitFor(attached);
+  assert.equal(
+    await page
+      .locator("#assignments")
+      .getByText(/Admitted with local listening/)
+      .count(),
+    1,
   );
 });

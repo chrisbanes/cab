@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Runtime, RuntimeTurnPolicy } from "../../src/standalone/codex.js";
+import { SchedulerStore } from "../../src/standalone/scheduler.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { ExecutionState } from "../../src/standalone/state.js";
 import { coordinationFixture } from "../fixtures/coordination.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -30,6 +32,16 @@ function admissionFixture() {
       projectId,
       expectedVersion: Number(f.domain.project(projectId).version),
       commandNetworkAccess: enabled,
+    });
+  };
+  const setListening = (enabled: boolean) => {
+    f.domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: crypto.randomUUID(),
+      projectId,
+      expectedVersion: Number(f.domain.project(projectId).version),
+      localListening: enabled,
     });
   };
   let sequence = 0;
@@ -67,7 +79,7 @@ function admissionFixture() {
   };
   const admit = (intent: { id: string }) =>
     f.state.begin(intent.id, { projectId });
-  return { f, setNetwork, ready, admit };
+  return { f, setNetwork, setListening, ready, admit };
 }
 
 test("a turn records the project's command network setting at its own admission", () => {
@@ -131,6 +143,82 @@ test("only Codex task turns can be admitted with command network access", () => 
   }
 });
 
+test("a Claude task turn records the project's local listening setting at its own admission", () => {
+  const { f, setListening, ready, admit } = admissionFixture();
+  try {
+    const before = ready(taskA, "claude");
+    const earlier = ready(taskB, "claude");
+    assert.equal(f.state.localListening(before.id), null);
+
+    // Enabled after `before` was created but before it is admitted: the
+    // setting at admission wins, and an already admitted turn keeps its value.
+    assert.equal(admit(earlier), true);
+    setListening(true);
+    assert.equal(admit(before), true);
+    assert.equal(f.state.localListening(earlier.id), false);
+    assert.equal(f.state.localListening(before.id), true);
+    assert.equal(f.state.commandNetworkAccess(before.id), false);
+
+    // Disabling leaves the admitted turn on and the next one off.
+    setListening(false);
+    const after = ready(taskA, "claude");
+    assert.equal(admit(after), true);
+    assert.equal(f.state.localListening(after.id), false);
+    assert.equal(f.state.localListening(before.id), true);
+  } finally {
+    f.close();
+  }
+});
+
+test("only Claude task turns can be admitted with local listening", () => {
+  const { f, setNetwork, setListening, ready, admit } = admissionFixture();
+  try {
+    setNetwork(true);
+    setListening(true);
+    const codex = ready(taskA);
+    assert.equal(admit(codex), true);
+    assert.equal(f.state.localListening(codex.id), false);
+    assert.equal(f.state.commandNetworkAccess(codex.id), true);
+
+    // A request without a task binding, such as a drafting run, stays off.
+    const drafting = f.state.create(
+      "drafting:run-1",
+      "draft",
+      "/tmp/net-draft",
+    );
+    assert.equal(f.state.begin(drafting.id, { projectId }), true);
+    assert.equal(f.state.localListening(drafting.id), false);
+
+    // No admission, no record.
+    const waiting = ready(taskB, "claude");
+    assert.equal(f.state.localListening(waiting.id), null);
+    const heldEarly = ready(taskB, "claude");
+    assert.equal(
+      f.state.hold(heldEarly.id, "Storage failure before submission"),
+      true,
+    );
+    assert.equal(f.state.localListening(heldEarly.id), null);
+    const running = f.state.byWorkId("work-child-a");
+    assert.equal(running?.state, "running");
+    assert.equal(f.state.localListening(String(running?.id)), null);
+
+    // A draft turn never gets local listening, even on a Claude task binding.
+    new SchedulerStore(f.db);
+    const state = new ExecutionState(f.db);
+    const draft = ready(taskB, "claude");
+    f.db
+      .prepare(
+        "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
+      )
+      .run(randomUUID(), draft.workId);
+    assert.equal(state.begin(draft.id, { projectId }), true);
+    assert.equal(state.localListening(draft.id), false);
+    assert.equal(state.commandNetworkAccess(draft.id), false);
+  } finally {
+    f.close();
+  }
+});
+
 test("the live network run refuses to start without --live --one-attempt", () => {
   const run = spawnSync(
     process.execPath,
@@ -175,14 +263,19 @@ class RecordingRuntime implements Runtime {
   onUnexpectedRequest() {}
 }
 
-test("a turn admitted after enabling runs with network access and one admitted before keeps it off", async (t) => {
+/** A service on a `RecordingRuntime` for both harnesses, with helpers to run one task turn. */
+async function recordingService(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "cab-network-admission-"));
   const runtime = new RecordingRuntime();
   const service = new StandaloneService(
     join(root, "data"),
     () => runtime,
     undefined,
-    { power: { enabled: false }, routingClient: null },
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      power: { enabled: false },
+      routingClient: null,
+    },
   );
   t.after(async () => {
     await service.stop().catch(() => {});
@@ -192,36 +285,43 @@ test("a turn admitted after enabling runs with network access and one admitted b
   const d = service.domain();
   const exec = (body: Record<string, unknown>) =>
     d.execute({ key: randomUUID(), actor: "operator", ...body } as never);
-  const profileId = randomUUID();
-  const projectId = randomUUID();
-  exec({
-    type: "profile.create",
-    profileId,
-    name: "Lead",
-    instructions: "Lead the work.",
-    capabilities: "shell",
-  });
-  exec({
-    type: "project.create",
-    projectId,
-    name: "Network admission",
-    leadProfileId: profileId,
-  });
-  exec({
-    type: "project.configure",
-    projectId,
-    expectedVersion: 1,
-    paused: false,
-  });
-  const setNetwork = (enabled: boolean) =>
+  /** An unpaused project whose lead runs on `harness`. */
+  const project = (harness: ExecutionHarness = "codex") => {
+    const profileId = randomUUID();
+    const projectId = randomUUID();
+    exec({
+      type: "profile.create",
+      profileId,
+      name: "Lead",
+      instructions: "Lead the work.",
+      capabilities: "shell",
+      ...(harness === "claude"
+        ? { runtime: { harness, model: "opus", reasoningEffort: "high" } }
+        : {}),
+    });
+    exec({
+      type: "project.create",
+      projectId,
+      name: `Network admission ${harness}`,
+      leadProfileId: profileId,
+    });
+    exec({
+      type: "project.configure",
+      projectId,
+      expectedVersion: 1,
+      paused: false,
+    });
+    return projectId;
+  };
+  const configure = (projectId: string, settings: Record<string, boolean>) =>
     exec({
       type: "project.configure",
       projectId,
       expectedVersion: Number(d.project(projectId).version),
-      commandNetworkAccess: enabled,
+      ...settings,
     });
   const seen = new Set<string>();
-  const start = async (title: string) => {
+  const start = async (projectId: string, title: string) => {
     const taskId = randomUUID();
     exec({
       type: "task.create",
@@ -259,9 +359,18 @@ test("a turn admitted after enabling runs with network access and one admitted b
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   };
+  return { service, runtime, project, configure, start, turnOf, finished };
+}
+
+test("a turn admitted after enabling runs with network access and one admitted before keeps it off", async (t) => {
+  const { service, runtime, project, configure, start, turnOf, finished } =
+    await recordingService(t);
+  const projectId = project();
+  const setNetwork = (enabled: boolean) =>
+    configure(projectId, { commandNetworkAccess: enabled });
 
   // (a) Default: today's three-argument call and a recorded off.
-  await start("default");
+  await start(projectId, "default");
   const first = await finished();
   assert.deepEqual(turnOf(first), { arity: 3, policy: undefined });
   assert.equal(service.commandNetworkAccessFor(first.workId), false);
@@ -274,7 +383,7 @@ test("a turn admitted after enabling runs with network access and one admitted b
   const entered = new Promise<void>((resolve) => {
     runtime.entered = resolve;
   });
-  await start("before");
+  await start(projectId, "before");
   await entered;
   runtime.gate = undefined;
   setNetwork(true);
@@ -284,7 +393,7 @@ test("a turn admitted after enabling runs with network access and one admitted b
   assert.equal(service.commandNetworkAccessFor(before.workId), false);
 
   // (b) A turn admitted after enabling carries the policy as the fifth argument.
-  await start("after");
+  await start(projectId, "after");
   const after = await finished();
   assert.deepEqual(turnOf(after), {
     arity: 5,
@@ -294,10 +403,44 @@ test("a turn admitted after enabling runs with network access and one admitted b
 
   // (d) Disabling again affects only later admissions.
   setNetwork(false);
-  await start("disabled");
+  await start(projectId, "disabled");
   const disabled = await finished();
   assert.deepEqual(turnOf(disabled), { arity: 3, policy: undefined });
   assert.equal(service.commandNetworkAccessFor(disabled.workId), false);
   assert.equal(service.commandNetworkAccessFor(after.workId), true);
   assert.equal(service.commandNetworkAccessFor("unknown-work"), null);
+});
+
+test("each harness receives the expected sandbox policy for every combination of local listening and command network access", async (t) => {
+  const { service, project, configure, start, turnOf, finished } =
+    await recordingService(t);
+  for (const harness of ["codex", "claude"] as const) {
+    const projectId = project(harness);
+    for (const network of [false, true])
+      for (const listening of [false, true]) {
+        configure(projectId, {
+          commandNetworkAccess: network,
+          localListening: listening,
+        });
+        await start(projectId, `${harness} ${network} ${listening}`);
+        const intent = await finished();
+        const expected =
+          harness === "codex"
+            ? network
+              ? { networkAccess: true }
+              : undefined
+            : listening
+              ? { networkAccess: false, localListening: true }
+              : undefined;
+        assert.deepEqual(
+          turnOf(intent)?.policy,
+          expected,
+          `${harness} network=${network} listening=${listening}`,
+        );
+        assert.equal(
+          service.localListeningFor(intent.workId),
+          harness === "claude" && listening,
+        );
+      }
+  }
 });

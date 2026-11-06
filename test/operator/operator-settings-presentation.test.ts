@@ -10,6 +10,11 @@ import {
   projectCommandNetworkLine,
 } from "../../src/operator/command-network-copy.js";
 import {
+  localListeningAppliesNote,
+  projectLocalListeningLine,
+  turnLocalListeningLine,
+} from "../../src/operator/local-listening-copy.js";
+import {
   diagnosticCaptureAppliesNote,
   diagnosticCaptureLine,
   sourceCredentialCopy,
@@ -172,6 +177,15 @@ test("project and profile change lists name each change without private values",
   assert.deepEqual(network(false, true), ["Command network access enabled"]);
   assert.deepEqual(network(true, false), ["Command network access disabled"]);
   assert.deepEqual(network(true, true), []);
+  const listening = (saved: boolean | undefined, next: boolean) =>
+    projectChanges(
+      { ...c, ...(saved === undefined ? {} : { localListening: saved }) },
+      { name: "Atlas", leadProfileId: mira, localListening: next },
+    );
+  assert.deepEqual(listening(false, true), ["Local listening enabled"]);
+  assert.deepEqual(listening(true, false), ["Local listening disabled"]);
+  assert.deepEqual(listening(true, true), []);
+  assert.deepEqual(listening(undefined, true), []);
   // Diagnostic capture lists the change in both directions, and nothing for a mode the service did not report.
   const capture = (saved: "enhanced" | "baseline" | undefined, next: string) =>
     projectChanges(
@@ -1535,6 +1549,33 @@ test("command network access reads the saved setting, what applies and what it e
   assert.equal(
     commandNetworkDisclosure,
     "Network-enabled commands can reach whatever credentials and logins the host exposes.",
+  );
+});
+
+test("local listening reads the saved setting, what applies and each turn's admission", () => {
+  assert.equal(
+    projectLocalListeningLine(false),
+    "Local listening is disabled for this project.",
+  );
+  assert.equal(
+    projectLocalListeningLine(true),
+    "Local listening is enabled for this project's Claude Code task turns; Codex turns can listen only with command network access.",
+  );
+  assert.equal(
+    localListeningAppliesNote,
+    "Applies to Claude Code task turns admitted after the change; running turns keep their policy.",
+  );
+  assert.equal(
+    turnLocalListeningLine(true),
+    "Admitted with local listening enabled.",
+  );
+  assert.equal(
+    turnLocalListeningLine(false),
+    "Admitted with local listening disabled.",
+  );
+  assert.equal(
+    turnLocalListeningLine(null),
+    "No local listening admission recorded; the project's setting at admission applies.",
   );
 });
 

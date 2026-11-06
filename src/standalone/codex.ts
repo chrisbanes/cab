@@ -633,6 +633,11 @@ export interface RuntimeTurnPolicy {
   access?: "read-only";
   /** A task turn's writable Git roots (`taskGitWritableRoots`); a read-only turn ignores them. */
   gitWritableRoots?: readonly string[];
+  /**
+   * Local listening captured at admission; recorded only on Claude task turns. Codex has no
+   * loopback-only control, so `CodexRuntime` ignores it; a read-only turn ignores it too.
+   */
+  localListening?: boolean;
 }
 
 /** Per-turn read-only policy of a draft turn; proven on a workspace-write thread. */

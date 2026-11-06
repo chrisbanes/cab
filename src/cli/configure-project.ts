@@ -8,6 +8,10 @@ import {
   commandNetworkDisclosure,
 } from "../operator/command-network-copy.js";
 import {
+  localListeningAppliesNote,
+  localListeningLimit,
+} from "../operator/local-listening-copy.js";
+import {
   stackingAppliesNote,
   stackingDisclosure,
 } from "../operator/stacking-copy.js";
@@ -52,7 +56,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--local-listening true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
@@ -64,6 +68,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "lead-profile",
         "diagnostic-capture",
         "command-network-access",
+        "local-listening",
         "stacking",
         "instructions",
         "instructions-file",
@@ -91,6 +96,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         const network = boolFlag(
           ctx.values["command-network-access"],
           "command-network-access",
+        );
+        const listening = boolFlag(
+          ctx.values["local-listening"],
+          "local-listening",
         );
         const stacking = boolFlag(ctx.values.stacking, "stacking");
         // Read once before connecting: standard input cannot be read again on a retried read.
@@ -180,6 +189,18 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             to: String(network),
           });
           notes.push(commandNetworkAppliesNote, commandNetworkDisclosure);
+        }
+        const currentListening = config.data.localListening;
+        if (listening !== undefined && listening !== currentListening) {
+          if (currentListening === undefined) gaps.push("content-unavailable");
+          command.localListening = listening;
+          changes.push({
+            field: "localListening",
+            from:
+              currentListening === undefined ? null : String(currentListening),
+            to: String(listening),
+          });
+          notes.push(localListeningAppliesNote, localListeningLimit);
         }
         const currentStacking = config.data.stacking;
         if (stacking !== undefined && stacking !== currentStacking) {

@@ -218,6 +218,14 @@ const projectGet: BrowseCommand = {
                 : "disabled",
           ],
           [
+            "Local listening",
+            d.localListening === undefined
+              ? "not reported"
+              : d.localListening
+                ? "enabled"
+                : "disabled",
+          ],
+          [
             "Stacking",
             d.stacking === undefined
               ? "not reported"

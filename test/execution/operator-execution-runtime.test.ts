@@ -8,6 +8,13 @@ import {
   claudePolicyDisclosure,
   codexPolicyDisclosure,
 } from "../../src/standalone/execution-policy.js";
+import { claudePolicyLimits } from "../../src/standalone/claude.js";
+import { policyDisclosureSchema } from "../../src/operator/contracts.js";
+import {
+  claudeLocalListeningLine,
+  codexLocalListeningLine,
+  localListeningLimit,
+} from "../../src/operator/local-listening-copy.js";
 import {
   executionSummary,
   failureNotice,
@@ -391,6 +398,29 @@ test("both harnesses' disclosures name the writable Git paths and their limits",
       ),
     );
   }
+});
+
+test("both harnesses' disclosures state local listening within the disclosure caps", () => {
+  const claude = claudePolicyDisclosure(
+    {
+      writableRoots: ["/w", "/tmp/ens-0123"],
+      sharedWriteRoots: ["/tmp/shared"],
+      network: "denied",
+      fileToolConfinement: "hook",
+      limits: [...claudePolicyLimits],
+    },
+    "/w",
+  );
+  const codex = codexPolicyDisclosure();
+  assert.ok(claude.lines.includes(claudeLocalListeningLine));
+  assert.ok(claude.lines.includes(localListeningLimit));
+  assert.ok(codex.lines.includes(codexLocalListeningLine));
+  // Codex enforces no loopback-only listening; its line says the setting does not apply.
+  assert.match(codexLocalListeningLine, /does not change Codex turns/);
+  // The new text is in lines: Claude's limits are exactly its own and the Git limits.
+  assert.equal(claude.limits.length, claudePolicyLimits.length + 3);
+  for (const disclosure of [claude, codex])
+    assert.deepEqual(policyDisclosureSchema.parse(disclosure), disclosure);
 });
 
 test("supported settings narrow runtime errors to listed values", () => {

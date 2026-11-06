@@ -5,6 +5,7 @@ import {
   type Workspace,
 } from "../../src/operator/contracts.js";
 import { turnCommandNetworkLine } from "../../src/operator/command-network-copy.js";
+import { turnLocalListeningLine } from "../../src/operator/local-listening-copy.js";
 import { ActionLink } from "./components.js";
 import { failureNotice, waitRoute } from "./execution-runtime.js";
 
@@ -40,6 +41,19 @@ export function CommandNetworkLine({
   return (
     <p className="body">
       {turnCommandNetworkLine(generation?.commandNetworkAccess ?? null)}
+    </p>
+  );
+}
+
+/** What local listening this assignment's latest Claude Code turn was admitted with. */
+export function LocalListeningLine({
+  generation,
+}: {
+  generation?: { localListening?: boolean | null | undefined } | null;
+}) {
+  return (
+    <p className="body">
+      {turnLocalListeningLine(generation?.localListening ?? null)}
     </p>
   );
 }

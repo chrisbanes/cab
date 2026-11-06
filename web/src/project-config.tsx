@@ -17,6 +17,11 @@ import {
   commandNetworkDisclosure,
   projectCommandNetworkLine,
 } from "../../src/operator/command-network-copy.js";
+import {
+  localListeningAppliesNote,
+  localListeningLimit,
+  projectLocalListeningLine,
+} from "../../src/operator/local-listening-copy.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
@@ -371,6 +376,9 @@ function GeneralTab(p: TabProps) {
     ...(data.commandNetworkAccess === undefined
       ? {}
       : { commandNetworkAccess: data.commandNetworkAccess }),
+    ...(data.localListening === undefined
+      ? {}
+      : { localListening: data.localListening }),
     ...(data.diagnosticCapture === undefined
       ? {}
       : { diagnosticCapture: data.diagnosticCapture }),
@@ -417,6 +425,10 @@ function GeneralTab(p: TabProps) {
     ...(data.commandNetworkAccess !== undefined &&
     Boolean(v.commandNetworkAccess) !== data.commandNetworkAccess
       ? { commandNetworkAccess: Boolean(v.commandNetworkAccess) }
+      : {}),
+    ...(data.localListening !== undefined &&
+    Boolean(v.localListening) !== data.localListening
+      ? { localListening: Boolean(v.localListening) }
       : {}),
     ...(data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== data.diagnosticCapture
@@ -475,6 +487,20 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectCommandNetworkLine(data.commandNetworkAccess)}{" "}
                   {commandNetworkAppliesNote} {commandNetworkDisclosure}
+                </p>
+              </>
+            )}
+            {data.localListening !== undefined && (
+              <>
+                <DraftCheck
+                  draft={d}
+                  field="localListening"
+                  label="Local listening"
+                  toggle
+                />
+                <p className="metadata muted">
+                  {projectLocalListeningLine(data.localListening)}{" "}
+                  {localListeningAppliesNote} {localListeningLimit}
                 </p>
               </>
             )}

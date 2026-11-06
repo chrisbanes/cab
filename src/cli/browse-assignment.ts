@@ -3,6 +3,10 @@ import {
   turnCommandNetworkLine,
 } from "../operator/command-network-copy.js";
 import {
+  localListeningLimit,
+  turnLocalListeningLine,
+} from "../operator/local-listening-copy.js";
+import {
   assignmentDetailSchema,
   assignmentHistorySchema,
   assignmentInstructionsSchema,
@@ -170,6 +174,13 @@ const assignmentGet: BrowseCommand = {
           ? [
               turnCommandNetworkLine(g?.commandNetworkAccess ?? null),
               commandNetworkDisclosure,
+            ]
+          : []),
+        ...((g?.harness ?? a.runtime.harness) === "claude" &&
+        (!g || g.localListening !== undefined)
+          ? [
+              turnLocalListeningLine(g?.localListening ?? null),
+              localListeningLimit,
             ]
           : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),

@@ -31,6 +31,10 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
       '? "Command network access is enabled for this project\'s Codex turns; Claude Code turns keep it denied."',
     ],
   },
+  [join("src", "operator", "local-listening-copy.ts")]: {
+    reason:
+      "the setting applies only to Claude Code turns because Codex has no loopback-only control",
+  },
   [join("src", "core", "execution-runtime.ts")]: {
     reason: "the shared harness label map",
     lines: ['codex: "Codex",'],
