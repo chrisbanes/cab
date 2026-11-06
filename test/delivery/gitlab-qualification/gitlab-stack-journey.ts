@@ -361,9 +361,14 @@ export async function runGitLabStackQualification(
       iid: number,
       removeSourceBranch: boolean,
     ) => {
+      // A timeout names what still held the merge, so a failed attempt says why.
       await pollUntil(`merge request !${iid} mergeable`, async () => {
         await refresh(task);
         return bound(task)?.observation.mergeBlockers.length === 0;
+      }).catch((error) => {
+        throw new Error(
+          `${error instanceof Error ? error.message : error} (blockers: ${bound(task)?.observation.mergeBlockers.join(",")})`,
+        );
       });
       guard.allowMerge(iid, removeSourceBranch);
       // A wake that arrives before the merge holds it unsent; take it and ask again.

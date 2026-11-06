@@ -1112,7 +1112,19 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       number: identity.prNumber,
     });
     if (!mr.diff_refs?.base_sha) throw new Error("provider-pr-unreadable");
-    const pipeline = mr.head_pipeline?.sha === mr.sha ? mr.head_pipeline : null;
+    // GitLab clears `head_pipeline` when it retargets a merge request whose target branch was removed,
+    // so the merge request's newest pipeline at its head stands in for it.
+    const pipeline = mr.head_pipeline
+      ? mr.head_pipeline.sha === mr.sha
+        ? {
+            ...mr.head_pipeline,
+            updatedAt:
+              mr.head_pipeline.finished_at ??
+              mr.head_pipeline.started_at ??
+              "unproved",
+          }
+        : null
+      : await this.headPipeline(id, mr);
     const feedback: NonNullable<PrDeliveryObservation["feedback"]> = [];
     const reviewThreads: NonNullable<PrDeliveryObservation["reviewThreads"]> =
       [];
@@ -1149,8 +1161,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
             sha: pipeline.sha,
             status: pipelineStatus(pipeline.status),
             nodeId: String(pipeline.id),
-            updatedAt:
-              pipeline.finished_at ?? pipeline.started_at ?? "unproved",
+            updatedAt: pipeline.updatedAt,
           },
         ]
       : [];
@@ -1220,6 +1231,29 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       allowedMethods,
       ...(retarget ? { retarget } : {}),
     });
+  }
+  /** The merge request's newest pipeline at its head; null when there is none or it cannot be read. */
+  private async headPipeline(id: string, mr: MergeRequest) {
+    try {
+      const latest = z
+        .array(
+          z.object({
+            id: z.number().int(),
+            sha: z.string(),
+            status: z.string(),
+            updated_at: z.string().nullish(),
+          }),
+        )
+        .parse(
+          await this.get(`/projects/${id}/merge_requests/${mr.iid}/pipelines`),
+        )
+        .find((p) => p.sha === mr.sha);
+      return latest
+        ? { ...latest, updatedAt: latest.updated_at ?? "unproved" }
+        : null;
+    } catch {
+      return null;
+    }
   }
   /**
    * Whether the merge request that was the base (those from source branch `ref` within this project)

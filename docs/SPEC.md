@@ -2752,7 +2752,9 @@ requests, discussions, branches and pipelines are always read fresh, so no decis
 A GitLab merge is gated on GitLab's own verdict. The merge request reports no merge blocker only when it
 is open, not a draft, its `detailed_merge_status` is exactly `mergeable`, the repository's configured merge
 method is allowed, some check is required, and every required check, the code host's and cab's, passed on
-the head commit (the head pipeline, named `pipeline`).
+the head commit (the head pipeline, named `pipeline`). GitLab clears a merge request's head pipeline
+when it retargets it after its target branch is removed, so a merge request with none reads its newest
+pipeline at the head from its pipeline list instead.
 Otherwise the observation lists `pr-not-open`, `pr-draft`, `no-required-checks`,
 `merge-method-not-configured`, `check-<name>-unproved` or
 `merge-status-<status>` (`merge-status-unproved` when GitLab reports none), so GitLab's approval,
