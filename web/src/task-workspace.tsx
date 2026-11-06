@@ -66,6 +66,7 @@ import {
   isPlainClick,
 } from "./components.js";
 import { useOperatorResource } from "./resource.js";
+import { useTaskChangeStream } from "./task-change-stream.js";
 import type {
   OverviewCard,
   ReplyOutcome,
@@ -254,8 +255,7 @@ function ChecklistCoverage({
   source,
 }: {
   source:
-    | NonNullable<TaskRead["data"]["review"]>["sources"][number]
-    | undefined;
+    NonNullable<TaskRead["data"]["review"]>["sources"][number] | undefined;
 }) {
   if (!source || source.body === null) return <p>{sourceGap}</p>;
   if (source.criteriaOmittedCount === null)
@@ -900,10 +900,11 @@ export function TaskWorkspace({
     const target = document.getElementById(id);
     if (target) showSection(target);
   };
-  // The timer read: nothing blanks or announces progress unless it fails.
-  const poll = () => {
+  // The timer and change-notice read: nothing blanks or announces progress unless it fails.
+  // A notice supersedes an in-flight read, which may predate the change.
+  const poll = (supersede = false) => {
     capture();
-    resource.poll();
+    resource.poll({ supersede });
   };
   // Manual re-reads also refresh the shell's workspace and Inbox count; the poll below does not.
   const refreshAll = () => {
@@ -925,6 +926,21 @@ export function TaskWorkspace({
   }, []);
   const pollRef = useRef(poll);
   pollRef.current = poll;
+  const [changeTick, setChangeTick] = useState(0);
+  const { healthy: streaming } = useTaskChangeStream({
+    taskId,
+    // After the first task read, so the connect refetch never aborts it.
+    enabled:
+      resource.state.status !== "empty" && resource.state.status !== "loading",
+    onRead: () => pollRef.current(true),
+    onTimeline: () => setChangeTick((tick) => tick + 1),
+  });
+  // The 15-second poll is the fallback while the change stream is not healthy.
+  useEffect(() => {
+    if (streaming) return;
+    const timer = setInterval(() => pollRef.current(), 15000);
+    return () => clearInterval(timer);
+  }, [streaming]);
   const captureRef = useRef(capture);
   captureRef.current = capture;
   useEffect(() => {
@@ -958,7 +974,6 @@ export function TaskWorkspace({
     document.addEventListener("click", leave, true);
     document.addEventListener("submit", leave, true);
     document.addEventListener("focusin", intentionalFocus);
-    const timer = setInterval(() => pollRef.current(), 15000);
     return () => {
       scope.current = false;
       if (
@@ -983,7 +998,6 @@ export function TaskWorkspace({
         state.sourceRefreshFailed = true;
         state.sourceObservation = "unknown";
       }
-      clearInterval(timer);
       document.removeEventListener("click", leave, true);
       document.removeEventListener("submit", leave, true);
       document.removeEventListener("focusin", intentionalFocus);
@@ -1012,6 +1026,7 @@ export function TaskWorkspace({
       state.conversation = value;
     },
     taskRead: resource.state.data,
+    changeTick,
     running: new Set(
       data?.assignments
         .filter((a) => a.state === "running")
@@ -3545,8 +3560,7 @@ function Changes({
 }: {
   data: TaskRead["data"];
   selected:
-    | NonNullable<TaskRead["data"]["review"]>["results"][number]
-    | undefined;
+    NonNullable<TaskRead["data"]["review"]>["results"][number] | undefined;
   client: OperatorClient;
   session: Session;
   taskId: string;
