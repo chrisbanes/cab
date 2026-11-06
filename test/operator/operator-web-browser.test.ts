@@ -59,6 +59,7 @@ for (const viewport of [
     browser = await journey.start("browser.launch", () => chromium.launch());
     const context = await browser.newContext({
       viewport,
+      colorScheme: "dark",
       deviceScaleFactor: viewport.width === 683 ? 2 : 1,
     });
     const page = await context.newPage();
@@ -359,6 +360,52 @@ for (const viewport of [
         return { foreground: s.color, background: `rgb(${mix.join(", ")})` };
       });
     assert.ok(contrast(badge.foreground, badge.background) >= 4.5);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.waitForFunction(
+        (dark) => document.documentElement.classList.contains("dark") === dark,
+        scheme === "dark",
+      );
+      // Badges transition their colours; wait for the computed values to settle.
+      await page.waitForTimeout(400);
+      const measured = await page.evaluate(() => {
+        const rgba = (value: string) =>
+          (value.match(/[\d.]+/g) ?? []).map(Number);
+        const ground = rgba(getComputedStyle(document.body).backgroundColor);
+        const over = (value: string) => {
+          const [r = 0, g = 0, b = 0, a = 1] = rgba(value);
+          return `rgb(${[r, g, b].map((c, i) => a * c + (1 - a) * (ground[i] ?? 0)).join(", ")})`;
+        };
+        const text = (selector: string) => {
+          const el = document.querySelector(selector);
+          if (!el) throw new Error(`missing ${selector}`);
+          const s = getComputedStyle(el);
+          return { foreground: s.color, background: over(s.backgroundColor) };
+        };
+        const link = document.querySelector<HTMLElement>(
+          'main a[href$="/settings"]',
+        );
+        link?.focus({ focusVisible: true } as FocusOptions);
+        const ring = link ? getComputedStyle(link) : null;
+        return {
+          page: getComputedStyle(document.body).backgroundColor,
+          introduction: text("main .introduction"),
+          badge: text('main [data-slot="badge"]'),
+          ringColor: ring?.outlineColor ?? "",
+          ringWidth: ring?.outlineWidth ?? "0px",
+        };
+      });
+      for (const item of [measured.introduction, measured.badge])
+        assert.ok(
+          contrast(item.foreground, item.background) >= 4.5,
+          `${scheme} text contrast`,
+        );
+      assert.ok(
+        contrast(measured.ringColor, measured.page) >= 3,
+        `${scheme} focus ring contrast`,
+      );
+      assert.ok(Number.parseFloat(measured.ringWidth) > 0);
+    }
     if (viewport.width === 683) await screenshot(page, "1366-zoom200");
     const action = page.getByRole("link", {
       name: "Project settings",

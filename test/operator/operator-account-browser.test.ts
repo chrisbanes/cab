@@ -27,6 +27,7 @@ const viewports = [
 async function launch(
   journey: BrowserJourney,
   viewport: { width: number; height: number },
+  colorScheme: "light" | "dark" = "light",
 ) {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(
@@ -49,7 +50,7 @@ async function launch(
   );
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, colorScheme });
   journey.observe(page);
   page.setDefaultTimeout(5000);
   return { f, web, page };
@@ -421,6 +422,10 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   assert.equal(await focused(), "Settings");
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Getting started");
+  for (const theme of ["System", "Light", "Dark"]) {
+    await page.keyboard.press("ArrowDown");
+    assert.equal(await focused(), theme);
+  }
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Sign out");
   await page.keyboard.press("ArrowDown");
@@ -428,7 +433,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), "Sign out", "wraps to the last item");
   await page.keyboard.press("ArrowUp");
-  assert.equal(await focused(), "Getting started");
+  assert.equal(await focused(), "Dark");
   await page.keyboard.press("Home");
   assert.equal(await focused(), "Settings");
   await page.keyboard.press("End");
@@ -1100,4 +1105,151 @@ test("Home first run follows readiness and project changes", async (_t, journey)
   await row(card, "Runtime")
     .getByText("Needs attention", { exact: true })
     .waitFor();
+});
+
+const themeState = (page: Page) =>
+  page.evaluate(() => ({
+    dark: document.documentElement.classList.contains("dark"),
+    colorScheme: getComputedStyle(document.documentElement).colorScheme,
+    ground: getComputedStyle(document.body).backgroundColor,
+    stored: localStorage.getItem("cab.theme.v1"),
+    inlineScripts: document.querySelectorAll("script:not([src])").length,
+  }));
+
+test("System theme follows the OS before the first render and live, with no inline script", async (_t, journey) => {
+  const { web, page } = await launch(journey, viewports[0], "light");
+  await page.addInitScript(() => {
+    new MutationObserver((_records, observer) => {
+      const root = document.getElementById("root");
+      if (!root?.firstChild) return;
+      (window as unknown as { themeAtFirstRender: string }).themeAtFirstRender =
+        document.documentElement.className;
+      observer.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  assert.deepEqual(await themeState(page), {
+    dark: false,
+    colorScheme: "light",
+    ground: "rgb(255, 255, 255)",
+    stored: null,
+    inlineScripts: 0,
+  });
+  assert.equal(
+    await page.evaluate(
+      () =>
+        (window as unknown as { themeAtFirstRender: string })
+          .themeAtFirstRender,
+    ),
+    "",
+  );
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.waitForFunction(() =>
+    document.documentElement.classList.contains("dark"),
+  );
+  const dark = await themeState(page);
+  assert.equal(dark.colorScheme, "dark");
+  assert.equal(dark.ground, "rgb(10, 10, 11)");
+});
+
+test("account menu Theme: keyboard choice overrides the OS, persists and System removes it", async (_t, journey) => {
+  const { web, page } = await launch(journey, viewports[0], "dark");
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  const trigger = page.getByRole("button", {
+    name: "Operator account",
+    exact: true,
+  });
+  const menu = page.getByRole("menu");
+  const radio = (name: string) =>
+    menu.getByRole("menuitemradio", { name, exact: true });
+  await trigger.focus();
+  await page.keyboard.press("ArrowDown");
+  const light = radio("Light");
+  for (
+    let i = 0;
+    i < 8 && !(await light.evaluate((el) => el === document.activeElement));
+    i++
+  )
+    await page.keyboard.press("ArrowDown");
+  const focus = await light.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      active: el === document.activeElement,
+      style: style.outlineStyle,
+      width: Number.parseFloat(style.outlineWidth),
+    };
+  });
+  assert.equal(focus.active, true);
+  assert.equal(focus.style, "solid");
+  assert.ok(focus.width >= 2);
+  await page.keyboard.press("Enter");
+  assert.equal(await light.getAttribute("aria-checked"), "true");
+  assert.equal(await radio("System").getAttribute("aria-checked"), "false");
+  assert.equal(await radio("Dark").getAttribute("aria-checked"), "false");
+  assert.deepEqual(
+    { ...(await themeState(page)), inlineScripts: 0 },
+    {
+      dark: false,
+      colorScheme: "light",
+      ground: "rgb(255, 255, 255)",
+      stored: "light",
+      inlineScripts: 0,
+    },
+  );
+
+  await page.reload();
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  assert.equal((await themeState(page)).dark, false);
+  await trigger.click();
+  assert.equal(await radio("Light").getAttribute("aria-checked"), "true");
+
+  await radio("System").click();
+  await page.waitForFunction(() =>
+    document.documentElement.classList.contains("dark"),
+  );
+  assert.equal((await themeState(page)).stored, null);
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await radio("Dark").click();
+  const forced = await themeState(page);
+  assert.equal(forced.dark, true);
+  assert.equal(forced.colorScheme, "dark");
+  assert.equal(forced.stored, "dark");
+  // The Theme choices are not plain menu items.
+  assert.equal(await menu.getByRole("menuitem").count(), 3);
+});
+
+test("phone drawer Theme group sets, stores and keeps the choice", async (_t, journey) => {
+  const { web, page } = await launch(journey, viewports[1], "light");
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  const open = async () => {
+    await page.getByRole("button", { name: "Projects and navigation" }).click();
+    return page.getByRole("dialog").getByRole("group", { name: "Theme" });
+  };
+  const group = await open();
+  const buttons = group.getByRole("button");
+  assert.equal(await buttons.count(), 3);
+  for (const height of await buttons.evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().height),
+  ))
+    assert.ok(height >= 44);
+  await group.getByRole("button", { name: "Dark", exact: true }).click();
+  assert.equal(
+    await group
+      .getByRole("button", { name: "Dark", exact: true })
+      .getAttribute("aria-pressed"),
+    "true",
+  );
+  const chosen = await themeState(page);
+  assert.equal(chosen.dark, true);
+  assert.equal(chosen.stored, "dark");
+  await page.reload();
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  assert.equal((await themeState(page)).dark, true);
 });

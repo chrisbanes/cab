@@ -6,13 +6,41 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ChevronsUpDown, ListChecks, LogOut, Settings } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  ListChecks,
+  LogOut,
+  Monitor,
+  Moon,
+  Settings,
+  Sun,
+} from "lucide-react";
+import {
+  setTheme,
+  THEME_CHOICES,
+  useTheme,
+  type ThemeChoice,
+} from "./theme.js";
+
+export const THEME_OPTIONS: Record<
+  ThemeChoice,
+  { label: string; icon: typeof Sun }
+> = {
+  system: { label: "System", icon: Monitor },
+  light: { label: "Light", icon: Sun },
+  dark: { label: "Dark", icon: Moon },
+};
 
 /** Sessions carry no operator name (SPEC: one operator), so the account is labelled by its role. */
 export const OPERATOR_LABEL = "Operator";
 
 const menuItems = (menu: HTMLElement | null) =>
-  Array.from(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+  Array.from(
+    menu?.querySelectorAll<HTMLElement>(
+      '[role="menuitem"], [role="menuitemradio"]',
+    ) ?? [],
+  );
 
 /**
  * Sidebar account menu: a WAI-ARIA menu button above the footer. Settings and Getting started are links (a button once dismissed);
@@ -45,6 +73,8 @@ export function AccountMenu({
   const menuId = useId();
   const pathname = path.split(/[?#]/)[0];
   const items = () => menuItems(menu.current);
+  const theme = useTheme();
+  const themeLabelId = useId();
 
   useEffect(() => {
     if (!open || !focusOnOpen) return;
@@ -198,6 +228,37 @@ export function AccountMenu({
               Show getting started
             </button>
           )}
+          <hr />
+          {/* biome-ignore lint/a11y/useSemanticElements: a fieldset inside role=menu would not be a menu group. */}
+          <div role="group" aria-labelledby={themeLabelId}>
+            <p
+              id={themeLabelId}
+              role="presentation"
+              className="account-menu-label metadata muted"
+            >
+              Theme
+            </p>
+            {THEME_CHOICES.map((choice) => {
+              const { label, icon: Icon } = THEME_OPTIONS[choice];
+              return (
+                <button
+                  key={choice}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={theme === choice}
+                  tabIndex={-1}
+                  className="account-menu-item"
+                  onClick={() => setTheme(choice)}
+                >
+                  <Icon aria-hidden="true" />
+                  {label}
+                  {theme === choice && (
+                    <Check aria-hidden="true" className="account-menu-check" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
           <hr />
           <button
             type="button"

@@ -13,8 +13,9 @@ contracts.
 
 ## Visual direction
 
-A dense dark workbench for one trusted operator: obsidian surfaces separated by
-hairlines, tonal depth instead of shadows, a black-and-white accent, and compact rows with
+A dense workbench for one trusted operator, in dark and light: obsidian or paper
+surfaces separated by hairlines, tonal depth instead of shadows in both themes, a
+black-and-white accent, and compact rows with
 monospaced identifiers. Calm surfaces, clear decisions: the next decision and its
 evidence get the space; navigation metadata stays quiet.
 
@@ -23,30 +24,65 @@ symbol and a word with its colour. Colour never establishes repair ownership,
 delivery or operator attention on its own; running does not imply a repair owner,
 and provider closure is never shown as success.
 
-The UI is dark only; a user-facing theme switch is not designed.
+## Themes
+
+The operator offers three theme choices: System (the default), Light and Dark.
+System follows `prefers-color-scheme` and tracks live OS changes. The active theme
+is the `dark` class on `<html>` (always set for dark, including under System), with
+light values on `:root`; `color-scheme` matches so native controls and scrollbars
+follow. `web/src/main.tsx` resolves the theme before the first render, because the
+operator CSP allows no inline script. The choice is a per-browser preference in
+`localStorage` (`cab.theme.v1`; only Light or Dark is stored). It has no server
+or cross-device state, applies only to the app, and other open tabs pick it up on
+their next load. It is offered in the sidebar account menu (a Theme group of three
+radio items) and in the phone drawer's account rows (three pressed-state buttons);
+the active choice carries a check as well as the pressed state.
 
 ## Tokens
 
 [`web/src/tokens.css`](../web/src/tokens.css) defines the tokens as CSS custom
 properties and maps the shadcn names onto them. Keep this table in step with it.
 
-| Token | Value | Purpose |
-| --- | --- | --- |
-| `--bg` | `#0A0A0B` | Page ground, inputs, segmented-control track |
-| `--surface` | `#0F0F11` | Sidebar, panels, lists, cards, sticky bars |
-| `--raised` | `#17171A` | Row hover, secondary buttons, evidence and excerpt blocks |
-| `--overlay` | `#202024` | Selection, menus, dialogs, active tab |
-| `--line`, `--line-strong` | `#26262B`, `#2E2E34` | Hairline separators; control and card borders |
-| `--fg`, `--fg-2`, `--fg-3` | `#F4F4F5`, `#A6A6AE`, `#8E8E97` | Primary, secondary and muted text (muted is at least 5.5:1 on `--raised`) |
-| `--accent-fill` (shadcn `--primary`) | `#F4F4F5` | Primary action fill, near-black `#0A0A0B` text (18:1) |
-| `--accent-edge` | `#E4E4E7` | Selected-row left edge, selected tab underline |
-| `--accent-text` | `#E4E4E7` | Links, Not started state text, selection marks |
-| `--focus` | `#E4E4E7` | 2px focus outline with 2px offset |
-| `--attn`, `--attn-soft`, `--attn-border` | `#FBBF24`, amber 12%, amber 35% | Attention: questions, approvals, "Next: you" |
-| `--risk`, `--risk-soft`, `--risk-border` | `#FB7185`, rose 12%, rose 38% | Uncertain execution, interventions, confirmed failures, destructive actions, field errors |
-| `--run`, `--run-soft`, `--run-border` | `#7CC7B2`, mint 12%, mint 35% | Running work; cooler and quieter than `--ok` |
-| `--ok`, `--ok-soft`, `--ok-border` | `#34D399`, emerald 12%, emerald 32% | Completed results, recorded answers, confirmed saves |
-| `--idle`, `--idle-soft`, `--idle-border` | `#A6A6AE`, grey 14%, grey 35% | Waiting, paused, queued, capacity, ready, stopping, stopped, cancelled, provider closed, unknown |
+| Token | Dark | Light | Purpose |
+| --- | --- | --- | --- |
+| `--bg` | `#0A0A0B` | `#FFFFFF` | Page ground, inputs, segmented-control track |
+| `--surface` | `#0F0F11` | `#FAFAFA` | Sidebar, panels, lists, cards, sticky bars |
+| `--raised` | `#17171A` | `#F4F4F5` | Row hover, secondary buttons, evidence and excerpt blocks |
+| `--overlay` | `#202024` | `#ECECF0` | Selection, menus, dialogs, active tab |
+| `--line` | `#26262B` | `#E4E4E7` | Hairline separators |
+| `--line-strong` | `#2E2E34` | `#D4D4D8` | Control and card borders |
+| `--fg` | `#F4F4F5` | `#18181B` | Primary text |
+| `--fg-2` | `#A6A6AE` | `#52525B` | Secondary text |
+| `--fg-3` | `#8E8E97` | `#60606A` | Muted text (at least 5.5:1 on `--raised` in both themes) |
+| `--accent-fill` | `#F4F4F5` | `#18181B` | Primary action fill (shadcn `--primary`) |
+| `--primary-foreground` | `#0A0A0B` | `#FAFAFA` | Primary action text (at least 17:1) |
+| `--accent-edge` | `#E4E4E7` | `#27272A` | Selected-row left edge, selected tab underline |
+| `--accent-text` | `#E4E4E7` | `#27272A` | Links, Not started state text, selection marks |
+| `--accent-border` | `#E4E4E766` | `#27272A66` | Accent-tinted borders |
+| `--accent-soft` | `#E4E4E71F` | `#27272A14` | Not started state fill |
+| `--accent-soft-border` | `#E4E4E759` | `#27272A40` | Not started state border |
+| `--focus` | `#E4E4E7` | `#18181B` | 2px focus outline with 2px offset |
+| `--attn` | `#FBBF24` | `#8A3B0C` | Attention text: questions, approvals, "Next: you" |
+| `--attn-soft` | `#FBBF241F` | `#D9770624` | Attention fill |
+| `--attn-border` | `#FBBF2459` | `#D9770673` | Attention border |
+| `--risk` | `#FB7185` | `#A8123A` | Uncertain execution, interventions, confirmed failures, destructive actions, field errors |
+| `--risk-soft` | `#FB71851F` | `#E11D481A` | Risk fill |
+| `--risk-border` | `#FB718561` | `#E11D4873` | Risk border |
+| `--run` | `#7CC7B2` | `#0B5D73` | Running work; cooler and quieter than `--ok` |
+| `--run-soft` | `#7CC7B21F` | `#0891B21F` | Running fill |
+| `--run-border` | `#7CC7B259` | `#0891B273` | Running border |
+| `--ok` | `#34D399` | `#05664A` | Completed results, recorded answers, confirmed saves |
+| `--ok-soft` | `#34D3991F` | `#0596691F` | Completed fill |
+| `--ok-border` | `#34D39952` | `#05966973` | Completed border |
+| `--idle` | `#A6A6AE` | `#4B4B54` | Waiting, paused, queued, capacity, ready, stopping, stopped, cancelled, provider closed, unknown |
+| `--idle-soft` | `#A6A6AE24` | `#71717A1F` | Idle fill |
+| `--idle-border` | `#A6A6AE59` | `#71717A73` | Idle border |
+| `--menu-shadow` | `0 8px 24px rgba(0, 0, 0, 0.5)` | `0 8px 24px rgba(0, 0, 0, 0.12)` | The one menu and dialog shadow |
+
+State text over its soft fill is at least 4.5:1 on the page ground and on every
+surface in both themes; light state text is darker than the dark theme's so amber,
+rose, mint and emerald stay legible on a light ground, and run and ok stay apart by
+hue as well as by symbol and word.
 
 The cab identity is an amber taxi roof sign. Shared shell and sign-in branding
 use the flat 20 × 20px symbol beside a readable cab label; the symbol is decorative.
@@ -57,14 +93,13 @@ silhouette and c without illumination. Amber retains its attention meaning in
 state badges: identity uses silhouette and label, while states use a bordered
 badge with a symbol and a word.
 
-Project identity uses a small square dot per project (Atlas indigo, Relay teal,
-Fieldnotes violet); it is never a state colour.
+Project identity uses a small square dot per project, coloured from `--accent-text`,
+`--fg-2` and `--fg-3`; it is never a state colour.
 
-Code, diff and evidence views use local values: editor ground `#0B0D14`; hunk header
-indigo 10% with `#A5B4FC` text; added lines emerald 12% with `#6EE7B7`; removed lines
-rose 12% with `#FDA4AF` (20% when selected, with a 2px `--focus` inset edge); line
-numbers `#7C879B`. Diff colour always pairs with `+`/`−` markers and Before/After
-labels.
+Code, diff and evidence views take their colours from the tokens in both themes:
+added lines mix `--primary`, removed lines mix `--destructive`, and hunk headers,
+excerpts and line numbers use `--muted` and `--fg-3`, so they follow the active
+theme. Diff colour always pairs with `+`/`−` markers and Before/After labels.
 
 ### Typography, spacing and shape
 
@@ -80,14 +115,14 @@ plain-language state, never the headline.
 | --- | --- |
 | Badges | 20px high, 4px radius, soft fill + border + text in the state colour, symbol + word |
 | Buttons, inputs, selects | 30–32px desktop, 6px radius, 10–12px side padding; phone 44px |
-| Primary button | `--accent-fill` fill, near-black text, 1px white 12% border; one per view |
+| Primary button | `--accent-fill` fill, `--primary-foreground` text, 1px white 12% border; one per view |
 | Secondary button | `--raised` fill, `--line-strong` border |
 | Destructive button | rose-tinted fill and border with `--risk` text, never solid red |
 | Panels, cards, dialogs | 8px radius, 1px `--line` border, `--surface` fill; header row separated by a hairline |
 | Evidence blocks, chips | `--raised` fill, 6px radius |
 | Keyboard keys | 18px high, 4px radius, `--bg` fill, mono 11px |
 | Selection in lists | `--overlay` fill plus a 2px `--accent-edge` left edge; tabs use a 2px underline |
-| Menus and dialogs | `--overlay` with one shadow, `0 8px 24px rgba(0,0,0,0.5)` |
+| Menus and dialogs | `--overlay` with `--menu-shadow` |
 
 Spacing follows a 4px rhythm (4, 8, 12, 16, 20, 24, 32). Status icons supplement
 visible state words; treat them as decorative when adjacent text conveys the
@@ -104,7 +139,7 @@ fixed application dimensions.
   activity meta, a capacity meter and the account menu), a 48px top bar
   (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and
   New task with its key), then the page. Settings, Getting started, Approval and
-  delivery forms and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
+  delivery forms, the Theme choice and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
   run panes edge to edge with hairline dividers.
 - **Breakpoints:** the production shell uses the navigation drawer through 1120 CSS
   pixels; the browser test checks 1119, 1120 and 1121px as well as 759, 760 and

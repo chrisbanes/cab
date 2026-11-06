@@ -318,23 +318,10 @@ test("shared controls retain visible focus in forced colours and remove optional
   const list = page.getByRole("button", { name: "List", exact: true });
   await search.waitFor();
   await project.waitFor();
-  await focusByTab(page, search);
-  const ordinaryFocus = await search.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      visible: element.matches(":focus-visible"),
-      outlineStyle: style.outlineStyle,
-      outlineWidth: parseFloat(style.outlineWidth),
-    };
-  });
-  assert.equal(ordinaryFocus.visible, true);
-  assert.equal(ordinaryFocus.outlineStyle, "solid");
-  assert.ok(ordinaryFocus.outlineWidth >= 2);
-  await page.emulateMedia({ forcedColors: "active" });
-
-  for (const control of [search, project, list]) {
-    await focusByTab(page, control);
-    const focus = await control.evaluate((element) => {
+  for (const scheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme: scheme, forcedColors: "none" });
+    await focusByTab(page, search);
+    const ordinaryFocus = await search.evaluate((element) => {
       const style = getComputedStyle(element);
       return {
         visible: element.matches(":focus-visible"),
@@ -342,9 +329,25 @@ test("shared controls retain visible focus in forced colours and remove optional
         outlineWidth: parseFloat(style.outlineWidth),
       };
     });
-    assert.equal(focus.visible, true);
-    assert.equal(focus.outlineStyle, "solid");
-    assert.ok(focus.outlineWidth >= 2);
+    assert.equal(ordinaryFocus.visible, true, scheme);
+    assert.equal(ordinaryFocus.outlineStyle, "solid");
+    assert.ok(ordinaryFocus.outlineWidth >= 2);
+    await page.emulateMedia({ colorScheme: scheme, forcedColors: "active" });
+
+    for (const control of [search, project, list]) {
+      await focusByTab(page, control);
+      const focus = await control.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          visible: element.matches(":focus-visible"),
+          outlineStyle: style.outlineStyle,
+          outlineWidth: parseFloat(style.outlineWidth),
+        };
+      });
+      assert.equal(focus.visible, true);
+      assert.equal(focus.outlineStyle, "solid");
+      assert.ok(focus.outlineWidth >= 2);
+    }
   }
   assert.equal(await list.getAttribute("aria-pressed"), "true");
   await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" });
@@ -999,6 +1002,7 @@ for (const engine of ["chromium", "webkit"] as const)
         (engine === "webkit" ? webkit : chromium).launch(),
       );
       const page = await browser.newPage({
+        colorScheme: "dark",
         viewport: { width: 1366, height: 900 },
       });
       journey.observe(page);

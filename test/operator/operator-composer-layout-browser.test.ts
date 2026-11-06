@@ -481,6 +481,7 @@ test("Composer predicts start or wait before submission from the same waits", as
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
+    colorScheme: "dark",
     viewport: { width: 1366, height: 820 },
   });
   j.observe(page);

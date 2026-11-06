@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Check,
   CirclePause,
   Folder,
   InboxIcon,
@@ -77,7 +78,8 @@ import { TaskWorkspaceStates } from "./task-workspace-state.js";
 import { TaskViews } from "./task-views.js";
 import { Login, SignInBootstrap } from "./sign-in.js";
 import { NotFound, notFoundSubtitle } from "./not-found.js";
-import { AccountMenu, OPERATOR_LABEL } from "./account-menu.js";
+import { AccountMenu, OPERATOR_LABEL, THEME_OPTIONS } from "./account-menu.js";
+import { setTheme, THEME_CHOICES, useTheme } from "./theme.js";
 import {
   configureGettingStarted,
   GETTING_STARTED_DRAFT,
@@ -372,6 +374,7 @@ function AccountRows({
   onShowGettingStarted: () => void;
 }) {
   const pathname = path.split(/[?#]/)[0];
+  const theme = useTheme();
   return (
     <section className="account-rows" aria-label="Account">
       <p className="metadata muted">Signed in as {OPERATOR_LABEL}</p>
@@ -401,6 +404,30 @@ function AccountRows({
           Show getting started
         </Button>
       )}
+      {/* biome-ignore lint/a11y/useSemanticElements: a plain group of pressed buttons, like the List/Board toggle. */}
+      <div role="group" aria-label="Theme" className="account-theme">
+        {THEME_CHOICES.map((choice) => {
+          const { label, icon: Icon } = THEME_OPTIONS[choice];
+          return (
+            <Button
+              key={choice}
+              variant="secondary"
+              aria-pressed={theme === choice}
+              onClick={(event) => {
+                // The drawer body closes on any click; keep it open so the result shows.
+                event.stopPropagation();
+                setTheme(choice);
+              }}
+            >
+              <Icon aria-hidden="true" />
+              {label}
+              {theme === choice && (
+                <Check aria-hidden="true" className="ml-auto" />
+              )}
+            </Button>
+          );
+        })}
+      </div>
       <Button variant="secondary" disabled={pending} onClick={onSignOut}>
         <LogOut aria-hidden="true" />
         {pending ? "Signing out…" : "Sign out"}
