@@ -1097,6 +1097,31 @@ The limits:
 - cab keeps a project's managed repositories after the project is deleted. Once no task of
   the project has a workspace, the operator can delete `<data>/repositories/<key>`.
 
+## Local listening for test fixtures
+
+A project's browser and HTTP tests need to start local servers, which both sandboxes deny
+by default (`listen EPERM 127.0.0.1`). Turn on **Local listening** in the project's
+Settings, General tab, or run `cab project prepare PROJECT_ID --local-listening true` and
+apply the prepared file. It is off by default and applies to turns admitted after the
+change; a running turn keeps its policy. [ADR-1027](../adr/1027-local-listening-for-test-fixtures.md)
+records the decision.
+
+- **Claude Code.** A task turn's commands can bind local ports, and outbound network stays
+  denied. The control is macOS only. Binding is not limited to loopback: a listener on
+  `0.0.0.0` accepts connections on any interface the host's firewall allows.
+- **Codex.** Codex has no loopback-only control, so the setting does not change Codex turns.
+  A Codex command can listen only when command network access is enabled for the project,
+  and then on any interface with outbound network open.
+- Draft turns and drafting runs never listen.
+
+Other processes on the host can connect to a listening port, and a Claude command allowed to
+listen can connect to other services on the host's loopback interface. Keep the setting off
+for projects whose tests do not need it.
+
+To check what a turn was admitted with, open the assignment's **Effective execution policy**
+on the task page, or run `cab assignment get ASSIGNMENT_ID`: a Claude Code turn states
+whether it was admitted with local listening enabled.
+
 ## Startup snapshot
 
 Whenever the service starts against an existing database with migrations pending, it

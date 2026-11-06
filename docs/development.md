@@ -557,6 +557,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
    project's command network access the same way. It applies to Codex task turns
    admitted afterwards; running turns keep their policy.
 
+   `project prepare PROJECT_ID --local-listening true|false` changes the project's
+   local listening the same way. It applies to Claude Code task turns admitted
+   afterwards; running turns keep their policy.
+
    Retention: items older than `CAB_DIAGNOSTIC_RETENTION_DAYS` (1–365,
    default 30) are deleted hourly; beyond `CAB_DIAGNOSTIC_STORAGE_MIB`
    (16–1048576, default 1024) the oldest items are evicted. Invalid values fail
