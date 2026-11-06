@@ -208,7 +208,7 @@ test("production workspace retains literal captured text, pending request, focus
     .getAttribute("data-record-id");
   assert.ok(readingId);
   const reading = log.locator(`[data-record-id="${readingId}"]`);
-  const readingButton = reading.getByRole("button");
+  const readingButton = reading.getByRole("button", { name: /^Raw text/ });
   await reading.scrollIntoViewIfNeeded();
   const readingY = await reading.evaluate(
     (el) => el.getBoundingClientRect().top,
@@ -777,7 +777,12 @@ test("production workspace retains literal captured text, pending request, focus
   markLeadStarted(f, r.assignmentId);
   addItem("streaming", "streaming", null, streamingAt);
   await refreshTask();
-  await log.getByText("writing…").waitFor();
+  // The delegate's own status line; the lead's root status reads the same.
+  await log
+    .locator(`[data-record-id="delegation:${r.assignmentId}"]`)
+    .getByRole("status")
+    .filter({ hasText: "Working…" })
+    .waitFor();
   for (let i = 0; i < 48; i++)
     addItem(`newer-${i}`, "completed", `Newer note ${i}`, streamingAt + 1 + i);
   const batchRequests: string[] = [];

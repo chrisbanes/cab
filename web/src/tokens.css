@@ -78,6 +78,7 @@
   --fg: #18181b;
   --fg-2: #52525b;
   --fg-3: #60606a;
+  --shimmer: #18181b;
   --accent-fill: #18181b;
   --accent-text: #27272a;
   --accent-edge: #27272a;
@@ -161,6 +162,7 @@
   --fg: #f4f4f5;
   --fg-2: #a6a6ae;
   --fg-3: #8e8e97;
+  --shimmer: #f4f4f5;
   --accent-fill: #f4f4f5;
   --accent-text: #e4e4e7;
   --accent-edge: #e4e4e7;

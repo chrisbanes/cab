@@ -118,24 +118,66 @@ export function ActionOutcome({
   );
 }
 
+/**
+ * Copies `text` to the clipboard and says so: Copy, Copied, or Copy unavailable. With `of`
+ * (what is copied) the accessible name carries it and a visually hidden status announces the
+ * result; `resetMs` returns the button to Copy after that long.
+ */
+export function CopyButton({
+  text,
+  of,
+  resetMs,
+}: {
+  text: string;
+  of?: string;
+  resetMs?: number;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle" || resetMs === undefined) return;
+    const timer = setTimeout(() => setState("idle"), resetMs);
+    return () => clearTimeout(timer);
+  }, [state, resetMs]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+  };
+  const label =
+    state === "copied"
+      ? "Copied"
+      : state === "failed"
+        ? "Copy unavailable"
+        : "Copy";
+  return (
+    <>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={copy}
+        {...(of ? { "aria-label": `${label} ${of}` } : {})}
+      >
+        {label}
+      </Button>
+      {of && state !== "idle" && (
+        <span role="status" className="sr-only">
+          {label}
+        </span>
+      )}
+    </>
+  );
+}
+
 /** A collapsed Details disclosure with a Geist Mono key/value list and Copy. */
 export function OutcomeDetails({
   fields,
 }: {
   fields: readonly OutcomeField[];
 }) {
-  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   if (!fields.length) return null;
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        fields.map(([label, value]) => `${label}: ${value}`).join("\n"),
-      );
-      setCopied("copied");
-    } catch {
-      setCopied("failed");
-    }
-  };
   return (
     <details className="action-outcome-details">
       <summary className="metadata">Details</summary>
@@ -147,13 +189,9 @@ export function OutcomeDetails({
           </div>
         ))}
       </dl>
-      <Button type="button" variant="secondary" onClick={copy}>
-        {copied === "copied"
-          ? "Copied"
-          : copied === "failed"
-            ? "Copy unavailable"
-            : "Copy"}
-      </Button>
+      <CopyButton
+        text={fields.map(([label, value]) => `${label}: ${value}`).join("\n")}
+      />
     </details>
   );
 }
