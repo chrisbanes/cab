@@ -336,6 +336,8 @@ export class TaskWorkspaceState {
   cardRequest: string | null = null;
   /** The inspector's fold; null follows the screen: open beside the conversation, closed above it on a phone. */
   inspectorOpen: boolean | null = null;
+  /** The Changes side pane beside the conversation (1024px and wider); `opener` is the selector that gets focus back on Close. */
+  changesPane: { opener: string } | null = null;
   /** The phone banner's collapsed attention card; it opens on arrival so the first screen holds the decision. */
   attentionCollapsed = false;
   get sourceObservation() {

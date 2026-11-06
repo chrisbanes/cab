@@ -147,6 +147,15 @@ fixed application dimensions.
   top bar. This shell breakpoint does not qualify task-row, Inbox or reading
   layouts by itself. Phone controls accommodate touch, keyboard and safe-area space
   without covering content.
+- **Changes pane:** from 1024px the Overview's Changes actions open a split in place of
+  the inspector: the conversation (at least 480px) and the Changes view (at least
+  320px, a surface card like the inspector, sticky under the page top) share the row,
+  and the page's 1100px maximum width is lifted while it is open. The handle between
+  them is a 1px `--line` hairline with a 16px hit target (`--line-strong` on hover and
+  drag, a 2px `--focus` line on keyboard focus), is a window splitter that Arrow keys,
+  Home and End resize, and keeps its width per browser in `localStorage`. Opening
+  moves focus into the pane; Close returns it to the opener. It is page state, not a
+  route, and below 1024px the same actions select the Changes tab.
 
 ## Shared components
 
