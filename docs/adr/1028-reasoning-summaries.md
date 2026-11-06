@@ -19,8 +19,8 @@ Reasoning summaries help an operator understand an agent's decisions during revi
 debugging. They are not a live progress feed or an audit trail.
 
 - **Collection.** cab collects provider-produced reasoning summaries only, from runtimes
-  whose summaries are usable (see [Runtimes](#runtimes)). It never collects raw reasoning, even where a
-  provider exposes it. A runtime that offers only raw reasoning shows none.
+  whose summaries are usable (see [Runtimes](#runtimes)). It never collects raw reasoning,
+  even where a provider exposes it. A runtime that offers only raw reasoning shows none.
 - **Setting.** Reasoning summaries are a separate project setting, `reasoningSummaries`, off by
   default, beside diagnostic capture.
   - It is a versioned `project.configure` boolean. A revision setting it `true` is rejected
@@ -77,8 +77,9 @@ debugging. They are not a live progress feed or an audit trail.
   `item/reasoning/summaryTextDelta` notifications; the item's `content` array and
   `item/reasoning/textDelta` carry raw reasoning. At `medium` effort the requested turn
   returned one 32-character heading that named what the agent was fixing but not why, which is
-  not usable for review; it used 18 reasoning output tokens against 14 not requested. Codex shows none: cab sends Codex turns today's requests, stores no
-  Codex reasoning, and reports `unavailable` for a Codex turn admitted with the setting on.
+  not usable for review; it used 18 reasoning output tokens against 14 not requested. Codex
+  shows none: cab sends Codex turns today's requests, stores no Codex reasoning, and reports
+  `unavailable` for a Codex turn admitted with the setting on.
   Requesting Codex summaries later needs evidence of usable output and a revised decision; the
   `summary` override persists for a thread's later turns, so that decision must send
   `summary: "none"` on a turn admitted with the setting off.
