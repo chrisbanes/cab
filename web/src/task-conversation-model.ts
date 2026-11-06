@@ -16,7 +16,6 @@ type Kind<K extends TimelineEntry["kind"]> = Extract<
 >;
 export type ToolEntry = Kind<"tool">;
 export type DelegationEntry = Kind<"delegation">;
-export type PlanEntry = Kind<"plan">;
 export type AgentPlan = Page["plans"][number];
 type Assignment = TaskRead["data"]["assignments"][number];
 

@@ -886,6 +886,7 @@ a.task-source-chip:hover {
    attention card whenever the page header filled the first screen. The browser must not
    anchor scrolling to it: a linked inspector record would otherwise leave the view when the
    conversation loads above the composer. */
+.task-workspace .task-columns > section.plan-card,
 .task-workspace .task-columns > section.reply-card {
   overflow-anchor: none;
 }

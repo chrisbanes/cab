@@ -648,8 +648,8 @@ refreshes the login through the link and keeps it
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
 installation are disabled. Codex gets plugin skills only from its agent's plugins, as
 skill directories, including plugins installed in Claude Code or Codex. Codex starts
-with `tools.update_plan.enabled=true` whether or not cab owns its home, so its plan
-reaches cab. A Codex conversation started under the previous home is not
+with `tools.update_plan.enabled=true` whether or not cab owns its home, so the agent is
+offered its plan tool. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
 state, and the runtime refuses the resume before any App Server request.

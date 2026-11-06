@@ -71,6 +71,7 @@ export function PlanCard({
       <p className="metadata muted">{planNote}</p>
       <Button
         variant="secondary"
+        aria-label={`${planHeading} · ${planCountsLabel(plan.done, plan.total)}`}
         aria-expanded={open}
         onClick={() => {
           if (!state.expanded.delete(collapsedKey))

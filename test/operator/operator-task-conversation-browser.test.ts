@@ -1106,7 +1106,9 @@ for (const colorScheme of ["light", "dark"] as const)
     assert.notEqual(contrast[0], contrast[1]);
 
     // Keyboard: Tab reaches the toggle; Enter collapses, Space expands.
-    const toggle = card.getByRole("button", { name: "1/3 done" });
+    const toggle = card.getByRole("button", {
+      name: "Agent's plan · 1/3 done",
+    });
     await card.locator(".metadata").evaluate((e) => {
       e.setAttribute("tabindex", "-1");
       (e as HTMLElement).focus();

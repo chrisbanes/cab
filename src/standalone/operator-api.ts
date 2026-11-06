@@ -5358,9 +5358,10 @@ export class OperatorApi {
       const assignmentIds = new Set(
         view.assignments.map((a) => a.assignmentId),
       );
-      const latestPlans = (historyStore?.latestPlans(taskId) ?? []).filter(
-        (plan) => assignmentIds.has(plan.assignmentId),
-      );
+      // The newest 200, the contract's bound, so a large task still reads.
+      const latestPlans = (historyStore?.latestPlans(taskId) ?? [])
+        .filter((plan) => assignmentIds.has(plan.assignmentId))
+        .slice(-200);
       const diagnostics = this.service.executionDiagnostics();
       const executions = diagnostics?.executionsForTask(taskId) ?? [];
       const tools =
