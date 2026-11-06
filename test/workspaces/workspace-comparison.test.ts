@@ -176,6 +176,53 @@ test("comparison Git reads disable configured filesystem monitors", async (t) =>
   assert.equal(existsSync(marker), false, "configured fsmonitor hook ran");
 });
 
+test("working-tree comparisons never run the clean filter of a submodule an agent staged", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const repo = f.repository.workspacePath;
+  const sub = join(repo, "sub");
+  execFileSync("git", ["init", "--quiet", sub]);
+  writeFileSync(join(sub, "f.txt"), "sub\n");
+  git(sub, "add", "f.txt");
+  git(
+    sub,
+    "-c",
+    "user.name=T",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    "sub",
+  );
+  const marker = join(f.root, "submodule-filter-invoked");
+  const filter = executable(
+    f.root,
+    "submodule-filter",
+    `#!/bin/sh\ntouch '${marker}'\ncat\n`,
+  );
+  git(sub, "config", "filter.x.clean", filter);
+  writeFileSync(join(sub, ".gitattributes"), "*.txt filter=x\n");
+  writeFileSync(join(sub, "f.txt"), "dirty\n");
+  git(repo, "add", "sub");
+  // An untracked .gitmodules is read too; its `ignore` cannot override cab's option.
+  writeFileSync(
+    join(repo, ".gitmodules"),
+    '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n\tignore = none\n',
+  );
+  const comparison = await compareRepository(
+    {
+      taskId: f.binding.taskId,
+      repositoryId: f.repository.repositoryId,
+      target: "uncommitted",
+      changeSet: "all",
+    },
+    f.current,
+  );
+  assert.ok(entry(comparison, "sub", "staged"));
+  assert.equal(existsSync(marker), false, "submodule clean filter ran");
+});
+
 test("working-tree comparisons disable configured clean and process filters", async (t) => {
   const f = await fixture();
   t.after(() => f.close());

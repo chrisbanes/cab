@@ -2277,8 +2277,11 @@ test("polled task list, project and Inbox reads redact stored workspace paths wi
       r.sourcePath,
       r.workspacePath,
       r.gitCommonDir ?? "",
+      r.sourceGitCommonDir ?? "",
+      r.gitDirectory ?? "",
     ]),
   ];
+  assert.ok(workspace.repositories[0]?.sourceGitCommonDir);
   assert.deepEqual(
     [...f.service.taskWorkspaceRedactionPaths(ids.taskId)].sort(),
     [...new Set(paths)].sort(),

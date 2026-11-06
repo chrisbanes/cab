@@ -11,14 +11,16 @@ import {
   taskAcceptsWrites,
   ProjectArchivedError,
 } from "../core/project-lifecycle.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { realpathSync } from "node:fs";
@@ -31,6 +33,7 @@ const maxTimerMs = 2_147_483_647;
 
 const gitOperations = [
   "repository-identity",
+  "repository-create",
   "ref-resolution",
   "checkout-validation",
   "worktree-add",
@@ -43,6 +46,7 @@ type GitFailureKind = "failed" | "timed-out" | "cancelled" | "output-limit";
 
 const gitOperationTimeouts: Record<GitOperation, number> = {
   "repository-identity": 30_000,
+  "repository-create": 30_000,
   "ref-resolution": 30_000,
   "checkout-validation": 30_000,
   "worktree-add": 120_000,
@@ -63,8 +67,13 @@ export const repositoryBindingSchema = z.object({
   sourcePath: z.string().min(1),
   workspacePath: z.string().min(1),
   ref: z.string().min(1).max(512),
+  /** The worktree's common directory: cab's managed repository, or the source's for a legacy binding. */
   gitCommonDir: z.string().nullable(),
   commit: z.string().nullable(),
+  /** The source checkout's common directory; present only when `gitCommonDir` is a managed repository. */
+  sourceGitCommonDir: z.string().nullable().optional(),
+  /** The worktree's admin directory in the managed repository. */
+  gitDirectory: z.string().nullable().optional(),
 });
 
 export const taskWorkspaceSchema = z.object({
@@ -108,6 +117,66 @@ export type TaskWorkspaceRepositoryInput = z.infer<
 
 export type TaskWorkspaceRepository = z.infer<typeof repositoryBindingSchema>;
 
+/** Every stored path of a repository binding, for reservations and redaction. */
+export function repositoryBindingPaths(
+  repository: TaskWorkspaceRepository,
+): string[] {
+  return [
+    repository.sourcePath,
+    repository.workspacePath,
+    ...[
+      repository.gitCommonDir,
+      repository.sourceGitCommonDir,
+      repository.gitDirectory,
+    ].filter((path): path is string => typeof path === "string"),
+  ];
+}
+
+/**
+ * The paths a task turn's Git may write besides its workspace: the managed repository's
+ * objects and refs and the worktree's own admin directory. None for a legacy binding.
+ */
+export function taskGitWritableRoots(binding: TaskWorkspaceBinding): string[] {
+  return binding.repositories.flatMap((repository) =>
+    managedRepositoryOf(repository) && repository.gitDirectory
+      ? [
+          join(repository.gitCommonDir, "objects"),
+          join(repository.gitCommonDir, "reftable"),
+          repository.gitDirectory,
+        ]
+      : [],
+  );
+}
+
+/** A binding made from a managed repository, which is its `gitCommonDir`; legacy ones are not. */
+function managedRepositoryOf(
+  repository: TaskWorkspaceRepository,
+): repository is TaskWorkspaceRepository & { gitCommonDir: string } {
+  return !!repository.sourceGitCommonDir && !!repository.gitCommonDir;
+}
+
+/** The repository whose worktree list holds this binding's worktree. */
+function worktreeOwner(repository: TaskWorkspaceRepository): string {
+  return managedRepositoryOf(repository)
+    ? repository.gitCommonDir
+    : repository.sourcePath;
+}
+
+/** Runs `operation` after every earlier one under `key` has settled. */
+function serialized<T>(
+  chains: Map<string, Promise<unknown>>,
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const current = (chains.get(key) ?? Promise.resolve())
+    .catch(() => {})
+    .then(operation);
+  chains.set(key, current);
+  return current.finally(() => {
+    if (chains.get(key) === current) chains.delete(key);
+  });
+}
+
 export type TaskWorkspaceBinding = z.infer<typeof taskWorkspaceSchema>;
 
 export interface CapturedWorkspaceDiscard {
@@ -136,6 +205,11 @@ export type WorkspaceCleanupResult =
   | { outcome: "retained"; binding: TaskWorkspaceBinding; reason: string };
 
 export type WorkspaceManagerOptions = {
+  /**
+   * Makes new worktrees from a cab-owned bare repository per scope and source repository,
+   * under `root`, instead of from the source checkout. Task workspaces only.
+   */
+  managedRepositories?: { root: string; scopeOf(taskId: string): string };
   /** Narrow path-access observer used to prove restored-root identity ordering. */
   beforePathAccess?: (path: string) => void;
   /** Test-only executable override; production always resolves the `git` command. */
@@ -193,6 +267,13 @@ export interface WorkspaceBindingStore {
     repositoryId: string,
     gitCommonDir: string,
     commit: string,
+    sourceGitCommonDir?: string,
+  ): TaskWorkspaceBinding;
+  /** Records a managed worktree's admin directory once Git has created it. */
+  recordGitDirectory(
+    taskId: string,
+    repositoryId: string,
+    gitDirectory: string,
   ): TaskWorkspaceBinding;
   update(
     taskId: string,
@@ -317,6 +398,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     repositoryId: string,
     gitCommonDir: string,
     commit: string,
+    sourceGitCommonDir?: string,
   ): TaskWorkspaceBinding {
     return transaction(this.db, () => {
       assertOwnedTaskWritable(this.db, taskId);
@@ -329,12 +411,49 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       const current = binding.repositories[index];
       if (!current) throw new Error(`Unknown repository ${repositoryId}`);
       if (current.gitCommonDir !== null) {
-        if (current.gitCommonDir !== gitCommonDir)
+        if (
+          current.gitCommonDir !== gitCommonDir ||
+          (current.sourceGitCommonDir ?? undefined) !== sourceGitCommonDir
+        )
           throw new Error(`Repository identity changed for ${repositoryId}`);
         return binding;
       }
       const repositories = [...binding.repositories];
-      repositories[index] = { ...current, gitCommonDir, commit };
+      repositories[index] = {
+        ...current,
+        gitCommonDir,
+        commit,
+        ...(sourceGitCommonDir ? { sourceGitCommonDir } : {}),
+      };
+      assertCapturedWorkspaceAvailable(this.db, { ...binding, repositories });
+      this.db
+        .prepare(
+          `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,
+        )
+        .run(JSON.stringify(repositories), new Date().toISOString(), taskId);
+      return this.get(taskId) ?? this.invalidRow();
+    });
+  }
+
+  recordGitDirectory(
+    taskId: string,
+    repositoryId: string,
+    gitDirectory: string,
+  ): TaskWorkspaceBinding {
+    return transaction(this.db, () => {
+      assertOwnedTaskWritable(this.db, taskId);
+      const binding = this.get(taskId);
+      const current = binding?.repositories.find(
+        (repository) => repository.repositoryId === repositoryId,
+      );
+      if (!binding || !current?.sourceGitCommonDir)
+        throw new Error(`Unknown managed repository ${repositoryId}`);
+      if (current.gitDirectory === gitDirectory) return binding;
+      if (current.gitDirectory)
+        throw new Error(`Repository identity changed for ${repositoryId}`);
+      const repositories = binding.repositories.map((repository) =>
+        repository === current ? { ...repository, gitDirectory } : repository,
+      );
       assertCapturedWorkspaceAvailable(this.db, { ...binding, repositories });
       this.db
         .prepare(
@@ -408,6 +527,9 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
 /** Creates task worktrees and keeps their stable bindings independent of turns. */
 export class WorkspaceManager implements TaskWorkspaceLifecycle {
   private readonly workspaceRoot: string;
+  private readonly repositoryRoot: string | undefined;
+  /** Serializes create-or-validate of each managed repository. */
+  private readonly repositoryLocks = new Map<string, Promise<unknown>>();
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private readonly unobservedCaptured = new Set<string>();
   private readonly settlementWaiters = new Set<() => void>();
@@ -430,11 +552,12 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   ) {
     if (!isAbsolute(workspaceRoot))
       throw new Error("Workspace directory must be absolute");
-    const resolvedRoot = resolve(workspaceRoot);
-    this.workspaceRoot = join(
-      realpathSync(dirname(resolvedRoot)),
-      basename(resolvedRoot),
-    );
+    this.workspaceRoot = canonicalRoot(workspaceRoot);
+    const repositoryRoot = options.managedRepositories?.root;
+    if (repositoryRoot !== undefined && !isAbsolute(repositoryRoot))
+      throw new Error("Managed repository directory must be absolute");
+    this.repositoryRoot =
+      repositoryRoot === undefined ? undefined : canonicalRoot(repositoryRoot);
     if (
       options.gitExecutable !== undefined &&
       !isAbsolute(options.gitExecutable)
@@ -611,6 +734,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           "--porcelain=v1",
           "--untracked-files=all",
           "--ignored=matching",
+          "--ignore-submodules=dirty",
         ).catch((error: unknown) => {
           if (isUncertainGitError(error)) {
             const held = this.store.markGitUncertain(id, error.message);
@@ -640,7 +764,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       try {
         for (const repository of archiving.repositories) {
           await this.git(
-            repository.sourcePath,
+            worktreeOwner(repository),
             "worktree-remove",
             "worktree",
             "remove",
@@ -684,7 +808,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         for (const repository of binding.repositories) {
           if (!(await lstatIfExists(repository.workspacePath))) continue;
           await this.git(
-            repository.sourcePath,
+            worktreeOwner(repository),
             "worktree-remove",
             "worktree",
             "remove",
@@ -897,7 +1021,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
             let failure: unknown;
             try {
               await this.capturedGit(
-                repository.sourcePath,
+                worktreeOwner(repository),
                 ["worktree", "remove", "--force", repository.workspacePath],
                 () => {
                   this.unobservedCaptured.add(binding.taskId);
@@ -1042,16 +1166,24 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         if (!repository) throw new Error("Repository binding disappeared");
 
         if (!repository.gitCommonDir || !repository.commit) {
+          const source = await this.gitRepositoryInfo(repository.sourcePath);
+          const managed = this.repositoryRoot
+            ? await this.managedRepository(binding.taskId, source.gitCommonDir)
+            : undefined;
           // A requested commit must already be in the repository: it never falls back to `ref`.
-          const source = await this.gitInfo(
-            repository.sourcePath,
-            repository.commit ?? repository.ref,
-          );
+          // A stacked dependent's requested commit is its blocker's, in the managed repository.
+          const commit = repository.commit
+            ? await this.resolveCommit(
+                managed ?? repository.sourcePath,
+                repository.commit,
+              )
+            : await this.resolveCommit(repository.sourcePath, repository.ref);
           binding = this.store.bindRepository(
             binding.taskId,
             repository.repositoryId,
-            source.gitCommonDir,
-            source.commit,
+            managed ?? source.gitCommonDir,
+            commit,
+            managed && source.gitCommonDir,
           );
           repository = binding.repositories.find(
             (candidate) =>
@@ -1066,11 +1198,12 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 
         if (await this.isExistingWorktree(repository)) {
           await this.assertProvisionedWorktree(repository);
+          await this.recordGitDirectory(binding.taskId, repository);
           continue;
         }
-        await this.ensureSourceStillMatches(repository);
+        await this.ensureSourceStillMatches(binding.taskId, repository);
         await this.git(
-          repository.sourcePath,
+          worktreeOwner(repository),
           "worktree-add",
           "worktree",
           "add",
@@ -1086,6 +1219,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
             `Git did not create the workspace for ${repository.repositoryId}`,
           );
         await this.assertProvisionedWorktree(repository);
+        await this.recordGitDirectory(binding.taskId, repository);
       }
       return this.store.update(binding.taskId, "ready", null);
     } catch (error) {
@@ -1173,21 +1307,24 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   }
 
   private async ensureSourceStillMatches(
+    taskId: string,
     repository: TaskWorkspaceRepository,
   ): Promise<void> {
     const source = await this.gitRepositoryInfo(repository.sourcePath);
-    if (source.gitCommonDir !== repository.gitCommonDir)
+    const managed = repository.sourceGitCommonDir;
+    if (
+      source.gitCommonDir !== (managed ?? repository.gitCommonDir) ||
+      (managed &&
+        (await this.managedRepository(taskId, managed)) !==
+          repository.gitCommonDir)
+    )
       throw new Error(
         `Repository identity changed for ${repository.repositoryId}`,
       );
   }
 
-  private async gitInfo(
-    path: string,
-    ref: string,
-  ): Promise<{ root: string; gitCommonDir: string; commit: string }> {
-    const repository = await this.gitRepositoryInfo(path);
-    const commit = await this.git(
+  private resolveCommit(path: string, ref: string): Promise<string> {
+    return this.git(
       path,
       "ref-resolution",
       "rev-parse",
@@ -1195,7 +1332,118 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       "--end-of-options",
       `${ref}^{commit}`,
     );
-    return { ...repository, commit };
+  }
+
+  /**
+   * Creates or validates the scope's bare reftable repository for a source common
+   * directory. It reads the source's objects through an alternate, so no transport runs.
+   * A repository that no longer matches is refused, never repaired.
+   */
+  private async managedRepository(
+    taskId: string,
+    sourceGitCommonDir: string,
+  ): Promise<string> {
+    const root = this.repositoryRoot;
+    const scope = this.options.managedRepositories?.scopeOf(taskId);
+    if (!root || !scope)
+      throw new Error("Managed repository scope unavailable");
+    const key = createHash("sha256")
+      .update(`${scope}\0${sourceGitCommonDir}`)
+      .digest("hex")
+      .slice(0, 32);
+    const path = join(root, key);
+    const alternates = `${join(sourceGitCommonDir, "objects")}\n`;
+    return serialized(this.repositoryLocks, path, async () => {
+      if (!(await lstatIfExists(path))) {
+        await mkdir(root, { recursive: true });
+        const temporary = join(root, `.${key}-${randomUUID()}`);
+        try {
+          const format = await this.git(
+            sourceGitCommonDir,
+            "repository-identity",
+            "rev-parse",
+            "--show-object-format",
+          );
+          await this.git(
+            root,
+            "repository-create",
+            "init",
+            "--quiet",
+            "--bare",
+            "--template=",
+            "--ref-format=reftable",
+            `--object-format=${format}`,
+            temporary,
+          );
+          await writeFile(
+            join(temporary, "objects", "info", "alternates"),
+            alternates,
+          );
+          for (const [name, value] of [
+            ["gc.auto", "0"],
+            ["maintenance.auto", "false"],
+            ["core.logAllRefUpdates", "true"],
+          ] as const)
+            await this.git(
+              temporary,
+              "repository-create",
+              "config",
+              name,
+              value,
+            );
+          await rename(temporary, path);
+        } catch (error) {
+          await rm(temporary, { recursive: true, force: true });
+          // Another process may have created it first; validation below decides.
+          if (!(await lstatIfExists(path))) throw error;
+        }
+      }
+      const info = await lstat(path);
+      if (
+        info.isSymbolicLink() ||
+        !info.isDirectory() ||
+        (await realpath(path)) !== path ||
+        (await this.git(
+          path,
+          "repository-identity",
+          "rev-parse",
+          "--absolute-git-dir",
+          "--is-bare-repository",
+          "--show-ref-format",
+        )) !== `${path}\ntrue\nreftable` ||
+        (await readFile(
+          join(path, "objects", "info", "alternates"),
+          "utf8",
+        ).catch(() => null)) !== alternates
+      )
+        throw new Error(
+          "Managed repository does not match its source; inspect it before recovery",
+        );
+      return path;
+    });
+  }
+
+  /** Binds a managed worktree to the admin directory Git chose for it. */
+  private async recordGitDirectory(
+    taskId: string,
+    repository: TaskWorkspaceRepository,
+  ): Promise<void> {
+    if (!managedRepositoryOf(repository)) return;
+    const gitDirectory = await this.git(
+      repository.workspacePath,
+      "checkout-validation",
+      "rev-parse",
+      "--absolute-git-dir",
+    );
+    if (dirname(gitDirectory) !== join(repository.gitCommonDir, "worktrees"))
+      throw new Error(
+        `Workspace admin directory is outside the managed repository for ${repository.repositoryId}`,
+      );
+    this.store.recordGitDirectory(
+      taskId,
+      repository.repositoryId,
+      gitDirectory,
+    );
   }
 
   private async gitRepositoryInfo(
@@ -1342,7 +1590,14 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       const worktree = await this.gitRepositoryInfo(repository.workspacePath);
       if (
         worktree.root !== resolve(repository.workspacePath) ||
-        worktree.gitCommonDir !== repository.gitCommonDir
+        worktree.gitCommonDir !== repository.gitCommonDir ||
+        (repository.gitDirectory &&
+          (await this.git(
+            repository.workspacePath,
+            "repository-identity",
+            "rev-parse",
+            "--absolute-git-dir",
+          )) !== repository.gitDirectory)
       )
         throw new Error(
           `Workspace path for ${repository.repositoryId} belongs to another repository`,
@@ -1389,6 +1644,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       "status",
       "--porcelain=v1",
       "--untracked-files=no",
+      "--ignore-submodules=dirty",
     );
     if (head !== repository.commit || trackedChanges.length > 0)
       throw new Error(
@@ -1490,16 +1746,9 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     taskId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const previous = this.inFlight.get(taskId) ?? Promise.resolve();
-    const current = previous
-      .catch(() => {})
-      .then(() => {
-        this.assertNotCancelled();
-        return operation();
-      });
-    this.inFlight.set(taskId, current);
-    return current.finally(() => {
-      if (this.inFlight.get(taskId) === current) this.inFlight.delete(taskId);
+    return serialized(this.inFlight, taskId, () => {
+      this.assertNotCancelled();
+      return operation();
     });
   }
 }
@@ -1561,6 +1810,12 @@ function validateTimer(milliseconds: number, label: string): number {
   )
     throw new Error(`${label} must be finite positive milliseconds`);
   return milliseconds;
+}
+
+/** An absolute directory under its parent's physical path, as cab's managed roots are kept. */
+function canonicalRoot(path: string): string {
+  const resolved = resolve(path);
+  return join(realpathSync(dirname(resolved)), basename(resolved));
 }
 
 /** Bounds how long an unchanged worktree may skip its Git identity read. */

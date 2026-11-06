@@ -6,14 +6,26 @@ export interface PolicyDisclosure {
   limits: string[];
 }
 
+/** What `taskGitWritableRoots` adds to a task turn, in both harnesses. */
+const taskGitDisclosure =
+  "In a task repository, Git commands can also write cab's per-project repository's objects/ and reftable/ and the worktree's own worktrees/<name>/ directory. Its root, config, info/ and hooks stay read-only, and the operator's checkout is never written.";
+
+const taskGitLimits = [
+  "Tasks of one project share their repository's objects and refs: an agent can move another task's branches and delete or corrupt its unpushed commits, and a changed alternates file stops new workspaces until the operator repairs it. Older workspaces have no Git write access.",
+  "The repository reads the operator's objects through an alternate, so pruning objects a task's base needs breaks it. git fetch, pull, gc and worktree add fail, because they write the repository root. Git LFS content is not available, and submodule metadata is not writable.",
+  "The source checkout's own Git config, including a repository-local user identity, does not apply in task worktrees. cab keeps a project's repositories after the project is deleted; the operator can remove them.",
+];
+
 /** The retained Codex disclosure; `executionPolicy` in codex.ts is what it describes. */
 export function codexPolicyDisclosure(): PolicyDisclosure {
   return {
     lines: [
       "Default policy: workspace writes with broad host-permitted reads.",
       "Command network access is disabled unless the project enables it. Approval policy is never.",
+      taskGitDisclosure,
     ],
     limits: [
+      ...taskGitLimits,
       "Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.",
       "Codex runs in cab's own Codex home with the operator's login linked; it loads no user Codex settings, only the skills enabled in the agent settings, and has subagents disabled. cab does not provide an independent execution sandbox.",
       "Codex gets plugin skills only from its agent settings, from local plugin directories or plugins installed in Claude Code or Codex, as skill directories: a plugin's hooks, MCP servers and apps are not loaded, and skills are instructions to the agent, not cab policy.",
@@ -56,7 +68,8 @@ export function claudePolicyDisclosure(
         : []),
       "Command network access is denied. There are no interactive approvals.",
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
+      taskGitDisclosure,
     ],
-    limits: policy.limits,
+    limits: [...policy.limits, ...taskGitLimits],
   };
 }

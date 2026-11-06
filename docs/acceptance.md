@@ -795,6 +795,25 @@ harnesses; the real-runtime runs are recorded in the
 | Commands are receipted by key; excluded text, a stale copy, a missing grant and a runtime actor are refused; the task read reports the first unavailable reason and the latest edit | `operator-issue-edit-api.test.ts` |
 | Improve with lead runs from note to proposal, edit, full current-and-proposed review and send, shows disabled, stale (Redraft) and uncertain (held, no resend, kept across a reload) states, and sends no task or comment command (1366 px, 390 px, WebKit phone) | `operator-issue-improve-browser.test.ts`, `issue-improve-model.test.ts` |
 
+## Task Git access
+
+Task worktrees are made from cab's managed repository, and each task turn can write its
+Git metadata roots and nothing of the operator's checkout. The service and both runtimes
+are covered by deterministic suites; the sandboxes are proved by the
+[probe](evidence/task-git-access-probe-2026-11-05.md) and one
+[live service turn per harness](evidence/2026-11-05-task-git-access-live.md), which CI
+does not repeat.
+
+| Criteria | Evidence |
+| --- | --- |
+| A task worktree comes from a bare reftable repository per project and source with the source's objects as its alternate; a second task of the project reuses it and another project gets its own; a requested commit resolves in it; the source's worktree list and refs are unchanged | `workspaces.test.ts` |
+| A managed repository whose alternates or ref format changed is refused with a reason and no worktree; a worktree redirected to another admin directory is held; a legacy binding of the source checkout validates and cleans up as before; cab's status never runs the configuration of a submodule an agent staged | `workspaces.test.ts` |
+| Archive and deleted-project cleanup remove the worktree from the managed repository and keep the repository | `workspaces.test.ts`, `deleted-project-cleanup.test.ts` |
+| A task turn sends its three Git roots (with network access when enabled) and a draft turn sends none; Git confined to the workspace and those roots branches, commits, amends, rebases and deletes a branch, while the managed config and the source stay unwritten | `task-git-access.test.ts` |
+| Codex adds the roots to `writableRoots`; Claude adds them to the sandbox `allowWrite` while its file-editing hook still refuses them; both disclosures name the writable paths and their limits | `codex-runtime.test.ts`, `claude-runtime.test.ts`, `operator-execution-runtime.test.ts` |
+| Delivery pushes a managed worktree's commit, whose base objects exist only in the source, through the nested alternate | `git-push.test.ts` |
+| Comparisons against a base branch read the operator's branches from the source checkout | `operator-comparisons.test.ts` |
+
 ## Draft turns
 
 A draft turn is a read-only turn of the project lead on a task that is not Ready. The

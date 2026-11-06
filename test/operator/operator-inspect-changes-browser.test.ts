@@ -19,6 +19,9 @@ import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
+
+setFixtureGitIdentity();
 
 // The budget is the table under "Budget" in docs/user-flows/inspect-changes.md.
 const test = browserSuite("inspect-changes-budget");

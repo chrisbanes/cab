@@ -60,7 +60,10 @@ export function childProcessEnvironment(
   );
 }
 
-/** Environment for every Git child: no inherited `GIT_*`, no prompts, lazy fetches or transports. */
+/**
+ * Environment for every Git child: no inherited `GIT_*`, no prompts, lazy fetches or transports,
+ * and no look inside submodule working trees, whose configuration an agent may have chosen.
+ */
 export function gitEnvironment(
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -71,5 +74,8 @@ export function gitEnvironment(
   environment.GIT_NO_LAZY_FETCH = "1";
   environment.GIT_OPTIONAL_LOCKS = "0";
   environment.GIT_TERMINAL_PROMPT = "0";
+  environment.GIT_CONFIG_COUNT = "1";
+  environment.GIT_CONFIG_KEY_0 = "diff.ignoreSubmodules";
+  environment.GIT_CONFIG_VALUE_0 = "dirty";
   return environment;
 }

@@ -206,7 +206,13 @@ async function countUncommitted(git: Git): Promise<number | null> {
     "-c",
     `filter.${driver}.required=false`,
   ]);
-  const status = await git([...overrides, "status", "--porcelain=v1", "-z"]);
+  const status = await git([
+    ...overrides,
+    "status",
+    "--ignore-submodules=dirty",
+    "--porcelain=v1",
+    "-z",
+  ]);
   if (status.status !== "ok") return null;
   // A driver that appeared while status ran could have run unneutralised.
   const after = await drivers();

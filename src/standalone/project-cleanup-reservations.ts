@@ -7,7 +7,10 @@ import {
 } from "../core/project-cleanup-reservations.js";
 import type { Database } from "../core/store.js";
 import { projectCleanupId } from "./project-cleanup-identities.js";
-import type { TaskWorkspaceBinding } from "./workspaces.js";
+import {
+  repositoryBindingPaths,
+  type TaskWorkspaceBinding,
+} from "./workspaces.js";
 
 export function isDeletedProjectThread(
   db: Database,
@@ -37,14 +40,7 @@ export function assertCapturedWorkspaceAvailable(
     throw new Error("Workspace identity belongs to a deleted project");
   assertCleanupOwnershipAvailableWithinTransaction(
     db,
-    [
-      binding.path,
-      ...binding.repositories.flatMap((repo) => [
-        repo.sourcePath,
-        repo.workspacePath,
-        ...(repo.gitCommonDir === null ? [] : [repo.gitCommonDir]),
-      ]),
-    ],
+    [binding.path, ...binding.repositories.flatMap(repositoryBindingPaths)],
     binding.taskId,
   );
 }
@@ -86,11 +82,17 @@ export function capturedWorkspaceUnclaimed(
       )
     )
       return false;
-    for (const field of ["sourcePath", "workspacePath", "gitCommonDir"]) {
+    for (const field of [
+      "sourcePath",
+      "workspacePath",
+      "gitCommonDir",
+      "sourceGitCommonDir",
+      "gitDirectory",
+    ]) {
       const rows = db
         .prepare(`SELECT json_extract(r.value,'$.${field}') AS path
         FROM ${table} b,json_each(b.repositories) r
-        ${field === "gitCommonDir" ? "WHERE json_extract(r.value,'$.gitCommonDir') IS NOT NULL" : ""}
+        ${field === "sourcePath" || field === "workspacePath" ? "" : `WHERE json_extract(r.value,'$.${field}') IS NOT NULL`}
         LIMIT 10001`)
         .all() as { path: unknown }[];
       if (!unclaimed(rows)) return false;

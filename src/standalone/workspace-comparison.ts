@@ -996,19 +996,14 @@ export async function compareRepository(
     },
     configOverrides: readonly string[] = [],
     emptyOutputExitCode?: number,
+    root = repository.workspacePath,
   ): Promise<Buffer | undefined> => {
     if (!(await stillCurrent())) {
       result.state = "gap";
       result.reason = "workspace-changed";
       return undefined;
     }
-    let read = await readGit(
-      repository.workspacePath,
-      args,
-      startedAt,
-      options,
-      configOverrides,
-    );
+    let read = await readGit(root, args, startedAt, options, configOverrides);
     if (
       !read.ok &&
       read.reason === "failed" &&
@@ -1093,11 +1088,15 @@ export async function compareRepository(
     return output;
   };
 
-  const refs = await run([
-    "for-each-ref",
-    "--format=%(refname:lstrip=2)",
-    "refs/heads",
-  ]);
+  // Base branches are the operator's: a managed worktree's own refs hold only task branches.
+  const branchRoot = repository.sourceGitCommonDir ?? repository.workspacePath;
+  const refs = await run(
+    ["for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads"],
+    undefined,
+    [],
+    undefined,
+    branchRoot,
+  );
   if (!refs) return result;
   let branchText: string;
   try {
@@ -1144,6 +1143,9 @@ export async function compareRepository(
         `refs/heads/${selected}^{commit}`,
       ],
       { reason: "base-branch-unavailable", exitCode: 128 },
+      [],
+      undefined,
+      branchRoot,
     );
     if (!branchCommitRaw) return result;
     const branchCommit = branchCommitRaw.toString("ascii").trim();
@@ -1211,6 +1213,7 @@ export async function compareRepository(
   if (request.target === "branch") {
     const output = await runWorkingTreeDiff([
       "diff",
+      "--ignore-submodules=dirty",
       "--raw",
       "-z",
       "--no-abbrev",
@@ -1249,6 +1252,7 @@ export async function compareRepository(
     if (changeSet !== "unstaged") {
       const stagedOutput = await run([
         "diff",
+        "--ignore-submodules=dirty",
         "--cached",
         "--raw",
         "-z",
@@ -1272,6 +1276,7 @@ export async function compareRepository(
     if (changeSet !== "staged") {
       const unstagedOutput = await runWorkingTreeDiff([
         "diff",
+        "--ignore-submodules=dirty",
         "--raw",
         "-z",
         "--no-abbrev",
@@ -1622,12 +1627,18 @@ export async function compareRepository(
     return result;
   }
   if (selectedBranchCommit !== undefined) {
-    const branchRef = await run([
-      "rev-parse",
-      "--verify",
-      "--end-of-options",
-      `refs/heads/${selectedBranch}^{commit}`,
-    ]);
+    const branchRef = await run(
+      [
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `refs/heads/${selectedBranch}^{commit}`,
+      ],
+      undefined,
+      [],
+      undefined,
+      branchRoot,
+    );
     if (!branchRef) return result;
     if (branchRef.toString("ascii").trim() !== selectedBranchCommit) {
       result.state = "gap";

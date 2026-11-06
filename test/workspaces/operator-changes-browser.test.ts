@@ -19,6 +19,9 @@ import {
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { until } from "../fixtures/until.js";
+import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
+
+setFixtureGitIdentity();
 
 const test = browserSuite("operator-changes-browser");
 
@@ -291,7 +294,13 @@ test("Changes opens on the Branch comparison against the configured ref", async 
         git(workspace, "commit", "--quiet", "-m", "default ref change");
       },
     });
-  const mergeBase = git(alpha.workspacePath, "merge-base", "main", "HEAD");
+  // The operator's `main` is in the source checkout; the task worktree reads its objects.
+  const mergeBase = git(
+    alpha.workspacePath,
+    "merge-base",
+    git(alpha.sourcePath, "rev-parse", "main"),
+    "HEAD",
+  );
 
   // Choosing a repository is not a base-branch step; the fixture lists beta
   // first and it keeps the HEAD ref, so it still needs a base.

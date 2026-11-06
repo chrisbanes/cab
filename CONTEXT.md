@@ -118,6 +118,12 @@ host. It belongs to the project, independently of any task source, and grants
 access only to that repository.
 _Avoid_: Source repository when referring to a project's linked repository
 
+**Managed repository**:
+cab's own bare repository for one project and one linked source checkout, which task
+worktrees are made from. It reads the checkout's objects through an alternate, so agents
+can commit in their task workspace without writing the operator's checkout.
+_Avoid_: Clone or mirror
+
 **Change request**:
 A code host's request to merge a task branch into its base: a GitHub pull request
 or a GitLab merge request.

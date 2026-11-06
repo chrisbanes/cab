@@ -290,6 +290,8 @@ for (const surface of [
           "origin",
           "https://github.com/cleanup-owner/repository.git",
         );
+        // The task's managed repository has no operator branches; give the link its ref.
+        await cleanupGit(source, "branch", "main");
       } else
         await separateRepository(
           source,

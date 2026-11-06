@@ -879,6 +879,33 @@ linked path and ref, and only once the turn is otherwise admissible, so a held o
 not-Ready task gets no checkout. An imported task whose source repository the
 project does not link waits, without a workspace, until it is linked.
 
+A task worktree is made from cab's managed repository for its project and source
+checkout, not from the operator's checkout ([ADR-1026](adr/1026-cab-owned-task-repositories.md)).
+The managed repository is a bare repository with Git's reftable ref backend under
+`<data>/repositories/`. It reads the operator's objects through an alternate, so creating
+it runs no transport, and nothing is ever written to the operator's checkout. A task turn
+can write, besides its workspace, the managed repository's `objects/` and `reftable/`
+directories and the worktree's own `worktrees/<name>/` admin directory. The repository's
+root, `config`, `info/` and hooks stay read-only, so agents branch, commit, amend and
+rebase with normal Git, and cab's [task commit publication](#github-and-completion)
+pushes the worktree's commits as before. The limits:
+
+- Tasks of one project share the repository's objects and refs: an agent can move
+  another task's branches and delete or corrupt its unpushed commits, though not move
+  another worktree's checked-out commit. An agent that changes the alternates file stops
+  new workspaces of the project until the operator repairs it.
+- If the operator prunes objects a task's base needs, that task's repository loses them.
+- `git fetch`, `pull`, `gc` and `worktree add` fail in a task workspace, because they
+  write the repository root. Git LFS content is not available in a task worktree, and
+  submodule metadata is not writable.
+- Workspaces created before managed repositories keep their worktree of the operator's
+  checkout, with no Git write access. Drafting runs keep a disposable worktree of the
+  operator's checkout, also with no Git write access.
+- The source checkout's own Git configuration, including a repository-local user identity,
+  does not apply in task worktrees; agents' Git reads the managed repository's and the
+  host's configuration.
+- cab keeps a project's managed repositories after the project is deleted.
+
 Normal successful completion trusts Codex's successful terminal status for the
 bound thread/turn. After every cab-owned callback has ended, with no known
 unfinished execution or other hold, persist completion and serialize ownership
@@ -902,8 +929,10 @@ reconciliation evidence. Missing workspaces hold affected execution visibly.
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository
 verification) clears inherited `GIT_*` variables, never prompts on a terminal,
-lazily fetches objects or allows transport protocols, and uses bounded time and
-output. A repository that needs the network to supply objects therefore fails
+lazily fetches objects or allows transport protocols, never looks inside a
+submodule's working tree (`--ignore-submodules=dirty` on its status and diff reads, and
+`diff.ignoreSubmodules=dirty` for every other command, so the configuration of a submodule
+an agent created never runs), and uses bounded time and output. A repository that needs the network to supply objects therefore fails
 closed. This governs cab's own Git; agent processes run their own Git with
 their runtime environment. The one exception is [task commit
 publication](#github-and-completion): a single bounded HTTPS push to the verified

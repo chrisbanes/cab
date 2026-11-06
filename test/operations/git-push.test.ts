@@ -93,6 +93,7 @@ writeFileSync(${JSON.stringify(record)}, JSON.stringify({
   config: real([...args.slice(0, args.indexOf("push")), "config", "--list", "--show-origin"]).stdout,
   scratchConfig: readFileSync(process.env.GIT_DIR + "/config", "utf8"),
   resolves: real(["rev-parse", "--verify", sha + "^{commit}"]).stdout.trim(),
+  history: real(["rev-list", sha]).stdout.trim().split(String.fromCharCode(10)),
 }));
 writeFileSync(${JSON.stringify(started)}, "1");
 ${behaviour.sleep ? "setTimeout(() => {}, 60000);" : `process.stdout.write(${JSON.stringify(behaviour.stdout ?? "")}); process.exit(${behaviour.exit ?? 0});`}
@@ -110,6 +111,7 @@ ${behaviour.sleep ? "setTimeout(() => {}, 60000);" : `process.stdout.write(${JSO
         config: string;
         scratchConfig: string;
         resolves: string;
+        history: string[];
       },
   };
 }
@@ -187,6 +189,55 @@ test("a checkout path containing a colon still resolves the commit through quote
       join(git(repo.workspace, "rev-parse", "--git-common-dir"), "objects"),
     ),
   );
+});
+
+test("a worktree of a cab-owned repository pushes through its nested alternate to the source's objects", async (t) => {
+  const repo = repository(t);
+  const managed = join(repo.root, "repositories", "managed");
+  mkdirSync(managed, { recursive: true });
+  git(
+    repo.root,
+    "init",
+    "-q",
+    "--bare",
+    "--template=",
+    "--ref-format=reftable",
+    managed,
+  );
+  writeFileSync(
+    join(managed, "objects", "info", "alternates"),
+    `${join(repo.source, ".git", "objects")}\n`,
+  );
+  const base = git(repo.source, "rev-parse", "HEAD");
+  const workspace = join(repo.root, "managed-workspace");
+  git(managed, "worktree", "add", "-q", "--detach", workspace, base);
+  writeFileSync(join(workspace, "c.txt"), "c\n");
+  git(workspace, "add", ".");
+  git(
+    workspace,
+    "-c",
+    "user.name=T",
+    "-c",
+    "user.email=t@e.com",
+    "commit",
+    "-q",
+    "-m",
+    "c",
+  );
+  const sha = git(workspace, "rev-parse", "HEAD");
+  const fake = shim(t);
+  assert.equal(
+    await pushTaskCommit({
+      ...request(repo, fake.executable),
+      workspacePath: workspace,
+      commitSha: sha,
+    }),
+    "pushed",
+  );
+  const seen = fake.recorded();
+  assert.equal(seen.resolves, sha);
+  // The base commit exists only in the source, so this walk crosses the nested alternate.
+  assert.deepEqual(seen.history, [sha, base]);
 });
 
 test("repository-local, user and system configuration cannot redirect the push or its credential", async (t) => {

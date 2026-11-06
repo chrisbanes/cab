@@ -1058,6 +1058,45 @@ access, or with `project prepare --diagnostic-capture`. A change applies to
 executions started afterwards and erases no stored diagnostics. A service that
 does not report the mode shows it as not reported, and the control is absent.
 
+## Task Git access
+
+Agents can branch, commit, amend and rebase in a task workspace with normal Git. A task
+worktree is made from cab's managed repository for its project and source checkout:
+a bare repository with Git's reftable ref backend at `<data>/repositories/<key>`, whose
+`objects/info/alternates` names the operator checkout's `objects/`. cab creates it with
+`git init` and that alternates file, so no transport runs and nothing in the operator's
+checkout is written; its config sets `gc.auto=0`, `maintenance.auto=false` and
+`core.logAllRefUpdates=true`. Each task turn, in Codex and in Claude Code, can also write
+the managed repository's `objects/` and `reftable/` and the worktree's own
+`worktrees/<name>/` directory. The root, `config`, `info/` and hooks stay read-only. A
+task's branches and commits live only in the managed repository; delivery pushes the
+worktree's commits through `cab_external_action` as before. Git 2.45 or later is required
+for reftable; with an older Git, provisioning fails with the reason on the task.
+
+A managed repository that no longer matches (it is not bare, not reftable, or its
+alternates changed) is refused, and the task waits in provisioning with the reason. cab
+never repairs it: inspect it, and remove it only if no task workspace of that project
+still uses it.
+
+The limits:
+
+- Tasks of one project share the repository's objects and refs: an agent can move another
+  task's branches and delete or corrupt its unpushed commits, though not move another
+  worktree's checked-out commit. An agent that changes the alternates file stops new
+  workspaces of the project until you repair it.
+- If the operator prunes objects a task's base needs (`git gc --prune` after deleting the
+  branch), that task's repository loses them.
+- `git fetch`, `pull`, `gc` and `worktree add` fail in a task workspace, because they write
+  the repository root. Git LFS content is not available in a task worktree, and submodule
+  metadata is not writable.
+- Workspaces created before managed repositories keep their worktree of the operator's
+  checkout and have no Git write access. Drafting runs have none either.
+- The source checkout's own Git configuration, including a repository-local `user.name`
+  and `user.email`, does not apply in task worktrees. Set a global identity for the account
+  the service runs as if agents should commit without passing one.
+- cab keeps a project's managed repositories after the project is deleted. Once no task of
+  the project has a workspace, the operator can delete `<data>/repositories/<key>`.
+
 ## Startup snapshot
 
 Whenever the service starts against an existing database with migrations pending, it
@@ -1159,7 +1198,8 @@ limits count BLOB content, not SQLite pages, indexes, WAL files or filesystem
 overhead. A snapshot preserves database evidence only; it does not restore the
 managed workspace needed for live-file inspection.
 
-The database snapshot excludes managed worktree contents, repository state,
+The database snapshot excludes managed worktree contents, cab's managed repositories
+under `<data>/repositories/`, repository state,
 operator auth files, Codex/provider records, logs and external effects. Stored
 workspace paths remain evidence. A managed workspace restored under a different
 installation root is rejected by identity before access to the old path and
