@@ -336,3 +336,21 @@ test("skill fields name missing, duplicate and Claude-incompatible plugins, and 
     s.done();
   }
 });
+
+test("global field validation inspects selected sources without preparing adapters", async (t) => {
+  const s = sandbox();
+  t.after(s.done);
+  const environment = { HOME: join(s.root, "home") };
+  const skills = { plugins: [], global: ["review"] };
+  assert.deepEqual(await skillFieldErrors(skills, "codex", environment), [
+    "skills.global",
+  ]);
+  const directory = join(environment.HOME, ".agents", "skills", "review");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "SKILL.md"),
+    "---\nname: review\n---\nReview\n",
+  );
+  assert.deepEqual(await skillFieldErrors(skills, "codex", environment), []);
+  assert.deepEqual(await skillFieldErrors(skills, "claude", environment), []);
+});

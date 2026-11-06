@@ -667,7 +667,8 @@ and key before leaving an uncertain outcome so its operation can be read back.
 
 **Codex home.** Codex App Server runs with a `CODEX_HOME` and an isolated `HOME` that
 cab owns under its data directory ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
-so Codex itself loads nothing from the service user's `~/.codex` or `~/.agents`. The home's
+so Codex itself does not load ambient configuration or skills from the service user's
+`~/.codex` or `~/.agents`. cab separately supplies explicitly selected global skills. The home's
 `auth.json` is only a symlink to the service user's own file-backed Codex login
 (`$CODEX_HOME/auth.json` from the service environment, else `~/.codex/auth.json`):
 cab never copies, creates, reads or hashes the login, and a regular file or a link to
@@ -677,7 +678,7 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. Codex gets plugin skills only from its agent's plugins, as
+installation are disabled. Codex gets its agent's selected plugin and global skills as
 skill directories, including plugins installed in Claude Code or Codex. Codex starts
 with `tools.update_plan.enabled=true` whether or not cab owns its home, so the agent is
 offered its plan tool. A Codex conversation started under the previous home is not
@@ -1400,7 +1401,8 @@ without showing it.
 
 An agent may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
 each with the names of its skills the agent enables (at most 16 plugins and 32 skills
-each), set in the agent settings or with `cab profile prepare --skills-file`. An entry is
+each), set in the agent settings or with `cab profile prepare --skills-file`. The same
+file can be used with `cab profile prepare-create`. An entry is
 an absolute plugin directory on the service host (`{"path":…}`) or a plugin the operator
 installed and enabled in Claude Code or Codex for the service user
 (`{"plugin":"claude:<plugin>@<marketplace>"}` or `codex:…`). The agent settings list
@@ -1410,6 +1412,25 @@ and its skills are chosen in a dialog with a filter. The select leaves out plugi
 added and, on a Claude agent, plugins without a Claude manifest. A local directory is
 added in the same dialog by path and skill names. The listing
 (`GET /api/operator/installed-plugins`) names plugins, tools and skills, never paths.
+
+An agent may also explicitly select up to 32 global skills from the service user's
+`~/.agents/skills`. New skills are not enabled automatically. For example,
+`{"plugins":[],"global":["review"]}` selects one global skill; `{"plugins":[]}` clears
+all selections. The optional `global` field is omitted when empty. A selected plugin
+skill replaces a selected global skill with the same name; selecting a different skill
+from that plugin does not. Removing the plugin does not reselect the global skill.
+The CLI's prepared change shows the resulting selection.
+
+cab discovers direct child skill directories, including directory links to installations
+outside the root. Links inside a skill must resolve within that skill's resolved directory;
+invalid, ambiguous, missing or unreadable selected skills refuse a profile change or hold
+work, with path-free errors and readiness reasons. Held work is retried every 30 s. At each
+turn cab reads the current selected content, builds a bounded adapter for both harnesses and
+records its digest; an assignment retains its selected names, not a copy of their content.
+The service retains immutable, content-addressed adapters across Stop and restart. Each is
+bounded, but the cache has no total size limit or automatic collection. The
+[qualification record](evidence/global-skills-2026-11-06.md) covers both Claude
+and Codex, with separate Chromium coverage for profile settings.
 
 An installed plugin is resolved to its install directory at each turn start, and both
 harnesses load that directory, so an agent never sees two versions of a plugin; no hook,

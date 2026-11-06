@@ -1,3 +1,4 @@
+import { inspectGlobalSkills } from "./global-skills.js";
 import { lstat } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import type { z } from "zod";
@@ -169,7 +170,7 @@ const fixes = {
     "Run a Claude task; supported models are read before its first turn, then run the check again",
   unknown: "Run the check again, or restart the service",
   skillPlugins:
-    "Install or enable the named plugin in Claude Code or Codex as the service user, or edit the agent's skill plugins",
+    "Install or enable the named plugin in Claude Code or Codex as the service user, restore the selected global skill in ~/.agents/skills, or edit the agent's skills",
   runtimeEnabled: "Enable a runtime in Settings → Runtime",
   runtimeBinary:
     "Install Codex or Claude Code into the fixed PATH, then turn it off and on in Settings → Runtime",
@@ -653,7 +654,11 @@ export class Readiness {
       { skills: ProfileSkills; harness: ExecutionHarness }
     >();
     for (const profile of this.deps.profiles())
-      if (!profile.revoked && profile.skills?.plugins.length)
+      if (
+        !profile.revoked &&
+        profile.skills &&
+        (profile.skills.plugins.length || profile.skills.global?.length)
+      )
         unique.set(
           `${profile.runtime.harness}:${JSON.stringify(profile.skills)}`,
           { skills: profile.skills, harness: profile.runtime.harness },
@@ -662,13 +667,15 @@ export class Readiness {
     // Each load is bounded by the plugin inspection time limit; together they run in parallel.
     await Promise.all(
       [...unique.values()].map(({ skills, harness }) =>
-        loadProfilePlugins(skills, harness, this.deps.env).catch(
-          (error: unknown) =>
-            reasons.add(
-              error instanceof SkillPluginError
-                ? error.message
-                : "Skill plugins could not be read",
-            ),
+        Promise.all([
+          loadProfilePlugins(skills, harness, this.deps.env),
+          inspectGlobalSkills(skills, this.deps.env),
+        ]).catch((error: unknown) =>
+          reasons.add(
+            error instanceof SkillPluginError
+              ? error.message
+              : "Skill plugins could not be read",
+          ),
         ),
       ),
     );

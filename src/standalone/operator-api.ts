@@ -1,3 +1,4 @@
+import { listGlobalSkills } from "./global-skills.js";
 import {
   unstackReadSchema,
   unstackReceiptSchema,
@@ -6990,10 +6991,14 @@ export class OperatorApi {
     }
     return operationReadSchema.parse({ data, observedAt: Date.now() });
   }
-  /** Plugins installed and enabled in Claude Code or Codex that a profile can enable; no path. */
+  /** Installed plugin choices and service-user global skill availability; no paths. */
   async readInstalledPlugins() {
+    const [installed, global] = await Promise.all([
+      listInstalledPlugins(),
+      listGlobalSkills(),
+    ]);
     return installedPluginsSchema.parse({
-      data: await listInstalledPlugins(),
+      data: { ...installed, global },
       observedAt: Date.now(),
     });
   }

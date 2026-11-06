@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -59,7 +59,7 @@ const manifestSchema = z.object({
 });
 
 /** Longest all of a profile's plugins may take to inspect and digest together. A stuck read ends the wait but is not cancelled. */
-const inspectionTimeoutMs = 30_000;
+export const inspectionTimeoutMs = 30_000;
 const withTimeout = <T>(work: Promise<T>): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
   return Promise.race([
@@ -77,11 +77,12 @@ const withTimeout = <T>(work: Promise<T>): Promise<T> => {
  * Reads at most `size` bytes of a regular file opened without following links or blocking on
  * a pipe, and checks the opened handle (not the path) is that regular file of that size.
  */
-async function readRegular(
+export async function readRegular(
   path: string,
   expectedSize: number | undefined,
   maxBytes: number,
   onChunk: (chunk: Buffer) => void,
+  expected?: Stats,
 ): Promise<void> {
   const handle = await open(
     path,
@@ -90,6 +91,8 @@ async function readRegular(
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new SkillPluginError("contains a special file");
+    if (expected && !unchangedFile(info, expected))
+      throw new SkillPluginError("changed while it was read");
     if (
       info.size > maxBytes ||
       (expectedSize !== undefined && info.size !== expectedSize)
@@ -109,10 +112,24 @@ async function readRegular(
       onChunk(buffer.subarray(0, Math.min(bytesRead, info.size - position)));
       position += bytesRead;
     }
+    if (!unchangedFile(info, await handle.stat()))
+      throw new SkillPluginError("changed while it was read");
   } finally {
     await handle.close();
   }
 }
+
+/** Metadata checked before/after bounded reads, including same-size writes and replacements. */
+export const unchangedFile = (a: Stats, b: Stats): boolean =>
+  a.dev === b.dev &&
+  a.ino === b.ino &&
+  a.mode === b.mode &&
+  a.uid === b.uid &&
+  a.gid === b.gid &&
+  a.nlink === b.nlink &&
+  a.size === b.size &&
+  a.mtimeMs === b.mtimeMs &&
+  a.ctimeMs === b.ctimeMs;
 
 /** Where both runtimes look for a plugin's manifests, relative to its directory. */
 const claudeManifest = join(".claude-plugin", "plugin.json");
@@ -139,10 +156,17 @@ async function realInside(
 }
 
 /** The frontmatter `name` of a `SKILL.md`, read from its first bytes. */
-async function frontmatterName(file: string): Promise<string | undefined> {
-  const handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK);
+export async function frontmatterName(
+  file: string,
+): Promise<string | undefined> {
+  const handle = await open(
+    file,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   let text: string;
   try {
+    if (!(await handle.stat()).isFile())
+      throw new SkillPluginError("contains a special file");
     const buffer = Buffer.alloc(frontmatterBytes);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     text = buffer.subarray(0, bytesRead).toString("utf8");
@@ -402,9 +426,10 @@ export const skillFieldErrors = (
   harness: ExecutionHarness,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string[]> =>
-  withTimeout(fieldErrors(skills, harness, environment)).catch(() =>
-    skills.plugins.map(entryField),
-  );
+  withTimeout(fieldErrors(skills, harness, environment)).catch(() => [
+    ...skills.plugins.map(entryField),
+    ...(skills.global?.length ? ["skills.global"] : []),
+  ]);
 
 async function fieldErrors(
   skills: ProfileSkills,
@@ -450,6 +475,12 @@ async function fieldErrors(
       () => false,
     );
     if (!loadable) fields.push(entryField(plugin, index));
+  }
+  if (skills.global?.length) {
+    const { inspectGlobalSkills } = await import("./global-skills.js");
+    await inspectGlobalSkills(skills, environment).catch(() =>
+      fields.push("skills.global"),
+    );
   }
   return fields;
 }

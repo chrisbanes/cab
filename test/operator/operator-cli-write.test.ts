@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -26,6 +27,7 @@ import {
 import type { CommandReceipt } from "../../src/operator/contracts.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
+import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
@@ -103,6 +105,136 @@ const apiError = (code: string, fieldPaths?: string[]) => ({
 const thrown = (code: string) => async () => {
   throw new TypeError("fetch failed", { cause: { code } });
 };
+
+test("profile CLI retains global skills and previews plugin replacements", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t);
+  const previousHome = process.env.HOME;
+  process.env.HOME = join(h.dir, "home");
+  t.after(() => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  });
+  for (const name of ["shared", "other"]) {
+    const dir = join(process.env.HOME, ".agents", "skills", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      `---\nname: ${name}\n---\nInstructions`,
+    );
+  }
+  const plugin = writeSkillPlugin(join(h.dir, "plugin"), ["shared"]);
+  const issued = await s.issue("read-write", "skills-cli");
+  const login = await h.run([
+    "auth",
+    "login",
+    "--connection",
+    "home",
+    "--url",
+    s.origin,
+    "--token-file",
+    h.tokenFile(issued.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const run = async (args: string[]) => {
+    const result = await h.run(args);
+    assert.equal(result.code, 0, `${result.err}${result.out}`);
+    return result;
+  };
+  const file = join(h.dir, "skills.json");
+  let doc = join(h.dir, "change.json");
+  const id = randomUUID();
+  writeFileSync(
+    file,
+    JSON.stringify({ plugins: [], global: ["shared", "other"] }),
+  );
+  let result = await run([
+    "profile",
+    "prepare-create",
+    "--name",
+    "Skills",
+    "--instructions",
+    "Work",
+    "--id",
+    id,
+    "--skills-file",
+    file,
+    "--out",
+    doc,
+  ]);
+  assert.match(result.out, /Global \(shared, other\)/);
+  let change = JSON.parse(readFileSync(doc, "utf8")) as Json;
+  assert.deepEqual(change.command.skills, {
+    plugins: [],
+    global: ["shared", "other"],
+  });
+  await run(["profile", "apply", "--file", doc]);
+  result = await run(["profile", "get", id]);
+  assert.match(result.out, /Global \(shared, other\)/);
+  writeFileSync(
+    file,
+    JSON.stringify({
+      plugins: [{ path: plugin, skills: ["shared"] }],
+      global: ["shared", "other"],
+    }),
+  );
+  doc = join(h.dir, "update.json");
+  result = await run([
+    "profile",
+    "prepare",
+    id,
+    "--skills-file",
+    file,
+    "--out",
+    doc,
+  ]);
+  assert.match(result.out, /Global \(shared, other\)/);
+  assert.match(result.out, /Global \(other\)/);
+  change = JSON.parse(readFileSync(doc, "utf8")) as Json;
+  assert.deepEqual(change.command.skills, {
+    plugins: [{ path: plugin, skills: ["shared"] }],
+    global: ["other"],
+  });
+  await run(["profile", "apply", "--file", doc]);
+  result = await run(["profile", "get", id]);
+  assert.match(result.out, /Global \(other\)/);
+  assert.match(result.out, /plugin.*\(shared\)/);
+  const journal = readFileSync(join(h.configDir, "requests.jsonl"), "utf8");
+  const entries = journal
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Json);
+  assert.deepEqual(
+    entries.map((entry) => [entry.type, entry.state]),
+    [
+      ["profile.create", "sending"],
+      ["profile.create", "recorded"],
+      ["profile.configure", "sending"],
+      ["profile.configure", "recorded"],
+    ],
+  );
+  assert.equal(entries[2]?.digest, change.digest);
+  assert.doesNotMatch(journal, /shared|other/);
+
+  writeFileSync(file, JSON.stringify({ plugins: [], global: ["other"] }));
+  doc = join(h.dir, "remove-plugin.json");
+  result = await run([
+    "profile",
+    "prepare",
+    id,
+    "--skills-file",
+    file,
+    "--out",
+    doc,
+  ]);
+  assert.match(result.out, /Global \(other\)/);
+  change = JSON.parse(readFileSync(doc, "utf8")) as Json;
+  assert.deepEqual(change.command.skills, { plugins: [], global: ["other"] });
+  await run(["profile", "apply", "--file", doc]);
+  result = await run(["profile", "get", id]);
+  assert.match(result.out, /Global \(other\)/);
+  assert.doesNotMatch(result.out, /shared|plugin/);
+});
 
 test("write transport classifies every outcome and journals before sending", async (t) => {
   const origin = "http://127.0.0.1:9";

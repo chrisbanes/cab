@@ -27,6 +27,11 @@ implemented too ([#1525](https://github.com/chrisbanes/cab/issues/1525)); the
 shows a plugin installed and then updated with each tool's own CLI, with the next turn
 running the update.
 
+Explicit per-profile global skills are implemented for both harnesses. The
+[qualification record](../evidence/global-skills-2026-11-06.md) shows current content
+and relative resources on Claude and Codex, with separate Chromium coverage for
+profile settings.
+
 ## Decision
 
 - An agent lists skill plugins and which of their skills are enabled. A plugin
@@ -35,6 +40,10 @@ running the update.
   service host. Like other agent settings, an assignment keeps the agent revision
   it started with; an installed plugin's content is whatever is installed when each
   turn starts.
+- An agent can also select individual skills from the service user's `~/.agents/skills`.
+  Selection is explicit and new installs remain disabled. A selected plugin skill removes
+  a same-named global selection; removing that plugin does not restore it. The optional
+  `global` list holds at most 32 names and is omitted when empty.
 - Both harnesses receive the same skill set from the same directory. Claude receives the
   plugins through the Agent SDK's local `plugins` option and the enabled names through
   its `skills` option. Codex receives each plugin's skill directories as extra skills
@@ -127,11 +136,29 @@ No hook, MCP server, app or setting is read from the operator's configuration.
 Local plugin directories remain for plugins that are not installed, such as one under
 development.
 
+## Global skills
+
+cab discovers direct skill-directory children of the service user's `~/.agents/skills`,
+including directory links to installations outside that root. A link within a selected
+skill must resolve inside that skill's resolved directory. Missing, unreadable, invalid or
+ambiguous selections refuse a profile change or hold work; readiness reports the reason,
+and held work is retried. Listing, errors and turn evidence do not expose source or cache
+paths.
+
+Each turn reads the current selected content and prepares a bounded `cab-global-skills`
+adapter for both harnesses. The turn records its digest, while the profile revision retains
+names rather than content. The adapter's load scope has the existing 2,000-file, 16-MiB
+and depth-12 bounds. Completed content-addressed adapters are immutable and retained across
+Stop and restart for unresolved consumers and Codex roots. The cache has no total disk bound
+or automatic collection. A real plugin named `cab-global-skills` cannot be selected alongside
+global skills; 16 real plugin entries remain available alongside the adapter.
+
 ## Codex home and login
 
 Codex App Server runs with a `CODEX_HOME` and an isolated `HOME` that cab owns under
-its data directory, so no skill, plugin or setting is read from the service user's
-`~/.codex` or `~/.agents`. With only `CODEX_HOME` overridden, `~/.agents/skills` still
+its data directory, so Codex does not load ambient skills, plugins or settings from the
+service user's `~/.codex` or `~/.agents`. cab supplies explicitly selected global skills
+through the adapter above. With only `CODEX_HOME` overridden, `~/.agents/skills` still
 loaded ([probe record](../evidence/skill-plugin-probes-2026-10-29.md)).
 
 - **Login.** cab's home holds `auth.json` only as a symlink to the service user's
@@ -209,7 +236,8 @@ the feature stays off.
   repositories and storage, when both tools already install them.
 - Copying installed plugins into a cab store, on import or at assignment start.
   Rejected: an import is another update step to manage, and a per-assignment copy adds
-  storage and collection to keep a version the operator has already replaced.
+  storage and collection to keep a version the operator has already replaced. Global skills
+  instead use the per-turn retained adapter described above.
 - Each harness loading its own tool's install of a plugin. Rejected: the two tools hold
   different versions of the same plugin, so an agent's skills would differ by harness.
 - Skill directories only, without plugins. Rejected: most of the operator's skills

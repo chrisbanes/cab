@@ -1,3 +1,4 @@
+import { prepareGlobalSkills } from "./global-skills.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
@@ -8838,7 +8839,7 @@ export class StandaloneService {
    * Model settings of the bound profile revision. Claude always carries them; Codex only
    * when a value is set, so a Codex profile without settings keeps today's call shapes.
    * Skills are the plugins `skillPluginWait` resolved for this turn, never the profile's
-   * entries: a turn whose profile enables plugins and has none resolved throws, except for
+   * entries: a turn whose profile enables skills and has none resolved throws, except for
    * `preflight`, which reads no skills.
    */
   private turnSettings(
@@ -8851,8 +8852,8 @@ export class StandaloneService {
     const runtime = domain.profileRuntime(bound.profileId, bound.revision);
     const model = runtime.model ?? null,
       reasoningEffort = runtime.reasoningEffort ?? null;
-    const enabled =
-      domain.profileSkills(bound.profileId, bound.revision).plugins.length > 0;
+    const skills = domain.profileSkills(bound.profileId, bound.revision);
+    const enabled = skills.plugins.length > 0 || Boolean(skills.global?.length);
     const loaded = this.turnPlugins.get(request.workId);
     if (enabled && !loaded && !preflight)
       throw new Error("Skill plugins were not loaded for this turn");
@@ -8880,10 +8881,9 @@ export class StandaloneService {
   }
 
   /**
-   * Resolves (an installed plugin to its current install), loads and digests the turn's
-   * skill plugins before admission. A reason keeps the work waiting, with no hold taken:
-   * a missing, disabled or unreadable plugin never falls back to running without it. The
-   * reason never contains a path.
+   * Resolves current plugins and prepares selected global skills before admission.
+   * A missing, disabled or unreadable selection keeps work waiting, with no hold
+   * taken and no fallback to running without it. The reason never contains a path.
    */
   private async skillPluginWait(
     request: TurnRequest,
@@ -8895,11 +8895,14 @@ export class StandaloneService {
       const skills = bound
         ? this.domain().profileSkills(bound.profileId, bound.revision)
         : undefined;
-      if (skills && skills.plugins.length > 0)
-        this.turnPlugins.set(
-          request.workId,
-          await loadProfilePlugins(skills, harness),
-        );
+      if (skills && (skills.plugins.length > 0 || skills.global?.length)) {
+        const loaded = await loadProfilePlugins(skills, harness);
+        const global = await prepareGlobalSkills(this.dataDir, skills);
+        this.turnPlugins.set(request.workId, [
+          ...loaded,
+          ...(global ? [global] : []),
+        ]);
+      }
       return undefined;
     } catch (error) {
       return error instanceof SkillPluginError
@@ -8910,7 +8913,7 @@ export class StandaloneService {
 
   /**
    * Wakes the scheduler once `skillPluginRetryMs` after work waits on a skill plugin:
-   * installing or enabling a plugin is not a cab event, so nothing else would re-check it.
+   * restoring a skill source is not a cab event, so nothing else would re-check it.
    * One timer per generation; other wakes still re-check the work at once.
    */
   private retrySkillPluginWait(generation: ServiceGeneration): void {

@@ -136,7 +136,7 @@ async function readProfile(client: ServiceClient, id: string) {
 /**
  * The skill plugins as JSON `{"plugins":[{"path":"/abs/dir","skills":["name"]}]}`, where an
  * entry may instead name an installed plugin, `{"plugin":"claude:<plugin>@<marketplace>",…}`
- * or `codex:…`; `{"plugins":[]}` clears.
+ * or `codex:…`. Optional `global` names select service-user skills; `{"plugins":[]}` clears.
  */
 async function skillsFromFile(path: string | undefined) {
   const text = await readTextFile(path, "skills-file");
@@ -151,17 +151,18 @@ async function skillsFromFile(path: string | undefined) {
   if (!parsed.success)
     throw new CliError(
       "invalid-input",
-      '--skills-file takes JSON like {"plugins":[{"path":"/absolute/plugin/dir","skills":["skill-name"]},{"plugin":"claude:name@marketplace","skills":["skill-name"]}]}, where "plugin" names an installed plugin as claude:<plugin>@<marketplace> or codex:<plugin>@<marketplace>; {"plugins":[]} clears them.',
+      '--skills-file takes JSON like {"plugins":[{"path":"/absolute/plugin/dir","skills":["skill-name"]},{"plugin":"claude:name@marketplace","skills":["skill-name"]}],"global":["global-skill"]}, where "plugin" names an installed plugin as claude:<plugin>@<marketplace> or codex:<plugin>@<marketplace>; {"plugins":[]} clears them.',
     );
   return parsed.data;
 }
 
-const describeSkills = (skills: ProfileSkills) =>
-  skills.plugins.length === 0
-    ? "none"
-    : skills.plugins
-        .map((p) => `${profilePluginKey(p)} (${p.skills.join(", ")})`)
-        .join("; ");
+export const describeSkills = (skills: ProfileSkills) =>
+  [
+    ...skills.plugins.map(
+      (p) => `${profilePluginKey(p)} (${p.skills.join(", ")})`,
+    ),
+    ...(skills.global?.length ? [`Global (${skills.global.join(", ")})`] : []),
+  ].join("; ") || "none";
 
 const instructionsOf = (client: ServiceClient, id: string, revision?: number) =>
   client
@@ -323,7 +324,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
             to: describeSkills(skills),
           });
           notes.push(
-            "A skills change saves a new profile revision and affects new conversations only. Plugins contribute skills, instructions and scripts; their hooks and MCP servers never run.",
+            "A skills change saves a new profile revision; existing assignments keep their revision until applied. Skills can include instructions and scripts; plugin hooks and MCP servers never run.",
           );
         }
         instructionChange(current, proposed, changes, diff, gaps, notes);
@@ -348,7 +349,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
     "profile prepare-create",
     {
       usage:
-        "profile prepare-create [--out FILE] --name S (--instructions TEXT|- | --instructions-file PATH) [--summary S] [--capabilities-file PATH] [--id UUID]",
+        "profile prepare-create [--out FILE] --name S (--instructions TEXT|- | --instructions-file PATH) [--summary S] [--capabilities-file PATH] [--skills-file PATH] [--id UUID]",
       positionals: 0,
       flags: [
         "out",
@@ -357,6 +358,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
         "instructions",
         "instructions-file",
         "capabilities-file",
+        "skills-file",
         "id",
       ],
       async run(ctx) {
@@ -377,6 +379,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
             ctx.values["capabilities-file"],
             "capabilities-file",
           )) ?? "";
+        const skills = await skillsFromFile(ctx.values["skills-file"]);
         const session = await ctx.connect(["cli.identity", "workspace.read"]);
         return writePrepared(ctx, session, {
           kind: "profile.create",
@@ -389,10 +392,14 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
               : { summary: ctx.values.summary?.trim() }),
             instructions,
             capabilities,
+            ...(skills === undefined ? {} : { skills }),
           },
           changes: [
             { field: "profile", from: null, to: id },
             { field: "name", from: null, to: ctx.values.name?.trim() },
+            ...(skills === undefined
+              ? []
+              : [{ field: "skills", from: null, to: describeSkills(skills) }]),
             {
               field: "instructions",
               from: null,

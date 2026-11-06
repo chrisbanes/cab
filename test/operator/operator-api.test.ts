@@ -8,6 +8,7 @@ import {
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -3179,8 +3180,22 @@ test("installed plugins are listed by tool with their skills and no path, saved 
       },
     ],
     status: { claude: "available", codex: "available" },
+    global: { status: "missing", skills: [] },
   });
   assert.equal(JSON.stringify(listing).includes(root), false);
+  const globalRoot = join(homes.environment.HOME!, ".agents", "skills");
+  mkdirSync(globalRoot, { recursive: true });
+  for (let i = 0; i < 2001; i++) writeFileSync(join(globalRoot, String(i)), "");
+  const oversized = await api.readInstalledPlugins();
+  assert.deepEqual(oversized.data.plugins, listing.data.plugins);
+  assert.deepEqual(oversized.data.status, listing.data.status);
+  assert.deepEqual(oversized.data.global, { status: "unreadable", skills: [] });
+  assert.equal(JSON.stringify(oversized).includes(root), false);
+  rmSync(globalRoot, { recursive: true });
+  assert.deepEqual((await api.readInstalledPlugins()).data.global, {
+    status: "missing",
+    skills: [],
+  });
   const configure = (skills: object, expectedVersion: number) =>
     ({
       type: "profile.configure",
@@ -4938,4 +4953,119 @@ test("a Jira project's status mapping is read with its observed status names, sa
       ],
     },
   );
+});
+
+test("global listing and profile validation are path-free, read-only and canonical", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const home = join(f.directory, "global-home");
+  const previous = process.env.HOME;
+  process.env.HOME = home;
+  t.after(() => {
+    if (previous === undefined) delete process.env.HOME;
+    else process.env.HOME = previous;
+  });
+  for (const name of ["chosen", "unselected"]) {
+    const dir = join(home, ".agents/skills", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      `---\nname: ${name}\n---\nInstructions`,
+    );
+  }
+  const listing = await api.readInstalledPlugins();
+  assert.deepEqual(listing.data.global, {
+    status: "available",
+    skills: [
+      { name: "chosen", available: true },
+      { name: "unselected", available: true },
+    ],
+  });
+  assert.equal(JSON.stringify(listing).includes(home), false);
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    { plugins: [] },
+  );
+  const configure = (skills: object, version = 1) => ({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: version,
+    skills,
+  });
+  const fields = async (skills: object) => {
+    const error = await api.execute(configure(skills)).then(
+      () => undefined,
+      (error) => error,
+    );
+    assert.ok(error instanceof OperatorApiError);
+    assert.equal(error.status, 400);
+    assert.deepEqual(error.fieldPaths, ["skills.global"]);
+    assert.equal(error.message.includes(home), false);
+  };
+  await fields({ plugins: [], global: ["unknown"] });
+  const reserved = writeSkillPlugin(
+    join(f.directory, "reserved"),
+    ["p"],
+    "cab-global-skills",
+  );
+  await fields({
+    plugins: [{ path: reserved, skills: ["p"] }],
+    global: ["chosen"],
+  });
+  if (process.getuid?.() !== 0) {
+    chmodSync(join(home, ".agents/skills"), 0);
+    try {
+      await fields({ plugins: [], global: ["chosen"] });
+    } finally {
+      chmodSync(join(home, ".agents/skills"), 0o700);
+    }
+  }
+  const malformed = operatorCommandSchema.safeParse(
+    configure({ plugins: [], global: ["../bad"] }),
+  );
+  assert.equal(malformed.success, false);
+  if (!malformed.success)
+    assert.ok(
+      malformed.error.issues.some((i) =>
+        i.path.join(".").startsWith("skills.global"),
+      ),
+    );
+  await api.execute(configure({ plugins: [], global: ["chosen"] }));
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    { plugins: [], global: ["chosen"] },
+  );
+  const plugin = writeSkillPlugin(join(f.directory, "mixed"), [
+    "chosen",
+    "other",
+  ]);
+  await api.execute(
+    configure(
+      { plugins: [{ path: plugin, skills: ["other"] }], global: ["chosen"] },
+      2,
+    ),
+  );
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills.global,
+    ["chosen"],
+  );
+  await api.execute(
+    configure(
+      { plugins: [{ path: plugin, skills: ["chosen"] }], global: ["chosen"] },
+      3,
+    ),
+  );
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    { plugins: [{ path: plugin, skills: ["chosen"] }] },
+  );
+  await api.execute(configure({ plugins: [] }, 4));
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    { plugins: [] },
+  );
+  assert.equal(existsSync(join(f.directory, "data/global-skill-cache")), false);
 });

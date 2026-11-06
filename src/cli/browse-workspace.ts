@@ -1,4 +1,3 @@
-import { profilePluginKey } from "../core/execution-runtime.js";
 import {
   projectExternalRetention,
   retainedProjectLine,
@@ -29,6 +28,7 @@ import {
   uuidArg,
 } from "./browse.js";
 import { CliError } from "./connections.js";
+import { describeSkills } from "./configure-profile.js";
 import { nextLine, nextText } from "./remedy.js";
 import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
@@ -296,14 +296,7 @@ const profileGet: BrowseCommand = {
         ["Version", String(d.profile.version)],
         ["Revoked", d.profile.revoked ? "yes" : "no"],
         ["Runtime", harnessLine(d.runtime)],
-        [
-          "Skills",
-          d.skills.plugins.length === 0
-            ? "none"
-            : d.skills.plugins
-                .map((p) => `${profilePluginKey(p)} (${p.skills.join(", ")})`)
-                .join("; "),
-        ],
+        ["Skills", describeSkills(d.skills)],
         ["Capabilities", unavailable(d.capabilities)],
         [
           "Instructions",

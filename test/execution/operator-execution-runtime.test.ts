@@ -347,7 +347,7 @@ test("Claude policy disclosure names roots by category and keeps the runtime's l
       /cab's hook, not by the operating system/.test(l),
     ),
   );
-  assert.deepEqual(redirected.limits.slice(0, 1), base.limits);
+  assert.deepEqual(redirected.limits.slice(0, base.limits.length), base.limits);
   assert.equal(JSON.stringify(redirected).includes("/tmp/ens-"), false);
   const shared = claudePolicyDisclosure(
     { ...base, writableRoots: ["/w"], sharedWriteRoots: ["/tmp/claude-501"] },
@@ -418,8 +418,8 @@ test("both harnesses' disclosures state local listening within the disclosure ca
   assert.ok(codex.lines.includes(localListeningLimit));
   // Codex enforces no loopback-only listening; its line says the setting does not apply.
   assert.match(codexLocalListeningLine, /does not change Codex turns/);
-  // The new text is in lines: Claude's limits are exactly its own and the Git limits.
-  assert.equal(claude.limits.length, claudePolicyLimits.length + 3);
+  // Limits include Claude, Git and retained global adapters.
+  assert.equal(claude.limits.length, claudePolicyLimits.length + 4);
   for (const disclosure of [claude, codex])
     assert.deepEqual(policyDisclosureSchema.parse(disclosure), disclosure);
 });
@@ -525,4 +525,24 @@ test("unsupported Codex settings are judged against the runtime catalogue", () =
     unsupportedRuntimeField({ harness: "codex" }, { models: [] }),
     null,
   );
+});
+
+test("both runtime policy disclosures explain explicit Global skills selection and retained adapters", () => {
+  const claude = claudePolicyDisclosure(
+    {
+      writableRoots: ["/w"],
+      sharedWriteRoots: [],
+      network: "denied",
+      fileToolConfinement: "hook",
+      limits: [],
+    },
+    "/w",
+  );
+  for (const policy of [codexPolicyDisclosure(), claude]) {
+    assert.match(
+      policy.lines.join(" "),
+      /Global skills.*selected.*~\/.agents\/skills/,
+    );
+    assert.match(policy.limits.join(" "), /total.*disk.*not bounded/);
+  }
 });

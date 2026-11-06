@@ -1,5 +1,6 @@
 // The #827 journey service: built in-process by live-journeys.mjs, or run as a
 // forked child for the crash facet, where the parent drives it over IPC.
+import { globalBrief } from "./global-fixture.mjs";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -32,6 +33,20 @@ export function recordClaudeSpawns(sdk, observed) {
   };
 }
 
+export async function postGlobalFollowUp(service, taskId, message) {
+  const binding = service.recoveryForTask(taskId)[0]?.binding;
+  if (!binding) throw new Error("no conversation to continue");
+  return service.coordinationView().postOperatorMessage({
+    key: randomUUID(),
+    taskId,
+    recipientAssignmentId: binding.assignmentId,
+    expectedAssignmentVersion: Number(
+      service.domain().assignment(binding.assignmentId).version,
+    ),
+    message,
+  });
+}
+
 /**
  * Starts the real service with ledger-wrapped runtimes and the token reference.
  * The token enters this process's environment only after the reference is
@@ -55,6 +70,7 @@ export async function startJourneyService({
   );
   const observed = {
     turns: [],
+    skillPlugins: [],
     refused: [],
     calls: [],
     workspaces: [],
@@ -68,7 +84,13 @@ export async function startJourneyService({
   const wrap = (runtime, harness) => {
     observed.runtimes[harness] = runtime;
     const startTurn = runtime.startTurn.bind(runtime);
-    runtime.startTurn = async (threadId, workspace, prompt, settings) => {
+    runtime.startTurn = async (
+      threadId,
+      workspace,
+      prompt,
+      settings,
+      policy,
+    ) => {
       try {
         reserveTurnInFile(harness, ledgerFile);
       } catch (error) {
@@ -78,8 +100,15 @@ export async function startJourneyService({
       }
       if (!observed.workspaces.includes(workspace))
         observed.workspaces.push(workspace);
-      const turnId = await startTurn(threadId, workspace, prompt, settings);
+      const turnId = await startTurn(
+        threadId,
+        workspace,
+        prompt,
+        settings,
+        policy,
+      );
       observed.turns.push({ harness, threadId, turnId, at: Date.now() });
+      observed.skillPlugins.push(settings?.skills?.plugins ?? []);
       return turnId;
     };
     const onToolCall = runtime.onToolCall.bind(runtime);
@@ -211,6 +240,7 @@ const decisionBrief = [
 
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
 export function facetOutcome(facet, { workerProfileId, nonce }) {
+  if (facet.endsWith("-global-skill")) return globalBrief;
   if (facet === "scrub") return shellOnly(PROBE);
   // Claude Code blocks a bare `sleep N` (N >= 25) in the foreground.
   if (facet === "stop") return shellOnly(SLEEP);
@@ -267,6 +297,7 @@ export async function setupJourney(
       facet === "codex-skill" ||
       facet === "codex-nested-skill" ||
       facet === "codex-decision-question" ||
+      facet === "codex-global-skill" ||
       facet === "codex-installed-plugin"
         ? { harness: "codex" }
         : claude,

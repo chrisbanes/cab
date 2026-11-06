@@ -1251,3 +1251,23 @@ test("skill plugins fail while an active agent's installed plugin is unavailable
   // No profile enables a plugin: nothing can be held.
   assert.equal((await check(f, "skill-plugins")).status, "pass");
 });
+
+test("globals-only readiness refuses missing sources, recovers after restoration, and never writes adapters", async (t) => {
+  const f = fixture(t);
+  const home = join(f.root, "global-home");
+  const skills = { plugins: [], global: ["chosen"] };
+  const over = {
+    env: { PATH: f.bin, HOME: home },
+    ...profiles({ ...codexProfile(), skills }),
+    timeoutMs: 2000,
+  };
+  const failed = await check(f, "skill-plugins", over);
+  assert.equal(failed.status, "fail");
+  assert.match(failed.reason ?? "", /Global skill chosen/);
+  assert.equal(JSON.stringify(failed).includes(f.root), false);
+  const source = join(home, ".agents/skills/chosen");
+  mkdirSync(source, { recursive: true });
+  writeFileSync(join(source, "SKILL.md"), "---\nname: chosen\n---\nChosen");
+  assert.equal((await check(f, "skill-plugins", over)).status, "pass");
+  assert.equal(existsSync(join(f.data, "global-skill-cache")), false);
+});

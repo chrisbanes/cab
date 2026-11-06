@@ -299,7 +299,7 @@ const turnPluginsSchema = z
       })
       .strict(),
   )
-  .max(16);
+  .max(17);
 
 const runtimeThreadQualificationSchema = z
   .object({

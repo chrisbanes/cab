@@ -223,7 +223,7 @@ const envelope = <T extends z.ZodType>(schema: T) =>
 export const policyDisclosureSchema = z
   .object({
     lines: z.array(z.string().max(300)).max(10),
-    limits: z.array(z.string().max(300)).max(20),
+    limits: z.array(z.string().max(300)).max(21),
   })
   .strict();
 const harnessStatusBase = {
@@ -4008,6 +4008,18 @@ export const installedPluginsSchema = envelope(
             .strict(),
         )
         .max(256),
+      global: z
+        .object({
+          status: z.enum(["available", "missing", "unreadable"]),
+          skills: z
+            .array(
+              z
+                .object({ name: skillNameSchema, available: z.boolean() })
+                .strict(),
+            )
+            .max(2000),
+        })
+        .strict(),
       status: z
         .object({
           claude: installedToolStatusSchema,
@@ -5463,7 +5475,7 @@ export const executionDetailSchema = envelope(
         .nullable(),
       settings: z.array(settingEntrySchema).nullable(),
       /** The skill plugins the turn ran with, by digest; empty when it ran with none. */
-      skillPlugins: z.array(skillPluginRecordSchema).max(16),
+      skillPlugins: z.array(skillPluginRecordSchema).max(17),
       counts: z
         .object({
           items: z.number().int().nonnegative().safe(),

@@ -21,6 +21,11 @@ const taskGitLimits = [
   "The source checkout's own Git config, including a repository-local user identity, does not apply in task worktrees. cab keeps a project's repositories after the project is deleted; the operator can remove them.",
 ];
 
+const globalSkillsDisclosure =
+  "Global skills load only when selected in the agent, from the service user's ~/.agents/skills; they are instructions, not cab policy.";
+const globalCacheLimit =
+  "Prepared global-skill adapters are retained across stops and restarts; total disk use is not bounded.";
+
 /** The retained Codex disclosure; `executionPolicy` in codex.ts is what it describes. */
 export function codexPolicyDisclosure(): PolicyDisclosure {
   return {
@@ -30,6 +35,8 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
       codexLocalListeningLine,
       localListeningLimit,
       taskGitDisclosure,
+
+      globalSkillsDisclosure,
     ],
     limits: [
       ...taskGitLimits,
@@ -38,6 +45,7 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
       "Codex gets plugin skills only from its agent settings, from local plugin directories or plugins installed in Claude Code or Codex, as skill directories: a plugin's hooks, MCP servers and apps are not loaded, and skills are instructions to the agent, not cab policy.",
       "Plan capture relies on Codex's tools.update_plan.enabled setting, as qualified on codex-cli 0.166.0. The agent decides whether to plan, so a Codex turn may show no plan.",
       commandNetworkDisclosure,
+      globalCacheLimit,
     ],
   };
 }
@@ -77,9 +85,11 @@ export function claudePolicyDisclosure(
       "Command network access is denied. There are no interactive approvals.",
       claudeLocalListeningLine,
       localListeningLimit,
+
+      globalSkillsDisclosure,
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
       taskGitDisclosure,
     ],
-    limits: [...policy.limits, ...taskGitLimits],
+    limits: [...policy.limits, ...taskGitLimits, globalCacheLimit],
   };
 }

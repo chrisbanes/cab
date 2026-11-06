@@ -18,7 +18,7 @@ import {
   writeNestedSkillPlugin,
   writeSkillPlugin,
 } from "../fixtures/skill-plugin.js";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -931,4 +931,234 @@ test("Agent configuration picks installed plugins' skills in a dialog, edits and
   await save();
   await page.getByText("Current revision 6.").waitFor();
   assert.deepEqual(d.profileSkills(builder), { plugins: [] });
+});
+
+test("Global skills preserve profile drafts through selection, replacement, discard and source refresh", async (t, journey) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-global-settings-"));
+  const homes = installedPluginHomes(root);
+  for (const [key, value] of Object.entries(homes.environment)) {
+    const previous = process.env[key];
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+    process.env[key] = value;
+  }
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const install = (name: string) => {
+    const dir = join(homes.environment.HOME!, ".agents/skills", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n---\nFixture`);
+  };
+  install("review");
+  install("plan");
+  homes.installClaude("demo@m", { skills: ["review", "other"] });
+  const { f, ids, page, web } = await startSettings(journey, "/app/settings");
+  const profileId = ids.profiles.Builder as string;
+  const url = `${web.origin}/profiles/${profileId}/settings`;
+  await page.goto(url);
+  const dialog = page.getByRole("dialog");
+  const globalRows = page.getByRole("list", { name: "Enabled global skills" });
+  const save = page.getByRole("button", { name: "Save agent", exact: true });
+  const addGlobal = page.getByRole("button", {
+    name: "Add global skills",
+    exact: true,
+  });
+  await addGlobal.click();
+  await dialog
+    .getByRole("heading", {
+      name: "Global skills (~/.agents/skills)",
+      exact: true,
+    })
+    .waitFor();
+  await dialog.getByRole("checkbox", { name: "review", exact: true }).focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(
+    await addGlobal.evaluate((e) => e === document.activeElement),
+    true,
+  );
+  await page.getByText("No skills enabled.").waitFor();
+  await addGlobal.click();
+  await dialog.getByRole("checkbox", { name: "review", exact: true }).check();
+  await dialog.getByRole("button", { name: "Use global skills" }).click();
+  const editGlobal = page.getByRole("button", {
+    name: "Edit global skills",
+    exact: true,
+  });
+  await globalRows.getByText("review", { exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("aria-label") ===
+      "Edit global skills",
+  );
+  await page
+    .getByRole("region", { name: "Changes to save" })
+    .getByText("Skill plugins: none → 1 global skill")
+    .waitFor();
+  await save.click();
+  await savedOutcome(page);
+  await page.reload();
+  await globalRows.getByText("review", { exact: true }).waitFor();
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  await editGlobal.click();
+  assert.equal(
+    await dialog
+      .getByRole("checkbox", { name: "review", exact: true })
+      .isChecked(),
+    true,
+  );
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await save.click();
+  await savedOutcome(page);
+  await page.reload();
+  await globalRows.waitFor();
+  // New source stays disabled. A global-only profile never presents the empty state.
+  install("new");
+  await page.reload();
+  await editGlobal.click();
+  assert.equal(
+    await dialog
+      .getByRole("checkbox", { name: "new", exact: true })
+      .isChecked(),
+    false,
+  );
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(await page.getByText("No skills enabled.").count(), 0);
+  for (let i = 0; i < 33; i++) install(`extra-${i}`);
+  await page.reload();
+  await editGlobal.click();
+  await dialog.getByRole("button", { name: "Select all", exact: true }).click();
+  assert.equal(
+    await dialog
+      .getByRole("button", { name: "Use global skills" })
+      .isDisabled(),
+    true,
+  );
+  await dialog
+    .getByRole("alert")
+    .getByText("An agent can enable at most 32 global skills.")
+    .waitFor();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  const choosePlugin = async () => {
+    await page
+      .getByLabel("Installed plugin", { exact: true })
+      .selectOption("claude:demo@m");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await dialog.getByRole("checkbox", { name: "review", exact: true }).check();
+  };
+  await choosePlugin();
+  await dialog
+    .getByRole("status")
+    .getByText("Replaces global selection: review.")
+    .waitFor();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await globalRows.getByText("review", { exact: true }).waitFor();
+  await choosePlugin();
+  await dialog.getByRole("button", { name: "Add plugin", exact: true }).click();
+  await globalRows.waitFor({ state: "detached" });
+  await page
+    .getByRole("region", { name: "Changes to save" })
+    .getByText("Global skills replaced by plugin selections: review")
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Discard changes", exact: true })
+    .click();
+  await globalRows.getByText("review", { exact: true }).waitFor();
+  await choosePlugin();
+  await dialog.getByRole("button", { name: "Add plugin", exact: true }).click();
+  await save.click();
+  await savedOutcome(page);
+  await page
+    .getByRole("button", { name: "Remove demo · Claude Code", exact: true })
+    .click();
+  await addGlobal.click();
+  assert.equal(
+    await dialog
+      .getByRole("checkbox", { name: "review", exact: true })
+      .isChecked(),
+    false,
+  );
+  await dialog.getByRole("checkbox", { name: "plan", exact: true }).check();
+  await dialog.getByRole("button", { name: "Use global skills" }).click();
+  await save.click();
+  await savedOutcome(page);
+  // Readable source metadata is followed by unreadable and failed refreshes, without clearing the draft.
+  let unreadable = true;
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((done) => {
+    releaseRefresh = done;
+  });
+  journey.cleanup(async () => releaseRefresh(), "release-global-refresh");
+  await page.route("**/api/operator/installed-plugins", async (route) => {
+    if (!unreadable) {
+      await refreshGate;
+      await route.fulfill({ status: 503, body: "Unavailable" });
+      return;
+    }
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.global = { status: "unreadable", skills: [] };
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+  await globalRows.getByText("Unavailable", { exact: true }).waitFor();
+  await editGlobal.click();
+  assert.equal(
+    await dialog
+      .getByRole("checkbox", { name: "plan (unavailable)", exact: true })
+      .isChecked(),
+    true,
+  );
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByLabel("Summary", { exact: true }).fill("Kept during refresh");
+  unreadable = false;
+  // Pending and failed source reads do not replace the profile draft.
+  const refresh = page.getByRole("button", {
+    name: "Refresh skill sources",
+    exact: true,
+  });
+  await refresh.click();
+  assert.equal(await refresh.isDisabled(), true);
+  await globalRows.getByText("plan", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Summary", { exact: true }).inputValue(),
+    "Kept during refresh",
+  );
+  releaseRefresh();
+  await page
+    .getByText("Refresh failed. Showing the last fetched data.", {
+      exact: true,
+    })
+    .waitFor();
+  await page.route("**/api/operator/commands", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "invalid-input",
+          message: "Invalid input",
+          fieldPaths: ["skills.global"],
+        },
+      }),
+    }),
+  );
+  // Global field feedback must preserve the unavailable choice.
+  await editGlobal.click();
+  await dialog.getByRole("button", { name: "Use global skills" }).click();
+  await save.click();
+  await page
+    .getByText(
+      "A selected global skill is unavailable, invalid, ambiguous, or conflicts with a plugin name.",
+      { exact: false },
+    )
+    .waitFor();
+  await globalRows.getByText("plan", { exact: true }).waitFor();
+  assert.deepEqual(f.service.domain().profileSkills(profileId), {
+    plugins: [],
+    global: ["plan"],
+  });
+  await page.unrouteAll({ behavior: "wait" });
 });
