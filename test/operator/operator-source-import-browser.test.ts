@@ -364,7 +364,10 @@ test("saved source imports through Preview and import now", async (_t, journey) 
   const lead = await importPanel(page).locator("p").first().innerText();
   assert.match(lead, /^Saved\. .*acme\/extra.* imported yet\.$/);
   await importButton(page).click();
-  const activation = outcomeMessages(page).filter({ hasText: /^Previewed/ });
+  // The message names each source as its preview is recorded; wait for the last of them.
+  const activation = outcomeMessages(page).filter({
+    hasText: /^Previewed .* are active\./,
+  });
   await activation.waitFor(refreshed);
   assert.match(
     await activation.locator(".action-outcome-message").innerText(),

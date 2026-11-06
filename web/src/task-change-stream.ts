@@ -10,10 +10,11 @@ export interface TaskChangeStreamOptions {
   url: string;
   /**
    * Refetch the task read (and with it the timeline): a `read` notice, or a
-   * (re)connect that may have missed one. `opening` marks the first
-   * connection, which follows the page's opening reads.
+   * reconnect that may have missed one. The first connection does not
+   * refetch: it follows the page's opening reads, and the healthy page's
+   * one-minute poll covers a change made between them.
    */
-  onRead: (opening?: boolean) => void;
+  onRead: () => void;
   /** Refetch only the newest timeline page. */
   onTimeline: () => void;
   onHealthy: (healthy: boolean) => void;
@@ -41,7 +42,7 @@ export const streamTiming = {
 
 /**
  * One task's change stream. Healthy from the first frame of a connection,
- * which also refetches once; reconnects with jittered back-off after an error
+ * which refetches once after a reconnect; reconnects with jittered back-off after an error
  * or 45 s of silence; closes after 60 s hidden and reopens when visible.
  * Notices are debounced (trailing, with a maximum wait).
  */
@@ -49,7 +50,7 @@ export class TaskChangeStream {
   private source: ChangeSource | undefined;
   private healthy = false;
   private attempt = 0;
-  private connections = 0;
+  private connected = false;
   private retry: unknown;
   private silence: unknown;
   private hiding: unknown;
@@ -109,7 +110,8 @@ export class TaskChangeStream {
         this.healthy = true;
         this.attempt = 0;
         this.options.onHealthy(true);
-        this.options.onRead(++this.connections === 1);
+        if (this.connected) this.options.onRead();
+        this.connected = true;
       }
       if (kind) this.notice(kind);
     };
@@ -199,7 +201,7 @@ export function useTaskChangeStream({
 }: {
   taskId: string;
   enabled: boolean;
-  onRead: (opening?: boolean) => void;
+  onRead: () => void;
   onTimeline: () => void;
 }): { healthy: boolean } {
   const [healthy, setHealthy] = useState(false);
@@ -209,7 +211,7 @@ export function useTaskChangeStream({
     if (!enabled) return;
     const stream = new TaskChangeStream({
       url: `/api/operator/tasks/${encodeURIComponent(taskId)}/stream`,
-      onRead: (opening) => handlers.current.onRead(opening),
+      onRead: () => handlers.current.onRead(),
       onTimeline: () => handlers.current.onTimeline(),
       onHealthy: setHealthy,
     });

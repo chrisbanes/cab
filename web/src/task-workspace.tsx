@@ -929,13 +929,10 @@ export function TaskWorkspace({
   const [changeTick, setChangeTick] = useState(0);
   const { healthy: streaming } = useTaskChangeStream({
     taskId,
-    // After the first task read, so the connect refetch never aborts it.
+    // After the first task read, so the stream follows the page's opening reads.
     enabled:
       resource.state.status !== "empty" && resource.state.status !== "loading",
-    // The opening connection's refetch skips the reading capture: it can land while
-    // the page is still following its link, which a capture would undo.
-    onRead: (opening) =>
-      opening ? resource.poll({ supersede: true }) : pollRef.current(true),
+    onRead: () => pollRef.current(true),
     onTimeline: () => setChangeTick((tick) => tick + 1),
   });
   // The 15-second poll is the fallback while the change stream is not healthy. While it is,
