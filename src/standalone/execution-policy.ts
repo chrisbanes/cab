@@ -13,7 +13,7 @@ const taskGitDisclosure =
 const taskGitLimits = [
   "Tasks of one project share their repository's objects and refs: an agent can move another task's branches and delete or corrupt its unpushed commits, and a changed alternates file stops new workspaces until the operator repairs it. Older workspaces have no Git write access.",
   "The repository reads the operator's objects through an alternate, so pruning objects a task's base needs breaks it. git fetch, pull, gc and worktree add fail, because they write the repository root. Git LFS content is not available, and submodule metadata is not writable.",
-  "cab keeps a project's repositories after the project is deleted; the operator can remove them.",
+  "The source checkout's own Git config, including a repository-local user identity, does not apply in task worktrees. cab keeps a project's repositories after the project is deleted; the operator can remove them.",
 ];
 
 /** The retained Codex disclosure; `executionPolicy` in codex.ts is what it describes. */

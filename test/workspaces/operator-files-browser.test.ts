@@ -17,6 +17,9 @@ import {
   nameLinkedRepository,
   seedReviewTask,
 } from "../fixtures/task-review.js";
+import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
+
+setFixtureGitIdentity();
 
 const test = browserSuite("operator-files-browser");
 

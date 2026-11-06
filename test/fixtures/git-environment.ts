@@ -125,3 +125,15 @@ export async function withHostileGitEnvironment<T>(
     rmSync(decoy, { recursive: true, force: true });
   }
 }
+
+/**
+ * Gives this test process's own Git a commit identity. A task worktree comes from cab's managed
+ * repository, so a source fixture's local `user.name` does not apply there, and CI has no global
+ * identity. cab's Git never sees these: `gitEnvironment()` drops every inherited `GIT_*`.
+ */
+export function setFixtureGitIdentity(): void {
+  process.env.GIT_AUTHOR_NAME ??= "Fixture";
+  process.env.GIT_AUTHOR_EMAIL ??= "fixture@example.invalid";
+  process.env.GIT_COMMITTER_NAME ??= "Fixture";
+  process.env.GIT_COMMITTER_EMAIL ??= "fixture@example.invalid";
+}

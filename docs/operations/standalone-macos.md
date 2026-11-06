@@ -1091,6 +1091,9 @@ The limits:
   metadata is not writable.
 - Workspaces created before managed repositories keep their worktree of the operator's
   checkout and have no Git write access. Drafting runs have none either.
+- The source checkout's own Git configuration, including a repository-local `user.name`
+  and `user.email`, does not apply in task worktrees. Set a global identity for the account
+  the service runs as if agents should commit without passing one.
 - cab keeps a project's managed repositories after the project is deleted. Once no task of
   the project has a workspace, the operator can delete `<data>/repositories/<key>`.
 

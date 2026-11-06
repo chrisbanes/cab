@@ -17,6 +17,9 @@ import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
+import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
+
+setFixtureGitIdentity();
 
 class ReportingComparisonRuntime extends OperatorFixtureRuntime {
   override async waitForTurn(threadId: string, turnId: string) {

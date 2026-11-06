@@ -901,6 +901,9 @@ pushes the worktree's commits as before. The limits:
 - Workspaces created before managed repositories keep their worktree of the operator's
   checkout, with no Git write access. Drafting runs keep a disposable worktree of the
   operator's checkout, also with no Git write access.
+- The source checkout's own Git configuration, including a repository-local user identity,
+  does not apply in task worktrees; agents' Git reads the managed repository's and the
+  host's configuration.
 - cab keeps a project's managed repositories after the project is deleted.
 
 Normal successful completion trusts Codex's successful terminal status for the
