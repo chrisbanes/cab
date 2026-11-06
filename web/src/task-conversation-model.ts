@@ -319,8 +319,40 @@ function groupTools(items: ConversationItem[]): ConversationItem[] {
   return out;
 }
 
-export const commandsLabel = (count: number, failed: number) =>
-  `Ran ${count} ${count === 1 ? "command" : "commands"}${failed ? ` · ${failed} failed` : ""}`;
+/** `<1s`, `12s`, `2m 5s`, `1h 2m`. */
+export function durationLabel(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 1) return "<1s";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/** The span from the tool's first row to its completion; null when unknown or negative. */
+export function entryDuration(entry: ToolEntry): number | null {
+  if (entry.endedAt == null) return null;
+  const span = entry.endedAt - entry.at;
+  return span >= 0 ? span : null;
+}
+
+/** The sum of the known durations, or null when none is known. */
+export function commandsDuration(entries: readonly ToolEntry[]): number | null {
+  const known = entries.flatMap((entry) => entryDuration(entry) ?? []);
+  return known.length === 0 ? null : known.reduce((a, b) => a + b, 0);
+}
+
+/** Distinct changed paths, plus one for each entry that carries none. */
+export const changedFileCount = (entries: readonly ToolEntry[]): number =>
+  new Set(entries.flatMap((entry) => entry.paths ?? [])).size +
+  entries.filter((entry) => !entry.paths?.length).length;
+
+export const commandsLabel = (
+  count: number,
+  failed: number,
+  duration: number | null = null,
+) =>
+  `Ran ${count} ${count === 1 ? "command" : "commands"}${failed ? ` · ${failed} failed` : ""}${duration === null ? "" : ` · ${durationLabel(duration)}`}`;
 
 export const changesLabel = (count: number) =>
   `Changed ${count} ${count === 1 ? "file" : "files"}`;

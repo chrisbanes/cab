@@ -1034,7 +1034,8 @@ a.task-source-chip:hover {
   border: 1px solid var(--risk-border);
 }
 
-.conv-commands {
+.conv-commands,
+.conv-paths {
   width: 100%;
   margin: 0;
   padding: 0;
@@ -1044,7 +1045,8 @@ a.task-source-chip:hover {
   gap: var(--space-8);
 }
 
-.conv-commands code {
+.conv-commands code,
+.conv-paths code {
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }

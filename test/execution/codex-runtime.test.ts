@@ -3113,9 +3113,43 @@ test("diagnostic events carry tool metadata and observed settings only", async (
       summary: ["SECRET-SUMMARY"],
       content: ["SECRET-CONTENT"],
     }),
-    item("item/completed", { id: "m1", type: "mcpToolCall", command: "no" }),
-    item("item/completed", { id: "f1", type: "fileChange" }),
+    item("item/completed", {
+      id: "m1",
+      type: "mcpToolCall",
+      command: "no",
+      server: "docs",
+      tool: "search",
+      arguments: { q: "SECRET-ARGS" },
+    }),
+    item("item/completed", {
+      id: "f1",
+      type: "fileChange",
+      changes: [
+        {
+          path: join(root, "src", "a.ts"),
+          kind: "update",
+          diff: "SECRET-DIFF",
+        },
+        { path: "/etc/outside", kind: "add", diff: "SECRET-DIFF" },
+      ],
+    }),
     item("item/completed", { id: "u1", type: "somethingNew" }),
+    item("item/completed", { id: "w1", type: "webSearch", query: "how to x" }),
+    item("item/completed", {
+      id: "m2",
+      type: "mcpToolCall",
+      server: "cab",
+      tool: "cab_report_result",
+    }),
+    item("item/completed", {
+      id: "f2",
+      type: "fileChange",
+      changes: Array.from({ length: 26 }, (_, i) => ({
+        path: join(root, `f${i}`),
+        kind: "add",
+        diff: "",
+      })),
+    }),
     item("item/completed", { id: "a1", type: "agentMessage", text: "hi" }),
     item("item/completed", { id: "p1", type: "userMessage", text: "hi" }),
     { method: "item/completed", params: { threadId: "thread-1" } },
@@ -3183,6 +3217,9 @@ test("diagnostic events carry tool metadata and observed settings only", async (
         "completed:mcpToolCall",
         "completed:fileChange",
         "completed:somethingNew",
+        "completed:webSearch",
+        "completed:mcpToolCall",
+        "completed:fileChange",
         "turn",
       ],
     );
@@ -3215,9 +3252,21 @@ test("diagnostic events carry tool metadata and observed settings only", async (
       itemType: "reasoning",
       status: "completed",
     });
-    assert.ok(!JSON.stringify(captured).includes("SECRET"));
+    const serialized = JSON.stringify(captured);
+    assert.ok(!serialized.includes("SECRET"));
+    assert.ok(!serialized.includes(root));
+    assert.ok(!serialized.includes("/etc/outside"));
     assert.ok(!("command" in (captured[4] ?? {})));
-    assert.deepEqual(captured[7], {
+    const field = (index: number, key: string) =>
+      (captured[index] as unknown as Record<string, unknown>)[key];
+    assert.equal(field(4, "target"), "docs/search");
+    assert.deepEqual(field(5, "paths"), ["src/a.ts", "outside workspace"]);
+    assert.equal(field(5, "target"), undefined);
+    assert.equal(field(7, "target"), "how to x");
+    assert.equal(field(8, "target"), undefined);
+    assert.equal((field(9, "paths") as string[]).length, 25);
+    assert.equal(field(9, "pathsTruncated"), true);
+    assert.deepEqual(captured[10], {
       kind: "turn",
       threadId: "thread-1",
       turnId: "turn-1",

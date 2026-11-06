@@ -534,10 +534,13 @@ name, version and preview digest. The service rechecks every confirmation atomic
    Claude records Bash as command executions (command, status, exit code and
    bounded output, with no working directory), `Write` and `Edit` as file changes,
    and other tools by name and status; its `cab_*` tools appear as coordination
-   records, not runtime items. Accepted but not yet implemented
-   ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)): tool
-   items also keep an end time, repository-relative file paths and, for allowlisted
-   non-command tools, a bounded target, all redacted and capped; plan steps are a
+   records, not runtime items. Every runtime item is stamped with its observation time
+   ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)); file
+   changes keep up to 25 repository-relative paths (a path outside the workspace is
+   stored as "outside workspace"), and allowlisted non-command tools keep one target
+   (Read, Write and Edit path; Grep and Glob pattern; web search query; MCP
+   `server/tool`; Agent subagent type), dropped whole when over its cap, never absolute
+   and redacted again on every read. Accepted but not yet implemented: plan steps are a
    separate curated record, not diagnostic items. No message text, deltas or
    reasoning is collected and tool observation is never claimed complete.
    Payloads are redacted before storage and again with current exclusions on every

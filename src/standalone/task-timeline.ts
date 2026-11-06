@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import {
   boundDetail,
   type DiagnosticExecution,
   type DiagnosticItem,
 } from "./execution-diagnostics.js";
+import {
+  maxToolPathChars,
+  maxToolPaths,
+  maxToolTargetChars,
+  outsideWorkspace,
+} from "../operator/tool-limits.js";
+import { isCoordinationTool } from "./tool-activity.js";
 import {
   compareTimelineKeys,
   serializeTimelineKey,
@@ -43,6 +51,17 @@ const maxCommandChars = 512;
 const maxLabelChars = 128;
 const maxStatusChars = 64;
 
+/** A stored path is relative; anything absolute, escaping or oversized reads as masked. */
+function safePath(path: string): string {
+  return path.length > maxToolPathChars ||
+    isAbsolute(path) ||
+    path === ".." ||
+    path.startsWith("../") ||
+    path.startsWith("..\\")
+    ? outsideWorkspace
+    : path;
+}
+
 const toolPayload = z
   .object({
     itemType: z.string(),
@@ -52,6 +71,10 @@ const toolPayload = z
       .union([z.string(), z.object({ omitted: z.literal("size-limit") })])
       .optional(),
     exitCode: z.number().int().nullable().optional(),
+    // Each field falls back alone, so one bad value never gaps the row.
+    paths: z.array(z.string()).optional().catch(undefined),
+    pathsTruncated: z.boolean().optional().catch(undefined),
+    target: z.string().optional().catch(undefined),
   })
   .loose();
 
@@ -66,6 +89,13 @@ export type ToolProjection =
       exitCode: number | null;
       /** The completed row whose output can be fetched, for a command. */
       outputSequence: number | null;
+      /** When the newest completed row was observed; null while unfinished. */
+      endedAt: number | null;
+      /** Changed files, repository-relative; empty when none were captured. */
+      paths: string[];
+      pathsTruncated: boolean;
+      /** The allowlisted target (path, pattern, query, `server/tool`, subagent type). */
+      target: string | null;
     }
   | { kind: "gap"; reason: "size-limit" | "redaction-unavailable" };
 
@@ -97,6 +127,9 @@ export function projectTool(
         tool: raw.data.tool,
         command: raw.data.command,
         exitCode: raw.data.exitCode,
+        paths: raw.data.paths,
+        pathsTruncated: raw.data.pathsTruncated,
+        target: raw.data.target,
       }
     : undefined;
   const bounded = boundDetail(picked, excluded);
@@ -117,6 +150,23 @@ export function projectTool(
     return { kind: "gap", reason: "redaction-unavailable" };
   const command = typeof collapsed === "string" ? collapsed : null;
   const label = data.tool ?? data.itemType;
+  const capped = (data.paths ?? []).slice(0, maxToolPaths).map(safePath);
+  // A file path target is re-checked; a pattern or query may legitimately start with "/".
+  const shown =
+    tool === "file-change" || label === "Read"
+      ? data.target === undefined
+        ? undefined
+        : safePath(data.target)
+      : data.target;
+  const target =
+    shown !== undefined && !isCoordinationTool(label)
+      ? shown.length > maxToolTargetChars
+        ? `${shown.slice(0, maxToolTargetChars - 1)}…`
+        : shown
+      : null;
+  const completedAt = z
+    .object({ observedAt: z.number().int().nonnegative() })
+    .safeParse(last?.payload);
   return {
     kind: "tool",
     tool,
@@ -132,6 +182,11 @@ export function projectTool(
       tool === "command" && last !== undefined && last.state === "available"
         ? last.sequence
         : null,
+    endedAt: completedAt.success ? completedAt.data.observedAt : null,
+    paths: [...new Set(capped)],
+    pathsTruncated:
+      data.pathsTruncated === true || (data.paths?.length ?? 0) > maxToolPaths,
+    target,
   };
 }
 

@@ -1200,6 +1200,7 @@ test("stopping the runtime ends a settings read that is still waiting", async ()
 async function diagnosticTurn(
   calls: (session: Parameters<Script>[0]) => Promise<unknown>,
   diagnostic: "collect" | "throw" | "none" = "collect",
+  access?: "read-only",
 ) {
   const f = fixture({
     diagnostic,
@@ -1214,7 +1215,7 @@ async function diagnosticTurn(
   try {
     await f.runtime.start();
     const threadId = await f.runtime.startThread(f.workspace, []);
-    const turnId = await f.turn(threadId);
+    const turnId = await f.turn(threadId, access);
     const outcome = await f.runtime.waitForTurn(threadId, turnId);
     return { outcome, diagnostics: f.diagnostics, threadId, turnId };
   } finally {
@@ -1338,8 +1339,8 @@ test("oversized Claude commands and output are replaced whole, as for Codex", as
   });
 });
 
-test("file changes and other tools record no path, content or input", async () => {
-  const run = await diagnosticTurn(async (session) => {
+test("file changes and allowlisted tools record a relative path or target, never content or input", async () => {
+  const script = async (session: Parameters<Script>[0]) => {
     const path = join(String(session.options.cwd), "secret-name.txt");
     await session.hook("Write", { file_path: path, content: "BODY" }, "w1");
     await session.postHook(
@@ -1354,22 +1355,78 @@ test("file changes and other tools record no path, content or input", async () =
     await session.postHook("Read", { file_path: path }, "r1", {
       response: { file: { content: "BODY" } },
     });
-  });
-  assert.deepEqual(
-    run.diagnostics.map((event) =>
-      event.kind === "item"
-        ? [event.itemType, event.phase, event.status, event.tool]
-        : event,
-    ),
-    [
-      ["fileChange", "started", "inProgress", undefined],
-      ["fileChange", "completed", "completed", undefined],
-      ["toolCall", "started", "inProgress", "Read"],
-      ["toolCall", "completed", "completed", "Read"],
-    ],
-  );
-  const text = JSON.stringify(run.diagnostics);
-  assert.equal(/secret-name|BODY|file_path|cwd/.test(text), false);
+    await session.hook("Grep", { pattern: "needle", path }, "g1");
+    await session.hook("Glob", { pattern: "**/*.ts" }, "g2");
+    await session.hook(
+      "Agent",
+      { subagent_type: "explore", prompt: "P" },
+      "a1",
+    );
+    await session.hook("mcp__docs__search", { q: "Q" }, "m1");
+    await session.hook("Skill", { skill: "s" }, "s1");
+    await session.hook("mcp__cab__cab_report_result", {}, "c1");
+  };
+  for (const access of [undefined, "read-only"] as const) {
+    const run = await diagnosticTurn(script, "collect", access);
+    const items = run.diagnostics.flatMap((event) =>
+      event.kind === "item" ? [event] : [],
+    );
+    if (access === "read-only") {
+      // The Write is declined here, so it records more rows; each still has the relative path.
+      for (const event of items.filter((e) => e.itemType === "fileChange"))
+        assert.deepEqual(event.paths, ["secret-name.txt"]);
+    } else
+      assert.deepEqual(
+        items.map((event) => [
+          event.itemType,
+          event.phase,
+          event.tool,
+          event.target,
+          event.paths,
+        ]),
+        [
+          [
+            "fileChange",
+            "started",
+            undefined,
+            "secret-name.txt",
+            ["secret-name.txt"],
+          ],
+          [
+            "fileChange",
+            "completed",
+            undefined,
+            "secret-name.txt",
+            ["secret-name.txt"],
+          ],
+          ["toolCall", "started", "Read", "secret-name.txt", undefined],
+          ["toolCall", "completed", "Read", "secret-name.txt", undefined],
+          ["toolCall", "started", "Grep", "needle", undefined],
+          ["toolCall", "started", "Glob", "**/*.ts", undefined],
+          ["toolCall", "started", "Agent", "explore", undefined],
+          [
+            "toolCall",
+            "started",
+            "mcp__docs__search",
+            "docs/search",
+            undefined,
+          ],
+          // A tool the profile does not allow is recorded as declined, with its name only.
+          [
+            "toolCall",
+            "completed",
+            "mcp__docs__search",
+            "docs/search",
+            undefined,
+          ],
+          ["toolCall", "started", "Skill", undefined, undefined],
+          ["toolCall", "completed", "Skill", undefined, undefined],
+        ],
+      );
+    const text = JSON.stringify(run.diagnostics);
+    assert.equal(/BODY|file_path|cwd|"P"/.test(text), false);
+    assert.equal(text.includes(String(tmpdir())), false);
+  }
 });
 
 test("cab tools emit nothing and refused calls are recorded as declined", async () => {
@@ -1398,6 +1455,13 @@ test("cab tools emit nothing and refused calls are recorded as declined", async 
       ["b1", "commandExecution", "completed", "declined"],
     ],
   );
+  const write = run.diagnostics.find(
+    (event) => event.kind === "item" && event.itemId === "w1",
+  );
+  assert.deepEqual(write?.kind === "item" && write.paths, [
+    "outside workspace",
+  ]);
+  assert.equal(JSON.stringify(run.diagnostics).includes("/etc/x"), false);
 });
 
 test("a failing diagnostic listener changes no hook result or turn outcome", async () => {

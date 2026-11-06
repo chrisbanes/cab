@@ -10,6 +10,12 @@ import { isAbsolute } from "node:path";
 import { pluginSkillScope, skillScopeConfig } from "./codex-skills.js";
 import { resolveOnPath } from "./executable-path.js";
 import {
+  capTarget,
+  changedPaths,
+  mcpTarget,
+  workspaceRoots,
+} from "./tool-activity.js";
+import {
   encodeNativeInputReply,
   nativeEndpointKey,
   parseNativeInputRequest,
@@ -291,6 +297,12 @@ export type RuntimeDiagnosticEvent =
       cwd?: string;
       exitCode?: number | null;
       aggregatedOutput?: string | RuntimeOmittedField | null;
+      /** File changes: workspace-relative paths, or "outside workspace"; never a diff. */
+      paths?: string[];
+      /** Set when paths were dropped for count or length. */
+      pathsTruncated?: true;
+      /** Allowlisted tools only: a relative path, pattern, query, `server/tool` or subagent type. */
+      target?: string;
     }
   | { kind: "turn"; threadId: string; turnId: string; status: string };
 
@@ -401,6 +413,15 @@ const diagnosticItemSchema = z.object({
     cwd: z.string().optional().catch(undefined),
     exitCode: z.number().nullable().optional().catch(undefined),
     aggregatedOutput: z.string().nullable().optional().catch(undefined),
+    // Only what tool rows show: a changed file's path (never its diff), an MCP
+    // call's server and tool (never its arguments), a web search's query.
+    changes: z
+      .array(z.object({ path: z.string() }))
+      .optional()
+      .catch(undefined),
+    server: z.string().optional().catch(undefined),
+    tool: z.string().optional().catch(undefined),
+    query: z.string().optional().catch(undefined),
   }),
 });
 export const maxDiagnosticCommandBytes = 4 * 1024;
@@ -1525,6 +1546,8 @@ export class CodexRuntime implements Runtime {
       processIdentity: RuntimeProcessIdentity | null;
     }
   >();
+  /** Each thread's workspace roots, so file paths can be made relative; masked when unknown. */
+  private readonly threadWorkspace = new Map<string, readonly string[]>();
   private readonly events = new EventEmitter();
   private unexpected?: (request: UnexpectedRequest) => void;
   private toolCall?: (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
@@ -2281,6 +2304,12 @@ export class CodexRuntime implements Runtime {
     settings?: RuntimeTurnSettings,
     policy?: RuntimeTurnPolicy,
   ): Promise<string> {
+    this.threadWorkspace.delete(threadId);
+    this.threadWorkspace.set(threadId, workspaceRoots(workspace));
+    if (this.threadWorkspace.size > maxObservedThreads) {
+      const oldest = this.threadWorkspace.keys().next();
+      if (!oldest.done) this.threadWorkspace.delete(oldest.value);
+    }
     // Retire only the ephemeral readback before a new turn can emit callbacks.
     // Saved endpoints/receipts and disqualified turn identities remain historical.
     const previousTurn = this.nativeTurns.get(threadId);
@@ -2633,6 +2662,21 @@ export class CodexRuntime implements Runtime {
     const { threadId, turnId, item } = parsed.data;
     if (item.type === "agentMessage" || item.type === "userMessage") return;
     const command = item.type === "commandExecution";
+    const changed =
+      item.type === "fileChange" && item.changes !== undefined
+        ? changedPaths(
+            this.threadWorkspace.get(threadId) ?? [],
+            item.changes.map((change) => change.path),
+          )
+        : undefined;
+    const target =
+      item.type === "mcpToolCall" &&
+      item.server !== undefined &&
+      item.tool !== undefined
+        ? mcpTarget(item.server, item.tool)
+        : item.type === "webSearch" && item.query !== undefined
+          ? capTarget(item.query)
+          : undefined;
     listener({
       kind: "item",
       phase: method === "item/started" ? "started" : "completed",
@@ -2649,6 +2693,13 @@ export class CodexRuntime implements Runtime {
             ),
           }
         : {}),
+      ...(changed
+        ? {
+            paths: changed.paths,
+            ...(changed.truncated ? { pathsTruncated: true as const } : {}),
+          }
+        : {}),
+      ...(target !== undefined ? { target } : {}),
       ...(command && item.cwd !== undefined ? { cwd: item.cwd } : {}),
       ...(command && item.exitCode !== undefined
         ? { exitCode: item.exitCode }

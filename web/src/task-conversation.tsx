@@ -17,8 +17,12 @@ import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
 import { clockLabel } from "./presentation.js";
 import {
+  changedFileCount,
   changesLabel,
+  commandsDuration,
   commandsLabel,
+  durationLabel,
+  entryDuration,
   conversationTree,
   gapCopy,
   hasDelegation,
@@ -422,22 +426,38 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
     case "changes":
       return (
         <div className="conv-tools" data-record-id={`c:${item.id}`}>
-          <span>{changesLabel(item.entries.length)}</span>
+          <span>{changesLabel(changedFileCount(item.entries))}</span>
           <Button
             variant="secondary"
             onClick={(event) => ctx.openChanges(event.currentTarget)}
           >
             Open in Changes
           </Button>
+          <ul className="conv-paths">
+            {[...new Set(item.entries.flatMap((e) => e.paths ?? []))].map(
+              (path) => (
+                <li key={path}>
+                  <code>{path}</code>
+                </li>
+              ),
+            )}
+          </ul>
+          {item.entries.some((e) => e.pathsTruncated) && (
+            <p className="muted">Paths not all listed</p>
+          )}
         </div>
       );
-    case "tool":
+    case "tool": {
+      const duration = entryDuration(item.entry);
       return (
         <p className="conv-tools" data-record-id={`c:${item.id}`}>
           Tool · {item.entry.label ?? "Other tool"}
+          {item.entry.target ? ` · ${item.entry.target}` : ""}
           {item.entry.status ? ` · ${item.entry.status}` : ""}
+          {duration === null ? "" : ` · ${durationLabel(duration)}`}
         </p>
       );
+    }
     case "delegation":
       return <Delegation item={item} ctx={ctx} />;
     case "entry":
@@ -711,7 +731,11 @@ function CommandGroup({
           for (const key of keys) if (ctx.expanded(key)) ctx.toggle(key);
         }}
       >
-        {commandsLabel(item.entries.length, item.failed)}
+        {commandsLabel(
+          item.entries.length,
+          item.failed,
+          commandsDuration(item.entries),
+        )}
       </Button>
       {open && (
         <ul className="conv-commands">
@@ -772,6 +796,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
     return () => abort.abort();
   }, [open, sequence, ctx.client, ctx.taskId, ctx.visibility, attempt]);
   const failed = entry.exitCode !== null && entry.exitCode !== 0;
+  const duration = entryDuration(entry);
   return (
     <li data-record-id={`c:${entry.entryId}`}>
       <code>
@@ -782,6 +807,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
         {entry.exitCode === null
           ? (entry.status ?? "no exit status")
           : `exit ${entry.exitCode}`}
+        {duration === null ? "" : ` · ${durationLabel(duration)}`}
       </span>{" "}
       {sequence === null ? (
         <span className="muted">No output retained</span>
