@@ -29,6 +29,8 @@ import {
   type VerifiedOperatorCredential,
 } from "./operator-credentials.js";
 import type { OperatorPush } from "./operator-push.js";
+import { TaskStreams } from "./operator-task-stream.js";
+import type { TaskChangeFeed } from "./task-change-feed.js";
 import { PushError } from "./web-push.js";
 import { z } from "zod";
 import {
@@ -48,10 +50,15 @@ type OperatorHttpOptions = {
   localAccess?: LocalAccess | undefined;
   /** Opt-in browser push; absent, notification routes answer 404. */
   push?: OperatorPush;
+  /** Task change notices; absent, the task stream route answers 404. */
+  changes?: TaskChangeFeed;
+  /** Stream heartbeat interval; tests shorten it. */
+  streamHeartbeatMs?: number;
 };
 const SESSION_COOKIE = "cab_operator_session";
 const CREDENTIAL_ACTION =
   /^\/api\/operator\/credentials\/([^/]+)\/(rotate|revoke)$/;
+const TASK_STREAM = /^\/api\/operator\/tasks\/([^/]+)\/stream$/;
 const PUSH_ACTION =
   /^\/api\/operator\/notifications\/subscriptions\/([^/]+)\/(revoke|test)$/;
 const MAX_JSON_BYTES = 64 * 1024;
@@ -300,8 +307,7 @@ export class LocalOperatorHttp {
   private server: Server | undefined;
   private lanServer: Server | undefined;
   private readonly lan:
-    | { address: string; origin?: string | undefined }
-    | undefined;
+    { address: string; origin?: string | undefined } | undefined;
   private readonly browserContext: Readonly<{
     origin: string;
     secureCookie: boolean;
@@ -311,6 +317,7 @@ export class LocalOperatorHttp {
   private readonly credentials: OperatorCredentialStore | undefined;
   private readonly localAccess: LocalAccess | undefined;
   private readonly push: OperatorPush | undefined;
+  private readonly streams: TaskStreams | undefined;
 
   constructor(
     private readonly auth: OperatorAuth,
@@ -323,6 +330,9 @@ export class LocalOperatorHttp {
     this.localAccess = options.localAccess;
     this.credentials = options.credentials;
     this.push = options.push;
+    this.streams =
+      options.changes &&
+      new TaskStreams(options.changes, options.streamHeartbeatMs);
     this.browserContext = Object.freeze({
       origin: auth.origin,
       secureCookie: new URL(auth.origin).protocol === "https:",
@@ -516,7 +526,14 @@ export class LocalOperatorHttp {
     return address.port;
   }
 
+  /** Ends every open task stream, as a dropped connection would. */
+  closeTaskStreams(): void {
+    this.streams?.closeAll();
+  }
+
   async stop(): Promise<void> {
+    // Before close(), which waits for every active response.
+    this.streams?.closeAll();
     const servers = [this.server, this.lanServer];
     this.server = undefined;
     this.lanServer = undefined;
@@ -715,6 +732,7 @@ export class LocalOperatorHttp {
         if (path === "/api/operator/logout") {
           z.object({}).strict().parse(body);
           const ownerKey = this.auth.logout(session.id, context.origin);
+          this.streams?.closeSession(session.id);
           if (ownerKey) web.api.purgeLocalReviewDrafts(ownerKey);
           json(
             200,
@@ -844,6 +862,41 @@ export class LocalOperatorHttp {
             data: this.push.read(),
             observedAt: Date.now(),
           }),
+        );
+        return true;
+      }
+      const stream = TASK_STREAM.exec(path);
+      if (stream && session) {
+        // A same-origin EventSource sends no Origin; a foreign one is refused as for a POST.
+        if (
+          request.headers.origin !== undefined &&
+          request.headers.origin !== context.origin
+        ) {
+          deny(403, "forbidden");
+          return true;
+        }
+        if (!this.streams) throw new OperatorApiError(404, "not-found");
+        if (url.search) throw new OperatorApiError(400, "invalid-input");
+        const taskId = stream[1] ?? "";
+        web.api.taskChangeIds(taskId);
+        if (!this.streams.admits(session.id)) {
+          request.resume();
+          json(503, apiError("unavailable"), { "retry-after": "30" });
+          return true;
+        }
+        this.streams.open(
+          session.id,
+          response,
+          headers,
+          () => {
+            try {
+              return web.api.taskChangeIds(taskId);
+            } catch {
+              return undefined;
+            }
+          },
+          () =>
+            !!this.auth.getSession(session.id, context.origin)?.authenticated,
         );
         return true;
       }

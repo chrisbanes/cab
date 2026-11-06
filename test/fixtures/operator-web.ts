@@ -542,6 +542,7 @@ export async function createOperatorFixture<
             : {}),
           credentials: service.operatorCredentials(),
           push,
+          changes: service.taskChanges(),
           web: new OperatorWebBoundary(bundle, api, {
             read: () => (readReadiness ? readReadiness() : readiness.read()),
             claudeToken: () => readiness.claudeToken(),
