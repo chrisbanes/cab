@@ -15,6 +15,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
+import { outsideWorkspace } from "../../src/operator/tool-limits.js";
 import { clockLabel } from "./presentation.js";
 import {
   changedFileCount,
@@ -284,7 +285,7 @@ export function TaskConversation({
   requests: RequestPlaces;
   /** True while the page is at the bottom, so the log announces what arrives. */
   following: boolean;
-  openChanges: (opener: HTMLElement) => void;
+  openChanges: (opener: HTMLElement, path?: string) => void;
   /** The form that sends a message to a pending or running delegated assignment. */
   messageAssignment: (assignment: Assignment) => ReactNode;
 }) {
@@ -404,7 +405,7 @@ interface Context {
   expanded: (key: string) => boolean;
   toggle: (key: string) => void;
   requests: RequestPlaces;
-  openChanges: (opener: HTMLElement) => void;
+  openChanges: (opener: HTMLElement, path?: string) => void;
   messageAssignment: (assignment: Assignment) => ReactNode;
   /** Older pages exist, so an assignment with nothing loaded may still have entries there. */
   earlier: boolean;
@@ -438,7 +439,18 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
             <ul className="conv-paths">
               {distinctPaths(item.entries).map((path) => (
                 <li key={path}>
-                  <code>{path}</code>
+                  {path === outsideWorkspace ? (
+                    <code>{path}</code>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      onClick={(event) =>
+                        ctx.openChanges(event.currentTarget, path)
+                      }
+                    >
+                      <code>{path}</code>
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

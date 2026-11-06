@@ -2432,7 +2432,8 @@ export function TaskWorkspace({
         timeline={timeline}
         requests={requestPlaces}
         following={!updates}
-        openChanges={(opener) => {
+        openChanges={(opener, path) => {
+          if (path) state.changes.pendingPath = path;
           const id =
             opener.closest<HTMLElement>("[data-record-id]")?.dataset.recordId;
           if (wide && id) openPane(`[data-record-id="${id}"] button`);
