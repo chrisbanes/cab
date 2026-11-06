@@ -125,8 +125,9 @@ configuration directory. cab supplies repository instructions (`CLAUDE.md`,
 `AGENTS.md`) as instruction text, so repository content cannot add permission rules,
 hooks or MCP servers. The one addition is the agent's skill plugins
 ([ADR-1021](1021-profile-skill-plugins-and-subagents.md)): local plugin directories,
-or plugins installed in Claude Code or Codex resolved to their install directory at each
-turn start, passed through the SDK `plugins` option as local plugins, with the enabled names in `skills` and the
+plugins installed in Claude Code or Codex resolved at each turn start, and the adapter
+for explicitly selected global skills. These are passed through the SDK `plugins` option
+as local plugins, with the enabled names in `skills` and the
 `Skill` tool allowed only when an agent enables any. A plugin contributes skills,
 instructions and scripts; the hooks and MCP servers it declares never run, and its
 scripts run through the ordinary sandboxed shell. The `Agent` tool is allowed on every

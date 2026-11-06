@@ -428,3 +428,36 @@ test("profile entries name a local directory or an installed plugin by tool and 
     }).success,
   );
 });
+
+test("global skill selections are bounded and canonical without changing plugin-only shapes", () => {
+  const plugins = [{ plugin: "claude:demo@m", skills: ["same"] }];
+  assert.deepEqual(profileSkillsSchema.parse({ plugins }), { plugins });
+  assert.deepEqual(profileSkillsSchema.parse({ plugins, global: [] }), {
+    plugins,
+  });
+  assert.deepEqual(
+    profileSkillsSchema.parse({ plugins, global: ["same", "other"] }),
+    { plugins, global: ["other"] },
+  );
+  for (const global of [
+    ["a", "a"],
+    ["../escape"],
+    Array.from({ length: 33 }, (_, i) => `s${i}`),
+  ])
+    assert.equal(
+      profileSkillsSchema.safeParse({ plugins: [], global }).success,
+      false,
+    );
+});
+
+test("globals retain the existing sixteen-plugin capacity and accept thirty-two selections", () => {
+  const plugins = Array.from({ length: 16 }, (_, i) => ({
+    plugin: `claude:p${i}@m`,
+    skills: ["plugin-skill"],
+  }));
+  const global = Array.from({ length: 32 }, (_, i) => `global${i}`);
+  assert.deepEqual(profileSkillsSchema.parse({ plugins, global }), {
+    plugins,
+    global,
+  });
+});

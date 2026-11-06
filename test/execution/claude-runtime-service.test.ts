@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
+  existsSync,
+  readFileSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -1648,3 +1650,144 @@ test("a started Claude runtime's supported settings and effective policy parse i
   assert.ok(settings && settings.models.length > 0);
   assert.deepEqual(run.service.harnessStatuses()[1]?.settings, settings);
 });
+
+for (const mixed of [false, true])
+  test(`Claude global${mixed ? " and plugin" : "-only"} selections wait, retry and refresh current resources`, async (t) => {
+    const script: Script = async function* (session) {
+      yield init(sessionOf(session));
+      const args = { summary: "global fixture result" };
+      await session.hook("mcp__cab__cab_report_result", args, randomUUID());
+      const outcome = (await session.callTool("cab_report_result", args)) as {
+        isError: boolean;
+      };
+      assert.equal(outcome.isError, false);
+      yield result(sessionOf(session));
+    };
+    const run = await claudeServiceRun(t, [script, script, script], {
+      selfTest: true,
+      verified: true,
+      skillPluginRetryMs: 30,
+    });
+    const home = join(run.root, "service-home");
+    withEnvironment(t, { HOME: home });
+    const source = join(home, ".agents/skills/chosen");
+    const plugins = mixed
+      ? [
+          {
+            path: writeSkillPlugin(join(run.root, "normal"), ["normal"]),
+            skills: ["normal"],
+          },
+        ]
+      : [];
+    const { projectId, worker } = run.setup();
+    run.execute({
+      type: "profile.configure",
+      profileId: worker,
+      expectedVersion: 1,
+      skills: { plugins, global: ["chosen"] },
+    });
+    const first = await run.claudeTask(projectId, worker);
+    await waitUntil(
+      () =>
+        run.service
+          .turnRequests()
+          .some(
+            (r) =>
+              r.workId === first.workId &&
+              /Global skill chosen/.test(r.reason ?? ""),
+          ),
+      run.describe,
+    );
+    assert.equal(run.queries.includes("turn"), false);
+    mkdirSync(join(source, "resources"), { recursive: true });
+    writeFileSync(join(source, "SKILL.md"), "---\nname: chosen\n---\nChosen");
+    writeFileSync(join(source, "resources/answer"), "v1");
+    const other = join(home, ".agents/skills/other");
+    mkdirSync(other, { recursive: true });
+    writeFileSync(
+      join(other, "SKILL.md"),
+      "---\nname: other\n---\nOther profile only",
+    );
+    await waitUntil(
+      () => run.intent(first.workId)?.state === "completed",
+      run.describe,
+    );
+    const firstBase = run.intent(first.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(firstBase));
+    const initial = run.sessions[0]!.options;
+    const firstAdapter = initial.plugins!.at(-1)!.path;
+    assert.equal(existsSync(join(firstAdapter, "skills/other")), false);
+    assert.deepEqual(initial.skills, [
+      ...(mixed ? ["unit-plugin:normal"] : []),
+      "cab-global-skills:chosen",
+    ]);
+    assert.equal(
+      readFileSync(
+        join(firstAdapter, "skills/chosen/resources/answer"),
+        "utf8",
+      ),
+      "v1",
+    );
+    assert.deepEqual(initial.managedSettings, { disableAllHooks: true });
+    assert.equal(initial.strictMcpConfig, true);
+    assert.deepEqual(Object.keys(initial.mcpServers ?? {}), ["cab"]);
+    const firstEvidence = run.service.turnSkillPlugins(first.workId);
+    assert.equal(firstEvidence.length, mixed ? 2 : 1);
+    writeFileSync(join(source, "resources/answer"), "v2");
+    const second = await run.claudeTask(projectId, worker);
+    await waitUntil(
+      () => run.intent(second.workId)?.state === "completed",
+      run.describe,
+    );
+    const secondBase = run.intent(second.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(secondBase));
+    const secondAdapter = run.sessions.at(-1)!.options.plugins!.at(-1)!.path;
+    assert.notEqual(secondAdapter, firstAdapter);
+    assert.equal(
+      readFileSync(
+        join(secondAdapter, "skills/chosen/resources/answer"),
+        "utf8",
+      ),
+      "v2",
+    );
+    assert.notEqual(
+      run.service.turnSkillPlugins(second.workId).at(-1)?.digest,
+      firstEvidence.at(-1)?.digest,
+    );
+    assert.equal(JSON.stringify(firstEvidence).includes(run.root), false);
+    const independent = randomUUID();
+    run.execute({
+      type: "profile.create",
+      profileId: independent,
+      name: "Independent global worker",
+      instructions: "worker",
+      capabilities: "code",
+      runtime: { harness: "claude", model: "haiku", reasoningEffort: "low" },
+      skills: { plugins: [], global: ["other"] },
+    });
+    run.execute({
+      type: "routing.configure",
+      projectId,
+      expectedVersion: 2,
+      enabled: false,
+      guidance: "",
+      candidateProfileIds: [worker, independent],
+    });
+    const third = await run.claudeTask(projectId, independent);
+    await waitUntil(
+      () => run.intent(third.workId)?.state === "completed",
+      run.describe,
+    );
+    const thirdBase = run.intent(third.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(thirdBase));
+    const independentOptions = run.sessions.at(-1)!.options;
+    assert.deepEqual(independentOptions.skills, ["cab-global-skills:other"]);
+    assert.equal(independentOptions.plugins!.length, 1);
+    assert.equal(
+      existsSync(join(independentOptions.plugins![0]!.path, "skills/chosen")),
+      false,
+    );
+    await run.service.stop();
+    assert.equal(existsSync(firstAdapter), true);
+    assert.equal(existsSync(secondAdapter), true);
+  });

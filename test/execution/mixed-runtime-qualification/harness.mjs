@@ -38,11 +38,15 @@ export const FACETS = {
   // each one turn, and a reporting repair at most once.
   "claude-installed-plugin": { claude: 3, codex: 0 },
   "codex-installed-plugin": { claude: 0, codex: 3 },
+  "claude-global-skill": { claude: 3, codex: 0 },
+  "codex-global-skill": { claude: 0, codex: 3 },
   "claude-subagent-stop": { claude: 1, codex: 0 },
   "claude-subagent-crash": { claude: 3, codex: 0 },
 };
 export const GLOBAL_CAPS = { claude: 30, codex: 10 };
 export const MAX_ATTEMPTS = 2;
+// Explicit additional host grant: three more attempts for these two facets only.
+const attemptLimits = { "claude-global-skill": 5, "codex-global-skill": 5 };
 export const TURN_MS = 4 * 60_000;
 export const ATTEMPT_MS = 20 * 60_000;
 export const SESSION_MS = 2 * 60 * 60_000;
@@ -179,7 +183,7 @@ export function beginAttempt(state, facet, now = Date.now()) {
   if (now - state.sessionStartedAt > SESSION_MS)
     throw new BudgetExhausted("session wall-time cap reached");
   const previous = state.attempts[facet] ?? [];
-  if (previous.length >= MAX_ATTEMPTS)
+  if (previous.length >= (attemptLimits[facet] ?? MAX_ATTEMPTS))
     throw new BudgetExhausted(`${facet}: attempt cap reached`);
   const model =
     previous.at(-1)?.failureKind === "model-compliance" &&

@@ -1,6 +1,7 @@
 import {
   type ExecutionHarness,
   noProfileSkills,
+  normalizeProfileSkills,
   type ProfilePlugin,
   type ProfileSkills,
   pluginToolLabels,
@@ -22,8 +23,14 @@ export function parseSkillsDraft(
 ): ProfileSkills | null {
   if (text === undefined || text === "") return noProfileSkills;
   try {
-    const parsed = profileSkillsSchema.safeParse(JSON.parse(text));
-    return parsed.success ? parsed.data : null;
+    // Apply precedence during explicit draft edits, so replacements are visible before save.
+    const parsed = profileSkillsSchema.in.safeParse(JSON.parse(text));
+    return parsed.success
+      ? {
+          plugins: parsed.data.plugins,
+          ...(parsed.data.global?.length ? { global: parsed.data.global } : {}),
+        }
+      : null;
   } catch {
     return null;
   }
@@ -126,17 +133,20 @@ export const withEntry = (
   skills: ProfileSkills,
   entry: ProfilePlugin,
   index?: number,
-): ProfileSkills => ({
-  plugins:
-    index === undefined
-      ? [...skills.plugins, entry]
-      : skills.plugins.map((e, i) => (i === index ? entry : e)),
-});
+): ProfileSkills =>
+  normalizeProfileSkills({
+    ...skills,
+    plugins:
+      index === undefined
+        ? [...skills.plugins, entry]
+        : skills.plugins.map((e, i) => (i === index ? entry : e)),
+  });
 
 export const withoutEntry = (
   skills: ProfileSkills,
   index: number,
 ): ProfileSkills => ({
+  ...skills,
   plugins: skills.plugins.filter((_, i) => i !== index),
 });
 
@@ -182,9 +192,48 @@ export function installedStatusNotes(
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 export const skillsSummary = (skills: ProfileSkills): string =>
-  skills.plugins.length === 0
-    ? "none"
-    : `${count(skills.plugins.length, "plugin")}, ${count(
-        skills.plugins.reduce((n, p) => n + p.skills.length, 0),
-        "skill",
-      )}`;
+  [
+    ...(skills.plugins.length
+      ? [
+          `${count(skills.plugins.length, "plugin")}, ${count(
+            skills.plugins.reduce((n, p) => n + p.skills.length, 0),
+            "skill",
+          )}`,
+        ]
+      : []),
+    ...(skills.global?.length
+      ? [count(skills.global.length, "global skill")]
+      : []),
+  ].join(", ") || "none";
+
+export const globalSkillsLabel = "Global skills (~/.agents/skills)";
+
+/** Saved selections remain visible even when their source cannot be read. */
+export function globalChoices(
+  source: InstalledPlugins["global"] | undefined,
+  skills: ProfileSkills,
+) {
+  const replaced = new Set(skills.plugins.flatMap((p) => p.skills));
+  const available = new Set(
+    source?.status === "available"
+      ? source.skills.filter((s) => s.available).map((s) => s.name)
+      : [],
+  );
+  const names = [
+    ...new Set([
+      ...(source?.skills.map((s) => s.name) ?? []),
+      ...(skills.global ?? []),
+    ]),
+  ];
+  return names
+    .filter((name) => !replaced.has(name))
+    .map((name) => ({
+      name,
+      available: available.has(name),
+    }));
+}
+
+export const withGlobals = (
+  skills: ProfileSkills,
+  global: string[],
+): ProfileSkills => normalizeProfileSkills({ ...skills, global });

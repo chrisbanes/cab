@@ -11,6 +11,9 @@ import { locked, type SettingsProps } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 import {
   allSelected,
+  globalChoices,
+  globalSkillsLabel,
+  withGlobals,
   entryErrors,
   entryLabel,
   entryUnavailable,
@@ -46,6 +49,13 @@ type Editing =
       /** Saved skills the plugin no longer offers; saving the dialog drops them. */
       dropped?: string[];
       query: string;
+    }
+  | {
+      kind: "global";
+      selected: string[];
+      query: string;
+      index?: never;
+      dropped?: never;
     }
   | { kind: "local"; index?: number; path: string; skills: string };
 
@@ -83,6 +93,7 @@ export function SkillFields({
   // The control that opened the dialog gets focus back when it closes.
   const opener = useRef<HTMLElement | null>(null);
   const localButton = useRef<HTMLButtonElement | null>(null);
+  const globalButton = useRef<HTMLButtonElement | null>(null);
   const setEditing = (next: Editing | null) => {
     if (next && !editing)
       opener.current =
@@ -95,6 +106,23 @@ export function SkillFields({
   const disabled = locked(draft) || skills === null;
   const offered =
     listing && skills ? offeredPlugins(listing.plugins, harness, skills) : [];
+  const globals = skills
+    ? globalChoices(listing?.global, {
+        ...skills,
+        global: [
+          ...new Set([
+            ...(skills.global ?? []),
+            ...(editing?.kind === "global" ? editing.selected : []),
+          ]),
+        ],
+      })
+    : [];
+  const editGlobals = () =>
+    setEditing({
+      kind: "global",
+      selected: [...(skills?.global ?? [])],
+      query: "",
+    });
   const set = (next: NonNullable<typeof skills>) =>
     draft.set("skills", skillsDraft(next));
   const editEntry = (entry: ProfilePlugin, index: number) => {
@@ -121,11 +149,12 @@ export function SkillFields({
   };
   return (
     <fieldset className="field body" aria-describedby={`${selectId}-help`}>
-      <legend>Skill plugins</legend>
+      <legend>Skills</legend>
       <p id={`${selectId}-help`} className="metadata muted">
         Plugins installed in {pluginToolLabels.claude} or{" "}
         {pluginToolLabels.codex} for the service user, or a local plugin
-        directory. Each turn loads the plugin as installed then.
+        directory. Global skills come from ~/.agents/skills. Each turn loads
+        current selected content.
       </p>
       {skills === null && (
         <span className="error-text" role="alert">
@@ -133,7 +162,7 @@ export function SkillFields({
           start again.
         </span>
       )}
-      {skills && skills.plugins.length === 0 && (
+      {skills && skills.plugins.length === 0 && !skills.global?.length && (
         <p className="metadata muted">No skills enabled.</p>
       )}
       {skills && skills.plugins.length > 0 && (
@@ -182,6 +211,72 @@ export function SkillFields({
           })}
         </ul>
       )}
+      {skills && Boolean(skills.global?.length) && (
+        <ul className="skill-plugin-rows" aria-label="Enabled global skills">
+          <li>
+            <span className="body">{globalSkillsLabel}</span>{" "}
+            <span className="metadata muted">{skills.global!.join(", ")}</span>{" "}
+            {globals.some(
+              (g) => skills.global!.includes(g.name) && !g.available,
+            ) &&
+              listing && (
+                <StatusBadge tone="warning">Unavailable</StatusBadge>
+              )}{" "}
+            <Button
+              ref={globalButton}
+              type="button"
+              variant="secondary"
+              disabled={disabled}
+              onClick={editGlobals}
+              aria-label="Edit global skills"
+            >
+              Edit skills
+            </Button>{" "}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={disabled}
+              onClick={() => set(withGlobals(skills, []))}
+              aria-label="Remove global skills"
+            >
+              Remove
+            </Button>
+          </li>
+        </ul>
+      )}
+      {Object.keys(draft.errors).some(
+        (k) => k === "skills.global" || k.startsWith("skills.global."),
+      ) && (
+        <span className="error-text" role="alert">
+          A selected global skill is unavailable, invalid, ambiguous, or
+          conflicts with a plugin name. Restore it on the service host or remove
+          the selection.
+        </span>
+      )}
+      {listing?.global.status === "unreadable" && (
+        <p className="metadata muted">
+          Global skills could not be read. Saved selections are kept.
+        </p>
+      )}
+      {!skills?.global?.length && (
+        <Button
+          ref={globalButton}
+          type="button"
+          variant="secondary"
+          disabled={disabled || !globals.some((g) => g.available)}
+          onClick={editGlobals}
+        >
+          Add global skills
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={resource.state.pending}
+        onClick={() => void resource.refresh()}
+      >
+        Refresh skill sources
+      </Button>
       <ResourceStatus
         label="Installed plugins"
         state={resource.state}
@@ -251,11 +346,31 @@ export function SkillFields({
       </div>
       <SkillDialog
         editing={editing}
+        globals={globals}
+        replacedGlobals={
+          editing && editing.kind !== "global"
+            ? (skills?.global ?? []).filter((name) =>
+                (editing.kind === "installed"
+                  ? editing.selected
+                  : typedSkills(editing.skills)
+                ).includes(name),
+              )
+            : []
+        }
+        onGlobals={(selected) => {
+          if (skills) set(withGlobals(skills, selected));
+          setEditing(null);
+        }}
         harness={harness}
         error={dialogError}
         opener={opener}
         fallbackFocus={() => {
           // The opener may be gone or disabled after an add: the select, else Add local directory.
+          if (
+            opener.current?.textContent === "Add global skills" ||
+            opener.current?.getAttribute("aria-label") === "Edit global skills"
+          )
+            return globalButton.current ?? localButton.current;
           const select = document.getElementById(selectId);
           return select instanceof HTMLSelectElement && !select.disabled
             ? select
@@ -286,6 +401,9 @@ export function SkillFields({
 
 function SkillDialog({
   editing,
+  globals,
+  replacedGlobals,
+  onGlobals,
   harness,
   error,
   opener,
@@ -294,6 +412,9 @@ function SkillDialog({
   onDone,
 }: {
   editing: Editing | null;
+  globals: { name: string; available: boolean }[];
+  replacedGlobals: string[];
+  onGlobals: (selected: string[]) => void;
   harness: ExecutionHarness;
   error: string | null;
   opener: { current: HTMLElement | null };
@@ -308,20 +429,33 @@ function SkillDialog({
   const title =
     editing?.kind === "installed"
       ? `${editing.plugin.name} · ${pluginToolLabels[editing.plugin.tool]}`
-      : "Local plugin directory";
+      : editing?.kind === "global"
+        ? globalSkillsLabel
+        : "Local plugin directory";
   const names =
     editing?.kind === "installed"
       ? selectableSkills(editing.plugin, harness)
-      : [];
+      : editing?.kind === "global"
+        ? globals.map((g) => g.name)
+        : [];
   const shown =
-    editing?.kind === "installed" ? filterSkills(names, editing.query) : [];
+    editing?.kind === "installed" || editing?.kind === "global"
+      ? filterSkills(names, editing.query)
+      : [];
+  const selectableShown = shown.filter(
+    (name) =>
+      editing?.kind !== "global" ||
+      editing.selected.includes(name) ||
+      globals.some((g) => g.name === name && g.available),
+  );
   const tooMany =
-    editing?.kind === "installed" && editing.selected.length > maxEnabledSkills;
+    (editing?.kind === "installed" || editing?.kind === "global") &&
+    editing.selected.length > maxEnabledSkills;
   const localSkills =
     editing?.kind === "local" ? typedSkills(editing.skills) : [];
   const ready =
-    editing?.kind === "installed"
-      ? editing.selected.length > 0 && !tooMany
+    editing?.kind === "installed" || editing?.kind === "global"
+      ? (editing.kind === "global" || editing.selected.length > 0) && !tooMany
       : editing?.kind === "local"
         ? editing.path.trim() !== "" &&
           localSkills.length > 0 &&
@@ -348,11 +482,11 @@ function SkillDialog({
       >
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>
-          {editing?.kind === "installed"
+          {editing?.kind === "installed" || editing?.kind === "global"
             ? `Choose up to ${maxEnabledSkills} skills to enable.`
             : "The plugin's absolute directory on the service host and the skills to enable, separated by commas. Both are checked when you save."}
         </DialogDescription>
-        {editing?.kind === "installed" && (
+        {(editing?.kind === "installed" || editing?.kind === "global") && (
           <>
             <label className="field body" htmlFor={filterId}>
               Filter skills
@@ -369,18 +503,30 @@ function SkillDialog({
               <span id={countId} className="metadata muted">
                 {editing.selected.length} of {names.length} selected
               </span>
-              {shown.length > 0 && (
+              {selectableShown.length > 0 && (
                 <Button
                   type="button"
                   variant="secondary"
                   onClick={() =>
                     onChange({
                       ...editing,
-                      selected: toggleShown(names, shown, editing.selected),
+                      selected: toggleShown(
+                        editing.kind === "global"
+                          ? names.filter(
+                              (name) =>
+                                editing.selected.includes(name) ||
+                                globals.some(
+                                  (g) => g.name === name && g.available,
+                                ),
+                            )
+                          : names,
+                        selectableShown,
+                        editing.selected,
+                      ),
                     })
                   }
                 >
-                  {allSelected(shown, editing.selected)
+                  {allSelected(selectableShown, editing.selected)
                     ? "Clear selection"
                     : "Select all"}
                 </Button>
@@ -400,6 +546,11 @@ function SkillDialog({
                     id={`${countId}-${name}`}
                     type="checkbox"
                     className="native-check size-5 shrink-0 p-0 accent-foreground"
+                    disabled={
+                      editing.kind === "global" &&
+                      !editing.selected.includes(name) &&
+                      !globals.some((g) => g.name === name && g.available)
+                    }
                     checked={editing.selected.includes(name)}
                     onChange={(e) =>
                       onChange({
@@ -411,6 +562,10 @@ function SkillDialog({
                     }
                   />
                   {name}
+                  {editing.kind === "global" &&
+                  !globals.some((g) => g.name === name && g.available)
+                    ? " (unavailable)"
+                    : ""}
                 </label>
               ))}
               {shown.length === 0 && (
@@ -427,8 +582,11 @@ function SkillDialog({
             )}
             {tooMany && (
               <span className="error-text" role="alert">
-                An agent can enable at most {maxEnabledSkills} skills of one
-                plugin.
+                An agent can enable at most {maxEnabledSkills}{" "}
+                {editing?.kind === "global"
+                  ? "global skills"
+                  : "skills of one plugin"}
+                .
               </span>
             )}
           </>
@@ -457,6 +615,11 @@ function SkillDialog({
             </label>
           </>
         )}
+        {replacedGlobals.length > 0 && (
+          <p className="metadata" role="status">
+            Replaces global selection: {replacedGlobals.join(", ")}.
+          </p>
+        )}
         {error && (
           <span className="error-text" role="alert">
             {error}
@@ -474,7 +637,8 @@ function SkillDialog({
             type="button"
             disabled={!ready}
             onClick={() => {
-              if (editing?.kind === "installed")
+              if (editing?.kind === "global") onGlobals(editing.selected);
+              else if (editing?.kind === "installed")
                 onDone(
                   {
                     plugin: editing.plugin.plugin,
@@ -489,7 +653,11 @@ function SkillDialog({
                 );
             }}
           >
-            {editing?.index === undefined ? "Add plugin" : "Update skills"}
+            {editing?.kind === "global"
+              ? "Use global skills"
+              : editing?.index === undefined
+                ? "Add plugin"
+                : "Update skills"}
           </Button>
         </div>
       </DialogContent>

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   allSelected,
+  globalChoices,
+  withGlobals,
   entryErrors,
   entryLabel,
   entryUnavailable,
@@ -18,6 +20,8 @@ import {
   withEntry,
   withoutEntry,
 } from "../../web/src/skill-plugins.js";
+
+import { profileChanges } from "../../web/src/settings-changes.js";
 
 const demo: InstalledPlugin = {
   plugin: "claude:demo@m",
@@ -163,5 +167,90 @@ test("server field errors are worded for their row, and unreadable tool records 
   assert.deepEqual(
     installedStatusNotes({ claude: "available", codex: "none" }),
     [],
+  );
+});
+
+test("plugin draft edits retain globals and remove only actually selected conflicts without resurrection", () => {
+  const original = { plugins: [], global: ["review", "plan"] };
+  const unrelated = withEntry(original, { path: "/p", skills: ["other"] });
+  assert.deepEqual(unrelated.global, ["review", "plan"]);
+  const replaced = withEntry(unrelated, { path: "/p", skills: ["review"] }, 0);
+  assert.deepEqual(replaced.global, ["plan"]);
+  assert.deepEqual(withoutEntry(replaced, 0), {
+    plugins: [],
+    global: ["plan"],
+  });
+  assert.deepEqual(original.global, ["review", "plan"]);
+  assert.equal(skillsSummary(original), "2 global skills");
+  assert.equal(skillsSummary(replaced), "1 plugin, 1 skill, 1 global skill");
+});
+
+test("global choices retain unavailable selections, exclude only selected plugin names, and keep new installs disabled", () => {
+  const skills = {
+    plugins: [{ path: "/p", skills: ["review"] }],
+    global: ["gone"],
+  };
+  const source = {
+    status: "available" as const,
+    skills: [
+      { name: "review", available: true },
+      { name: "new", available: true },
+    ],
+  };
+  assert.deepEqual(globalChoices(source, skills), [
+    { name: "new", available: true },
+    { name: "gone", available: false },
+  ]);
+  assert.deepEqual(globalChoices(undefined, skills), [
+    { name: "gone", available: false },
+  ]);
+  assert.deepEqual(withGlobals(skills, ["gone", "new", "review"]).global, [
+    "gone",
+    "new",
+  ]);
+  assert.deepEqual(
+    parseSkillsDraft(
+      JSON.stringify({
+        plugins: [{ path: "/p", skills: ["review"] }],
+        global: ["review"],
+      }),
+    )?.global,
+    ["review"],
+  );
+});
+
+test("profile change previews name replaced globals and leave a discarded draft unchanged", () => {
+  const skills = { plugins: [], global: ["review"] };
+  const data: Parameters<typeof profileChanges>[0] = {
+    profile: {
+      id: "worker",
+      name: "Worker",
+      summary: "",
+      revoked: false,
+      version: 1,
+    },
+    instructionPresent: true,
+    instructionRevision: 1,
+    capabilities: "code",
+    runtime: { harness: "codex" },
+    skills,
+  };
+  const next = withEntry(skills, {
+    plugin: "claude:demo@m",
+    skills: ["review"],
+  });
+  assert.deepEqual(profileChanges(data, { skills: skillsDraft(next) }), [
+    "Skill plugins: 1 global skill → 1 plugin, 1 skill",
+    "Global skills replaced by plugin selections: review",
+  ]);
+  assert.deepEqual(profileChanges(data, { skills: skillsDraft(skills) }), []);
+  assert.equal(
+    parseSkillsDraft(
+      skillsDraft({
+        plugins: [],
+        global: Array.from({ length: 33 }, (_, i) => `skill-${i}`),
+      }),
+    ),
+    null,
   );
 });

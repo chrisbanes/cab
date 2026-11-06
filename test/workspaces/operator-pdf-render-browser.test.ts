@@ -104,7 +104,7 @@ test("production Vite bundle renders a synthetic PDF in its local worker without
   );
   assert.equal(
     await page.locator("html").getAttribute("data-pdf-version"),
-    "6.4.299",
+    "6.5.438",
   );
   assert.equal(await page.locator("html").getAttribute("data-pdf-pages"), "1");
   assert.ok(

@@ -140,10 +140,19 @@ export function profileChanges(
     lines.push(
       `Runtime: ${runtimeSummary(data.runtime)} → ${runtimeSummary(runtimeCommand(v))}`,
     );
-  if (v.skills !== undefined && skillsChanged(data.skills, v))
+  if (v.skills !== undefined && skillsChanged(data.skills, v)) {
+    const nextSkills = parseSkillsDraft(String(v.skills)) ?? data.skills;
     lines.push(
-      `Skill plugins: ${skillsSummary(data.skills)} → ${skillsSummary(parseSkillsDraft(String(v.skills)) ?? data.skills)}`,
+      `Skill plugins: ${skillsSummary(data.skills)} → ${skillsSummary(nextSkills)}`,
     );
+    const replacements = (data.skills.global ?? []).filter((name) =>
+      nextSkills.plugins.some((p) => p.skills.includes(name)),
+    );
+    if (replacements.length)
+      lines.push(
+        `Global skills replaced by plugin selections: ${replacements.join(", ")}`,
+      );
+  }
   return lines;
 }
 /** Whether the draft's skill entries differ from the stored skills (an unreadable draft counts as changed). */

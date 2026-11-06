@@ -40,6 +40,7 @@ import {
 } from "./harness.mjs";
 import {
   addJourneyTask,
+  postGlobalFollowUp,
   codexSkillBrief,
   INSTALLED_PHRASES,
   INSTALLED_SKILL,
@@ -53,6 +54,17 @@ import {
   TOKEN_VARIABLE,
 } from "./service-child.mjs";
 import { writePluginFixture } from "../skill-plugin-qualification/fixture.mjs";
+
+import {
+  writeGlobalSource,
+  assertGlobalMeasurement,
+  GLOBAL_SKILL,
+  globalBrief,
+} from "./global-fixture.mjs";
+
+const globalFacet = (facetName) => facetName.endsWith("-global-skill");
+let globalSource;
+let sourceEnvironment;
 
 const refuse = (message) => {
   process.stderr.write(`Refusing live Claude journeys: ${message}\n`);
@@ -292,6 +304,16 @@ const settled = (state) => !["running", "submitting"].includes(state);
 async function inProcess(run) {
   // Before the service exposes the token, so git children never inherit it.
   const repository = gitFixture();
+  if (globalFacet(facet)) {
+    globalSource = writeGlobalSource(root, "v1", randomUUID());
+    sourceEnvironment = {
+      HOME: process.env.HOME,
+      CODEX_HOME: process.env.CODEX_HOME,
+    };
+    // Only the disposable service source changes; runtime HOME isolation and login stay unchanged.
+    process.env.CODEX_HOME ??= join(homedir(), ".codex");
+    process.env.HOME = globalSource.home;
+  }
   const current = await startJourneyService({
     dataDir: join(root, "data"),
     launcher,
@@ -378,7 +400,9 @@ async function inProcess(run) {
                 });
               },
             }
-          : {}),
+          : globalFacet(facet)
+            ? { skills: { plugins: [], global: [GLOBAL_SKILL] } }
+            : {}),
   });
   current.taskId = ids.taskId;
   try {
@@ -388,6 +412,7 @@ async function inProcess(run) {
   }
   // A Codex-only facet runs no Claude query.
   if (
+    facet !== "codex-global-skill" &&
     facet !== "codex-skill" &&
     facet !== "codex-nested-skill" &&
     facet !== "codex-decision-question" &&
@@ -662,6 +687,147 @@ async function installedPlugin(current, ids, check, plugin) {
   } finally {
     restoreProbeEnvironment();
   }
+}
+
+async function globalSkill(current, ids, check) {
+  const resource = () =>
+    readFileSync(join(globalSource.source, "resources/answer.txt"), "utf8");
+  const records = () =>
+    current.observed.turns.map((turn) => {
+      const intent = current.service
+        .list()
+        .find((i) => i.turnId === turn.turnId);
+      if (!intent) throw new Error("a measured turn has no service intent");
+      return current.service.turnSkillPlugins(intent.workId);
+    });
+  const answers = [resource()];
+  const waitAnswer = async (answer) =>
+    waitUntil(
+      () => {
+        check();
+        return (
+          current.service
+            .coordinationView()
+            .readTask(ids.taskId)
+            .results.some((r) => r.summary === answer) &&
+          current.service.list().every((i) => settled(i.state))
+        );
+      },
+      TURN_MS,
+      "the relative resource answer",
+      true,
+    );
+  await waitAnswer(answers[0]);
+  globalSource = writeGlobalSource(root, "v2", randomUUID());
+  answers.push(resource());
+  await postGlobalFollowUp(current.service, ids.taskId, globalBrief);
+  await waitAnswer(answers[1]);
+  const missingAnswer = randomUUID();
+  globalSource = writeGlobalSource(root, "omitted", missingAnswer, {
+    omitResource: true,
+  });
+  const beforeMissing = current.service.coordinationView().readTask(ids.taskId)
+    .results.length;
+  await postGlobalFollowUp(current.service, ids.taskId, globalBrief);
+  await waitUntil(
+    () => {
+      check();
+      return (
+        current.service.coordinationView().readTask(ids.taskId).results.length >
+          beforeMissing && current.service.list().every((i) => settled(i.state))
+      );
+    },
+    TURN_MS,
+    "the omitted-resource result",
+    true,
+  );
+  const missingResult = current.service
+    .coordinationView()
+    .readTask(ids.taskId)
+    .results.at(-1).summary;
+  let omissionRejected = false;
+  try {
+    assertGlobalMeasurement(missingResult, missingAnswer);
+  } catch {
+    omissionRejected = missingResult === "RESOURCE_MISSING";
+  }
+  const calls = current.observed.calls;
+  const callbackPolicy = {
+    reports: calls.filter(
+      (c) => c.tool === "cab_report_result" && c.success === true,
+    ).length,
+    unexpected: calls
+      .filter((c) => c.tool !== "cab_report_result")
+      .map((c) => c.tool),
+    rejected: calls.filter((c) => c.success !== true).length,
+  };
+  const exclusions = {
+    sourcePresent: existsSync(
+      join(
+        root,
+        "service-home",
+        ".agents",
+        "skills",
+        "cab-unselected",
+        "SKILL.md",
+      ),
+    ),
+    adapterAbsent: current.observed.skillPlugins.every(
+      (plugins) =>
+        plugins.length === 1 &&
+        plugins[0].name === "cab-global-skills" &&
+        plugins[0].skills.length === 1 &&
+        plugins[0].skills[0] === GLOBAL_SKILL &&
+        !existsSync(join(plugins[0].path, "skills", "cab-unselected")),
+    ),
+    reportedLeak: current.service
+      .coordinationView()
+      .readTask(ids.taskId)
+      .results.some((r) => r.summary === "UNSELECTED_LEAK"),
+  };
+  const { digestPlugin } = await import(
+    "../../../dist/src/standalone/skill-plugins.js"
+  );
+  const runtimeDigests = await Promise.all(
+    current.observed.skillPlugins.map((plugins) =>
+      Promise.all(plugins.map((p) => digestPlugin(p.path, p.skills))),
+    ),
+  );
+  const turns = current.observed.turns;
+  evidence.observations = {
+    integratedServiceProof: true,
+    selectedGlobals: current.service
+      .domain()
+      .profileSkills(ids.leadProfileId, 1).global,
+    missingResult,
+    callbackPolicy,
+    exclusions,
+    answersMatched: true,
+    omissionRejected,
+    turnSkillPlugins: records(),
+    evidenceMatchesRuntime: records().every(
+      (plugins, index) =>
+        plugins.length === 1 &&
+        plugins[0].digest === runtimeDigests[index]?.[0],
+    ),
+    digests: records().map((plugins) => plugins.map((p) => p.digest)),
+    sameConversation:
+      turns.length >= 2 && turns.every((t) => t.threadId === turns[0].threadId),
+    digestChanged: records()[0]?.[0]?.digest !== records()[1]?.[0]?.digest,
+  };
+  if (
+    !omissionRejected ||
+    !evidence.observations.evidenceMatchesRuntime ||
+    callbackPolicy.reports !== 3 ||
+    callbackPolicy.unexpected.length !== 0 ||
+    callbackPolicy.rejected !== 0 ||
+    !exclusions.sourcePresent ||
+    !exclusions.adapterAbsent ||
+    exclusions.reportedLeak ||
+    !evidence.observations.sameConversation ||
+    !evidence.observations.digestChanged
+  )
+    throw new Error("global adapter refresh assertion failed");
 }
 
 /** The one installed version of mattpocock-skills in the operator's Claude Code plugin cache. */
@@ -1478,6 +1644,11 @@ function cleanup() {
     for (const identity of active.codex)
       await settleProcess("codex-app-server", identity);
     delete process.env[TOKEN_VARIABLE];
+    if (sourceEnvironment)
+      for (const [name, value] of Object.entries(sourceEnvironment)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     // An unsafe shutdown fails the attempt, so the ledger and outcome record it.
     if (
       !evidence.cleanup.serviceStopped ||
@@ -1551,7 +1722,9 @@ async function attemptBody(attempt) {
                         ? nestedSkill(current, ids, check, plugin)
                         : installedFacet
                           ? installedPlugin(current, ids, check, plugin)
-                          : coordination(current, ids, check),
+                          : globalFacet(facet)
+                            ? globalSkill(current, ids, check)
+                            : coordination(current, ids, check),
           );
     work.catch(() => {});
     await Promise.race([work, aborted]);

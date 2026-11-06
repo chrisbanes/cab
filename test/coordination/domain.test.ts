@@ -2739,3 +2739,78 @@ test("runtime enablement persists per harness, replays its receipt and sets the 
     f.close();
   }
 });
+
+test("profile globals persist canonically across updates and immutable revisions without resurrection", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Globals",
+      instructions: "Build",
+      capabilities: "code",
+      skills: { plugins: [], global: ["same", "other"] },
+    });
+    assert.deepEqual(f.domain.profileSkills(profile, 1), {
+      plugins: [],
+      global: ["same", "other"],
+    });
+    const plugins = [{ path: "/plugins/p", skills: ["same"] }];
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 1,
+      skills: { plugins, global: ["same", "other"] },
+    });
+    assert.deepEqual(f.domain.profileSkills(profile), {
+      plugins,
+      global: ["other"],
+    });
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 2,
+      skills: {
+        plugins: [],
+        global: f.domain.profileSkills(profile).global ?? [],
+      },
+    });
+    assert.deepEqual(f.domain.profileSkills(profile), {
+      plugins: [],
+      global: ["other"],
+    });
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 3,
+      name: "Renamed",
+    });
+    f.reopen();
+    assert.deepEqual(f.domain.profileSkills(profile), {
+      plugins: [],
+      global: ["other"],
+    });
+    assert.deepEqual(f.domain.profileSkills(profile, 1), {
+      plugins: [],
+      global: ["same", "other"],
+    });
+    assert.deepEqual(f.domain.profileSkills(profile, 2), {
+      plugins,
+      global: ["other"],
+    });
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 4,
+      skills: { plugins: [], global: [] },
+    });
+    assert.deepEqual(f.domain.profileSkills(profile), { plugins: [] });
+  } finally {
+    f.close();
+  }
+});

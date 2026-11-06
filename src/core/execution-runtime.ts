@@ -56,7 +56,8 @@ export type ProfileRuntime = z.infer<typeof profileRuntimeSchema>;
  * an absolute local directory on the service host (`path`), or a plugin the operator
  * installed and enabled in Claude Code or Codex (`plugin`, `claude:<plugin>@<marketplace>`
  * or `codex:<plugin>@<marketplace>`). Shared by both harnesses, so it is not part of the
- * runtime JSON. A plugin contributes skills, instructions and scripts only.
+ * runtime JSON. Optional global names select skills from the service user's `.agents/skills`.
+ * A plugin contributes skills, instructions and scripts only.
  */
 export const skillNameSchema = z
   .string()
@@ -78,8 +79,15 @@ const enabledSkillsSchema = z
 export const profilePluginKey = (
   plugin: { path: string } | { plugin: string },
 ): string => ("path" in plugin ? plugin.path : plugin.plugin);
-export const profileSkillsSchema = z
+const profileSkillsInputSchema = z
   .object({
+    global: z
+      .array(skillNameSchema)
+      .max(32)
+      .refine((names) => new Set(names).size === names.length, {
+        message: "Duplicate skill",
+      })
+      .optional(),
     plugins: z
       .array(
         z.union([
@@ -112,7 +120,16 @@ export const profileSkillsSchema = z
       ),
   })
   .strict();
-export type ProfileSkills = z.infer<typeof profileSkillsSchema>;
+export type ProfileSkills = z.infer<typeof profileSkillsInputSchema>;
+/** Selected plugin skills replace matching globals; removing a plugin never restores them. */
+export function normalizeProfileSkills(skills: ProfileSkills): ProfileSkills {
+  const selected = new Set(skills.plugins.flatMap((plugin) => plugin.skills));
+  const global = skills.global?.filter((name) => !selected.has(name));
+  return { plugins: skills.plugins, ...(global?.length ? { global } : {}) };
+}
+export const profileSkillsSchema = profileSkillsInputSchema.transform(
+  normalizeProfileSkills,
+);
 export type ProfilePlugin = ProfileSkills["plugins"][number];
 export const noProfileSkills: ProfileSkills = { plugins: [] };
 /** A new profile's runtime: the first enabled harness, else Codex, with default settings. */

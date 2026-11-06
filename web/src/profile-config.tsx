@@ -547,7 +547,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                 title="About skill plugins"
                 items={[
                   "Skills are instructions to the agent, not cab policy. A plugin contributes skills, instructions and scripts only; its hooks, MCP servers and apps never run, including for an installed plugin.",
-                  "An installed plugin is used as installed when each turn starts: an update applies to the next turn, and a plugin that is disabled or uninstalled makes the work wait.",
+                  "Global skills are explicitly selected from the service user's ~/.agents/skills. An installed plugin or global skill is used as installed when each turn starts: an update applies to the next turn, and a selected skill that is unavailable makes the work wait.",
                   "Skill scripts run through the shell tool under the same sandbox and network policy. A skills change affects new conversations only.",
                 ]}
               />

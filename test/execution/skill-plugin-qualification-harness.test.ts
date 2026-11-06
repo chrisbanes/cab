@@ -93,3 +93,103 @@ test("probe facets cover every ADR-1021 question once", async () => {
     "F3.4",
   ]);
 });
+
+test("global live facets explicitly cap each attempt and session", async () => {
+  const { FACETS, GLOBAL_CAPS, parseArgs } = await import(
+    pathToFileURL(
+      resolve("test/execution/mixed-runtime-qualification/harness.mjs"),
+    ).href
+  );
+  assert.equal(
+    parseArgs(["--live", "--facet", "claude-global-skill"]),
+    "claude-global-skill",
+  );
+  assert.deepEqual(FACETS["claude-global-skill"], { claude: 3, codex: 0 });
+  assert.deepEqual(FACETS["codex-global-skill"], { claude: 0, codex: 3 });
+  assert.deepEqual(GLOBAL_CAPS, { claude: 30, codex: 10 });
+});
+
+test("global live measurement rejects omitted, stale and leaked answers", async () => {
+  const { assertGlobalMeasurement } = await import(
+    pathToFileURL(
+      resolve("test/execution/mixed-runtime-qualification/global-fixture.mjs"),
+    ).href
+  );
+  assertGlobalMeasurement("fresh-answer", "fresh-answer");
+  for (const actual of ["RESOURCE_MISSING", "stale-answer", "UNSELECTED_LEAK"])
+    assert.throws(
+      () => assertGlobalMeasurement(actual, "fresh-answer"),
+      /resource answer/,
+    );
+});
+
+test("additional grant admits five global attempts and leaves other facets at two", async () => {
+  const { FACETS, beginAttempt, finishAttempt, emptyLedger, BudgetExhausted } =
+    await import(
+      pathToFileURL(
+        resolve("test/execution/mixed-runtime-qualification/harness.mjs"),
+      ).href
+    );
+  for (const facet of Object.keys(FACETS)) {
+    const limit = ["claude-global-skill", "codex-global-skill"].includes(facet)
+      ? 5
+      : 2;
+    let ledger = emptyLedger();
+    for (let i = 0; i < limit; i++)
+      ledger = finishAttempt(beginAttempt(ledger, facet), "failed", "harness");
+    assert.throws(() => beginAttempt(ledger, facet), BudgetExhausted, facet);
+  }
+});
+
+test("global follow-up uses the current assignment version rather than its execution snapshot", async () => {
+  const { postGlobalFollowUp } = await import(
+    pathToFileURL(
+      resolve("test/execution/mixed-runtime-qualification/service-child.mjs"),
+    ).href
+  );
+  let posted: Record<string, unknown> | undefined;
+  const service = {
+    recoveryForTask: () => [
+      { binding: { assignmentId: "assignment", assignmentVersion: 1 } },
+    ],
+    domain: () => ({ assignment: () => ({ version: 7 }) }),
+    coordinationView: () => ({
+      postOperatorMessage: async (message: Record<string, unknown>) => {
+        posted = message;
+      },
+    }),
+  };
+  await postGlobalFollowUp(service, "task", "brief");
+  assert.equal(posted?.recipientAssignmentId, "assignment");
+  assert.equal(posted?.expectedAssignmentVersion, 7);
+  assert.equal(posted?.message, "brief");
+});
+
+test("integrated global fixture updates linked sources without a synthetic adapter and removes the probe resource", async (t) => {
+  const { createRoot } = await harness();
+  const root = createRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const { writeGlobalSource } = await import(
+    pathToFileURL(
+      resolve("test/execution/mixed-runtime-qualification/global-fixture.mjs"),
+    ).href
+  );
+  const first = writeGlobalSource(root, "v1", "first");
+  assert.equal(
+    readFileSync(join(first.source, "resources/answer.txt"), "utf8"),
+    "first",
+  );
+  assert.equal(existsSync(join(root, "adapter-v1")), false);
+  const second = writeGlobalSource(root, "v2", "second");
+  assert.equal(second.source, first.source);
+  assert.equal(
+    readFileSync(join(second.source, "resources/answer.txt"), "utf8"),
+    "second",
+  );
+  writeGlobalSource(root, "omitted", "hidden", { omitResource: true });
+  assert.equal(existsSync(join(second.source, "resources/answer.txt")), false);
+  assert.equal(
+    existsSync(join(first.home, ".agents/skills/cab-unselected/SKILL.md")),
+    true,
+  );
+});
