@@ -8,7 +8,7 @@ question with options and recommendations, on each harness
 real Claude CLI or Codex App Server, on a disposable repository and temporary data. Redacted
 output, an array of the two facet records:
 [`decision-question-form-journeys-2026-11-06.json`](decision-question-form-journeys-2026-11-06.json)
-(SHA-256 `ba3bf3735eeb3f2cded468c04f9707f90c91d4e39471a1ceec5a577c6dda02b7`).
+(SHA-256 `447b823e729603bde87a6f94ede83179be7df9a8ee2a3cef571e7419aa535468`).
 
 The brief states three separate decisions only the operator can make (git metadata write
 access, local listening ports for browser tests, permitting named agents or revising their

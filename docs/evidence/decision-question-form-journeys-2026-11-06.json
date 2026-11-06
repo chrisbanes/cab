@@ -20,16 +20,8 @@
     "observations": {
       "source": "form",
       "questionCount": 3,
-      "kinds": [
-        "single-choice",
-        "single-choice",
-        "single-choice"
-      ],
-      "optionCounts": [
-        2,
-        3,
-        2
-      ],
+      "kinds": ["single-choice", "single-choice", "single-choice"],
+      "optionCounts": [2, 3, 2],
       "recommendedCount": 3,
       "customAllowedCount": 1
     },
@@ -57,9 +49,7 @@
     "trace": [],
     "cleanup": {
       "serviceStopped": true,
-      "temporaryBases": [
-        "removed"
-      ],
+      "temporaryBases": ["removed"],
       "rootRemoved": true
     },
     "claudeCli": {
@@ -109,16 +99,8 @@
     "observations": {
       "source": "form",
       "questionCount": 3,
-      "kinds": [
-        "single-choice",
-        "single-choice",
-        "single-choice"
-      ],
-      "optionCounts": [
-        2,
-        2,
-        2
-      ],
+      "kinds": ["single-choice", "single-choice", "single-choice"],
+      "optionCounts": [2, 2, 2],
       "recommendedCount": 3,
       "customAllowedCount": 2
     },
@@ -141,9 +123,7 @@
     "trace": [],
     "cleanup": {
       "serviceStopped": true,
-      "temporaryBases": [
-        "removed"
-      ],
+      "temporaryBases": ["removed"],
       "rootRemoved": true
     },
     "claudeCli": {
