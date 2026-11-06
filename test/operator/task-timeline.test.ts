@@ -188,7 +188,7 @@ async function setup(t: { after(fn: () => unknown): void }) {
     toolRow("tc-unknown", "toolCall", { tool: "Skill" });
     toolRow("tc-abs", "toolCall", { tool: "Read", target: "/abs/leak.ts" });
     toolRow("ws-1", "webSearch", { target: "how to x" });
-    toolRow("mcp-1", "mcpToolCall", { target: "docs/search" });
+    toolRow("mcp-1", "mcpToolCall", { target: "kb/search" });
     toolRow("fc-abs", "fileChange", {
       paths: ["/abs/leak.ts", "../up.ts", "ok.ts", "ok.ts", "a".repeat(257)],
     });
@@ -453,7 +453,7 @@ test("only the curated tool projection crosses the boundary", async (t) => {
       ["other", "Skill", null],
       ["other", "Read", "outside workspace"],
       ["other", "webSearch", "how to x"],
-      ["other", "mcpToolCall", "docs/search"],
+      ["other", "mcpToolCall", "kb/search"],
       ["file-change", null, null],
     ],
   );

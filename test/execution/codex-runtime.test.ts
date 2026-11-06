@@ -3117,7 +3117,7 @@ test("diagnostic events carry tool metadata and observed settings only", async (
       id: "m1",
       type: "mcpToolCall",
       command: "no",
-      server: "docs",
+      server: "kb",
       tool: "search",
       arguments: { q: "SECRET-ARGS" },
     }),
@@ -3259,7 +3259,7 @@ test("diagnostic events carry tool metadata and observed settings only", async (
     assert.ok(!("command" in (captured[4] ?? {})));
     const field = (index: number, key: string) =>
       (captured[index] as unknown as Record<string, unknown>)[key];
-    assert.equal(field(4, "target"), "docs/search");
+    assert.equal(field(4, "target"), "kb/search");
     assert.deepEqual(field(5, "paths"), ["src/a.ts", "outside workspace"]);
     assert.equal(field(5, "target"), undefined);
     assert.equal(field(7, "target"), "how to x");

@@ -1362,7 +1362,7 @@ test("file changes and allowlisted tools record a relative path or target, never
       { subagent_type: "explore", prompt: "P" },
       "a1",
     );
-    await session.hook("mcp__docs__search", { q: "Q" }, "m1");
+    await session.hook("mcp__kb__search", { q: "Q" }, "m1");
     await session.hook("Skill", { skill: "s" }, "s1");
     await session.hook("mcp__cab__cab_report_result", {}, "c1");
   };
@@ -1406,21 +1406,9 @@ test("file changes and allowlisted tools record a relative path or target, never
           ["toolCall", "started", "Grep", "needle", undefined],
           ["toolCall", "started", "Glob", "**/*.ts", undefined],
           ["toolCall", "started", "Agent", "explore", undefined],
-          [
-            "toolCall",
-            "started",
-            "mcp__docs__search",
-            "docs/search",
-            undefined,
-          ],
+          ["toolCall", "started", "mcp__kb__search", "kb/search", undefined],
           // A tool the profile does not allow is recorded as declined, with its name only.
-          [
-            "toolCall",
-            "completed",
-            "mcp__docs__search",
-            "docs/search",
-            undefined,
-          ],
+          ["toolCall", "completed", "mcp__kb__search", "kb/search", undefined],
           ["toolCall", "started", "Skill", undefined, undefined],
           ["toolCall", "completed", "Skill", undefined, undefined],
         ],
