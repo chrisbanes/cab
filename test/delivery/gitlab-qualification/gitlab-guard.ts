@@ -206,6 +206,8 @@ export class GitLabGuard {
       this.deny("auto-merge");
     const path = url.pathname;
     if (url.search && url.search !== "?resolved=true") this.deny("query");
+    const stack = this.mode === "stack";
+    if (stack && path === "/api/graphql") this.deny("graphql");
     if (method === "POST" && path === "/api/graphql") {
       const variables = body.variables as Record<string, unknown> | undefined;
       if (
@@ -223,7 +225,6 @@ export class GitLabGuard {
     const mr = rest.match(new RegExp(`^/merge_requests/${iidPattern}(/.*)?$`));
     const iid = mr ? Number(mr[1]) : null;
     const known = iid !== null && this.requests.has(iid);
-    const stack = this.mode === "stack";
     if (method === "POST" && rest === "/merge_requests") {
       const target = String(body.target_branch);
       if (
@@ -237,7 +238,10 @@ export class GitLabGuard {
         (stack && this.stackCreates >= stackLayers)
       )
         this.deny("merge-request-create");
-      if (stack) this.stackCreates++;
+      if (stack) {
+        this.stackCreates++;
+        this.undo = () => this.stackCreates--;
+      }
       return this.spend("POST merge_requests");
     }
     if (method === "PUT" && mr && !mr[2]) {
@@ -256,11 +260,9 @@ export class GitLabGuard {
       }
       if (
         !known ||
+        (stack && keys.join() !== "state_event") ||
         keys.some(
-          (k) =>
-            !(
-              stack ? ["state_event"] : ["title", "description", "state_event"]
-            ).includes(k),
+          (k) => !["title", "description", "state_event"].includes(k),
         ) ||
         (body.state_event !== undefined && body.state_event !== "close")
       )

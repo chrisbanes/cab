@@ -126,9 +126,15 @@ export async function runGitLabStackQualification(
     steps,
     cleanupReads: [],
   };
-  const token = await options.token();
+  // The login's token can rotate during a run: cleanup reads it again, and every token seen is redacted.
+  let token = await options.token();
+  const seen = new Set<string>();
+  if (token) seen.add(token);
   const clean = (value: unknown) =>
-    token ? String(value).replaceAll(token, "[redacted]") : String(value);
+    [...seen].reduce(
+      (text, secret) => text.replaceAll(secret, "[redacted]"),
+      String(value),
+    );
   const pass = (step: string, detail?: string) =>
     steps.push({
       step,
@@ -192,7 +198,7 @@ export async function runGitLabStackQualification(
     };
 
     const f = await stackedDeliveryFixture(
-      { after: (fn: () => unknown) => after.push(fn) } as never,
+      { after: (fn: () => unknown) => after.push(fn) },
       {
         tasks: 3,
         gitlab: {
@@ -546,6 +552,8 @@ export async function runGitLabStackQualification(
       evidence.failure += ` [guard refused: ${[...new Set(guard.denied)].join(", ")}]`;
   } finally {
     // Cleanup acts only on what the run recorded, and counts toward pass or fail.
+    token = (await options.token().catch(() => undefined)) ?? token;
+    if (token) seen.add(token);
     Object.assign(evidence, await cleanUp(api, guard, pendingMerge, clean));
     for (const fn of after.reverse())
       await Promise.resolve(fn()).catch(() => {});

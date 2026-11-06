@@ -172,6 +172,17 @@ test("the stack guard allows one removal merge of the bottom layer, a plain midd
   // Nothing else the delivery journey may write.
   await denied(call("POST", "/merge_requests/3/discussions", { body: "x" }));
   await denied(call("PUT", "/merge_requests/3", { title: "x" }));
+  await denied(call("PUT", "/merge_requests/3", {}));
+  await denied(
+    fetcher("https://gitlab.com/api/graphql", {
+      method: "POST",
+      body: JSON.stringify({
+        query:
+          "mutation($projectPath: ID!, $iid: String!) { mergeRequestSetDraft(input: { projectPath: $projectPath, iid: $iid, draft: false }) { errors } }",
+        variables: { projectPath, iid: "3" },
+      }),
+    }),
+  );
   assert.equal(guard.mergeCount, 2);
   assert.deepEqual(
     guard.mergeBodies.map((m) => m.iid),
@@ -202,4 +213,28 @@ test("the live stack invocation needs --live and an absolute result path, and no
   );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Refusing execution/);
+});
+
+test("a stack create answered 429 may be sent again without spending a layer", async () => {
+  const guard = new GitLabGuard(maxWrites, 0, 0, "stack");
+  let limited = true;
+  const fetcher = guard.fetcher((async () => {
+    if (limited) {
+      limited = false;
+      return new Response("", { status: 429 });
+    }
+    return Response.json({ id: 100, iid: 1 }, { status: 201 });
+  }) as typeof fetch);
+  const push = guard.guardPush(async () => "pushed");
+  for (const branch of ["cab/a", "cab/b", "cab/c"])
+    await push({ host: "gitlab.com", nameWithOwner: projectPath, branch });
+  const create = (source: string) =>
+    fetcher(`https://gitlab.com/api/v4/projects/${id}/merge_requests`, {
+      method: "POST",
+      body: JSON.stringify({ source_branch: source, target_branch: "main" }),
+    });
+  assert.equal((await create("cab/a")).status, 429);
+  for (const branch of ["cab/a", "cab/b", "cab/c"])
+    assert.equal((await create(branch)).status, 201);
+  assert.deepEqual(guard.denied, []);
 });

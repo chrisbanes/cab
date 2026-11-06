@@ -6,6 +6,7 @@ import {
   unstackConfirmation,
   unstackConfirmationFor,
   unstackRecovery,
+  unstackRecoveryFor,
   unstackStatus,
   cancelStackedConfirmation,
 } from "../operator/unstack-copy.js";
@@ -39,7 +40,7 @@ export const unstackBrowseCommands = new Map<string, BrowseCommand>([
           ),
           human: [
             unstackConfirmationFor(p?.codeHost ?? "github"),
-            unstackRecovery,
+            unstackRecoveryFor(p?.codeHost ?? "github"),
             d.operation
               ? unstackStatus(d.operation)
               : "No recorded Unstack operation.",

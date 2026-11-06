@@ -5,6 +5,7 @@ import {
   unstackConfirmation,
   unstackConfirmationFor,
   unstackRecovery,
+  unstackRecoveryFor,
   unstackStatus,
   cancelStackedConfirmation,
 } from "../../src/operator/unstack-copy.js";
@@ -42,6 +43,8 @@ test("GitLab Unstack copy retargets only the selected merge request; GitHub copy
   assert.match(gitlab, /restack follows only after the retarget is confirmed/);
   assert.match(gitlab, /Merged layers are unaffected/);
   assert.match(gitlab, /cannot undo merges or automatic adoption/);
+  assert.equal(unstackRecoveryFor("github"), unstackRecovery);
+  assert.match(unstackRecoveryFor("gitlab"), /retarget is not confirmed/);
 });
 
 test("typed status distinguishes a recorded intent from provider success for every durable phase", () => {

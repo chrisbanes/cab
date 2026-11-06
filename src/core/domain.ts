@@ -2768,15 +2768,10 @@ export class DomainStore {
     blocker: string,
     repositoryId: string,
   ): number {
-    const links = this.one(
-      "SELECT links FROM project_repository_links WHERE projectId = ?",
-      projectId,
-    );
     if (
-      !links ||
-      !repositoryLinkListSchema
-        .parse(JSON.parse(String(links.links)))
-        .some((l) => l.repositoryId === repositoryId && l.codeHost === "gitlab")
+      !this.repositoryLinks(projectId).links.some(
+        (l) => l.repositoryId === repositoryId && l.codeHost === "gitlab",
+      )
     )
       return 0;
     const delivery = new DeliveryStore(this.db);

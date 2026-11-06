@@ -98,6 +98,11 @@ const mergeRequestSchema = z.object({
     })
     .nullish(),
 });
+/** A merge request as a list reports it: no diff refs or pipeline. */
+const listedMergeRequestSchema = z.object({
+  ...mergeRequestFields,
+  state: mergeRequestSchema.shape.state,
+});
 const noteSchema = z.object({
   id: z.number().int(),
   type: z.string().nullable(),
@@ -972,14 +977,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         `/projects/${repositoryId}/merge_requests?state=all&source_branch=${encodeURIComponent(own.target_branch)}`,
       )
     )
-      .map((v) =>
-        z
-          .object({
-            ...mergeRequestFields,
-            state: mergeRequestSchema.shape.state,
-          })
-          .parse(v),
-      )
+      .map((v) => listedMergeRequestSchema.parse(v))
       .filter(
         (m) =>
           m.source_branch === own.target_branch &&

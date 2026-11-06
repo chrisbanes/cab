@@ -12,7 +12,7 @@ import {
 } from "../../src/operator/unstack-contracts.js";
 import {
   unstackConfirmationFor,
-  unstackRecovery,
+  unstackRecoveryFor,
   unstackStatus,
   cancelStackedConfirmation,
 } from "../../src/operator/unstack-copy.js";
@@ -139,6 +139,7 @@ export function TaskUnstack({
     (view.preview?.materialHash === captured.materialHash ||
       view.operation?.materialHash === captured.materialHash);
   const cancelVersion = Number(cancel.entry.text);
+  const codeHost = captured?.codeHost ?? view?.preview?.codeHost ?? "github";
   const checkOriginal = async () => {
     const command = active.entry.lifecycle.frozen;
     const saved = mode === "cancel" ? view?.cancelOperation : view?.operation;
@@ -327,9 +328,7 @@ export function TaskUnstack({
           <DialogDescription>
             {mode === "cancel"
               ? cancelStackedConfirmation
-              : unstackConfirmationFor(
-                  captured?.codeHost ?? view?.preview?.codeHost ?? "github",
-                )}
+              : unstackConfirmationFor(codeHost)}
           </DialogDescription>
           {mode === "unstack" && (
             <>
@@ -346,7 +345,7 @@ export function TaskUnstack({
                   . Retarget #{captured.selectedPr} to {captured.targetBase}.
                 </p>
               )}
-              <p>{unstackRecovery}</p>
+              <p>{unstackRecoveryFor(codeHost)}</p>
               {captured && !discloseCapture && (
                 <p>Retained preview details are currently withheld.</p>
               )}
