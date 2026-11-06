@@ -202,3 +202,11 @@ test("dispose closes the source and cancels every timer", () => {
   assert.equal(s.sources.length, 1);
   assert.deepEqual(s.calls, []);
 });
+
+test("a first connection after a failed attempt refetches once", () => {
+  const s = setup();
+  s.source().emit("error");
+  s.advance(streamTiming.firstRetryMs);
+  s.source().emit("heartbeat");
+  assert.deepEqual(s.calls, ["read"]);
+});

@@ -138,6 +138,8 @@ export class TaskChangeStream {
 
   private reconnect(): void {
     this.disconnect();
+    // A connection after a failed attempt may have missed a change, so it refetches.
+    this.connected = true;
     const base = Math.min(
       streamTiming.maxRetryMs,
       streamTiming.firstRetryMs * 2 ** this.attempt,
