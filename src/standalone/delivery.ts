@@ -3,6 +3,7 @@ import type { GhOptions } from "./gh-credential.js";
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   absentBranchHead,
+  acceptableBaseRefs,
   isIssueTrackerAction,
   isOperatorAction,
   isRecoveryAction,
@@ -471,9 +472,23 @@ export class DeliveryCoordinator {
       policy = this.store.configuration(caller.projectId);
     const action = record.request.action;
     const target = action.target.repositoryId;
+    // GitLab has no stack object: the merge request's target branch is its stack membership.
+    const mergeHost =
+      action.kind === "pr.merge"
+        ? this.codeHost(caller.projectId, target)
+        : null;
+    const linkBases =
+      mergeHost?.codeHost === "gitlab"
+        ? acceptableBaseRefs(mergeHost.ref)
+        : undefined;
     const lowerChain =
       action.kind === "pr.merge"
-        ? this.store.stackMergeGuard(caller.taskId, target)
+        ? this.store.stackMergeGuard(caller.taskId, target, linkBases)
+        : null;
+    // GitLab retargets the next merge request only when the merged branch is removed.
+    const stackedDependent =
+      action.kind === "pr.merge" && linkBases
+        ? this.store.stackedDependentOf(caller.taskId, target)
         : null;
     if (lowerChain?.reason)
       return this.store.recordObservation(record.operationId, {
@@ -609,7 +624,7 @@ export class DeliveryCoordinator {
           receipt: null,
         });
     } else {
-      const resolved = this.codeHost(caller.projectId, target);
+      const resolved = mergeHost ?? this.codeHost(caller.projectId, target);
       if (
         resolved.codeHost !== "github" &&
         !this.options.providerFactories?.[resolved.codeHost]
@@ -716,7 +731,13 @@ export class DeliveryCoordinator {
     try {
       before = await this.bounded(
         caller,
-        provider.preflight(action, policy, publication, adoption),
+        provider.preflight(
+          action,
+          policy,
+          publication,
+          adoption,
+          stackedDependent ? { removeSourceBranch: true } : undefined,
+        ),
       );
     } catch (error) {
       // The issue no longer shows the text the operator edit replaces, or the item the Status
@@ -795,8 +816,18 @@ export class DeliveryCoordinator {
           )
             throw new Error("Stacked PR dependency changed during preflight");
           if (lowerChain) {
-            const current = this.store.stackMergeGuard(caller.taskId, target);
-            if (current.reason || current.material !== lowerChain.material)
+            const current = this.store.stackMergeGuard(
+              caller.taskId,
+              target,
+              linkBases,
+            );
+            if (
+              current.reason ||
+              current.material !== lowerChain.material ||
+              (linkBases &&
+                this.store.stackedDependentOf(caller.taskId, target) !==
+                  stackedDependent)
+            )
               throw new Error(
                 "Lower stack chain changed during merge preflight",
               );

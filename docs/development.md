@@ -172,6 +172,13 @@ model-free fake runtimes before a live attempt. These checks do not prove
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.
 
+GitLab stacking on gitlab.com runs, after `npm run build` and with `glab` logged in, as
+`node test/delivery/gitlab-qualification/live-gitlab-stack.mjs --live [--result ABSOLUTE_PATH]`.
+It refuses to start with `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` set, writes
+only to the fixture project through its guard (at most 16 writes, two of them real merges
+into its `main`) and cleans up what it created; its offline contract is
+`test/delivery/gitlab-stack-live-harness.test.ts`.
+
 The production service runs the Claude runtime
 ([ADR-1008](adr/1008-claude-code-execution-harness.md)) beside Codex; agents
 select it explicitly. Its token is the operator's own subscription token from `claude setup-token`,

@@ -29,6 +29,7 @@ export const stackReasonLabels: Record<StackReason, string> = {
   "blocker-failed":
     "The blocker was cancelled or its change request closed without merging; Unstack or Cancel this task",
   "blocker-unknown": "its blocker's change request or state is unknown",
+  "gitlab-stack-limit": "its GitLab stack would exceed 20 merge requests",
 };
 
 /** A task's stack facts as one sentence; null when stacking does not apply. */

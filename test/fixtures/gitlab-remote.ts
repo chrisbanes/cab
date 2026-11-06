@@ -30,6 +30,8 @@ export interface ScriptedMergeRequest {
   author: { id: number };
   diff_refs: { base_sha: string | null } | null;
   head_pipeline: ScriptedPipeline | null;
+  /** The merge request's pipelines, newest first; its head pipeline alone when unset. */
+  pipelines?: ScriptedPipeline[];
   detailed_merge_status: string | null;
   merge_when_pipeline_succeeds: boolean;
 }
@@ -139,6 +141,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
     tokenKinds: new Map<string, "oauth" | "pat">(),
     /** Commits made through the commits API so far. */
     commits: 0,
+    /** A merge ignores `should_remove_source_branch`, as a project that keeps branches would. */
+    ignoreRemoval: false,
   };
   const headOf = (branch: string) => state.heads.get(branch) ?? state.head;
   /** The merge and train writes, with their bodies. */
@@ -315,6 +319,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       }
       if (body.description !== undefined)
         mr.description = saved(String(body.description));
+      if (body.target_branch !== undefined)
+        mr.target_branch = body.target_branch;
       return json(mr);
     }
     if (rest === "merge" && method === "PUT") {
@@ -324,9 +330,34 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       if (mr.state !== "opened" || mr.detailed_merge_status !== "mergeable")
         return json({}, 405);
       mr.state = "merged";
+      // Removing the source branch makes GitLab retarget the merge requests that targeted it.
+      if (body.should_remove_source_branch === true && !state.ignoreRemoval) {
+        state.heads.delete(mr.source_branch);
+        for (const next of state.mergeRequests)
+          if (
+            next.state === "opened" &&
+            next.target_branch === mr.source_branch
+          ) {
+            next.target_branch = mr.target_branch;
+            // GitLab's retarget clears the head pipeline; the merge request still lists it.
+            next.pipelines = next.head_pipeline ? [next.head_pipeline] : [];
+            next.head_pipeline = null;
+          }
+      }
       if (state.loseMergeResponse) throw new TypeError("fetch failed");
       return json(mr);
     }
+    if (rest === "pipelines")
+      return json(
+        (mr.pipelines ?? (mr.head_pipeline ? [mr.head_pipeline] : [])).map(
+          (p) => ({
+            id: p.id,
+            sha: p.sha,
+            status: p.status,
+            updated_at: p.finished_at,
+          }),
+        ),
+      );
     if (rest === "discussions" && method === "POST") {
       const id = (state.nextId++).toString(16);
       const created = gitLabDiscussion(id, [

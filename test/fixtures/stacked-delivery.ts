@@ -27,18 +27,33 @@ import type {
   RuntimeToolCall,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
-import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import type {
+  CodeHostDeliveryProvider,
+  CodeHostProviderFactory,
+} from "../../src/standalone/code-host.js";
+import type { AdoptFunction } from "../../src/standalone/git-fetch.js";
+import type { PushFunction } from "../../src/standalone/github-delivery.js";
+import type { RateLimitPolicy } from "../../src/standalone/gitlab-http.js";
+import { gitLabDeliveryFactory } from "../../src/standalone/gitlab-delivery.js";
 import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
 import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
 import { unusedIssueInspection } from "./delivery-fixture.js";
+import { scriptedGitLabRemote } from "./gitlab-remote.js";
 import { git } from "./publication.js";
 import { tmpdir } from "./temp.js";
 import { until } from "./until.js";
 
 export const repositoryId = "R1";
+/** The GitLab project the fixture links in its GitLab mode. */
+export const gitLabProject = {
+  repositoryId: "42",
+  host: "gitlab.example.com",
+  projectPath: "group/app",
+  credentialVariable: "CAB_TEST_GITLAB_STACK_TOKEN",
+};
 
 /**
  * The fixture's source plays the outside writer and the remote, so it reads the objects of the
@@ -60,12 +75,27 @@ export function shareTaskObjects(source: string, gitCommonDir: string | null) {
 /**
  * The assembled service over a real Git repository linked as R1, in a stacking project, with a
  * fake GitHub that records branch heads and serves each task's PR. Tasks are local and Ready;
- * `tasks` lists them in creation order, each blocked by the one before it.
+ * `tasks` lists them in creation order, each blocked by the one before it. With `codeHost: "gitlab"`
+ * the repository is linked as a GitLab project instead, delivered by the real GitLab provider over
+ * a scripted instance (`gitlab`), whose branch heads the fixture's pushes set. `gitlab` replaces that
+ * instance with a real one: its transport, credential, project and checkout (the live harness).
  */
 export async function stackedDeliveryFixture(
-  t: TestContext,
+  t: Pick<TestContext, "after">,
   options: {
     tasks?: number;
+    codeHost?: "github" | "gitlab";
+    gitlab?: {
+      fetcher: typeof fetch;
+      push: PushFunction;
+      adopt: AdoptFunction;
+      credentialRef: string;
+      glabExecutable?: string;
+      rateLimit?: RateLimitPolicy;
+      project: { repositoryId: string; host: string; projectPath: string };
+      /** The checkout to link, whose `origin` is the project. */
+      source: string;
+    };
     forcePush?: "allow" | "approval";
     stacking?: boolean;
     backgroundDiagnosticSink?: StandaloneServiceOptions["backgroundDiagnosticSink"];
@@ -79,12 +109,27 @@ export async function stackedDeliveryFixture(
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-stacked-")));
-  const source = join(root, "source");
-  git(root, "init", "-q", "-b", "main", source);
-  writeFileSync(join(source, "base.txt"), "base\n");
-  git(source, "add", ".");
-  git(source, "commit", "-q", "-m", "base");
-  const base = git(source, "rev-parse", "HEAD");
+  const live = options.gitlab;
+  const source = live?.source ?? join(root, "source");
+  if (!live) {
+    git(root, "init", "-q", "-b", "main", source);
+    writeFileSync(join(source, "base.txt"), "base\n");
+    git(source, "add", ".");
+    git(source, "commit", "-q", "-m", "base");
+  }
+  const base = git(source, "rev-parse", "main");
+  const gitlabMode = options.codeHost === "gitlab" || live !== undefined;
+  const project = live?.project ?? gitLabProject;
+  const linkedId = gitlabMode ? project.repositoryId : repositoryId;
+  // A GitLab link is verified against the checkout's origin.
+  if (gitlabMode && !live)
+    git(
+      source,
+      "remote",
+      "add",
+      "origin",
+      `https://${project.host}/${project.projectPath}.git`,
+    );
 
   let tool: ((call: RuntimeToolCall) => Promise<RuntimeToolResult>) | undefined;
   const turns: Array<{
@@ -213,11 +258,32 @@ export async function stackedDeliveryFixture(
     },
   };
 
+  const gitlab = scriptedGitLabRemote({
+    repositoryId: gitLabProject.repositoryId,
+  });
+  gitlab.state.project = {
+    id: Number(gitLabProject.repositoryId),
+    path_with_namespace: gitLabProject.projectPath,
+  };
+  gitlab.state.heads.set("main", base);
+  let gitlabFactory: CodeHostProviderFactory | undefined;
+  if (gitlabMode && !live) {
+    const prior = process.env[gitLabProject.credentialVariable];
+    process.env[gitLabProject.credentialVariable] = "glpat-synthetic-stack";
+    t.after(() => {
+      if (prior === undefined)
+        delete process.env[gitLabProject.credentialVariable];
+      else process.env[gitLabProject.credentialVariable] = prior;
+    });
+  }
   const dataDir = join(root, "data");
   const startService = async () => {
     const service = new StandaloneService(dataDir, runtime, undefined, {
       delivery: {
-        providerFactories: { github: () => provider },
+        providerFactories: {
+          github: () => provider,
+          gitlab: (...args) => gitlabFactory!(...args),
+        },
         issueTrackerFactories: { github: () => provider },
       },
       power: { enabled: false },
@@ -226,6 +292,39 @@ export async function stackedDeliveryFixture(
         : {}),
     });
     await service.start();
+    // The real GitLab provider; on the scripted instance its Git transport is the fixture's, so a push sets the head.
+    gitlabFactory = gitLabDeliveryFactory(
+      service.domain(),
+      live
+        ? {
+            fetcher: live.fetcher,
+            push: live.push,
+            adopt: live.adopt,
+            glabExecutable: live.glabExecutable,
+            rateLimit: live.rateLimit,
+          }
+        : {
+            fetcher: gitlab.fetcher,
+            push: async (request) => {
+              gitlab.state.heads.set(request.branch, request.commitSha);
+              remote[request.branch] = request.commitSha;
+              for (const mr of gitlab.state.mergeRequests)
+                if (mr.source_branch === request.branch)
+                  mr.sha = request.commitSha;
+              return "pushed";
+            },
+            prove: async (request) => {
+              rebaseProofs++;
+              return proveUnchangedRebase(
+                verifierGit(request.workspacePath),
+                request.oldBase,
+                request.oldHead,
+                String(request.baseCommit),
+                request.commitSha,
+              );
+            },
+          },
+    );
     return service;
   };
   let service = await startService();
@@ -261,15 +360,32 @@ export async function stackedDeliveryFixture(
     projectId,
     expectedVersion: d.repositoryLinks(projectId).version,
     repositories: [
-      {
-        codeHost: "github",
-        host: "github.com",
-        repositoryId,
-        path: source,
-        ref: "main",
-      },
+      gitlabMode
+        ? {
+            codeHost: "gitlab",
+            host: project.host,
+            repositoryId: linkedId,
+            projectPath: project.projectPath,
+            path: source,
+            ref: "main",
+          }
+        : {
+            codeHost: "github",
+            host: "github.com",
+            repositoryId,
+            path: source,
+            ref: "main",
+          },
     ],
   });
+  if (gitlabMode)
+    run({
+      type: "code-host-credential.configure",
+      codeHost: "gitlab",
+      host: project.host,
+      credentialRef:
+        live?.credentialRef ?? `env:${gitLabProject.credentialVariable}`,
+    });
   const projectVersion = () =>
     Number(service.domain().project(projectId).version);
   const grant = (forcePush: "allow" | "approval") =>
@@ -280,8 +396,12 @@ export async function stackedDeliveryFixture(
       mode: "reviewable-pr",
       credentialRef: null,
       grants: [
-        { action: "branch.push", repositoryId, mode: "allow" },
-        { action: "branch.force-push", repositoryId, mode: forcePush },
+        { action: "branch.push", repositoryId: linkedId, mode: "allow" },
+        {
+          action: "branch.force-push",
+          repositoryId: linkedId,
+          mode: forcePush,
+        },
       ],
       requiredChecks: [],
     });
@@ -408,11 +528,11 @@ export async function stackedDeliveryFixture(
   ) =>
     call(taskId, "cab_external_action", {
       operationId: randomUUID(),
-      action: { kind, target: { repositoryId }, commitSha },
+      action: { kind, target: { repositoryId: linkedId }, commitSha },
       ...(approval ? { approval } : {}),
     });
   const branchOf = (taskId: string) =>
-    service.delivery().taskBranch(taskId, repositoryId);
+    service.delivery().taskBranch(taskId, linkedId);
   /** The task's PR at its branch's last push, as GitHub shows it; registered on first use. */
   const showPr = async (
     taskId: string,
@@ -514,6 +634,8 @@ export async function stackedDeliveryFixture(
   };
   return {
     provider,
+    gitlab,
+    repositoryId: linkedId,
     prs,
     onRebaseProof: (hook: () => void | Promise<void>) => {
       afterRebaseProof = hook;

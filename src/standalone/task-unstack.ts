@@ -62,7 +62,7 @@ export class TaskUnstack {
       .links.find((r) => r.repositoryId === edge.repositoryId);
     const targetBaseRef = acceptableBaseRefs(link?.ref)[0];
     if (
-      link?.codeHost !== "github" ||
+      !link ||
       !targetBaseRef ||
       !binding ||
       binding.readError ||
@@ -199,7 +199,7 @@ export class TaskUnstack {
       const before = this.local(taskId),
         provider = this.options.provider(taskId);
       if (!provider.prepareUnstack || !provider.unstackProvider)
-        throw new DomainConflictError("GitHub Unstack unavailable");
+        throw new DomainConflictError("Code host Unstack unavailable");
       let material: Awaited<
         ReturnType<NonNullable<CodeHostDeliveryProvider["prepareUnstack"]>>
       >;
@@ -217,7 +217,7 @@ export class TaskUnstack {
         )
           throw error;
         throw new UnstackPreviewUnavailableError(
-          "GitHub Unstack preview is unavailable",
+          "Code host Unstack preview is unavailable",
         );
       }
       const after = this.local(taskId);
@@ -296,7 +296,8 @@ export class TaskUnstack {
     const provider = this.options
       .provider(record.identity.taskId)
       .unstackProvider?.(delivery.configuration(record.identity.projectId));
-    if (!provider) throw new DomainConflictError("GitHub Unstack unavailable");
+    if (!provider)
+      throw new DomainConflictError("Code host Unstack unavailable");
     coordinator = new UnstackCoordinator(this.journal, provider, {
       projectWrite: this.options.projectWrite,
       validate: (i) => this.validate(i, record.operationId),
@@ -310,7 +311,7 @@ export class TaskUnstack {
           ).run(r.newBaseSha, i.pr.headSha, i.taskId);
           coordination.ensureDeliveryEventWithinTransaction(
             i.taskId,
-            `The provider stack membership was removed and this pull request now targets ${i.targetBaseRef}. Rebase this task's branch onto ${r.newBaseSha} and publish under the existing branch policy. Merged layers are unaffected.`,
+            `The provider stack membership was removed and this change request now targets ${i.targetBaseRef}. Rebase this task's branch onto ${r.newBaseSha} and publish under the existing branch policy. Merged layers are unaffected.`,
             `unstack-restack:${r.operationId}`,
           );
           return this.journal.updateWithinTransaction(r, {

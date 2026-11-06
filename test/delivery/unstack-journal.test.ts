@@ -22,6 +22,7 @@ import {
   type UnstackProvider,
   type UnstackReadback,
 } from "../../src/standalone/unstack.js";
+import { unstackFixtureRecord } from "../fixtures/unstack-journal.js";
 
 function fixture(t: TestContext) {
   const db = new DatabaseSync(":memory:");
@@ -913,3 +914,49 @@ for (const valid of [true, false]) {
     assert.equal(f.counts().confirms, 1);
   });
 }
+
+test("a GitLab Unstack identity has no stack object; GitHub identities parse and hash as before", () => {
+  const github = unstackFixtureRecord({
+    projectId: randomUUID(),
+    taskId: randomUUID(),
+    blockerTaskId: randomUUID(),
+    operationId: randomUUID(),
+    seq: 1,
+  }).identity;
+  const reparsed = unstackIdentitySchema.parse(structuredClone(github));
+  assert.deepEqual(reparsed, github);
+  assert.equal(materialDigest(reparsed), materialDigest(github));
+  const accepts = (value: unknown) =>
+    unstackIdentitySchema.safeParse(value).success;
+  assert.equal(
+    accepts({ ...github, stack: { ...github.stack, number: null } }),
+    false,
+  );
+  const gitlab = {
+    ...github,
+    repositoryId: "42",
+    repositoryPath: "/projects/42",
+    edge: { ...github.edge, repositoryId: "42" },
+    stack: { ...github.stack, id: null, number: null },
+  };
+  assert.equal(accepts(gitlab), true);
+  assert.equal(
+    accepts({ ...gitlab, stack: { ...gitlab.stack, number: 1 } }),
+    false,
+  );
+  const [lower, own] = gitlab.stack.members;
+  assert.equal(
+    accepts({
+      ...gitlab,
+      stack: {
+        ...gitlab.stack,
+        members: [{ ...lower!, nodeId: "PR-other", number: 9 }, lower, own],
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    accepts({ ...gitlab, stack: { ...gitlab.stack, members: [own, lower] } }),
+    false,
+  );
+});

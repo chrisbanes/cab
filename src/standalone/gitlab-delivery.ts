@@ -11,7 +11,10 @@ import {
   prObservationSchema,
   repositoryDeliverySettings,
 } from "../core/delivery.js";
+import { DomainConflictError } from "../core/domain-errors.js";
 import { isGitLabProjectPath } from "../core/github-source.js";
+import type { RebaseProof } from "../core/rebase-proof.js";
+import type { UnstackIdentity, UnstackRecord } from "../core/unstack.js";
 import {
   type BranchRemote,
   type BranchRemotes,
@@ -27,7 +30,11 @@ import type {
   CodeHostProviderFactory,
   RepositoryRequirements,
 } from "./code-host.js";
-import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
+import {
+  type AdoptFunction,
+  adoptOutsideHead,
+  proveOutsideRebase,
+} from "./git-fetch.js";
 import { pushTaskCommit } from "./git-push.js";
 import {
   type AdoptionContext,
@@ -37,6 +44,13 @@ import {
   mergeGateReasons,
   requiredCheckSources,
 } from "./github-delivery.js";
+import {
+  type UnstackMaterial,
+  type UnstackProvider,
+  type UnstackReadback,
+  UnstackDispatchFailure,
+  unstackDispatchGuard,
+} from "./unstack.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
 import {
   type RateLimitPolicy,
@@ -83,6 +97,11 @@ const mergeRequestSchema = z.object({
       finished_at: z.string().nullable(),
     })
     .nullish(),
+});
+/** A merge request as a list reports it: no diff refs or pipeline. */
+const listedMergeRequestSchema = z.object({
+  ...mergeRequestFields,
+  state: mergeRequestSchema.shape.state,
 });
 const noteSchema = z.object({
   id: z.number().int(),
@@ -199,6 +218,8 @@ export interface GitLabDeliveryOptions {
   fetcher?: typeof fetch | undefined;
   push?: PushFunction | undefined;
   adopt?: AdoptFunction | undefined;
+  /** Test-only: the unchanged-rebase proof over Git. */
+  prove?: typeof proveOutsideRebase | undefined;
   /** How a request waits out a 429; see `RateLimitPolicy`. */
   rateLimit?: RateLimitPolicy | undefined;
   /** What the service reuses between its providers: the project's settings and the token's account. */
@@ -251,12 +272,15 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     method: "GET" | "POST" | "PUT",
     path: string,
     body?: unknown,
+    /** Runs synchronously just before each request leaves; throwing sends nothing. */
+    beforeSend?: () => void,
   ): Promise<Response> {
     const url = new URL(path, this.origin);
     if (url.origin !== this.origin) throw new Error("provider-origin-mismatch");
     let response: Response;
     for (let reauthenticated = false; ; ) {
       const token = await this.token();
+      beforeSend?.();
       // A 429 was not processed, so even a write is sent again once the limit clears.
       response = await fetchRateLimited(
         this.options.fetcher ?? fetch,
@@ -309,8 +333,14 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     method: "POST" | "PUT",
     path: string,
     body: unknown,
+    beforeSend?: () => void,
   ): Promise<void> {
-    const response = await this.send(method, `/api/v4${path}`, body);
+    const response = await this.send(
+      method,
+      `/api/v4${path}`,
+      body,
+      beforeSend,
+    );
     await response.body?.cancel().catch(() => {});
   }
   /** Every row of a list, following `x-next-page` up to a fixed bound; an incomplete list is a failure. */
@@ -482,6 +512,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     policy: DeliveryPolicy,
     publication?: PublicationContext,
     adoption?: AdoptionContext,
+    merge?: { removeSourceBranch: boolean },
   ): ReturnType<CodeHostDeliveryProvider["preflight"]> {
     if (!isBranchAction(action) && !isChangeRequestAction(action))
       throw new Error("provider-action-unsupported");
@@ -580,6 +611,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         ...recorded,
         headSha: observation.headSha,
         mergeTrain: project.merge_trains_enabled === true,
+        ...(merge?.removeSourceBranch ? { removeSourceBranch: true } : {}),
       };
     }
     const mr = await this.targetMergeRequest(action.target);
@@ -654,6 +686,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         case "pr.merge": {
           const train = record.beforeState?.mergeTrain === true;
           // The sha makes GitLab refuse a head that moved; auto_merge false keeps cab from queueing a merge.
+          // Removing a stacked blocker's branch is what makes GitLab retarget the next merge request.
           await this.write(
             train ? "POST" : "PUT",
             train
@@ -663,6 +696,9 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
               sha: a.target.expectedHeadSha,
               squash: a.method === "squash",
               auto_merge: false,
+              ...(!train && record.beforeState?.removeSourceBranch === true
+                ? { should_remove_source_branch: true }
+                : {}),
             },
           );
           break;
@@ -880,6 +916,175 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         : "provider-effect-unproved",
     );
   }
+  async readRebaseHead(repositoryId: string, branch: string) {
+    return this.remoteFor(
+      repositoryId,
+      await this.project(repositoryId),
+    ).readRef(branch);
+  }
+  /** The unchanged-rebase proof, with the remote branch read at the new head before and after the fetch. */
+  async proveRebase(input: {
+    repositoryId: string;
+    branch: string;
+    workspacePath: string;
+    oldBase: string;
+    oldHead: string;
+    newBase: string;
+    newHead: string;
+  }): Promise<RebaseProof | null> {
+    const projectPath = await this.project(input.repositoryId);
+    const remote = this.remoteFor(input.repositoryId, projectPath);
+    if ((await remote.readRef(input.branch)) !== input.newHead) return null;
+    const proof = await (this.options.prove ?? proveOutsideRebase)({
+      workspacePath: input.workspacePath,
+      baseCommit: input.newBase,
+      oldBase: input.oldBase,
+      oldHead: input.oldHead,
+      commitSha: input.newHead,
+      branch: input.branch,
+      host: this.options.host,
+      codeHost: "gitlab",
+      nameWithOwner: projectPath,
+      token: await this.transportToken(),
+    });
+    return proof && (await remote.readRef(input.branch)) === input.newHead
+      ? proof
+      : null;
+  }
+  /**
+   * Fresh material for an operator preview. GitLab has no stack object: the merge request is a member
+   * because it targets its blocker's branch, so the stack is that blocker's single unmerged merge request
+   * (open, or closed for a failed blocker) and this one.
+   */
+  async prepareUnstack(
+    repositoryId: string,
+    iid: number,
+  ): Promise<UnstackMaterial> {
+    await this.projectInfo(repositoryId);
+    const own = mergeRequestSchema.parse(
+      await this.get(`/projects/${repositoryId}/merge_requests/${iid}`),
+    );
+    const sameProject = (m: {
+      source_project_id: number;
+      target_project_id: number;
+    }) =>
+      String(m.source_project_id) === repositoryId &&
+      String(m.target_project_id) === repositoryId;
+    if (own.iid !== iid || !sameProject(own) || own.state !== "opened")
+      throw new Error("Unstack merge request membership unproved");
+    const lowers = (
+      await this.pages(
+        `/projects/${repositoryId}/merge_requests?state=all&source_branch=${encodeURIComponent(own.target_branch)}`,
+      )
+    )
+      .map((v) => listedMergeRequestSchema.parse(v))
+      .filter(
+        (m) =>
+          m.source_branch === own.target_branch &&
+          sameProject(m) &&
+          m.state !== "merged",
+      );
+    const lower = lowers[0];
+    if (lowers.length !== 1 || !lower || lower.state === "locked")
+      throw new Error("Unstack lower merge request unproved");
+    const member = (m: typeof lower) => ({
+      nodeId: String(m.id),
+      number: m.iid,
+      headRef: m.source_branch,
+      headSha: m.sha,
+      state: m.state === "opened" ? ("OPEN" as const) : ("CLOSED" as const),
+    });
+    return {
+      repositoryPath: `/projects/${repositoryId}`,
+      pr: {
+        nodeId: String(own.id),
+        number: own.iid,
+        headRef: own.source_branch,
+        headSha: own.sha,
+        baseRef: own.target_branch,
+      },
+      stack: {
+        id: null,
+        number: null,
+        baseRef: lower.target_branch,
+        members: [member(lower), member(own)],
+      },
+    };
+  }
+  /** Still on the blocker's branch is a member; on the target base is removed; anything else changed. */
+  private async readUnstack(
+    identity: UnstackIdentity,
+  ): Promise<UnstackReadback> {
+    const id = identity.repositoryId;
+    if (identity.repositoryPath !== `/projects/${id}`)
+      throw new Error("Unstack repository moved");
+    const own = await this.boundMergeRequest({
+      repositoryId: id,
+      nodeId: identity.pr.nodeId,
+      number: identity.pr.number,
+    });
+    if (
+      own.state !== "opened" ||
+      own.sha !== identity.pr.headSha ||
+      own.source_branch !== identity.pr.headRef
+    )
+      return { state: "changed" };
+    if (own.target_branch === identity.pr.baseRef)
+      return {
+        state: "member",
+        material: await this.prepareUnstack(id, identity.pr.number),
+      };
+    if (own.target_branch !== identity.targetBaseRef)
+      return { state: "changed" };
+    // The branch tip, as GitHub's `base.sha`: what the restack rebases onto.
+    const baseSha = await this.remoteFor(id, await this.project(id)).readRef(
+      identity.targetBaseRef,
+    );
+    if (!baseSha) throw new Error("provider-ref-missing");
+    return { state: "removed", baseRef: identity.targetBaseRef, baseSha };
+  }
+  unstackProvider(_policy: DeliveryPolicy): UnstackProvider {
+    return {
+      read: (i) => this.readUnstack(i),
+      sendUnstack: (r, guard) =>
+        this.retargetForUnstack(r, guard, r.phase === "unstack-attempting"),
+      // A retarget-only edit has nothing left after the first; it is reached only if the base moved again.
+      sendRetarget: (r, guard) =>
+        this.retargetForUnstack(
+          r,
+          guard,
+          r.phase === "retarget-attempting" && r.removed,
+        ),
+    };
+  }
+  /** Unstack on GitLab is one edit: the merge request targets the repository link's base. */
+  private async retargetForUnstack(
+    record: UnstackRecord,
+    guard: () => void,
+    intended: boolean,
+  ) {
+    const i = record.identity;
+    if (!intended || i.repositoryPath !== `/projects/${i.repositoryId}`)
+      throw new Error("Unstack send intent missing");
+    try {
+      await this.write(
+        "PUT",
+        `/projects/${i.repositoryId}/merge_requests/${i.pr.number}`,
+        { target_branch: i.targetBaseRef },
+        unstackDispatchGuard(guard),
+      );
+      return "unknown" as const;
+    } catch (error) {
+      if (
+        error instanceof UnstackDispatchFailure &&
+        !(error.failure instanceof DomainConflictError)
+      )
+        throw error;
+      return error instanceof GitLabFailure && [400, 422].includes(error.status)
+        ? ("refused" as const)
+        : ("unknown" as const);
+    }
+  }
   async repositoryRequirements(
     repositoryId: string,
   ): Promise<RepositoryRequirements> {
@@ -907,7 +1112,19 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       number: identity.prNumber,
     });
     if (!mr.diff_refs?.base_sha) throw new Error("provider-pr-unreadable");
-    const pipeline = mr.head_pipeline?.sha === mr.sha ? mr.head_pipeline : null;
+    // GitLab clears `head_pipeline` when it retargets a merge request whose target branch was removed,
+    // so the merge request's newest pipeline at its head stands in for it.
+    const pipeline = mr.head_pipeline
+      ? mr.head_pipeline.sha === mr.sha
+        ? {
+            ...mr.head_pipeline,
+            updatedAt:
+              mr.head_pipeline.finished_at ??
+              mr.head_pipeline.started_at ??
+              "unproved",
+          }
+        : null
+      : await this.headPipeline(id, mr);
     const feedback: NonNullable<PrDeliveryObservation["feedback"]> = [];
     const reviewThreads: NonNullable<PrDeliveryObservation["reviewThreads"]> =
       [];
@@ -944,8 +1161,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
             sha: pipeline.sha,
             status: pipelineStatus(pipeline.status),
             nodeId: String(pipeline.id),
-            updatedAt:
-              pipeline.finished_at ?? pipeline.started_at ?? "unproved",
+            updatedAt: pipeline.updatedAt,
           },
         ]
       : [];
@@ -1016,6 +1232,31 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       ...(retarget ? { retarget } : {}),
     });
   }
+  /** The merge request's newest pipeline at its head; null when there is none or it cannot be read. */
+  private async headPipeline(id: string, mr: MergeRequest) {
+    try {
+      const latest = z
+        .array(
+          z.object({
+            id: z.number().int(),
+            sha: z.string(),
+            status: z.string(),
+            updated_at: z.string().nullish(),
+          }),
+        )
+        .parse(
+          await this.get(`/projects/${id}/merge_requests/${mr.iid}/pipelines`),
+        )
+        // The newest by id, whatever order GitLab lists them in.
+        .sort((a, b) => b.id - a.id)
+        .find((p) => p.sha === mr.sha);
+      return latest
+        ? { ...latest, updatedAt: latest.updated_at ?? "unproved" }
+        : null;
+    } catch {
+      return null;
+    }
+  }
   /**
    * Whether the merge request that was the base (those from source branch `ref` within this project)
    * is merged into `into`, the new base: at least one is, and none is open. A read that fails reads as not merged.
@@ -1072,6 +1313,7 @@ export function gitLabDeliveryFactory(
     fetcher?: typeof fetch | undefined;
     push?: PushFunction | undefined;
     adopt?: AdoptFunction | undefined;
+    prove?: typeof proveOutsideRebase | undefined;
     rateLimit?: RateLimitPolicy | undefined;
     /** Test-only: the clock the service's GitLab reads are kept by. */
     now?: (() => number) | undefined;
@@ -1115,6 +1357,7 @@ export function gitLabDeliveryFactory(
       fetcher: seams.fetcher,
       push: seams.push,
       adopt: seams.adopt,
+      prove: seams.prove,
       rateLimit: seams.rateLimit,
       cache,
     });

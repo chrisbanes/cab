@@ -4,7 +4,9 @@ import {
 } from "../operator/unstack-contracts.js";
 import {
   unstackConfirmation,
+  unstackConfirmationFor,
   unstackRecovery,
+  unstackRecoveryFor,
   unstackStatus,
   cancelStackedConfirmation,
 } from "../operator/unstack-copy.js";
@@ -37,13 +39,13 @@ export const unstackBrowseCommands = new Map<string, BrowseCommand>([
             d.unavailable === "unproved" ? ["content-unavailable"] : [],
           ),
           human: [
-            unstackConfirmation,
-            unstackRecovery,
+            unstackConfirmationFor(p?.codeHost ?? "github"),
+            unstackRecoveryFor(p?.codeHost ?? "github"),
             d.operation
               ? unstackStatus(d.operation)
               : "No recorded Unstack operation.",
             p
-              ? `Stack #${p.stackNumber} in ${p.repository}: ${p.members.map((m) => `#${m.number} (${m.state})`).join(", ")}. Retarget #${p.selectedPr} to ${p.targetBase}.\nExpected version: ${p.expectedVersion}\nMaterial hash: ${p.materialHash}`
+              ? `${p.stackNumber === null ? "Stack" : `Stack #${p.stackNumber}`} in ${p.repository}: ${p.members.map((m) => `#${m.number} (${m.state})`).join(", ")}. Retarget #${p.selectedPr} to ${p.targetBase}.\nExpected version: ${p.expectedVersion}\nMaterial hash: ${p.materialHash}`
               : `Unavailable: ${d.unavailable ?? "unproved"}`,
           ].join("\n"),
         };

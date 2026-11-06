@@ -2122,10 +2122,15 @@ export class DeliveryStore {
       return record;
     });
   }
-  /** Offline lower-chain proof, refreshed synchronously at the merge effect boundary. */
+  /**
+   * Offline lower-chain proof, refreshed synchronously at the merge effect boundary. With `linkBases`
+   * (GitLab), a task whose lower chain is all merged is held until its change request's accepted base
+   * is one of them, so it never merges into a merged layer's branch.
+   */
   stackMergeGuard(
     taskId: string,
     repositoryId: string,
+    linkBases?: readonly string[],
   ): { reason: string | null; material: string } {
     const seen = new Set([taskId]);
     const projectOf = (id: string) => {
@@ -2184,7 +2189,51 @@ export class DeliveryStore {
       }
       current = blocker;
     }
-    return { reason, material: materialDigest({ chain, reason }) };
+    if (!linkBases)
+      return { reason, material: materialDigest({ chain, reason }) };
+    const accepted = this.delivery(taskId)?.acceptedBaseRef;
+    if (
+      !reason &&
+      chain.length &&
+      (accepted === undefined || !linkBases.includes(accepted))
+    )
+      reason = "stacked-pr-retarget-pending";
+    return {
+      reason,
+      material: materialDigest({ chain, reason, linkBases, accepted }),
+    };
+  }
+  /**
+   * The task stacked on `blockerTaskId` whose open change request, bound and read, targets the
+   * blocker's task branch as its accepted base; null otherwise. Retired edges have no dependent.
+   */
+  stackedDependentOf(
+    blockerTaskId: string,
+    repositoryId: string,
+  ): string | null {
+    const row = this.db
+      .prepare(
+        "SELECT taskId FROM stacked_dependencies WHERE blockerTaskId=? AND repositoryId=?",
+      )
+      .get(blockerTaskId, repositoryId);
+    if (!row) return null;
+    const dependent = z.object({ taskId: identity }).parse(row).taskId;
+    const bound = this.delivery(dependent),
+      branch = this.taskBranch(blockerTaskId, repositoryId)?.branch;
+    const retired = new UnstackStore(this.db).retiredSelected(
+      dependent,
+      blockerTaskId,
+    );
+    return !retired &&
+      bound &&
+      !bound.readError &&
+      bound.observation.repositoryId === repositoryId &&
+      bound.observation.state === "OPEN" &&
+      branch !== undefined &&
+      bound.observation.baseRef === branch &&
+      bound.acceptedBaseRef === branch
+      ? dependent
+      : null;
   }
   /** Freeze the blocker before the first effect; old records remain unchanged. */
   prepareStackCreate(
