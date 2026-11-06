@@ -28,6 +28,7 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
       "Default policy: workspace writes with broad host-permitted reads.",
       "Command network access is disabled unless the project enables it. Approval policy is never.",
       codexLocalListeningLine,
+      localListeningLimit,
       taskGitDisclosure,
     ],
     limits: [

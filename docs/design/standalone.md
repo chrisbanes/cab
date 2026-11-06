@@ -310,7 +310,7 @@ Both values are recorded at admission (`execution_intent_network_access` and
 running turn keeps its policy. Claude Code turns, drafting runs and requests without a task
 binding always run with command network access denied. Codex has no loopback-only per-turn
 control, so a Codex command listens only with command network access, on any interface, and
-local listening is never recorded for a Codex turn. Draft turns and drafting runs never
+a Codex turn's admission always records local listening off. Draft turns and drafting runs never
 listen. Neither setting is an allow-list, proxy or host filter: network access enables
 whatever the runtime then permits, including the credentials and logins the host exposes,
 and Claude Code's local binding is not limited to loopback.

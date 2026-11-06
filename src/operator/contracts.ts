@@ -1290,7 +1290,7 @@ const generation = z
     harness: executionHarnessSchema.nullable(),
     /** Optional so older services still parse; null until the turn is admitted. */
     commandNetworkAccess: z.boolean().nullable().optional(),
-    /** Optional so older services still parse; null until a Claude task turn is admitted. */
+    /** Optional so older services still parse; null until the turn is admitted, true only for a Claude task turn. */
     localListening: z.boolean().nullable().optional(),
     /** The latest failed turn's bounded classification; null when none failed. */
     failure: z

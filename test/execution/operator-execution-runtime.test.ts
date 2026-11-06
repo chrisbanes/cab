@@ -415,6 +415,7 @@ test("both harnesses' disclosures state local listening within the disclosure ca
   assert.ok(claude.lines.includes(claudeLocalListeningLine));
   assert.ok(claude.lines.includes(localListeningLimit));
   assert.ok(codex.lines.includes(codexLocalListeningLine));
+  assert.ok(codex.lines.includes(localListeningLimit));
   // Codex enforces no loopback-only listening; its line says the setting does not apply.
   assert.match(codexLocalListeningLine, /does not change Codex turns/);
   // The new text is in lines: Claude's limits are exactly its own and the Git limits.

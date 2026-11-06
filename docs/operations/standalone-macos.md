@@ -1108,7 +1108,7 @@ records the decision.
 
 - **Claude Code.** A task turn's commands can bind local ports, and outbound network stays
   denied. The control is macOS only. Binding is not limited to loopback: a listener on
-  `0.0.0.0` accepts connections on any interface the host's firewall allows.
+  `0.0.0.0` can accept connections on any interface the host's firewall allows.
 - **Codex.** Codex has no loopback-only control, so the setting does not change Codex turns.
   A Codex command can listen only when command network access is enabled for the project,
   and then on any interface with outbound network open.

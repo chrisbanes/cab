@@ -2129,7 +2129,9 @@ test("local listening is a switch with its disclosure that saves as a versioned 
   await listening.waitFor();
   assert.equal(await listening.isChecked(), false);
   await page
-    .getByText("Local listening is disabled for this project.")
+    .getByText(
+      "Local listening is disabled for this project's Claude Code task turns; Codex turns can listen only with command network access.",
+    )
     .waitFor();
   await page
     .getByText(/Other processes on the host can connect to a listening port/)

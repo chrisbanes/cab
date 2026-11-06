@@ -5385,7 +5385,8 @@ export class ExecutionState {
         ).workId;
         // Only a Codex task turn can run with command network access, and only a
         // Claude task turn with local listening: drafting runs have no binding and
-        // stay off, as does the other harness.
+        // stay off, as does the other harness. Writes execution_intent_network_access
+        // and execution_intent_local_listening.
         for (const [intentTable, projectTable, harness] of [
           [
             "execution_intent_network_access",

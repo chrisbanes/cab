@@ -1555,7 +1555,7 @@ test("command network access reads the saved setting, what applies and what it e
 test("local listening reads the saved setting, what applies and each turn's admission", () => {
   assert.equal(
     projectLocalListeningLine(false),
-    "Local listening is disabled for this project.",
+    "Local listening is disabled for this project's Claude Code task turns; Codex turns can listen only with command network access.",
   );
   assert.equal(
     projectLocalListeningLine(true),

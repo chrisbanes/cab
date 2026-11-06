@@ -6,7 +6,7 @@
 
 /** What Claude Code's `allowLocalBinding` permits, as measured in the 2026-11-06 probe. */
 export const claudeLocalListeningLine =
-  "Commands can listen on local ports only when the project enables local listening, and outbound network stays denied. Claude Code does not limit binding to loopback, so a listener on 0.0.0.0 accepts connections on any interface the host allows.";
+  "Commands can listen on local ports only when the project enables local listening, and outbound network stays denied. Claude Code does not limit binding to loopback, so a listener on 0.0.0.0 can accept connections on any interface the host allows.";
 
 /** Codex has no loopback-only per-turn control; the setting never reaches a Codex turn. */
 export const codexLocalListeningLine =
@@ -22,7 +22,7 @@ export const localListeningAppliesNote =
 export const projectLocalListeningLine = (enabled: boolean) =>
   enabled
     ? "Local listening is enabled for this project's Claude Code task turns; Codex turns can listen only with command network access."
-    : "Local listening is disabled for this project.";
+    : "Local listening is disabled for this project's Claude Code task turns; Codex turns can listen only with command network access.";
 
 /** `null` is a turn with no recorded admission: not admitted yet, held before admission, or admitted before the setting existed. */
 export const turnLocalListeningLine = (value: boolean | null) =>

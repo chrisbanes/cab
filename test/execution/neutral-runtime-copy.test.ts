@@ -34,6 +34,11 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
   [join("src", "operator", "local-listening-copy.ts")]: {
     reason:
       "the setting applies only to Claude Code turns because Codex has no loopback-only control",
+    lines: [
+      '"Codex has no loopback-only control: commands can listen on local ports, on any interface, only when command network access is enabled. The local listening setting does not change Codex turns.";',
+      '? "Local listening is enabled for this project\'s Claude Code task turns; Codex turns can listen only with command network access."',
+      ': "Local listening is disabled for this project\'s Claude Code task turns; Codex turns can listen only with command network access.";',
+    ],
   },
   [join("src", "core", "execution-runtime.ts")]: {
     reason: "the shared harness label map",

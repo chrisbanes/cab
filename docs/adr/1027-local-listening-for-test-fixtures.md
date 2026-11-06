@@ -24,7 +24,7 @@ turn keeps its policy.
   and it can connect to other services listening on the host's loopback interface.
 - **Codex.** The App Server's per-turn `sandboxPolicy` has no local-binding field. A Codex
   command can listen only when command network access is on, and then on any interface with
-  outbound network open. Admission never records local listening for a Codex turn, and its
+  outbound network open. Admission always records local listening off for a Codex turn, and its
   `sandboxPolicy` does not change.
 - Draft turns, drafting runs and turns without a task binding never get local listening.
 - Every surface that shows the effective policy states, per harness, what local listening does,
