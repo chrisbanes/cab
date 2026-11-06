@@ -1035,6 +1035,7 @@ test("shared task comments have a strict command, receipt, operation scope and t
       visibilityRevision: "b".repeat(64),
       olderCursor: null,
       entries: [e],
+      plans: [],
     },
     observedAt: 1,
   });

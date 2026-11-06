@@ -59,6 +59,7 @@ import {
   captureProcessIdentity,
   MacProcessTerminationVerifier,
 } from "./termination.js";
+import { normalizePlan } from "./agent-plan.js";
 import { resolveOnPath } from "./executable-path.js";
 import { isWithin } from "./workspace-inspection.js";
 import { maxToolPathChars } from "../operator/tool-limits.js";
@@ -124,6 +125,16 @@ const builtInTools = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"];
 /** Subagents run in the turn, under the same hook and sandbox; `Skill` only when skills are enabled. */
 const agentTool = "Agent";
 const skillTool = "Skill";
+/** The agent's own in-turn task list; it feeds only the plan record (ADR-1025). */
+const todoTool = "TodoWrite";
+const todoInputSchema = z.object({
+  todos: z.array(
+    z.object({
+      content: z.string(),
+      status: z.enum(["pending", "in_progress", "completed"]),
+    }),
+  ),
+});
 const disallowedTools = [
   "AskUserQuestion",
   "WebFetch",
@@ -259,6 +270,9 @@ export function claudeTurnEnvironment(
   env.CLAUDE_CODE_OAUTH_TOKEN = token;
   env.CLAUDE_CONFIG_DIR = configDirectory;
   env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
+  // Claude Code 2.1.318 offers TodoWrite, the plan source, only with the task tools off.
+  env.CLAUDE_CODE_ENABLE_TASKS = "0";
+  env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "1";
   // Moves the sandbox $TMPDIR to <base>/claude-<uid> (#825 T1 F9.1).
   env.CLAUDE_CODE_TMPDIR = temporaryBase;
   return env;
@@ -493,6 +507,7 @@ export const claudePolicyLimits: readonly string[] = [
   "The sandboxed agent can write the per-task temporary directory; cab checks only its top-level entries before each turn.",
   "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
   "If the sandboxed agent changes the per-task temporary directory's permissions, the task's Claude work waits as not private until the operator repairs or removes it.",
+  "Plan capture relies on the undocumented CLAUDE_CODE_ENABLE_TASKS and CLAUDE_CODE_ENABLE_TODO_TOOLS gates, as qualified on Claude Code 2.1.318; another version may not offer TodoWrite, and then no Claude plan appears.",
 ];
 
 async function readBounded(path: string, limit: number): Promise<string> {
@@ -1025,6 +1040,7 @@ export class ClaudeRuntime implements Runtime {
     const turnTools = [
       ...builtInTools,
       agentTool,
+      todoTool,
       ...(enabledSkills.length > 0 ? [skillTool] : []),
     ];
     const fresh = this.freshThreads.delete(threadId);
@@ -1468,6 +1484,7 @@ export class ClaudeRuntime implements Runtime {
     if (
       !builtInTools.includes(name) &&
       name !== agentTool &&
+      name !== todoTool &&
       !(name === skillTool && turn.skills) &&
       !name.startsWith(mcpToolPrefix)
     )
@@ -1524,6 +1541,10 @@ export class ClaudeRuntime implements Runtime {
       });
       return {};
     }
+    if (call.tool_name === todoTool) {
+      if (!call.agent_id) this.emitPlan(turn, call.tool_input);
+      return {};
+    }
     const bash = bashResponseSchema.safeParse(call.tool_response);
     this.emitTool(turn, "completed", call, {
       status: "completed",
@@ -1546,6 +1567,30 @@ export class ClaudeRuntime implements Runtime {
     return {};
   }
 
+  /** The lead's applied todo list as a plan event; a subagent's or invalid list feeds nothing. */
+  private emitPlan(turn: ClaudeTurn, toolInput: unknown): void {
+    const input = todoInputSchema.safeParse(toolInput);
+    const plan =
+      input.success &&
+      normalizePlan(
+        input.data.todos.map(({ content, status }) => ({
+          text: content,
+          status,
+        })),
+      );
+    if (!plan) return;
+    try {
+      this.conversation?.({
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        kind: "plan",
+        plan,
+      });
+    } catch {
+      // History is diagnostic: a consumer failure must not alter runtime control.
+    }
+  }
+
   /**
    * Best-effort diagnostic item for a built-in tool. Never throws, never awaits,
    * and carries no input except a Bash command and allowlisted targets (relative
@@ -1564,7 +1609,12 @@ export class ClaudeRuntime implements Runtime {
     },
     done?: { status: string; exitCode?: number | null; output?: string },
   ): void {
-    if (!this.diagnostic || call.tool_name.startsWith(mcpToolPrefix)) return;
+    if (
+      !this.diagnostic ||
+      call.tool_name.startsWith(mcpToolPrefix) ||
+      call.tool_name === todoTool
+    )
+      return;
     try {
       const bash = call.tool_name === "Bash";
       const itemType = bash

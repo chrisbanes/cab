@@ -32,12 +32,15 @@ import {
   pendingBelow,
   prependTimeline,
   type ConversationCache,
+  type AgentPlan,
   type ConversationItem,
   type TimelineEntry,
   type TimelineWindow,
   type ToolEntry,
 } from "./task-conversation-model.js";
 import { recipientLabel } from "./task-comment-model.js";
+import { PlanSteps } from "./task-plan.js";
+import { currentPlanCaption, planUpdatedLabel } from "./task-plan-model.js";
 import { MarkdownPreview } from "./task-files.js";
 import type { TaskWorkspaceState } from "./task-workspace-state.js";
 
@@ -334,6 +337,7 @@ export function TaskConversation({
     openChanges,
     messageAssignment,
     earlier: timeline.hasEarlier,
+    plans: timeline.window?.plans ?? [],
   };
   return (
     <section
@@ -409,6 +413,8 @@ interface Context {
   messageAssignment: (assignment: Assignment) => ReactNode;
   /** Older pages exist, so an assignment with nothing loaded may still have entries there. */
   earlier: boolean;
+  /** Each assignment's latest plan; a plan line shows its assignment's. */
+  plans: readonly AgentPlan[];
 }
 
 function Items({ items, ctx }: { items: ConversationItem[]; ctx: Context }) {
@@ -618,6 +624,34 @@ function Entry({
           </ActionLink>
         </article>
       );
+    case "plan": {
+      const key = `c:plan:${entry.entryId}`;
+      const open = ctx.expanded(key);
+      const plan = ctx.plans.find((p) => p.assignmentId === entry.assignmentId);
+      return (
+        <div className="conv-tools" data-record-id={`c:${entry.entryId}`}>
+          <Button
+            variant="secondary"
+            aria-expanded={open}
+            onClick={() => ctx.toggle(key)}
+          >
+            {planUpdatedLabel(entry.done, entry.total)}
+          </Button>
+          {open && (
+            <div className="plan-current">
+              <p className="metadata muted">
+                {currentPlanCaption} of {who}
+              </p>
+              {plan ? (
+                <PlanSteps plan={plan} />
+              ) : (
+                <p className="muted">The current plan is not available.</p>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
     case "gap":
       return (
         <div

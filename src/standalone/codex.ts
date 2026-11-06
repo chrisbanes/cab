@@ -7,6 +7,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { isAbsolute } from "node:path";
+import { normalizePlan, type NormalizedPlan } from "./agent-plan.js";
 import { pluginSkillScope, skillScopeConfig } from "./codex-skills.js";
 import { resolveOnPath } from "./executable-path.js";
 import {
@@ -345,6 +346,12 @@ export type RuntimeConversationEvent =
         | "active-turn-limit"
         | "turn-ended"
         | "missing-text";
+    }
+  | {
+      threadId: string;
+      turnId: string;
+      kind: "plan";
+      plan: NormalizedPlan;
     };
 
 type PendingConversationItem =
@@ -445,6 +452,17 @@ const conversationDeltaSchema = z.object({
   turnId: conversationIdentity,
   itemId: conversationIdentity,
   delta: z.string(),
+});
+/** `explanation` and any other field are dropped; only steps reach the plan record. */
+const planUpdatedSchema = z.object({
+  threadId: conversationIdentity,
+  turnId: conversationIdentity,
+  plan: z.array(
+    z.object({
+      step: z.string(),
+      status: z.enum(["pending", "inProgress", "completed"]),
+    }),
+  ),
 });
 const conversationItemCompletedSchema = z.object({
   threadId: conversationIdentity,
@@ -1923,6 +1941,9 @@ export class CodexRuntime implements Runtime {
         "approval_policy=never",
         "-c",
         "sandbox_mode=workspace-write",
+        // codex-cli 0.166.0 offers `update_plan`, the plan source, only behind this gate.
+        "-c",
+        "tools.update_plan.enabled=true",
         ...(codex
           ? [
               // The keyring and auto modes key credentials by CODEX_HOME and would ignore the link.
@@ -2719,6 +2740,23 @@ export class CodexRuntime implements Runtime {
   }
 
   private projectConversationEvent(method: string, params: unknown): void {
+    if (method === "turn/plan/updated") {
+      const parsed = planUpdatedSchema.safeParse(params);
+      if (!parsed.success) return;
+      const { threadId, turnId } = parsed.data;
+      try {
+        if (this.persistedTerminal(threadId, turnId)) return;
+      } catch {
+        return;
+      }
+      const plan = normalizePlan(
+        parsed.data.plan.map(({ step, status }) => ({ text: step, status })),
+      );
+      if (plan)
+        this.emitConversationEvent({ threadId, turnId, kind: "plan", plan });
+      return;
+    }
+
     if (method === "item/started") {
       const parsed = conversationItemStartedSchema.safeParse(params);
       if (!parsed.success || parsed.data.item.type !== "agentMessage") return;

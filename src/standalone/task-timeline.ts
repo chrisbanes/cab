@@ -31,7 +31,8 @@ export interface TimelineCandidate {
 /**
  * The only diagnostic item types that reach the timeline, and how each is shown.
  * Reasoning, plans, messages and cab's own coordination tool calls are absent on
- * purpose: those are represented by their own records or not shown at all.
+ * purpose: those are represented by their own records (plans by the conversation
+ * plan record) or not shown at all.
  */
 const toolKinds = {
   commandExecution: "command",

@@ -647,7 +647,9 @@ refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
 installation are disabled. Codex gets plugin skills only from its agent's plugins, as
-skill directories, including plugins installed in Claude Code or Codex. A Codex conversation started under the previous home is not
+skill directories, including plugins installed in Claude Code or Codex. Codex starts
+with `tools.update_plan.enabled=true` whether or not cab owns its home, so its plan
+reaches cab. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
 state, and the runtime refuses the resume before any App Server request.
@@ -1768,12 +1770,19 @@ workspace and unknown tools name-only; and cab's own coordination calls appear a
 records they produce. A pending or running delegated
 assignment takes a durable message from its sub-conversation header.
 
+The lead's latest plan is pinned above the composer as a collapsible card, labelled as
+the agent's working plan and never as a requirement or the task brief. Its ordered
+steps show a symbol and a word for pending, in progress or done, and the card appears
+only while the lead has a plan. A compact "Plan updated · 3/7 done" line marks each
+change in the conversation and expands to that assignment's current plan. Plans come
+from Codex `turn/plan/updated` notifications and Claude `TodoWrite` calls, each behind
+a CLI gate cab sets and discloses as a limit; the agent decides whether to plan, so an
+absent plan is not evidence that none was made. Only the latest snapshot keeps its
+steps, which are redacted and capped.
+
 Accepted but not yet implemented
 ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)): the
-conversation also shows each assignment's plan, the agent's working plan as an ordered
-list of steps with a pending, in progress or done status; the latest snapshot is
-authoritative and the timeline marks each change. It is labelled as the agent's plan
-and is never a requirement or the task brief. The task view follows changes through an
+task view follows changes through an
 authenticated per-task stream of content-free notices; it refetches through the same
 reads, which stay authoritative, and polling remains the fallback when the stream drops.
 

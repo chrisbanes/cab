@@ -5,6 +5,12 @@ import {
   withinRedactionLimits,
 } from "../core/redaction-limits.js";
 import { type Database, transaction } from "../core/store.js";
+import {
+  maxPlanSteps,
+  type NormalizedPlan,
+  type PlanStep,
+  planStepSchema,
+} from "./agent-plan.js";
 import type { RuntimeConversationEvent } from "./codex.js";
 import {
   keysetBelow,
@@ -23,6 +29,8 @@ export type ConversationHistoryEntry = z.infer<typeof historyEntrySchema>;
 export type ConversationHistoryTurnOmission = z.infer<
   typeof turnOmissionSchema
 >;
+
+export type ConversationPlanUpdate = z.infer<typeof planUpdateSchema>;
 
 export interface ConversationHistoryAssignmentRead {
   items: ConversationHistoryEntry[];
@@ -94,6 +102,27 @@ const turnOmissionSchema = bindingSchema.extend({
   reason: z.literal("early-buffer-limit"),
   createdAt: z.number().int().nonnegative().safe(),
 });
+
+const planUpdateSchema = bindingSchema.extend({
+  sequence: z.number().int().positive(),
+  /** Kept only on the assignment's newest row; redacted with capture-time exclusions. */
+  steps: z
+    .string()
+    .nullable()
+    .transform((value) =>
+      value === null
+        ? null
+        : z.array(planStepSchema).max(maxPlanSteps).parse(JSON.parse(value)),
+    ),
+  omissionReason: z.literal("redaction-unavailable").nullable(),
+  omittedStepCount: z.number().int().nonnegative().safe(),
+  done: z.number().int().nonnegative().safe(),
+  total: z.number().int().nonnegative().safe(),
+  createdAt: z.number().int().nonnegative().safe(),
+});
+const planUpdateColumns = `sequence, workId, taskId, assignmentId, assignmentVersion,
+  instructionsRevision, profileRevision, conversationRevision, workRevision, threadId,
+  turnId, steps, omissionReason, omittedStepCount, done, total, createdAt`;
 
 /** Validated, deduplicated exclusions of each list `prepareExclusions` owns; undefined when invalid. */
 const preparedExclusions = new WeakMap<
@@ -231,12 +260,33 @@ export class ConversationHistoryStore {
       UNIQUE(workId, threadId, turnId)
     );
     CREATE INDEX IF NOT EXISTS conversation_history_turn_omissions_task
-      ON conversation_history_turn_omissions(taskId, sequence)`);
+      ON conversation_history_turn_omissions(taskId, sequence);
+    CREATE TABLE IF NOT EXISTS conversation_plan_updates (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      workId TEXT NOT NULL,
+      taskId TEXT NOT NULL,
+      assignmentId TEXT NOT NULL,
+      assignmentVersion INTEGER NOT NULL,
+      instructionsRevision INTEGER NOT NULL,
+      profileRevision INTEGER NOT NULL,
+      conversationRevision INTEGER NOT NULL,
+      workRevision INTEGER NOT NULL,
+      threadId TEXT NOT NULL,
+      turnId TEXT NOT NULL,
+      steps TEXT,
+      omissionReason TEXT CHECK(omissionReason IS NULL OR omissionReason = 'redaction-unavailable'),
+      omittedStepCount INTEGER NOT NULL CHECK(omittedStepCount >= 0),
+      done INTEGER NOT NULL CHECK(done >= 0),
+      total INTEGER NOT NULL CHECK(total >= 0),
+      createdAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS conversation_plan_updates_task
+      ON conversation_plan_updates(taskId, sequence)`);
   }
 
   record(
     binding: ConversationHistoryBinding,
-    event: RuntimeConversationEvent,
+    event: Exclude<RuntimeConversationEvent, { kind: "plan" }>,
     exclusions: readonly string[],
   ): void {
     if (!taskAcceptsWrites(this.db, binding.taskId)) return;
@@ -277,6 +327,118 @@ export class ConversationHistoryStore {
           updatedAt = excluded.updatedAt
         WHERE conversation_history_items.lifecycle IN ('started','streaming')`)
       .run(...this.bindingValues(binding), event.itemId, text, now, now);
+  }
+
+  /**
+   * Records a plan change. Step text is stored only redacted, and only on the
+   * assignment's newest row; without exclusions the snapshot is omitted and the counts
+   * kept. An update equal to the newest snapshot records nothing.
+   */
+  recordPlan(
+    binding: ConversationHistoryBinding,
+    plan: NormalizedPlan,
+    exclusions: readonly string[] | undefined,
+  ): void {
+    if (!taskAcceptsWrites(this.db, binding.taskId)) return;
+    const now = this.checkedNow();
+    let steps: PlanStep[] | null = null;
+    if (exclusions) {
+      const prepared = prepareExclusions(exclusions);
+      steps = [];
+      for (const step of plan.steps) {
+        const text =
+          step.text === null
+            ? null
+            : sanitizeConversationText(step.text, prepared);
+        if (text === undefined) {
+          steps = null;
+          break;
+        }
+        steps.push({ text, status: step.status });
+      }
+    }
+    const json = steps === null ? null : JSON.stringify(steps);
+    transaction(this.db, () => {
+      const newest = this.db
+        .prepare(
+          `SELECT steps, omittedStepCount, done, total FROM conversation_plan_updates
+          WHERE taskId = ? AND assignmentId = ? ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(binding.taskId, binding.assignmentId) as
+        | {
+            steps: string | null;
+            omittedStepCount: number;
+            done: number;
+            total: number;
+          }
+        | undefined;
+      if (
+        json !== null &&
+        newest?.steps === json &&
+        newest.omittedStepCount === plan.omittedStepCount &&
+        newest.done === plan.done &&
+        newest.total === plan.total
+      )
+        return;
+      this.db
+        .prepare(
+          `UPDATE conversation_plan_updates SET steps = NULL
+          WHERE taskId = ? AND assignmentId = ? AND steps IS NOT NULL`,
+        )
+        .run(binding.taskId, binding.assignmentId);
+      this.db
+        .prepare(
+          `INSERT INTO conversation_plan_updates
+          (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
+            profileRevision, conversationRevision, workRevision, threadId, turnId,
+            steps, omissionReason, omittedStepCount, done, total, createdAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          ...this.bindingValues(binding),
+          json,
+          json === null ? "redaction-unavailable" : null,
+          plan.omittedStepCount,
+          plan.done,
+          plan.total,
+          now,
+        );
+    });
+  }
+
+  /** The task's plan changes strictly below `before`, newest first. Steps are not re-sanitised. */
+  readPlanUpdatesBefore(
+    taskId: string,
+    before: TimelineKey | undefined,
+    limit: number,
+  ): ConversationPlanUpdate[] {
+    const below = keysetBelow(
+      timelineRank.plan,
+      before,
+      "createdAt",
+      "sequence",
+    );
+    return this.db
+      .prepare(
+        `SELECT ${planUpdateColumns} FROM conversation_plan_updates
+        WHERE taskId = ? AND ${below.sql}
+        ORDER BY createdAt DESC, sequence DESC LIMIT ?`,
+      )
+      .all(taskId, ...below.params, limit)
+      .map((row) => planUpdateSchema.parse(row));
+  }
+
+  /** Each assignment's newest plan change for the task. Steps are not re-sanitised. */
+  latestPlans(taskId: string): ConversationPlanUpdate[] {
+    return this.db
+      .prepare(
+        `SELECT ${planUpdateColumns} FROM conversation_plan_updates
+        WHERE sequence IN (SELECT MAX(sequence) FROM conversation_plan_updates
+          WHERE taskId = ? GROUP BY assignmentId)
+        ORDER BY sequence`,
+      )
+      .all(taskId)
+      .map((row) => planUpdateSchema.parse(row));
   }
 
   /** Writes batched diagnostic byte counts in one transaction. */
@@ -558,7 +720,14 @@ export class ConversationHistoryCapture {
     }
     if (this.exceededBuffer) return;
     const textBytes =
-      event.kind === "completed" ? Buffer.byteLength(event.text, "utf8") : 0;
+      event.kind === "completed"
+        ? Buffer.byteLength(event.text, "utf8")
+        : event.kind === "plan"
+          ? event.plan.steps.reduce(
+              (sum, step) => sum + Buffer.byteLength(step.text ?? "", "utf8"),
+              0,
+            )
+          : 0;
     if (
       this.buffered.length >= maxBufferedEvents ||
       this.bufferedTextBytes + textBytes > maxBufferedTextBytes
@@ -628,7 +797,7 @@ export class ConversationHistoryCapture {
     // A settled row must never precede its item's pending count.
     if (event.kind !== "started") this.flush();
     try {
-      if (event.kind !== "completed") {
+      if (event.kind !== "completed" && event.kind !== "plan") {
         this.options.store.record(binding, event, []);
         return;
       }
@@ -639,7 +808,13 @@ export class ConversationHistoryCapture {
       } catch {
         current = undefined;
       }
-      if (!start || !current)
+      if (event.kind === "plan")
+        this.options.store.recordPlan(
+          binding,
+          event.plan,
+          start && current ? [...start, ...current] : undefined,
+        );
+      else if (!start || !current)
         this.options.store.omitItem(
           binding,
           event.itemId,

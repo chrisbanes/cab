@@ -9,7 +9,7 @@ const itemId = "message-bound";
 const marker = "S05_CAPTURE_OK";
 
 function event(
-  kind: RuntimeConversationEvent["kind"],
+  kind: Exclude<RuntimeConversationEvent["kind"], "plan">,
   currentTurnId = turnId,
 ): RuntimeConversationEvent {
   const identity = {

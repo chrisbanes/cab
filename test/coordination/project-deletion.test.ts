@@ -491,7 +491,7 @@ for (const phase of projectDeletionFaultPhases)
 
 test("the inventory classifies every fresh table and column and refuses new unclassified schema", async (t) => {
   const f = await projectDeletionFixture(t);
-  assert.equal(Object.keys(projectDeletionInventory).length, 180);
+  assert.equal(Object.keys(projectDeletionInventory).length, 181);
   assertProjectDeletionInventory(f.db);
   f.db.exec("ALTER TABLE tasks ADD COLUMN unclassifiedOwner TEXT");
   assert.throws(() => assertProjectDeletionInventory(f.db), /column inventory/);

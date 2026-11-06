@@ -125,6 +125,7 @@ import {
   TaskConversation,
   useTaskTimeline,
 } from "./task-conversation.js";
+import { PlanCard } from "./task-plan.js";
 import {
   conversationTree,
   hasDelegation,
@@ -2451,6 +2452,12 @@ export function TaskWorkspace({
             onReply={() => replyTo(assignment.assignmentId)}
           />
         )}
+      />
+      <PlanCard
+        plans={timeline.window?.plans ?? []}
+        assignmentId={data.leadAssignmentId ?? null}
+        state={state}
+        changed={changed}
       />
       {reply}
     </div>

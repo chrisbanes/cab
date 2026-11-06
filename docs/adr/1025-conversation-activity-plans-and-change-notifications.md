@@ -9,7 +9,8 @@ to a curated projection: the tool kind, a one-line summary and bounded output on
 File changes appear only as a count and rows carry no duration. Plans are absent: Claude is
 not offered `TodoWrite`, and Codex `turn/plan/updated` events never reach the diagnostic
 store. The task view polls every 15 seconds and has no push channel. This decision widens
-all three and fixes the new boundary. The tool projection is implemented; plans and change notices are accepted but not yet implemented.
+all three and fixes the new boundary. The tool projection and plan capture are implemented;
+change notices are accepted but not yet implemented.
 
 ## Decision
 

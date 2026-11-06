@@ -91,6 +91,7 @@ test("Codex runs under cab's home, links the operator login and keeps agent shel
     assert.equal(seen.codexHome, f.codex.home);
     assert.equal(seen.home, f.codex.userHome);
     for (const override of [
+      "tools.update_plan.enabled=true",
       "cli_auth_credentials_store=file",
       "features.multi_agent=false",
       "features.plugins=false",
@@ -196,6 +197,8 @@ test("without cab's home configured, Codex runs as before", async () => {
     assert.equal(seen.codexHome, f.environment.CODEX_HOME);
     assert.equal(seen.home, f.environment.HOME);
     assert.ok(!seen.argv.includes("features.multi_agent=false"));
+    // The plan source does not depend on cab owning the Codex home.
+    assert.ok(seen.argv.includes("tools.update_plan.enabled=true"));
   } finally {
     await runtime.stop();
     f.cleanup();

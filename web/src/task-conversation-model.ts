@@ -16,11 +16,15 @@ type Kind<K extends TimelineEntry["kind"]> = Extract<
 >;
 export type ToolEntry = Kind<"tool">;
 export type DelegationEntry = Kind<"delegation">;
+export type PlanEntry = Kind<"plan">;
+export type AgentPlan = Page["plans"][number];
 type Assignment = TaskRead["data"]["assignments"][number];
 
 export interface TimelineWindow {
   visibilityRevision: string;
   entries: TimelineEntry[];
+  /** Each assignment's latest plan, from the newest page read. */
+  plans: AgentPlan[];
 }
 
 /** The conversation's retained window and the cursor beneath it; a remount keeps both. */
@@ -45,12 +49,13 @@ const byKey = (a: TimelineEntry, b: TimelineEntry) =>
  */
 export function mergeTimeline(
   window: TimelineWindow | null,
-  page: Pick<Page, "visibilityRevision" | "entries" | "olderCursor">,
+  page: Pick<Page, "visibilityRevision" | "entries" | "olderCursor" | "plans">,
 ): { window: TimelineWindow; reset: boolean; changed: boolean } {
   const fresh = (reset: boolean) => ({
     window: {
       visibilityRevision: page.visibilityRevision,
       entries: [...page.entries].sort(byKey),
+      plans: page.plans,
     },
     reset,
     changed: true,
@@ -67,7 +72,7 @@ export function mergeTimeline(
   )
     return fresh(true);
   const held = new Map(window.entries.map((e) => [e.entryId, e]));
-  let changed = false;
+  let changed = JSON.stringify(window.plans) !== JSON.stringify(page.plans);
   // An entry the page's range covers but the service no longer returns (pruned by retention)
   // is gone; the window does not keep showing it.
   if (oldest) {
@@ -90,6 +95,7 @@ export function mergeTimeline(
       ? {
           visibilityRevision: window.visibilityRevision,
           entries: [...held.values()].sort(byKey),
+          plans: page.plans,
         }
       : window,
     reset: false,
@@ -119,6 +125,7 @@ export function prependTimeline(
     ? {
         visibilityRevision: window.visibilityRevision,
         entries: [...held.values()].sort(byKey),
+        plans: window.plans,
       }
     : window;
 }

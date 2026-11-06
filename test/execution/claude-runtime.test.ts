@@ -21,6 +21,7 @@ import {
   claudeSdkVersion,
   claudeTemporaryBase,
   claudeToolShape,
+  claudeTurnEnvironment,
   releaseClaudeTemporaryBase,
 } from "../../src/standalone/claude.js";
 import { coordinationTools } from "../../src/standalone/coordination-tools.js";
@@ -301,6 +302,9 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
     assert.equal(options.effort, "low");
     assert.equal(options.env?.CLAUDE_CODE_OAUTH_TOKEN, TOKEN);
     assert.equal(options.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+    // Claude Code offers TodoWrite only behind these gates.
+    assert.equal(options.env?.CLAUDE_CODE_ENABLE_TASKS, "0");
+    assert.equal(options.env?.CLAUDE_CODE_ENABLE_TODO_TOOLS, "1");
     assert.equal(
       options.env?.CLAUDE_CONFIG_DIR,
       join(f.root, "data", "claude", "config"),
@@ -317,6 +321,7 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Edit",
       "Bash",
       "Agent",
+      "TodoWrite",
     ]);
     assert.deepEqual(options.allowedTools, [
       "Read",
@@ -326,6 +331,7 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Edit",
       "Bash",
       "Agent",
+      "TodoWrite",
       "mcp__cab__*",
     ]);
     assert.deepEqual(options.disallowedTools, [
@@ -1088,6 +1094,7 @@ test("the effective policy discloses hook confinement, the redirected temporary 
     /F6\.4/,
     /scrub/,
     /version the pinned SDK declares/,
+    /TodoWrite/,
   ])
     assert.match(limits, pattern);
 });
@@ -1562,6 +1569,7 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
       "Edit",
       "Bash",
       "Agent",
+      "TodoWrite",
       "Skill",
     ]);
     assert.ok(!options?.disallowedTools?.includes("Agent"));
@@ -1663,6 +1671,7 @@ test("the Skill tool is outside policy for a turn whose profile enables no skill
       "Edit",
       "Bash",
       "Agent",
+      "TodoWrite",
     ]);
   } finally {
     await f.cleanup();
@@ -1709,6 +1718,104 @@ test("a subagent's tool calls are recorded with their attribution, and a denied 
       ["w1", "completed", "declined", { id: "agent-7" }],
     ],
   );
+});
+
+test("the TodoWrite gates override the service environment", () => {
+  const env = claudeTurnEnvironment(
+    { CLAUDE_CODE_ENABLE_TASKS: "1", CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" },
+    TOKEN,
+    "/config",
+    "/tmp/base",
+  );
+  assert.equal(env.CLAUDE_CODE_ENABLE_TASKS, "0");
+  assert.equal(env.CLAUDE_CODE_ENABLE_TODO_TOOLS, "1");
+});
+
+test("the lead's TodoWrite calls feed plan events and never tool rows", async () => {
+  const decisions: unknown[] = [];
+  const todos = (...statuses: string[]) => ({
+    todos: statuses.map((status, index) => ({
+      content: `Step ${index + 1}`,
+      status,
+      activeForm: "ACTIVE_FORM_CANARY",
+    })),
+  });
+  const f = fixture({
+    diagnostic: "collect",
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        const calls: [unknown, string, { id: string }?][] = [
+          [todos("in_progress", "pending"), "t1"],
+          [todos("completed", "in_progress"), "t2"],
+          [todos("completed", "completed"), "t3", { id: "agent-7" }],
+          [todos("done"), "t4"],
+        ];
+        for (const [input, id, agent] of calls) {
+          decisions.push(await session.hook("TodoWrite", input, id, agent));
+          decisions.push(
+            await session.postHook(
+              "TodoWrite",
+              input,
+              id,
+              { response: {} },
+              agent,
+            ),
+          );
+        }
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.deepEqual(decisions, Array(8).fill({}));
+    assert.deepEqual(
+      f.emitted.filter((event) => (event as { kind: string }).kind === "plan"),
+      [
+        {
+          threadId,
+          turnId,
+          kind: "plan",
+          plan: {
+            steps: [
+              { text: "Step 1", status: "in-progress" },
+              { text: "Step 2", status: "pending" },
+            ],
+            omittedStepCount: 0,
+            done: 0,
+            total: 2,
+          },
+        },
+        {
+          threadId,
+          turnId,
+          kind: "plan",
+          plan: {
+            steps: [
+              { text: "Step 1", status: "done" },
+              { text: "Step 2", status: "in-progress" },
+            ],
+            omittedStepCount: 0,
+            done: 1,
+            total: 2,
+          },
+        },
+      ],
+    );
+    assert.equal(
+      f.diagnostics.filter(
+        (event) => (event as { kind: string }).kind === "item",
+      ).length,
+      0,
+    );
+    assert.doesNotMatch(JSON.stringify(f.emitted), /ACTIVE_FORM_CANARY/);
+  } finally {
+    await f.cleanup();
+  }
 });
 
 test("settings probe cleanup awaits its existing SIGKILL fallback", {

@@ -5348,19 +5348,28 @@ export class OperatorApi {
       const workspaceVisibility = this.service.taskWorkspaceVisibility(taskId);
       const { data: view } = await this.readTask(taskId);
       const want = limit + 1;
-      const history = this.service
-        .conversationHistoryStore()
-        ?.readTaskBefore(taskId, before, want) ?? {
+      const historyStore = this.service.conversationHistoryStore();
+      const history = historyStore?.readTaskBefore(taskId, before, want) ?? {
         items: [],
         turnOmissions: [],
       };
+      const planUpdates =
+        historyStore?.readPlanUpdatesBefore(taskId, before, want) ?? [];
+      const assignmentIds = new Set(
+        view.assignments.map((a) => a.assignmentId),
+      );
+      const latestPlans = (historyStore?.latestPlans(taskId) ?? []).filter(
+        (plan) => assignmentIds.has(plan.assignmentId),
+      );
       const diagnostics = this.service.executionDiagnostics();
       const executions = diagnostics?.executionsForTask(taskId) ?? [];
       const tools =
         diagnostics?.toolItemsBefore(taskId, before, want, toolRowNames) ?? [];
+      // Plan change rows carry no text, so only the latest snapshots add bindings.
       const excluded = await this.exclusions(projectId, taskId, [
         ...history.items,
         ...history.turnOmissions,
+        ...latestPlans,
       ]);
       const detail = (workId: string, turnId?: string, itemId?: string) => ({
         workId: this.safe(workId, excluded),
@@ -5426,6 +5435,43 @@ export class OperatorApi {
           }),
         ),
       ];
+
+      const planSource = planUpdates.map(
+        (update): TimelineCandidate => ({
+          key: {
+            timeMs: update.createdAt,
+            rank: timelineRank.plan,
+            ordinal: update.sequence,
+            id: `plan-${update.sequence}`,
+          },
+          assignmentId: update.assignmentId,
+          precision: "ms",
+          body: { kind: "plan", done: update.done, total: update.total },
+        }),
+      );
+      const plans = latestPlans.map((plan) => {
+        const steps =
+          excluded === undefined || plan.steps === null
+            ? undefined
+            : plan.steps.map((step) => ({
+                text:
+                  step.text === null
+                    ? null
+                    : sanitizeConversationText(step.text, excluded),
+                status: step.status,
+              }));
+        const readable =
+          steps?.every((step) => step.text !== undefined) === true;
+        return {
+          assignmentId: plan.assignmentId,
+          updatedAt: plan.createdAt,
+          done: plan.done,
+          total: plan.total,
+          omittedStepCount: plan.omittedStepCount,
+          steps: readable ? steps : null,
+          omissionReason: readable ? null : ("redaction-unavailable" as const),
+        };
+      });
 
       const toolSource = tools.flatMap(({ first, last }) => {
         const assignmentId = assignmentOf.get(first.workId);
@@ -5635,6 +5681,7 @@ export class OperatorApi {
       const { page, olderCursor } = mergeTimelinePage(
         [
           historySource,
+          planSource,
           toolSource,
           ...[gapSource, delegations, records].map((source) =>
             newestBelow(source, before, want),
@@ -5656,6 +5703,7 @@ export class OperatorApi {
             at: c.key.timeMs,
             precision: c.precision,
           })),
+          plans,
         },
         observedAt: Date.now(),
       });

@@ -3405,6 +3405,11 @@ test("workspace reads report every harness's status", async (t) => {
   );
   assert.deepEqual(read.data.harnesses[0]?.policy, codexPolicyDisclosure());
   assert.equal(read.data.harnesses[1]?.policy, null);
+  // Plan capture's dependence on the Codex gate is disclosed.
+  assert.match(
+    codexPolicyDisclosure().limits.join(" "),
+    /update_plan.*codex-cli 0\.166\.0/,
+  );
   // The disclosure describes the policy Codex is actually given.
   assert.deepEqual(executionPolicy("/w"), {
     type: "workspaceWrite",

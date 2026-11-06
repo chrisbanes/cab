@@ -1345,6 +1345,115 @@ test("conversation projection bounds completed items and ignores post-terminal r
   }
 });
 
+test("turn/plan/updated feeds plan events for the live turn only", {
+  timeout: 12000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-plan-"));
+  const executable = join(root, "fake-codex.mjs");
+  const update = (plan: unknown) => ({
+    method: "turn/plan/updated",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      explanation: "PLAN_EXPLANATION_CANARY",
+      plan,
+    },
+  });
+  const events: unknown[] = [
+    update([
+      { step: "Read the files", status: "inProgress" },
+      { step: "Write the summary", status: "pending" },
+    ]),
+    update([
+      { step: "Read the files", status: "completed" },
+      { step: "Write the summary", status: "inProgress" },
+    ]),
+    update([{ step: "Bad status", status: "in_progress" }]),
+    {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      },
+    },
+    update([{ step: "After the terminal", status: "completed" }]),
+  ];
+  const source = [
+    `#!${process.execPath}`,
+    "import { createInterface } from 'node:readline';",
+    `const events = ${JSON.stringify(events)};`,
+    "const write = (message) => process.stdout.write(JSON.stringify(message) + '\\n');",
+    "for await (const line of createInterface({ input: process.stdin })) {",
+    "  const message = JSON.parse(line);",
+    "  if (message.method === 'initialize') write({ id: message.id, result: {} });",
+    "  else if (message.method === 'account/read') write({ id: message.id, result: { account: { type: 'chatgpt' } } });",
+    "  else if (message.method === 'config/read') write({ id: message.id, result: { config: { approval_policy: 'never', sandbox_mode: 'workspace-write' } } });",
+    "  else if (message.method === 'thread/start') write({ id: message.id, result: { thread: { id: 'thread-1' }, approvalPolicy: 'never', sandbox: { type: 'workspaceWrite' } } });",
+    "  else if (message.method === 'turn/start') {",
+    "    write({ id: message.id, result: { turn: { id: 'turn-1' } } });",
+    "    for (const event of events) write(event);",
+    "  }",
+    "}",
+  ].join("\n");
+  writeFileSync(executable, source);
+  chmodSync(executable, 0o700);
+  const runtime = newTestRuntime(executable);
+  const captured: RuntimeConversationEvent[] = [];
+  const diagnostics: unknown[] = [];
+  runtime.onConversationEvent?.((event) => captured.push(event));
+  runtime.onDiagnosticEvent?.((event) => diagnostics.push(event));
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    const turnId = await bounded(
+      runtime.startTurn("thread-1", root, "test"),
+      3000,
+    );
+    assert.equal(
+      await bounded(runtime.waitForTurn("thread-1", turnId), 3000),
+      "completed",
+    );
+    assert.deepEqual(captured, [
+      {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        kind: "plan",
+        plan: {
+          steps: [
+            { text: "Read the files", status: "in-progress" },
+            { text: "Write the summary", status: "pending" },
+          ],
+          omittedStepCount: 0,
+          done: 0,
+          total: 2,
+        },
+      },
+      {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        kind: "plan",
+        plan: {
+          steps: [
+            { text: "Read the files", status: "done" },
+            { text: "Write the summary", status: "in-progress" },
+          ],
+          omittedStepCount: 0,
+          done: 1,
+          total: 2,
+        },
+      },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(diagnostics),
+      /Read the files|PLAN_EXPLANATION_CANARY/,
+    );
+    assert.doesNotMatch(JSON.stringify(captured), /PLAN_EXPLANATION_CANARY/);
+  } finally {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("large discarded stderr cannot stall App Server initialization or RPC", {
   timeout: 12000,
 }, async () => {
