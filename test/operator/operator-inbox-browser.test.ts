@@ -720,14 +720,16 @@ test("the last field stays reachable above the sticky submit area on a short pho
   const { page } = await openInbox(j, 1, { width: 390, height: 480 });
   await page.locator(".inbox-row").first().click();
   const form = page.getByRole("region", { name: "Exact question response" });
-  await form.getByRole("textbox", { name: "Optional", exact: true }).waitFor();
+  await form
+    .getByRole("textbox", { name: "Your answer: Optional", exact: true })
+    .waitFor();
   const detail = page.locator(".inbox-detail");
   await detail.evaluate((e) => {
     e.scrollTop = e.scrollHeight;
   });
   await settle(page);
   const last = (await form
-      .getByRole("textbox", { name: "Optional", exact: true })
+      .getByRole("textbox", { name: "Your answer: Optional", exact: true })
       .boundingBox())!,
     submit = (await form.locator(".question-submit").boundingBox())!,
     box = (await detail.boundingBox())!;

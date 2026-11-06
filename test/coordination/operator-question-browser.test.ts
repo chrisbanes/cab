@@ -8,7 +8,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { choiceForm } from "../fixtures/question-data.js";
-import { seedOwnQuestion } from "../fixtures/questions.js";
+import { seedOwnQuestion, seedPlainQuestion } from "../fixtures/questions.js";
 const test = browserSuite("operator-question-browser");
 test("a page refresh does not reread a request whose answer is unconfirmed", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -333,7 +333,7 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   );
   await captureBrowserEvidence(page, "1366-field-error", { fullPage: false });
   await form
-    .getByRole("textbox", { name: "Explain", exact: true })
+    .getByRole("textbox", { name: "Your answer: Explain", exact: true })
     .fill("Exact typed answer");
   await form
     .getByRole("textbox", { name: "Custom answer: Places", exact: true })
@@ -372,7 +372,7 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   );
   assert.equal(
     await form
-      .getByRole("textbox", { name: "Explain", exact: true })
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
       .inputValue(),
     "Exact typed answer",
   );
@@ -399,7 +399,7 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   const original = commands.at(-1)!;
   assert.equal(
     await form
-      .getByRole("textbox", { name: "Explain", exact: true })
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
       .isDisabled(),
     true,
   );
@@ -481,10 +481,10 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     // The outcome message makes the footer taller, so bring the scroller into view first.
     await form.locator(".question-content").scrollIntoViewIfNeeded();
     await form
-      .getByRole("textbox", { name: "Optional", exact: true })
+      .getByRole("textbox", { name: "Your answer: Optional", exact: true })
       .scrollIntoViewIfNeeded();
     const lastField = await form
-        .getByRole("textbox", { name: "Optional", exact: true })
+        .getByRole("textbox", { name: "Your answer: Optional", exact: true })
         .boundingBox(),
       submitTop = await form.locator(".question-submit").boundingBox();
     assert.ok(
@@ -589,7 +589,10 @@ async function runQuestionTextareaJourney(
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const form = page.getByRole("region", { name: "Exact question response" });
-  const answer = form.getByRole("textbox", { name: "Explain", exact: true });
+  const answer = form.getByRole("textbox", {
+    name: "Your answer: Explain",
+    exact: true,
+  });
   await answer.waitFor();
   await answer.focus();
   const ordinaryFocus = await answer.evaluate((element) => ({
@@ -867,7 +870,9 @@ test("Inbox queue and selected detail scroll independently at phone heights", as
     .click();
   const detail = page.locator(".inbox-detail");
   const form = page.getByRole("region", { name: "Exact question response" });
-  await form.getByRole("textbox", { name: "Explain", exact: true }).waitFor();
+  await form
+    .getByRole("textbox", { name: "Your answer: Explain", exact: true })
+    .waitFor();
   const detailMetrics = await detail.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
@@ -971,7 +976,7 @@ test("Inbox queue and selected detail scroll independently at phone heights", as
     await rows.locator(".inbox-row").filter({ hasText: title }).click();
     await page
       .getByRole("region", { name: "Exact question response" })
-      .getByRole("textbox", { name: "Explain", exact: true })
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
       .waitFor();
     return settledScrollTop();
   };
@@ -1027,7 +1032,7 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
     .click();
   const form = page.getByRole("region", { name: "Exact question response" });
   await form
-    .getByRole("textbox", { name: "Explain", exact: true })
+    .getByRole("textbox", { name: "Your answer: Explain", exact: true })
     .fill("Inbox retained draft");
   await captureBrowserEvidence(page, "1366-inbox-draft", { fullPage: false });
   await page.getByRole("link", { name: "Task evidence", exact: true }).click();
@@ -1047,19 +1052,23 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
       text: (await page.locator("main").innerText()).slice(-2000),
     }),
   );
-  await page.getByRole("textbox", { name: "Explain", exact: true }).waitFor();
+  await page
+    .getByRole("textbox", { name: "Your answer: Explain", exact: true })
+    .waitFor();
   assert.equal(
     await page
-      .getByRole("textbox", { name: "Explain", exact: true })
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
       .inputValue(),
     "Inbox retained draft",
   );
   await page.goBack();
   await page.goBack();
-  await form.getByRole("textbox", { name: "Explain", exact: true }).waitFor();
+  await form
+    .getByRole("textbox", { name: "Your answer: Explain", exact: true })
+    .waitFor();
   assert.equal(
     await form
-      .getByRole("textbox", { name: "Explain", exact: true })
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
       .inputValue(),
     "Inbox retained draft",
   );
@@ -1118,7 +1127,7 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
     .click();
   assert.equal(
     await form
-      .getByRole("textbox", { name: "Explain", exact: true })
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
       .inputValue(),
     "Inbox retained draft",
   );
@@ -1228,7 +1237,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   await page.getByRole("link", { name: "Inbox", exact: true }).click();
   // The only request opens by itself on a wide layout; its draft focus is restored.
   await form
-    .getByRole("textbox", { name: "Literal x-error", exact: true })
+    .getByRole("textbox", { name: "Your answer: Literal x-error", exact: true })
     .waitFor();
   assert.equal(
     await page.evaluate(() => document.activeElement?.id),
@@ -1236,7 +1245,10 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   );
   assert.equal(
     await form
-      .getByRole("textbox", { name: "Literal x-error", exact: true })
+      .getByRole("textbox", {
+        name: "Your answer: Literal x-error",
+        exact: true,
+      })
       .inputValue(),
     "Retained x-error value",
   );
@@ -1251,7 +1263,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
     .getByRole("link", { name: "Answer question", exact: true })
     .click();
   await form
-    .getByRole("textbox", { name: "Literal x-error", exact: true })
+    .getByRole("textbox", { name: "Your answer: Literal x-error", exact: true })
     .waitFor();
   assert.equal(
     await page.evaluate(() => document.activeElement?.id),
@@ -1348,4 +1360,61 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
       ["x-error", { optionIds: [], text: "Retained x-error value" }],
     ]),
   );
+});
+
+test("a plain question shows a visible Your answer label and a keyboard-reachable box in the Inbox and the task view", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const prompt =
+      "Should the agents get git access, open local ports, and keep their roles?",
+    a = await seedPlainQuestion(f, prompt, "Plain task", "Docs"),
+    web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(`${web.origin}/app/inbox`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const check = async () => {
+    const form = page.getByRole("region", { name: "Exact question response" }),
+      box = form.getByRole("textbox", {
+        name: "Your answer: Answer",
+        exact: true,
+      });
+    await box.waitFor();
+    assert.ok(
+      await form.locator("label", { hasText: "Your answer" }).isVisible(),
+    );
+    assert.match(
+      (await form.locator("label").first().innerText()).trim(),
+      /^Your answer/,
+    );
+    assert.ok(await form.locator("p.literal", { hasText: prompt }).isVisible());
+    assert.equal(await box.inputValue(), "");
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+    let reached = false;
+    for (let i = 0; i < 40 && !reached; i++) {
+      await page.keyboard.press("Tab");
+      reached = await box.evaluate((el) => el === document.activeElement);
+    }
+    assert.ok(reached, "Tab reaches the answer box");
+    await page.keyboard.type("ok");
+    assert.equal(await box.inputValue(), "ok");
+  };
+  await page.locator(".inbox-row").first().click();
+  await check();
+  await page.goto(
+    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
+  );
+  await check();
 });

@@ -2480,6 +2480,10 @@ as `cab_ask_question`; tool names alone do not establish runtime support.
 Preserve the originating task, assignment, conversation and request identity, and
 surface the question in the attention inbox and task detail.
 
+Direct agents to structured forms, one question per decision with options and a
+recommended option, for decisions with known alternatives; plain questions are for
+open-ended input.
+
 Support a single question or a related set, free-text answers, single-choice and
 multiple-choice answers. Preserve question text, option labels and descriptions,
 selection constraints, and an explicit recommended option when supplied. Allow

@@ -63,7 +63,8 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
   {
     type: "function",
     name: "cab_ask_question",
-    description: "Create a durable question for operator attention.",
+    description:
+      "Create a durable question for operator attention. For any decision with known alternatives pass `form` (version 1): one question per decision, kind single-choice or multiple-choice, concrete options (each with a short description) and a `recommended` option id; never bundle several decisions into one plain question. Pass plain `question` only for open-ended input with no fixed choices.",
     inputSchema: z.toJSONSchema(questionToolArgumentsSchema),
   },
   {

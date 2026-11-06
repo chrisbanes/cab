@@ -168,7 +168,7 @@ for (const [name, engine] of engines) {
       );
       await form
         .getByRole("textbox", {
-          name: "How should the opening sound?",
+          name: "Your answer: How should the opening sound?",
           exact: true,
         })
         .fill("Friendly and direct.");
@@ -334,7 +334,7 @@ for (const [name, engine] of engines) {
       await form.getByRole("checkbox", { name: /^Invite teammates/ }).check();
       await form
         .getByRole("textbox", {
-          name: "How should the opening sound?",
+          name: "Your answer: How should the opening sound?",
           exact: true,
         })
         .fill("Friendly and direct.");

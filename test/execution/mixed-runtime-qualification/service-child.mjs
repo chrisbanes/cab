@@ -202,6 +202,13 @@ export const nestedSkillBrief = (harness, skill = NESTED_SKILL) =>
     }`,
   ].join("\n");
 
+const decisionBrief = [
+  "Disposable cab decision probe. Use only cab tools; no shell, file, browser or network tools.",
+  "Before any work can start, the operator must decide three separate things only they can decide:",
+  "whether agents may write git metadata in the workspace; which local listening ports browser tests may open; and whether to permit the named agents or revise their role requirements.",
+  "Ask the operator through cab, then end the turn without answering for them.",
+].join("\n");
+
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
 export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "scrub") return shellOnly(PROBE);
@@ -210,6 +217,11 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "claude-subagent-stop") return subagentSleep;
   if (facet === "claude-skill") return skillBrief;
   if (facet === "codex-skill") return codexSkillBrief;
+  if (
+    facet === "claude-decision-question" ||
+    facet === "codex-decision-question"
+  )
+    return decisionBrief;
   if (facet === "claude-nested-skill") return nestedSkillBrief("claude");
   if (facet === "codex-nested-skill") return nestedSkillBrief("codex");
   if (facet === "claude-installed-plugin")
@@ -254,6 +266,7 @@ export async function setupJourney(
       facet === "mixed" ||
       facet === "codex-skill" ||
       facet === "codex-nested-skill" ||
+      facet === "codex-decision-question" ||
       facet === "codex-installed-plugin"
         ? { harness: "codex" }
         : claude,
