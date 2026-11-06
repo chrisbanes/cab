@@ -148,7 +148,6 @@ import {
   type ConversationTarget,
   type TaskTab,
   conversationTarget,
-  inspectorTargets,
   linkNamesInspector,
   tabForLocation,
   tabForSection,
@@ -493,9 +492,6 @@ export function TaskWorkspace({
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const wide = useMediaQuery("(min-width: 1024px)");
-  const focusRemembered = useFocusMode();
-  const focus = wide && focusRemembered && !state.focusYielded;
-  const paneVisible = state.changesPane !== null && wide && !focus;
   const selectedPath = useRef<string | null>(null);
   if (selectedPath.current !== path) {
     selectedPath.current = path;
@@ -563,6 +559,9 @@ export function TaskWorkspace({
       if (params.has("review")) state.review.inspectKey = params.get("review");
     }
   }
+  const focusRemembered = useFocusMode();
+  const focus = wide && focusRemembered && !state.focusYielded;
+  const paneVisible = state.changesPane !== null && wide && !focus;
   const selectionQuery = new URLSearchParams();
   if (state.selectedResult)
     selectionQuery.set("resultId", state.selectedResult);
@@ -835,12 +834,14 @@ export function TaskWorkspace({
     state.focusYielded = false;
     setFocusMode(!focus);
     changed();
-    // Focus inside a panel that just unmounted would fall to the page.
-    requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (!active || active === document.body || !active.isConnected)
-        focusToggle.current?.focus();
-    });
+    // Focus inside a panel that is about to unmount would fall to the page; elsewhere it stays put.
+    const inPanel = document.activeElement?.closest(
+      ".task-inspector, aside[aria-label='Changes']",
+    );
+    if (inPanel)
+      requestAnimationFrame(() =>
+        focusToggle.current?.focus({ preventScroll: true }),
+      );
   };
   const toggleFocusRef = useRef(toggleFocus);
   toggleFocusRef.current = toggleFocus;
@@ -895,13 +896,6 @@ export function TaskWorkspace({
   }, [paneVisible, focus]);
   /** Move to a section in place, on its tab. */
   const reveal = (id: string) => {
-    // The target is in a hidden panel: show it, then look again once it is mounted.
-    if (focus && !state.focusYielded && inspectorTargets.includes(id)) {
-      state.focusYielded = true;
-      changed();
-      requestAnimationFrame(() => reveal(id));
-      return;
-    }
     selectTab(tabForSection(id));
     const target = document.getElementById(id);
     if (target) showSection(target);
@@ -2632,8 +2626,8 @@ export function TaskWorkspace({
                 ref={focusToggle}
                 variant="secondary"
                 aria-pressed={focus}
-                aria-keyshortcuts="\\"
-                title="Hide the side panels (\\)"
+                aria-keyshortcuts={"\\"}
+                title={"Focus mode (\\)"}
                 onClick={toggleFocus}
               >
                 Focus mode

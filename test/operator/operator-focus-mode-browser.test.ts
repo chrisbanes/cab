@@ -269,6 +269,21 @@ test("leaving the unmounted inspector moves focus to the button", async (_t, j) 
   );
 });
 
+test("the key leaves focus and the scroll position where they were and the shortcut is announced once", async (_t, j) => {
+  const { page } = await start(j, { viewport: { width: 1366, height: 400 } });
+  await readyPage(page);
+  assert.equal(await toggle(page).getAttribute("aria-keyshortcuts"), "\\");
+  await page.evaluate(() => scrollTo(0, 200));
+  await page.keyboard.press("\\");
+  await page.waitForTimeout(200);
+  assert.equal(await pressed(page), "true");
+  assert.equal(
+    await page.evaluate(() => document.activeElement === document.body),
+    true,
+  );
+  assert.ok((await page.evaluate(() => scrollY)) > 100);
+});
+
 test("below 1024px there is no button, the key does nothing and the inspector stays", async (_t, j) => {
   for (const width of [1023, 390]) {
     const { page } = await start(j, {
