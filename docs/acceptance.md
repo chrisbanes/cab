@@ -992,5 +992,4 @@ one target-branch edit, read-back recovery of a lost response without a second e
 
 Bounded live evidence on gitlab.com must cover a two-layer stack, bottom-up merge with
 source-branch removal, GitLab's retarget and its acceptance, and Unstack of the top layer.
-[The first attempt](evidence/2026-11-06-gitlab-stack-live.md) did not qualify: the retargeted
-middle layer's merge was not reached, so this gate remains open.
+Live evidence: [GitLab stacking live run](evidence/2026-11-06-gitlab-stack-live.md).

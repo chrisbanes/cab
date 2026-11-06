@@ -76,7 +76,10 @@ After the run, read-only checks of the three merge requests showed:
 
 So GitLab's automatic retarget clears the merge request's head pipeline. cab read the required
 `pipeline` check only from `head_pipeline`, so B's check stayed unproved and the merge gate held it.
-The run did not record B's merge blockers, so this cause is inferred from those reads. The harness
+The run did not record B's merge blockers, so this cause is inferred from those reads. The project
+does not require pipelines to succeed (`only_allow_merge_if_pipeline_succeeds: false`, read after the
+run), so GitLab's own merge status does not depend on the head pipeline there; cab's required check
+was the only gate the missing head pipeline could hold. The harness
 now names the blockers when that wait times out.
 
 This is a plan assumption that failed: the plan expected a retargeted dependent to merge as it is.

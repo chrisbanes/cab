@@ -212,6 +212,30 @@ test("merging a stacked blocker removes its branch, GitLab retargets the depende
   });
 });
 
+test("a retargeted merge request's newest pipeline at its head decides its check, whatever the list order", async (t) => {
+  const f = await twoLayer(t);
+  assert.equal((await f.merge(f.a, "main")).success, true);
+  const dependent = f.mrOf(f.b);
+  assert.equal(dependent.head_pipeline, null);
+  const run = (id: number, status: string) => ({
+    id,
+    sha: dependent.sha,
+    status,
+    started_at: "2026-01-01T00:00:00Z",
+    finished_at: "2026-01-01T00:04:00Z",
+  });
+  // Oldest first: a retried pipeline at the head failed after an earlier one passed.
+  dependent.pipelines = [run(70, "success"), run(71, "failed")];
+  await f.service.refreshGitHub();
+  assert.deepEqual(
+    f.service
+      .delivery()
+      .delivery(f.b)
+      ?.observation.checks.map((c) => [c.nodeId, c.status]),
+    [["71", "failure"]],
+  );
+});
+
 test("a merge request with no stacked dependent merges with GitLab's plain body", async (t) => {
   const f = await gitLabStack(t, 1);
   const [a] = f.tasks as [string];

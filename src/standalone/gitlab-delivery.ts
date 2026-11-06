@@ -1247,6 +1247,8 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         .parse(
           await this.get(`/projects/${id}/merge_requests/${mr.iid}/pipelines`),
         )
+        // The newest by id, whatever order GitLab lists them in.
+        .sort((a, b) => b.id - a.id)
         .find((p) => p.sha === mr.sha);
       return latest
         ? { ...latest, updatedAt: latest.updated_at ?? "unproved" }
