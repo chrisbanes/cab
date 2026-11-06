@@ -46,7 +46,7 @@ Every route is limited to 16 writes, 4 of them kept for cleanup. The guard refus
   `19.6.0-pre`. Settings read at run time: merge method `merge`, squash option `default_off`, merge
   trains disabled, `remove_source_branch_after_merge: true`.
 - `main` before attempt 1: `6eb0c4bcf08479a16e3e9c8529701140f4b255d8`; before attempt 2:
-  `74e1da6d42bf09367a885adcd2d1191373f20772`. Each equalled the local clone
+  `74e1da6d42bf09367a885adcd2d1191373f20772` (read from the project after attempt 1). Each equalled the local clone
   `/Users/chris/dev/Banes-project` when its run started.
 - Each run has three tasks: B is blocked by A and C by B, in a stacking project with the required
   check `pipeline` and merge method `merge`.
@@ -64,14 +64,14 @@ Merge requests: !11 (A, on `main`), !12 (B, on A's branch), !13 (C, on B's branc
 | 5. A's branch reads 404; !12 targets `main`; cab accepted the retarget; B's head unchanged, no adoption | passed |
 | 6. Unstack of C: preview `codeHost: "gitlab"`, members `[!12, !13]`; one `{target_branch: "main"}` edit; journal `confirmed`; C's edge retired; one restack notice queued | passed |
 | 7. B's merge body `{sha, squash: false, auto_merge: false}`, with no removal key, settled `confirmed-success` | passed |
-| 8. Pipeline on `main` after the merges | `success` (`main` at `d66002663c`) |
+| 8. Pipeline on `main` after the merges | `success` (`main` read at `d66002663c` after the run) |
 | 9. Cleanup | verified: !11 and !12 `merged`, !13 `closed`, all three branches read 404; `guard.denied` empty; no 429 |
 
 Writes: **11 of 16**, 2 merges. In order: push and create for each of A, B and C; A's merge; C's
 retarget; B's merge; close !13; delete C's branch. GitLab had already removed A's and B's branches.
-142 API requests, none answered 429. Seven of them read a merge request's pipeline list. That list
-is the fallback the provider uses when GitLab has cleared the head pipeline, which is what made B
-mergeable this time.
+142 API requests, none answered 429. Seven of them read a merge request's pipeline list, the fallback
+the provider uses when a merge request has no head pipeline. The result does not record which merge
+request those reads were for, so that they are what made B mergeable is inferred.
 
 Before attempt 2's run, one invocation of the same command was refused before any write
 (`clone-main-stale`): the local clone's `main` still pointed at the commit from before attempt 1. Its
@@ -129,9 +129,10 @@ without the fallback.
 
 ## Limits of this evidence
 
-- The project removes source branches after merge by default, so the live run cannot show whether
-  GitLab removed A's branch because cab asked or because of that default. Only the recorded merge
-  body proves what cab sent.
+- The project removes source branches after merge by default, and that default applies to merge
+  requests cab creates: in attempt 2, GitLab removed B's branch after a merge that sent no removal
+  flag. So on this fixture A's branch removal cannot be credited to cab's flag; only the recorded
+  merge body proves what cab sent.
 - It covers gitlab.com SaaS at `19.6.0-pre` only, one personal project with no concurrent activity,
   no merge trains, no restart and no rate limiting. The harness reads with the first `glab` token
   until cleanup, which reads it again; a token that expires mid-run fails the run but not its cleanup.
