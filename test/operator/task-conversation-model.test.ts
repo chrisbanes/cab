@@ -11,8 +11,12 @@ import {
   timelineRank,
 } from "../../src/operator/timeline-key.js";
 import {
+  changedFileCount,
   changesLabel,
+  commandsDuration,
   commandsLabel,
+  durationLabel,
+  entryDuration,
   conversationTree,
   gapCopy,
   hasDelegation,
@@ -20,6 +24,7 @@ import {
   pendingBelow,
   prependTimeline,
   type ConversationItem,
+  type ToolEntry,
   type TimelineEntry,
 } from "../../web/src/task-conversation-model.js";
 
@@ -266,6 +271,57 @@ test("consecutive file changes become one row", () => {
   assert.equal(
     row?.type === "changes" && changesLabel(row.entries.length),
     "Changed 2 files",
+  );
+});
+
+const timed = (at: number, endedAt: number | null, tool = "command") =>
+  entry({
+    kind: "tool",
+    tool,
+    label: null,
+    status: "completed",
+    command: tool === "command" ? "npm test" : null,
+    truncated: false,
+    exitCode: null,
+    outputSequence: null,
+    at,
+    endedAt,
+  }) as ToolEntry;
+
+test("durations format as seconds, minutes and hours", () => {
+  assert.deepEqual(
+    [0, 999, 1000, 12_500, 125_000, 3_720_000].map(durationLabel),
+    ["<1s", "<1s", "1s", "12s", "2m 5s", "1h 2m"],
+  );
+});
+
+test("a duration is known only for a finished tool with a non-negative span", () => {
+  assert.equal(entryDuration(timed(1000, null)), null);
+  assert.equal(entryDuration(timed(1000, 500)), null);
+  assert.equal(entryDuration(timed(1000, 3500)), 2500);
+  assert.equal(entryDuration(command(0) as ToolEntry), null);
+  const known = [timed(0, 1000), timed(0, null), timed(0, 2000)];
+  assert.equal(commandsDuration(known), 3000);
+  assert.equal(commandsDuration([timed(0, null)]), null);
+  assert.equal(commandsLabel(3, 1, 3000), "Ran 3 commands · 1 failed · 3s");
+});
+
+test("changed files count distinct paths and entries without paths", () => {
+  const paths = (...p: string[]) =>
+    entry({
+      kind: "tool",
+      tool: "file-change",
+      label: null,
+      status: null,
+      command: null,
+      truncated: false,
+      exitCode: null,
+      outputSequence: null,
+      paths: p,
+    }) as ToolEntry;
+  assert.equal(
+    changedFileCount([paths("a", "b"), paths("a"), fileChange() as ToolEntry]),
+    3,
   );
 });
 

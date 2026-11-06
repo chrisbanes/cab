@@ -15,10 +15,16 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
+import { outsideWorkspace } from "../../src/operator/tool-limits.js";
 import { clockLabel } from "./presentation.js";
 import {
+  changedFileCount,
+  distinctPaths,
   changesLabel,
+  commandsDuration,
   commandsLabel,
+  durationLabel,
+  entryDuration,
   conversationTree,
   gapCopy,
   hasDelegation,
@@ -279,7 +285,7 @@ export function TaskConversation({
   requests: RequestPlaces;
   /** True while the page is at the bottom, so the log announces what arrives. */
   following: boolean;
-  openChanges: (opener: HTMLElement) => void;
+  openChanges: (opener: HTMLElement, path?: string) => void;
   /** The form that sends a message to a pending or running delegated assignment. */
   messageAssignment: (assignment: Assignment) => ReactNode;
 }) {
@@ -399,7 +405,7 @@ interface Context {
   expanded: (key: string) => boolean;
   toggle: (key: string) => void;
   requests: RequestPlaces;
-  openChanges: (opener: HTMLElement) => void;
+  openChanges: (opener: HTMLElement, path?: string) => void;
   messageAssignment: (assignment: Assignment) => ReactNode;
   /** Older pages exist, so an assignment with nothing loaded may still have entries there. */
   earlier: boolean;
@@ -422,22 +428,50 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
     case "changes":
       return (
         <div className="conv-tools" data-record-id={`c:${item.id}`}>
-          <span>{changesLabel(item.entries.length)}</span>
+          <span>{changesLabel(changedFileCount(item.entries))}</span>
           <Button
             variant="secondary"
             onClick={(event) => ctx.openChanges(event.currentTarget)}
           >
             Open in Changes
           </Button>
+          {distinctPaths(item.entries).length > 0 && (
+            <ul className="conv-paths">
+              {distinctPaths(item.entries).map((path) => (
+                <li key={path}>
+                  {path === outsideWorkspace ? (
+                    <code>{path}</code>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      data-path={path}
+                      onClick={(event) =>
+                        ctx.openChanges(event.currentTarget, path)
+                      }
+                    >
+                      <code>{path}</code>
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {item.entries.some((e) => e.pathsTruncated) && (
+            <p className="muted">Paths not all listed</p>
+          )}
         </div>
       );
-    case "tool":
+    case "tool": {
+      const duration = entryDuration(item.entry);
       return (
         <p className="conv-tools" data-record-id={`c:${item.id}`}>
           Tool · {item.entry.label ?? "Other tool"}
+          {item.entry.target ? ` · ${item.entry.target}` : ""}
           {item.entry.status ? ` · ${item.entry.status}` : ""}
+          {duration === null ? "" : ` · ${durationLabel(duration)}`}
         </p>
       );
+    }
     case "delegation":
       return <Delegation item={item} ctx={ctx} />;
     case "entry":
@@ -711,7 +745,11 @@ function CommandGroup({
           for (const key of keys) if (ctx.expanded(key)) ctx.toggle(key);
         }}
       >
-        {commandsLabel(item.entries.length, item.failed)}
+        {commandsLabel(
+          item.entries.length,
+          item.failed,
+          commandsDuration(item.entries),
+        )}
       </Button>
       {open && (
         <ul className="conv-commands">
@@ -772,6 +810,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
     return () => abort.abort();
   }, [open, sequence, ctx.client, ctx.taskId, ctx.visibility, attempt]);
   const failed = entry.exitCode !== null && entry.exitCode !== 0;
+  const duration = entryDuration(entry);
   return (
     <li data-record-id={`c:${entry.entryId}`}>
       <code>
@@ -782,6 +821,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
         {entry.exitCode === null
           ? (entry.status ?? "no exit status")
           : `exit ${entry.exitCode}`}
+        {duration === null ? "" : ` · ${durationLabel(duration)}`}
       </span>{" "}
       {sequence === null ? (
         <span className="muted">No output retained</span>

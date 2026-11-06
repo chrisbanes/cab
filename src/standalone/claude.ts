@@ -61,6 +61,8 @@ import {
 } from "./termination.js";
 import { resolveOnPath } from "./executable-path.js";
 import { isWithin } from "./workspace-inspection.js";
+import { maxToolPathChars } from "../operator/tool-limits.js";
+import { claudeToolTarget, workspaceRoots } from "./tool-activity.js";
 
 /** The SDK surface the runtime uses; tests inject a fake. */
 export interface ClaudeSdk {
@@ -616,6 +618,8 @@ interface ClaudeTurn {
   pendingToolUses: Map<string, string[]>;
   pendingCount: number;
   roots: readonly string[];
+  /** The workspace (lexical and real path), for relative tool paths; `roots[0]` is not it on a read-only turn. */
+  workspace: readonly string[];
   /** The `Skill` tool is allowed only when the bound profile revision enables skills. */
   skills: boolean;
   release: (released: boolean) => void;
@@ -1043,6 +1047,7 @@ export class ClaudeRuntime implements Runtime {
       pendingToolUses: new Map(),
       pendingCount: 0,
       roots: writable,
+      workspace: workspaceRoots(workspace),
       skills: enabledSkills.length > 0,
       release: (released) => {
         turn.released = released;
@@ -1543,7 +1548,8 @@ export class ClaudeRuntime implements Runtime {
 
   /**
    * Best-effort diagnostic item for a built-in tool. Never throws, never awaits,
-   * and carries no input except a Bash command; cab's own tools are recorded as
+   * and carries no input except a Bash command and allowlisted targets (relative
+   * paths, patterns, subagent types); cab's own tools are recorded as
    * coordination records instead.
    */
   private emitTool(
@@ -1569,6 +1575,9 @@ export class ClaudeRuntime implements Runtime {
       const command = z
         .object({ command: z.string() })
         .safeParse(call.tool_input);
+      const target = bash
+        ? undefined
+        : claudeToolTarget(turn.workspace, call.tool_name, call.tool_input);
       this.diagnostic({
         kind: "item",
         phase,
@@ -1578,6 +1587,12 @@ export class ClaudeRuntime implements Runtime {
         itemType,
         status: done?.status ?? "inProgress",
         ...(itemType === "toolCall" ? { tool: call.tool_name } : {}),
+        ...(itemType === "fileChange" && target !== undefined
+          ? target.length > maxToolPathChars
+            ? { paths: [], pathsTruncated: true as const }
+            : { paths: [target] }
+          : {}),
+        ...(target !== undefined ? { target } : {}),
         ...(call.agent_id
           ? {
               subagent: {

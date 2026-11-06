@@ -1,3 +1,8 @@
+import {
+  maxToolPathChars,
+  maxToolPaths,
+  maxToolTargetChars,
+} from "./tool-limits.js";
 import { unstackReceiptSchema } from "./unstack-contracts.js";
 import { rebaseProofSchema } from "../core/rebase-proof.js";
 import {
@@ -2296,6 +2301,19 @@ export const taskTimelineSchema = envelope(
                 exitCode: z.number().int().nullable(),
                 /** Pass to the output read; null when no output is retained. */
                 outputSequence: revision.nullable(),
+                /** When the tool finished; null while it runs or when not captured. */
+                endedAt: time.nullable().optional(),
+                /** Changed files, repository-relative or "outside workspace". */
+                paths: z
+                  .array(z.string().max(maxToolPathChars))
+                  .max(maxToolPaths)
+                  .optional(),
+                pathsTruncated: z.boolean().optional(),
+                target: z
+                  .string()
+                  .max(maxToolTargetChars)
+                  .nullable()
+                  .optional(),
               })
               .strict(),
             z

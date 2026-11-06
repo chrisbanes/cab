@@ -1759,17 +1759,17 @@ raw-text view), operator messages and follow-ups, questions and answers, approva
 results, delegations and curated tool activity, from one paged service timeline read.
 A question or approval is answerable from the attention card or from its place in the
 conversation, with one shared request state. Tool activity shows each command's
-summary and exit status, with bounded redacted output on request; consecutive calls
-are grouped with a failure count, file changes open Changes (in a side pane at 1024px and wider, otherwise the tab), and cab's own
-coordination calls appear as the records they produce. A pending or running delegated
+summary, exit status and duration, with bounded redacted output on request;
+consecutive calls are grouped with a failure count and total duration; file changes list
+their repository-relative paths, each opening that file in Changes (in a side pane at 1024px and wider, otherwise the tab); a non-command tool shows one
+allowlisted target (a path, pattern, query, MCP server and tool, or subagent type),
+capped at 128 characters and redacted, with "outside workspace" for a path outside the
+workspace and unknown tools name-only; and cab's own coordination calls appear as the
+records they produce. A pending or running delegated
 assignment takes a durable message from its sub-conversation header.
 
 Accepted but not yet implemented
-([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)): tool
-rows also show a duration; file changes list repository-relative paths; and a
-non-command tool shows one allowlisted target (a path, pattern, query, MCP server and
-tool, or subagent type), capped at 128 characters, redacted, and shown as "outside
-workspace" for a path outside the workspace. Unknown tools stay name-only. The
+([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)): the
 conversation also shows each assignment's plan, the agent's working plan as an ordered
 list of steps with a pending, in progress or done status; the latest snapshot is
 authoritative and the timeline marks each change. It is labelled as the agent's plan

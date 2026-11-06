@@ -171,6 +171,7 @@ async function seed(f: Fixture, filler = earlier) {
         command: `npm run step-${n}`,
         exitCode,
         aggregatedOutput: `output of step ${n}`,
+        observedAt: clock + 1500,
       });
     }
     clock = t0 + 3500;
@@ -178,7 +179,16 @@ async function seed(f: Fixture, filler = earlier) {
       phase: "completed",
       itemType: "fileChange",
       status: "completed",
-      path: "src/menu.ts",
+      paths: ["src/menu.ts", "src/menu.css"],
+    });
+    clock = t0 + 3550;
+    tool("toolCall/completed", "rd-1", {
+      phase: "completed",
+      itemType: "toolCall",
+      status: "completed",
+      tool: "Read",
+      target: "src/menu.ts",
+      observedAt: clock + 2000,
     });
     db.prepare(
       `INSERT INTO diagnostic_gaps(workId,code,count,bytes,firstAt,lastAt,maxPrunedSequence)
@@ -363,8 +373,8 @@ for (const [label, viewport] of [
     const text = (await log.textContent()) ?? "";
     const order = [
       "First:",
-      "Ran 3 commands · 1 failed",
-      "Changed 1 file",
+      "Ran 3 commands · 1 failed · 4s",
+      "Changed 2 files",
       "Second: all steps ran.",
       "Please also check Escape",
     ].map((part) => text.indexOf(part));
@@ -390,7 +400,7 @@ for (const [label, viewport] of [
       "no output is read before it is asked for",
     );
     await log
-      .getByRole("button", { name: "Ran 3 commands · 1 failed" })
+      .getByRole("button", { name: "Ran 3 commands · 1 failed · 4s" })
       .click();
     const failing = log.locator("li", { hasText: "npm run step-2" });
     assert.match((await failing.textContent()) ?? "", /exit 1/);
@@ -415,12 +425,22 @@ for (const [label, viewport] of [
     await page.unroute(timelineUrl);
     // The group closes and opens again, whichever of its commands holds the open state.
     const group = log.getByRole("button", {
-      name: "Ran 3 commands · 1 failed",
+      name: "Ran 3 commands · 1 failed · 4s",
     });
     await group.click();
     assert.equal(await group.getAttribute("aria-expanded"), "false");
     await group.click();
     assert.equal(await group.getAttribute("aria-expanded"), "true");
+    // Durations, changed paths and the allowlisted target read in the conversation.
+    assert.match((await failing.textContent()) ?? "", /exit 1 · 1s/);
+    const changed = log.locator(".conv-tools", { hasText: "Changed 2 files" });
+    assert.deepEqual(await changed.locator("li").allTextContents(), [
+      "src/menu.ts",
+      "src/menu.css",
+    ]);
+    await log
+      .getByText("Tool · Read · src/menu.ts · completed · 2s", { exact: true })
+      .waitFor();
     const opener = log.getByRole("button", { name: "Open in Changes" });
     const changesTab = page.getByRole("tab", { name: "Changes", exact: true });
     const pane = page.locator("aside[aria-label='Changes']");
@@ -532,7 +552,7 @@ for (const [label, viewport] of [
     const reply = page.getByLabel("Editable reply");
     await reply.fill("An unfinished reply");
     const anchor = log.getByRole("button", {
-      name: "Ran 3 commands · 1 failed",
+      name: "Ran 3 commands · 1 failed · 4s",
     });
     await page.evaluate(() => scrollTo(0, 0));
     await anchor.scrollIntoViewIfNeeded();
@@ -956,3 +976,48 @@ test("a delegate is replied to from its sub-conversation header through the shar
   assert.equal(await log.getByText("Also cover toolbar launch.").count(), 1);
   assert.equal(await waiter.getByText("Also cover toolbar launch.").count(), 0);
 });
+
+for (const colorScheme of ["light", "dark"] as const)
+  test(`tool durations, targets and changed paths are legible in the ${colorScheme} theme`, async (_t, j) => {
+    const f = await j.start("fixture.create", () =>
+      createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+    );
+    let browser: Browser | undefined;
+    j.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const s = await seed(f, 2);
+    const web = await j.start("fixture.web", () => f.startWeb());
+    browser = await j.start("browser.launch", () => chromium.launch());
+    const page = await browser.newPage({ viewport: desktop, colorScheme });
+    j.observe(page);
+    page.setDefaultTimeout(5000);
+    await stubReadiness(page);
+    await signIn(page, web, `/app/tasks/${s.taskId}`);
+    const log = page.getByRole("log", { name: "Task conversation" });
+    await log.getByText("Second: all steps ran.").waitFor();
+    await log
+      .getByRole("button", { name: "Ran 3 commands · 1 failed · 4s" })
+      .click();
+    for (const locator of [
+      log.getByRole("button", { name: /Ran 3 commands/ }),
+      log.locator(".conv-commands li", { hasText: "exit 1 · 1s" }).first(),
+      log.locator(".conv-paths code").first(),
+      log.getByText("Tool · Read · src/menu.ts"),
+    ]) {
+      await locator.waitFor();
+      const { color, background } = await locator.evaluate((element) => {
+        let node: Element | null = element;
+        let background = "rgba(0, 0, 0, 0)";
+        while (node) {
+          background = getComputedStyle(node).backgroundColor;
+          if (background !== "rgba(0, 0, 0, 0)") break;
+          node = node.parentElement;
+        }
+        return { color: getComputedStyle(element).color, background };
+      });
+      assert.notEqual(color, background, `${colorScheme} text is distinct`);
+    }
+  });

@@ -195,6 +195,37 @@ test("a Claude command item without exclusions is omitted, not stored", () => {
   }
 });
 
+test("a buffered item keeps the time it was received, not the bind time", () => {
+  const f = fixture();
+  try {
+    let now = 5_000;
+    const capture = new ExecutionDiagnosticsCapture({
+      store: f.store,
+      workId: "w1",
+      threadId: "th1",
+      exclusions: [],
+      now: () => now,
+    });
+    capture.receive({
+      kind: "item",
+      phase: "completed",
+      threadId: "th1",
+      turnId: "tu1",
+      itemId: "i1",
+      itemType: "fileChange",
+    });
+    now = 9_000;
+    capture.bind("tu1");
+    const [row] = rows(f);
+    assert.equal(
+      (JSON.parse(row!.payload!) as { observedAt: number }).observedAt,
+      5_000,
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("redacts string leaves before persistence", () => {
   const f = fixture();
   const secrets = ["sk-secret-value", "/ctl/path", "line one\nline two"];

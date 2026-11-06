@@ -146,6 +146,8 @@ export class TaskChangesState {
   layout: "split" | "unified" = "split";
   mobileView: "list" | "preview" = "list";
   selectedEntryKey: string | null = null;
+  /** A file the conversation asked to open; selected once the comparison has loaded, then cleared. */
+  pendingPath: string | null = null;
   selection: TaskChangeSelection | null = null;
   notice = "";
   /** Summary of how an explicit Refresh differed from the previous observation. */

@@ -836,6 +836,8 @@ export class ExecutionDiagnosticsCapture {
       threadId: string;
       /** The general set: every instruction text stays redacted. */
       exclusions: readonly string[] | undefined;
+      /** The clock that stamps `observedAt`; tests inject one. */
+      now?: () => number;
     },
   ) {}
 
@@ -859,7 +861,8 @@ export class ExecutionDiagnosticsCapture {
           : `${event.itemType}/${event.phase}`,
       severity: runtimeSeverity(event),
       itemId: event.kind === "item" ? event.itemId : undefined,
-      payload: detail,
+      // Stamped here so a row buffered before the turn binds keeps its real time.
+      payload: { ...detail, observedAt: (this.options.now ?? Date.now)() },
     });
   }
 

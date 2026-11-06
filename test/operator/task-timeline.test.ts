@@ -143,6 +143,7 @@ async function setup(t: { after(fn: () => unknown): void }) {
       exitCode: 3,
       aggregatedOutput: `out ${path} ${instructionSecret} token=hunter2`,
       agentId: "agent-secret-id",
+      observedAt: t0 + 2040,
     });
     clock = t0 + 50;
     item("fileChange/completed", "fc-1", {
@@ -151,6 +152,12 @@ async function setup(t: { after(fn: () => unknown): void }) {
       itemType: "fileChange",
       status: "completed",
       path: `${path}/file.ts`,
+      paths: [
+        "src/a.ts",
+        "outside workspace",
+        `token=hunter2 ${instructionSecret}`,
+      ],
+      pathsTruncated: true,
     });
     clock = t0 + 55;
     item("toolCall/completed", "tc-1", {
@@ -159,6 +166,31 @@ async function setup(t: { after(fn: () => unknown): void }) {
       itemType: "toolCall",
       status: "completed",
       tool: "Read",
+      target: "src/a.ts",
+    });
+    // Rows from every allowlisted tool, plus defence cases the capture never writes.
+    const toolRow = (id: string, itemType: string, extra: object) => {
+      clock += 1;
+      item(`${itemType}/completed`, id, {
+        phase: "completed",
+        itemId: id,
+        itemType,
+        status: "completed",
+        ...extra,
+      });
+    };
+    toolRow("tc-grep", "toolCall", { tool: "Grep", target: "g".repeat(200) });
+    toolRow("tc-glob", "toolCall", {
+      tool: "Glob",
+      target: `**/${instructionSecret} token=hunter2`,
+    });
+    toolRow("tc-agent", "toolCall", { tool: "Agent", target: "explore" });
+    toolRow("tc-unknown", "toolCall", { tool: "Skill" });
+    toolRow("tc-abs", "toolCall", { tool: "Read", target: "/abs/leak.ts" });
+    toolRow("ws-1", "webSearch", { target: "how to x" });
+    toolRow("mcp-1", "mcpToolCall", { target: "kb/search" });
+    toolRow("fc-abs", "fileChange", {
+      paths: ["/abs/leak.ts", "../up.ts", "ok.ts", "ok.ts", "a".repeat(257)],
     });
     clock = t0 + 60;
     item("commandExecution/completed", "cmd-big", {
@@ -410,13 +442,33 @@ test("only the curated tool projection crosses the boundary", async (t) => {
     assert.equal(text.includes(forbidden), false, forbidden);
   const tools = entries.filter((e) => e.kind === "tool");
   assert.deepEqual(
-    tools.map((e) => [e.tool, e.label]),
+    tools.map((e) => [e.tool, e.label, e.target]),
     [
-      ["command", null],
-      ["file-change", null],
-      ["other", "Read"],
+      ["command", null, null],
+      ["file-change", null, null],
+      ["other", "Read", "src/a.ts"],
+      ["other", "Grep", `${"g".repeat(127)}…`],
+      ["other", "Glob", "**/[redacted] token=[redacted]"],
+      ["other", "Agent", "explore"],
+      ["other", "Skill", null],
+      ["other", "Read", "outside workspace"],
+      ["other", "webSearch", "how to x"],
+      ["other", "mcpToolCall", "kb/search"],
+      ["file-change", null, null],
     ],
   );
+  // A completed row gives the end time; one without observedAt reads as unfinished.
+  assert.equal(tools[0]?.endedAt, t0 + 2040);
+  assert.equal(tools[2]?.endedAt, null);
+  assert.deepEqual(tools[1]?.paths, [
+    "src/a.ts",
+    "outside workspace",
+    "token=[redacted] [redacted]",
+  ]);
+  assert.equal(tools[1]?.pathsTruncated, true);
+  assert.deepEqual(tools[10]?.paths, ["outside workspace", "ok.ts"]);
+  assert.equal(tools[10]?.pathsTruncated, true);
+  assert.deepEqual(tools[0]?.paths, []);
   const command = tools[0];
   assert.match(command?.command ?? "", /^cat \[redacted\]/);
   assert.equal(command?.command.includes("\n"), false);
@@ -441,6 +493,34 @@ test("only the curated tool projection crosses the boundary", async (t) => {
       "result",
       "tool",
     ].sort(),
+  );
+});
+
+test("a tool row captured before durations, paths and targets projects empty values", () => {
+  const first = {
+    sequence: 1,
+    workId: "w",
+    kind: "runtime" as const,
+    name: "toolCall/completed",
+    severity: "info",
+    itemId: "t",
+    state: "available" as const,
+    reason: null,
+    payload: { itemType: "toolCall", tool: "Read", status: "completed" },
+    payloadBytes: 1,
+    originalBytes: 1,
+    createdAt: 1,
+  };
+  const projected = projectTool(first, undefined, []);
+  assert.ok(projected.kind === "tool");
+  assert.deepEqual(
+    [
+      projected.endedAt,
+      projected.paths,
+      projected.pathsTruncated,
+      projected.target,
+    ],
+    [null, [], false, null],
   );
 });
 
@@ -612,4 +692,32 @@ test("collapsing a command's whitespace cannot assemble an excluded value", () =
     projected.kind === "tool" ? projected.command : null,
     "run [redacted] now",
   );
+});
+
+test("a target is redacted before it is cut, and coordination tools get none", () => {
+  const row = (payload: object) => ({
+    sequence: 1,
+    workId: "w",
+    kind: "runtime" as const,
+    name: "toolCall/completed",
+    severity: "info",
+    itemId: "t",
+    state: "available" as const,
+    reason: null,
+    payload: { itemType: "toolCall", ...payload },
+    payloadBytes: 1,
+    originalBytes: 1,
+    createdAt: 1,
+  });
+  const target = (payload: object, excluded: string[] = []) => {
+    const projected = projectTool(row(payload), undefined, excluded);
+    return projected.kind === "tool" ? projected.target : "gap";
+  };
+  const secret = "s3cretvalue";
+  // The secret straddles the cut; cutting first would leave part of it.
+  const long = `${"a".repeat(120)}${secret}tail`;
+  const cut = target({ tool: "Grep", target: long }, [secret]);
+  assert.equal(cut, `${"a".repeat(120)}[redacted]tail`.slice(0, 127) + "…");
+  assert.equal(target({ tool: "cab_report_result", target: "x" }), null);
+  assert.equal(target({ tool: "mcp__cab__x", target: "x" }), null);
 });

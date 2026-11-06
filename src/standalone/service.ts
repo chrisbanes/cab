@@ -9645,6 +9645,9 @@ export class StandaloneService {
         workId: request.workId,
         threadId,
         exclusions,
+        ...(this.options.diagnostics?.now
+          ? { now: this.options.diagnostics.now }
+          : {}),
       });
       const key = runtimeKey(harness, threadId);
       this.diagnosticCaptures.delete(key);

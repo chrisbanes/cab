@@ -2432,10 +2432,16 @@ export function TaskWorkspace({
         timeline={timeline}
         requests={requestPlaces}
         following={!updates}
-        openChanges={(opener) => {
+        openChanges={(opener, path) => {
+          if (path) state.changes.pendingPath = path;
           const id =
             opener.closest<HTMLElement>("[data-record-id]")?.dataset.recordId;
-          if (wide && id) openPane(`[data-record-id="${id}"] button`);
+          if (wide && id)
+            openPane(
+              path
+                ? `[data-record-id="${id}"] button[data-path="${CSS.escape(path)}"]`
+                : `[data-record-id="${id}"] button`,
+            );
           else selectTab("changes");
         }}
         messageAssignment={(assignment) => (

@@ -15,9 +15,10 @@ feedback to the lead without leaving the task.
 ## Entry points
 
 - Task detail Changes and Files tabs.
-- Latest result on the task Overview, and a conversation's "Open in Changes". At 1024px and
-  wider both open the Changes pane beside the conversation (still two interactions);
-  below it they open the tab.
+- Latest result on the task Overview, and a conversation's "Open in Changes" or a changed
+  file path listed there. At 1024px and wider these open the Changes pane beside the
+  conversation (still two interactions); below it they open the tab. A path selects that
+  file, or says it is not in the comparison.
 - Inbox request pane evidence links.
 - Operator CLI `workspace` and `result` reads.
 

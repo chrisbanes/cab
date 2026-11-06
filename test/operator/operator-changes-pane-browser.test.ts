@@ -10,6 +10,7 @@ import {
   type BrowserJourney,
   browserSuite,
 } from "../fixtures/browser-diagnostics.js";
+import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { seedChangedTask } from "../fixtures/changed-task.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -60,9 +61,48 @@ async function start(
         throw new Error("blocked");
       };
     });
+  // A captured file change naming a file in the comparison, one outside it and one outside the workspace.
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    const store = new ExecutionDiagnosticsStore(db, { now: () => t0 });
+    store.begin({
+      workId: "work-paths",
+      taskId: task.taskId,
+      projectId: task.projectId,
+      assignmentId: task.assignmentId,
+      assignmentVersion: 1,
+      instructionsRevision: 1,
+      profileRevision: 1,
+      conversationRevision: 1,
+      harness: "codex",
+      mode: "enhanced",
+      eventSource: "supported",
+    });
+    store.record(
+      "work-paths",
+      "runtime",
+      "fileChange/completed",
+      "info",
+      "fc-paths",
+      {
+        itemId: "fc-paths",
+        itemType: "fileChange",
+        status: "completed",
+        paths: ["guide.md", "missing.md", "outside workspace"],
+      },
+      [],
+    );
+  });
   await signIn(page, web, `/app/tasks/${task.taskId}`);
   return { page, ...task };
 }
+
+const t0 = 1_700_000_000_000;
+const filePath = (page: Page, name: string) =>
+  page.getByRole("log", { name: "Task conversation" }).getByRole("button", {
+    name,
+    exact: true,
+  });
 
 const resultLink = (page: Page) =>
   page
@@ -382,3 +422,51 @@ test(
     );
   },
 );
+
+for (const colorScheme of ["light", "dark"] as const)
+  test(`a changed file in the conversation opens in the pane at 1280px (${colorScheme})`, async (_t, j) => {
+    const { page } = await start(j, {
+      colorScheme,
+      viewport: { width: 1280, height: 900 },
+    });
+    const url = page.url();
+    // The path outside the workspace is text, not a button.
+    assert.equal(await filePath(page, "outside workspace").count(), 0);
+    await page
+      .locator(".conv-paths", { hasText: "outside workspace" })
+      .waitFor();
+    // A path the comparison does not hold leaves a notice and no selection.
+    await filePath(page, "missing.md").click();
+    await pane(page).waitFor();
+    await pane(page)
+      .getByText(
+        "missing.md is not in this comparison. Refresh to compare again.",
+      )
+      .waitFor();
+    assert.equal(await pane(page).locator("[aria-current='true']").count(), 0);
+    await closePane(page);
+    await filePath(page, "guide.md").click();
+    await pane(page).waitFor();
+    assert.equal(page.url(), url);
+    await pane(page)
+      .locator(".changes-entry[aria-current='true']")
+      .filter({ hasText: /guide\.md/ })
+      .waitFor();
+    await pane(page).getByLabel("Diff hunk 1").first().waitFor();
+    // Close returns focus to the path that opened the pane.
+    await closePane(page);
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute("data-path") === "guide.md",
+    );
+  });
+
+test("a changed file in the conversation opens in the Changes tab at 800px", async (_t, j) => {
+  const { page } = await start(j, { viewport: { width: 800, height: 900 } });
+  await filePath(page, "guide.md").click();
+  assert.equal(await changesTab(page).getAttribute("aria-selected"), "true");
+  assert.equal(await pane(page).count(), 0);
+  await page
+    .locator(".changes-entry[aria-current='true']")
+    .filter({ hasText: /guide\.md/ })
+    .waitFor();
+});

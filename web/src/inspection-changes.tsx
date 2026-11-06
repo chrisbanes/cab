@@ -494,6 +494,22 @@ export function TaskWorkspaceChanges({
       : -1;
   const selected =
     selectedIndex >= 0 ? snapshot?.entries[selectedIndex] : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the snapshot or the request changes.
+  useEffect(() => {
+    const path = state.pendingPath;
+    if (path === null || !snapshot) return;
+    const index = snapshot.entries.findIndex((entry) => entry.path === path);
+    const entry = snapshot.entries[index];
+    state.pendingPath = null;
+    if (entry) {
+      state.selectedEntryKey = entryKey(entry, index);
+      state.selection = null;
+      state.mobileView = "preview";
+      state.notice = "";
+    } else
+      state.notice = `${path} is not in this comparison. Refresh to compare again.`;
+    changedRef.current();
+  }, [snapshot, state.pendingPath]);
   const availableBaseBranches =
     (current && "availableBaseBranches" in current
       ? current.availableBaseBranches
