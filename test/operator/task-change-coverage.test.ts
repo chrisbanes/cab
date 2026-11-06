@@ -99,19 +99,20 @@ test("operator commands, executions, capture and project edits notify the task a
   drain(sibling);
 
   // History capture binds the task; diagnostics capture binds only the work id.
+  const binding = {
+    workId: work.workId,
+    taskId: task.taskId,
+    assignmentId: task.assignmentId,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    workRevision: 1,
+    threadId: work.threadId,
+    turnId: work.turnId,
+  };
   f.service.conversationHistoryStore()?.record(
-    {
-      workId: work.workId,
-      taskId: task.taskId,
-      assignmentId: task.assignmentId,
-      assignmentVersion: 1,
-      instructionsRevision: 1,
-      profileRevision: 1,
-      conversationRevision: 1,
-      workRevision: 1,
-      threadId: work.threadId,
-      turnId: work.turnId,
-    },
+    binding,
     {
       kind: "completed",
       threadId: work.threadId,
@@ -138,6 +139,20 @@ test("operator commands, executions, capture and project edits notify the task a
   record(work.workId, "coverage-tool");
   await settle();
   assert.deepEqual(drain(events), ["timeline"], "diagnostics capture");
+
+  // A plan record is not a capture table: it refetches the task read and timeline.
+  f.service.conversationHistoryStore()?.recordPlan(
+    binding,
+    {
+      steps: [{ text: "Plan step", status: "in-progress" }],
+      omittedStepCount: 0,
+      done: 0,
+      total: 1,
+    },
+    [],
+  );
+  await settle();
+  assert.deepEqual(drain(events), ["read"], "plan record");
 
   // A diagnostics burst on this task's work reaches neither the idle sibling
   // nor another project's task.

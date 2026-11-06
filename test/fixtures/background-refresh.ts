@@ -127,7 +127,7 @@ export async function watchDom(page: Page) {
 export async function settleReads(page: Page) {
   const reading = reads.get(page);
   if (!reading) throw Error("watchDom must be installed first");
-  for (let seen = -1; seen !== reading.started;) {
+  for (let seen = -1; seen !== reading.started; ) {
     seen = reading.started;
     while (reading.open.size > 0) await new Promise((r) => setTimeout(r, 10));
     // Macrotask turns rather than timers, which the page clock controls.

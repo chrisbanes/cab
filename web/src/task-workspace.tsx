@@ -255,7 +255,8 @@ function ChecklistCoverage({
   source,
 }: {
   source:
-    NonNullable<TaskRead["data"]["review"]>["sources"][number] | undefined;
+    | NonNullable<TaskRead["data"]["review"]>["sources"][number]
+    | undefined;
 }) {
   if (!source || source.body === null) return <p>{sourceGap}</p>;
   if (source.criteriaOmittedCount === null)
@@ -3560,7 +3561,8 @@ function Changes({
 }: {
   data: TaskRead["data"];
   selected:
-    NonNullable<TaskRead["data"]["review"]>["results"][number] | undefined;
+    | NonNullable<TaskRead["data"]["review"]>["results"][number]
+    | undefined;
   client: OperatorClient;
   session: Session;
   taskId: string;

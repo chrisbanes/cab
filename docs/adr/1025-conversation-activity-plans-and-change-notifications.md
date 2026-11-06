@@ -9,8 +9,8 @@ to a curated projection: the tool kind, a one-line summary and bounded output on
 File changes appear only as a count and rows carry no duration. Plans are absent: Claude is
 not offered `TodoWrite`, and Codex `turn/plan/updated` events never reach the diagnostic
 store. The task view polls every 15 seconds and has no push channel. This decision widens
-all three and fixes the new boundary. The tool projection and plan capture are implemented;
-change notices are accepted but not yet implemented.
+all three and fixes the new boundary. The tool projection, plan capture and change
+notices are implemented.
 
 ## Decision
 
@@ -45,9 +45,16 @@ change notices are accepted but not yet implemented.
   only.** A notice says that the task's read or timeline changed and carries no task
   content. The browser refetches through the existing reads, which stay the one
   authoritative path, consistent with ADR-1022's rejection of merging in the browser.
-  Polling remains the fallback when the stream drops. The endpoint, authentication reuse,
-  heartbeat and reconnect back-off are decided with the stream's implementation
-  ([#1513](https://github.com/chrisbanes/cab/issues/1513)).
+  Polling remains the fallback when the stream drops. The stream is
+  `GET /api/operator/tasks/:taskId/stream`, a session-only route: it reuses the cookie
+  session, Host check and task visibility of the reads, refuses a foreign `Origin`, and
+  sends only `read`, `timeline` and `heartbeat` events with `data: {}`. Notices come from
+  committed writes observed at the shared database facade and attributed to the task by
+  the ids they bind; an unattributable write notifies every watched task. A heartbeat
+  every 15 seconds keeps the session current and ends the stream when it is not; sign-out,
+  shutdown and the task leaving the readable set also end it. The browser reconnects with
+  jittered back-off from 1 to 30 seconds and polls every 15 seconds only while the stream
+  is not healthy.
 - **Reasoning stays uncollected.** A separate ADR decides on it.
 
 ## Considered options

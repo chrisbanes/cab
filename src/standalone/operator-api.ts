@@ -449,12 +449,12 @@ function exactRetainedAnchorExcerpt(
   const range = retainedAnchorRange(source, anchor.startLine, anchor.endLine);
   return Boolean(
     range &&
-    range.byteStart === anchor.byteStart &&
-    range.byteEnd === anchor.byteEnd &&
-    range.bytes.equals(excerpt) &&
-    range.bytes.byteLength === anchor.size &&
-    createHash("sha256").update(range.bytes).digest("hex") ===
-      anchor.excerptSha256,
+      range.byteStart === anchor.byteStart &&
+      range.byteEnd === anchor.byteEnd &&
+      range.bytes.equals(excerpt) &&
+      range.bytes.byteLength === anchor.size &&
+      createHash("sha256").update(range.bytes).digest("hex") ===
+        anchor.excerptSha256,
   );
 }
 function retainedTextLineCount(text: string) {
@@ -1208,10 +1208,10 @@ export class OperatorApi {
   ) {
     return Boolean(
       current &&
-      current.taskId === initial.taskId &&
-      current.projectId === initial.projectId &&
-      current.taskVersion === initial.taskVersion &&
-      current.fingerprint === initial.fingerprint,
+        current.taskId === initial.taskId &&
+        current.projectId === initial.projectId &&
+        current.taskVersion === initial.taskVersion &&
+        current.fingerprint === initial.fingerprint,
     );
   }
   private async retainedPathUnavailable(
@@ -5035,7 +5035,8 @@ export class OperatorApi {
         ];
       });
       const submitted = items.find((i) => i.name === "submitted")?.payload as
-        { bytes?: unknown; sha256?: unknown } | undefined;
+        | { bytes?: unknown; sha256?: unknown }
+        | undefined;
       const instructionCaptured = segments.some((x) =>
         x.name.endsWith("-instructions"),
       );
@@ -5433,21 +5434,23 @@ export class OperatorApi {
                 },
           };
         }),
-        ...history.turnOmissions.map((omission): TimelineCandidate => ({
-          key: {
-            timeMs: omission.createdAt,
-            rank: timelineRank.turnOmission,
-            ordinal: omission.sequence,
-            id: `omit-${omission.sequence}`,
-          },
-          assignmentId: omission.assignmentId,
-          precision: "ms",
-          body: {
-            kind: "gap",
-            reason: omission.reason,
-            detail: detail(omission.workId, omission.turnId),
-          },
-        })),
+        ...history.turnOmissions.map(
+          (omission): TimelineCandidate => ({
+            key: {
+              timeMs: omission.createdAt,
+              rank: timelineRank.turnOmission,
+              ordinal: omission.sequence,
+              id: `omit-${omission.sequence}`,
+            },
+            assignmentId: omission.assignmentId,
+            precision: "ms",
+            body: {
+              kind: "gap",
+              reason: omission.reason,
+              detail: detail(omission.workId, omission.turnId),
+            },
+          }),
+        ),
       ];
 
       const planSource = planUpdates.map(
@@ -5536,17 +5539,19 @@ export class OperatorApi {
             at: w.createdAt,
             reason: "tool-activity-not-captured" as const,
           })),
-      ].map((g): TimelineCandidate => ({
-        key: {
-          timeMs: g.at,
-          rank: timelineRank.toolGap,
-          ordinal: 0,
-          id: `gap-${g.reason}-${identityToken(g.workId)}`,
-        },
-        assignmentId: g.assignmentId,
-        precision: "ms",
-        body: { kind: "gap", reason: g.reason, detail: detail(g.workId) },
-      }));
+      ].map(
+        (g): TimelineCandidate => ({
+          key: {
+            timeMs: g.at,
+            rank: timelineRank.toolGap,
+            ordinal: 0,
+            id: `gap-${g.reason}-${identityToken(g.workId)}`,
+          },
+          assignmentId: g.assignmentId,
+          precision: "ms",
+          body: { kind: "gap", reason: g.reason, detail: detail(g.workId) },
+        }),
+      );
 
       const delegated = new Map(
         this.coordination()
@@ -6749,14 +6754,17 @@ export class OperatorApi {
         operation && !["confirmed", "failed"].includes(operation.phase);
       let preview = null,
         unavailable:
-          "archived" | "unproved" | "not-stacked" | "pending" | null =
-          project.archived
-            ? "archived"
-            : pending
-              ? "pending"
-              : !this.domain().activeStackedDependency(taskId)
-                ? "not-stacked"
-                : null;
+          | "archived"
+          | "unproved"
+          | "not-stacked"
+          | "pending"
+          | null = project.archived
+          ? "archived"
+          : pending
+            ? "pending"
+            : !this.domain().activeStackedDependency(taskId)
+              ? "not-stacked"
+              : null;
       if (!unavailable) {
         try {
           const identity = await this.service.previewTaskUnstack(taskId);
@@ -10021,12 +10029,12 @@ export class OperatorApi {
                   : ["codex-executable", "codex-login"];
               ready = Boolean(
                 status?.enabled &&
-                status.state === "available" &&
-                checks.every((id) =>
-                  read?.data.checks.some(
-                    (c) => c.id === id && c.status === "pass",
+                  status.state === "available" &&
+                  checks.every((id) =>
+                    read?.data.checks.some(
+                      (c) => c.id === id && c.status === "pass",
+                    ),
                   ),
-                ),
               );
             } catch {
               /* A failed readiness read cannot authorize an alternate runtime. */

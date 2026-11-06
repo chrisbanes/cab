@@ -307,7 +307,8 @@ export class LocalOperatorHttp {
   private server: Server | undefined;
   private lanServer: Server | undefined;
   private readonly lan:
-    { address: string; origin?: string | undefined } | undefined;
+    | { address: string; origin?: string | undefined }
+    | undefined;
   private readonly browserContext: Readonly<{
     origin: string;
     secureCookie: boolean;

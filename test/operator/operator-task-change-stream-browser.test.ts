@@ -139,14 +139,15 @@ test("a dropped stream falls back to polling and recovers", async (_t, j) => {
 
   // Reconnected: one refetch, then notices without the clock.
   await refused.stop();
-  const reconnected = page.waitForResponse(
-    (response) => response.url().endsWith("/stream") && response.ok(),
-  );
+  let atConnect = -1;
+  page.on("response", (response) => {
+    if (atConnect < 0 && response.url().endsWith("/stream") && response.ok())
+      atConnect = taskReads();
+  });
   await page.clock.runFor(40_000);
-  await reconnected;
-  reads = taskReads();
+  while (atConnect < 0) await page.waitForTimeout(50);
   await page.waitForTimeout(1_500);
-  assert.equal(taskReads() - reads, 1, "one refetch on reconnect");
+  assert.equal(taskReads() - atConnect, 1, "one refetch on reconnect");
   capture("Recovered assistant entry");
   await conversation
     .getByText("Recovered assistant entry", { exact: true })

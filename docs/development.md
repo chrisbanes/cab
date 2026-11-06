@@ -576,6 +576,28 @@ name, version and preview digest. The service rechecks every confirmation atomic
    Code 2.1.318. The agent decides whether to plan, so a missing plan is not evidence
    that none was made.
 
+   Task change notices
+   ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)) come
+   from `TaskChangeFeed` (`src/standalone/task-change-feed.ts`), which observes every
+   committed write at the shared `CachedDatabase` facade. A write binding a watched
+   task's task, assignment, work or imported-item id is that task's; one binding its
+   project id counts only when the commit wrote no task or assignment record, and a
+   parameterless write that changed rows and names no watched id notifies every watched
+   task. A commit whose attributed tables are all in `timelineCaptureTables` emits
+   `timeline`, anything else `read`. Add a table there only when the task read never
+   reads it, with a case in `test/operator/task-change-feed.test.ts`;
+   `test/operator/task-change-coverage.test.ts` probes each write category.
+   `GET /api/operator/tasks/:taskId/stream` (`src/standalone/operator-task-stream.ts`)
+   relays them as `read`, `timeline` and `heartbeat` events with `data: {}`, coalesced
+   per task for 200 ms, with a heartbeat every 15 s. A session holds at most 3 streams
+   and the service 32; beyond either the route answers 503 with `retry-after: 30`. A
+   reader stalled for two heartbeats is disconnected. The browser
+   (`web/src/task-change-stream.ts`) debounces notices for 300 ms (2 s at most), treats
+   45 s without a frame as a dropped stream, reconnects after 1 s doubling to 30 s with
+   ±20% jitter, refetches once per connection and closes after 60 s hidden. Browser
+   tests that drive the 15-second poll with the page clock call
+   `withoutChangeStream(page)` from `test/fixtures/background-refresh.ts`.
+
    `project prepare PROJECT_ID --diagnostic-capture enhanced|baseline` previews and
    applies the mode change through the same revision-checked, replay-safe flow;
    omitting the flag leaves the mode unchanged.
