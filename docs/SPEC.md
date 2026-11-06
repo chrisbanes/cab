@@ -1761,7 +1761,7 @@ A question or approval is answerable from the attention card or from its place i
 conversation, with one shared request state. Tool activity shows each command's
 summary, exit status and duration, with bounded redacted output on request;
 consecutive calls are grouped with a failure count and total duration; file changes list
-their repository-relative paths and open Changes (in a side pane at 1024px and wider, otherwise the tab); a non-command tool shows one
+their repository-relative paths, each opening that file in Changes (in a side pane at 1024px and wider, otherwise the tab); a non-command tool shows one
 allowlisted target (a path, pattern, query, MCP server and tool, or subagent type),
 capped at 128 characters and redacted, with "outside workspace" for a path outside the
 workspace and unknown tools name-only; and cab's own coordination calls appear as the
