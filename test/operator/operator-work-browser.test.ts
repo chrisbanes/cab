@@ -87,7 +87,7 @@ async function open(
   if (
     !defaults &&
     !url.searchParams.has("ready") &&
-    /^\/(\/tasks|\/projects\/[^/]+)?$/.test(url.pathname)
+    /^\/(tasks|projects\/[^/]+)?$/.test(url.pathname)
   )
     url.searchParams.set("ready", "any");
   await page.goto(url.href);
