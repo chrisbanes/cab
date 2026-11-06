@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import {
   Group,
   Panel,
@@ -10,15 +10,18 @@ import { Button } from "./components.js";
 import "./changes-pane.css";
 
 /** The conversation never gets narrower than this, whatever width was saved. */
-export const conversationMinimum = 480;
+const conversationMinimum = 480;
 /** The pane's own floor. */
-export const paneMinimum = 320;
+const paneMinimum = 320;
 const panelIds = ["split-conversation", "split-changes"];
 /** Blocked or unavailable storage reads as no saved width. */
 const storage: LayoutStorage = {
   getItem(key) {
     try {
-      return localStorage.getItem(key);
+      const saved = localStorage.getItem(key);
+      // The library parses this unguarded, so only a saved object reaches it.
+      const layout: unknown = saved === null ? null : JSON.parse(saved);
+      return typeof layout === "object" && layout !== null ? saved : null;
     } catch {
       return null;
     }
@@ -77,24 +80,16 @@ export function ChangesSplit({
   );
 }
 
-/**
- * The Changes content beside the conversation. `opened` changes on every open, so opening
- * again moves focus back in; Escape closes the pane only when nothing inside dismissed it.
- */
+/** The Changes content beside the conversation; Escape closes it only when nothing inside dismissed it. */
 export function ChangesPane({
-  opened,
   onClose,
   onFullWidth,
   children,
 }: {
-  opened: unknown;
   onClose: () => void;
   onFullWidth: () => void;
   children: ReactNode;
 }) {
-  const ref = useRef<HTMLElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: each open moves focus into the pane.
-  useEffect(() => ref.current?.focus({ preventScroll: true }), [opened]);
   const dismiss = (event: KeyboardEvent) => {
     if (
       event.key === "Escape" &&
@@ -105,7 +100,6 @@ export function ChangesPane({
   };
   return (
     <aside
-      ref={ref}
       className="changes-pane"
       aria-label="Changes"
       tabIndex={-1}

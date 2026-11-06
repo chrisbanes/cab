@@ -127,7 +127,10 @@ for (const colorScheme of ["light", "dark"] as const) {
         .filter({ hasText: /guide\.md/ })
         .click();
       await page.getByLabel("Diff hunk 1").first().waitFor();
-      if (w === 1366) await j.capture(page, `changes-pane-${colorScheme}`);
+      // The rail stacks above the diff, which keeps a readable width beside the conversation.
+      assert.ok((await width(page.locator(".changes-reading-area"))) >= 280);
+      if (w === 1366)
+        await j.capture(page, `changes-pane-${colorScheme}`, false);
     }
     const line = await separator(page).evaluate(
       (el) => getComputedStyle(el, "::after").backgroundColor,
@@ -287,6 +290,18 @@ test("the split resizes from the keyboard within its minimums and keeps its widt
   await page.reload();
   await openPane(page);
   assert.ok(Math.abs((await value(page)) - chosen) < 0.5);
+});
+
+test("a corrupt saved width opens the pane at the default", async (_t, j) => {
+  const { page } = await start(j);
+  await page.evaluate(() =>
+    localStorage.setItem("cab.changes-pane.v1", "null"),
+  );
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await openPane(page);
+  await separator(page).waitFor();
+  assert.deepEqual(errors, []);
 });
 
 test("blocked storage opens the pane at the default width and still resizes", async (_t, j) => {

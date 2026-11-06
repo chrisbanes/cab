@@ -1,12 +1,7 @@
 /* The Overview's Changes side pane: the conversation and the pane share the row, split by a
    resizable handle. The pane stays under the page top while the conversation scrolls. */
-.task-workspace:has(.changes-split) {
+.task-workspace:has(.task-panel:not([hidden]) .changes-split) {
   max-width: none;
-}
-
-.changes-split {
-  align-items: stretch;
-  gap: 0;
 }
 
 .changes-pane {
@@ -18,6 +13,7 @@
   flex-direction: column;
   gap: var(--space-12);
   min-width: 0;
+  container-type: inline-size;
   padding: var(--space-12);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -39,7 +35,7 @@
 /* A 1px hairline with a wider hit target; the focus ring is the visible keyboard cue. */
 .changes-split-handle {
   position: relative;
-  flex: 0 0 var(--space-16);
+  width: var(--space-16);
   background: transparent;
   cursor: col-resize;
   outline: none;
@@ -62,4 +58,11 @@
 .changes-split-handle:focus-visible::after {
   width: 2px;
   background: var(--focus);
+}
+
+/* Beside a conversation the pane is too narrow for the rail and the diff side by side. */
+@container (max-width: 760px) {
+  .changes-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

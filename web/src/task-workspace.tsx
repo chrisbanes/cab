@@ -799,15 +799,23 @@ export function TaskWorkspace({
     changed();
   };
   /** Open the Changes pane (1024px and wider); `opener` is the selector that gets focus back on Close. */
+  const reflow = useRef(false);
   const openPane = (opener: string) => {
     capture();
     state.changesPane = { opener };
+    reflow.current = true;
     changed();
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>("aside[aria-label='Changes']")
+        ?.focus({ preventScroll: true }),
+    );
   };
   const closePane = () => {
     const opener = state.changesPane?.opener;
     capture();
     state.changesPane = null;
+    reflow.current = true;
     changed();
     requestAnimationFrame(() =>
       (
@@ -825,6 +833,9 @@ export function TaskWorkspace({
   // The conversation reflows when the pane opens or closes; keep the entry being read in place.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pane's visibility is the only trigger.
   useLayoutEffect(() => {
+    // Only the operator's own open or close, not a window resize or Back.
+    if (!reflow.current) return;
+    reflow.current = false;
     const a = anchor.current;
     const el = a
       ? [...document.querySelectorAll<HTMLElement>("[data-record-id]")].find(
@@ -2609,7 +2620,6 @@ export function TaskWorkspace({
                 conversation={columns}
                 pane={
                   <ChangesPane
-                    opened={state.changesPane}
                     onClose={closePane}
                     onFullWidth={paneToFullWidth}
                   >
@@ -3037,11 +3047,9 @@ export function TaskWorkspace({
             changes={state.changes}
           />
         </TabPanel>
-        {!paneVisible && (
-          <TabPanel tab="changes" active={state.tab}>
-            {changesView}
-          </TabPanel>
-        )}
+        <TabPanel tab="changes" active={state.tab}>
+          {!paneVisible && changesView}
+        </TabPanel>
         <TabPanel tab="review" active={state.tab}>
           <LocalReviewPanel />
         </TabPanel>
