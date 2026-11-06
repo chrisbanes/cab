@@ -293,6 +293,7 @@ import {
 } from "./service.js";
 import { refusedRevisionPrefix } from "./state.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import type { TaskChangeIds } from "./task-change-feed.js";
 import {
   compareRepository,
   type WorkspaceComparisonSideContent,
@@ -825,6 +826,21 @@ export class OperatorApi {
     if (!d.projectListed(String(task.projectId)))
       throw new OperatorApiError(404, "not-found");
     return task;
+  }
+  /** The ids this task's writes bind; throws the reads' 404 when it is not readable. */
+  taskChangeIds(taskId: string): TaskChangeIds {
+    const task = this.requireTask(taskId),
+      d = this.domain(),
+      nodeId = d.importedTask(taskId)?.nodeId;
+    return {
+      own: [
+        taskId,
+        ...d.assignments(taskId).map((a) => String(a.id)),
+        ...this.service.taskWorkIds(taskId),
+        ...(typeof nodeId === "string" ? [nodeId] : []),
+      ],
+      project: String(task.projectId),
+    };
   }
   /**
    * One read's global exclusion inputs: instruction revisions tagged for dedicated

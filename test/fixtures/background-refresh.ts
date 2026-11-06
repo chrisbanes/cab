@@ -145,3 +145,11 @@ export async function settleReads(page: Page) {
 export function observedDom(page: Page) {
   return page.evaluate(() => window.__domChanges?.());
 }
+
+/** Refuses the task change stream, so the page keeps its 15-second polling fallback. */
+export async function withoutChangeStream(page: Page) {
+  const glob = "**/api/operator/tasks/*/stream";
+  // 204 makes EventSource give up without the console error an aborted request logs.
+  await page.route(glob, (route) => route.fulfill({ status: 204 }));
+  return { stop: () => page.unroute(glob) };
+}

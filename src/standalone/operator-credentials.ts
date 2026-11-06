@@ -215,7 +215,7 @@ export function operatorRouteAuthority(
       "/api/operator/credentials",
     ].includes(path) ||
     /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
-    /^\/api\/operator\/tasks\/[^/]+\/(?:review-draft|local-reviews(?:\/[^/]+)?)$/.test(
+    /^\/api\/operator\/tasks\/[^/]+\/(?:review-draft|stream|local-reviews(?:\/[^/]+)?)$/.test(
       path,
     ) ||
     /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/private-values$/.test(

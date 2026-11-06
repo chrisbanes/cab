@@ -94,7 +94,10 @@ with `--lan-ip off` or the corrected address while the service is down, then res
 A DHCP address can change; for a daemon with `KeepAlive=false`, an address missing at
 boot needs a later explicit restart after correction. An HTTPS proxy Host that matches
 the numeric loopback Host is ambiguous when LAN is enabled; use a distinct proxy Host
-or disable LAN access. See the [operator boundary](../design/s04c-operator-ui.md).
+or disable LAN access. A proxy in front of the operator UI must pass the task change
+stream (`/api/operator/tasks/<id>/stream`, `text/event-stream`) through unbuffered and
+keep it open for at least 30 seconds without traffic; otherwise the task page falls back
+to 15-second polling. See the [operator boundary](../design/s04c-operator-ui.md).
 
 ### Install
 

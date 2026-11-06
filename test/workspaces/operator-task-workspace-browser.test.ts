@@ -11,6 +11,7 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import { withoutChangeStream } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
@@ -145,6 +146,8 @@ test("production workspace retains literal captured text, pending request, focus
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
+  // Drives the 15-second polling fallback with the page clock.
+  await withoutChangeStream(page);
   await page.clock.install();
   await page.goto(`${web.origin}/tasks/${a.taskId}?result=${r.resultId}`);
   await page.getByLabel("Password").fill(web.password);

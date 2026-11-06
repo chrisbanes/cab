@@ -329,3 +329,34 @@ test("the existing minimal Database contract and bind values remain supported", 
     database.close();
   }
 });
+
+test("observer sees each successful call with its parameters and transaction state", () => {
+  const raw = new DatabaseSync(":memory:");
+  const seen: unknown[][] = [];
+  const database = new CachedDatabase(raw, {
+    observer: (...call) => seen.push(call),
+  });
+  database.exec("CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)");
+  database.exec("BEGIN IMMEDIATE");
+  database.prepare("INSERT INTO entries VALUES (?, ?)").run(1, "one");
+  database.prepare("SELECT value FROM entries WHERE id = ?").get(1);
+  database.exec("COMMIT");
+  database.exec("UPDATE entries SET value = 'x'");
+  database.prepare("SELECT value FROM entries").all();
+  assert.throws(() =>
+    database.prepare("INSERT INTO entries VALUES (?, ?)").run(1, "again"),
+  );
+  assert.deepEqual(seen, [
+    ["CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)", [], false, 0],
+    ["BEGIN IMMEDIATE", [], true, undefined],
+    ["INSERT INTO entries VALUES (?, ?)", [1, "one"], true, 1],
+    ["SELECT value FROM entries WHERE id = ?", [1], true, undefined],
+    ["COMMIT", [], false, undefined],
+    ["UPDATE entries SET value = 'x'", [], false, 1],
+    ["SELECT value FROM entries", [], false, undefined],
+  ]);
+  database.close();
+  seen.length = 0;
+  assert.throws(() => database.exec("SELECT 1"));
+  assert.deepEqual(seen, []);
+});

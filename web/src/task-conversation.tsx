@@ -70,7 +70,7 @@ const maxCatchUpPages = 5;
 const maxFindPages = 10;
 
 /**
- * Reads the newest page whenever the task read changes (`taskRead`) and merges it into the
+ * Reads the newest page whenever the task read (`taskRead`) or `changeTick` changes and merges it into the
  * retained window by entry and the service's ordering key. `beforeApply` runs just before a
  * change is committed so the page can capture its reading position; `first` marks the opening
  * read, where the page stays where it is.
@@ -81,6 +81,7 @@ export function useTaskTimeline({
   cache,
   setCache,
   taskRead,
+  changeTick = 0,
   running: runningAssignments,
   beforeApply,
 }: {
@@ -90,6 +91,8 @@ export function useTaskTimeline({
   setCache: (value: ConversationCache | null) => void;
   /** The task read this conversation goes with; each new read (not each new time) reads the newest page again. */
   taskRead: unknown;
+  /** Bumped by a `timeline` change notice: reads the newest page again without a new task read. */
+  changeTick?: number;
   /** Assignments the task read shows running: only their unfinished entries can still finish. */
   running: ReadonlySet<string>;
   beforeApply: (first: boolean) => void;
@@ -184,12 +187,12 @@ export function useTaskTimeline({
     life.current = new AbortController();
     return () => life.current.abort();
   }, [read]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the task read is the trigger.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the task read and timeline notices are the triggers.
   useEffect(() => {
     const abort = new AbortController();
     void refresh(abort.signal);
     return () => abort.abort();
-  }, [read, taskRead]);
+  }, [read, taskRead, changeTick]);
 
   // One read of the next older page at a time; a second caller waits for it.
   const flight = useRef<Promise<void> | null>(null);

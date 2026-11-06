@@ -31,6 +31,8 @@ type ServeOptions = {
   auth?: { now: () => number; idleTimeoutMs: number };
   /** Browser push for the notification routes. */
   push?: OperatorPush;
+  /** Task stream heartbeat interval. */
+  streamHeartbeatMs?: number;
 };
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 
@@ -125,6 +127,10 @@ export async function serveCli<F extends Fixture>(
       credentials: f.service.operatorCredentials(),
       localAccess: f.service.localAccess(),
       ...(options.push ? { push: options.push } : {}),
+      changes: f.service.taskChanges(),
+      ...(options.streamHeartbeatMs
+        ? { streamHeartbeatMs: options.streamHeartbeatMs }
+        : {}),
       web: new OperatorWebBoundary(
         bundle,
         api,

@@ -245,6 +245,7 @@ export async function main(
         credentials: service.operatorCredentials(),
         localAccess: service.localAccess(),
         push,
+        changes: service.taskChanges(),
         web: new OperatorWebBoundary(bundle, api, readiness),
       });
       const boundPort = await ui.start(port);

@@ -52,6 +52,7 @@ import {
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
 import { CachedDatabase } from "../core/database-cache.js";
+import { TaskChangeFeed } from "./task-change-feed.js";
 import {
   type Publication,
   type PublicationAvailability,
@@ -850,6 +851,16 @@ export class StandaloneService {
   private cache: CachedDatabase | undefined;
   /** The only operational view; see started(). */
   private current: Started | undefined;
+  /** Observes every write through the facade; outlives service generations. */
+  private readonly changes = new TaskChangeFeed({
+    isTaskRecordId: (values) =>
+      values.length > 0 &&
+      this.cache
+        ?.prepare(
+          "SELECT 1 FROM domain_tasks WHERE id IN (SELECT value FROM json_each(?)) UNION ALL SELECT 1 FROM domain_assignments WHERE id IN (SELECT value FROM json_each(?)) LIMIT 1",
+        )
+        .get(JSON.stringify(values), JSON.stringify(values)) !== undefined,
+  });
   /** What start() has created so far; teardown releases from it, published or not. */
   private acquired: Partial<Started> | undefined;
   private readonly timers = new Set<NodeJS.Timeout>();
@@ -1039,6 +1050,7 @@ export class StandaloneService {
         close: () => {
           if (rawDb.isOpen) rawDb.close();
         },
+        observer: this.changes.observer,
       });
       this.cache = db;
       rawDb.exec(
@@ -3994,6 +4006,21 @@ export class StandaloneService {
 
   operatorPush(): OperatorPushStore {
     return this.started().operatorPush;
+  }
+
+  /** Content-free task change notices for the operator stream. */
+  taskChanges(): TaskChangeFeed {
+    return this.changes;
+  }
+
+  /** Every work id bound to the task, for change attribution. */
+  taskWorkIds(taskId: string): string[] {
+    this.started();
+    return this.cache!.prepare(
+      "SELECT workId FROM task_execution_bindings WHERE taskId = ?",
+    )
+      .all(taskId)
+      .map((row) => String((row as { workId: unknown }).workId));
   }
 
   githubSources(): GitHubSourceStore {
@@ -7918,8 +7945,8 @@ export class StandaloneService {
   /** Lead turn text and handback anchors; see `LeadTextStore`. */
   leadText(): LeadTextStore {
     this.started();
-    if (!this.db) throw new Error("Service database is not open");
-    return new LeadTextStore(this.db);
+    if (!this.cache) throw new Error("Service database is not open");
+    return new LeadTextStore(this.cache);
   }
 
   /**

@@ -136,3 +136,75 @@ test("replies that arrive out of order publish only the latest read, whether it 
   assert.equal(controller.state.error, "unavailable");
   assert.equal(controller.state.data, "latest");
 });
+
+test("a superseding background read replaces an in-flight one and follows a foreground read", async () => {
+  const { controller } = await freshController();
+  const stale = deferred<string>();
+  const first = controller.load(() => stale.promise, { background: true });
+  const second = controller.load(async () => "notice", {
+    background: true,
+    supersede: true,
+  });
+  stale.resolve("stale");
+  await Promise.all([first, second]);
+  assert.equal(controller.state.data, "notice");
+
+  let skipped = true;
+  const busy = deferred<string>();
+  const third = controller.load(() => busy.promise, { background: true });
+  await controller.load(
+    async () => {
+      skipped = false;
+      return "ignored";
+    },
+    { background: true },
+  );
+  busy.resolve("polled");
+  await third;
+  assert.ok(skipped, "a plain background read still skips");
+
+  const foreground = deferred<string>();
+  const explicit = controller.load(() => foreground.promise);
+  await controller.load(async () => "after", {
+    background: true,
+    supersede: true,
+  });
+  assert.equal(controller.state.pending, true);
+  foreground.resolve("explicit");
+  await explicit;
+  assert.equal(controller.state.data, "after");
+});
+
+test("beforeApply runs as a successful read lands, before it is published", async () => {
+  const order: string[] = [];
+  const controller = new ResourceController<string>((state) =>
+    order.push(`publish ${state.data}`),
+  );
+  await controller.load(async () => "first");
+  order.length = 0;
+  const slow = deferred<string>();
+  const loading = controller.load(() => slow.promise, {
+    background: true,
+    beforeApply: () => order.push("capture"),
+  });
+  assert.deepEqual(
+    [...order],
+    [],
+    "nothing is captured while the read is in flight",
+  );
+  slow.resolve("second");
+  await loading;
+  assert.deepEqual([...order], ["capture", "publish second"]);
+  order.length = 0;
+  await controller.load(
+    async () => {
+      throw new Error("unavailable");
+    },
+    { background: true, beforeApply: () => order.push("capture") },
+  );
+  assert.deepEqual(
+    [...order],
+    ["publish second"],
+    "a failed read captures nothing",
+  );
+});

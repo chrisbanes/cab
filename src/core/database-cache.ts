@@ -8,7 +8,23 @@ export interface CachedDatabaseOptions {
   capacity?: number;
   /** Called after cache invalidation on every close attempt. */
   close?: () => void;
+  /**
+   * Called after each successful `exec` or statement call with its SQL, bound
+   * parameters (none for `exec`), whether a transaction is still open, and the
+   * rows changed by a `run` or a non-transaction-control `exec`.
+   */
+  observer?: DatabaseObserver;
 }
+
+export type DatabaseObserver = (
+  sql: string,
+  parameters: readonly SqlValue[],
+  inTransaction: boolean,
+  changes?: number,
+) => void;
+
+const transactionControl =
+  /^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA)\b/i;
 
 const defaultCapacity = 512;
 const schemaCommands = new Set([
@@ -141,6 +157,8 @@ export class CachedDatabase implements Database {
   private readonly statements = new Map<string, PreparedStatement>();
   private readonly capacity: number;
   private readonly closeCallback: () => void;
+  private readonly observer: DatabaseObserver | undefined;
+  private totalChangesStatement: PreparedStatement | undefined;
   private closed = false;
   declare readonly isTransaction?: boolean;
 
@@ -154,6 +172,7 @@ export class CachedDatabase implements Database {
         "Statement cache capacity must be a positive safe integer",
       );
     this.closeCallback = options.close ?? (() => undefined);
+    this.observer = options.observer;
     if (database.isTransaction !== undefined)
       Object.defineProperty(this, "isTransaction", {
         configurable: false,
@@ -169,7 +188,15 @@ export class CachedDatabase implements Database {
   exec(sql: string): unknown {
     this.assertOpen();
     if (invalidatesStatements(sql)) this.invalidate();
-    return this.database.exec(sql);
+    if (!this.observer || transactionControl.test(sql)) {
+      const result = this.database.exec(sql);
+      this.observe(sql, []);
+      return result;
+    }
+    const before = this.totalChanges();
+    const result = this.database.exec(sql);
+    this.observe(sql, [], this.totalChanges() - before);
+    return result;
   }
 
   prepare(sql: string): PreparedStatement {
@@ -187,15 +214,26 @@ export class CachedDatabase implements Database {
       run: (...parameters: SqlValue[]) => {
         this.assertOpen();
         if (invalidatesOnRun) this.invalidate();
-        return rawStatement.run(...parameters);
+        const result = rawStatement.run(...parameters);
+        const changes = (result as { changes?: unknown } | undefined)?.changes;
+        this.observe(
+          sql,
+          parameters,
+          changes === undefined ? undefined : Number(changes),
+        );
+        return result;
       },
       get: (...parameters: SqlValue[]) => {
         this.assertOpen();
-        return rawStatement.get(...parameters);
+        const result = rawStatement.get(...parameters);
+        this.observe(sql, parameters);
+        return result;
       },
       all: (...parameters: SqlValue[]) => {
         this.assertOpen();
-        return rawStatement.all(...parameters);
+        const result = rawStatement.all(...parameters);
+        this.observe(sql, parameters);
+        return result;
       },
     };
 
@@ -215,6 +253,28 @@ export class CachedDatabase implements Database {
     this.invalidate();
     this.closed = true;
     this.closeCallback();
+  }
+
+  private observe(
+    sql: string,
+    parameters: readonly SqlValue[],
+    changes?: number,
+  ): void {
+    this.observer?.(
+      sql,
+      parameters,
+      this.database.isTransaction === true,
+      changes,
+    );
+  }
+
+  private totalChanges(): number {
+    this.totalChangesStatement ??= this.database.prepare(
+      "SELECT total_changes() AS n",
+    );
+    return Number(
+      (this.totalChangesStatement.get() as { n: unknown } | undefined)?.n,
+    );
   }
 
   private invalidate(): void {

@@ -333,7 +333,8 @@ cookie sessions, legacy HTML or slot routes. The browser-push routes are session
 too (`GET /api/operator/notifications` and `POST` to `/api/operator/notifications/subscriptions`
 and `…/subscriptions/<id>/revoke|test`): no CLI command lists, creates or revokes a
 subscription, and a bearer request receives the same `forbidden` refusal as credential
-management. `GET /api/operator/cli` returns the
+management. The task change stream (`GET /api/operator/tasks/<id>/stream`) is
+session-only as well: it serves the browser's task page, and the CLI has no stream. `GET /api/operator/cli` returns the
 API version, capabilities, the service's persistent installation identity and the
 calling credential's metadata. A connection records the installation identity at
 login; a later mismatch fails as `service-identity-changed`.

@@ -66,6 +66,7 @@ import {
   isPlainClick,
 } from "./components.js";
 import { useOperatorResource } from "./resource.js";
+import { useTaskChangeStream } from "./task-change-stream.js";
 import type {
   OverviewCard,
   ReplyOutcome,
@@ -900,11 +901,11 @@ export function TaskWorkspace({
     const target = document.getElementById(id);
     if (target) showSection(target);
   };
-  // The timer read: nothing blanks or announces progress unless it fails.
-  const poll = () => {
-    capture();
-    resource.poll();
-  };
+  // The timer and change-notice read: nothing blanks or announces progress unless it fails.
+  // A notice supersedes an in-flight read, which may predate the change. The reading position
+  // is captured as the read lands, so scrolling while it is in flight is not undone.
+  const poll = (supersede = false) =>
+    resource.poll({ supersede, beforeApply: () => captureRef.current() });
   // Manual re-reads also refresh the shell's workspace and Inbox count; the poll below does not.
   const refreshAll = () => {
     refresh();
@@ -925,6 +926,24 @@ export function TaskWorkspace({
   }, []);
   const pollRef = useRef(poll);
   pollRef.current = poll;
+  const [changeTick, setChangeTick] = useState(0);
+  const { healthy: streaming } = useTaskChangeStream({
+    taskId,
+    // After the first task read, so the stream follows the page's opening reads.
+    enabled:
+      resource.state.status !== "empty" && resource.state.status !== "loading",
+    onRead: () => pollRef.current(true),
+    onTimeline: () => setChangeTick((tick) => tick + 1),
+  });
+  // The 15-second poll is the fallback while the change stream is not healthy. While it is,
+  // a minute's poll still catches a change no notice was attributed to.
+  useEffect(() => {
+    const timer = setInterval(
+      () => pollRef.current(),
+      streaming ? 60_000 : 15_000,
+    );
+    return () => clearInterval(timer);
+  }, [streaming]);
   const captureRef = useRef(capture);
   captureRef.current = capture;
   useEffect(() => {
@@ -958,7 +977,6 @@ export function TaskWorkspace({
     document.addEventListener("click", leave, true);
     document.addEventListener("submit", leave, true);
     document.addEventListener("focusin", intentionalFocus);
-    const timer = setInterval(() => pollRef.current(), 15000);
     return () => {
       scope.current = false;
       if (
@@ -983,7 +1001,6 @@ export function TaskWorkspace({
         state.sourceRefreshFailed = true;
         state.sourceObservation = "unknown";
       }
-      clearInterval(timer);
       document.removeEventListener("click", leave, true);
       document.removeEventListener("submit", leave, true);
       document.removeEventListener("focusin", intentionalFocus);
@@ -1012,6 +1029,7 @@ export function TaskWorkspace({
       state.conversation = value;
     },
     taskRead: resource.state.data,
+    changeTick,
     running: new Set(
       data?.assignments
         .filter((a) => a.state === "running")
