@@ -538,8 +538,8 @@ name, version and preview digest. The service rechecks every confirmation atomic
    ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)): tool
    items also keep an end time, repository-relative file paths and, for allowlisted
    non-command tools, a bounded target, all redacted and capped; plan steps are a
-   separate curated record, not diagnostic items. No message text, deltas or reasoning is collected
-   and tool observation is never claimed complete.
+   separate curated record, not diagnostic items. No message text, deltas or
+   reasoning is collected and tool observation is never claimed complete.
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as
    `omitted/redaction-unavailable`. Capture, storage or pruning failures become

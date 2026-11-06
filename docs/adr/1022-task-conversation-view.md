@@ -37,7 +37,7 @@ why meant reassembling it across tabs, so the task view was hard to read.
   request, its bounded, redacted output. Runs of consecutive tool calls are grouped
   with a failure count. File changes open the Changes tab. cab's own coordination
   tool calls appear as the records they produce, not as tool rows. Working
-  directories, workspace paths, raw payloads and service or severity rows still do not
+  directories, absolute workspace paths, raw payloads and service or severity rows still do not
   cross the operator UI boundary. [ADR-1025](1025-conversation-activity-plans-and-change-notifications.md)
   widens the projection with durations, repository-relative file paths and one
   allowlisted target per non-command tool, and adds agent plans and push change

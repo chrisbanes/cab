@@ -22,7 +22,7 @@ all three and fixes the new boundary. The behaviour is accepted but not yet impl
     query; MCP tools the server and tool name; Agent the subagent type.
   - A target is capped at 128 characters and passes through the existing projection
     redaction. A path outside the workspace shows as "outside workspace". Unknown tools
-    stay name-only. cab's own `cab_*` and `mcp__` coordination tools stay excluded.
+    stay name-only. cab's own `cab_*` and `mcp__cab__` coordination tools stay excluded.
   - Tool observation is still never claimed complete: an absent tool row is not evidence
     that no tool ran.
 - **A curated plan record per assignment.** A plan is an ordered list of steps, each with
@@ -36,7 +36,7 @@ all three and fixes the new boundary. The behaviour is accepted but not yet impl
   the PreToolUse hook refuses any other tool outside cab's coordination tools as outside
   cab's tool policy. `TodoWrite` reads and writes no file, runs no command and reaches no
   network; its only effect is the agent's own in-turn task list. Every call still passes
-  the same hook, sandbox and diagnostic capture, and its payload reaches cab only through
+  the same PreToolUse hook and diagnostic capture, and its payload reaches cab only through
   the redacted, capped plan record. The tool list and the hook allowance change together.
   `EnterPlanMode` and `ExitPlanMode` stay disallowed: they gate approval flow and do not
   display a plan.
@@ -72,5 +72,5 @@ all three and fixes the new boundary. The behaviour is accepted but not yet impl
 - The stream adds a long-lived authenticated connection and a second signalling path, but
   no second content path.
 - `docs/SPEC.md`, ADR-1022, `docs/design/operator-cli.md` and `docs/development.md`
-  describe the contract and mark it accepted but not yet implemented. `cab logs` and the
+  describe the contract. `cab logs` and the
   CLI diagnostic views are not widened by this decision.

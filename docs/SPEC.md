@@ -1722,21 +1722,21 @@ A question or approval is answerable from the attention card or from its place i
 conversation, with one shared request state. Tool activity shows each command's
 summary and exit status, with bounded redacted output on request; consecutive calls
 are grouped with a failure count, file changes open the Changes tab, and cab's own
-coordination calls appear as the records they produce. Accepted but not yet
-implemented ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)):
-tool rows also show a duration; file changes list repository-relative paths; and a
-non-command tool shows one target from a per-tool allowlist (the path for Read, Write
-and Edit, the pattern for Grep and Glob, the query for web search, the server and tool
-for MCP, the subagent type for Agent), capped at 128 characters, redacted, and shown as
-"outside workspace" for a path outside the workspace. Unknown tools stay name-only.
-The conversation also shows each assignment's plan, the agent's working plan as an
-ordered list of steps with a pending, in progress or done status; the latest snapshot
-is authoritative and the timeline marks each change. It is labelled as the agent's plan
+coordination calls appear as the records they produce. A pending or running delegated
+assignment takes a durable message from its sub-conversation header.
+
+Accepted but not yet implemented
+([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)): tool
+rows also show a duration; file changes list repository-relative paths; and a
+non-command tool shows one allowlisted target (a path, pattern, query, MCP server and
+tool, or subagent type), capped at 128 characters, redacted, and shown as "outside
+workspace" for a path outside the workspace. Unknown tools stay name-only. The
+conversation also shows each assignment's plan, the agent's working plan as an ordered
+list of steps with a pending, in progress or done status; the latest snapshot is
+authoritative and the timeline marks each change. It is labelled as the agent's plan
 and is never a requirement or the task brief. The task view follows changes through an
 authenticated per-task stream of content-free notices; it refetches through the same
-reads, which stay authoritative, and polling remains the fallback when the stream
-drops. A pending or running delegated
-assignment takes a durable message from its sub-conversation header.
+reads, which stay authoritative, and polling remains the fallback when the stream drops.
 
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
