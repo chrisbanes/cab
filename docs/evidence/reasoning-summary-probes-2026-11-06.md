@@ -10,7 +10,9 @@ Versions: Node.js v26.13.0, `@anthropic-ai/claude-agent-sdk` 0.3.316 from the ch
 Claude Code 2.1.318 (`claude` on `PATH`, passed as `pathToClaudeCodeExecutable`) and
 codex-cli 0.166.0.
 
-## Setup
+## Round one
+
+### Setup
 
 Each run used a fresh Git workspace under `/tmp` with three short files: two describing
 alternative caching approaches and one listing constraints. The prompt was the same for
@@ -45,7 +47,7 @@ one-paragraph justification, and run no other commands. Each run was one `query(
 
 Six model turns were used, the plan's maximum. No harness failure occurred.
 
-## Claude
+### Claude
 
 | Run       | Result  | SDK turns | Wall ms | `duration_ms` / `duration_api_ms` | Output tokens | Thinking tokens | Cost (USD, list) |
 | --------- | ------- | --------: | ------: | --------------------------------: | ------------: | --------------: | ---------------: |
@@ -70,7 +72,7 @@ default or high effort, did not make the model think on this task.
 
 **Verdict: not usable: none emitted.**
 
-## Codex
+### Codex
 
 | Run       | Result    | Wall ms | Total input / cached | Total output | Reasoning output | Last turn input / output |
 | --------- | --------- | ------: | -------------------: | -----------: | ---------------: | -----------------------: |
@@ -101,7 +103,7 @@ The [agent plan capture probes](agent-plan-capture-probes-2026-11-06.md) recorde
 operator's Codex home rather than an isolated one; their `summary` and `content` fields were
 not measured.
 
-## Cost comparison
+### Cost comparison
 
 One sample per condition, indicative only. With no reasoning in any run, requesting summaries
 changed neither runtime's output: Claude's output tokens were 782 not requested against 765
@@ -109,12 +111,12 @@ and 799 requested, and Codex's 258 against 225 and 268. The wall-clock and cost 
 come from prompt caching (Claude's not-requested run wrote 14083 cache tokens against about
 6540 in the others) and run-to-run variation, not from the request.
 
-## Observed caps
+### Observed caps
 
 No summary was emitted, so there is no largest per-turn total from which to set the per-turn
 cap.
 
-## Round one result
+### Result
 
 Neither runtime produced a provider-designated summary in the allowed runs, because neither
 model reasoned on this task at its default settings. The evidence does not show that
@@ -201,7 +203,7 @@ did not explain the causes or why the agent chose its fix.
 **Verdict: not usable: heading only.** The summary field works as documented, but at this
 effort it carried no explanation.
 
-### Round two cost comparison
+### Cost comparison
 
 One sample per condition, indicative only.
 
@@ -213,7 +215,7 @@ One sample per condition, indicative only.
   reasoning output tokens, and 28400 against 34309 wall ms. The differences follow the number
   of commands run (5 against 7), not the request.
 
-### Round two caps
+### Observed caps
 
 The largest per-turn summary total observed was 593 characters (Claude, C-R). Codex's was 32.
 

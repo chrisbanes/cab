@@ -18,8 +18,8 @@ no reasoning.
 Reasoning summaries help an operator understand an agent's decisions during review and
 debugging. They are not a live progress feed or an audit trail.
 
-- **Collection.** cab collects provider-produced reasoning summaries only: Codex reasoning
-  summaries and Claude summarised thinking. It never collects raw reasoning, even where a
+- **Collection.** cab collects provider-produced reasoning summaries only, from runtimes
+  whose summaries are usable (see [Runtimes](#runtimes)). It never collects raw reasoning, even where a
   provider exposes it. A runtime that offers only raw reasoning shows none.
 - **Setting.** Reasoning summaries are a separate project setting, `reasoningSummaries`, off by
   default, beside diagnostic capture.
@@ -65,8 +65,10 @@ debugging. They are not a live progress feed or an audit trail.
   `parent_tool_use_id` belong to a subagent, and `redacted_thinking` blocks are never stored.
   A turn may carry several blocks, some empty, interleaved with text and tool use. On a
   diagnosis task at `effort: "high"` the requested turn returned one 593-character summary
-  that explained the agent's choice of fix. Thinking tokens are counted within output tokens;
-  in one sample each, requesting summaries did not raise them (285 against 337). The model
+  that explained the agent's choice of fix. Thinking tokens are counted within output tokens.
+  In one sample each, the requested turn used 1912 output tokens and 285 thinking tokens
+  against 1617 and 337 not requested, and cost 0.0598 against 0.0533 USD list; the
+  difference follows the tool calls each run made, not the request. The model
   may not think at all on a simple task, even when asked, and then the turn reports
   `unavailable`. The CLI also returns thinking text when not asked, so the off path must drop
   it.
@@ -75,7 +77,7 @@ debugging. They are not a live progress feed or an audit trail.
   `item/reasoning/summaryTextDelta` notifications; the item's `content` array and
   `item/reasoning/textDelta` carry raw reasoning. At `medium` effort the requested turn
   returned one 32-character heading that named what the agent was fixing but not why, which is
-  not usable for review. Codex shows none: cab sends Codex turns today's requests, stores no
+  not usable for review; it used 18 reasoning output tokens against 14 not requested. Codex shows none: cab sends Codex turns today's requests, stores no
   Codex reasoning, and reports `unavailable` for a Codex turn admitted with the setting on.
   Requesting Codex summaries later needs evidence of usable output and a revised decision; the
   `summary` override persists for a thread's later turns, so that decision must send
