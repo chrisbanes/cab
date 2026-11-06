@@ -308,6 +308,19 @@ test("the skill and subagent facets are accepted, and their briefs name the tool
       /skill grilling/,
     );
   }
+  // The decision-question facets run one turn; the brief names the decisions, not the form.
+  for (const [facet, own, other] of [
+    ["claude-decision-question", "claude", "codex"],
+    ["codex-decision-question", "codex", "claude"],
+  ] as const) {
+    assert.equal(parseArgs(["--live", "--facet", facet]), facet);
+    assert.equal(FACETS[facet][own], 1);
+    assert.equal(FACETS[facet][other], 0);
+    const brief = facetOutcome(facet, { workerProfileId: "w", nonce: "n" });
+    assert.match(brief, /git metadata/);
+    assert.match(brief, /listening ports/);
+    assert.doesNotMatch(brief, /\bform\b/i);
+  }
   // The installed-plugin facets run two tasks on their own harness and name the probe skill.
   for (const [facet, own, other, tool] of [
     ["claude-installed-plugin", "claude", "codex", /Skill tool/],

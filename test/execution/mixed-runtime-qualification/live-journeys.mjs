@@ -390,6 +390,7 @@ async function inProcess(run) {
   if (
     facet !== "codex-skill" &&
     facet !== "codex-nested-skill" &&
+    facet !== "codex-decision-question" &&
     facet !== "codex-installed-plugin"
   )
     assertPathClaude();
@@ -764,6 +765,47 @@ async function nestedSkill(current, ids, check, plugin) {
     throw new Error("the turn did not record mattpocock-skills");
   if (!o.reportedPhraseMatched)
     throw new ComplianceError("the result did not report the skill's phrase");
+}
+
+/**
+ * A lead facing three operator decisions asks one structured question: a stored form with
+ * several choice questions, each with options and a recommendation. Shapes and counts only.
+ */
+async function decisionQuestion(current, ids, check) {
+  const view = current.service.coordinationView();
+  await waitUntil(
+    () => {
+      check();
+      return view.readTask(ids.taskId).questions.length > 0;
+    },
+    TURN_MS,
+    "the lead's question",
+    true,
+  );
+  const stored = view.questionForm(
+    view.readTask(ids.taskId).questions[0].interactionId,
+  );
+  const qs = stored?.form.questions ?? [];
+  const choice = qs.filter((q) => q.kind !== "free-text");
+  evidence.observations = {
+    source: stored ? "form" : "plain",
+    questionCount: qs.length,
+    kinds: qs.map((q) => q.kind),
+    optionCounts: choice.map((q) => q.options.length),
+    recommendedCount: choice.filter((q) => q.recommended?.length).length,
+    customAllowedCount: choice.filter((q) => q.customAllowed).length,
+  };
+  const o = evidence.observations;
+  if (
+    o.source !== "form" ||
+    o.questionCount < 2 ||
+    choice.length !== qs.length ||
+    o.optionCounts.some((n) => n < 2) ||
+    o.recommendedCount < 1
+  )
+    throw new ComplianceError(
+      "the question is not a structured form with options and a recommendation",
+    );
 }
 
 /** Pass or fail, the evidence shows which `claude` each service generation's queries ran. */
@@ -1503,11 +1545,13 @@ async function attemptBody(attempt) {
                   ? stop(current, ids, check, true)
                   : facet === "claude-skill" || facet === "codex-skill"
                     ? skill(current, ids, check, plugin)
-                    : nestedFacet
-                      ? nestedSkill(current, ids, check, plugin)
-                      : installedFacet
-                        ? installedPlugin(current, ids, check, plugin)
-                        : coordination(current, ids, check),
+                    : facet.endsWith("-decision-question")
+                      ? decisionQuestion(current, ids, check)
+                      : nestedFacet
+                        ? nestedSkill(current, ids, check, plugin)
+                        : installedFacet
+                          ? installedPlugin(current, ids, check, plugin)
+                          : coordination(current, ids, check),
           );
     work.catch(() => {});
     await Promise.race([work, aborted]);

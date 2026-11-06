@@ -388,6 +388,10 @@ test("task turns include their captured instructions and lead accountability con
     assert.doesNotMatch(workerPrompt, /OTHER_PROFILE_PRIVATE_INSTRUCTIONS/);
     assert.ok(!workerPrompt.includes(unrelatedProfileId));
     assert.match(workerPrompt, /cab_ask_question, never native asynchronous/);
+    for (const prompt of [leadPrompt, workerPrompt]) {
+      assert.match(prompt, /pass a form/);
+      assert.match(prompt, /recommended option/);
+    }
     assert.ok(
       service
         .turnRequests()
@@ -1752,10 +1756,12 @@ test("stale inbox withdrawal preserves independent stop and admission holds", as
         await service.stopTask(taskId);
       } else if (witness === "recovery") {
         database()
-          .prepare(`INSERT INTO execution_recovery_identities
+          .prepare(
+            `INSERT INTO execution_recovery_identities
             (workId, workRevision, requestSequence, processId,
               processStartedAt, bootId, threadId, turnId)
-            VALUES (?, NULL, ?, NULL, NULL, NULL, NULL, NULL)`)
+            VALUES (?, NULL, ?, NULL, NULL, NULL, NULL, NULL)`,
+          )
           .run(oldRequest.workId, oldRequest.sequence);
       } else {
         const workspace = row<{ workspace: string }>(

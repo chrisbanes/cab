@@ -381,10 +381,14 @@ export function QuestionResponse({
                         <p className="literal">{q.description}</p>
                       )}
                       {q.kind === "free-text" ? (
-                        <label htmlFor={`${qid}-text`}>
-                          <span className="sr-only">{q.label}</span>
+                        <label
+                          htmlFor={`${qid}-text`}
+                          className="question-custom"
+                        >
+                          Your answer
                           <Textarea
                             id={`${qid}-text`}
+                            aria-label={`Your answer: ${q.label}`}
                             autoGrow
                             value={answer.text}
                             disabled={!canEdit}

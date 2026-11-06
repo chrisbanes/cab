@@ -82,6 +82,26 @@ export async function seedOwnQuestion(
   projectName = "Question project",
   repositories: TaskWorkspaceRepositoryInput[] = [],
 ) {
+  return {
+    ...(await seedQuestionCall(f, { form }, title, projectName, repositories)),
+    form,
+  };
+}
+export function seedPlainQuestion(
+  f: Fixture,
+  question: string,
+  title = "Plain question",
+  projectName = "Question project",
+) {
+  return seedQuestionCall(f, { question }, title, projectName, []);
+}
+async function seedQuestionCall(
+  f: Fixture,
+  args: { form: QuestionForm } | { question: string },
+  title: string,
+  projectName: string,
+  repositories: TaskWorkspaceRepositoryInput[],
+) {
   const started = await startOwnWork(f, title, projectName, repositories),
     { a, work } = started;
   const call = await f.runtime.callTool({
@@ -89,12 +109,12 @@ export async function seedOwnQuestion(
     turnId: work.turnId!,
     callId: randomUUID(),
     tool: "cab_ask_question",
-    arguments: { form },
+    arguments: args,
   });
   assert.equal(call.success, true, call.text);
   const q = f.service.coordinationView().readTask(a.taskId).questions[0]!;
   await finishOwnWork(f, started);
-  return { ...a, interactionId: q.interactionId, workId: work.workId, form };
+  return { ...a, interactionId: q.interactionId, workId: work.workId };
 }
 /** An open approval request for an exact action and target; the decision control is not in the app. */
 export async function seedOwnApproval(
