@@ -12,6 +12,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { desktop, phone, signIn } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { finishOwnWork, startOwnWork } from "../fixtures/questions.js";
+import { markLeadStarted } from "../fixtures/task-review.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 
@@ -1142,3 +1143,225 @@ for (const colorScheme of ["light", "dark"] as const)
     assert.match((await current.textContent()) ?? "", /^Current plan of /);
     assert.equal(await current.locator(".plan-steps li").count(), 3);
   });
+
+async function openWith<S extends { taskId: string }>(
+  j: BrowserJourney,
+  contextOptions: Parameters<Browser["newContext"]>[0],
+  prepare: (f: Fixture) => Promise<S>,
+) {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const s = await prepare(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const context = await browser.newContext({
+    viewport: desktop,
+    ...contextOptions,
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: web.origin,
+  });
+  const page = await context.newPage();
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await stubReadiness(page);
+  await signIn(page, web, `/tasks/${s.taskId}`);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  return { f, s, web, page, log };
+}
+
+const turn = (log: Locator, text: string) =>
+  log.locator("article.conv-agent", { hasText: text });
+const opacity = (button: Locator) =>
+  button.evaluate((e) => getComputedStyle(e.parentElement as Element).opacity);
+
+test("Copy is visible on the latest turn, revealed on focus for earlier ones, and copies the Markdown source", async (_t, j) => {
+  const { page, log } = await openWith(j, {}, (f) => seed(f, 2));
+  await log.getByText("Second: all steps ran.").waitFor();
+  const latest = turn(log, "Second: all steps ran.").getByRole("button", {
+    name: /^Copy /,
+  });
+  const first = turn(log, "First:").getByRole("button", { name: /^Copy / });
+  assert.equal(await opacity(latest), "1");
+  assert.equal(await opacity(first), "0");
+  await first.focus();
+  assert.equal(await opacity(first), "1");
+  await page.mouse.move(0, 0);
+  await first.evaluate((e) => (e as HTMLElement).blur());
+  await turn(log, "First:").hover();
+  assert.equal(await opacity(first), "1");
+
+  const source =
+    "First: **bold** and a [link](https://example.com/docs) <script>window.pwned = 1</script>\n\n- item one";
+  await first.click();
+  await turn(log, "First:")
+    .getByRole("button", { name: /^Copied / })
+    .waitFor();
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    source,
+  );
+  await turn(log, "First:")
+    .getByRole("button", { name: /^Raw text / })
+    .click();
+  await turn(log, "First:").locator("pre.conv-raw").waitFor();
+  await turn(log, "First:")
+    .getByRole("button", { name: /^Copied / })
+    .or(turn(log, "First:").getByRole("button", { name: /^Copy / }))
+    .click();
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    source,
+  );
+  // Operator turns carry no Copy.
+  assert.equal(
+    await log.locator(".conv-operator").getByText("Copy").count(),
+    0,
+  );
+});
+
+test("Copy is always visible on a touch device", async (_t, j) => {
+  const { page, log } = await openWith(
+    j,
+    { viewport: phone, hasTouch: true, isMobile: true },
+    (f) => seed(f, 2),
+  );
+  await log.getByText("Second: all steps ran.").waitFor();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        matchMedia("(hover: none)").matches ||
+        matchMedia("(pointer: coarse)").matches,
+    ),
+    true,
+  );
+  assert.equal(
+    await opacity(turn(log, "First:").getByRole("button", { name: /^Copy / })),
+    "1",
+  );
+});
+
+/** One unfinished tool row on the running lead's stream. */
+async function startWorking(f: Fixture) {
+  const started = await startOwnWork(f, "Status line", "Atlas");
+  markLeadStarted(f, started.a.assignmentId);
+  return started.a;
+}
+function tool(
+  f: Fixture,
+  a: Awaited<ReturnType<typeof startWorking>>,
+  itemId: string,
+  name: string,
+  status: "inProgress" | "completed",
+  payload: object,
+) {
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    const diagnostics = new ExecutionDiagnosticsStore(db, { now: Date.now });
+    const workId = "work-status-lead";
+    if (name.startsWith("commandExecution") && status === "inProgress")
+      diagnostics.begin({
+        workId,
+        taskId: a.taskId,
+        projectId: a.projectId,
+        assignmentId: a.assignmentId,
+        assignmentVersion: 1,
+        instructionsRevision: 1,
+        profileRevision: 1,
+        conversationRevision: 1,
+        harness: "codex",
+        mode: "enhanced",
+        eventSource: "supported",
+      });
+    diagnostics.record(
+      workId,
+      "runtime",
+      name,
+      "info",
+      itemId,
+      {
+        itemId,
+        phase: status === "completed" ? "completed" : "started",
+        status,
+        ...payload,
+      },
+      [],
+    );
+  });
+}
+
+for (const colorScheme of ["light", "dark"] as const)
+  test(`the working status line follows the running assignment's newest tool and clears on completion (${colorScheme})`, async (_t, j) => {
+    const { f, s, page, log } = await openWith(
+      j,
+      { colorScheme },
+      async (f) => {
+        const a = await startWorking(f);
+        tool(f, a, "cmd-live", "commandExecution/started", "inProgress", {
+          itemType: "commandExecution",
+          command: "npm test",
+        });
+        return a;
+      },
+    );
+    const status = log.locator("xpath=..").locator(".conv-working");
+    await status.waitFor();
+    assert.equal(await status.innerText(), "Running npm test");
+    assert.equal(await status.getAttribute("role"), "status");
+    assert.equal(await status.getAttribute("aria-live"), "polite");
+    assert.equal(await log.locator(".conv-working").count(), 0);
+    assert.notEqual(
+      await status.evaluate((e) => getComputedStyle(e).animationName),
+      "none",
+    );
+    const shimmer = await page.evaluate(() =>
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--shimmer")
+        .trim()
+        .toLowerCase(),
+    );
+    assert.equal(shimmer, colorScheme === "dark" ? "#f4f4f5" : "#18181b");
+
+    tool(f, s, "fc-live", "fileChange/started", "inProgress", {
+      itemType: "fileChange",
+      paths: ["src/app.ts"],
+    });
+    await refresh(page);
+    await page
+      .locator(".conv-working", { hasText: "Editing src/app.ts" })
+      .waitFor({ timeout: 8000 });
+
+    f.seedPersistedState((db) =>
+      db
+        .prepare("UPDATE domain_assignments SET state='completed' WHERE id=?")
+        .run(s.assignmentId),
+    );
+    await refresh(page);
+    await status.waitFor({ state: "detached" });
+    assert.equal(await page.getByText("writing…").count(), 0);
+  });
+
+test("the working status line is static under reduced motion", async (_t, j) => {
+  const { page } = await openWith(j, { reducedMotion: "reduce" }, async (f) => {
+    const a = await startWorking(f);
+    tool(f, a, "cmd-live", "commandExecution/started", "inProgress", {
+      itemType: "commandExecution",
+      command: "npm test",
+    });
+    return a;
+  });
+  const status = page.locator(".conv-working");
+  await status.waitFor();
+  const style = await status.evaluate((e) => {
+    const c = getComputedStyle(e);
+    return { name: c.animationName, image: c.backgroundImage };
+  });
+  assert.deepEqual(style, { name: "none", image: "none" });
+});

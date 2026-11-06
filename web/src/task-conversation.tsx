@@ -17,6 +17,8 @@ import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
 import { outsideWorkspace } from "../../src/operator/tool-limits.js";
 import { clockLabel } from "./presentation.js";
+import { CopyButton } from "./action-feedback.js";
+import { WorkingStatus } from "./working-status.js";
 import {
   changedFileCount,
   distinctPaths,
@@ -28,9 +30,11 @@ import {
   conversationTree,
   gapCopy,
   hasDelegation,
+  latestAgentTurns,
   mergeTimeline,
   pendingBelow,
   prependTimeline,
+  workingStatus,
   type ConversationCache,
   type AgentPlan,
   type ConversationItem,
@@ -316,6 +320,7 @@ export function TaskConversation({
         : [],
     [entries, data.assignments, data.leadAssignmentId],
   );
+  const latest = useMemo(() => latestAgentTurns(entries ?? []), [entries]);
   // A linked record the window did not hold is named until it is loaded; nothing is said while the window is unread.
   const notice = state.conversationNotice;
   const missing =
@@ -341,6 +346,8 @@ export function TaskConversation({
     messageAssignment,
     earlier: timeline.hasEarlier,
     plans: timeline.window?.plans ?? [],
+    latest,
+    entries: entries ?? [],
   };
   return (
     <section
@@ -397,6 +404,11 @@ export function TaskConversation({
         )}
         <Items items={items} ctx={ctx} />
       </div>
+      {lead && entries && (
+        <WorkingStatus
+          text={workingStatus(ctx.entries, lead.assignmentId, lead.state)}
+        />
+      )}
       <div id="conversation-end" data-conversation-end />
     </section>
   );
@@ -418,6 +430,10 @@ interface Context {
   earlier: boolean;
   /** Each assignment's latest plan; a plan line shows its assignment's. */
   plans: readonly AgentPlan[];
+  /** Entry ids of each assignment's newest agent turn; their Copy stays visible. */
+  latest: ReadonlySet<string>;
+  /** The loaded window, from which a running assignment's status line is derived. */
+  entries: readonly TimelineEntry[];
 }
 
 function Items({ items, ctx }: { items: ConversationItem[]; ctx: Context }) {
@@ -536,16 +552,15 @@ function Entry({
     }
     case "assistant": {
       const raw = ctx.expanded(`c:raw:${entry.entryId}`);
+      const turnName = `${who}'s entry at ${clockLabel(entry.at)}`;
       return (
         <article
           className="conv-entry conv-agent"
           data-record-id={`c:${entry.entryId}`}
+          data-latest={ctx.latest.has(entry.entryId) || undefined}
         >
           <header>
             <strong>{who}</strong> {time(entry)}
-            {entry.lifecycle !== "completed" && (
-              <span className="muted"> · writing…</span>
-            )}
           </header>
           {entry.text === null ? (
             <p className="muted">No text captured for this item.</p>
@@ -555,13 +570,20 @@ function Entry({
             <FormattedText text={entry.text} />
           )}
           {entry.text !== null && (
-            <Button
-              variant="secondary"
-              aria-label={`${raw ? "Formatted" : "Raw text"} of ${who}'s entry at ${clockLabel(entry.at)}`}
-              onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
-            >
-              {raw ? "Formatted" : "Raw text"}
-            </Button>
+            <div className="conv-actions">
+              <Button
+                variant="secondary"
+                aria-label={`${raw ? "Formatted" : "Raw text"} of ${turnName}`}
+                onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
+              >
+                {raw ? "Formatted" : "Raw text"}
+              </Button>
+              {entry.lifecycle === "completed" && (
+                <span className="conv-copy">
+                  <CopyButton text={entry.text} of={turnName} resetMs={2000} />
+                </span>
+              )}
+            </div>
           )}
         </article>
       );
@@ -975,6 +997,7 @@ function Delegation({
           ) : (
             <Items items={item.items} ctx={ctx} />
           )}
+          <WorkingStatus text={workingStatus(ctx.entries, item.id, a?.state)} />
         </div>
       )}
     </section>

@@ -54,6 +54,7 @@ properties and maps the shadcn names onto them. Keep this table in step with it.
 | `--fg` | `#F4F4F5` | `#18181B` | Primary text |
 | `--fg-2` | `#A6A6AE` | `#52525B` | Secondary text |
 | `--fg-3` | `#8E8E97` | `#60606A` | Muted text (at least 5.5:1 on `--raised` in both themes) |
+| `--shimmer` | `#F4F4F5` | `#18181B` | Highlight sweeping across live status text |
 | `--accent-fill` | `#F4F4F5` | `#18181B` | Primary action fill (shadcn `--primary`) |
 | `--primary-foreground` | `#0A0A0B` | `#FAFAFA` | Primary action text (about 17:1) |
 | `--accent-edge` | `#E4E4E7` | `#27272A` | Selected-row left edge, selected tab underline |
@@ -174,11 +175,11 @@ fixed application dimensions.
 | Top bar | Every desktop screen: breadcrumb, connection status and New task |
 | Foundations and controls (`web/src/ui/`) | Buttons, fields, selects, badges, cards, dialogs, sheets and alerts |
 | Domain components | Request row, board card, source identity chip, execution blocker, recorded response, structured answers, phone headers, navigation row, column tabs |
-| Action feedback | Success line, Details toggle and panel, warning and destructive alerts |
+| Action feedback | Success line, Details toggle and panel, warning and destructive alerts, Copy button (Copy, Copied, Copy unavailable) |
 | Compact progress | Task progress across Overview, List, Board and Inbox entry points |
 | Review components | Criterion rows and local-feedback context |
 | Inspection components | Observation strip, selectable code line, editor row with separate gutter, marker and source |
-| Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view, tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, composer, Jump to latest |
+| Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view and Copy (always visible on an assignment's latest turn, revealed on hover or focus for earlier ones, always visible on touch), working status line (polite, throttled, static under reduced motion), tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, composer, Jump to latest |
 
 Rules:
 

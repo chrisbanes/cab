@@ -992,6 +992,60 @@ a.task-source-chip:hover {
   line-height: 1.6;
 }
 
+.conv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/*
+ * Opacity, not display, keeps Copy in the tab order and the entry's height steady. Only a
+ * pointer that hovers hides it; touch devices always show it.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .conv-agent:not([data-latest]) .conv-copy {
+    opacity: 0;
+  }
+
+  .conv-agent:not([data-latest]):hover .conv-copy,
+  .conv-agent:not([data-latest]):focus-within .conv-copy {
+    opacity: 1;
+  }
+}
+
+.conv-working {
+  margin: var(--space-4) 0 0;
+  font-size: var(--type-xs);
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--fg-3) 40%,
+    var(--shimmer) 50%,
+    var(--fg-3) 60%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: conv-shimmer 2s linear infinite;
+}
+
+@keyframes conv-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .conv-working {
+    animation: none;
+    background: none;
+    color: var(--fg-2);
+  }
+}
+
 .conv-operator {
   padding: 10px var(--space-12);
   border: 1px solid var(--line-strong);

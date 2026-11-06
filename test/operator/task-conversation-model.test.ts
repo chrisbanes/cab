@@ -20,6 +20,10 @@ import {
   conversationTree,
   gapCopy,
   hasDelegation,
+  latestAgentTurns,
+  statusAnnouncementGapMs,
+  throttleDelay,
+  workingStatus,
   mergeTimeline,
   pendingBelow,
   prependTimeline,
@@ -513,4 +517,103 @@ test("the newest page's plans replace the window's, and older pages keep them", 
   );
   const older = prependTimeline(merged.window, page([text("zero")]));
   assert.deepEqual(older?.plans, [plan(1)]);
+});
+
+const running = (
+  fields: Record<string, unknown>,
+  assignmentId?: string,
+  status = "inProgress",
+) =>
+  entry(
+    {
+      kind: "tool",
+      tool: "other",
+      label: null,
+      status,
+      command: null,
+      truncated: false,
+      exitCode: null,
+      outputSequence: null,
+      ...fields,
+    },
+    assignmentId ? { assignmentId } : {},
+  );
+
+test("working status names the newest unfinished tool of a running assignment", () => {
+  const status = (entries: TimelineEntry[], state = "running") =>
+    workingStatus(entries, lead, state);
+  assert.equal(
+    status([running({ tool: "command", command: "npm test" })]),
+    "Running npm test",
+  );
+  assert.equal(
+    status([running({ tool: "command", command: "x".repeat(81) })]),
+    `Running ${"x".repeat(79)}…`,
+  );
+  assert.equal(status([running({ tool: "command" })]), "Running a command");
+  const edit = (f: Record<string, unknown>) =>
+    status([running({ tool: "file-change", ...f })]);
+  assert.equal(edit({ target: "src/app.ts" }), "Editing src/app.ts");
+  assert.equal(edit({ paths: ["src/app.ts"] }), "Editing src/app.ts");
+  assert.equal(
+    edit({ paths: ["outside workspace"] }),
+    "Editing a file outside the workspace",
+  );
+  assert.equal(edit({}), "Editing files");
+  const other = (f: Record<string, unknown>) =>
+    status([running({ tool: "other", ...f })]);
+  assert.equal(
+    other({ label: "Read", target: "src/menu.ts" }),
+    "Reading src/menu.ts",
+  );
+  assert.equal(other({ label: "Read" }), "Reading a file");
+  assert.equal(other({ label: "Grep", target: "foo" }), "Using Grep · foo");
+  assert.equal(other({ label: "Grep" }), "Using Grep");
+  assert.equal(other({}), "Working…");
+  assert.equal(
+    status([
+      running({ tool: "command", command: "done" }, undefined, "completed"),
+    ]),
+    "Working…",
+  );
+  assert.equal(
+    status([
+      running({ tool: "command", command: "old" }),
+      running({ tool: "command", command: "new" }),
+    ]),
+    "Running new",
+  );
+  assert.equal(
+    status([
+      running({ tool: "command", command: "mine" }),
+      running({ tool: "command", command: "theirs" }, worker),
+    ]),
+    "Running mine",
+  );
+  for (const state of ["completed", "pending", "held", undefined])
+    assert.equal(
+      workingStatus([running({ tool: "command" })], lead, state),
+      null,
+    );
+});
+
+test("status announcements wait out the gap and the latest turn is per assignment", () => {
+  assert.equal(throttleDelay(null, 5000, statusAnnouncementGapMs), 0);
+  assert.equal(throttleDelay(1000, 2000, 2500), 1500);
+  assert.equal(throttleDelay(1000, 9000, 2500), 0);
+  const streaming = entry(
+    { kind: "assistant", workId: "w", lifecycle: "streaming", text: "so far" },
+    { rank: timelineRank.history, assignmentId: worker },
+  );
+  const entries = [
+    text("a1"),
+    text("w1", worker),
+    taskComment("c"),
+    text("a2"),
+    streaming,
+  ];
+  assert.deepEqual(
+    latestAgentTurns(entries),
+    new Set([entries[3]?.entryId, streaming.entryId]),
+  );
 });
