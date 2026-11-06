@@ -506,7 +506,8 @@ export function TaskWorkspaceChanges({
       state.selection = null;
       state.mobileView = "preview";
       state.notice = "";
-    } else state.notice = `${path} is not in this comparison.`;
+    } else
+      state.notice = `${path} is not in this comparison. Refresh to compare again.`;
     changedRef.current();
   }, [snapshot, state.pendingPath]);
   const availableBaseBranches =

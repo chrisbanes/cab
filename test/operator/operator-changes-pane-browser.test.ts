@@ -439,7 +439,9 @@ for (const colorScheme of ["light", "dark"] as const)
     await filePath(page, "missing.md").click();
     await pane(page).waitFor();
     await pane(page)
-      .getByText("missing.md is not in this comparison.")
+      .getByText(
+        "missing.md is not in this comparison. Refresh to compare again.",
+      )
       .waitFor();
     assert.equal(await pane(page).locator("[aria-current='true']").count(), 0);
     await closePane(page);
@@ -451,6 +453,11 @@ for (const colorScheme of ["light", "dark"] as const)
       .filter({ hasText: /guide\.md/ })
       .waitFor();
     await pane(page).getByLabel("Diff hunk 1").first().waitFor();
+    // Close returns focus to the path that opened the pane.
+    await closePane(page);
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute("data-path") === "guide.md",
+    );
   });
 
 test("a changed file in the conversation opens in the Changes tab at 800px", async (_t, j) => {

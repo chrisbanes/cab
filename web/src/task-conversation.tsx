@@ -444,6 +444,7 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
                   ) : (
                     <Button
                       variant="secondary"
+                      data-path={path}
                       onClick={(event) =>
                         ctx.openChanges(event.currentTarget, path)
                       }
