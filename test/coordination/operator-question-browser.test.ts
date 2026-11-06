@@ -1411,11 +1411,7 @@ test("a plain question shows a visible Your answer label and a keyboard-reachabl
     await page.keyboard.type("ok");
     assert.equal(await box.inputValue(), "ok");
   };
-  await page
-    .getByRole("button", { name: new RegExp(prompt.slice(0, 20)) })
-    .first()
-    .click()
-    .catch(() => undefined);
+  await page.locator(".inbox-row").first().click();
   await check();
   await page.goto(
     `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
