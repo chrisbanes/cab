@@ -106,11 +106,12 @@ jobs:
           fi
       - name: Install selected browsers
         if: matrix.profile != 'service'
+        timeout-minutes: 6
         run: |
-          # WebKit needs GTK 4, libsoup and GStreamer from apt. The runner image already
-          # has Chromium's libraries; --with-deps would only add fonts, whose mirror
-          # fetches sometimes stall for minutes.
+          # Chromium's libraries are preinstalled; WebKit needs apt.
           if [ "$TEST_PROFILE" = all ]; then
+            # shortcut: bypass Azure's slow archives until actions/runner-images#14823 is fixed.
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
             npx playwright install --with-deps chromium webkit
           else
             npx playwright install chromium
