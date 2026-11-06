@@ -591,7 +591,10 @@ test("working status names the newest unfinished tool of a running assignment", 
     "Running mine",
   );
   for (const state of ["completed", "pending", "held", undefined])
-    assert.equal(status([running({ tool: "command" })], state), null);
+    assert.equal(
+      workingStatus([running({ tool: "command" })], lead, state),
+      null,
+    );
 });
 
 test("status announcements wait out the gap and the latest turn is per assignment", () => {
