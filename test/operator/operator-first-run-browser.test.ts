@@ -48,7 +48,7 @@ async function firstRun(
     profiles: false,
     readiness: async () => JSON.parse(readinessBody()),
     discovery: linked,
-    path: "/app",
+    path: "/",
     viewport,
     ...(engine ? { engine } : {}),
     ...(linked

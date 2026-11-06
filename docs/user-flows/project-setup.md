@@ -1,6 +1,6 @@
 # Project setup
 
-**Status:** implemented (`/app/settings/projects/new`). Product rules are in
+**Status:** implemented (`/settings/projects/new`). Product rules are in
 [SPEC](../SPEC.md#task-creation-and-project-setup).
 
 ## Goal

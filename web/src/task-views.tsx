@@ -277,7 +277,7 @@ export function TaskBoard({
     const leave = (event: Event) => {
       if (
         (event.target as Element | null)?.closest(
-          event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/app"]',
+          event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/"]',
         )
       )
         capture();
@@ -470,7 +470,7 @@ export function TaskViews({
   /** Project page only: what the paused banner's Resume project reads and sends with. */
   resume?: WaitProps | undefined;
 }) {
-  const base = path.split("?")[0] ?? "/app/tasks",
+  const base = path.split("?")[0] ?? "/tasks",
     query = path.includes("?") ? path.slice(path.indexOf("?")) : "",
     // An entry that was left bare while the filters were the defaults says so, so Back and
     // Forward to it show the defaults rather than whatever was remembered since.
@@ -562,7 +562,7 @@ export function TaskViews({
             ) : (
               <>
                 No projects yet.{" "}
-                <a href="/app/getting-started">See getting started</a>
+                <a href="/getting-started">See getting started</a>
               </>
             )}
           </p>
@@ -618,7 +618,7 @@ export function TaskViews({
       )}
       {projectId && (
         <p className="metadata muted work-project-links">
-          <a href={`/app/projects/${projectId}/settings`}>Project settings</a>
+          <a href={`/projects/${projectId}/settings`}>Project settings</a>
         </p>
       )}
       {state.status !== "fresh" && (

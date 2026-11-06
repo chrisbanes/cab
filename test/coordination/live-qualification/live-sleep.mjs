@@ -1289,7 +1289,7 @@ async function runLiveJourney(approval) {
     page = await context.newPage();
     page.setDefaultTimeout(20_000);
     page.setDefaultNavigationTimeout(20_000);
-    await page.goto(`${origin}/app`);
+    await page.goto(`${origin}/`);
     await waitForOperatorSignIn(page);
     assert.match(await page.locator("body").innerText(), /Sign in/);
     await page.getByLabel("Password", { exact: true }).fill(password);

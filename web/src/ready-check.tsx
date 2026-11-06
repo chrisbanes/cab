@@ -174,7 +174,7 @@ export function ReadyCheck({
   });
   const open = () => {
     p.refresh();
-    navigate(`/app/tasks/new?project=${encodeURIComponent(projectId)}`);
+    navigate(`/tasks/new?project=${encodeURIComponent(projectId)}`);
   };
   const busy = ["pending", "recorded", "conflict"].includes(resume.phase);
 
@@ -290,7 +290,7 @@ export function ReadyCheck({
         )}
         <ActionLink
           variant="secondary"
-          href={`/app/projects/${projectId}/settings`}
+          href={`/projects/${projectId}/settings`}
         >
           Keep paused
         </ActionLink>

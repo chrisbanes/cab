@@ -347,9 +347,7 @@ async function uiPass(expected) {
     });
     page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-    await page.goto(
-      `${web.origin}/app/tasks/${harness.taskId}?section=changes`,
-    );
+    await page.goto(`${web.origin}/tasks/${harness.taskId}?section=changes`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     const changes = page.locator("#changes");
@@ -372,7 +370,7 @@ async function uiPass(expected) {
     chmodSync(lastTurnShot, 0o600);
 
     await page.goto(
-      `${web.origin}/app/tasks/${harness.taskId}?section=review&result=${expected.r1}&evidence=${expected.r1ItemId}`,
+      `${web.origin}/tasks/${harness.taskId}?section=review&result=${expected.r1}&evidence=${expected.r1ItemId}`,
     );
     const retained = page.locator(".retained-evidence");
     await retained

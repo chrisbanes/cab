@@ -47,7 +47,7 @@ test("a task workspace timer poll keeps the conversation, position and status qu
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.clock.install();
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}?result=${r.resultId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?result=${r.resultId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const conversation = page.locator("#conversation");

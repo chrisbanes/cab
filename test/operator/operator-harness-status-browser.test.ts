@@ -55,7 +55,7 @@ for (const [name, viewport] of [
     const unavailable = claudeUnavailable();
     const { page } = await startSettings(
       journey,
-      "/app/settings/runtime",
+      "/settings/runtime",
       viewport,
       undefined,
       unavailable.options,
@@ -107,7 +107,7 @@ for (const [name, viewport] of [
   test(`execution policies and supported Claude settings appear on Runtime and profile pages at ${name}`, async (_t, journey) => {
     const { page, web } = await startSettings(
       journey,
-      "/app/settings/runtime",
+      "/settings/runtime",
       viewport,
       undefined,
       claudeEnabled,
@@ -138,7 +138,7 @@ for (const [name, viewport] of [
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-runtime-policies`);
 
-    await page.goto(`${web.origin}/app/settings/profiles/new`);
+    await page.goto(`${web.origin}/settings/profiles/new`);
     const aside = page.getByRole("complementary", { name: "Execution policy" });
     await aside.getByText("Execution policy · Codex").waitFor();
     await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
@@ -166,12 +166,12 @@ for (const [name, viewport] of [
   });
 
 test("Claude not enabled: policy appears once available and settings stay free text", async (_t, journey) => {
-  const { page, web } = await startSettings(journey, "/app/settings/runtime");
+  const { page, web } = await startSettings(journey, "/settings/runtime");
   await page
     .getByText("Effective policy appears once the Claude runtime is available.")
     .waitFor();
   assert.equal(await runtimeLimits(page, "Claude").count(), 0);
-  await page.goto(`${web.origin}/app/settings/profiles/new`);
+  await page.goto(`${web.origin}/settings/profiles/new`);
   await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
   assert.equal(
     await page.getByLabel("Model", { exact: true }).evaluate((e) => e.tagName),
@@ -182,7 +182,7 @@ test("Claude not enabled: policy appears once available and settings stay free t
 test("a name-only save keeps a stored Claude model the runtime no longer supports", async (_t, journey) => {
   const { f, page, web } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     desktop,
     undefined,
     claudeEnabled,
@@ -199,7 +199,7 @@ test("a name-only save keeps a stored Claude model the runtime no longer support
     capabilities: "x",
     runtime: { harness: "claude", model: "opus", reasoningEffort: null },
   });
-  await page.goto(`${web.origin}/app/profiles/${profileId}/settings`);
+  await page.goto(`${web.origin}/profiles/${profileId}/settings`);
   await page
     .getByLabel("Model", { exact: true })
     .locator("option", { hasText: "opus (not supported)" })
@@ -218,7 +218,7 @@ test("a name-only save keeps a stored Claude model the runtime no longer support
 test("a runtime setting switched back leaves the profile form clean", async (_t, journey) => {
   const { f, page, web } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     desktop,
     undefined,
     claudeEnabled,
@@ -234,7 +234,7 @@ test("a runtime setting switched back leaves the profile form clean", async (_t,
     capabilities: "x",
     runtime: { harness: "codex" },
   });
-  await page.goto(`${web.origin}/app/profiles/${profileId}/settings`);
+  await page.goto(`${web.origin}/profiles/${profileId}/settings`);
   const runtime = page.getByLabel("Runtime", { exact: true });
   await runtime.selectOption("claude");
   const model = page.getByLabel("Model", { exact: true });
@@ -251,7 +251,7 @@ test("a runtime setting switched back leaves the profile form clean", async (_t,
 });
 
 test("an override that was switched off again leaves the capacity form clean, and 04 equals 4", async (_t, journey) => {
-  const { f, page } = await startSettings(journey, "/app/settings/runtime");
+  const { f, page } = await startSettings(journey, "/settings/runtime");
   const region = page.getByRole("region", { name: "Changes to save" });
   const cap = page.getByLabel("Global active-turn cap", { exact: true });
   await cap.waitFor();
@@ -322,7 +322,7 @@ for (const [name, viewport] of [
   test(`turning an execution runtime off and on needs no confirmation without bound work at ${name}`, async (_t, journey) => {
     const { f, page } = await startSettings(
       journey,
-      "/app/settings/runtime",
+      "/settings/runtime",
       viewport,
       undefined,
       switchable(),
@@ -399,7 +399,7 @@ const holdWorkspaceReads = async (page: Page) => {
 test("turning off a runtime that tasks use confirms first; Keep leaves it on and Turn off saves", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     switchable(),
@@ -520,7 +520,7 @@ const unknownToggleFocusesTheCheck = async (
 ) => {
   const { f, page } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     launch,
     switchable(),
@@ -565,7 +565,7 @@ test(
 test("a refused runtime toggle returns focus to the enabled switch after frame callbacks that run before the commit", async (_t, journey) => {
   const { f, page } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     {
@@ -595,7 +595,7 @@ test("a refused runtime toggle returns focus to the enabled switch after frame c
 test("a runtime toggle answered after its page was left focuses nothing", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     switchable(),
@@ -638,7 +638,7 @@ test("a runtime toggle answered after its page was left focuses nothing", async 
 test("turning on a runtime whose executable is missing says so inline and stays off", async (_t, journey) => {
   const { f, page } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     {
@@ -674,7 +674,7 @@ test("turning on a runtime whose executable is missing says so inline and stays 
 test("with both runtimes off, Readiness fails with its fix and points at Runtime settings", async (_t, journey) => {
   const { page, web } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     switchable(),
@@ -693,7 +693,7 @@ test("with both runtimes off, Readiness fails with its fix and points at Runtime
     .click();
   await runtimeRow(page, "Codex").getByText("Disabled in Settings").waitFor();
   assert.equal(await page.getByRole("alert").count(), 0);
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   const check = page
     .locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Readiness", exact: true }),
@@ -720,7 +720,7 @@ for (const [name, viewport] of [
   test(`runtime limits sit in a closed disclosure per runtime under the switch, status and two policy lines at ${name}`, async (_t, journey) => {
     const { page } = await startSettings(
       journey,
-      "/app/settings/runtime",
+      "/settings/runtime",
       viewport,
       undefined,
       claudeEnabled,
@@ -813,7 +813,7 @@ for (const [name, viewport] of [
 test("an open runtime limits disclosure stays open across Refresh and starts closed after navigating back", async (_t, journey) => {
   const { page, web } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     claudeEnabled,
@@ -860,7 +860,7 @@ test("an open runtime limits disclosure stays open across Refresh and starts clo
   );
 
   // In-app route change and back: the page is not reloaded, so module state would survive.
-  await page.locator('a[href="/app/inbox"]').first().click();
+  await page.locator('a[href="/inbox"]').first().click();
   await runtimesPanel(page).waitFor({ state: "detached" });
   await page.goBack();
   await runtimeRow(page, "Claude").getByRole("switch").waitFor();
@@ -868,7 +868,7 @@ test("an open runtime limits disclosure stays open across Refresh and starts clo
   assert.equal(await isOpen(codex), false);
 
   await claude.locator("summary").click();
-  await page.goto(`${web.origin}/app/settings/runtime`);
+  await page.goto(`${web.origin}/settings/runtime`);
   await runtimeRow(page, "Claude").getByRole("switch").waitFor();
   assert.equal(await isOpen(claude), false, "a reload starts closed");
 });
@@ -876,7 +876,7 @@ test("an open runtime limits disclosure stays open across Refresh and starts clo
 test("the runtime limits disclosure toggles with Enter and Space and keeps focus on its summary", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     desktop,
     undefined,
     claudeEnabled,
@@ -926,7 +926,7 @@ for (const [name, viewport] of [
   test(`the runtime page orders Add Claude, Execution runtimes, Capacity, then Task recovery destinations at ${name}`, async (_t, journey) => {
     const { page } = await startSettings(
       journey,
-      "/app/settings/runtime",
+      "/settings/runtime",
       viewport,
       undefined,
       claudeEnabled,
@@ -969,7 +969,7 @@ for (const [name, viewport] of [
     const exhaustion = exhaustibleRuntime();
     const { page, f } = await startSettings(
       journey,
-      "/app/settings/runtime",
+      "/settings/runtime",
       viewport,
       undefined,
       {

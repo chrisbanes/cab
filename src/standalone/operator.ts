@@ -397,15 +397,23 @@ export class LocalOperatorHttp {
             writeText(response, 404, "Not found");
             return;
           }
-          if (url.pathname === "/") {
+          const page = request.method === "GET" || request.method === "HEAD";
+          // Old /app addresses move permanently to the same root path and query. Leading slashes
+          // are collapsed so /app//host never becomes a protocol-relative location.
+          if (page && /^\/app(?=[/?]|$)/.test(requestTarget)) {
             request.resume();
-            response.writeHead(302, { ...RESPONSE_HEADERS, location: "/app" });
+            response.writeHead(308, {
+              ...RESPONSE_HEADERS,
+              location: `/${requestTarget.slice(4).replace(/^\/+/, "")}`,
+            });
             response.end();
             return;
           }
-          // Retired and unknown paths are rejected before looking up or creating a session.
+          // Unknown non-page requests are rejected before looking up or creating a session.
           if (
-            (!this.web.owns(url.pathname) && url.pathname !== "/favicon.svg") ||
+            (!this.web.owns(url.pathname) &&
+              url.pathname !== "/favicon.svg" &&
+              !page) ||
             (url.pathname === "/login" &&
               request.method !== "GET" &&
               request.method !== "HEAD")
@@ -559,9 +567,9 @@ export class LocalOperatorHttp {
     context: typeof this.browserContext,
   ): Promise<boolean> {
     const web = this.web;
-    if (!web.owns(url.pathname)) return false;
     const path = url.pathname,
       method = request.method;
+    if (!web.owns(path) && method !== "GET" && method !== "HEAD") return false;
     const headers = API_HEADERS;
     const json = (
       status: number,
@@ -578,17 +586,19 @@ export class LocalOperatorHttp {
         deny(405, "method-not-allowed");
         return true;
       }
-      // An unknown address under /app gets the public shell with 404, so the client can render "Page not found".
-      const unknownApp =
-        !web.shell(path) && path.startsWith("/app/") && !web.bundle.asset(path);
+      // An unknown address gets the public shell with 404, so the client can render "Page not found".
+      const unknownPage =
+        !web.shell(path) &&
+        !path.startsWith("/assets/") &&
+        !web.bundle.asset(path);
       const asset = web.bundle.asset(
-        web.shell(path) || unknownApp ? "/app" : path,
+        web.shell(path) || unknownPage ? "/" : path,
       );
       if (!asset) {
         deny(404, "not-found");
         return true;
       }
-      response.writeHead(unknownApp ? 404 : 200, {
+      response.writeHead(unknownPage ? 404 : 200, {
         ...headers,
         "content-type": asset.type,
       });

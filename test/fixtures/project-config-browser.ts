@@ -164,7 +164,7 @@ export async function startDiscovery(
 ) {
   const started = await startSettings(
     journey,
-    `/app/projects/:atlas/settings?tab=${tab}`,
+    `/projects/:atlas/settings?tab=${tab}`,
     undefined,
     undefined,
     { setup: { discovery: fakeDiscovery(state) } },

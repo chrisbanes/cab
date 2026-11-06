@@ -36,9 +36,7 @@ test("a page refresh does not reread a request whose answer is unconfirmed", asy
     )
       questionReads.push(request.url());
   });
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const form = page.getByRole("region", { name: "Exact question response" });
@@ -106,9 +104,7 @@ test("an unconfirmed answer is still checkable after leaving the task and coming
     )
       commands.push(request.postData() ?? "");
   });
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const form = page.getByRole("region", { name: "Exact question response" });
@@ -133,7 +129,7 @@ test("an unconfirmed answer is still checkable after leaving the task and coming
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.goBack();
   await check().waitFor();
   assert.equal(
@@ -184,9 +180,7 @@ test("an answer the service recorded but whose reply was lost is checkable when 
     )
       commands.push(request.postData() ?? "");
   });
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const form = page.getByRole("region", { name: "Exact question response" });
@@ -207,11 +201,11 @@ test("an answer the service recorded but whose reply was lost is checkable when 
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.evaluate((path) => {
     history.pushState(null, "", path);
     dispatchEvent(new PopStateEvent("popstate"));
-  }, `/app/tasks/${a.taskId}`);
+  }, `/tasks/${a.taskId}`);
   await page.locator("main.page h1").waitFor();
   assert.equal(await form.count(), 0, "the question card is not shown");
   await check().waitFor();
@@ -221,11 +215,11 @@ test("an answer the service recorded but whose reply was lost is checkable when 
       history.pushState(null, "", to);
       dispatchEvent(new PopStateEvent("popstate"));
     }, path);
-  await go(`/app/tasks/${a.taskId}?request=${a.interactionId}`);
+  await go(`/tasks/${a.taskId}?request=${a.interactionId}`);
   await form.waitFor();
   await page.waitForTimeout(500);
   assert.ok((await check().count()) <= 1, "never two checks at once");
-  await go(`/app/tasks/${a.taskId}`);
+  await go(`/tasks/${a.taskId}`);
   await form.waitFor({ state: "detached" });
   await check().waitFor();
   assert.equal(await check().count(), 1);
@@ -265,9 +259,7 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -583,9 +575,7 @@ async function runQuestionTextareaJourney(
     )
       commandWrites++;
   });
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const form = page.getByRole("region", { name: "Exact question response" });
@@ -789,7 +779,7 @@ test("Inbox queue and selected detail scroll independently at phone heights", as
     )
       commandWrites++;
   });
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -1011,7 +1001,7 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator(".inbox-row").first().waitFor();
@@ -1198,9 +1188,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const form = page.getByRole("region", { name: "Exact question response" });
@@ -1382,7 +1370,7 @@ test("a plain question shows a visible Your answer label and a keyboard-reachabl
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const check = async () => {
@@ -1413,8 +1401,6 @@ test("a plain question shows a visible Your answer label and a keyboard-reachabl
   };
   await page.locator(".inbox-row").first().click();
   await check();
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await check();
 });

@@ -221,8 +221,8 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
   assert.match(notConfigured?.message ?? "", /not enabled.*never falls back/);
   assert.match(notConfigured?.message ?? "", /Stop/);
   assert.deepEqual(routes("Claude runtime is not configured"), [
-    "/app/profiles/p1/settings",
-    "/app/settings/runtime",
+    "/profiles/p1/settings",
+    "/settings/runtime",
   ]);
   assert.match(
     notConfigured?.message ?? "",
@@ -239,8 +239,8 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
       "The Claude runtime is unavailable. cab restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Queued work waits; running work is held, see Recovery.",
     );
     assert.deepEqual(routes(reason), [
-      "/app/settings/runtime",
-      "/app/assignments/a1/recovery",
+      "/settings/runtime",
+      "/assignments/a1/recovery",
     ]);
   }
   assert.match(
@@ -312,7 +312,7 @@ test("only Claude failures render a failure notice", () => {
     "Turn failed (permanent · error_max_turns). Held without automatic retry.",
   );
   assert.deepEqual(notice?.routes, [
-    { label: "Recovery", href: "/app/assignments/a1/recovery" },
+    { label: "Recovery", href: "/assignments/a1/recovery" },
   ]);
   assert.equal(
     failureNotice(
@@ -454,7 +454,7 @@ test("an unauthorized Claude failure names the token and Settings", () => {
   assert.match(notice?.message ?? "", /Claude rejected the configured token/);
   assert.deepEqual(
     notice?.routes.map((r) => r.href),
-    ["/app/settings#runtime", "/app/assignments/a1/recovery"],
+    ["/settings#runtime", "/assignments/a1/recovery"],
   );
   assert.deepEqual(
     waitRoute(
@@ -463,7 +463,7 @@ test("an unauthorized Claude failure names the token and Settings", () => {
           "Claude runtime unavailable: subscription token is unavailable",
       }),
     )?.routes.map((r) => r.href),
-    ["/app/settings/runtime", "/app/settings#runtime"],
+    ["/settings/runtime", "/settings#runtime"],
   );
 });
 
@@ -496,7 +496,7 @@ test("no runtime wait or failure route opens bare Settings", () => {
   );
   assert.ok(hrefs.length >= 6);
   assert.deepEqual(
-    hrefs.filter((h) => h === "/app/settings"),
+    hrefs.filter((h) => h === "/settings"),
     [],
   );
 });

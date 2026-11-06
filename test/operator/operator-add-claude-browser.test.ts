@@ -69,7 +69,7 @@ async function open(
 ) {
   const started = await startSettings(
     journey,
-    "/app/settings/runtime",
+    "/settings/runtime",
     viewport,
     undefined,
     {

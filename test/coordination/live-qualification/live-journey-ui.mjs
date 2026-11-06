@@ -665,7 +665,7 @@ function streamEvidenceForTask(runtime, service, taskId) {
 
 /** Opens a task's Execution tab in the signed-in app and returns its section. */
 async function openExecutionTab(page, origin, taskId) {
-  await page.goto(`${origin}/app/tasks/${taskId}?section=execution`);
+  await page.goto(`${origin}/tasks/${taskId}?section=execution`);
   const section = page.locator("section#execution");
   await section.locator("[data-execution-status]").waitFor();
   return section;
@@ -707,7 +707,7 @@ async function headerHoldCommand(page, kind) {
 
 async function login(page, origin, password) {
   // The public app shell acquires its session through the JSON API.
-  await page.goto(`${origin}/app`);
+  await page.goto(`${origin}/`);
   await page.getByLabel("Password", { exact: true }).fill(password);
   const response = page.waitForResponse(
     (candidate) =>
@@ -3714,7 +3714,7 @@ export async function runLiveJourney(mode) {
       await startOperator(current, evidence, (owner) => {
         operatorOwners.push(owner);
       });
-      await page.goto(`${current.origin}/app/settings/runtime`);
+      await page.goto(`${current.origin}/settings/runtime`);
       await waitForOperatorSignIn(page);
       required(
         /Sign in/.test(await page.locator("body").innerText()),

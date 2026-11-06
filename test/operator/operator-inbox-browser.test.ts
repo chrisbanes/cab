@@ -38,7 +38,7 @@ async function openInbox<T = undefined>(
   j: BrowserJourney,
   count: number,
   viewport: { width: number; height: number },
-  path = "/app/inbox",
+  path = "/inbox",
   extra?: (f: Fixture) => Promise<T>,
   fakeClock = false,
   runtimes?: Pick<
@@ -230,7 +230,7 @@ test("an Inbox with nothing unresolved says so and links to Overview", async (_t
     await page
       .getByRole("link", { name: "Back to overview", exact: true })
       .getAttribute("href"),
-    "/app",
+    "/",
   );
   assert.equal(
     await page.locator(".inbox-summary").textContent(),
@@ -267,7 +267,7 @@ test("phone: the Inbox header has the title and count only, and the filter row h
     j,
     3,
     { width: 390, height: 844 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnQuestion(f, undefined, "Long project request", longName),
   );
   const header = page.locator("header.page-header"),
@@ -413,7 +413,7 @@ test("the request pane leads with the question and keeps its scaffolding below t
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
   );
   const detail = page.getByRole("region", { name: "Selected request" });
@@ -452,7 +452,7 @@ test("phone: the options are above the sticky submit bar on first view and the e
     j,
     0,
     { width: 390, height: 844 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
   );
   await page.locator(".inbox-row").click();
@@ -485,7 +485,7 @@ test("the page Refresh rereads the open request: an answer recorded elsewhere sh
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
   );
   const form = page.getByRole("region", { name: "Exact question response" });
@@ -568,7 +568,7 @@ test("a wide Inbox opens the first request by itself without navigating, and kee
     j,
     3,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     undefined,
     true,
   );
@@ -589,17 +589,14 @@ test("a wide Inbox opens the first request by itself without navigating, and kee
     await detail.getByRole("heading", { level: 2 }).textContent(),
     firstTitle,
   );
-  assert.equal(new URL(page.url()).pathname, "/app/inbox");
+  assert.equal(new URL(page.url()).pathname, "/inbox");
   assert.equal(new URL(page.url()).search, "");
   const entries = await page.evaluate(() => history.length);
   // Selection state is not navigation; the header reads Question · 1 of 3 with one Open task link.
   await detail.getByText("Question", { exact: true }).first().waitFor();
   await detail.getByText("1 of 3", { exact: true }).waitFor();
   const open = detail.getByRole("link", { name: "Open task" });
-  assert.match(
-    (await open.getAttribute("href"))!,
-    /^\/app\/tasks\/[0-9a-f-]{36}$/,
-  );
+  assert.match((await open.getAttribute("href"))!, /^\/tasks\/[0-9a-f-]{36}$/);
   assert.equal(
     await page.getByRole("button", { name: "Back to queue" }).count(),
     0,
@@ -853,7 +850,7 @@ test("an approval shows its exact action, target and independent holds, and deci
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnApproval(f),
   );
   const commands: string[] = [];
@@ -894,7 +891,7 @@ test("an approval shows its exact action, target and independent holds, and deci
   });
   assert.equal(
     await decide.getAttribute("href"),
-    `/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
+    `/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   // Nothing on the page decides: not the request pane, not the inspector.
   assert.equal(
@@ -998,7 +995,7 @@ test("an approval for a GitLab discussion names the code host in the Inbox and i
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnApproval(f),
   );
   const taskUrl = `**/api/operator/tasks/${approval.taskId}`;
@@ -1023,7 +1020,7 @@ test("an approval for a GitLab discussion names the code host in the Inbox and i
     .first()
     .waitFor();
   await page.goto(
-    `${new URL(page.url()).origin}/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
+    `${new URL(page.url()).origin}/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   const item = page.locator(
     `.approval-review[data-record-id="${approval.interactionId}"]`,
@@ -1042,7 +1039,7 @@ test("an intervention shows its recorded reason and links to the execution", asy
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnIntervention(f),
   );
   const detail = page.getByRole("region", { name: "Selected request" });
@@ -1093,7 +1090,7 @@ test("an intervention shows its recorded reason and links to the execution", asy
   });
   assert.equal(
     await inspect.getAttribute("href"),
-    `/app/tasks/${held.taskId}?section=decisions`,
+    `/tasks/${held.taskId}?section=decisions`,
   );
   await captureBrowserEvidence(page, "1366-inbox-intervention", {
     fullPage: false,
@@ -1115,7 +1112,7 @@ test("an intervention shows its recorded reason and links to the execution", asy
     await card
       .getByRole("link", { name: "Recovery evidence", exact: true })
       .evaluateAll((a) => a.map((x) => x.getAttribute("href"))),
-    Array(3).fill(`/app/assignments/${held.assignmentId}/recovery`),
+    Array(3).fill(`/assignments/${held.assignmentId}/recovery`),
   );
 });
 
@@ -1124,7 +1121,7 @@ test("an intervention that leaves the queue stops saying ownership stays held", 
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnIntervention(f),
   );
   const detail = page.getByRole("region", { name: "Selected request" });
@@ -1155,7 +1152,7 @@ test("an incomplete refresh that omits an intervention keeps saying ownership st
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnIntervention(f),
   );
   const detail = page.getByRole("region", { name: "Selected request" });
@@ -1222,7 +1219,7 @@ test("an Inbox question in a paused project shows its hold in the footer, record
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     seedHeldQuestions("Paused question", "Unread holds question"),
   );
   const form = page.getByRole("region", { name: "Exact question response" }),
@@ -1282,7 +1279,7 @@ test("an Inbox question beside an open approval lists the approval as a hold in 
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     seedHeldQuestions("Question beside approval"),
   );
   // The task also has an open approval, served as a contract-valid task read.
@@ -1328,7 +1325,7 @@ test("phone: the question hold sits in the sticky submit area without covering f
     j,
     0,
     { width: 390, height: 844 },
-    "/app/inbox",
+    "/inbox",
     seedHeldQuestions("Phone question"),
   );
   const form = page.getByRole("region", { name: "Exact question response" }),
@@ -1405,7 +1402,7 @@ test("three panes: a grouped queue under its filters, with the overlay and indig
     j,
     2,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     async (f) => {
       await seedOwnIntervention(f);
       await seedOwnApproval(f);
@@ -1495,7 +1492,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
     j,
     3,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnApproval(f),
     true,
   );
@@ -1542,7 +1539,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
   assert.equal(await detail.getByText("Approval", { exact: true }).count(), 1);
   assert.equal(
     await detail.getByRole("link", { name: "Open task" }).getAttribute("href"),
-    `/app/tasks/${approval.taskId}`,
+    `/tasks/${approval.taskId}`,
   );
   assert.match(
     (await detail.locator(".inbox-identity").textContent())!,
@@ -1573,7 +1570,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
     await bar
       .getByRole("link", { name: "Review material & decide", exact: true })
       .getAttribute("href"),
-    `/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
+    `/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   assert.equal(
     await page.getByRole("button", { name: /^(approve|deny)\b/i }).count(),
@@ -1655,7 +1652,7 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
     page,
     web,
     more: approval,
-  } = await openInbox(j, 1, { width: 1366, height: 900 }, "/app/inbox", (f) =>
+  } = await openInbox(j, 1, { width: 1366, height: 900 }, "/inbox", (f) =>
     seedOwnApproval(f),
   );
   const taskUrl = await serveSourceHold(page, approval.taskId);
@@ -1687,10 +1684,7 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
     ).json(),
   ).data;
   const link = aside.getByRole("link", { name: item.taskTitle });
-  assert.equal(
-    await link.getAttribute("href"),
-    `/app/tasks/${approval.taskId}`,
-  );
+  assert.equal(await link.getAttribute("href"), `/tasks/${approval.taskId}`);
   await aside
     .getByText(`${item.projectName} · acme/atlas#12`, { exact: true })
     .waitFor();
@@ -1746,7 +1740,7 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
       (await page
         .getByRole("link", { name: "Requesting conversation" })
         .getAttribute("href")) ?? "",
-      /^\/app\/tasks\/[^?#]+\?assignment=[^#]+$/,
+      /^\/tasks\/[^?#]+\?assignment=[^#]+$/,
     );
   await captureBrowserEvidence(page, "1366-inbox-inspector", {
     fullPage: false,
@@ -1832,7 +1826,7 @@ test("an intervention's inspector lists a pending approval on its task as a hold
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnIntervention(f),
   );
   // The same task also has a pending approval, served as a contract-valid task read.
@@ -1856,7 +1850,7 @@ test("an approval's inspector keeps another open approval on its task as a hold,
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnApproval(f),
   );
   const serveApprovals = (ids: string[]) =>
@@ -1905,7 +1899,7 @@ test("the inspector drops the next action once the answer is recorded, and alway
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     seedHeldQuestions("Recorded question"),
   );
   const aside = page.getByRole("complementary", { name: "Task context" }),
@@ -1946,7 +1940,7 @@ test("without a task read the inspector says the source is unavailable, and an i
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (f) => seedOwnIntervention(f),
   );
   await page.route(`**/api/operator/tasks/${held.taskId}`, (route) =>
@@ -1974,7 +1968,7 @@ for (const [name, viewport] of [
       j,
       2,
       viewport,
-      "/app/inbox",
+      "/inbox",
       (fixture) => exhaustion.exhaust(fixture.runtime),
       false,
       exhaustion,
@@ -2042,7 +2036,7 @@ for (const [name, viewport] of [
       `Attempt 3 · ${clockLabel(base)} · Failed — The runtime failed to start`,
     ]);
     const action = detail.getByRole("link", { name: "Open runtime settings" });
-    assert.equal(await action.getAttribute("href"), "/app/settings/runtime");
+    assert.equal(await action.getAttribute("href"), "/settings/runtime");
     // The action follows the attempts in reading order and takes keyboard focus.
     assert.equal(
       await action.evaluate((a) =>
@@ -2115,7 +2109,7 @@ test("a runtime link whose item has recovered says it is unavailable and reads n
     j,
     1,
     { width: 1366, height: 900 },
-    "/app/inbox?request=runtime%3Acodex",
+    "/inbox?request=runtime%3Acodex",
   );
   await page.getByText("Selected request is unavailable.").waitFor();
   const taskReads: string[] = [];
@@ -2141,7 +2135,7 @@ test("an Inbox holding only an exhausted runtime counts it without naming projec
     j,
     0,
     { width: 1366, height: 900 },
-    "/app/inbox",
+    "/inbox",
     (fixture) => exhaustion.exhaust(fixture.runtime),
     false,
     exhaustion,

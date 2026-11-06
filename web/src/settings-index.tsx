@@ -239,9 +239,7 @@ export function SettingsWorkspace(
         title="Projects"
         description={`${plural(projects.length, "project")} · ${paused} paused · repository access and GitHub discovery per project`}
         action={
-          <ActionLink href="/app/settings/projects/new">
-            Create project
-          </ActionLink>
+          <ActionLink href="/settings/projects/new">Create project</ActionLink>
         }
       >
         <label className="body check-field">
@@ -279,7 +277,7 @@ export function SettingsWorkspace(
                 </StatusBadge>
                 <ActionLink
                   variant="secondary"
-                  href={`/app/projects/${r.id}/settings`}
+                  href={`/projects/${r.id}/settings`}
                   aria-label={`Configure ${name}`}
                 >
                   Configure
@@ -366,7 +364,7 @@ export function SettingsWorkspace(
               : "Global active turns: loading…"
         }
         action={
-          <ActionLink variant="secondary" href="/app/settings/runtime">
+          <ActionLink variant="secondary" href="/settings/runtime">
             Open runtime
           </ActionLink>
         }
@@ -380,7 +378,7 @@ export function SettingsWorkspace(
         title="Agents"
         description={`${plural(profiles.length, "agent")} · ${revoked} revoked`}
         action={
-          <ActionLink variant="secondary" href="/app/settings/profiles/new">
+          <ActionLink variant="secondary" href="/settings/profiles/new">
             Create agent
           </ActionLink>
         }
@@ -409,7 +407,7 @@ export function SettingsWorkspace(
                 </StatusBadge>
                 <ActionLink
                   variant="secondary"
-                  href={`/app/profiles/${r.id}/settings`}
+                  href={`/profiles/${r.id}/settings`}
                   aria-label={`Edit ${name}`}
                 >
                   Edit
@@ -455,7 +453,7 @@ export function SettingsWorkspace(
                 )}
                 <ActionLink
                   variant="secondary"
-                  href={`/app/projects/${r.id}/settings?tab=routing`}
+                  href={`/projects/${r.id}/settings?tab=routing`}
                   aria-label={`Open routing for ${name}`}
                 >
                   Open routing

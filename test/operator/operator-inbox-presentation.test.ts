@@ -48,7 +48,7 @@ const runtimeItem = (
   reason: "Restart retries exhausted",
   lastFailure: "exited",
   attempts: [],
-  destination: "/app/settings/runtime",
+  destination: "/settings/runtime",
 });
 
 test("kind and action labels cover every request kind", () => {

@@ -428,7 +428,7 @@ test("a GitLab push rejects paths GitLab and Git would read differently", async 
     "group/../app",
     "group/./app",
     "group/app.git",
-    "group//app",
+    "group//",
     "group/app; rm",
   ])
     assert.equal(

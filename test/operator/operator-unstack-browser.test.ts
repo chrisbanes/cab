@@ -115,7 +115,7 @@ for (const engine of ["chromium", "webkit"] as const) {
             },
           });
         });
-        await page.goto(`${web.origin}/app/tasks/${taskId}`);
+        await page.goto(`${web.origin}/tasks/${taskId}`);
         await page.getByLabel("Password").fill(web.password);
         await page
           .getByRole("button", { name: "Sign in", exact: true })
@@ -294,7 +294,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         lookups++;
         await r.abort("failed");
       });
-      await page.goto(`${web.origin}/app/tasks/${taskId}`);
+      await page.goto(`${web.origin}/tasks/${taskId}`);
       await page.getByLabel("Password").fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.getByRole("button", { name: "Unstack…", exact: true }).click();
@@ -397,7 +397,7 @@ for (const engine of ["chromium", "webkit"] as const) {
           },
         }),
       );
-      await page.goto(`${web.origin}/app/tasks/${taskId}`);
+      await page.goto(`${web.origin}/tasks/${taskId}`);
       await page.getByLabel("Password").fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page

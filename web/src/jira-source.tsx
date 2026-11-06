@@ -351,7 +351,7 @@ export function JiraSourceTab(
       <div className="settings-column">
         {!saved && (
           <p className="metadata muted">
-            <a href={`/app/projects/${projectId}/settings?tab=github`}>
+            <a href={`/projects/${projectId}/settings?tab=github`}>
               Use GitHub for this project instead
             </a>
           </p>

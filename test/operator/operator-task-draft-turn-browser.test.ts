@@ -71,13 +71,13 @@ for (const [name, viewport] of Object.entries(viewports)) {
       if (request.method() === "POST" && body.includes('"task.draft-turn"'))
         commands.push(body);
     });
-    await page.goto(`${web.origin}/app/tasks/${open.taskId}`);
+    await page.goto(`${web.origin}/tasks/${open.taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.locator("main.page h1").waitFor();
 
     const visit = async (taskId: string, title: string) => {
-      await page.goto(`${web.origin}/app/tasks/${taskId}`);
+      await page.goto(`${web.origin}/tasks/${taskId}`);
       await page.getByRole("heading", { name: title, level: 1 }).waitFor();
     };
     // The shared comment is the default reply; a Draft task's draft turn is its own explicit choice.

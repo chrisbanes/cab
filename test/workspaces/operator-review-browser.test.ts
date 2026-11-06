@@ -220,7 +220,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?section=review&result=${r2.resultId}&source=${a.source.sourceId}`,
+    `${web.origin}/tasks/${a.taskId}?section=review&result=${r2.resultId}&source=${a.source.sourceId}`,
   );
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -648,7 +648,7 @@ for (const [limitCase, sourceBody] of [
     });
     j.observe(page);
     page.setDefaultTimeout(5000);
-    await page.goto(`${web.origin}/app/tasks/${taskId}`);
+    await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     const brief = page.locator("#brief"),
@@ -759,9 +759,7 @@ test("partial literal checklist coverage remains explicit with collapsed and exp
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?result=${result.resultId}`,
-  );
+  await page.goto(`${web.origin}/tasks/${a.taskId}?result=${result.resultId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const partial =
@@ -842,7 +840,7 @@ test("bounded captured context warns with exact omitted count while pinning an o
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?result=${old.resultId}&section=context`,
+    `${web.origin}/tasks/${a.taskId}?result=${old.resultId}&section=context`,
   );
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -898,7 +896,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
   page.setDefaultTimeout(10_000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
@@ -1084,7 +1082,7 @@ test("an imported task's issue brief shows as its own Overview section beside th
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks/${taskId}`);
+  await page.goto(`${web.origin}/tasks/${taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await openOverviewCard(page, "issue-brief");

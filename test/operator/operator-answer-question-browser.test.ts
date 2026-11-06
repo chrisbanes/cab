@@ -121,7 +121,7 @@ for (const [label, viewport] of [
   ["390 x 844", phone],
 ] as const) {
   test(`answer a question budget: two interactions from the Home card (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, () => "/app");
+    const s = await start(journey, viewport, () => "/");
     const card = s.page.locator(
       `.overview-card[data-request-id="${s.interactionId}"]`,
     );
@@ -140,7 +140,7 @@ for (const [label, viewport] of [
   });
 
   test(`answer a question budget: three interactions from the Inbox row (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, () => "/app/inbox");
+    const s = await start(journey, viewport, () => "/inbox");
     const row = s.page.locator(".inbox-row").filter({ hasText: "Guide task" });
     await assertFirstScreen(s.page, [
       row,
@@ -165,7 +165,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/app/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}`,
     );
     const decision = s.page.locator(
       `#decisions .decision[data-record-id="${s.interactionId}"]`,
@@ -195,11 +195,7 @@ for (const [label, viewport] of [
 }
 
 test("the task decision card withdraws the question text when a refresh withholds or fails the exact read", async (_t, journey) => {
-  const s = await start(
-    journey,
-    desktop,
-    ({ taskId }) => `/app/tasks/${taskId}`,
-  );
+  const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
   const decision = s.page.locator(
       `#decisions .decision[data-record-id="${s.interactionId}"]`,
     ),

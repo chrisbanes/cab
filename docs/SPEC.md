@@ -994,7 +994,7 @@ views, with the list as the initial default.
 Keep known state and uncertainty legible and retain unfinished drafts across
 transient failures.
 
-The operator UI is a React application at `/app`, served with same-origin
+The operator UI is a React application at `/`, served with same-origin
 `/api/operator` JSON by the production `operator` command. Approval decisions, handback
 settlement, result-destination reconciliation and messages to delegated assignments
 are task-view controls, and the CLI offers the same commands. A local task's title, outcome
@@ -1005,21 +1005,23 @@ the task read discloses exactly (`task.textExact`); text the service redacts or 
 offered for editing or written back, and the dialog sends only the fields the operator changed. A
 task with redacted text changes Ready through `cab task configure TASK_ID --ready true|false`.
 There are no server-rendered operator pages apart from the public React shell.
-`/`, `/runtime`, `/profile/:id`, `/command` and the legacy login/logout and recovery
-form POSTs return ordinary not-found responses without creating sessions or redirecting. A task's Execution tab (`/app/tasks/:id?section=execution`)
+`/command` and the legacy login/logout and recovery form POSTs return ordinary not-found
+responses without creating sessions or redirecting; any other unknown `GET`/`HEAD` address,
+including the retired `/runtime` and `/profile/:id` pages, gets the public shell with status 404.
+Old `/app` and `/app/*` addresses permanently redirect (308) to the same path at the root, keeping the query; the browser keeps the fragment. A task's Execution tab (`/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions
-for its next turn. These use the same receipted JSON commands as the CLI. Runtime settings at `/app/settings/runtime` show capacity, runtime availability and
+for its next turn. These use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
-per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
+per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
 [operator integration](design/s04d-operator-integration.md) designs. The operator listener requires a validated web bundle. The `operator` command checks
 it before starting the service; a missing or invalid bundle fails with
 `operator web UI not built; run npm run build:web`. Other service commands retain
-their startup behavior. The application stays at `/app`; `/login` serves its public
+their startup behavior. The application is served at `/`; `/login` serves its public
 shell, and login/logout use `/api/operator/login` and `/api/operator/logout`.
 
 ### Everyday navigation and attention
@@ -1797,7 +1799,7 @@ that no tool ran. This presentation adds no terminal, embedded browser or
 complete-transcript capability.
 
 Every entry point that opens a task (Overview, List/Board, Inbox, Search, recovery
-links and assignment links) reaches the same task workspace at `/app/tasks/:id`. There
+links and assignment links) reaches the same task workspace at `/tasks/:id`. There
 is no History tab: a link that names the conversation (`#conversation`), an assignment
 (`?assignment=`) or a request (`?request=` with `#conversation`) opens the Overview at
 that place, reading earlier pages first when it is not in the part already loaded, and
@@ -2542,8 +2544,8 @@ an answer or silently treating it as ordinary chat. Structured runtime bridging
 requires qualification; the existing plain-text question tool alone is not evidence
 of support for these interactions.
 
-The action Inbox at `/app/inbox` and the shared exact request view at
-`/app/tasks/:taskId?request=:interactionId` present these requests. The summary
+The action Inbox at `/inbox` and the shared exact request view at
+`/tasks/:taskId?request=:interactionId` present these requests. The summary
 queue uses 100-row fingerprinted pages over the bounded 10,000-task catalog.
 Selected forms are read independently of queue and history pages. Approval and
 recovery items retain their exact existing material/control destinations. Unknown
@@ -2597,6 +2599,12 @@ the operator auth file, with bounded concurrency, timeouts and retries; a push s
 that reports a subscription gone revokes it. The operator can send a test, turn off this
 browser, and revoke any other from Settings, and a revoked browser turns on again. Where
 the platform allows, the page closes a notification once its request leaves the Inbox.
+The push worker is `/service-worker.js` with scope `/`. A browser turned on before the app
+moved to the root still has a worker at scope `/app/`; on its first signed-in load the page
+subscribes it at the root, and only after the service records that subscription revokes the
+old row, unsubscribes and removes the old registration. Until that move succeeds, the old
+registration keeps receiving pushes and Settings → Notifications says to turn notifications
+on again.
 Delivery is qualified on the host's browser only; phone and other-device delivery is not
 qualified. Credentials must not
 appear in UI payloads or exposed transcripts. The operator login, session and
@@ -2622,7 +2630,7 @@ conditions; observed PR auto-closure is reconciled, not assumed to complete all 
 Writes record confirmed success, confirmed failure or uncertainty; local edits
 cannot masquerade as confirmed remote updates.
 
-The additive Settings Delivery tab (`/app/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Unavailable grant references also carry an opaque post-migration format marker. A fresh save with an older unmarked reference is refused; refresh the policy and discard the draft. An already-open pre-upgrade tab shows a generic conflict and an ordinary refresh may fail to read the new projection. A deliberate full page reload discards its unsaved draft and recovers. Exact recorded requests remain replayable. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
+The additive Settings Delivery tab (`/projects/:id/settings?tab=delivery`) edits completion mode, branch prefix, all 16 scoped action kinds, and each linked repository's merge method and additional required checks with optional app bindings. Credential Preserve omits the reference; Set and Clear are explicit. Saved reference names and values are never disclosed. Unavailable policy rows and prefix are kept with version-bound references; removing a row is explicit and Discard restores the loaded draft. Unavailable grant references also carry an opaque post-migration format marker. A fresh save with an older unmarked reference is refused; refresh the policy and discard the draft. An already-open pre-upgrade tab shows a generic conflict and an ordinary refresh may fail to read the new projection. A deliberate full page reload discards its unsaved draft and recovers. Exact recorded requests remain replayable. Indexed validation focuses the first invalid field. Unknown saves check the original operation receipt before any same-key retry. The curated configuration read omits the status-mapping view when any projected mapping or scope identity cannot be disclosed; the persisted mapping remains unchanged. The tab states what the saved status mapping lets cab write as a read-only line ("Status mapping: cab may set Status to Ready on Project Atlas roadmap" or "…move issues to In Progress, Done") with an Edit status mapping link to the mapping editor, and reads the Project's title from discovery where it lists it, else the node ID. The line is withheld with the mapping view, and a delivery save never warns about status-mapping authority, because the mapping needs no grant. The former `/project/:id` editor returns an authenticated 404 without redirection. Its eight exclusive form commands and four Settings links are removed; JSON commands and shared form capabilities remain available.
 
 A grant row reads as a sentence of names ("Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas"); an ID no read names shows as "<ID> (name not found)", and a row still being filled in shows "(not chosen)". Its Action select shows each kind's plain label and a one-line description, from the one wording the task's delivery actions and `cab delivery get` also use (a recorded action whose kind this version does not know keeps its recorded text). Its Repository is chosen from the project's linked repositories and, when GitHub discovery lists them, the others the credential can see; its Project, field and options are chosen from what discovery lists, the Project from the owner's Projects as well as those linked, with Other… to type a Project's node ID. Where discovery cannot list a value, or the saved value is not in the list, the control is a typed node-ID field labelled as the fallback and stays typed while it is shown. A Jira container is a typed Jira project ID, as no read lists them. Stored grants, the `delivery.configure` command and replay are unchanged: names are display only, and every value stays an ID. A save the service refuses for a named field shows the service's fixed sentence for it in the save outcome, as a refused status mapping does, with a Go to field action that focuses the first highlighted control; the draft stays.
 

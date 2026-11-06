@@ -806,7 +806,7 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
     assert.equal(first.urgency, 0);
     assert.equal(first.harness, "codex");
     assert.equal(first.createdAt, first.since);
-    assert.equal(first.destination, "/app/settings/runtime");
+    assert.equal(first.destination, "/settings/runtime");
     assert.deepEqual(
       first.attempts.map((x) => [x.attempt, x.outcome, x.failure]),
       [

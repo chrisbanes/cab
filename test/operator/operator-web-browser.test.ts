@@ -191,7 +191,7 @@ for (const viewport of [
     });
     await reenterHome(page);
     await page
-      .locator(`a[href="/app/projects/${projectId}"]`)
+      .locator(`a[href="/projects/${projectId}"]`)
       .first()
       .waitFor({ state: viewport.width < 760 ? "attached" : "visible" });
     if (viewport.width >= 760) {
@@ -225,12 +225,12 @@ for (const viewport of [
       assert.deepEqual(
         phoneNavLinks.map(({ href }) => href),
         [
-          "/app",
-          "/app/inbox",
-          "/app/tasks",
-          "/app/search",
-          `/app/projects/${projectId}`,
-          "/app/settings/projects/new",
+          "/",
+          "/inbox",
+          "/tasks",
+          "/search",
+          `/projects/${projectId}`,
+          "/settings/projects/new",
         ],
       );
       assert.ok(
@@ -265,7 +265,7 @@ for (const viewport of [
       await trigger.click();
       assert.equal(
         await dialog
-          .locator(`a[href="/app/projects/${projectId}"]`)
+          .locator(`a[href="/projects/${projectId}"]`)
           .getAttribute("aria-current"),
         "page",
       );
@@ -391,7 +391,7 @@ for (const viewport of [
           page: getComputedStyle(document.body).backgroundColor,
           introduction: text("main .introduction"),
           badge: text('main [data-slot="badge"]'),
-          action: text('a[href^="/app/tasks/new"][data-slot="button"]'),
+          action: text('a[href^="/tasks/new"][data-slot="button"]'),
           ringColor: ring?.outlineColor ?? "",
           ringWidth: ring?.outlineWidth ?? "0px",
         };
@@ -433,14 +433,14 @@ for (const viewport of [
       true,
     );
     // The legacy project page keeps its zoom and styling coverage by direct navigation.
-    await page.goto(`${web.origin}/app/projects/${projectId}/settings`);
+    await page.goto(`${web.origin}/projects/${projectId}/settings`);
     await page
       .getByRole("navigation", {
         name: "Project configuration sections",
         exact: true,
       })
       .waitFor();
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     await page
       .getByRole("heading", { name: "Overview", exact: true })
       .waitFor();
@@ -487,7 +487,7 @@ test("browser API guards, absolute expiry, successful logout and restart reject 
   let page = await context.newPage();
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.getByLabel("Password", { exact: true }).fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
@@ -606,7 +606,7 @@ test("browser API guards, absolute expiry, successful logout and restart reject 
     ).status(),
     401,
   );
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
   assert.equal(f.runtime.turns, 0);
 });
@@ -691,7 +691,7 @@ test("React shell Inbox poll surfaces a runtime failure on its own", async (_t, 
   const loaded = page.waitForResponse((r) =>
     r.url().endsWith("/api/operator/workspace"),
   );
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await loaded;
   await page.getByRole("heading", { name: "Inbox", exact: true }).waitFor();
   const banner = page.getByRole("alert").filter({

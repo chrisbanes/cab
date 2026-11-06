@@ -29,15 +29,14 @@ export function settingsSectionOrder(
     : ids;
 }
 
-export const settingsSectionHref = (id: SettingsSectionId) =>
-  `/app/settings#${id}`;
+export const settingsSectionHref = (id: SettingsSectionId) => `/settings#${id}`;
 
 /** Add Claude, the panel at the top of the Runtime page. */
-export const addClaudeHref = "/app/settings/runtime#add-claude";
+export const addClaudeHref = "/settings/runtime#add-claude";
 
 /** A Readiness check's own article, by its public check id. */
 export const readinessCheckHref = (checkId: string) =>
-  `/app/settings#readiness-${checkId}`;
+  `/settings#readiness-${checkId}`;
 
 /** A fragment as an element id, or null when it is empty or not decodable. */
 function fragmentId(hash = location.hash) {
@@ -51,7 +50,7 @@ function fragmentId(hash = location.hash) {
 /**
  * The one answer to "does this page land on this fragment right now": the element a
  * fragment names on a Settings route, or null. The route decides which ids are targets
- * (a section or a check's own anchor on `/app/settings`, `add-claude` on the Runtime
+ * (a section or a check's own anchor on `/settings`, `add-claude` on the Runtime
  * page), and the element must be on the page, so a page that has not rendered its target
  * yet (reads or the workspace still loading, a failed readiness read) answers null.
  * `useFragmentLanding` lands on it and the shell's popstate restore skips scrolling
@@ -64,10 +63,10 @@ export function landingElement(
   const id = fragmentId(hash);
   if (!id) return null;
   const supported =
-    pathname === "/app/settings"
+    pathname === "/settings"
       ? SETTINGS_SECTIONS.some((s) => s.id === id) ||
         readinessCheckIds.some((c) => `readiness-${c}` === id)
-      : pathname === "/app/settings/runtime" && id === "add-claude";
+      : pathname === "/settings/runtime" && id === "add-claude";
   return supported ? document.getElementById(id) : null;
 }
 

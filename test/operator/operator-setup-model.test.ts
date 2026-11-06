@@ -238,27 +238,23 @@ test("setup headers follow the first-run and settings frames", () => {
         profiles: [],
       },
     }) as never;
+  assert.deepEqual(settingsHeader("/settings/projects/new", "", workspace(0)), {
+    title: "Set up your first project",
+    trail: [{ label: "Overview", href: "/" }, { label: "New project" }],
+  });
   assert.deepEqual(
-    settingsHeader("/app/settings/projects/new", "", workspace(0)),
-    {
-      title: "Set up your first project",
-      trail: [{ label: "Overview", href: "/app" }, { label: "New project" }],
-    },
-  );
-  assert.deepEqual(
-    settingsHeader("/app/settings/projects/new", "", workspace(1))?.trail.map(
+    settingsHeader("/settings/projects/new", "", workspace(1))?.trail.map(
       (c) => c.label,
     ),
     ["Settings", "Projects", "Create project"],
   );
   // Setup latches the heading for the visit, so the project it creates keeps it.
   assert.equal(
-    settingsHeader("/app/settings/projects/new", "", workspace(1), true)?.title,
+    settingsHeader("/settings/projects/new", "", workspace(1), true)?.title,
     "Set up your first project",
   );
   assert.equal(
-    settingsHeader("/app/settings/projects/new", "", workspace(0), false)
-      ?.title,
+    settingsHeader("/settings/projects/new", "", workspace(0), false)?.title,
     "Create project",
   );
 });
@@ -423,7 +419,7 @@ test("the ready check lists only what would make this lead's work wait", () => {
     {
       text: "claude-token reason",
       fix: "claude-token fix",
-      link: { label: "Add Claude", href: "/app/settings/runtime#add-claude" },
+      link: { label: "Add Claude", href: "/settings/runtime#add-claude" },
     },
   ]);
   assert.equal(token.blocked, true);
@@ -444,7 +440,7 @@ test("the ready check lists only what would make this lead's work wait", () => {
     {
       text: "claude-token reason",
       fix: "claude-token fix",
-      link: { label: "Add Claude", href: "/app/settings/runtime#add-claude" },
+      link: { label: "Add Claude", href: "/settings/runtime#add-claude" },
     },
   ]);
   // A Codex lead ignores it.
@@ -497,7 +493,7 @@ test("the ready check names a runtime that cannot run the lead's work in fixed w
 });
 
 test("the ready check links a disabled runtime to Settings > Runtime and says it once when none is enabled", () => {
-  const link = { label: "Runtime settings", href: "/app/settings/runtime" };
+  const link = { label: "Runtime settings", href: "/settings/runtime" };
   assert.deepEqual(
     readyCheckItems(input({ workspace: workspace("claude") })).items,
     [{ text: "Claude runtime isn't enabled for this service.", link }],
@@ -564,7 +560,7 @@ test("the ready check judges the lead's own model and effort against the support
   };
   const edit = {
     text: "Claude runtime doesn't accept the lead agent's model or reasoning effort.",
-    link: { label: "Edit agent", href: `/app/profiles/${leadId}/settings` },
+    link: { label: "Edit agent", href: `/profiles/${leadId}/settings` },
   };
   // A model the runtime lacks, and an effort its model lacks: the lead cannot run.
   for (const rejected of [
@@ -663,7 +659,7 @@ test("the ready check states the recorded source credential with a settings link
   const id = "p1";
   const link = {
     label: "GitHub source settings",
-    href: "/app/projects/p1/settings?tab=github",
+    href: "/projects/p1/settings?tab=github",
   };
   const credential = (
     over: Partial<{
@@ -789,7 +785,7 @@ test("the ready check reports missing delivery authority and credential with a D
   const id = "p1";
   const link = {
     label: "Delivery settings",
-    href: "/app/projects/p1/settings?tab=delivery",
+    href: "/projects/p1/settings?tab=delivery",
   };
   const grant = (repositoryId: string) => ({
     action: "pr.create" as const,

@@ -1,17 +1,24 @@
-// cab operator push worker, served at /app/service-worker.js (scope /app/).
+// cab operator push worker, served at /service-worker.js (scope /).
 // It has no fetch handler and keeps no cache, so an update can never serve a stale app.
 // A push shows a notification; a click routes an open tab to the exact Inbox selection in
 // place, or opens one. Nothing else.
 const FALLBACK_TITLE = "cab needs you";
-const FALLBACK_URL = "/app/inbox";
+const FALLBACK_URL = "/inbox";
 const BODY = "Open cab to respond.";
+
+// Notifications delivered before the app moved to the root carry the old /app prefix.
+const canonicalUrl = (url) =>
+  typeof url === "string" &&
+  /^\/app\/(?:inbox\?|settings#notifications$)/.test(url)
+    ? url.slice(4)
+    : url;
 
 // The server only ever sends an Inbox link or the Settings link; anything else is ignored.
 const safeUrl = (url) =>
   typeof url === "string" &&
   url.length <= 600 &&
   /^[\x21-\x7e]+$/.test(url) &&
-  (url.startsWith("/app/inbox?") || url === "/app/settings#notifications");
+  (url.startsWith("/inbox?") || url === "/settings#notifications");
 
 const accepted = (payload) =>
   payload !== null &&
@@ -23,7 +30,7 @@ const accepted = (payload) =>
   typeof payload.tag === "string" &&
   payload.tag.length >= 1 &&
   payload.tag.length <= 256 &&
-  safeUrl(payload.url);
+  safeUrl(canonicalUrl(payload.url));
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -37,7 +44,8 @@ self.addEventListener("push", (event) => {
   let note = { title: FALLBACK_TITLE, url: FALLBACK_URL, tag: undefined };
   try {
     const payload = event.data.json();
-    if (accepted(payload)) note = payload;
+    if (accepted(payload))
+      note = { ...payload, url: canonicalUrl(payload.url) };
   } catch {
     // An unreadable payload still shows the fixed notification: browsers require one per push.
   }
@@ -66,8 +74,8 @@ const routed = (client, url) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const data = event.notification.data;
-  const url = data && safeUrl(data.url) ? data.url : FALLBACK_URL;
+  const clicked = canonicalUrl(event.notification.data?.url);
+  const url = safeUrl(clicked) ? clicked : FALLBACK_URL;
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({
@@ -76,11 +84,7 @@ self.addEventListener("notificationclick", (event) => {
       });
       const target = windows.find((client) => {
         try {
-          const address = new URL(client.url);
-          return (
-            address.origin === self.location.origin &&
-            address.pathname.startsWith("/app/")
-          );
+          return new URL(client.url).origin === self.location.origin;
         } catch {
           return false;
         }

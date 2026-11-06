@@ -106,23 +106,23 @@ const valid = (url: string, title = "Question in Relay: 1 waiting") => ({
 
 test("a valid push shows the payload's title, tag and link, for a task and for a runtime", async () => {
   const w = await load();
-  await w.push(valid("/app/inbox?task=T&request=Q"));
+  await w.push(valid("/inbox?task=T&request=Q"));
   await w.push({
     v: 1,
     title: "Codex runtime unavailable",
-    url: "/app/inbox?request=runtime%3Acodex",
+    url: "/inbox?request=runtime%3Acodex",
     tag: "runtime:codex:5",
   });
   assert.equal(w.shown.length, 2);
   assert.equal(w.shown[0]?.title, "Question in Relay: 1 waiting");
   assert.equal(w.shown[0]?.options.tag, "q1");
   assert.deepEqual(plain(w.shown[0]?.options.data), {
-    url: "/app/inbox?task=T&request=Q",
+    url: "/inbox?task=T&request=Q",
   });
   assert.equal(w.shown[1]?.title, "Codex runtime unavailable");
   assert.equal(w.shown[1]?.options.tag, "runtime:codex:5");
   assert.deepEqual(plain(w.shown[1]?.options.data), {
-    url: "/app/inbox?request=runtime%3Acodex",
+    url: "/inbox?request=runtime%3Acodex",
   });
   // The body is fixed text; nothing from the payload becomes body content.
   assert.equal(w.shown[0]?.options.body, "Open cab to respond.");
@@ -133,12 +133,30 @@ test("the Settings link of a test notification is accepted", async () => {
   await w.push({
     v: 1,
     title: "Test notification from cab",
-    url: "/app/settings#notifications",
+    url: "/settings#notifications",
     tag: "test:notification",
   });
   assert.deepEqual(plain(w.shown[0]?.options.data), {
-    url: "/app/settings#notifications",
+    url: "/settings#notifications",
   });
+});
+
+test("a link from before the move to the root is shown, opened and routed at the root", async () => {
+  const w = await load();
+  await w.push(valid("/app/inbox?task=T&request=Q"));
+  await w.push(valid("/app/settings#notifications"));
+  assert.deepEqual(
+    w.shown.map((note) => plain(note.options.data)),
+    [{ url: "/inbox?task=T&request=Q" }, { url: "/settings#notifications" }],
+  );
+  await w.click("/app/inbox?task=T&request=Q");
+  assert.deepEqual(w.opened, ["/inbox?task=T&request=Q"]);
+  const app = client(`${ORIGIN}/inbox`);
+  const routed = await load([app]);
+  await routed.click("/app/settings#notifications");
+  assert.deepEqual(plain(app.posted), [
+    { type: "cab.notification-open", url: "/settings#notifications" },
+  ]);
 });
 
 test("an invalid link, version, shape or payload shows the fixed notification linking to the Inbox", async () => {
@@ -147,15 +165,19 @@ test("an invalid link, version, shape or payload shows the fixed notification li
     valid("https://evil.test/"),
     valid("//evil.test"),
     valid("/api/operator/inbox"),
+    valid("/settings/runtime"),
+    valid("/inbox"),
+    valid("/inbox?x= y"),
+    valid("/inbox?x=é"),
     valid("/app/settings/runtime"),
     valid("/app/inbox"),
-    valid("/app/inbox?x= y"),
+    valid("/app//evil.test/inbox?x"),
     valid("javascript:alert(1)"),
-    { ...valid("/app/inbox?a=1"), v: 2 },
-    { ...valid("/app/inbox?a=1"), title: "" },
-    { ...valid("/app/inbox?a=1"), title: "x".repeat(201) },
-    { ...valid("/app/inbox?a=1"), tag: "" },
-    { ...valid("/app/inbox?a=1"), title: 5 },
+    { ...valid("/inbox?a=1"), v: 2 },
+    { ...valid("/inbox?a=1"), title: "" },
+    { ...valid("/inbox?a=1"), title: "x".repeat(201) },
+    { ...valid("/inbox?a=1"), tag: "" },
+    { ...valid("/inbox?a=1"), title: 5 },
     null,
     "text",
     [],
@@ -165,7 +187,7 @@ test("an invalid link, version, shape or payload shows the fixed notification li
   assert.equal(w.shown.length, bad.length);
   for (const note of w.shown) {
     assert.equal(note.title, "cab needs you");
-    assert.deepEqual(plain(note.options.data), { url: "/app/inbox" });
+    assert.deepEqual(plain(note.options.data), { url: "/inbox" });
   }
 });
 
@@ -188,18 +210,14 @@ const client = (url: string): FakeClient => ({
 });
 
 test("a click focuses an open app window and routes it in place, never opening another", async () => {
-  const app = client(`${ORIGIN}/app/tasks`);
-  const w = await load([
-    client("https://other.test/app/x"),
-    client(`${ORIGIN}/login`),
-    app,
-  ]);
-  await w.click("/app/inbox?request=runtime%3Acodex");
+  const app = client(`${ORIGIN}/tasks`);
+  const w = await load([client("https://other.test/app/x"), app]);
+  await w.click("/inbox?request=runtime%3Acodex");
   assert.equal(app.focused, 1);
   assert.deepEqual(plain(app.posted), [
     {
       type: "cab.notification-open",
-      url: "/app/inbox?request=runtime%3Acodex",
+      url: "/inbox?request=runtime%3Acodex",
     },
   ]);
   assert.deepEqual(app.navigated, []);
@@ -207,40 +225,48 @@ test("a click focuses an open app window and routes it in place, never opening a
   assert.deepEqual(w.closed, ["closed"]);
 });
 
+test("a same-origin window at any path counts as the app window", async () => {
+  const signIn = client(`${ORIGIN}/login`);
+  const w = await load([signIn]);
+  await w.click("/inbox?request=Q");
+  assert.equal(signIn.focused, 1);
+  assert.deepEqual(w.opened, []);
+});
+
 test("a click with no app window opens one at the link", async () => {
   const w = await load([client("https://other.test/app/x")]);
-  await w.click("/app/inbox?task=T&request=Q");
-  assert.deepEqual(w.opened, ["/app/inbox?task=T&request=Q"]);
+  await w.click("/inbox?task=T&request=Q");
+  assert.deepEqual(w.opened, ["/inbox?task=T&request=Q"]);
   assert.deepEqual(w.closed, ["closed"]);
 });
 
 test("a click on a notification with a foreign link opens the Inbox instead", async () => {
   const w = await load();
   await w.click("https://evil.test/");
-  assert.deepEqual(w.opened, ["/app/inbox"]);
+  assert.deepEqual(w.opened, ["/inbox"]);
 });
 
 test("a click with a foreign link routes an open app window to the Inbox", async () => {
-  const app = client(`${ORIGIN}/app/tasks`);
+  const app = client(`${ORIGIN}/tasks`);
   const w = await load([app]);
   await w.click("https://evil.test/");
   assert.deepEqual(plain(app.posted), [
-    { type: "cab.notification-open", url: "/app/inbox" },
+    { type: "cab.notification-open", url: "/inbox" },
   ]);
   assert.deepEqual(w.opened, []);
 });
 
 test("a tab that does not confirm routing is replaced by a new window", async () => {
-  const stale = { ...client(`${ORIGIN}/app/tasks`), acknowledges: false };
+  const stale = { ...client(`${ORIGIN}/tasks`), acknowledges: false };
   const w = await load([stale]);
-  await w.click("/app/inbox?request=Q");
+  await w.click("/inbox?request=Q");
   assert.equal(stale.posted.length, 1);
   assert.equal(
     stale.focused,
     0,
     "the click's one window interaction opens the window",
   );
-  assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+  assert.deepEqual(w.opened, ["/inbox?request=Q"]);
   assert.deepEqual(w.closed, ["closed"]);
 });
 
@@ -258,9 +284,9 @@ test("a window that cannot be focused or messaged is replaced by a new one", asy
     },
   ];
   for (const refusal of refusals) {
-    const w = await load([{ ...client(`${ORIGIN}/app/inbox`), ...refusal }]);
-    await w.click("/app/inbox?request=Q");
-    assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+    const w = await load([{ ...client(`${ORIGIN}/inbox`), ...refusal }]);
+    await w.click("/inbox?request=Q");
+    assert.deepEqual(w.opened, ["/inbox?request=Q"]);
   }
 });
 

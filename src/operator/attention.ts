@@ -153,9 +153,9 @@ export function inboxSelectionHref(
     case "question":
     case "approval":
     case "intervention":
-      return `/app/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`;
+      return `/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`;
     case "runtime":
-      return `/app/inbox?request=${encodeURIComponent(item.id)}`;
+      return `/inbox?request=${encodeURIComponent(item.id)}`;
     default: {
       const exhaustive: never = item;
       return exhaustive;

@@ -16,7 +16,7 @@ const span = async (row: Locator) => {
 };
 
 test("Settings issues, rotates and revokes CLI credentials without keeping the token", async (_t, journey) => {
-  const { web, page } = await setupJourney(journey, { path: "/app/settings" });
+  const { web, page } = await setupJourney(journey, { path: "/settings" });
   const bodies: string[] = [];
   const posts: string[] = [];
   page.on("request", (r) => {

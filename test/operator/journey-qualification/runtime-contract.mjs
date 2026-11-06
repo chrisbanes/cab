@@ -668,7 +668,7 @@ export async function runQualification(options = {}) {
         !finishing && Date.now() < deadline,
         "browser-create-task-deadline",
       );
-      await page.goto(`${origin}/app/tasks/new`);
+      await page.goto(`${origin}/tasks/new`);
       await page.getByLabel("Password").fill(password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.getByLabel("Project", { exact: true }).selectOption(projectId);
@@ -702,8 +702,7 @@ export async function runQualification(options = {}) {
     const q = service.coordinationView().readTask(taskId).runtimeQuestions[0];
     assert.ok(q);
     await step(
-      () =>
-        page.goto(`${origin}/app/tasks/${taskId}?request=${q.interactionId}`),
+      () => page.goto(`${origin}/tasks/${taskId}?request=${q.interactionId}`),
       "browser-observe-question",
     );
     await step(
@@ -820,8 +819,8 @@ export async function runQualification(options = {}) {
       const commandCount = commands.length;
       const expected = nativeCall.request.questions[0].isOther ? text : "Local";
       for (const route of [
-        `/app/tasks/${taskId}?request=${q.interactionId}`,
-        `/app/inbox?task=${taskId}&request=${q.interactionId}`,
+        `/tasks/${taskId}?request=${q.interactionId}`,
+        `/inbox?task=${taskId}&request=${q.interactionId}`,
       ]) {
         await page.goto(`${origin}${route}`);
         await page.reload();

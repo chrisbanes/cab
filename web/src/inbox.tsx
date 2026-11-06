@@ -299,13 +299,13 @@ export function Inbox({
             detail: {
               title: detailTitle,
               ...(detailSubtitle ? { subtitle: detailSubtitle } : {}),
-              back: { href: "/app/inbox", label: "Inbox" },
+              back: { href: "/inbox", label: "Inbox" },
               ...(detailTask
                 ? {
                     action: (
                       <ActionLink
                         variant="secondary"
-                        href={`/app/tasks/${detailTask}`}
+                        href={`/tasks/${detailTask}`}
                       >
                         Open task
                       </ActionLink>
@@ -358,7 +358,7 @@ export function Inbox({
   const back = () => {
     state.selected = null;
     state.auto = null;
-    navigate("/app/inbox");
+    navigate("/inbox");
   };
   const clear = () => {
     state.project = "";
@@ -555,7 +555,7 @@ export function Inbox({
                     Questions, approvals and execution problems will appear
                     here. Routine progress and completed work stay in Overview.
                   </p>
-                  <ActionLink variant="secondary" href="/app">
+                  <ActionLink variant="secondary" href="/">
                     Back to overview
                   </ActionLink>
                 </>
@@ -595,7 +595,7 @@ export function Inbox({
                     {selected.kind !== "runtime" && (
                       <a
                         className="inbox-open-task"
-                        href={`/app/tasks/${selected.taskId}`}
+                        href={`/tasks/${selected.taskId}`}
                       >
                         Open task
                         <ArrowUpRight aria-hidden="true" />

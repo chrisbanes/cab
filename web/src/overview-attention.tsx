@@ -134,7 +134,7 @@ export function NeedsYou({
         <p className="metadata muted">
           Execution uncertainty first, then oldest
         </p>
-        <a className="control work-link" href="/app/inbox">
+        <a className="control work-link" href="/inbox">
           Open Inbox{total === undefined ? "" : ` · ${total}`}{" "}
           <ArrowRight aria-hidden="true" />
         </a>
@@ -168,7 +168,7 @@ export function NeedsYou({
         </ul>
       )}
       {further && (
-        <a className="overview-overflow body" href="/app/inbox">
+        <a className="overview-overflow body" href="/inbox">
           <span>{further.count} more</span> · {further.names.join(", ")} · Inbox{" "}
           <ArrowRight aria-hidden="true" />
         </a>
@@ -524,7 +524,7 @@ export function ProjectsPanel({
       <ul className="overview-projects">
         {rows.map((row, index) => (
           <li key={row.id}>
-            <a href={`/app/projects/${row.id}`} className="overview-project">
+            <a href={`/projects/${row.id}`} className="overview-project">
               <span
                 className="overview-dot"
                 data-slot={index % 3}
@@ -583,7 +583,7 @@ export function CompletedPanel({
       </ul>
       <a
         className="control work-link"
-        href={`/app/tasks?state=Done&ready=any${project ? `&project=${project}` : ""}`}
+        href={`/tasks?state=Done&ready=any${project ? `&project=${project}` : ""}`}
       >
         View completed <ArrowRight aria-hidden="true" />
       </a>

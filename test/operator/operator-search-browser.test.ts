@@ -58,7 +58,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks?view=board&q=Shared`);
+  await page.goto(`${web.origin}/tasks?view=board&q=Shared`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
@@ -164,9 +164,9 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page.unroute("**/api/operator/search?*");
   // The board is not a task or an Inbox item, so there is no Back; browser Back still restores it.
   assert.equal(await page.getByRole("button", { name: backName }).count(), 0);
-  await historyUntil(page, "back", (url) => url.pathname === "/app/tasks");
-  assert.equal(page.url(), `${web.origin}/app/tasks?view=board&q=Shared`);
-  await page.goto(`${web.origin}/app/projects/${b.projectId}`);
+  await historyUntil(page, "back", (url) => url.pathname === "/tasks");
+  assert.equal(page.url(), `${web.origin}/tasks?view=board&q=Shared`);
+  await page.goto(`${web.origin}/projects/${b.projectId}`);
   await page.getByRole("heading", { name: "Beta", exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page
@@ -201,7 +201,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await historyUntil(
     page,
     "back",
-    (url) => url.pathname === `/app/projects/${b.projectId}`,
+    (url) => url.pathname === `/projects/${b.projectId}`,
   );
   await page.setViewportSize({ width: 1366, height: 900 });
   await openSearchFromSidebar(page);
@@ -272,12 +272,10 @@ test("shared Search preserves exact historical target, dates, selected focus and
     }
     const pathname = new URL(page.url()).pathname;
     assert.ok(
-      ["/app/search", "/app/tasks", `/app/projects/${b.projectId}`].includes(
-        pathname,
-      ),
+      ["/search", "/tasks", `/projects/${b.projectId}`].includes(pathname),
       `Unexpected history destination: ${pathname}`,
     );
-    if (pathname === "/app/search") {
+    if (pathname === "/search") {
       await page
         .getByLabel("Search retained task, decision and result records")
         .waitFor();
@@ -292,7 +290,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
     } else {
       await page
         .getByRole("heading", {
-          name: pathname === "/app/tasks" ? "All tasks" : "Beta",
+          name: pathname === "/tasks" ? "All tasks" : "Beta",
           exact: true,
         })
         .waitFor();
@@ -371,7 +369,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
     );
     assert.equal(await page.locator("[data-search-record]").count(), 0);
     await page.goBack();
-    if (new URL(page.url()).pathname === "/app/search") {
+    if (new URL(page.url()).pathname === "/search") {
       await page
         .getByLabel("Search retained task, decision and result records")
         .waitFor();
@@ -386,7 +384,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
     await page
       .goForward({ waitUntil: "commit" })
       .catch((error) => assert.match(String(error), /ERR_ABORTED/));
-    if (new URL(page.url()).pathname === "/app/search")
+    if (new URL(page.url()).pathname === "/search")
       assert.equal(new URL(page.url()).search, "");
   }
 });
@@ -426,7 +424,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?result=${old.resultId}&source=${a.source.sourceId}&assignment=${a.assignmentId}`,
+    `${web.origin}/tasks/${a.taskId}?result=${old.resultId}&source=${a.source.sourceId}&assignment=${a.assignmentId}`,
   );
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -481,7 +479,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   await historyUntil(
     page,
     "back",
-    (url) => url.pathname === "/app/search" && !url.search,
+    (url) => url.pathname === "/search" && !url.search,
   );
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
   await page.goBack();
@@ -570,7 +568,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   await historyUntil(
     page,
     "back",
-    (url) => url.pathname === "/app/search" && !url.search,
+    (url) => url.pathname === "/search" && !url.search,
   );
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
   await page.goBack();
@@ -606,7 +604,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
   const page = await browser.newPage();
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel("Editable reply").fill("Exact in-flight reply");
@@ -724,15 +722,15 @@ test("Search shows Back only after arriving from a task or Inbox item", async (_
   page.setDefaultTimeout(5000);
   const back = page.getByRole("button", { name: backName, exact: true });
   const searchField = page.getByLabel(searchFieldLabel);
-  const taskURL = `${web.origin}/app/tasks/${task.taskId}`;
+  const taskURL = `${web.origin}/tasks/${task.taskId}`;
 
   // Direct entry, with and without a query, and a reload: nothing to go back to.
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await searchField.waitFor();
   assert.equal(await back.count(), 0);
-  await page.goto(`${web.origin}/app/search?query=Zebra%20anchor`);
+  await page.goto(`${web.origin}/search?query=Zebra%20anchor`);
   await page.locator("#search-count").waitFor();
   assert.equal(await back.count(), 0);
   // A reload purges the private query and the origin along with it.
@@ -743,14 +741,13 @@ test("Search shows Back only after arriving from a task or Inbox item", async (_
 
   // Overview, the board, a project page and the Inbox list are not items.
   for (const origin of [
-    "/app",
-    "/app/tasks?view=board",
-    `/app/projects/${task.projectId}`,
-    "/app/inbox",
+    "/",
+    "/tasks?view=board",
+    `/projects/${task.projectId}`,
+    "/inbox",
   ]) {
     await page.goto(`${web.origin}${origin}`);
-    if (origin === "/app/inbox")
-      await page.locator(".inbox-row").first().waitFor();
+    if (origin === "/inbox") await page.locator(".inbox-row").first().waitFor();
     assert.equal(
       page.url(),
       `${web.origin}${origin}`,
@@ -795,7 +792,7 @@ test("Search shows Back only after arriving from a task or Inbox item", async (_
   assert.equal(await searchField.count(), 0);
 
   // An Inbox item returns to that exact item.
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.locator(".inbox-row").first().click();
   const pressed = page.locator(".inbox-row[aria-pressed='true']");
   await pressed.waitFor();
@@ -890,7 +887,7 @@ test("Search leads with the field and shows filters beside the result count once
     );
 
   // Before a query: the field and one coverage line, no filters.
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel(searchFieldLabel).waitFor();
@@ -1074,7 +1071,7 @@ test("Search leads with the field and shows filters beside the result count once
         })
       : route.continue(),
   );
-  await page.goto(`${web.origin}/app/search?query=Leads`);
+  await page.goto(`${web.origin}/search?query=Leads`);
   await page.getByRole("alert").waitFor();
   assert.equal(await page.locator("#search-count").count(), 0);
   for (const control of Object.values(filters))
@@ -1108,7 +1105,7 @@ test("Search leads with the field and shows filters beside the result count once
       )
       .finally(delivered);
   });
-  await page.goto(`${web.origin}/app/search?query=Leads`);
+  await page.goto(`${web.origin}/search?query=Leads`);
   await entry;
   await replaced(async () => {
     await filters.type.selectOption("result");
@@ -1125,7 +1122,7 @@ test("Search leads with the field and shows filters beside the result count once
 
   // Phone: the header controls stay 44px and the note stays one line.
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await searchRecords(page, "Leads");
   const heights = await page
     .locator(
@@ -1206,7 +1203,7 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
       });
     });
 
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel(searchFieldLabel).waitFor();
@@ -1332,7 +1329,7 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   await page.locator("[data-search-record] a").first().waitFor();
   await field("From date").fill(day(-3));
   await page.locator("[data-search-record] a").first().click();
-  await page.waitForURL((url) => url.pathname.startsWith("/app/tasks/"));
+  await page.waitForURL((url) => url.pathname.startsWith("/tasks/"));
   await page.goBack();
   await page.waitForURL(searchURL);
   assert.equal(await field("From date").inputValue(), day(-1));
@@ -1384,7 +1381,7 @@ test("Search applies the whole header form in one navigation, whichever control 
   const open = async () => {
     // Re-entering the current URL would be a reload, which purges the private query.
     await page.goto("about:blank");
-    await page.goto(`${web.origin}/app/search?query=Matrix`);
+    await page.goto(`${web.origin}/search?query=Matrix`);
     await page.locator("#search-count").waitFor();
   };
   const replaced = async (action: () => Promise<unknown>) => {
@@ -1397,7 +1394,7 @@ test("Search applies the whole header form in one navigation, whichever control 
       .waitFor({ state: "detached" });
   };
 
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel(searchFieldLabel).waitFor();
@@ -1513,7 +1510,7 @@ test("Search applies the whole header form in one navigation, whichever control 
       if (navigates)
         for (const [name, value] of Object.entries(expected))
           assert.equal(searchParam(name), value, `${label}: ${name}`);
-      else assert.equal(page.url(), `${web.origin}/app/search?query=Matrix`);
+      else assert.equal(page.url(), `${web.origin}/search?query=Matrix`);
       assert.equal(
         await page.getByText("Dates not applied yet.").count(),
         0,
@@ -1593,7 +1590,7 @@ test("Search applies the whole header form in one navigation, whichever control 
       )
       .finally(delivered);
   });
-  await page.goto(`${web.origin}/app/search?query=Matrix`);
+  await page.goto(`${web.origin}/search?query=Matrix`);
   await entry;
   await replaced(async () => {
     await field("Record type").selectOption("result");

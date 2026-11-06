@@ -70,7 +70,7 @@ interface Surface {
 const surfaces: Surface[] = [
   {
     name: "General",
-    path: "/app/projects/:atlas/settings",
+    path: "/projects/:atlas/settings",
     save: "Save project",
     command: "project.configure",
     edit: (page) =>
@@ -94,7 +94,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "Routing",
-    path: "/app/projects/:relay/settings?tab=routing",
+    path: "/projects/:relay/settings?tab=routing",
     save: "Save routing",
     command: "routing.configure",
     edit: (page) => page.getByRole("checkbox", { name: /^Nora ·/ }).check(),
@@ -277,7 +277,7 @@ for (const [device, viewport] of [
 test("Profile edit, capacity, Claude token and discovery saves each leave one message", async (_t, journey) => {
   const { page, ids, web } = await startSettings(
     journey,
-    "/app/profiles/:reviewer/settings",
+    "/profiles/:reviewer/settings",
     desktop,
   );
   const go = async (path: string) => {
@@ -289,13 +289,13 @@ test("Profile edit, capacity, Claude token and discovery saves each leave one me
   await page.getByRole("button", { name: "Save agent" }).click();
   await savedOutcome(page);
 
-  await go("/app/settings/runtime");
+  await go("/settings/runtime");
   await page.getByLabel("Global active-turn cap", { exact: true }).fill("1");
   await page.getByRole("button", { name: "Save capacity" }).click();
   await savedOutcome(page);
 
   // Each credential row keeps the confirmation of its own save.
-  await go("/app/settings");
+  await go("/settings");
   const claude = page.getByRole("region", {
     name: "Claude subscription token",
   });
@@ -345,7 +345,7 @@ const configurationReads = (page: Page) => {
 test("a placement recorded through Check in a mounted row shows one saved line and resolves", async (_t, journey) => {
   const { f, ids, web, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=sync",
+    "/projects/:atlas/settings?tab=sync",
     desktop,
   );
   const d = f.service.domain();
@@ -365,7 +365,7 @@ test("a placement recorded through Check in a mounted row shows one saved line a
   const taskId = randomUUID();
   seedImportedConflict(f, taskId, [ids.atlas, ids.fieldnotes]);
   await page.goto(
-    web.origin + resolve("/app/projects/:atlas/settings?tab=sync", ids),
+    web.origin + resolve("/projects/:atlas/settings?tab=sync", ids),
   );
   const row = page.getByLabel("Placement project", { exact: true });
   await row.selectOption({ label: "Fieldnotes" });
@@ -399,7 +399,7 @@ test("a placement recorded through Check in a mounted row shows one saved line a
 test("Review changes without a manual Refresh loads the newer version, keeps the input and saves", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
     desktop,
   );
   const name = page.getByLabel("Project name", { exact: true });
@@ -473,7 +473,7 @@ const saveSourceElsewhere = async (d: Fixture) => {
 test("Sync & placement marks active selections and drops the marker when the source changes", async (_t, journey) => {
   const fixture = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=sync",
+    "/projects/:atlas/settings?tab=sync",
     desktop,
     undefined,
     { readerFactory: reader },
@@ -498,7 +498,7 @@ test("Sync & placement marks active selections and drops the marker when the sou
 test("activation by another client after the page loaded reads as already active", async (_t, journey) => {
   const fixture = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=sync",
+    "/projects/:atlas/settings?tab=sync",
     desktop,
     undefined,
     { readerFactory: reader },
@@ -523,7 +523,7 @@ test("activation by another client after the page loaded reads as already active
 test("observation rows of withheld selections show no activation marker", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=sync",
+    "/projects/:atlas/settings?tab=sync",
     desktop,
     undefined,
     { readerFactory: reader },

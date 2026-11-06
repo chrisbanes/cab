@@ -97,7 +97,7 @@ if (args.length !== 1 || args[0] !== "--live") {
       page.setDefaultTimeout(15_000);
       page.setDefaultNavigationTimeout(15_000);
       phase = "unauthenticated private read";
-      const privatePath = `/app/projects/${encodeURIComponent(config.projectId)}/settings`;
+      const privatePath = `/projects/${encodeURIComponent(config.projectId)}/settings`;
       assert.equal(
         (await page.goto(config.origin + privatePath))?.status(),
         200,
@@ -114,7 +114,7 @@ if (args.length !== 1 || args[0] !== "--live") {
       );
       assert.ok(anonymousCookie);
       phase = "unauthenticated runtime and workspace reads";
-      await page.goto(`${config.origin}/app/settings/runtime`);
+      await page.goto(`${config.origin}/settings/runtime`);
       await page
         .getByRole("button", { name: "Sign in", exact: true })
         .waitFor();

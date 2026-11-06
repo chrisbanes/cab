@@ -398,7 +398,7 @@ export function ImportPanel(
             tone="error"
             message={sourceCredentialCopy(data.source.credential?.reason)}
           >
-            <a href={`/app/projects/${projectId}/settings?tab=github`} {...tab}>
+            <a href={`/projects/${projectId}/settings?tab=github`} {...tab}>
               Set or change source credential
             </a>
           </ActionOutcome>
@@ -439,7 +439,7 @@ export function ImportPanel(
               </>
             }
           >
-            <a href={`/app/projects/${projectId}?ready=any`} {...tab}>
+            <a href={`/projects/${projectId}?ready=any`} {...tab}>
               View imported tasks
             </a>
           </ActionOutcome>

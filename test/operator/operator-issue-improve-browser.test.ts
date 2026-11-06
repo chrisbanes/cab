@@ -178,7 +178,7 @@ async function launch(
   page.setDefaultTimeout(8000);
   const commands = recordCommands(page);
   const open = async () => {
-    await page.goto(`${web.origin}/app/tasks/${taskId}`);
+    await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByRole("button", { name: "Improve with lead" }).waitFor();

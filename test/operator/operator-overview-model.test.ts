@@ -241,7 +241,7 @@ const runtimeItem = (): RuntimeInboxItem => ({
   reason: "Restart retries exhausted",
   lastFailure: "exited",
   attempts: [],
-  destination: "/app/settings/runtime",
+  destination: "/settings/runtime",
 });
 
 test("an exhausted runtime ranks before every task request, counts in Needs you and is named by its runtime", () => {

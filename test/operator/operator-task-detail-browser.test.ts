@@ -154,7 +154,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const h1 = page.locator("main.page h1");
   await page
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
@@ -188,10 +188,10 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   );
   assert.equal(
     await header.getByRole("link", { name: "Execution" }).getAttribute("href"),
-    `/app/tasks/${a.taskId}?section=execution`,
+    `/tasks/${a.taskId}?section=execution`,
   );
   const back = header.getByRole("link", { name: "Back to Atlas", exact: true });
-  assert.equal(await back.getAttribute("href"), `/app/projects/${a.projectId}`);
+  assert.equal(await back.getAttribute("href"), `/projects/${a.projectId}`);
   assert.ok(await back.isVisible());
   assert.equal(
     await page
@@ -464,12 +464,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(
-    page,
-    web.origin,
-    web.password,
-    "/app/tasks?view=board&ready=any",
-  );
+  await signIn(page, web.origin, web.password, "/tasks?view=board&ready=any");
   const card = page.locator(`[data-task-id="${a.taskId}"] .task-title`);
   await card.waitFor();
   // Columns and rails now fit one 1366 screen; widen them so the board still scrolls.
@@ -508,7 +503,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   const length = await page.evaluate(() => history.length);
   await back.click();
   await page.waitForURL(
-    (u) => u.pathname === "/app/tasks" && u.search === "?view=board&ready=any",
+    (u) => u.pathname === "/tasks" && u.search === "?view=board&ready=any",
   );
   assert.equal(await page.evaluate(() => history.length), length);
   await card.waitFor();
@@ -522,7 +517,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
       .requestSubmit();
     return offset;
   });
-  await page.waitForURL((u) => u.pathname === "/app/search");
+  await page.waitForURL((u) => u.pathname === "/search");
   assert.equal(await page.evaluate(() => history.state?.board), undefined);
   await page.goBack();
   await card.waitFor();
@@ -543,7 +538,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     return offset;
   });
   assert.ok(shortcutScroll > 0 && shortcutScroll !== searchScroll);
-  await page.waitForURL((u) => u.pathname === "/app/search");
+  await page.waitForURL((u) => u.pathname === "/search");
   assert.equal(await page.evaluate(() => history.state?.board), undefined);
   await page.goBack();
   await card.waitFor();
@@ -568,7 +563,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   });
   try {
     // Sign in again in the same document, at the address sign-out kept.
-    assert.equal(new URL(page.url()).pathname, `/app/tasks/${a.taskId}`);
+    assert.equal(new URL(page.url()).pathname, `/tasks/${a.taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page
@@ -619,7 +614,7 @@ test("An empty local task says so honestly", async (_t, j) => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
@@ -686,7 +681,7 @@ test("A question opened on the task page names its requester", async (_t, j) => 
     page,
     web.origin,
     web.password,
-    `/app/tasks/${q.taskId}?request=${q.interactionId}`,
+    `/tasks/${q.taskId}?request=${q.interactionId}`,
   );
   await page
     .getByRole("region", { name: "Exact question response" })
@@ -737,7 +732,7 @@ test("A rejected completion is a decision the strip and decision card both name"
     page,
     web.origin,
     web.password,
-    `/app/tasks/${a.taskId}?section=files`,
+    `/tasks/${a.taskId}?section=files`,
   );
   const next = page
     .locator("[data-task-strip]")
@@ -749,7 +744,7 @@ test("A rejected completion is a decision the strip and decision card both name"
     await card
       .getByRole("link", { name: "Message the lead" })
       .getAttribute("href"),
-    `/app/tasks/${a.taskId}?section=reply`,
+    `/tasks/${a.taskId}?section=reply`,
   );
   assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
   assert.equal(await card.getByText("No operator decision needed.").count(), 0);
@@ -773,7 +768,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
       await route.fulfill({ response, json });
     },
   );
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
   await strip
     .getByRole("button", { name: "Next: you · inspect execution" })
@@ -783,7 +778,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
     await card
       .getByRole("link", { name: "Inspect uncertain execution" })
       .getAttribute("href"),
-    `/app/tasks/${a.taskId}?section=execution`,
+    `/tasks/${a.taskId}?section=execution`,
   );
   // cab records a routing fallback itself: plain text, never an operator button.
   codes = ["lead-review"];
@@ -842,7 +837,7 @@ for (const engine of [
         )
           stops.push({ body: r.postData() });
       });
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       const stop = page.getByRole("button", { name: "Stop…", exact: true });
       await stop.waitFor();
       await stop.click();
@@ -1101,7 +1096,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   const waits = page.locator(".wait-reasons");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   const list = waits.locator(".wait-list li");
@@ -1114,7 +1109,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
       .nth(0)
       .getByRole("link", { name: "Fix: Choose a lead" })
       .getAttribute("href"),
-    `/app/projects/${projectId}/settings`,
+    `/projects/${projectId}/settings`,
   );
   // A dependency links to the blocking task and has no Fix.
   const dependency = list.nth(1);
@@ -1122,7 +1117,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
     await dependency
       .getByRole("link", { name: "Set up the deploy check" })
       .getAttribute("href"),
-    `/app/tasks/${blocker}`,
+    `/tasks/${blocker}`,
   );
   assert.equal(await dependency.getByText(/^Fix:/).count(), 0);
   assert.equal(await dependency.getByRole("button").count(), 0);
@@ -1182,19 +1177,19 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   assert.equal(d.project(projectId).paused, 0);
 
   // Claude token unavailable opens Add Claude.
-  await page.goto(`${web.origin}/app/tasks/${claudeTask}`);
+  await page.goto(`${web.origin}/tasks/${claudeTask}`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.equal(
     await waits
       .getByRole("link", { name: "Fix: Add Claude" })
       .getAttribute("href"),
-    "/app/settings/runtime#add-claude",
+    "/settings/runtime#add-claude",
   );
   assert.equal(
     await waits
       .getByRole("link", { name: "Fix: Open agent" })
       .getAttribute("href"),
-    `/app/profiles/${claudeLead}/settings`,
+    `/profiles/${claudeLead}/settings`,
   );
   await page.setViewportSize({ width: 390, height: 844 });
   await waits.getByRole("button", { name: "Fix: Resume project" }).waitFor();
@@ -1217,7 +1212,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
 
   // A revoked delegate profile is listed by its label and name, and its Fix opens that profile.
   await page.setViewportSize({ width: 1366, height: 900 });
-  await page.goto(`${web.origin}/app/tasks/${delegateTask}`);
+  await page.goto(`${web.origin}/tasks/${delegateTask}`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
     "Assignment agent revoked",
@@ -1228,7 +1223,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
     await revoked
       .getByRole("link", { name: "Fix: Open agent" })
       .getAttribute("href"),
-    `/app/profiles/${revokedWorker}/settings`,
+    `/profiles/${revokedWorker}/settings`,
   );
   assert.equal(await revoked.locator(".wait-detail").innerText(), "Linus");
 });
@@ -1285,7 +1280,7 @@ test("Holds stay listed beneath Fix: Resume project with what clears them and Ex
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   const waits = page.locator(".wait-reasons");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   const primary = waits.locator(".wait-primary");
@@ -1312,7 +1307,7 @@ test("Holds stay listed beneath Fix: Resume project with what clears them and Ex
   for (const href of await links.evaluateAll((a) =>
     a.map((x) => x.getAttribute("href")),
   ))
-    assert.equal(href, `/app/tasks/${taskId}?section=execution`);
+    assert.equal(href, `/tasks/${taskId}?section=execution`);
   // Holds are never a Fix: no buttons and no Fix text inside the list.
   assert.equal(await held.getByRole("button").count(), 0);
   assert.equal(await held.getByText(/^Fix:/).count(), 0);
@@ -1480,7 +1475,7 @@ test("Task detail explains a held assignment, revoked repository access and unre
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   const waits = page.locator(".wait-reasons");
   const list = waits.locator(".wait-list li");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
@@ -1525,14 +1520,14 @@ test("Task detail explains a held assignment, revoked repository access and unre
       .nth(0)
       .getByRole("link", { name: "Fix: Open repositories" })
       .getAttribute("href"),
-    `/app/projects/${projectId}/settings?tab=repositories`,
+    `/projects/${projectId}/settings?tab=repositories`,
   );
   const recovery = list.nth(2);
   assert.equal(
     await recovery
       .getByRole("link", { name: "Open recovery" })
       .getAttribute("href"),
-    `/app/assignments/${assignmentId}/recovery`,
+    `/assignments/${assignmentId}/recovery`,
   );
   assert.equal(await recovery.getByText(/^Fix:/).count(), 0);
   assert.equal(await recovery.locator(".wait-detail").innerText(), "Linus");
@@ -1557,14 +1552,14 @@ test("An approval request opens the approval review, not the question form", asy
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   // The card lists the approval as a request; the merged approval wait is not repeated.
   const review = page
     .locator("section#decisions .decision")
     .getByRole("link", { name: "Review material & decide" });
   assert.equal(
     await review.getAttribute("href"),
-    `/app/tasks/${a.taskId}?request=${a.interactionId}`,
+    `/tasks/${a.taskId}?request=${a.interactionId}`,
   );
   await review.click();
   // The task's request view shows the exact material and decides it in place.
@@ -1635,10 +1630,8 @@ test("A recovery approval shows its exact material and a compare link on its cod
       await route.fulfill({ response, json });
     },
   );
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-  );
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   const panel = page.locator(
     `.approval-review[data-record-id="${a.interactionId}"]`,
   );
@@ -1719,7 +1712,7 @@ for (const engine of ["chromium", "webkit"] as const)
       const fixture = await openFixture(j, engine);
       const a = await seed(fixture.f);
       const { web, page, commands } = await fixture.launch();
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       const tabs = page
         .getByRole("tablist", { name: "Task sections" })
         .getByRole("tab");
@@ -1791,7 +1784,7 @@ test("Task deep links open their tab on the first paint", async (_t, j) => {
       observer.disconnect();
     }).observe(document, { childList: true, subtree: true });
   });
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await taskTab(page, "Overview").waitFor();
   const cases: [string, string][] = [
     ["?section=files", "Files"],
@@ -1805,7 +1798,7 @@ test("Task deep links open their tab on the first paint", async (_t, j) => {
     ["?section=execution", "Execution"],
   ];
   for (const [query, name] of cases) {
-    await page.goto(`${web.origin}/app/tasks/${a.taskId}${query}`);
+    await page.goto(`${web.origin}/tasks/${a.taskId}${query}`);
     await page
       .getByRole("heading", {
         name: "Ship an accessible command menu",
@@ -1832,7 +1825,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
     height: 700,
   });
   await page.clock.install();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page
     .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
@@ -1998,7 +1991,7 @@ test("An open approval leads Overview and stays reachable from every tab through
     },
   );
   await page.clock.install();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
   await strip.getByText("No operator decision", { exact: true }).waitFor();
   await openTaskTab(page, "Files");
@@ -2041,7 +2034,7 @@ test("An open approval leads Overview and stays reachable from every tab through
     await decision
       .getByRole("link", { name: "Review material & decide" })
       .getAttribute("href"),
-    `/app/tasks/${a.taskId}?request=${a.interactionId}`,
+    `/tasks/${a.taskId}?request=${a.interactionId}`,
   );
   assert.equal(
     await card.getByRole("button", { name: /Approve|Deny/ }).count(),
@@ -2175,7 +2168,7 @@ test("An imported task separates read-only GitHub source from cab execution", as
     reason: null,
   });
   const { web, page, commands } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${ids.importedId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${ids.importedId}`);
   const strip = page.locator("[data-task-strip]");
   await strip.locator(".task-source-chip").waitFor();
   const read = await page.evaluate(
@@ -2291,7 +2284,7 @@ test("An imported task separates read-only GitHub source from cab execution", as
   });
 
   // A local task shows neither the GitHub group nor its note.
-  await page.goto(`${web.origin}/app/tasks/${ids.ready}`);
+  await page.goto(`${web.origin}/tasks/${ids.ready}`);
   await page.locator('aside[aria-label="Task context"]').waitFor();
   assert.equal(
     await page.getByText("GitHub owns the issue.", { exact: false }).count(),
@@ -2334,7 +2327,7 @@ test("A question opened on the task page keeps the holds an answer does not clea
     page,
     web.origin,
     web.password,
-    `/app/tasks/${q.taskId}?request=${q.interactionId}`,
+    `/tasks/${q.taskId}?request=${q.interactionId}`,
   );
   const form = page.getByRole("region", { name: "Exact question response" });
   await form.getByText("Recommended by Task lead", { exact: true }).waitFor();
@@ -2414,7 +2407,7 @@ test("The decision card and inspector list only the other open approvals as hold
     page,
     web.origin,
     web.password,
-    `/app/tasks/${a.taskId}?request=${a.interactionId}`,
+    `/tasks/${a.taskId}?request=${a.interactionId}`,
   );
   const holds = page.locator("section#decisions .question-holds"),
     aside = page.getByRole("complementary", { name: "Task context" }),
@@ -2439,7 +2432,7 @@ test("The decision card and inspector list only the other open approvals as hold
 
   // Nothing selected: both approvals are rows already, so neither surface repeats them as a hold.
   await serveApprovals(page, a.taskId, [a.interactionId, other]);
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await aside.getByText("Holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await page.getByText(approvalHold).count(), 0);
@@ -2477,7 +2470,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
   );
   a.result("Guide drafted");
   const { web, page, commands } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page
     .getByRole("heading", { name: "Latest result", level: 3 })
     .waitFor();
@@ -2557,7 +2550,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
   );
   a.result("Guide drafted");
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page.getByLabel("Editable reply").waitFor();
   // The shared comment names its one rule; the lead's completed assignment is previewed below the box.
   assert.deepEqual(await sentencesAboveReply(page), [`P:${commentNote}`]);
@@ -2647,7 +2640,7 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
     ready: false,
   });
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   await page.getByLabel("Editable reply").waitFor();
   assert.deepEqual(await sentencesAboveReply(page), [`P:${commentNote}`]);
   // With no lead, nothing is selected: the comment is recorded for the task only.
@@ -2663,7 +2656,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   const a = await seedImportedCommentTask(fixture.f, "approval");
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page.getByRole("button", { name: "Post GitHub comment" }).click();
   await page.getByLabel("Editable reply").fill("Exact comment body");
   assert.deepEqual(await sentencesAboveReply(page), [
@@ -2777,7 +2770,7 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   const a = await seedImportedCommentTask(fixture.f, "allow");
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const lead = page.getByRole("button", { name: "Comment on task" });
   await lead.waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
@@ -2828,7 +2821,7 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
     "Write the guide.",
   );
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
   const view = review.getByRole("button", { name: "Set viewing reference" });
@@ -2867,7 +2860,7 @@ test("A viewing reference the service refuses while the task page is away says s
   );
   a.result("Guide drafted");
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const review = page.locator("#review");
   const view = review.getByRole("button", { name: "Set viewing reference" });
   await view.waitFor();
@@ -2893,7 +2886,7 @@ test("A viewing reference the service refuses while the task page is away says s
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   release();
   await page.waitForTimeout(300);
   await page.goBack();
@@ -2912,7 +2905,7 @@ test("The outcome shows its first line and a closed disclosure with rendered Mar
   const fixture = await openFixture(j);
   const a = await seed(fixture.f);
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const subtitle = page.locator(".page-header-title p.introduction");
   await subtitle.waitFor();
   assert.equal(await subtitle.textContent(), "Context");
@@ -2963,7 +2956,7 @@ test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => 
       await route.fulfill({ response, json });
     },
   );
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
     .waitFor();
@@ -3014,7 +3007,7 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
     ],
   });
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const result = page.locator(`#review [data-record-id="${r2.resultId}"]`);
   await result.waitFor();
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/;
@@ -3252,7 +3245,7 @@ test("The delivery block names a GitLab merge request, its link and its read, an
       await route.fulfill({ response, json });
     },
   );
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await openTaskTab(page, "Changes");
   const changes = page.locator("#changes");
   const link = changes.getByRole("link", { name: "group/sub/app!12" });
@@ -3379,7 +3372,7 @@ test("The delivery block links the PR, says its state and blockers in words, and
     ]),
   );
   reads.set(other.taskId, read(null));
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await openTaskTab(page, "Changes");
   const changes = page.locator("#changes");
   const prLink = changes.getByRole("link", { name: "acme/app#12" });
@@ -3578,12 +3571,12 @@ test("The delivery block links the PR, says its state and blockers in words, and
     a.taskId,
     read({ checks: [{ name: "build", sha: head, status: "success" }] }),
   );
-  await open(`/app/tasks/${other.taskId}`);
+  await open(`/tasks/${other.taskId}`);
   await changes
     .getByRole("button", { name: "Refresh delivery status" })
     .waitFor();
   assert.equal(await changes.getByText(/#12|PR #|build:/).count(), 0);
-  await open(`/app/tasks/${a.taskId}`);
+  await open(`/tasks/${a.taskId}`);
   await prLink.waitFor();
   await changes.getByText("build: Passed", { exact: true }).waitFor();
   assert.equal(await changes.getByText("No GitHub link").count(), 0);
@@ -3609,7 +3602,7 @@ test("Delivery feedback leaves with the delivery controls and returns with them"
   a.result("Guide drafted");
   setLinkedRepository(fixture.f, a.projectId, true);
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page.getByLabel("Editable reply").fill("Keep this draft");
   await openTaskTab(page, "Changes");
   const changes = page.locator("#changes");
@@ -3650,7 +3643,7 @@ test("An unconfirmed delivery refresh stays checkable after delivery stops apply
   a.result("Guide drafted");
   setLinkedRepository(fixture.f, a.projectId, true);
   const { web, page } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await openTaskTab(page, "Changes");
   const bodies: { key?: string; type?: string }[] = [];
   let lost = true;
@@ -3706,7 +3699,7 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
     .sources(a.taskId)
     .at(-1)!.sourceId;
   const { web, page, commands } = await fixture.launch();
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const box = page.getByLabel("Editable reply");
   const post = page.getByRole("button", { name: "Post comment", exact: true });
   // A contextual lead draft with its immutable reference, then an approved GitHub comment.
@@ -3861,7 +3854,7 @@ for (const engine of ["chromium", "webkit"] as const)
       });
       const { web, page } = await fixture.launch();
       await serveApprovals(page, a.taskId, [a.interactionId, randomUUID()]);
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await page.locator("section#decisions .decision").nth(1).waitFor();
       await expectOverviewOrder(page, overviewOrder);
 
@@ -4013,7 +4006,7 @@ for (const engine of ["chromium", "webkit"] as const)
           .run(held, "Archival is awaiting review"),
       );
       const { web, page } = await fixture.launch();
-      const open1 = `/app/tasks/${open.taskId}`;
+      const open1 = `/tasks/${open.taskId}`;
       await signIn(page, web.origin, web.password, open1);
       const present = (selectors: string[]) =>
         Promise.all(selectors.map((s) => page.locator(s).count())).then(
@@ -4061,7 +4054,7 @@ for (const engine of ["chromium", "webkit"] as const)
       await page.unrouteAll({ behavior: "wait" });
 
       // Holds are lines inside the decision card, above the result.
-      await page.goto(`${web.origin}/app/tasks/${held}`);
+      await page.goto(`${web.origin}/tasks/${held}`);
       await page.locator("section#decisions .wait-reasons").waitFor();
       assert.ok(
         (
@@ -4076,7 +4069,7 @@ for (const engine of ["chromium", "webkit"] as const)
       );
 
       // An imported task keeps the order and the source chip.
-      await page.goto(`${web.origin}/app/tasks/${ids.importedId}`);
+      await page.goto(`${web.origin}/tasks/${ids.importedId}`);
       await page.locator("[data-task-strip] .task-source-chip").waitFor();
       await expectOverviewOrder(page, await present(overviewOrder));
       assert.equal(
@@ -4102,7 +4095,7 @@ for (const engine of ["chromium", "webkit"] as const)
       });
       a.delegatedResult("Linked newer result", { sourceId: a.source.sourceId });
       const { web, page } = await fixture.launch();
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await taskTab(page, "Overview").waitFor();
       const hits = await page.evaluate(
         (query) =>
@@ -4253,7 +4246,7 @@ for (const engine of ["chromium", "webkit"] as const)
       for (const c of cases) {
         // A hash-only change would stay in the loaded page; every link opens as a fresh load.
         await page.goto("about:blank");
-        await page.goto(`${web.origin}/app/tasks/${a.taskId}${c.link}`);
+        await page.goto(`${web.origin}/tasks/${a.taskId}${c.link}`);
         await page
           .getByRole("heading", { name: "Choose full form", level: 1 })
           .waitFor();
@@ -4292,7 +4285,7 @@ for (const engine of ["chromium", "webkit"] as const)
       }
       // ?source= also selects that retained revision; ?result= selects that result.
       await page.goto(
-        `${web.origin}/app/tasks/${a.taskId}?source=${a.source.sourceId}`,
+        `${web.origin}/tasks/${a.taskId}?source=${a.source.sourceId}`,
       );
       await page.locator("#retained-source-revision").waitFor();
       assert.equal(
@@ -4300,7 +4293,7 @@ for (const engine of ["chromium", "webkit"] as const)
         a.source.sourceId,
       );
       await page.goto(
-        `${web.origin}/app/tasks/${a.taskId}?result=${older.resultId}`,
+        `${web.origin}/tasks/${a.taskId}?result=${older.resultId}`,
       );
       await page.locator("#retained-result-revision").waitFor();
       assert.equal(
@@ -4309,13 +4302,13 @@ for (const engine of ["chromium", "webkit"] as const)
       );
 
       // A link followed in place reopens a card the operator closed, then focuses it.
-      await page.goto(`${web.origin}/app/tasks/${a.taskId}?section=brief`);
+      await page.goto(`${web.origin}/tasks/${a.taskId}?section=brief`);
       await overviewCard(page, "brief").locator("> summary").click();
       assert.equal(
         await overviewCard(page, "brief").getAttribute("open"),
         null,
       );
-      await followInApp(page, `/app/tasks/${a.taskId}?section=brief`);
+      await followInApp(page, `/tasks/${a.taskId}?section=brief`);
       await page.locator("#brief > details[open]").waitFor();
       await page.waitForFunction(
         () =>
@@ -4368,7 +4361,7 @@ for (const engine of ["chromium", "webkit"] as const)
         },
       );
       await page.clock.install();
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await page.locator("section#review").waitFor();
       await openOverviewCard(page, "brief");
       await openOverviewCard(page, "evidence");
@@ -4447,7 +4440,7 @@ for (const engine of ["chromium", "webkit"] as const)
       );
 
       // Another task starts with all three cards closed.
-      await followInApp(page, `/app/tasks/${other.taskId}`);
+      await followInApp(page, `/tasks/${other.taskId}`);
       await page
         .getByRole("heading", {
           name: "Ship an accessible command menu",
@@ -4484,7 +4477,7 @@ for (const engine of ["chromium", "webkit"] as const)
         ],
       });
       const { web, page } = await fixture.launch({ width: 1366, height: 700 });
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await page.locator("section#review").waitFor();
       // The conversation fills in above the inspector's cards; read positions after it has.
       await page
@@ -4510,7 +4503,7 @@ for (const engine of ["chromium", "webkit"] as const)
         );
 
       // Leaving the task and pressing Back restores the card, the scroll and the focus.
-      await followInApp(page, "/app/tasks");
+      await followInApp(page, "/tasks");
       await page
         .getByRole("heading", { name: "All tasks", exact: true })
         .waitFor();
@@ -4586,7 +4579,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     )
       stops.push(r.url());
   });
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page
     .getByRole("heading", {
       name: "Ship an accessible command menu",
@@ -4723,7 +4716,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await settle(page);
 
   // An imported task's identity is its repository and number.
-  await page.goto(`${web.origin}/app/tasks/${ids.importedId}`);
+  await page.goto(`${web.origin}/tasks/${ids.importedId}`);
   await header.locator(".page-subtitle-short").waitFor();
   assert.equal(
     await header.locator(".page-subtitle-short").textContent(),
@@ -4731,7 +4724,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   );
 
   // A finished task offers Execution and no Stop….
-  await page.goto(`${web.origin}/app/tasks/${finished.taskId}`);
+  await page.goto(`${web.origin}/tasks/${finished.taskId}`);
   await toggle.click();
   assert.deepEqual(
     await header
@@ -4744,7 +4737,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   );
 
   // A recorded Stop offers Resume… in place of Stop….
-  await page.goto(`${web.origin}/app/tasks/${stopped.taskId}`);
+  await page.goto(`${web.origin}/tasks/${stopped.taskId}`);
   await toggle.click();
   const resume = header.getByRole("button", { name: "Resume…", exact: true });
   await resume.waitFor();
@@ -4796,7 +4789,7 @@ for (const engine of ["chromium", "webkit"] as const)
         decisions: [{ text: "Closed card decision", attribution: "Task lead" }],
       });
       const { web, page } = await fixture.launch();
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await taskTab(page, "Overview").waitFor();
       const hrefs = await page.evaluate(() =>
         Promise.all(
@@ -4822,7 +4815,7 @@ for (const engine of ["chromium", "webkit"] as const)
         [decisionHit, "evidence"],
       ] as const) {
         await page.goto("about:blank");
-        await page.goto(`${web.origin}/app/tasks`);
+        await page.goto(`${web.origin}/tasks`);
         await page
           .getByRole("heading", { name: "All tasks", exact: true })
           .waitFor();
@@ -4856,7 +4849,7 @@ for (const engine of ["chromium", "webkit"] as const)
         [`?source=${a.source.sourceId}`, "brief"],
       ] as const) {
         await page.goto("about:blank");
-        await page.goto(`${web.origin}/app/tasks/${a.taskId}${link}`);
+        await page.goto(`${web.origin}/tasks/${a.taskId}${link}`);
         await page.locator(`#${sectionOf(card)} > details[open]`).waitFor();
         // Close it through its summary, leave the task and come Back.
         await overviewCard(page, card).locator("> summary").click();
@@ -4864,7 +4857,7 @@ for (const engine of ["chromium", "webkit"] as const)
           .locator(`#${sectionOf(card)} > details:not([open])`)
           .waitFor();
         await page.evaluate(() => scrollTo(0, 0));
-        await followInApp(page, "/app/tasks");
+        await followInApp(page, "/tasks");
         await page
           .getByRole("heading", { name: "All tasks", exact: true })
           .waitFor();
@@ -4889,7 +4882,7 @@ for (const engine of ["chromium", "webkit"] as const)
       const fixture = await openFixture(j, engine);
       const a = await seed(fixture.f);
       const { web, page } = await fixture.launch({ width: 390, height: 844 });
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await taskTab(page, "Overview").waitFor();
       const overflow = page.locator(
         ".page-header details.task-header-overflow",
@@ -4942,7 +4935,7 @@ for (const engine of ["chromium", "webkit"] as const)
       await overflow.and(page.locator("[open]")).waitFor();
       await page
         .locator(
-          `.task-header-actions a[href="/app/tasks/${a.taskId}?section=execution"]`,
+          `.task-header-actions a[href="/tasks/${a.taskId}?section=execution"]`,
         )
         .click();
       await taskTab(page, "Execution")

@@ -17,7 +17,7 @@ what the service can and cannot use, with one fix line per problem.
 - `cab service install`, which prints this table with its `Fix` lines on
   stderr through local CLI access (or the saved or explicitly provisioned token
   connection), before it opens the app. A failed check does not fail the install.
-- Settings → Readiness (`/app/settings#readiness`), the first section until a task
+- Settings → Readiness (`/settings#readiness`), the first section until a task
   starts a turn and the last afterwards.
 - [Getting started](getting-started.md) Runtime row and [first task](first-task.md)
   Fix actions.

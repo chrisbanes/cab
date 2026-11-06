@@ -20,7 +20,7 @@ import {
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-delivery-config-browser");
-const path = "/app/projects/:atlas/settings?tab=delivery";
+const path = "/projects/:atlas/settings?tab=delivery";
 const save = (page: Page) =>
   page.getByRole("button", { name: "Save delivery", exact: true });
 const read = async (page: Page) => {

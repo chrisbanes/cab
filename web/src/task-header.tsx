@@ -81,7 +81,7 @@ export function taskHeaderReport(
           history: true,
         }
       : {
-          href: `/app/projects/${data.task.projectId}`,
+          href: `/projects/${data.task.projectId}`,
           label: project,
           ariaLabel: `Back to ${project}`,
           history: false,
@@ -192,7 +192,7 @@ export function TaskHeaderActions({
       <div className="task-header-actions">
         <ActionLink
           variant="secondary"
-          href={`/app/tasks/${report.taskId}?section=execution`}
+          href={`/tasks/${report.taskId}?section=execution`}
         >
           Execution
         </ActionLink>

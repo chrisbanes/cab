@@ -104,7 +104,7 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
   });
   assert.equal(
     await addClaude.getAttribute("href"),
-    "/app/settings/runtime#add-claude",
+    "/settings/runtime#add-claude",
   );
   // The fix opens in a new tab, so this ready check is still here afterwards.
   assert.equal(await addClaude.getAttribute("target"), "_blank");
@@ -112,7 +112,7 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
   await addClaude.click();
   const fix = await tab;
   await fix.getByRole("heading", { name: "Add Claude", exact: true }).waitFor();
-  assert.equal(new URL(page.url()).pathname, "/app/settings/projects/new");
+  assert.equal(new URL(page.url()).pathname, "/settings/projects/new");
   assert.equal(await ready.count(), 1);
   assert.equal(await resume.isDisabled(), true);
   assert.equal(
@@ -215,7 +215,7 @@ test("Setup blocks Resume for a Claude lead whose model or effort the runtime re
     await ready
       .getByRole("link", { name: "Edit agent", exact: true })
       .getAttribute("href"),
-    `/app/profiles/${profileId}/settings`,
+    `/profiles/${profileId}/settings`,
   );
   assert.equal(
     sent.some((c) => c.type === "project.configure"),
@@ -245,7 +245,7 @@ test("Setup keeps the project paused when the operator chooses Keep paused", asy
   const keep = ready.getByRole("link", { name: "Keep paused", exact: true });
   assert.equal(
     await keep.getAttribute("href"),
-    `/app/projects/${projectId}/settings`,
+    `/projects/${projectId}/settings`,
   );
   await keep.click();
   await page
@@ -713,7 +713,7 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     await ready
       .getByRole("link", { name: "Delivery settings" })
       .getAttribute("href"),
-    `/app/projects/${projectId}/settings?tab=delivery`,
+    `/projects/${projectId}/settings?tab=delivery`,
   );
   assert.equal(
     f.service.delivery().configuration(projectId).credentialRef,
@@ -727,7 +727,7 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     await ready
       .getByRole("link", { name: "GitHub source settings" })
       .getAttribute("href"),
-    `/app/projects/${projectId}/settings?tab=github`,
+    `/projects/${projectId}/settings?tab=github`,
   );
   assert.equal(
     f.service.domain().githubConfiguration(projectId).credentialRef,
@@ -875,7 +875,7 @@ test("Setup's ready check imports the linked GitHub Project before Resume, then 
   const view = t.ready.getByRole("link", { name: "View imported tasks" });
   assert.equal(
     await view.getAttribute("href"),
-    `/app/projects/${t.projectId}?ready=any`,
+    `/projects/${t.projectId}?ready=any`,
   );
   assert.equal(await view.getAttribute("target"), "_blank");
   assert.deepEqual(t.steps, ["preview", "refresh"]);

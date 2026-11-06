@@ -59,7 +59,7 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
   const port = await http.start();
   t.after(() => http.stop());
   const origin = `http://127.0.0.1:${port}`;
-  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  assert.equal((await fetch(`${origin}/`)).status, 200);
   const stylesheet = await fetch(`${origin}/assets/main.css`);
   assert.equal(stylesheet.status, 200);
   assert.match(stylesheet.headers.get("content-type") ?? "", /text\/css/);
@@ -298,10 +298,15 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
     assert.equal(missing.status, 404);
     assert.match(missing.headers.get("content-type") ?? "", /json/);
   }
-  // An unknown address under /app gets the public shell with 404 so the client renders "Page not found".
-  const shell = await fetch(`${origin}/app`);
+  // An unknown address gets the public shell with 404 so the client renders "Page not found".
+  const shell = await fetch(`${origin}/`);
   const shellBody = await shell.text();
-  for (const path of ["/app/unknown", "/app/", "/app/tasks/not-a-uuid"]) {
+  for (const path of [
+    "/unknown",
+    "/tasks/not-a-uuid",
+    "/robots.txt",
+    "/favicon.ico",
+  ]) {
     const unknown = await fetch(`${origin}${path}`, { headers: { cookie } });
     assert.equal(unknown.status, 404, path);
     assert.match(unknown.headers.get("content-type") ?? "", /^text\/html/);
@@ -311,7 +316,7 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
     );
     assert.equal(await unknown.text(), shellBody);
   }
-  const unknownHead = await fetch(`${origin}/app/unknown`, { method: "HEAD" });
+  const unknownHead = await fetch(`${origin}/unknown`, { method: "HEAD" });
   assert.equal(unknownHead.status, 404);
   assert.equal(await unknownHead.text(), "");
   now += 1001;
@@ -658,6 +663,90 @@ async function webLogout(
   });
   assert.equal(response.status, 200);
 }
+
+test("old /app addresses redirect permanently to the root path with their query", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const web = await f.startWeb();
+  const { cookie } = await webLogin(web);
+  const id = randomUUID();
+  const redirects: Array<[string, string]> = [
+    ["/app", "/"],
+    ["/app/", "/"],
+    ["/app?x=1", "/?x=1"],
+    ["/app/inbox?task=T&request=Q", "/inbox?task=T&request=Q"],
+    [`/app/tasks/${id}?section=execution`, `/tasks/${id}?section=execution`],
+    ["/app/settings/runtime", "/settings/runtime"],
+    [
+      `/app/projects/${id}/settings?tab=delivery`,
+      `/projects/${id}/settings?tab=delivery`,
+    ],
+    ["/app/does-not-exist", "/does-not-exist"],
+    ["/app/service-worker.js", "/service-worker.js"],
+    ["/app//evil.example/x?y=1", "/evil.example/x?y=1"],
+  ];
+  for (const headers of [{}, { cookie }])
+    for (const method of ["GET", "HEAD"])
+      for (const [from, to] of redirects) {
+        const response = await fetch(`${web.origin}${from}`, {
+          method,
+          headers,
+          redirect: "manual",
+        });
+        assert.equal(response.status, 308, `${method} ${from}`);
+        assert.equal(response.headers.get("location"), to, from);
+        assert.equal(response.headers.get("set-cookie"), null, from);
+        assert.equal(response.headers.get("cache-control"), "no-store", from);
+        await response.text();
+      }
+  const post = await fetch(`${web.origin}/app/inbox`, {
+    method: "POST",
+    headers: { cookie, origin: web.origin },
+    redirect: "manual",
+  });
+  assert.equal(post.status, 404);
+  assert.equal(await post.text(), "Not found");
+  for (const path of ["/apps", "/appx/inbox"]) {
+    const response = await fetch(`${web.origin}${path}`, {
+      redirect: "manual",
+    });
+    assert.equal(response.status, 404, path);
+    assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
+    await response.text();
+  }
+});
+
+test("every app view is served at its root path", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const web = await f.startWeb();
+  const id = randomUUID();
+  const shell = await (await fetch(`${web.origin}/`)).text();
+  for (const path of [
+    "/",
+    "/tasks",
+    "/tasks/new",
+    `/tasks/${id}`,
+    "/inbox",
+    "/search",
+    "/getting-started",
+    "/settings",
+    "/settings/runtime",
+    "/settings/projects/new",
+    "/settings/profiles/new",
+    `/projects/${id}`,
+    `/projects/${id}/settings`,
+    `/profiles/${id}/settings`,
+    `/assignments/${id}/recovery`,
+    "/login",
+  ]) {
+    const response = await fetch(`${web.origin}${path}`, {
+      redirect: "manual",
+    });
+    assert.equal(response.status, 200, path);
+    assert.equal(await response.text(), shell, path);
+  }
+});
 
 test("every shared curated publication rechecks exact session after actual private reads on logout and expiry", async (t) => {
   const f = await createOperatorFixture();

@@ -69,7 +69,7 @@ async function open(
   password: string,
   projectId: string,
 ) {
-  await page.goto(`${origin}/app/tasks/new?project=${projectId}`);
+  await page.goto(`${origin}/tasks/new?project=${projectId}`);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
@@ -139,7 +139,7 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
     await panel
       .getByRole("link", { name: "View project instructions" })
       .getAttribute("href"),
-    `/app/projects/${projectId}/settings`,
+    `/projects/${projectId}/settings`,
   );
   const asideBox = (await aside.boundingBox())!,
     outcomeBox = await box(page, "Desired outcome");
@@ -377,7 +377,7 @@ test("phone composer header is Back and a centred New task with no Refresh or wr
   await check("Back to Atlas", 480);
 
   // (2) Without ?project= Back names Tasks.
-  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.goto(`${web.origin}/tasks/new`);
   await page.locator("main.page h1").waitFor();
   await check("Back to Tasks", 844);
   assert.ok(
@@ -393,7 +393,7 @@ test("phone composer header is Back and a centred New task with no Refresh or wr
 
   // (4) Other detail headers are unchanged.
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${web.origin}/app/settings/projects/new`);
+  await page.goto(`${web.origin}/settings/projects/new`);
   await header.locator("h1").waitFor();
   assert.equal(await header.getAttribute("data-compact-phone"), null);
   assert.equal(await header.locator(".page-header-title p").isVisible(), true);
@@ -702,7 +702,7 @@ test("Composer, post-create line and task detail show a power-supervision hold",
   // Once the hold releases the composer predicts a start again.
   events.complete = true;
   await until(() => f.service.powerStatus()?.admissionHeld === false);
-  await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
+  await page.goto(`${web.origin}/tasks/new?project=${projectId}`);
   await page
     .locator(".composer-prediction")
     .getByText("Starts now", { exact: true })
@@ -872,7 +872,7 @@ test("Composer bar keeps drafts, refused creation and admission distinct", async
   // Save draft sends a draft; Create and start sends ready work.
   await button("Save draft").click();
   await page.getByText("Draft saved.", { exact: true }).waitFor();
-  await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
+  await page.goto(`${web.origin}/tasks/new?project=${projectId}`);
   await fill("Created");
   await button("Create and start").click();
   const created = page.getByText("Task created.", { exact: true });
@@ -1066,11 +1066,11 @@ test("Composer shows the brief-limit note only within 10% of the limit or over i
   assert.equal(commands, 0);
 });
 
-// Getting started and Project setup open /app/tasks/new?project=<id>, the same shape as a
+// Getting started and Project setup open /tasks/new?project=<id>, the same shape as a
 // project page; the top bar on a page without a project is the one entry that must pick it.
 for (const [entry, path, scoped] of [
-  ["a project page", "/app/projects/:atlas", true],
-  ["the tasks overview", "/app", false],
+  ["a project page", "/projects/:atlas", true],
+  ["the tasks overview", "/", false],
 ] as const)
   for (const [label, viewport] of [
     ["1366 x 900", desktop],

@@ -65,12 +65,12 @@ test("a payload round trips through a random subscriber key", () => {
   const text = JSON.stringify({
     v: 1,
     title: "t",
-    url: "/app/inbox",
+    url: "/inbox",
     tag: "k",
   });
   const body = encryptPayload(device.keys, text);
   assert.equal(decryptPush(body, device), text);
-  assert.equal(body.includes(Buffer.from("/app/inbox")), false);
+  assert.equal(body.includes(Buffer.from("/inbox")), false);
   // Header, delimiter and tag come out of the 4096 bytes every push service accepts.
   assert.equal(
     encryptPayload(device.keys, "x".repeat(PUSH_PLAINTEXT_LIMIT)).length,

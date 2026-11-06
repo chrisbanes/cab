@@ -284,7 +284,7 @@ export function readyCheckItems(input: {
   const items: WaitItem[] = [];
   const runtimeLink = {
     label: "Runtime settings",
-    href: "/app/settings/runtime",
+    href: "/settings/runtime",
   };
   // With no runtime enabled the readiness check speaks for every lead, so say it once.
   const noRuntime =
@@ -337,7 +337,7 @@ export function readyCheckItems(input: {
           text: `${executionHarnessLabels[harness]} runtime doesn't accept the lead agent's model or reasoning effort.`,
           link: {
             label: "Edit agent",
-            href: `/app/profiles/${lead.id}/settings`,
+            href: `/profiles/${lead.id}/settings`,
           },
         });
       const own: readonly string[] =
@@ -435,7 +435,7 @@ export function deliveryReadyLine(
   if (!links.length) return null;
   const link = {
     label: "Delivery settings",
-    href: `/app/projects/${projectId}/settings?tab=delivery`,
+    href: `/projects/${projectId}/settings?tab=delivery`,
   };
   const unset = links.filter(
     (l) =>
@@ -490,7 +490,7 @@ export function sourceCredentialLine(
     return { text: "GitHub source credential: status unavailable." };
   const link = {
     label: "GitHub source settings",
-    href: `/app/projects/${projectId}/settings?tab=github`,
+    href: `/projects/${projectId}/settings?tab=github`,
   };
   const status = source.credential;
   if (!source.credentialConfigured)

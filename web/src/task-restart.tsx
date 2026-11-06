@@ -44,8 +44,8 @@ export function RestartDestinationLink({
       variant="secondary"
       href={
         destination === "recovery"
-          ? `/app/tasks/${taskId}?section=execution`
-          : `/app/tasks/${taskId}?section=decisions`
+          ? `/tasks/${taskId}?section=execution`
+          : `/tasks/${taskId}?section=decisions`
       }
     >
       {destination === "recovery" ? "Open recovery" : "Review the source"}

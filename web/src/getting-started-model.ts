@@ -147,7 +147,7 @@ export function checklistRows(input: {
         ? {
             kind: "link",
             label: "Open runtime settings",
-            href: "/app/settings/runtime",
+            href: "/settings/runtime",
           }
         : {
             kind: "link",
@@ -196,20 +196,20 @@ export function checklistRows(input: {
         ? {
             kind: "link",
             label: "Open project",
-            href: `/app/projects/${ready.id}`,
+            href: `/projects/${ready.id}`,
           }
         : leadless
           ? {
               kind: "link",
               label: "Choose a lead",
-              href: `/app/projects/${leadless.id}/settings`,
+              href: `/projects/${leadless.id}/settings`,
             }
           : paused
             ? { kind: "resume", projectId: paused.id }
             : {
                 kind: "link",
                 label: "Create project",
-                href: "/app/settings/projects/new",
+                href: "/settings/projects/new",
               },
     ),
     row(
@@ -224,7 +224,7 @@ export function checklistRows(input: {
         ? {
             kind: "link",
             label: "Create task",
-            href: `/app/tasks/new?project=${encodeURIComponent(firstTaskProject.id)}`,
+            href: `/tasks/new?project=${encodeURIComponent(firstTaskProject.id)}`,
           }
         : { kind: "unavailable", label: "Create task" },
     ),

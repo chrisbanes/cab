@@ -83,7 +83,7 @@ export async function loadTaskList(
   throw Error("catalog-too-large");
 }
 export const taskDetailHref = (task: Pick<TaskListSummary, "id">) =>
-  `/app/tasks/${task.id}`;
+  `/tasks/${task.id}`;
 /** The task opened at its decision card, where an uncertain execution's holds are listed. */
 export const taskDecisionHref = (task: Pick<TaskListSummary, "id">) =>
   `${taskDetailHref(task)}?section=decisions`;

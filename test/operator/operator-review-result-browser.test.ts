@@ -158,7 +158,7 @@ for (const [label, viewport] of [
       journey,
       viewport,
       seedFourCriteria,
-      ({ taskId }) => `/app/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}`,
     );
     await assertFirstScreen(s.page, resultScreen(s.page));
     // Headroom for font metrics that differ between macOS and CI.
@@ -218,7 +218,7 @@ for (const [label, viewport] of [
   });
 
   test(`review a result budget: two interactions from Home Completed work (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, seedFourCriteria, () => "/app");
+    const s = await start(journey, viewport, seedFourCriteria, () => "/");
     markDone(s);
     await s.page.reload();
     const link = s.page
@@ -233,7 +233,7 @@ for (const [label, viewport] of [
     let interactions = 0;
     await link.click();
     interactions++;
-    await s.page.waitForURL(new RegExp(`/app/tasks/${s.taskId}`));
+    await s.page.waitForURL(new RegExp(`/tasks/${s.taskId}`));
     await assertFirstScreen(s.page, [resultScreen(s.page)[0]!]);
     await openEvidence(s.page);
     interactions++;
@@ -246,7 +246,7 @@ for (const [label, viewport] of [
       viewport,
       (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
       ({ taskId, interactionId }) =>
-        `/app/inbox?request=${interactionId}&task=${taskId}`,
+        `/inbox?request=${interactionId}&task=${taskId}`,
       "delegated",
     );
     const link = s.page.getByRole("link", { name: "Task evidence" });
@@ -255,7 +255,7 @@ for (const [label, viewport] of [
     let interactions = 0;
     await link.click();
     interactions++;
-    await s.page.waitForURL(new RegExp(`/app/tasks/${s.taskId}#conversation`));
+    await s.page.waitForURL(new RegExp(`/tasks/${s.taskId}#conversation`));
     const overview = s.page.getByRole("tab", { name: "Overview", exact: true });
     assert.equal(await overview.getAttribute("aria-selected"), "true");
     // The link names the task's conversation, which shows the seeded result with its assignment.
@@ -272,7 +272,7 @@ test("review a result: criteria past the third open and close under N more", asy
     journey,
     desktop,
     seedFourCriteria,
-    ({ taskId }) => `/app/tasks/${taskId}`,
+    ({ taskId }) => `/tasks/${taskId}`,
   );
   const fourth = s.page
     .locator("#review .criterion-row[data-record-id]")
@@ -303,7 +303,7 @@ test("review a result: three criteria render no N more", async (_t, journey) => 
         "Ship an accessible command menu",
         "- [ ] Restore focus\n- [ ] Retain drafts\n- [ ] Announce results",
       ),
-    ({ taskId }) => `/app/tasks/${taskId}`,
+    ({ taskId }) => `/tasks/${taskId}`,
   );
   await s.page.locator("#review .criterion-row").nth(2).waitFor();
   assert.equal(await s.page.locator("#review .criteria-more").count(), 0);
@@ -322,7 +322,7 @@ test("review a result: a long criterion is shown in full and keeps its outcome",
         "Ship an accessible command menu",
         `- [ ] ${long}`,
       ),
-    ({ taskId }) => `/app/tasks/${taskId}`,
+    ({ taskId }) => `/tasks/${taskId}`,
   );
   const row = s.page.locator("#review .criterion-row").first();
   await row.waitFor();
@@ -345,7 +345,7 @@ test("review a result: an open N more, its scroll and the focus in it survive le
     journey,
     desktop,
     seedFourCriteria,
-    ({ taskId }) => `/app/tasks/${taskId}`,
+    ({ taskId }) => `/tasks/${taskId}`,
   );
   const more = s.page.locator("#review .criteria-more");
   const fourth = more.locator(".criterion-row");
@@ -362,7 +362,7 @@ test("review a result: an open N more, its scroll and the focus in it survive le
   // Leave in place, as the app's own links do, then come Back.
   await s.page.evaluate(() => {
     const a = document.createElement("a");
-    a.href = "/app/tasks";
+    a.href = "/tasks";
     document.body.append(a);
     a.click();
     a.remove();

@@ -56,7 +56,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
       )
         commands.push(JSON.parse(body));
     });
-    await page.goto(`${web.origin}/app/tasks/${detail.taskId}`);
+    await page.goto(`${web.origin}/tasks/${detail.taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.locator("main.page h1").waitFor();
@@ -89,7 +89,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await until(() => f.runtime.hasPending(1), "the restarted turn starts");
 
     // A hold that may be live shows its reason and the recovery, and sends nothing.
-    await page.goto(`${web.origin}/app/tasks/${held.taskId}`);
+    await page.goto(`${web.origin}/tasks/${held.taskId}`);
     await page
       .getByText(/Start again isn't offered: an execution is unresolved/)
       .waitFor();
@@ -98,7 +98,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
         .locator("[data-start-again]")
         .getByRole("link", { name: "Open recovery" })
         .getAttribute("href"),
-      `/app/tasks/${held.taskId}?section=execution`,
+      `/tasks/${held.taskId}?section=execution`,
     );
     // Reset is disabled, with its reason as the tooltip.
     if (viewport.width < 760)
@@ -114,7 +114,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // The Inbox intervention offers the same action.
     await page.goto(
-      `${web.origin}/app/inbox?task=${inbox.taskId}&request=${encodeURIComponent(`intervention:${inbox.taskId}`)}`,
+      `${web.origin}/inbox?task=${inbox.taskId}&request=${encodeURIComponent(`intervention:${inbox.taskId}`)}`,
     );
     await startAgain().waitFor();
     await startAgain().click();
@@ -123,7 +123,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     assert.equal(commands[1]?.workId, inbox.workId);
 
     // Home's Needs you card offers it in place.
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     const card = page.locator(
       `.overview-card[data-request-id="intervention:${home.taskId}"]`,
     );
@@ -135,7 +135,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     assert.equal(commands[2]?.workId, home.workId);
 
     // Reset task confirms first, says it cannot be undone and sends once on confirm.
-    await page.goto(`${web.origin}/app/tasks/${reset.taskId}`);
+    await page.goto(`${web.origin}/tasks/${reset.taskId}`);
     await page.locator("[data-task-strip]").waitFor();
     if (viewport.width < 760)
       await page.locator(".task-header-overflow-toggle").click();
@@ -169,7 +169,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     // A restarted request refused again (the task changed under it) is a new offer: the page
     // shows Start again for it, not the earlier confirmation. Made last: Home shows few cards.
     const again = await refusedTask(f);
-    await page.goto(`${web.origin}/app/tasks/${again.taskId}`);
+    await page.goto(`${web.origin}/tasks/${again.taskId}`);
     await startAgain().click();
     await page.getByText(/Queued again\./).waitFor();
     assert.equal(commands.length, 5);
@@ -234,7 +234,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // Reset: recorded, reply lost, dialog dismissed, a read makes Reset unavailable.
     const lostReset = await refusedTask(f);
-    await page.goto(`${web.origin}/app/tasks/${lostReset.taskId}`);
+    await page.goto(`${web.origin}/tasks/${lostReset.taskId}`);
     await page.locator("[data-task-strip]").waitFor();
     await loseNextReply("task.reset");
     const openReset = async () => {
@@ -267,7 +267,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // Start again on the task page: recorded, reply lost, a read drops the not-started code.
     const lostStart = await refusedTask(f);
-    await page.goto(`${web.origin}/app/tasks/${lostStart.taskId}`);
+    await page.goto(`${web.origin}/tasks/${lostStart.taskId}`);
     await loseNextReply("task.start-again");
     await startAgain().click();
     await check().waitFor();
@@ -281,7 +281,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     // The phone has no Refresh: a fake clock drives its Inbox poll (15s, web/src/inbox.tsx).
     if (viewport.width < 760) await page.clock.install();
     await page.goto(
-      `${web.origin}/app/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(`intervention:${lostInbox.taskId}`)}`,
+      `${web.origin}/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(`intervention:${lostInbox.taskId}`)}`,
     );
     await loseNextReply("task.start-again");
     await startAgain().click();
@@ -300,7 +300,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // And in Home's card, which re-reads the Inbox as soon as the start is sent.
     const lostHome = await refusedTask(f);
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     const lostCard = page.locator(
       `.overview-card[data-request-id="intervention:${lostHome.taskId}"]`,
     );
@@ -374,7 +374,7 @@ const checkButton = (scope: Page | Locator) =>
 
 test("an unconfirmed Reset is still checkable from the header after leaving the task and coming back", async (_t, j) => {
   const hold: { browser?: Browser } = {};
-  const { page } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  const { page } = await openRestartPage(j, hold, "/tasks/TASK");
   const sent: string[] = [];
   page.on("request", (request) => {
     if (
@@ -396,7 +396,7 @@ test("an unconfirmed Reset is still checkable from the header after leaving the 
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.goBack();
   await page.locator("[data-task-strip]").waitFor();
   await page.getByRole("button", { name: "Reset task…" }).click();
@@ -419,7 +419,7 @@ test("an unconfirmed Reset is still checkable from the header after leaving the 
 
 test("an unconfirmed Start again whose request was recorded is still checkable after leaving the task and coming back", async (_t, j) => {
   const hold: { browser?: Browser } = {};
-  const { page } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  const { page } = await openRestartPage(j, hold, "/tasks/TASK");
   const sent: string[] = [];
   page.on("request", (request) => {
     if (
@@ -439,7 +439,7 @@ test("an unconfirmed Start again whose request was recorded is still checkable a
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.goBack();
   await checkButton(page).waitFor();
   await page.unroute("**/api/operator/commands");
@@ -451,7 +451,7 @@ test("an unconfirmed Start again whose request was recorded is still checkable a
 
 test("the header drops Reset task… once the task is no longer open", async (_t, j) => {
   const hold: { browser?: Browser } = {};
-  const { f, page, task } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  const { f, page, task } = await openRestartPage(j, hold, "/tasks/TASK");
   await page.locator("[data-task-strip]").waitFor();
   await page.route("**/api/operator/commands", async (route) => {
     await route.fetch();
@@ -497,11 +497,7 @@ test("the header drops Reset task… once the task is no longer open", async (_t
 
 test("Home counts a kept Start again card once in its N more total", async (_t, j) => {
   const hold: { browser?: Browser } = {};
-  const { f, page, task, web } = await openRestartPage(
-    j,
-    hold,
-    "/app/tasks/TASK",
-  );
+  const { f, page, task, web } = await openRestartPage(j, hold, "/tasks/TASK");
   // Home shows its Needs you cards once a task has started a turn: let this one run.
   await page.getByRole("button", { name: "Start again", exact: true }).click();
   await page.getByText(/Queued again\./).waitFor();
@@ -523,7 +519,7 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
   const card = (taskId: string) =>
     page.locator(`.overview-card[data-request-id="intervention:${taskId}"]`);
   const overflow = page.locator(".overview-overflow");
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await card(kept).waitFor();
   assert.equal(await overflow.count(), 0);
   // The send never reaches the service, so the request stays listed.

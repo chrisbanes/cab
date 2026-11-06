@@ -73,10 +73,11 @@ owns delivery scope and status.
   restart interrupts running task turns and requeues the ones it sees end; a crash
   keeps every hold. Task coordination covers assignments, results, inboxes,
   questions, approvals, lead-gated completion and assignment routing.
-- **Operator UI.** An authenticated React interface at `/app` with an attention
+- **Operator UI.** An authenticated React interface at `/` with an attention
   overview, cross-project and per-project List and Board views, a local task
   composer, the Inbox, retained search and Settings. The operator listener requires
-  the built web bundle; legacy HTML pages/forms and `/` return not-found.
+  the built web bundle; legacy HTML pages/forms return not-found, and old `/app/*`
+  addresses permanently redirect to the same path at the root.
 - **Draft with lead.** In the task composer, a rough idea goes to the project lead,
   who reads the project's linked repositories in a throwaway copy with network off
   and proposes a title and outcome. Empty fields are filled; typed text keeps its
@@ -265,7 +266,7 @@ logs. Test deadlines end waiting; they do not prove execution termination or
 complete cleanup. Live runtime qualification is a separate, explicit step.
 
 `npm run build` compiles the service and the self-contained React operator assets
-into `dist/operator`. The production `operator` command serves `/app` and the
+into `dist/operator`. The production `operator` command serves `/` and the
 same-origin `/api/operator` JSON from its existing listener; no frontend server is
 needed. The interface uses locally owned shadcn/ui components, Dark / Neutral /
 Default tokens and self-hosted Geist and Geist Mono. The

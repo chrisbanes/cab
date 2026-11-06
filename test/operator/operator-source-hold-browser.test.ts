@@ -80,7 +80,7 @@ test("a source hold shows its reason and text with only Resume source hold, refu
     width: 1366,
     height: 900,
   });
-  await signIn(page, web, `/app/tasks/${imported.taskId}`);
+  await signIn(page, web, `/tasks/${imported.taskId}`);
   const card = page.locator("[data-source-hold]");
   await card.waitFor();
   // Reason, current source and task text, and the one decision.
@@ -160,7 +160,7 @@ test("the decisions link opens on the card and Resume source hold is keyboard op
     height: 844,
   });
   sync("open");
-  await signIn(page, web, `/app/tasks/${imported.taskId}?section=decisions`);
+  await signIn(page, web, `/tasks/${imported.taskId}?section=decisions`);
   const card = page.locator("section#decisions [data-source-hold]");
   await card.waitFor();
   const box = await card.boundingBox();
@@ -189,7 +189,7 @@ test("a stale hold decision conflicts, refreshes the hold and requires a new dec
     height: 900,
   });
   sync("open");
-  await signIn(page, web, `/app/tasks/${imported.taskId}`);
+  await signIn(page, web, `/tasks/${imported.taskId}`);
   const card = page.locator("[data-source-hold]");
   await card.waitFor();
   const original = Number(

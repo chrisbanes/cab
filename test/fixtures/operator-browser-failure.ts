@@ -22,7 +22,7 @@ test("injected browser assertion remains observable during fixture teardown", as
   peer = connect(Number(new URL(web.origin).port), "127.0.0.1");
   peer.on("error", () => {});
   await once(peer, "connect");
-  peer.write(`GET /app HTTP/1.1\r\nHost: ${new URL(web.origin).host}\r\n`);
+  peer.write(`GET / HTTP/1.1\r\nHost: ${new URL(web.origin).host}\r\n`);
   await new Promise((resolve) => setTimeout(resolve, 20));
   browser.once("disconnected", () => peer?.destroy());
   // Rescue only this test's owned resources if the old cleanup order deadlocks.

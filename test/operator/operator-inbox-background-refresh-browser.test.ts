@@ -31,7 +31,7 @@ test("Inbox and shell timer reads stay silent until they fail; header Refresh st
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.clock.install();
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const rows = page.locator(".inbox-row");

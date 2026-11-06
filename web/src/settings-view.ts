@@ -48,7 +48,7 @@ export function projectTab(query: string): ProjectTab {
   return projectTabs.find((t) => t.id === tab)?.id ?? "general";
 }
 
-const settings: Crumb = { label: "Settings", href: "/app/settings" };
+const settings: Crumb = { label: "Settings", href: "/settings" };
 
 /** Title and breadcrumb trail of a settings route, or null for other routes. */
 export function settingsHeader(
@@ -58,41 +58,38 @@ export function settingsHeader(
   /** Setup latches the first-run heading for the visit, so creating the project keeps it. */
   firstRunOverride?: boolean,
 ): SettingsHeader | null {
-  if (pathname === "/app/settings") return { title: "Settings", trail: [] };
-  if (pathname === "/app/settings/projects/new")
+  if (pathname === "/settings") return { title: "Settings", trail: [] };
+  if (pathname === "/settings/projects/new")
     return (firstRunOverride ?? workspace?.data.projects.length === 0)
       ? {
           title: "Set up your first project",
-          trail: [
-            { label: "Overview", href: "/app" },
-            { label: "New project" },
-          ],
+          trail: [{ label: "Overview", href: "/" }, { label: "New project" }],
         }
       : {
           title: "Create project",
           trail: [settings, { label: "Projects" }, { label: "Create project" }],
         };
-  if (pathname === "/app/settings/runtime")
+  if (pathname === "/settings/runtime")
     return {
       title: "Runtime capacity and recovery",
       trail: [settings, { label: "Runtime" }],
     };
-  if (pathname === "/app/settings/profiles/new")
+  if (pathname === "/settings/profiles/new")
     return {
       title: "Create agent",
       trail: [settings, { label: "Agents" }, { label: "Create agent" }],
     };
-  if (/^\/app\/assignments\/[^/]+\/recovery$/.test(pathname))
+  if (/^\/assignments\/[^/]+\/recovery$/.test(pathname))
     return {
       title: "Assignment recovery evidence",
       shortTitle: "Recovery",
       trail: [
         settings,
-        { label: "Runtime", href: "/app/settings/runtime" },
+        { label: "Runtime", href: "/settings/runtime" },
         { label: "Assignment recovery" },
       ],
     };
-  const profile = /^\/app\/profiles\/([^/]+)\/settings$/.exec(pathname)?.[1];
+  const profile = /^\/profiles\/([^/]+)\/settings$/.exec(pathname)?.[1];
   if (profile) {
     const name =
       workspace?.data.profiles.find((p) => p.id === profile)?.name ?? "Agent";
@@ -102,12 +99,12 @@ export function settingsHeader(
       trail: [settings, { label: "Agents" }, { label: name }],
     };
   }
-  const project = /^\/app\/projects\/([^/]+)\/settings$/.exec(pathname)?.[1];
+  const project = /^\/projects\/([^/]+)\/settings$/.exec(pathname)?.[1];
   if (project) {
     const name =
       workspace?.data.projects.find((p) => p.id === project)?.name ?? "Project";
     const tab = projectTab(query);
-    const page = `/app/projects/${project}/settings`;
+    const page = `/projects/${project}/settings`;
     return {
       title: `${name} · project configuration`,
       documentTitle: "Project configuration",

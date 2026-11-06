@@ -53,6 +53,7 @@ import {
 } from "./components.js";
 import { ActionOutcome } from "./action-feedback.js";
 import { notificationOpenPath } from "./notifications-model.js";
+import { migrateLegacyPush } from "./notifications.js";
 import { Alert } from "./ui/alert.js";
 import {
   isActiveColumn,
@@ -184,14 +185,14 @@ function ProjectNavigation({
   return (
     <nav aria-label="Operator navigation">
       {link(
-        "/app",
-        pathname === "/app",
+        "/",
+        pathname === "/",
         <LayoutDashboard {...navIcon} />,
         "Overview",
       )}
       {link(
-        "/app/inbox",
-        pathname === "/app/inbox",
+        "/inbox",
+        pathname === "/inbox",
         <InboxIcon {...navIcon} />,
         "Inbox",
         inboxCount === null
@@ -211,16 +212,16 @@ function ProjectNavigation({
             },
       )}
       {link(
-        "/app/tasks",
-        pathname === "/app/tasks",
+        "/tasks",
+        pathname === "/tasks",
         <ListChecks {...navIcon} />,
         "Tasks",
       )}
       {/* The sidebar's Search work field is the desktop entry; the drawer hides it, so it keeps this row. */}
       {row &&
         link(
-          "/app/search",
-          pathname === "/app/search",
+          "/search",
+          pathname === "/search",
           <SearchIcon {...navIcon} />,
           "Search",
         )}
@@ -230,9 +231,9 @@ function ProjectNavigation({
       )}
       {visibleProjects(workspace?.data.projects ?? []).map((p) =>
         link(
-          `/app/projects/${p.id}`,
-          pathname === `/app/projects/${p.id}` ||
-            (pathname === `/app/projects/${p.id}/settings` && "true"),
+          `/projects/${p.id}`,
+          pathname === `/projects/${p.id}` ||
+            (pathname === `/projects/${p.id}/settings` && "true"),
           <Folder {...navIcon} />,
           <ProjectName label={projectLabel(labels, p.id, p.name)} id={p.id} />,
           {
@@ -255,8 +256,8 @@ function ProjectNavigation({
         ),
       )}
       {link(
-        "/app/settings/projects/new",
-        pathname === "/app/settings/projects/new",
+        "/settings/projects/new",
+        pathname === "/settings/projects/new",
         <Plus {...navIcon} />,
         "New project",
       )}
@@ -280,7 +281,7 @@ function SearchWorkField({
       e.preventDefault();
       // The drawer layouts hide this field, so the shortcut opens the Search page's field instead.
       if (input.current?.checkVisibility()) return input.current.focus();
-      if (location.pathname !== "/app/search") go.current("/app/search");
+      if (location.pathname !== "/search") go.current("/search");
       requestAnimationFrame(() =>
         document.getElementById("retained-query")?.focus(),
       );
@@ -298,9 +299,7 @@ function SearchWorkField({
           e.preventDefault();
           const query = input.current?.value.trim();
           navigate(
-            query
-              ? `/app/search?query=${encodeURIComponent(query)}`
-              : "/app/search",
+            query ? `/search?query=${encodeURIComponent(query)}` : "/search",
           );
         }}
       >
@@ -379,8 +378,8 @@ function AccountRows({
     <section className="account-rows" aria-label="Account">
       <p className="metadata muted">Signed in as {OPERATOR_LABEL}</p>
       <RouteLink
-        href="/app/settings"
-        current={pathname === "/app/settings"}
+        href="/settings"
+        current={pathname === "/settings"}
         navigate={navigate}
         icon={<Settings {...navIcon} />}
         row
@@ -389,8 +388,8 @@ function AccountRows({
       </RouteLink>
       {gettingStartedDismissed === false && (
         <RouteLink
-          href="/app/getting-started"
-          current={pathname === "/app/getting-started"}
+          href="/getting-started"
+          current={pathname === "/getting-started"}
           navigate={navigate}
           icon={<ListChecks {...navIcon} />}
           row
@@ -441,52 +440,60 @@ function parentRoute(
   search: string,
   workspace: Workspace | null,
 ): { href: string; label: string } | null {
-  if (pathname === "/app/tasks/new") {
+  if (pathname === "/tasks/new") {
     const id = new URLSearchParams(search).get("project");
     return id
       ? {
-          href: `/app/projects/${encodeURIComponent(id)}`,
+          href: `/projects/${encodeURIComponent(id)}`,
           label:
             workspace?.data.projects.find((p) => p.id === id)?.name ??
             "Project",
         }
-      : { href: "/app/tasks", label: "Tasks" };
+      : { href: "/tasks", label: "Tasks" };
   }
-  if (/^\/app\/tasks\/[^/]+$/.test(pathname))
-    return { href: "/app/tasks", label: "Tasks" };
-  if (/^\/app\/assignments\/[^/]+\/recovery$/.test(pathname))
-    return { href: "/app/settings/runtime", label: "Runtime" };
+  if (/^\/tasks\/[^/]+$/.test(pathname))
+    return { href: "/tasks", label: "Tasks" };
+  if (/^\/assignments\/[^/]+\/recovery$/.test(pathname))
+    return { href: "/settings/runtime", label: "Runtime" };
   if (
-    pathname.startsWith("/app/settings/") ||
-    /^\/app\/(projects|profiles)\/[^/]+\/settings$/.test(pathname)
+    pathname.startsWith("/settings/") ||
+    /^\/(projects|profiles)\/[^/]+\/settings$/.test(pathname)
   )
-    return { href: "/app/settings", label: "Settings" };
+    return { href: "/settings", label: "Settings" };
   return null;
 }
 /**
- * Whether an `/app` address matches a client route; mirrors the view chosen in `App` and the
+ * Whether an address matches a client route; mirrors the view chosen in `App` and the
  * service's `shell()` routes. Task ids are not checked here: the task workspace owns its own
  * not-found state for a malformed id.
  */
+/** A same-origin root path the client router handles: not another origin, the API or a file. */
+function isInAppHref(href: string | null | undefined): href is string {
+  return (
+    href?.startsWith("/") === true &&
+    !href.startsWith("//") &&
+    !/^\/(?:api|assets)(?:[/?#]|$)/.test(href)
+  );
+}
 function knownRoute(pathname: string) {
   const id = "[a-f0-9-]{36}";
   return (
     [
-      "/app",
-      "/app/tasks",
-      "/app/tasks/new",
-      "/app/inbox",
-      "/app/search",
-      "/app/getting-started",
-      "/app/settings",
-      "/app/settings/runtime",
-      "/app/settings/projects/new",
-      "/app/settings/profiles/new",
+      "/",
+      "/tasks",
+      "/tasks/new",
+      "/inbox",
+      "/search",
+      "/getting-started",
+      "/settings",
+      "/settings/runtime",
+      "/settings/projects/new",
+      "/settings/profiles/new",
     ].includes(pathname) ||
-    /^\/app\/tasks\/[^/]+$/.test(pathname) ||
-    new RegExp(`^/app/projects/${id}$`).test(pathname) ||
-    new RegExp(`^/app/assignments/${id}/recovery$`).test(pathname) ||
-    new RegExp(`^/app/(?:projects|profiles)/${id}/settings$`).test(pathname)
+    /^\/tasks\/[^/]+$/.test(pathname) ||
+    new RegExp(`^/projects/${id}$`).test(pathname) ||
+    new RegExp(`^/assignments/${id}/recovery$`).test(pathname) ||
+    new RegExp(`^/(?:projects|profiles)/${id}/settings$`).test(pathname)
   );
 }
 /**
@@ -502,7 +509,7 @@ const ownsState = () => {
   return typeof stamp === "string" && stamp === location.href;
 };
 function pushAppEntry(href: string, navigationScope: string) {
-  const fromSearch = location.pathname === "/app/search";
+  const fromSearch = location.pathname === "/search";
   history.pushState(
     {
       origin: location.pathname + location.search,
@@ -538,8 +545,8 @@ export function App() {
   const clearPrivateNavigation = () => {
     // The fragment names a section on the page, not private state, so it stays.
     const next =
-      location.pathname === "/app/search"
-        ? "/app/search"
+      location.pathname === "/search"
+        ? "/search"
         : location.pathname + location.search + location.hash;
     history.replaceState(
       {
@@ -670,9 +677,8 @@ export function App() {
       // natively, with the state copied or dropped) is a new entry: it starts clean, so
       // no saved position or focus of another entry can be mistaken for its own.
       const copied =
-        ["/app/settings", "/app/settings/runtime"].includes(
-          location.pathname,
-        ) && !ownsState();
+        ["/settings", "/settings/runtime"].includes(location.pathname) &&
+        !ownsState();
       if (
         history.state?.navigationScope !== navigationScope.current ||
         copied
@@ -718,7 +724,7 @@ export function App() {
     [client],
   );
   // The Inbox route polls its own full read and reports its total, so the shell reads only elsewhere.
-  const onInboxRoute = path.split(/[?#]/)[0] === "/app/inbox";
+  const onInboxRoute = path.split(/[?#]/)[0] === "/inbox";
   // At the sidebar shell the Inbox queue header owns the heading, summary and Refresh.
   const inboxOwnsHeader = useMediaQuery("(min-width: 1121px)") && onInboxRoute;
   // On a phone the header keeps menu, title and count; Refresh moves into the queue's filter row.
@@ -739,7 +745,7 @@ export function App() {
   const workspaceRefresh = useRef(workspace.poll);
   workspaceRefresh.current = workspace.poll;
   const inboxScope =
-    session?.authenticated && path.split("?")[0] === "/app/inbox"
+    session?.authenticated && path.split("?")[0] === "/inbox"
       ? session.csrfToken
       : null;
   useEffect(() => {
@@ -776,7 +782,7 @@ export function App() {
       const anchor = target.closest("a"),
         href = anchor?.getAttribute("href");
       if (
-        href?.startsWith("/app") &&
+        isInAppHref(href) &&
         // A link that asks for a new tab keeps this page as it is.
         anchor?.target !== "_blank" &&
         !e.ctrlKey &&
@@ -799,18 +805,18 @@ export function App() {
     document.addEventListener("click", click);
     return () => document.removeEventListener("click", click);
   }, []);
-  const addressPath = path.split(/[?#]/)[0] ?? "/app";
+  const addressPath = path.split(/[?#]/)[0] ?? "/";
   // A signed-in visit to /login lands on Overview, like the legacy server's redirect.
   const pathname =
-    addressPath === "/login" && session?.authenticated ? "/app" : addressPath;
+    addressPath === "/login" && session?.authenticated ? "/" : addressPath;
   useEffect(() => {
     if (pathname !== addressPath) {
       history.replaceState(
-        { ...history.state, entryUrl: absoluteUrl("/app") },
+        { ...history.state, entryUrl: absoluteUrl("/") },
         "",
-        "/app",
+        "/",
       );
-      setPath("/app");
+      setPath("/");
     }
   }, [pathname, addressPath]);
   // Until a task starts a turn Home shows only the getting-started card, so a turn started
@@ -818,7 +824,7 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read on entering Home, not on every refresh of the reads it inspects.
   useEffect(() => {
     if (
-      pathname === "/app" &&
+      pathname === "/" &&
       workspace.state.fetchedAt !== null &&
       workspace.state.data?.data.gettingStarted.turnStarted === false
     ) {
@@ -843,6 +849,11 @@ export function App() {
     setNavigationVersion((n) => n + 1);
     setDrawer(false);
   };
+  const signedIn = session?.authenticated ? session.csrfToken : null;
+  // A browser set up before the app moved to the root moves its notifications on sign-in.
+  useEffect(() => {
+    if (signedIn) void migrateLegacyPush(client, signedIn);
+  }, [client, signedIn]);
   // Registered before the sign-in early returns, so a signed-out tab routes in place too.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
@@ -875,8 +886,8 @@ export function App() {
         expired={expiredNotice}
         onSignedIn={(next) => {
           if (pathname === "/login") {
-            history.replaceState(null, "", "/app");
-            setPath("/app");
+            history.replaceState(null, "", "/");
+            setPath("/");
           }
           acceptSession(next);
         }}
@@ -888,7 +899,7 @@ export function App() {
     activeSearch = new SearchState();
     searchState.current.set(entryKey, activeSearch);
   }
-  const projectId = pathname.match(/^\/app\/projects\/([a-f0-9-]{36})$/)?.[1];
+  const projectId = pathname.match(/^\/projects\/([a-f0-9-]{36})$/)?.[1];
   const project = workspace.state.data?.data.projects.find(
     (p) => p.id === projectId,
   );
@@ -908,20 +919,19 @@ export function App() {
     ? settingsPage.title
     : unknownRoute
       ? "Page not found"
-      : pathname === "/app/search"
+      : pathname === "/search"
         ? "Search"
-        : pathname === "/app/getting-started"
+        : pathname === "/getting-started"
           ? "Getting started"
-          : pathname === "/app"
+          : pathname === "/"
             ? "Overview"
-            : /^\/app\/tasks\/[^/]+$/.test(pathname) &&
-                pathname !== "/app/tasks/new"
+            : /^\/tasks\/[^/]+$/.test(pathname) && pathname !== "/tasks/new"
               ? "Task"
-              : pathname === "/app/tasks"
+              : pathname === "/tasks"
                 ? "All tasks"
-                : pathname === "/app/tasks/new"
+                : pathname === "/tasks/new"
                   ? "Create a task"
-                  : pathname === "/app/inbox"
+                  : pathname === "/inbox"
                     ? "Inbox"
                     : (project?.name ?? "Project");
   const inboxCount =
@@ -929,20 +939,20 @@ export function App() {
       ?.count ?? null;
   // The task views put their intro and the one primary action in the page header.
   const taskRoute =
-    pathname === "/app" || pathname === "/app/tasks" || Boolean(projectId);
-  const newTaskHref = `/app/tasks/new${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
+    pathname === "/" || pathname === "/tasks" || Boolean(projectId);
+  const newTaskHref = `/tasks/new${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
   const headerSubtitle = unknownRoute
     ? notFoundSubtitle
     : taskRoute
       ? taskRouteSubtitle(
-          projectId ? "project" : pathname === "/app" ? "overview" : "tasks",
+          projectId ? "project" : pathname === "/" ? "overview" : "tasks",
           tasks.state.data?.tasks,
           workspace.state.data?.data ?? null,
           projectId,
         )
-      : pathname === "/app/tasks/new"
+      : pathname === "/tasks/new"
         ? "Describe the result you want. The project lead stays accountable."
-        : pathname === "/app/settings/projects/new"
+        : pathname === "/settings/projects/new"
           ? setupHeader?.created
             ? undefined
             : (setupHeader?.firstRun ??
@@ -959,14 +969,14 @@ export function App() {
   // These pages own a refresh that already re-reads their data, or are create forms with nothing to refresh.
   const ownsRefresh =
     unknownRoute ||
-    pathname === "/app/tasks/new" ||
-    pathname === "/app/settings/projects/new" ||
-    pathname === "/app/settings/profiles/new" ||
-    pathname === "/app" ||
-    pathname === "/app/tasks" ||
+    pathname === "/tasks/new" ||
+    pathname === "/settings/projects/new" ||
+    pathname === "/settings/profiles/new" ||
+    pathname === "/" ||
+    pathname === "/tasks" ||
     Boolean(projectId) ||
-    /^\/app\/tasks\/[^/]+$/.test(pathname) ||
-    (pathname === "/app/search" &&
+    /^\/tasks\/[^/]+$/.test(pathname) ||
+    (pathname === "/search" &&
       Boolean(new URLSearchParams(query).get("query")));
   const parent = unknownRoute
     ? null
@@ -988,7 +998,7 @@ export function App() {
       : {};
   // The task page reports its title, status line, Back and Stop once its read lands.
   const taskReport =
-    taskHeader && pathname === `/app/tasks/${taskHeader.taskId}`
+    taskHeader && pathname === `/tasks/${taskHeader.taskId}`
       ? taskHeader
       : null;
   const taskHeaderProps = taskReport
@@ -1043,7 +1053,7 @@ export function App() {
     gettingStartedDismissed:
       workspace.state.data?.data.gettingStarted.dismissed ?? null,
     onShowGettingStarted: () => {
-      navigate("/app/getting-started");
+      navigate("/getting-started");
       void configureGettingStarted(
         drafts.current.get(GETTING_STARTED_DRAFT, rerender),
         { client, session, onChanged: workspace.refresh },
@@ -1053,7 +1063,7 @@ export function App() {
   };
   // Home is only the getting-started card until a task starts a turn; no read yet shows neither.
   const showBoard =
-    pathname !== "/app" ||
+    pathname !== "/" ||
     workspace.state.data?.data.gettingStarted.turnStarted === true;
   const waitProps = {
     client,
@@ -1108,7 +1118,7 @@ export function App() {
           </div>
           <SearchWorkField
             navigate={navigate}
-            current={pathname === "/app/search"}
+            current={pathname === "/search"}
           />
           {navigation(false)}
         </aside>
@@ -1147,7 +1157,7 @@ export function App() {
                 {...(settingsPage
                   ? { shortTitle: settingsPage.shortTitle }
                   : {})}
-                {...(pathname === "/app/tasks/new"
+                {...(pathname === "/tasks/new"
                   ? { shortTitle: "New task", compactPhone: true }
                   : {})}
                 badge={
@@ -1182,7 +1192,7 @@ export function App() {
                       variant="secondary"
                       onClick={() => {
                         refreshAll();
-                        if (pathname === "/app/inbox") tasks.refresh();
+                        if (pathname === "/inbox") tasks.refresh();
                       }}
                       disabled={workspace.state.pending}
                     >
@@ -1215,7 +1225,7 @@ export function App() {
             )}
             {unknownRoute ? (
               <NotFound />
-            ) : pathname === "/app/settings/runtime" ? (
+            ) : pathname === "/settings/runtime" ? (
               <RuntimeSettings
                 client={client}
                 session={session}
@@ -1224,7 +1234,7 @@ export function App() {
                 refresh={workspace.refresh}
                 refreshNonce={refreshNonce}
               />
-            ) : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname) ? (
+            ) : /^\/assignments\/[^/]+\/recovery$/.test(pathname) ? (
               <AssignmentRecovery
                 client={client}
                 session={session}
@@ -1234,7 +1244,7 @@ export function App() {
                 refreshNonce={refreshNonce}
                 assignmentId={pathname.split("/")[3] ?? ""}
               />
-            ) : pathname === "/app/settings" ? (
+            ) : pathname === "/settings" ? (
               <SettingsWorkspace
                 client={client}
                 session={session}
@@ -1247,7 +1257,7 @@ export function App() {
                 refresh={workspace.refresh}
                 refreshNonce={refreshNonce}
               />
-            ) : pathname === "/app/settings/projects/new" ? (
+            ) : pathname === "/settings/projects/new" ? (
               <ProjectSetup
                 // Choosing New project again remounts, so a recorded create starts clean.
                 key={navigationVersion}
@@ -1259,7 +1269,7 @@ export function App() {
                 navigate={navigate}
                 onHeader={setSetupHeader}
               />
-            ) : pathname === "/app/settings/profiles/new" ? (
+            ) : pathname === "/settings/profiles/new" ? (
               <ProfileCreate
                 client={client}
                 session={session}
@@ -1267,7 +1277,7 @@ export function App() {
                 workspace={workspace.state.data}
                 refresh={workspace.refresh}
               />
-            ) : /^\/app\/profiles\/[^/]+\/settings$/.test(pathname) ? (
+            ) : /^\/profiles\/[^/]+\/settings$/.test(pathname) ? (
               <ProfileConfiguration
                 key={pathname}
                 client={client}
@@ -1278,7 +1288,7 @@ export function App() {
                 refreshNonce={refreshNonce}
                 profileId={pathname.split("/")[3] ?? ""}
               />
-            ) : /^\/app\/projects\/[^/]+\/settings$/.test(pathname) ? (
+            ) : /^\/projects\/[^/]+\/settings$/.test(pathname) ? (
               <ProjectConfiguration
                 key={pathname}
                 client={client}
@@ -1290,7 +1300,7 @@ export function App() {
                 projectId={pathname.split("/")[3] ?? ""}
                 query={query}
               />
-            ) : pathname === "/app/tasks/new" ? (
+            ) : pathname === "/tasks/new" ? (
               <TaskComposer
                 key={session.csrfToken}
                 client={client}
@@ -1306,7 +1316,7 @@ export function App() {
                 refresh={workspace.refresh}
                 releaseDraft={releaseDraft}
               />
-            ) : pathname === "/app/inbox" ? (
+            ) : pathname === "/inbox" ? (
               <Inbox
                 client={client}
                 session={session}
@@ -1340,7 +1350,7 @@ export function App() {
                     : undefined
                 }
               />
-            ) : pathname === "/app/search" ? (
+            ) : pathname === "/search" ? (
               <Search
                 key={`${session.csrfToken}:${entryKey}`}
                 client={client}
@@ -1351,7 +1361,7 @@ export function App() {
                 onRefresh={refreshAll}
                 state={activeSearch}
               />
-            ) : /^\/app\/tasks\/[^/]+$/.test(pathname) ? (
+            ) : /^\/tasks\/[^/]+$/.test(pathname) ? (
               <TaskWorkspace
                 key={`${session.csrfToken}:${entryKey}`}
                 client={client}
@@ -1369,11 +1379,11 @@ export function App() {
                   entryKey,
                 )}
               />
-            ) : pathname === "/app/getting-started" ? (
+            ) : pathname === "/getting-started" ? (
               <GettingStarted mode="page" {...waitProps} />
             ) : (
               <>
-                {pathname === "/app" && (
+                {pathname === "/" && (
                   <GettingStarted mode="home" {...waitProps} />
                 )}
                 {showBoard && (
@@ -1399,9 +1409,9 @@ export function App() {
                           },
                         }
                       : {})}
-                    overview={pathname === "/app"}
+                    overview={pathname === "/"}
                     operator={
-                      pathname === "/app"
+                      pathname === "/"
                         ? { client, session, questions: questionStates.current }
                         : undefined
                     }

@@ -28,8 +28,8 @@ after(() => {
   else process.env.FIXTURE_GITHUB = sourceValue;
 });
 
-const githubTab = "/app/projects/:atlas/settings?tab=github";
-const syncTab = "/app/projects/:atlas/settings?tab=sync";
+const githubTab = "/projects/:atlas/settings?tab=github";
+const syncTab = "/projects/:atlas/settings?tab=sync";
 
 const start = (
   journey: Parameters<typeof startSettings>[0],
@@ -244,7 +244,7 @@ test("two searches on the same repository keep distinct names", async (_t, journ
 });
 
 test("a failed private read names searches neutrally", async (_t, journey) => {
-  const s = await start(journey, "/app/settings");
+  const s = await start(journey, "/settings");
   await saveElsewhere(s, [
     { id: "S-4", kind: "search", query: "repo:acme/atlas label:bug" },
   ]);
@@ -252,7 +252,7 @@ test("a failed private read names searches neutrally", async (_t, journey) => {
     route.fulfill({ status: 500, json: { error: "unavailable" } }),
   );
   await s.page.goto(
-    `${s.web.origin}/app/projects/${s.ids.atlas}/settings?tab=github`,
+    `${s.web.origin}/projects/${s.ids.atlas}/settings?tab=github`,
   );
   await row(s.page, "Saved search").first().waitFor();
   const headings = (await rowHeadings(s.page)).filter((h) => /search/.test(h));
@@ -390,7 +390,7 @@ test("saved source imports through Preview and import now", async (_t, journey) 
     await page
       .getByRole("link", { name: "View imported tasks" })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}?ready=any`,
+    `/projects/${ids.atlas}?ready=any`,
   );
   // Details name each source by id, with its request key and source version.
   await activation.locator("summary").click();
@@ -814,7 +814,7 @@ test("private query never leaves the session view", async (_t, journey) => {
     false,
   );
   await captureSettingsEvidence(page, "import-issues-private-name");
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await page.getByText("S-2 search").waitFor();
   assert.equal(
     await page.evaluate(

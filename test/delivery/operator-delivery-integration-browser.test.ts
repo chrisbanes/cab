@@ -33,7 +33,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     });
     j.observe(page);
     page.setDefaultTimeout(5000);
-    const taskPath = `/app/tasks/${f.taskId}?section=changes`;
+    const taskPath = `/tasks/${f.taskId}?section=changes`;
     const openTask = async () => {
       await page.goto(web.origin + taskPath);
       await page
@@ -307,7 +307,7 @@ async function sharedDestinations(
   done = false,
 ) {
   // The delivery task is not Ready, so each surface asks for Any readiness.
-  for (const route of ["/app", "/app/tasks", `/app/projects/${projectId}`]) {
+  for (const route of ["/", "/tasks", `/projects/${projectId}`]) {
     await page.goto(`${origin}${route}?ready=any`);
     if (done)
       await page.getByLabel("State", { exact: true }).selectOption("Done");
@@ -317,7 +317,7 @@ async function sharedDestinations(
       .waitFor();
     assert.match(await task.innerText(), /org\/repo#1/);
     if (done) assert.match(await task.innerText(), /Done/);
-    if (route !== "/app") {
+    if (route !== "/") {
       await page.getByRole("button", { name: "Board", exact: true }).click();
       // The column chips exist only below the shell breakpoint; wider boards show every column.
       if ((page.viewportSize()?.width ?? 0) < 1121) {
@@ -348,7 +348,7 @@ async function sharedDestinations(
       .getByRole("heading", { name: "Release delivery", exact: true })
       .waitFor();
   }
-  await page.goto(`${origin}/app/inbox`);
+  await page.goto(`${origin}/inbox`);
   // Count only once the inbox has rendered its read: either an empty-state card or request groups.
   await page.locator(".inbox-empty-card, .inbox-group").first().waitFor();
   // Routine delivery progress never invents an actionable request.
@@ -374,13 +374,13 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   let page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks/${f.taskId}`);
+  await page.goto(`${web.origin}/tasks/${f.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
     .getByRole("heading", { name: "Release delivery", exact: true })
     .waitFor();
-  await page.goto(`${web.origin}/app/tasks/new?project=${f.projectId}`);
+  await page.goto(`${web.origin}/tasks/new?project=${f.projectId}`);
   await page
     .getByLabel("Task title", { exact: true })
     .fill("Retain the exact composer input");
@@ -410,14 +410,14 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   );
   f.scripted.state.unknownEffect = true;
   assert.equal((await f.merge()).success, false);
-  await page.goto(`${web.origin}/app/tasks/${f.taskId}?section=changes`);
+  await page.goto(`${web.origin}/tasks/${f.taskId}?section=changes`);
   await page
     .locator("#changes")
     .getByText(/Merge pull requests: uncertain/)
     .waitFor();
   assert.equal(f.scripted.state.writes, 1);
   await captureBrowserEvidence(page, "phone-uncertain-effect");
-  await page.goto(`${web.origin}/app/tasks/${f.taskId}`);
+  await page.goto(`${web.origin}/tasks/${f.taskId}`);
   // At this phone width Stop… sits in the Task actions disclosure; clicking its toggle waits
   // for the header to render.
   await page.locator(".task-header-overflow-toggle").click();
@@ -438,7 +438,7 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   page = await browser.newPage();
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${restarted.origin}/app/tasks/${f.taskId}?section=changes`);
+  await page.goto(`${restarted.origin}/tasks/${f.taskId}?section=changes`);
   await page.getByLabel("Password").fill(restarted.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -493,7 +493,7 @@ test("a pull request in another repository is named by number only, never by the
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks/${f.taskId}`);
+  await page.goto(`${web.origin}/tasks/${f.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page

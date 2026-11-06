@@ -57,7 +57,7 @@ export function ObservationCounts({
             href={
               sameTab
                 ? `#${readinessAnchor}`
-                : `/app/projects/${projectId}/settings?tab=github#${readinessAnchor}`
+                : `/projects/${projectId}/settings?tab=github#${readinessAnchor}`
             }
             onClick={
               sameTab

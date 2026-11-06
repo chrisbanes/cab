@@ -36,7 +36,7 @@ const desktop = { width: 1366, height: 900 },
 async function open(
   defaults: boolean,
   journey: BrowserJourney,
-  path = "/app/tasks",
+  path = "/tasks",
   runtimes?: Pick<
     ReturnType<typeof exhaustibleRuntime>,
     "factory" | "serviceOptions"
@@ -87,7 +87,7 @@ async function open(
   if (
     !defaults &&
     !url.searchParams.has("ready") &&
-    /^\/app(\/tasks|\/projects\/[^/]+)?$/.test(url.pathname)
+    /^\/(\/tasks|\/projects\/[^/]+)?$/.test(url.pathname)
   )
     url.searchParams.set("ready", "any");
   await page.goto(url.href);
@@ -155,7 +155,7 @@ async function startBare<T>(
     )
       posts.push(request.postDataJSON());
   });
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator(".overview-card").first().waitFor();
@@ -223,13 +223,13 @@ test("toolbar puts the filters, switch and count on one row with Active tasks as
   await page.waitForURL((u) => u.searchParams.get("state") === "Stopping");
 
   // Filter tasks, Source and Readiness live in the disclosure, which opens for a URL filter.
-  await page.goto(`${web.origin}/app/tasks?q=Question`);
+  await page.goto(`${web.origin}/tasks?q=Question`);
   assert.equal(await page.locator(".work-more").getAttribute("open"), "");
   assert.equal(await page.getByLabel("Filter tasks").inputValue(), "Question");
   assert.equal(await page.getByLabel("Search tasks").count(), 0);
   // A bare URL would restore the remembered filter, so forget it first.
   await page.evaluate(() => localStorage.clear());
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.equal(await page.locator(".work-more").getAttribute("open"), null);
   await openMoreFilters(page);
@@ -249,7 +249,7 @@ test("toolbar puts the filters, switch and count on one row with Active tasks as
 
   // The switch keeps every filter and the same task set, and sends no command.
   await page.goto(
-    `${web.origin}/app/tasks?project=${ids.projectId}&state=all&q=a&source=local&ready=any`,
+    `${web.origin}/tasks?project=${ids.projectId}&state=all&q=a&source=local&ready=any`,
   );
   await page.locator(".task-list [data-task-id]").first().waitFor();
   const before = await taskIds(page);
@@ -276,7 +276,7 @@ const tasksLink = (page: Page) =>
   page.getByRole("link", { name: "Tasks", exact: true });
 
 test("task filters are remembered across navigation and reload, and the URL wins", async (_t, journey) => {
-  const { ids, web, page } = await startDefaults(journey, "/app/tasks");
+  const { ids, web, page } = await startDefaults(journey, "/tasks");
   // Ready is the default readiness: a fresh visit lists no Draft task and stores nothing.
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.ok(!(await taskIds(page, ".task-list")).includes(ids.draft));
@@ -287,36 +287,36 @@ test("task filters are remembered across navigation and reload, and the URL wins
 
   // A filtered visit is remembered, and the bare Tasks link restores it.
   const filtered = "?state=all&source=local&ready=any";
-  await page.goto(`${web.origin}/app/tasks${filtered}`);
+  await page.goto(`${web.origin}/tasks${filtered}`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   const expected = await taskIds(page, ".task-list");
   assert.ok(expected.includes(ids.draft));
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await tasksLink(page).click();
   await page.waitForURL((u) => u.search === filtered);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.deepEqual(await taskIds(page, ".task-list"), expected);
   await openMoreFilters(page);
   assert.equal(await page.getByLabel("Readiness").inputValue(), "any");
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   await page.waitForURL((u) => u.search === filtered);
   assert.deepEqual(await taskIds(page, ".task-list"), expected);
 
   // The URL wins and becomes the remembered set.
-  await page.goto(`${web.origin}/app/tasks?ready=no`);
+  await page.goto(`${web.origin}/tasks?ready=no`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   const unready = await taskIds(page, ".task-list");
   assert.ok(unready.includes(ids.draft));
   assert.ok(!unready.includes(ids.question.id));
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   await page.waitForURL((u) => u.search === "?ready=no");
 
   // A project page keeps its route's project and the remembered project.
   await page.goto(
-    `${web.origin}/app/tasks?project=${ids.pausedProject}&state=all&ready=any`,
+    `${web.origin}/tasks?project=${ids.pausedProject}&state=all&ready=any`,
   );
   await page.locator(".task-list [data-task-id]").first().waitFor();
-  await page.goto(`${web.origin}/app/projects/${ids.projectId}`);
+  await page.goto(`${web.origin}/projects/${ids.projectId}`);
   await page.waitForURL((u) => u.search === "?state=all&ready=any");
   await page
     .locator(`.task-list [data-task-id="${ids.question.id}"]`)
@@ -328,30 +328,30 @@ test("task filters are remembered across navigation and reload, and the URL wins
   );
 
   // Overview shows the same set.
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.waitForURL((u) => u.search.includes("ready=any"));
 });
 
 test("active filters are counted, reset in one step and undone by Back", async (_t, journey) => {
-  const { f, ids, web, page } = await startDefaults(journey, "/app/tasks");
+  const { f, ids, web, page } = await startDefaults(journey, "/tasks");
   const summary = page.locator(".work-more > summary"),
     reset = page.getByRole("button", { name: "Reset filters" });
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.equal(await summary.innerText(), "More filters");
   assert.equal(await reset.count(), 0);
-  await page.goto(`${web.origin}/app/tasks?source=github`);
+  await page.goto(`${web.origin}/tasks?source=github`);
   await page.locator(".work-more").waitFor();
   // A URL filter opens the disclosure; the indicator is for when it is collapsed.
   await summary.click();
   assert.equal(await page.locator(".work-more").getAttribute("open"), null);
   assert.match(await summary.innerText(), /More filters · 1 active$/);
   assert.equal(await reset.count(), 1);
-  await page.goto(`${web.origin}/app/tasks?source=github&ready=any`);
+  await page.goto(`${web.origin}/tasks?source=github&ready=any`);
   await page.locator(".work-more").waitFor();
   assert.match(await summary.innerText(), /More filters · 2 active$/);
 
   // Reset pushes the defaults and forgets the set; Back returns to the filtered URL.
-  await page.goto(`${web.origin}/app/tasks?state=all&view=board`);
+  await page.goto(`${web.origin}/tasks?state=all&view=board`);
   await page.locator(".board-columns").waitFor();
   await reset.click();
   await page.waitForURL((u) => u.search === "?view=board");
@@ -362,7 +362,7 @@ test("active filters are counted, reset in one step and undone by Back", async (
   assert.equal(await stored(page), "state=all&view=board");
 
   // The count line separates no tasks from no matches.
-  await page.goto(`${web.origin}/app/tasks?q=zzz-no-match`);
+  await page.goto(`${web.origin}/tasks?q=zzz-no-match`);
   await page
     .getByText("No tasks match these filters", { exact: true })
     .waitFor();
@@ -381,7 +381,7 @@ test("active filters are counted, reset in one step and undone by Back", async (
     name: "Empty project",
     leadProfileId: ids.profileId,
   });
-  await page.goto(`${web.origin}/app/projects/${emptyProject}`);
+  await page.goto(`${web.origin}/projects/${emptyProject}`);
   await page.getByText("No tasks", { exact: true }).waitFor();
   assert.equal(await reset.count(), 0);
   // The default view hides drafts; an empty page offers the whole list instead of a dead end.
@@ -397,7 +397,7 @@ test("active filters are counted, reset in one step and undone by Back", async (
     outcome: "Work",
     ready: false,
   });
-  await page.goto(`${web.origin}/app/projects/${emptyProject}`);
+  await page.goto(`${web.origin}/projects/${emptyProject}`);
   await page
     .getByText("No tasks match these filters", { exact: true })
     .waitFor();
@@ -406,11 +406,11 @@ test("active filters are counted, reset in one step and undone by Back", async (
   await page.waitForURL((u) => u.search === "?state=all&ready=any");
   await page.getByRole("link", { name: "Draft only", exact: true }).waitFor();
   assert.equal(await showAll.count(), 0);
-  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}?state=Done`);
+  await page.goto(`${web.origin}/projects/${ids.pausedProject}?state=Done`);
   await page
     .getByText("No tasks match these filters", { exact: true })
     .waitFor();
-  await page.goto(`${web.origin}/app?q=zzz-no-match`);
+  await page.goto(`${web.origin}/?q=zzz-no-match`);
   await page
     .locator(".empty-state")
     .getByText("No tasks match these filters.")
@@ -419,9 +419,9 @@ test("active filters are counted, reset in one step and undone by Back", async (
 });
 
 test("typing in the text filter adds one history entry that one Back clears", async (_t, journey) => {
-  const { page } = await start(journey, "/app");
+  const { page } = await start(journey, "/");
   await tasksLink(page).click();
-  await page.waitForURL((u) => u.pathname === "/app/tasks");
+  await page.waitForURL((u) => u.pathname === "/tasks");
   await page.locator(".task-list [data-task-id]").first().waitFor();
   const before = await page.evaluate(() => history.length);
   await openMoreFilters(page);
@@ -430,7 +430,7 @@ test("typing in the text filter adds one history entry that one Back clears", as
   assert.equal(await page.evaluate(() => history.length), before + 1);
   await page.goBack();
   await page.waitForURL(
-    (u) => u.pathname === "/app/tasks" && !u.searchParams.has("q"),
+    (u) => u.pathname === "/tasks" && !u.searchParams.has("q"),
   );
   assert.equal(await page.getByLabel("Filter tasks").inputValue(), "");
   await page.goForward();
@@ -442,7 +442,7 @@ test("typing in the text filter adds one history entry that one Back clears", as
 });
 
 test("Back and Forward show each entry's own filters", async (_t, journey) => {
-  const { page } = await startDefaults(journey, "/app/tasks");
+  const { page } = await startDefaults(journey, "/tasks");
   await page.locator(".task-list [data-task-id]").first().waitFor();
   await openMoreFilters(page);
   await page.getByLabel("Source").selectOption("github");
@@ -467,19 +467,19 @@ test("Back and Forward show each entry's own filters", async (_t, journey) => {
 });
 
 test("headers carry the new subtitles, one New task action and the page-owned refresh", async (_t, journey) => {
-  const { ids, web, page } = await start(journey, "/app");
+  const { ids, web, page } = await start(journey, "/");
   await page.getByRole("heading", { name: "Overview", level: 1 }).waitFor();
   assert.equal(
     await page.getByRole("link", { name: "New task", exact: true }).count(),
     1,
   );
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.match(
     await page.locator(".page-header-title p").innerText(),
     /^\d+ active tasks? · \d+ projects?$/,
   );
-  await page.goto(`${web.origin}/app/projects/${ids.projectId}`);
+  await page.goto(`${web.origin}/projects/${ids.projectId}`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.match(
     await page.locator(".page-header-title p").innerText(),
@@ -512,7 +512,7 @@ test("headers carry the new subtitles, one New task action and the page-owned re
   await shot(page, "1366-overview-toolbar");
 
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.ok(await noPageOverflow(page));
   const heights = await page
@@ -539,7 +539,7 @@ test("a paused project's banner resumes it with confirmation and shows the save 
       sent.push(request.postDataJSON());
   });
   const open = async () => {
-    await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+    await page.goto(`${web.origin}/projects/${ids.pausedProject}`);
     await banner.waitFor();
   };
   const pauseAgain = () =>
@@ -662,7 +662,7 @@ test("a recorded resume hides the banner's action while the workspace read is st
     )
       sent++;
   });
-  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  await page.goto(`${web.origin}/projects/${ids.pausedProject}`);
   const resume = page.getByRole("button", {
     name: "Resume project",
     exact: true,
@@ -708,7 +708,7 @@ test("a recorded resume stays suppressed across navigation until a read shows th
     )
       sent.push(request.postDataJSON());
   });
-  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  await page.goto(`${web.origin}/projects/${ids.pausedProject}`);
   const banner = page
     .getByRole("status")
     .filter({ hasText: "Project paused · New turns are held." });
@@ -797,7 +797,7 @@ test("a project paused again after a recorded resume offers Resume project on th
     )
       sent.push(request.postDataJSON());
   });
-  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  await page.goto(`${web.origin}/projects/${ids.pausedProject}`);
   const banner = page
     .getByRole("status")
     .filter({ hasText: "Project paused · New turns are held." });
@@ -851,7 +851,7 @@ test("reopening Resume project after cancelling uses the version now shown", asy
     )
       sent.push(request.postDataJSON());
   });
-  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  await page.goto(`${web.origin}/projects/${ids.pausedProject}`);
   const resume = page.getByRole("button", {
     name: "Resume project",
     exact: true,
@@ -901,7 +901,7 @@ test("a Resume conflict reviewed while the project is still paused resumes with 
     )
       sent.push(request.postDataJSON());
   });
-  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  await page.goto(`${web.origin}/projects/${ids.pausedProject}`);
   const resume = page.getByRole("button", {
     name: "Resume project",
     exact: true,
@@ -946,7 +946,7 @@ test("a Resume conflict reviewed while the project is still paused resumes with 
 });
 
 test("a routing fallback row names cab as the next actor without the operator tone", async (_t, journey) => {
-  const { ids, page } = await start(journey, "/app/tasks?state=all");
+  const { ids, page } = await start(journey, "/tasks?state=all");
   await page.route("**/api/operator/task-list*", async (route) => {
     const response = await route.fetch(),
       json = await response.json();
@@ -969,7 +969,7 @@ test("a routing fallback row names cab as the next actor without the operator to
 });
 
 test("task rows show state, next actor and lead from recorded facts without raw identifiers", async (_t, journey) => {
-  const { ids, web, page } = await start(journey, "/app/tasks?state=all");
+  const { ids, web, page } = await start(journey, "/tasks?state=all");
   const row = (id: string) => page.locator(`.task-list [data-task-id="${id}"]`);
   await row(ids.importedId).waitFor();
   const imported = await row(ids.importedId)
@@ -1015,11 +1015,11 @@ test("task rows show state, next actor and lead from recorded facts without raw 
     "small-heading task-title",
   );
   await page.mouse.click(...at);
-  await page.waitForURL((u) => u.pathname === `/app/tasks/${ids.running.id}`);
+  await page.waitForURL((u) => u.pathname === `/tasks/${ids.running.id}`);
   await page.goBack();
   await shot(page, "1366-list");
 
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page
     .getByRole("region", { name: "Across your projects" })
     .locator(".task-row")
@@ -1031,7 +1031,7 @@ test("task rows show state, next actor and lead from recorded facts without raw 
   await shot(page, "1366-overview-work");
 
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/tasks?state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?state=all&ready=any`);
   await row(ids.importedId).waitFor();
   assert.ok(await noPageOverflow(page));
   const narrow = await page.locator(".task-row > *").evaluateAll((es) =>
@@ -1045,7 +1045,7 @@ test("task rows show state, next actor and lead from recorded facts without raw 
 });
 
 test("overview cards read the Inbox and cover its failure and partial states", async (_t, journey) => {
-  const { f, ids, web, page } = await start(journey, "/app");
+  const { f, ids, web, page } = await start(journey, "/");
   const attention = page.getByRole("region", {
     name: "Needs you",
     exact: true,
@@ -1056,12 +1056,12 @@ test("overview cards read the Inbox and cover its failure and partial states", a
   const cards = attention.locator(".overview-card");
   await cards.first().waitFor();
   const navCount = await page
-    .locator('.sidebar a[href="/app/inbox"] .nav-count')
+    .locator('.sidebar a[href="/inbox"] .nav-count')
     .innerText();
   assert.equal(await stat(page, "Needs you"), navCount);
   const inboxLink = attention.getByRole("link", { name: /^Open Inbox/ });
   assert.equal(squash(await inboxLink.innerText()), `Open Inbox · ${navCount}`);
-  assert.equal(await inboxLink.getAttribute("href"), "/app/inbox");
+  assert.equal(await inboxLink.getAttribute("href"), "/inbox");
   assert.ok((await cards.count()) <= 3);
   for (const text of await cards.evaluateAll((es) =>
     es.map((e) => e.textContent ?? ""),
@@ -1099,7 +1099,7 @@ test("overview cards read the Inbox and cover its failure and partial states", a
     });
   assert.match(
     (await questionLink.getAttribute("href")) ?? "",
-    new RegExp(`^/app/inbox\\?task=${ids.question.id}&request=`),
+    new RegExp(`^/inbox\\?task=${ids.question.id}&request=`),
   );
   const intervention = cards.filter({
     hasText: "Stop with uncertain ownership",
@@ -1108,7 +1108,7 @@ test("overview cards read the Inbox and cover its failure and partial states", a
     await intervention
       .getByRole("link", { name: "Inspect execution" })
       .getAttribute("href"),
-    `/app/tasks/${ids.uncertainStop.id}?section=decisions`,
+    `/tasks/${ids.uncertainStop.id}?section=decisions`,
   );
   assert.equal(await attention.locator(".overview-overflow").count(), 0);
   await shot(page, "1366-overview-attention");
@@ -1138,14 +1138,14 @@ test("overview cards read the Inbox and cover its failure and partial states", a
     squash(await overflow.innerText()),
     "1 more · Question project / Fourth request · Inbox",
   );
-  assert.equal(await overflow.getAttribute("href"), "/app/inbox");
+  assert.equal(await overflow.getAttribute("href"), "/inbox");
   assert.equal(await cards.count(), 3);
   await page.waitForFunction(
     (n) => document.querySelector(".overview-stats dd")?.textContent === n,
     String(Number(navCount) + 1),
   );
   assert.equal(
-    await page.locator('.sidebar a[href="/app/inbox"] .nav-count').innerText(),
+    await page.locator('.sidebar a[href="/inbox"] .nav-count').innerText(),
     String(Number(navCount) + 1),
   );
 
@@ -1161,7 +1161,7 @@ test("overview cards read the Inbox and cover its failure and partial states", a
     await completed
       .getByRole("link", { name: "View completed" })
       .getAttribute("href"),
-    "/app/tasks?state=Done&ready=any",
+    "/tasks?state=Done&ready=any",
   );
   await shot(page, "1366-overview-completed");
 
@@ -1219,7 +1219,7 @@ test("overview cards read the Inbox and cover its failure and partial states", a
   }
 
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await cards.first().waitFor();
   assert.ok(await noPageOverflow(page));
   const action = await cards
@@ -1231,7 +1231,7 @@ test("overview cards read the Inbox and cover its failure and partial states", a
 });
 
 test("the stat strip counts the installation and shows — until the task list loads", async (_t, journey) => {
-  const { page } = await start(journey, "/app");
+  const { page } = await start(journey, "/");
   await page.locator(".task-list .task-row").first().waitFor();
   let release = () => {};
   const held = new Promise<void>((r) => (release = r));
@@ -1319,7 +1319,7 @@ test("cards put uncertain interventions first, then the oldest, with exact appro
     await approvalCard
       .getByRole("link", { name: "Review material & decide" })
       .getAttribute("href"),
-    `/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
+    `/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   // The paused approval project holds execution; the card says approval does not clear it.
   await approvalCard.getByText(/Approval does not resume work/).waitFor();
@@ -1497,7 +1497,7 @@ test("a single-choice question is answered in its card with the Inbox's command 
     .getByRole("radio", { name: /Team owners/ })
     .check();
   // In-app navigation: drafts live in this tab's session, not across a reload.
-  await page.locator('.sidebar a[href="/app/inbox"]').click();
+  await page.locator('.sidebar a[href="/inbox"]').click();
   await page.locator(".inbox-row").filter({ hasText: "Inbox choice" }).click();
   const inboxForm = page.locator(".inbox-detail");
   await inboxForm.getByRole("radio", { name: /Team owners/ }).waitFor();
@@ -1516,7 +1516,7 @@ test("a single-choice question is answered in its card with the Inbox's command 
   const inboxCommand = posts.at(-1)!;
 
   // Refused, then unconfirmed, then checked: the card keeps the choice and its outcomes.
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await inline.getByRole("radio", { name: /Every new member/ }).check();
   const before = Number(await stat(page, "Needs you"));
   await page.route("**/api/operator/commands", (route) =>
@@ -1607,7 +1607,7 @@ test("a single-choice question is answered in its card with the Inbox's command 
 });
 
 test("overview work sits in a panel beside Projects and Completed work and stacks on a phone", async (_t, journey) => {
-  const { ids, web, page, commands } = await start(journey, "/app");
+  const { ids, web, page, commands } = await start(journey, "/");
   const work = page.getByRole("region", {
     name: "Across your projects",
     exact: true,
@@ -1657,7 +1657,7 @@ test("overview work sits in a panel beside Projects and Completed work and stack
   const service = links.filter({ hasText: "Service integration" });
   assert.equal(
     await service.getAttribute("href"),
-    `/app/projects/${ids.projectId}`,
+    `/projects/${ids.projectId}`,
   );
   const serviceText = await service.innerText();
   assert.match(serviceText, /Lead · Accountable lead/);
@@ -1676,7 +1676,7 @@ test("overview work sits in a panel beside Projects and Completed work and stack
     await completed
       .getByRole("link", { name: "Completed result", exact: true })
       .getAttribute("href"),
-    `/app/tasks/${ids.done}`,
+    `/tasks/${ids.done}`,
   );
   // Beside the work panel at the desktop review width.
   const [panel, side] = await Promise.all(
@@ -1690,7 +1690,7 @@ test("overview work sits in a panel beside Projects and Completed work and stack
   assert.equal(commands(), 0);
 
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app?view=list`);
+  await page.goto(`${web.origin}/?view=list`);
   await work.locator(".task-row").first().waitFor();
   assert.ok(await noPageOverflow(page));
   assert.equal(await labels.isVisible(), false);
@@ -1734,7 +1734,7 @@ test("overview without requests or completed work says so and omits the complete
   journey.observe(page);
   page.setDefaultTimeout(5000);
   // The Draft task is not Ready, which the default readiness hides.
-  await page.goto(`${web.origin}/app?ready=any`);
+  await page.goto(`${web.origin}/?ready=any`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -1760,7 +1760,7 @@ const inBoard = (page: Page, column: string) =>
 test("board headings show every count, with collapsed empty columns and drawn cards", async (_t, journey) => {
   const { ids, web, page, commands } = await start(
     journey,
-    "/app/tasks?view=board&state=all",
+    "/tasks?view=board&state=all",
   );
   const bar = page.getByRole("toolbar", { name: "Board columns" });
   await page.locator(".board-column").first().waitFor();
@@ -1822,7 +1822,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
     (await card
       .getByRole("link", { name: "Answer question" })
       .getAttribute("href")) ?? "",
-    /^\/app\/inbox\?task=/,
+    /^\/inbox\?task=/,
   );
   const source = page
     .locator(`[data-task-id="${ids.importedId}"]`)
@@ -1843,7 +1843,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
     .getByRole("link", { name: "Question requiring action", exact: true })
     .focus();
   await page.keyboard.press("Enter");
-  await page.waitForURL((u) => u.pathname === `/app/tasks/${ids.question.id}`);
+  await page.waitForURL((u) => u.pathname === `/tasks/${ids.question.id}`);
   await page.goBack();
   await inBoard(page, "Uncertain");
 
@@ -1868,7 +1868,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   }
 
   // Active tasks with only Done added shows the terminal column the filter names.
-  await page.goto(`${web.origin}/app/tasks?view=board&state=Done&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=Done&ready=any`);
   await page.locator(".board-column").first().waitFor();
   assert.equal(await page.locator(".board-column").count(), 9);
   assert.equal(
@@ -1913,7 +1913,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   assert.equal(commands(), 0);
 
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=all&ready=any`);
   await bar.waitFor();
   assert.ok(await noPageOverflow(page));
   const tabs = await bar
@@ -2020,7 +2020,7 @@ const style = (page: Page, selector: string, property: string) =>
     );
 
 test("board cards follow the frame's anatomy", async (_t, journey) => {
-  const { ids, page, commands } = await start(journey, "/app/tasks?view=board");
+  const { ids, page, commands } = await start(journey, "/tasks?view=board");
   const card = (id: string) => `[data-task-id="${id}"]`;
   await page.locator(card(ids.question.id)).waitFor();
   await page
@@ -2061,7 +2061,7 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     (await page
       .locator(`${card(ids.question.id)} .task-request`)
       .getAttribute("href")) ?? "",
-    /^\/app\/inbox\?task=/,
+    /^\/inbox\?task=/,
   );
   assert.equal(
     await page.locator(`${card(ids.question.id)} .task-status`).count(),
@@ -2160,7 +2160,7 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
 test("board columns share one 1366 screen, collapse to rails and scroll only inside the board", async (_t, journey) => {
   const { ids, web, page, commands } = await start(
     journey,
-    "/app/tasks?view=board",
+    "/tasks?view=board",
   );
   const bar = page.getByRole("toolbar", { name: "Board columns" });
   await page.locator(`[data-task-id="${ids.question.id}"]`).waitFor();
@@ -2204,7 +2204,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   await shot(page, "1366-board-all-columns");
 
   // (b) Ten columns overflow into the board, never the page; Back restores its scroll.
-  await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=all&ready=any`);
   await page.locator(".board-column").first().waitFor();
   const all = await layout();
   assert.equal(all.columns.length, 10);
@@ -2224,7 +2224,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   );
   const title = page.getByRole("link", { name: "Cancelled work", exact: true });
   await title.click();
-  await page.waitForURL((u) => u.pathname.startsWith("/app/tasks/"));
+  await page.waitForURL((u) => u.pathname.startsWith("/tasks/"));
   await page.goBack();
   await page.locator(".board-column").first().waitFor();
   await page.waitForFunction(
@@ -2236,7 +2236,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   );
 
   // (c) Every empty column is a labelled vertical rail that does not clip its text.
-  await page.goto(`${web.origin}/app/tasks?view=board&state=Done&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=Done&ready=any`);
   await page.locator(".board-column").first().waitFor();
   const rails = await page.locator(".board-column").evaluateAll((es) =>
     es.map((e) => ({
@@ -2266,7 +2266,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
 
   // (d) Tablet: the board scrolls inside itself and the link bar reaches Uncertain.
   await page.setViewportSize({ width: 1024, height: 768 });
-  await page.goto(`${web.origin}/app/tasks?view=board&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&ready=any`);
   await bar.waitFor();
   const tablet = await layout();
   assert.ok(tablet.scrollWidth > tablet.clientWidth);
@@ -2289,7 +2289,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
 
   // (e) Phone: selected tab and Uncertain tones, 44px targets and the footer sentence.
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/tasks?view=board&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&ready=any`);
   await bar.waitFor();
   await bar.getByRole("button", { name: /^Waiting · / }).click();
   // Buttons transition their colours, so wait for the settled value.
@@ -2334,12 +2334,12 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
 
   // (f) Overview's Board sits in its work panel and keeps the List's task IDs.
   await page.setViewportSize(desktop);
-  await page.goto(`${web.origin}/app?view=board&ready=any`);
+  await page.goto(`${web.origin}/?view=board&ready=any`);
   await page.locator(".overview-panel .board-columns").waitFor();
   await page.locator(".overview-panel .task-card").first().waitFor();
   assert.ok(await noPageOverflow(page));
   const board = await taskIds(page, ".overview-panel .board-columns");
-  await page.goto(`${web.origin}/app?view=list&ready=any`);
+  await page.goto(`${web.origin}/?view=list&ready=any`);
   await page.locator(".overview-panel .task-row").first().waitFor();
   assert.deepEqual(await taskIds(page, ".overview-panel .task-list"), board);
   assert.equal(commands(), 0);
@@ -2348,12 +2348,12 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
 test("the board column chips render only below the shell breakpoint", async (_t, journey) => {
   const { web, page, commands } = await start(
     journey,
-    "/app/tasks?view=board&state=all",
+    "/tasks?view=board&state=all",
   );
   const bar = page.getByRole("toolbar", { name: "Board columns" });
   const cardCount = () => page.locator(".board-columns [data-task-id]").count();
   // A fresh load, so Tab below starts from the top of the page.
-  await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=all&ready=any`);
   await page.locator(".board-column").first().waitFor();
   const cards = await cardCount();
 
@@ -2424,7 +2424,7 @@ test("the board column chips render only below the shell breakpoint", async (_t,
 
   // (e) Beside the sidebar, seven Active columns overflow the board: Tab still reaches Uncertain.
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto(`${web.origin}/app/tasks?view=board&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&ready=any`);
   await page.locator(".board-column").first().waitFor();
   assert.equal(await bar.count(), 0);
   await page
@@ -2444,7 +2444,7 @@ test("the board column chips render only below the shell breakpoint", async (_t,
 test("phone board keeps filters and column chips in one horizontal row with the first card on screen", async (_t, journey) => {
   const { f, ids, web, page, commands } = await start(
     journey,
-    "/app/tasks?view=board&state=all",
+    "/tasks?view=board&state=all",
   );
   // A long project name must truncate in the Project select, not widen the row.
   f.service.domain().execute({
@@ -2456,7 +2456,7 @@ test("phone board keeps filters and column chips in one horizontal row with the 
     leadProfileId: ids.profileId,
   });
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=all&ready=any`);
   const bar = page.getByRole("toolbar", { name: "Board columns" }),
     state = page.getByRole("combobox", { name: "State", exact: true }),
     project = page.getByRole("combobox", { name: "Project", exact: true }),
@@ -2586,7 +2586,7 @@ test("phone board keeps filters and column chips in one horizontal row with the 
   assert.equal(await bar.count(), 1);
 
   // A fresh load that opens a later column fits its chip once the fonts have settled.
-  await page.goto(`${web.origin}/app/tasks?view=board&state=Paused&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&state=Paused&ready=any`);
   await bar.waitFor();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForFunction(() => {
@@ -2606,7 +2606,7 @@ test("phone board keeps filters and column chips in one horizontal row with the 
 
   // (8) The project route has no Project select; Overview puts the chips in its work panel.
   await page.goto(
-    `${web.origin}/app/projects/${ids.projectId}?view=board&ready=any`,
+    `${web.origin}/projects/${ids.projectId}?view=board&ready=any`,
   );
   await bar.waitFor();
   assert.equal(await project.count(), 0);
@@ -2620,14 +2620,14 @@ test("phone board keeps filters and column chips in one horizontal row with the 
     ),
   ).then((groups) => groups.flat());
   assert.ok(Math.max(...projectTops) - Math.min(...projectTops) <= 1);
-  await page.goto(`${web.origin}/app?view=board&ready=any`);
+  await page.goto(`${web.origin}/?view=board&ready=any`);
   await page
     .locator(".overview-panel .work-toolbar .column-navigation")
     .waitFor();
   assert.equal(await bar.count(), 1);
 
   // (9) List has no chip slot and keeps its visible count.
-  await page.goto(`${web.origin}/app/tasks?view=list&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=list&ready=any`);
   await page.locator(".task-row").first().waitFor();
   assert.equal(await page.locator(".work-columns").count(), 0);
   assert.equal(await bar.count(), 0);
@@ -2654,17 +2654,17 @@ test("attention summary names the uncertain or stopping task and links to the In
   });
   assert.match(
     (await action.getAttribute("href")) ?? "",
-    /^\/app\/tasks\/[0-9a-f-]{36}\?section=decisions$/,
+    /^\/tasks\/[0-9a-f-]{36}\?section=decisions$/,
   );
   const navCount = await page
-    .locator('.sidebar a[href="/app/inbox"] .nav-count')
+    .locator('.sidebar a[href="/inbox"] .nav-count')
     .innerText();
   const inbox = summary.getByRole("link", { name: /^Inbox/ });
   assert.equal(
     (await inbox.innerText()).replace(/\s+/g, " ").trim(),
     `Inbox · ${navCount}`,
   );
-  assert.equal(await inbox.getAttribute("href"), "/app/inbox");
+  assert.equal(await inbox.getAttribute("href"), "/inbox");
   const list = await taskIds(page);
   await shot(page, "1366-tasks-attention-bar");
   // Like the Inbox, it lands on the task's decision card with the hold lines in view.
@@ -2680,9 +2680,9 @@ test("attention summary names the uncertain or stopping task and links to the In
   assert.deepEqual(await taskIds(page), list);
 
   // Scoped to the project; the Inbox number stays global.
-  await page.goto(`${web.origin}/app/projects/${ids.projectId}`);
+  await page.goto(`${web.origin}/projects/${ids.projectId}`);
   await summary.waitFor();
-  await page.locator('.sidebar a[href="/app/inbox"] .nav-count').waitFor();
+  await page.locator('.sidebar a[href="/inbox"] .nav-count').waitFor();
   assert.equal(
     await summary
       .getByRole("link", { name: /^Inbox/ })
@@ -2710,7 +2710,7 @@ test("attention summary names the uncertain or stopping task and links to the In
       t.execution.state === "uncertain" ||
       t.attention.codes.includes("execution-uncertain"),
   );
-  await page.goto(`${web.origin}/app/tasks?view=list&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=list&ready=any`);
   await summary.getByText(/^Stopping · Normal Stop observation/).waitFor();
   await summary.getByRole("link", { name: "Open task", exact: true }).waitFor();
   await page.unroute("**/api/operator/task-list");
@@ -2720,20 +2720,20 @@ test("attention summary names the uncertain or stopping task and links to the In
       t.execution.state === "stopping" ||
       t.attention.codes.includes("execution-uncertain"),
   );
-  await page.goto(`${web.origin}/app/tasks?view=list&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=list&ready=any`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.equal(await summary.count(), 0);
   await page.unroute("**/api/operator/task-list");
 
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/tasks?view=board&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&ready=any`);
   await summary.waitFor();
   assert.ok(await noPageOverflow(page));
   await shot(page, "390-board-attention-bar");
 });
 
 test("the Updated line shows the last successful read and keeps it through a failed refresh", async (_t, journey) => {
-  const { web, page } = await start(journey, "/app/tasks");
+  const { web, page } = await start(journey, "/tasks");
   const label = (at: number) =>
     page.evaluate((t) => {
       const d = new Date(t);
@@ -2751,7 +2751,7 @@ test("the Updated line shows the last successful read and keeps it through a fai
     });
   };
   await page.route("**/api/operator/task-list", answerWith);
-  await page.goto(`${web.origin}/app/tasks?view=list&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=list&ready=any`);
   const line = page.locator("main p.metadata", { hasText: /^Updated / });
   const refresh = page.getByRole("button", {
     name: "Refresh tasks",
@@ -2793,7 +2793,7 @@ test("the Updated line shows the last successful read and keeps it through a fai
 
 test("a runtime Needs you card comes first and links to runtime settings", async (_t, journey) => {
   const exhaustion = exhaustibleRuntime();
-  const { page } = await start(journey, "/app", exhaustion, (f) =>
+  const { page } = await start(journey, "/", exhaustion, (f) =>
     exhaustion.exhaust(f.runtime),
   );
   const attention = page.getByRole("region", {
@@ -2814,14 +2814,14 @@ test("a runtime Needs you card comes first and links to runtime settings", async
     assert.ok(text.includes(expected), `${expected} in ${text}`);
   assert.doesNotMatch(text, uuidText);
   const link = first.getByRole("link", { name: "Open runtime settings" });
-  assert.equal(await link.getAttribute("href"), "/app/settings/runtime");
+  assert.equal(await link.getAttribute("href"), "/settings/runtime");
   const describedBy = await link.getAttribute("aria-describedby");
   assert.equal(await first.locator(`h3[id="${describedBy}"]`).count(), 1);
   // The same total in the stat, the sidebar and the Open Inbox link.
   const navCount = await page
-    .locator('.sidebar a[href="/app/inbox"] .nav-count')
+    .locator('.sidebar a[href="/inbox"] .nav-count')
     .innerText();
   assert.equal(await stat(page, "Needs you"), navCount);
   await link.click();
-  await page.waitForURL("**/app/settings/runtime");
+  await page.waitForURL("**/settings/runtime");
 });

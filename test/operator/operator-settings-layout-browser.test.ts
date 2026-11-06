@@ -23,7 +23,7 @@ async function assertPausedBadgeIdle(scope: Locator) {
 }
 
 test("Settings index lists projects, profiles, routing and runtime from their own reads", async (_t, journey) => {
-  const { ids, page } = await startSettings(journey, "/app/settings");
+  const { ids, page } = await startSettings(journey, "/settings");
   const main = page.locator("main");
   await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
   const projects = main.locator(".settings-panel", {
@@ -35,7 +35,7 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
     await page
       .getByRole("link", { name: "Configure Atlas", exact: true })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}/settings`,
+    `/projects/${ids.atlas}/settings`,
   );
   await projects
     .getByText("acme/atlas · main · checkout configured", { exact: false })
@@ -66,7 +66,7 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
     await page
       .getByRole("link", { name: "Edit Reviewer", exact: true })
       .getAttribute("href"),
-    `/app/profiles/${ids.profiles.Reviewer}/settings`,
+    `/profiles/${ids.profiles.Reviewer}/settings`,
   );
   const routing = main.locator(".settings-panel", {
     has: page.getByRole("heading", { name: "Routing", exact: true }),
@@ -79,7 +79,7 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
     await page
       .getByRole("link", { name: "Open routing for Relay", exact: true })
       .getAttribute("href"),
-    `/app/projects/${ids.relay}/settings?tab=routing`,
+    `/projects/${ids.relay}/settings?tab=routing`,
   );
   await main
     .getByText("1 task with a recorded execution hold", { exact: false })
@@ -88,7 +88,7 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
     await page
       .getByRole("link", { name: "Open runtime", exact: true })
       .getAttribute("href"),
-    "/app/settings/runtime",
+    "/settings/runtime",
   );
   const text = await page.locator("body").innerText();
   for (const secret of ["PRIVATE", "FIXTURE_GITHUB", "atlas-checkout"])
@@ -119,14 +119,11 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
 });
 
 test("a failed project configuration read marks only that row unavailable", async (_t, journey) => {
-  const { ids, page, web } = await startSettings(
-    journey,
-    "/app/settings/runtime",
-  );
+  const { ids, page, web } = await startSettings(journey, "/settings/runtime");
   const route = `**/api/operator/projects/${ids.atlas}/configuration`;
   await page.route(route, (r) => r.fulfill({ status: 500, body: "{}" }));
   try {
-    await page.goto(`${web.origin}/app/settings`);
+    await page.goto(`${web.origin}/settings`);
     await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
     await page.getByRole("button", { name: "Retry Atlas" }).first().waitFor();
     await page.getByText("Lead: Jonas").waitFor();
@@ -141,7 +138,7 @@ test("a failed project configuration read marks only that row unavailable", asyn
 });
 
 test("Settings index is one column with 44px targets on a phone", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings", phone);
+  const { page } = await startSettings(journey, "/settings", phone);
   await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
   await page.getByText("7 agents · 1 revoked").waitFor();
   await page.getByText("Lead: Mira").waitFor();
@@ -173,11 +170,8 @@ test(
   "Settings index renders in WebKit",
   { browserEngine: "webkit" },
   async (_t, journey) => {
-    const { page } = await startSettings(
-      journey,
-      "/app/settings",
-      undefined,
-      () => webkit.launch(),
+    const { page } = await startSettings(journey, "/settings", undefined, () =>
+      webkit.launch(),
     );
     await page.getByText("3 projects · 1 paused", { exact: false }).waitFor();
   },

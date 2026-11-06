@@ -516,7 +516,7 @@ function DeliveryPolicyForm(p: TabProps) {
                     : undefined,
                 )}{" "}
                 <a
-                  href={`/app/projects/${p.projectId}/settings?tab=github#status-mapping`}
+                  href={`/projects/${p.projectId}/settings?tab=github#status-mapping`}
                 >
                   Edit status mapping
                 </a>

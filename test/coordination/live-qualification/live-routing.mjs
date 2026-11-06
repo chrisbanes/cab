@@ -1008,7 +1008,7 @@ async function run() {
   if (evidence.failure) process.exitCode = 1;
 
   progress("operator-logout");
-  await page.goto(`${origin}/app`);
+  await page.goto(`${origin}/`);
   await signOutOperator(page, origin);
 }
 

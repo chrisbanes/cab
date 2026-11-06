@@ -290,7 +290,7 @@ export function RuntimeSettings(p: SettingsProps) {
       }
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
-  // `/app/settings/runtime#add-claude` lands once the panel exists.
+  // `/settings/runtime#add-claude` lands once the panel exists.
   useFragmentLanding(Boolean(data));
   const labels = workspaceLabels(p.workspace);
   type ProjectRow = NonNullable<typeof data>["projects"][number];
@@ -486,13 +486,13 @@ export function RuntimeSettings(p: SettingsProps) {
                     <div className="settings-actions">
                       <ActionLink
                         variant="secondary"
-                        href={`/app/tasks/${task.taskId}`}
+                        href={`/tasks/${task.taskId}`}
                       >
                         Task detail
                       </ActionLink>
                       <ActionLink
                         variant="secondary"
-                        href={`/app/tasks/${task.taskId}?section=execution`}
+                        href={`/tasks/${task.taskId}?section=execution`}
                       >
                         Task controls
                       </ActionLink>
@@ -500,9 +500,7 @@ export function RuntimeSettings(p: SettingsProps) {
                     <ul className="settings-links body">
                       {task.assignments.map((a) => (
                         <li key={a.assignmentId}>
-                          <a
-                            href={`/app/assignments/${a.assignmentId}/recovery`}
-                          >
+                          <a href={`/assignments/${a.assignmentId}/recovery`}>
                             {a.name ?? "Agent name unavailable"}: recovery
                             evidence
                           </a>
@@ -1010,14 +1008,14 @@ export function AssignmentRecovery(
     data = resource.state.data?.data;
   useHeaderRefresh(p.refreshNonce, resource.refresh);
   const inspect = data
-    ? `/app/tasks/${data.taskId}?assignment=${p.assignmentId}`
+    ? `/tasks/${data.taskId}?assignment=${p.assignmentId}`
     : "";
   const pills = data ? holdPills(data.holds) : [];
   const status = data ? executionStatus(data.execution, data) : null;
   const facts = data ? recoveryAssignmentFacts(data.assignment) : null;
   const taskFacts = data ? recoveryTaskFacts(data.lead, data.taskHold) : null;
   const assignmentInspector = data
-    ? `/app/tasks/${data.taskId}?section=assignments&inspectAssignment=${encodeURIComponent(p.assignmentId)}`
+    ? `/tasks/${data.taskId}?section=assignments&inspectAssignment=${encodeURIComponent(p.assignmentId)}`
     : "";
   return (
     <div className="settings-page">
@@ -1087,9 +1085,7 @@ export function AssignmentRecovery(
                 )}
                 <p className="body">{resumeWarning}</p>
                 <p className="body">{evidenceWarning}</p>
-                <ActionLink
-                  href={`/app/tasks/${data.taskId}?section=execution`}
-                >
+                <ActionLink href={`/tasks/${data.taskId}?section=execution`}>
                   View task-wide execution evidence
                 </ActionLink>
                 <p className="metadata muted">
@@ -1205,15 +1201,12 @@ export function AssignmentRecovery(
               <Aside
                 title="Advanced destinations · desktop-first"
                 items={[
-                  <a
-                    key="b"
-                    href={`/app/tasks/${data.taskId}?section=execution`}
-                  >
+                  <a key="b" href={`/tasks/${data.taskId}?section=execution`}>
                     Task Stop, Resume and dependencies
                   </a>,
                   <a
                     key="c"
-                    href={`/app/tasks/${data.taskId}?assignment=${p.assignmentId}`}
+                    href={`/tasks/${data.taskId}?assignment=${p.assignmentId}`}
                   >
                     Assignment conversation
                   </a>,

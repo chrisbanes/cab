@@ -82,11 +82,11 @@ test("production shell keeps direct task links usable and the navigation drawer 
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   await page
     .getByRole("heading", { name: "Direct shell task", exact: true })
     .waitFor();
-  assert.equal(new URL(page.url()).pathname, `/app/tasks/${taskId}`);
+  assert.equal(new URL(page.url()).pathname, `/tasks/${taskId}`);
 
   for (const width of [759, 760, 800, 1119, 1120, 1121, 1366]) {
     await page.setViewportSize({ width, height: 768 });
@@ -167,7 +167,7 @@ test("production shell keeps direct task links usable and the navigation drawer 
   );
   assert.equal(await page.locator("main h1").count(), 1);
   await back.click();
-  await page.waitForURL(`**/app/projects/${projectId}`);
+  await page.waitForURL(`**/projects/${projectId}`);
   await page.locator("main.page h1").waitFor();
 
   const trigger = page.getByRole("button", {
@@ -223,12 +223,12 @@ test("production shell keeps direct task links usable and the navigation drawer 
   assert.ok(drawerLinkHeights.length > 0);
   assert.ok(drawerLinkHeights.every((height) => height >= 44));
   await dialog.getByRole("link", { name: "Search", exact: true }).click();
-  await page.waitForURL("**/app/search");
+  await page.waitForURL("**/search");
   await page.goBack();
   await page
     .getByRole("heading", { name: longProjectName, exact: true, level: 1 })
     .waitFor();
-  assert.equal(new URL(page.url()).pathname, `/app/projects/${projectId}`);
+  assert.equal(new URL(page.url()).pathname, `/projects/${projectId}`);
 
   await trigger.click();
   await dialog.waitFor({ state: "visible" });
@@ -254,7 +254,7 @@ test("production shell keeps direct task links usable and the navigation drawer 
     true,
     "closing the drawer restores focus to its trigger",
   );
-  assert.equal(new URL(page.url()).pathname, `/app/projects/${projectId}`);
+  assert.equal(new URL(page.url()).pathname, `/projects/${projectId}`);
 
   // Browser Back from an open drawer to a nested screen closes it; Forward does not reopen it.
   await trigger.click();
@@ -312,7 +312,7 @@ test("shared controls retain visible focus in forced colours and remove optional
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks");
+  await signIn(page, web.origin, web.password, "/tasks");
   const search = page.getByRole("combobox", { name: "State", exact: true });
   const project = page.getByRole("combobox", { name: "Project", exact: true });
   const list = page.getByRole("button", { name: "List", exact: true });
@@ -386,9 +386,9 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app");
+  await signIn(page, web.origin, web.password, "/");
   const sidebar = page.locator(".sidebar");
-  await sidebar.locator('a[href="/app/inbox"] .nav-count').waitFor();
+  await sidebar.locator('a[href="/inbox"] .nav-count').waitFor();
   const labels = await sidebar
     .locator('nav[aria-label="Operator navigation"] a')
     .evaluateAll((links) =>
@@ -398,9 +398,9 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
       })),
     );
   assert.deepEqual(labels.slice(0, 3), [
-    { label: "Overview", href: "/app" },
-    { label: "Inbox", href: "/app/inbox" },
-    { label: "Tasks", href: "/app/tasks" },
+    { label: "Overview", href: "/" },
+    { label: "Inbox", href: "/inbox" },
+    { label: "Tasks", href: "/tasks" },
   ]);
   // The Search work field is the desktop shell's only Search entry.
   assert.equal(
@@ -411,15 +411,13 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   assert.equal(await sidebar.getByLabel("Search work").count(), 1);
   assert.deepEqual(labels.at(-1), {
     label: "New project",
-    href: "/app/settings/projects/new",
+    href: "/settings/projects/new",
   });
   assert.ok(
-    labels
-      .slice(3, -1)
-      .every((entry) => entry.href?.startsWith("/app/projects/")),
+    labels.slice(3, -1).every((entry) => entry.href?.startsWith("/projects/")),
   );
   assert.equal(
-    await sidebar.locator('a[href="/app/inbox"] .nav-count').textContent(),
+    await sidebar.locator('a[href="/inbox"] .nav-count').textContent(),
     "2",
   );
   assert.equal(
@@ -455,12 +453,12 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   assert.equal(await page.locator("main h1").count(), 1);
 
   // On the Inbox route the shell count is the list's own total, and the header explains it.
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.locator(".inbox-row").first().waitFor();
   assert.equal(await page.locator(".inbox-row").count(), 2);
-  await sidebar.locator('a[href="/app/inbox"] .nav-count').waitFor();
+  await sidebar.locator('a[href="/inbox"] .nav-count').waitFor();
   assert.equal(
-    await sidebar.locator('a[href="/app/inbox"] .nav-count').textContent(),
+    await sidebar.locator('a[href="/inbox"] .nav-count').textContent(),
     "2",
   );
   // At the sidebar shell the queue header owns the heading and summary; no page header.
@@ -481,13 +479,13 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   );
   await page.setViewportSize({ width: 1366, height: 900 });
 
-  await page.goto(`${web.origin}/app/tasks?view=board`);
+  await page.goto(`${web.origin}/tasks?view=board`);
   await page.locator("main.page h1").waitFor();
   const current = await sidebar
     .locator('a[aria-current="page"]')
     .evaluateAll((links) => links.map((link) => link.textContent?.trim()));
   assert.deepEqual(current, ["Tasks"]);
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   // goto resolves before the shell mounts; evaluateAll does not auto-wait.
   await sidebar.locator('a[aria-current="page"]').first().waitFor();
   assert.deepEqual(
@@ -497,7 +495,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     ["Tasks"],
   );
   // Overview and the task views carry their subtitle and the one primary action in the header.
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.locator("main.page h1").waitFor();
   assert.equal(
     await page.locator(".page-header-title p").textContent(),
@@ -522,7 +520,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   assert.equal(await page.locator(".top-bar-connection").count(), 0);
   await page.unroute("**/api/operator/workspace");
   // The Settings index, whose own trail is empty, still names the current page.
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   assert.equal(
     await page
       .getByRole("navigation", { name: "Breadcrumb" })
@@ -530,7 +528,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
       .textContent(),
     "Settings",
   );
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.locator("main.page h1").waitFor();
   // Ctrl+K focuses the sidebar field; in the drawer layout it opens Search's own field.
   await page.keyboard.press("Control+k");
@@ -542,12 +540,12 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   );
   await page.setViewportSize({ width: 390, height: 844 });
   await page.keyboard.press("Control+k");
-  await page.waitForURL(`${web.origin}/app/search`);
+  await page.waitForURL(`${web.origin}/search`);
   await page.waitForFunction(
     () => document.activeElement?.id === "retained-query",
   );
   await page.setViewportSize({ width: 1366, height: 900 });
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.locator("main.page h1").waitFor();
 
   // A failed Inbox read shows no number rather than a stale or partial one.
@@ -561,7 +559,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     }),
   );
   const failed = page.waitForResponse(inboxResponse);
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await failed;
   await page.locator("main.page h1").waitFor();
   assert.equal(await sidebar.locator(".nav-count").count(), 0);
@@ -590,13 +588,13 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app");
+  await signIn(page, web.origin, web.password, "/");
   const owned: [string, string][] = [
-    ["/app", "Refresh tasks"],
-    ["/app/tasks", "Refresh tasks"],
-    [`/app/projects/${projectId}`, "Refresh tasks"],
-    [`/app/tasks/${taskId}`, "Refresh task"],
-    ["/app/search?query=Refresh", "Refresh results"],
+    ["/", "Refresh tasks"],
+    ["/tasks", "Refresh tasks"],
+    [`/projects/${projectId}`, "Refresh tasks"],
+    [`/tasks/${taskId}`, "Refresh task"],
+    ["/search?query=Refresh", "Refresh results"],
   ];
   for (const [route, name] of owned) {
     await page.goto(web.origin + route);
@@ -617,7 +615,7 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     await workspace;
     await inbox;
   }
-  for (const route of ["/app/inbox", "/app/settings"]) {
+  for (const route of ["/inbox", "/settings"]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
     assert.equal(
@@ -626,11 +624,7 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
       `${route} keeps one Refresh`,
     );
   }
-  for (const route of [
-    ...owned.map(([r]) => r),
-    "/app/inbox",
-    "/app/settings",
-  ]) {
+  for (const route of [...owned.map(([r]) => r), "/inbox", "/settings"]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
     await page.waitForLoadState("networkidle");
@@ -705,25 +699,25 @@ test("every route renders in the shell on desktop and phone without horizontal s
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app");
-  const notFound = "/app/does-not-exist";
+  await signIn(page, web.origin, web.password, "/");
+  const notFound = "/does-not-exist";
   // [route, evidence name, top-level on a phone]
   const routes: [string, string | null, boolean][] = [
-    ["/app", "overview", true],
-    ["/app/inbox", "inbox", true],
-    ["/app/tasks", null, true],
-    ["/app/tasks?view=board", null, true],
-    ["/app/search", null, true],
-    [`/app/projects/${projectId}`, null, true],
-    [`/app/projects/${projectId}/settings`, null, false],
-    ["/app/tasks/new", null, false],
-    [`/app/tasks/${taskId}`, null, false],
-    ["/app/settings", "settings", true],
-    ["/app/settings/runtime", null, false],
-    ["/app/settings/projects/new", null, false],
-    ["/app/settings/profiles/new", null, false],
-    [`/app/profiles/${profileId}/settings`, null, false],
-    [`/app/assignments/${assignmentId}/recovery`, null, false],
+    ["/", "overview", true],
+    ["/inbox", "inbox", true],
+    ["/tasks", null, true],
+    ["/tasks?view=board", null, true],
+    ["/search", null, true],
+    [`/projects/${projectId}`, null, true],
+    [`/projects/${projectId}/settings`, null, false],
+    ["/tasks/new", null, false],
+    [`/tasks/${taskId}`, null, false],
+    ["/settings", "settings", true],
+    ["/settings/runtime", null, false],
+    ["/settings/projects/new", null, false],
+    ["/settings/profiles/new", null, false],
+    [`/profiles/${profileId}/settings`, null, false],
+    [`/assignments/${assignmentId}/recovery`, null, false],
     [notFound, null, true],
   ];
   for (const [width, height] of [
@@ -732,7 +726,7 @@ test("every route renders in the shell on desktop and phone without horizontal s
   ] as const) {
     await page.setViewportSize({ width, height });
     for (const [route, evidence, topLevel] of routes) {
-      // The service answers unknown /app paths itself, so the in-app
+      // The service answers unknown / paths itself, so the in-app
       // not-found screen is reached by client-side navigation.
       if (route === notFound)
         await page.evaluate((path) => {
@@ -781,18 +775,18 @@ test("every route renders in the shell on desktop and phone without horizontal s
         assert.equal(state.menu, topLevel, `${route}: menu button`);
         assert.equal(state.back, !topLevel, `${route}: Back link`);
       }
-      if (width === 390 && route === "/app/inbox")
+      if (width === 390 && route === "/inbox")
         assert.equal(
           await page.locator(".page-header-count").textContent(),
           "2 unresolved",
           "phone header count reads as text",
         );
       if (evidence) await captureBrowserEvidence(page, `${width}-${evidence}`);
-      if (width === 390 && route === `/app/tasks/${taskId}`)
+      if (width === 390 && route === `/tasks/${taskId}`)
         await captureBrowserEvidence(page, "390-task-detail-header");
     }
     if (width === 390) {
-      await page.goto(`${web.origin}/app`);
+      await page.goto(`${web.origin}/`);
       await page.locator("main.page h1").waitFor();
       await page
         .getByRole("button", { name: "Projects and navigation", exact: true })
@@ -833,7 +827,7 @@ async function startShell(
   const page = await browser.newPage({ viewport });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app");
+  await signIn(page, web.origin, web.password, "/");
   return { web, page, projectId };
 }
 
@@ -851,56 +845,56 @@ test("create forms have no shell Refresh while read views keep one, across navig
     assert.equal(await shellRefresh(page).count(), count, route);
   };
   for (const route of [
-    "/app/tasks/new",
-    `/app/tasks/new?project=${projectId}`,
-    "/app/settings/projects/new",
-    "/app/settings/profiles/new",
+    "/tasks/new",
+    `/tasks/new?project=${projectId}`,
+    "/settings/projects/new",
+    "/settings/profiles/new",
   ])
     await expectRefresh(route, 0);
   for (const route of [
-    "/app/settings",
-    "/app/getting-started",
-    "/app/settings/runtime",
-    "/app/inbox",
+    "/settings",
+    "/getting-started",
+    "/settings/runtime",
+    "/inbox",
   ])
     await expectRefresh(route, 1);
 
   // Client navigation re-evaluates the header: leaving a read view for a form drops Refresh,
   // Back brings it back, and the account menu's Settings returns to a read view.
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await page.locator("main.page h1").waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
   await page
     .locator(".sidebar")
     .getByRole("link", { name: "New project", exact: true })
     .click();
-  await page.waitForURL("**/app/settings/projects/new");
+  await page.waitForURL("**/settings/projects/new");
   assert.equal(await shellRefresh(page).count(), 0);
   await page.goBack();
-  await page.waitForURL("**/app/settings");
+  await page.waitForURL("**/settings");
   await shellRefresh(page).waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
 
-  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.goto(`${web.origin}/tasks/new`);
   await page.locator("main.page h1").waitFor();
   assert.equal(await shellRefresh(page).count(), 0);
   await page
     .getByRole("button", { name: "Operator account", exact: true })
     .click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-  await page.waitForURL("**/app/settings");
+  await page.waitForURL("**/settings");
   await shellRefresh(page).waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
 });
 
 test("create forms have no Refresh in the phone header", async (_t, journey) => {
   const { web, page } = await startShell(journey, { width: 390, height: 844 });
-  for (const route of ["/app/tasks/new", "/app/settings/projects/new"]) {
+  for (const route of ["/tasks/new", "/settings/projects/new"]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
     assert.equal(await shellRefresh(page).count(), 0, route);
   }
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await page.locator("main.page h1").waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
 });
@@ -913,22 +907,22 @@ test("the sidebar Search work field is the one desktop Search entry", async (_t,
 
   // An empty submit opens Search; a query is carried in the URL.
   await field.press("Enter");
-  await page.waitForURL((u) => u.pathname === "/app/search" && !u.search);
+  await page.waitForURL((u) => u.pathname === "/search" && !u.search);
   assert.notEqual(await form.getAttribute("data-current"), null);
   assert.equal(await form.getAttribute("aria-current"), "page");
   await page.goBack();
-  await page.waitForURL((u) => u.pathname === "/app");
+  await page.waitForURL((u) => u.pathname === "/");
   assert.equal(await form.getAttribute("data-current"), null);
   assert.equal(await form.getAttribute("aria-current"), null);
   await field.fill("Shared");
   await field.press("Enter");
   await page.waitForURL(
-    (u) => u.pathname === "/app/search" && u.search === "?query=Shared",
+    (u) => u.pathname === "/search" && u.search === "?query=Shared",
   );
   assert.notEqual(await form.getAttribute("data-current"), null);
 
   // Keyboard access: Tab reaches the field from the top of the page, and both shortcuts focus it.
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.locator("main.page h1").waitFor();
   await focusByTab(page, field);
   await page.locator("main.page h1").click();
@@ -968,7 +962,7 @@ for (const width of [1024, 390])
         document.activeElement?.tagName === "BUTTON",
     );
     await page.keyboard.press("Control+K");
-    await page.waitForURL("**/app/search");
+    await page.waitForURL("**/search");
     await page.waitForFunction(
       () => document.activeElement?.id === "retained-query",
     );
@@ -1007,7 +1001,7 @@ for (const engine of ["chromium", "webkit"] as const)
       });
       journey.observe(page);
       page.setDefaultTimeout(5000);
-      await page.goto(`${web.origin}/app/inbox`);
+      await page.goto(`${web.origin}/inbox`);
       await page.getByLabel("Password", { exact: true }).waitFor();
       await assertBrandMark(page.locator(".wordmark .workspace-mark"));
       const favicon = page.locator('link[rel="icon"]');
@@ -1163,3 +1157,21 @@ async function assertBrandMark(mark: import("playwright").Locator) {
     [20, 20],
   );
 }
+
+test("an old /app address opens the same view at the root, keeping its query and fragment", async (_t, journey) => {
+  const { web, page } = await startShell(journey, { width: 1366, height: 900 });
+  await page.goto(`${web.origin}/app/settings?tab=x#notifications`);
+  await page
+    .getByRole("heading", { name: "Notifications", level: 2 })
+    .waitFor();
+  assert.equal(page.url(), `${web.origin}/settings?tab=x#notifications`);
+
+  // Signed out, the old Inbox link asks for sign-in at the root address and returns to it.
+  await page.context().clearCookies();
+  await page.goto(`${web.origin}/app/inbox?request=Q`);
+  await page.getByLabel("Password", { exact: true }).fill(web.password);
+  assert.equal(page.url(), `${web.origin}/inbox?request=Q`);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.locator("main.page h1").waitFor();
+  assert.equal(page.url(), `${web.origin}/inbox?request=Q`);
+});

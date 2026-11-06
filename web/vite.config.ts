@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [tailwindcss()],
   root: fileURLToPath(new URL(".", import.meta.url)),
   base: "/",
-  // The favicon and push worker are copied verbatim; the worker is served under /app/.
+  // The favicon and push worker are copied verbatim; the worker is served under /.
   publicDir: "public",
   build: {
     outDir: "../dist/operator",

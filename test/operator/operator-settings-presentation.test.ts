@@ -923,40 +923,35 @@ test("settings headers, saved lines, state cards and hold pills", () => {
     observedAt: 0,
   } as never;
   assert.deepEqual(
-    settingsHeader(
-      `/app/projects/${projectId}/settings`,
-      "?tab=github",
-      workspace,
-    ),
+    settingsHeader(`/projects/${projectId}/settings`, "?tab=github", workspace),
     {
       title: "Atlas · project configuration",
       documentTitle: "Project configuration",
       trail: [
-        { label: "Settings", href: "/app/settings" },
+        { label: "Settings", href: "/settings" },
         { label: "Projects" },
-        { label: "Atlas", href: `/app/projects/${projectId}/settings` },
+        { label: "Atlas", href: `/projects/${projectId}/settings` },
         { label: "GitHub source" },
       ],
     },
   );
   assert.equal(
-    settingsHeader(`/app/projects/${id()}/settings`, "", workspace)?.title,
+    settingsHeader(`/projects/${id()}/settings`, "", workspace)?.title,
     "Project · project configuration",
   );
   assert.equal(
-    settingsHeader(`/app/profiles/${mira}/settings`, "", workspace)?.title,
+    settingsHeader(`/profiles/${mira}/settings`, "", workspace)?.title,
     "Mira · agent configuration",
   );
   assert.equal(
-    settingsHeader(`/app/profiles/${mira}/settings`, "", workspace)
-      ?.documentTitle,
+    settingsHeader(`/profiles/${mira}/settings`, "", workspace)?.documentTitle,
     "Agent configuration",
   );
   assert.equal(
-    settingsHeader(`/app/assignments/${id()}/recovery`, "", null)?.shortTitle,
+    settingsHeader(`/assignments/${id()}/recovery`, "", null)?.shortTitle,
     "Recovery",
   );
-  assert.equal(settingsHeader("/app/tasks", "", null), null);
+  assert.equal(settingsHeader("/tasks", "", null), null);
   const receipt = {
     kind: "configuration",
     key: "k",

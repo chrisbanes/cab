@@ -33,7 +33,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     async (_t, journey) => {
       const { f, ids, page, web } = await startSettings(
         journey,
-        "/app/settings/runtime",
+        "/settings/runtime",
         { width: 1366, height: 900 },
         launch,
       );
@@ -110,9 +110,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       assert.equal(posts[0]!.projectOverrides[ids.atlas], 5);
       assert.equal(d.capacityLimits().globalLimit, limit);
       assert.equal(d.capacityLimits().projectOverrides[ids.fieldnotes], 7);
-      await page.goto(
-        `${web.origin}/app/projects/${ids.atlas}/settings?tab=sync`,
-      );
+      await page.goto(`${web.origin}/projects/${ids.atlas}/settings?tab=sync`);
       const placement = page.getByLabel("Placement project", { exact: true });
       await placement.waitFor();
       assert.equal(
@@ -137,7 +135,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         expectedVersion: Number(d.project(ids.fieldnotes).version),
       });
       assert.equal(d.project(ids.fieldnotes).paused, 1);
-      await page.goto(`${web.origin}/app/settings/runtime`);
+      await page.goto(`${web.origin}/settings/runtime`);
       const restored = page.getByLabel("Active-turn cap for Fieldnotes", {
         exact: true,
       });
@@ -154,7 +152,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     async (_t, journey) => {
       const { page, ids } = await startSettings(
         journey,
-        "/app/settings/runtime",
+        "/settings/runtime",
         { width: 1366, height: 900 },
         launch,
       );

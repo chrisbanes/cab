@@ -22,7 +22,7 @@ async function signIn(
 
 const sidebarLinks = (page: Page) =>
   page.locator(
-    'nav[aria-label="Operator navigation"]:visible a[href^="/app/projects/"]:not([href$="/settings"])',
+    'nav[aria-label="Operator navigation"]:visible a[href^="/projects/"]:not([href$="/settings"])',
   );
 
 async function sidebar(page: Page) {
@@ -132,14 +132,14 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks?ready=any");
+  await signIn(page, web.origin, web.password, "/tasks?ready=any");
 
   // The sidebar: id order, id hrefs, distinct accessible names.
   await sidebarLinks(page).first().waitFor();
   const links = await sidebar(page);
   assert.deepEqual(
     links.slice(0, 3),
-    expected.map(([projectId, text]) => [`/app/projects/${projectId}`, text]),
+    expected.map(([projectId, text]) => [`/projects/${projectId}`, text]),
   );
   assert.equal(links[3]?.[1], "Relay");
   for (const [, text] of expected)
@@ -162,7 +162,7 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
   await page
     .getByRole("combobox", { name: "Project", exact: true })
     .selectOption(third);
-  await page.waitForURL(`**/app/tasks?*project=${third}*`);
+  await page.waitForURL(`**/tasks?*project=${third}*`);
   await page.getByText("Third task", { exact: true }).first().waitFor();
   await page.reload();
   await page.getByText("Third task", { exact: true }).first().waitFor();
@@ -177,21 +177,21 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     0,
   );
 
-  await page.goto(`${web.origin}/app/search?query=request`);
+  await page.goto(`${web.origin}/search?query=request`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   assert.deepEqual(
     project(await options(page, "Project")),
     expected.map(([value, text]) => [value, text]),
   );
 
-  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.goto(`${web.origin}/tasks/new`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   assert.deepEqual(
     project(await options(page, "Project")),
     expected.map(([value, text]) => [value, text]),
   );
 
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   // The Inbox lists projects in the order its requests appear, so compare by id.
   assert.deepEqual((await options(page, "Project")).sort(), [
@@ -202,15 +202,12 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
 
   // A project page selects its own sidebar item.
   for (const [projectId, text] of expected) {
-    await page.goto(`${web.origin}/app/projects/${projectId}`);
+    await page.goto(`${web.origin}/projects/${projectId}`);
     await page.locator("main.page h1").waitFor();
     const current = page.locator(
       'nav[aria-label="Operator navigation"]:visible a[aria-current]',
     );
-    assert.equal(
-      await current.getAttribute("href"),
-      `/app/projects/${projectId}`,
-    );
+    assert.equal(await current.getAttribute("href"), `/projects/${projectId}`);
     assert.equal(
       ((await current.locator(".nav-label").textContent()) ?? "")
         .replace(/\s+/g, " ")
@@ -221,9 +218,9 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
 
   // Every other project list reads the same labels: Overview Projects, Settings and Runtime.
   for (const [path, heading] of [
-    ["/app", ".overview-project-name"],
-    ["/app/settings", ".settings-row-heading h3"],
-    ["/app/settings/runtime", ".settings-row-heading h3"],
+    ["/", ".overview-project-name"],
+    ["/settings", ".settings-row-heading h3"],
+    ["/settings/runtime", ".settings-row-heading h3"],
   ] as const) {
     await page.goto(`${web.origin}${path}`);
     for (const [, text] of expected)
@@ -243,7 +240,7 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     );
   }
 
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   // Phone: the drawer carries the same labels without horizontal overflow.
   await page.setViewportSize({ width: 375, height: 812 });
   await page
@@ -283,7 +280,7 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     expectedVersion: Number(d.project(second.projectId).version),
     name: "Atlas Second",
   });
-  await page.goto(`${web.origin}/app/tasks`);
+  await page.goto(`${web.origin}/tasks`);
   await sidebarLinks(page).first().waitFor();
   assert.deepEqual((await sidebar(page)).map(([, text]) => text).sort(), [
     "Atlas",
@@ -344,14 +341,14 @@ test("same-named projects whose ids share their first eight characters stay dist
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks");
+  await signIn(page, web.origin, web.password, "/tasks");
   await sidebarLinks(page).first().waitFor();
   assert.deepEqual(
     await sidebar(page),
-    expected.map(([projectId, text]) => [`/app/projects/${projectId}`, text]),
+    expected.map(([projectId, text]) => [`/projects/${projectId}`, text]),
   );
   assert.deepEqual(await options(page, "Project"), expected);
-  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.goto(`${web.origin}/tasks/new`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   assert.deepEqual(await options(page, "Project"), expected);
 });
@@ -394,11 +391,11 @@ test("same-named projects whose ids differ only by letter case are numbered in t
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks");
+  await signIn(page, web.origin, web.password, "/tasks");
   await sidebarLinks(page).first().waitFor();
   assert.deepEqual(
     await sidebar(page),
-    expected.map(([projectId, text]) => [`/app/projects/${projectId}`, text]),
+    expected.map(([projectId, text]) => [`/projects/${projectId}`, text]),
   );
   assert.deepEqual(await options(page, "Project"), expected);
 });

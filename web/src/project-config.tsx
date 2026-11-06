@@ -185,7 +185,7 @@ export function ProjectConfiguration(
               <a
                 key={t.id}
                 className="control"
-                href={`/app/projects/${projectId}/settings${t.id === "general" ? "" : `?tab=${t.id}`}`}
+                href={`/projects/${projectId}/settings${t.id === "general" ? "" : `?tab=${t.id}`}`}
                 aria-current={t.id === tab ? "page" : undefined}
               >
                 {t.label}
@@ -219,7 +219,7 @@ export function ProjectConfiguration(
               {data.source.selections.length === 0 && (
                 <p className="metadata muted">
                   <a
-                    href={`/app/projects/${projectId}/settings?tab=github&tracker=jira`}
+                    href={`/projects/${projectId}/settings?tab=github&tracker=jira`}
                   >
                     Use Jira Cloud for this project instead
                   </a>
@@ -349,13 +349,13 @@ function ProjectStateCards({
         <h2 className="small-heading">Next step</h2>
         <p className="body">{next}</p>
         {next.includes("credential") && (
-          <a href={`/app/projects/${projectId}/settings?tab=github`}>
+          <a href={`/projects/${projectId}/settings?tab=github`}>
             Set or change source credential
           </a>
         )}
         {next === readinessNextStep && (
           <a
-            href={`/app/projects/${projectId}/settings?tab=github#${readinessAnchor}`}
+            href={`/projects/${projectId}/settings?tab=github#${readinessAnchor}`}
           >
             Check readiness conditions
           </a>
@@ -569,7 +569,7 @@ function GeneralTab(p: TabProps) {
         <Aside
           title="Related"
           items={[
-            <a key="tasks" href={`/app/projects/${projectId}`}>
+            <a key="tasks" href={`/projects/${projectId}`}>
               Project tasks
             </a>,
           ]}
@@ -586,7 +586,7 @@ function CredentialReferences({
   projectId: string;
   data: ProjectConfigurationData;
 }) {
-  const page = `/app/projects/${projectId}/settings`;
+  const page = `/projects/${projectId}/settings`;
   const row = (
     title: string,
     detail: string,

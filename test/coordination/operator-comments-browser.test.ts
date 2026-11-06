@@ -242,7 +242,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
       return result;
     };
   }, `/api/operator/tasks/${taskId}`);
-  await page.goto(`${web.origin}/app/tasks/${taskId}`);
+  await page.goto(`${web.origin}/tasks/${taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -434,7 +434,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .click();
   await replayEntry;
   await page.locator(".page-header-back").click();
-  await page.locator(`a[href="/app/tasks/${taskId}"]`).first().click();
+  await page.locator(`a[href="/tasks/${taskId}"]`).first().click();
   await page
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
@@ -619,7 +619,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     f.service.taskReview().sources(taskId).at(-1)!.sourceId,
     retainedSource,
   );
-  await page.goto(`${web.origin}/app/tasks/${taskId}`);
+  await page.goto(`${web.origin}/tasks/${taskId}`);
   await page
     .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor();

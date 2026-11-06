@@ -301,7 +301,7 @@ export function QuestionResponse({
                   {notice.label}
                 </Button>
               ) : (
-                <ActionLink variant="secondary" href={`/app/tasks/${taskId}`}>
+                <ActionLink variant="secondary" href={`/tasks/${taskId}`}>
                   {notice.label}
                 </ActionLink>
               )}
@@ -557,7 +557,7 @@ export function QuestionResponse({
                 id={conversationId}
                 variant="secondary"
                 onFocus={evidenceFocus(conversationId)}
-                href={`/app/tasks/${taskId}?assignment=${data.requestingAssignmentId}`}
+                href={`/tasks/${taskId}?assignment=${data.requestingAssignmentId}`}
               >
                 Requesting conversation
               </ActionLink>
@@ -566,7 +566,7 @@ export function QuestionResponse({
               id={evidenceId}
               variant="secondary"
               onFocus={evidenceFocus(evidenceId)}
-              href={`/app/tasks/${taskId}?request=${interactionId}#conversation`}
+              href={`/tasks/${taskId}?request=${interactionId}#conversation`}
             >
               Question evidence
             </ActionLink>

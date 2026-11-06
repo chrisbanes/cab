@@ -141,19 +141,19 @@ async function runResponsiveBrowserJourney(
     });
   const web = await journey.start("fixture.web", () => f.startWeb());
   const routes = {
-    overview: "/app?ready=any",
-    tasks: "/app/tasks?ready=any",
-    board: "/app/tasks?view=board&ready=any",
+    overview: "/?ready=any",
+    tasks: "/tasks?ready=any",
+    board: "/tasks?view=board&ready=any",
     // The seeded tasks are not Ready, so task views ask for Any readiness.
     // The default Board opens the empty Ready column; the first-viewport check needs a card.
-    boardpaused: "/app/tasks?view=board&state=Paused&ready=any",
-    project: `/app/projects/${question.projectId}?ready=any`,
-    inbox: "/app/inbox",
-    question: `/app/tasks/${question.taskId}?request=${question.interactionId}`,
-    approval: `/app/tasks/${approval.taskId}`,
-    composer: `/app/tasks/new?project=${question.projectId}`,
-    search: "/app/search?query=Reconcile",
-    settings: "/app/settings",
+    boardpaused: "/tasks?view=board&state=Paused&ready=any",
+    project: `/projects/${question.projectId}?ready=any`,
+    inbox: "/inbox",
+    question: `/tasks/${question.taskId}?request=${question.interactionId}`,
+    approval: `/tasks/${approval.taskId}`,
+    composer: `/tasks/new?project=${question.projectId}`,
+    search: "/search?query=Reconcile",
+    settings: "/settings",
   };
   const all = (Object.keys(routes) as (keyof typeof routes)[]).filter(
     (route) => route !== "boardpaused",

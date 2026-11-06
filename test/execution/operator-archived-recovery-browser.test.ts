@@ -15,7 +15,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       const { chromium, webkit } = await import("playwright");
       const { page, ids } = await startSettings(
         journey,
-        "/app/assignments/:assignment/recovery",
+        "/assignments/:assignment/recovery",
         { width: 1366, height: 900 },
         () => (engine === "webkit" ? webkit : chromium).launch(),
       );
@@ -170,7 +170,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       );
       assert.equal(
         await inspector.getAttribute("href"),
-        `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
+        `/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
       );
       lookup = "recorded";
       await panel

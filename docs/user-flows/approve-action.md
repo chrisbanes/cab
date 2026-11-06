@@ -2,7 +2,7 @@
 
 **Status:** built for the three budgeted entry points. The Review material & decide
 link opens the approval review on the task's Overview
-(`/app/tasks/:id?request=<interaction>`), and the recorded decision shows in the same
+(`/tasks/:id?request=<interaction>`), and the recorded decision shows in the same
 panel. The budget is asserted at 1366 × 900 and 390 × 844 by
 `test/operator/operator-approve-action-browser.test.ts` ("approve an exact action
 budget"); its Home cases pin runtime readiness to passing.

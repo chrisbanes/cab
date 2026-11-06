@@ -40,10 +40,7 @@ const showsText = (page: Page, text: string) =>
   );
 
 test("Create agent saves with one message, a breadcrumb, boundary aside and Cancel", async (_t, journey) => {
-  const { f, page } = await startSettings(
-    journey,
-    "/app/settings/profiles/new",
-  );
+  const { f, page } = await startSettings(journey, "/settings/profiles/new");
   await page.getByRole("heading", { level: 1, name: "Create agent" }).waitFor();
   assert.equal(await trail(page), "Settings / Agents / Create agent");
   await page.getByRole("complementary", { name: "Agent boundary" }).waitFor();
@@ -51,7 +48,7 @@ test("Create agent saves with one message, a breadcrumb, boundary aside and Canc
     await page
       .getByRole("link", { name: "Cancel", exact: true })
       .getAttribute("href"),
-    "/app/settings#profiles",
+    "/settings#profiles",
   );
   await page.getByLabel("Agent name", { exact: true }).fill("Tester");
   await page.getByLabel("Summary", { exact: true }).fill("Testing");
@@ -72,7 +69,7 @@ test("Create agent saves with one message, a breadcrumb, boundary aside and Canc
 test("Reviewer profile edits in place, restores and revokes, and edits revealed instructions", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/profiles/:reviewer/settings",
+    "/profiles/:reviewer/settings",
   );
   const reviewer = ids.profiles.Reviewer as string;
   const d = f.service.domain();
@@ -183,7 +180,7 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
 test("a profile form whose edits were reverted is clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/profiles/:reviewer/settings",
+    "/profiles/:reviewer/settings",
   );
   const reviewer = ids.profiles.Reviewer as string;
   const summary = page.getByLabel("Summary", { exact: true });
@@ -231,7 +228,7 @@ test("a profile form whose edits were reverted is clean and picks up a later rea
 test("profile instructions reverted or edited keep their state after leaving the page", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/profiles/:reviewer/settings",
+    "/profiles/:reviewer/settings",
   );
   const reviewer = ids.profiles.Reviewer as string;
   const save = page.getByRole("button", { name: "Save agent", exact: true });
@@ -276,7 +273,7 @@ test("profile instructions reverted or edited keep their state after leaving the
 test("a profile conflict keeps typed input until the newer version is reviewed", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/profiles/:reviewer/settings",
+    "/profiles/:reviewer/settings",
   );
   const reviewer = ids.profiles.Reviewer as string;
   await page.getByLabel("Summary", { exact: true }).waitFor();
@@ -336,7 +333,7 @@ test("a profile conflict keeps typed input until the newer version is reviewed",
 test("project settings highlight the project in the sidebar; phone profile pages use Back", async (_t, journey) => {
   const { ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   await page
     .getByRole("heading", { level: 1, name: "Atlas · project configuration" })
@@ -349,7 +346,7 @@ test("project settings highlight the project in the sidebar; phone profile pages
     "true",
   );
   await page.setViewportSize(phone);
-  await page.goto(`${web.origin}/app/profiles/${ids.profiles.Mira}/settings`);
+  await page.goto(`${web.origin}/profiles/${ids.profiles.Mira}/settings`);
   await page
     .getByRole("heading", { level: 1, name: "Mira · agent configuration" })
     .waitFor();
@@ -371,10 +368,7 @@ const controlHeights = (page: Page, labels: string[]) =>
   );
 
 test("Create agent chooses Claude with model and effort, rejecting invalid values before sending", async (_t, journey) => {
-  const { f, page } = await startSettings(
-    journey,
-    "/app/settings/profiles/new",
-  );
+  const { f, page } = await startSettings(journey, "/settings/profiles/new");
   let sent = 0;
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) sent++;
@@ -436,11 +430,11 @@ test("Create agent chooses Claude with model and effort, rejecting invalid value
 });
 
 test("Agent configuration switches Codex to Claude and back as new revisions", async (_t, journey) => {
-  const { f, ids, page, web } = await startSettings(journey, "/app/settings");
+  const { f, ids, page, web } = await startSettings(journey, "/settings");
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
   await page.getByText("Runtime: Codex").first().waitFor();
-  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page.goto(`${web.origin}/profiles/${builder}/settings`);
   await page
     .getByRole("complementary", { name: "Runtime change" })
     .getByText("affects new conversations only", { exact: false })
@@ -473,7 +467,7 @@ test("Agent configuration switches Codex to Claude and back as new revisions", a
     model: "sonnet",
     reasoningEffort: "high",
   });
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await page
     .locator(".settings-row", { hasText: "Builder" })
     .getByText("Runtime: Codex")
@@ -482,7 +476,7 @@ test("Agent configuration switches Codex to Claude and back as new revisions", a
 
 async function claudeDefaultProfile(
   journey: Parameters<typeof startSettings>[0],
-  path = "/app/settings/profiles/new",
+  path = "/settings/profiles/new",
 ) {
   const fixture = await startSettings(journey, path, undefined, undefined, {
     runtimeFactory: (_context, harness) =>
@@ -530,7 +524,7 @@ for (const schedule of [
   test(`New agent runtime follows workspace without replacing edits: ${schedule}`, async (_t, journey) => {
     const { page } = await claudeDefaultProfile(
       journey,
-      schedule === "workspace-first" ? "/app/settings" : undefined,
+      schedule === "workspace-first" ? "/settings" : undefined,
     );
     let release!: () => void;
     const gate = new Promise<void>((done) => {
@@ -648,14 +642,14 @@ const codexSettingsOptions = {
 test("Codex agent configuration sets, shows and clears model and effort", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     undefined,
     undefined,
     codexSettingsOptions,
   );
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
-  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page.goto(`${web.origin}/profiles/${builder}/settings`);
   await page
     .getByText("Leave model or effort blank to use the Codex default.")
     .waitFor();
@@ -693,13 +687,13 @@ test("Codex agent configuration sets, shows and clears model and effort", async 
     model: "m-alt",
     reasoningEffort: "medium",
   });
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await page
     .locator(".settings-row", { hasText: "Builder" })
     .getByText("Runtime: Codex · m-alt · medium")
     .waitFor();
 
-  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page.goto(`${web.origin}/profiles/${builder}/settings`);
   await model.selectOption("");
   await effort.selectOption("");
   await changes.getByText("Runtime: Codex · m-alt · medium → Codex").waitFor();
@@ -721,7 +715,7 @@ test("Codex agent configuration sets, shows and clears model and effort", async 
 test("Codex agent configuration rejects a stored effort the runtime no longer lists", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     undefined,
     undefined,
     codexSettingsOptions,
@@ -740,7 +734,7 @@ test("Codex agent configuration rejects a stored effort the runtime no longer li
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) sent++;
   });
-  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page.goto(`${web.origin}/profiles/${builder}/settings`);
   await page
     .getByLabel("Reasoning effort", { exact: true })
     .locator("option", { hasText: "gone (not supported)" })
@@ -772,14 +766,14 @@ test("Agent configuration picks installed plugins' skills in a dialog, edits and
         { name: "tools", claude: false },
       ),
   });
-  const { f, ids, page, web } = await startSettings(journey, "/app/settings");
+  const { f, ids, page, web } = await startSettings(journey, "/settings");
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
   const save = () =>
     page.getByRole("button", { name: "Save agent", exact: true }).click();
   const select = page.getByLabel("Installed plugin", { exact: true });
   const rows = page.getByRole("list", { name: "Enabled skill plugins" });
-  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page.goto(`${web.origin}/profiles/${builder}/settings`);
   await page
     .getByRole("complementary", { name: "About skill plugins" })
     .getByText("not cab policy", { exact: false })

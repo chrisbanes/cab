@@ -133,7 +133,7 @@ install (below) asks for the existing password. It renders the plist with the sa
 before (absolute canonical paths, no symlinks, new log files, the fixed `PATH`,
 `RunAtLoad=true`, `KeepAlive=false`, no secrets), lints it with `plutil -lint`,
 records it, moves it into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and
-waits up to 120 seconds for `/app`. The plist names the release's own
+waits up to 120 seconds for `/`. The plist names the release's own
 `node/bin/node` and `dist/src/standalone/cli.js`, so each version keeps its exact
 executable.
 
@@ -145,7 +145,7 @@ version, and the auth file once created, so a rerun asks for the existing passwo
 instead of a new one. Run it again after fixing the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
 keeps the record so that `service uninstall` can finish.
 
-Once `/app` answers, the service stays installed whatever follows. By default the
+Once `/` answers, the service stays installed whatever follows. By default the
 CLI uses **local access**: same-OS-account read/write authority through the
 service's private local state, with no token, login, Keychain or saved connection.
 Install issues no credential and opens no sign-in session. With no saved CLI
@@ -171,7 +171,7 @@ install neither converts it to local access nor issues a replacement token. Only
 states the default explicitly and refuses when the selected connection uses a token.
 
 Install then runs `cab doctor`, prints its table and `Fix` lines on stderr, and
-opens `http://127.0.0.1:PORT/app` unless you pass `--no-open`. The JSON result stays
+opens `http://127.0.0.1:PORT/` unless you pass `--no-open`. The JSON result stays
 on stdout with `"accessMode":"local"`, `"connection":null` (or the saved connection
 used), and `"credentialActive":false` and `"sessionOpen":false`.
 
@@ -316,7 +316,7 @@ runs these stages:
 3. `start`: `launchctl bootstrap`. The starting service takes and verifies the
    [startup snapshot](#startup-snapshot) before it applies pending migrations, or
    refuses to start.
-4. `health`: waits up to 120 seconds for `/app`.
+4. `health`: waits up to 120 seconds for `/`.
 5. `readiness`: reads readiness until no check reports Fail, for up to 120
    seconds. Not configured is accepted, so an unused GitHub discovery, GitLab
    credential or Claude does not block it. A configured GitLab credential that
@@ -434,7 +434,7 @@ the recorded sha256, and the loaded job's path must be that plist. It reports
 `"started":true` (exit 0, no steps) only when `launchctl print` shows the loaded job with a
 process, that process's identity can be read, and the process listening on the port
 (read with `lsof -nP -iTCP:PORT -sTCP:LISTEN`) is that same pid and no other, and
-`/app` answers 200 from it, and after that last wait the job's pid and every listener on the port are read again and are in full (pid, start time and boot session) the process that was first observed. A reused pid or a new boot is another process, and an identity that can no longer be read never matches. `"started":true` describes the moment of that last read. A loaded job with no
+`/` answers 200 from it, and after that last wait the job's pid and every listener on the port are read again and are in full (pid, start time and boot session) the process that was first observed. A reused pid or a new boot is another process, and an identity that can no longer be read never matches. `"started":true` describes the moment of that last read. A loaded job with no
 process, an unreadable identity, another or an unknown listener on the port, or a
 process that never serves, exits 1 with a message that keeps the record and gives the
 read-only checks. It never trusts a 200 from whatever else holds the port. After it reports
@@ -708,7 +708,7 @@ real-host behavior is not yet proven. Restart a daemon with
 `sudo /bin/launchctl kickstart -k system/local.cab.service`; cab does not
 run it. If the label is absent after a login, run
 `launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/local.cab.service.plist`
-and check `/app`.
+and check `/`.
 
 ### Not yet proven
 
@@ -1330,8 +1330,8 @@ repeats the package checks. It then uses a temporary `HOME` and a `PATH` of only
 system directories plus a generated fake `codex`, with no `node`. In that
 environment it runs `bin/cab --version`, initializes operator auth, starts the
 service against a fresh data directory, and expects the operator UI and one of its
-assets within 120 seconds, then `/app/service-worker.js` as uncached JavaScript with a
-push handler and no scope wider than `/app/`, before stopping that service. It does not exercise a real
+assets within 120 seconds, then `/service-worker.js` as uncached JavaScript with a
+push handler and no `Service-Worker-Allowed` header other than `/`, before stopping that service. It does not exercise a real
 Codex login.
 
 To run a release as the service, use [`cab service install`](#install) with its

@@ -1,6 +1,6 @@
 # UI02 foundation contract
 
-The React operator is served at `/app`; `/` and every legacy operator page/form route return not-found without redirect or session creation. A validated built web bundle is required before operator service startup. One production operator listener serves the built bundle and same-origin `/api/operator` boundary. The boundary delegates durable writes to existing domain and coordination commands. Receipts prove recorded outcomes only. `observedAt` means server capture, never successful provider sync.
+The React operator is served at `/`; every legacy operator page/form route returns not-found without redirect or session creation, and old `/app/*` addresses permanently redirect to the same path at the root. A validated built web bundle is required before operator service startup. One production operator listener serves the built bundle and same-origin `/api/operator` boundary. The boundary delegates durable writes to existing domain and coordination commands. Receipts prove recorded outcomes only. `observedAt` means server capture, never successful provider sync.
 
 ## Control inventory
 
@@ -10,34 +10,34 @@ Each semicolon-separated control has an individual disposition. Project controls
 | --- | --- | --- | --- | --- |
 | Project creation | project.create | create project; name; lead | Settings | yes |
 | Agent creation | agent.create | create agent; name; instructions; capabilities | Settings | yes |
-| Project Settings | project.configure | name; lead; instructions; pause | `/app/projects/:id/settings` | yes |
+| Project Settings | project.configure | name; lead; instructions; pause | `/projects/:id/settings` | yes |
 | Agent Settings | agent.configure | name; instructions; capabilities; revoke | Settings | yes |
-| Project Settings | routing.configure | enable; guidance; candidates; set/clear credential reference | `/app/projects/:id/settings?tab=routing` | yes |
-| Project Settings | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | `/app/projects/:id/settings?tab=github` | yes |
-| Project Settings | repositories.configure | repositories | `/app/projects/:id/settings?tab=repositories` | yes |
-| Project Settings | github.preview | preview selections; activation via preview receipt | `/app/projects/:id/settings?tab=sync` | yes |
-| Project Settings | github.refresh | refresh observation | `/app/projects/:id/settings?tab=sync` | guarded observation POST |
-| Project Settings | github.place | conflicting placement | `/app/projects/:id/settings?tab=sync` | yes |
-| Project Settings | delivery.configure | completion mode; branch prefix; scoped grants; required checks; set/clear credential reference | `/app/projects/:id/settings?tab=delivery` | yes |
-| /app/tasks/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Task Changes tab | yes |
-| /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
-| /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
-| Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
-| /app/tasks/:id | task.configure | local title; outcome; readiness | Task header Edit task… | yes |
-| /app/tasks/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Task Overview decision card and inspector | yes |
+| Project Settings | routing.configure | enable; guidance; candidates; set/clear credential reference | `/projects/:id/settings?tab=routing` | yes |
+| Project Settings | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | `/projects/:id/settings?tab=github` | yes |
+| Project Settings | repositories.configure | repositories | `/projects/:id/settings?tab=repositories` | yes |
+| Project Settings | github.preview | preview selections; activation via preview receipt | `/projects/:id/settings?tab=sync` | yes |
+| Project Settings | github.refresh | refresh observation | `/projects/:id/settings?tab=sync` | guarded observation POST |
+| Project Settings | github.place | conflicting placement | `/projects/:id/settings?tab=sync` | yes |
+| Project Settings | delivery.configure | completion mode; branch prefix; scoped grants; required checks; set/clear credential reference | `/projects/:id/settings?tab=delivery` | yes |
+| /tasks/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Task Changes tab | yes |
+| /tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
+| /tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
+| Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/tasks/new`) | yes |
+| /tasks/:id | task.configure | local title; outcome; readiness | Task header Edit task… | yes |
+| /tasks/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Task Overview decision card and inspector | yes |
 | Runtime Settings | capacity.configure | global capacity; project override; remove override | Settings (Runtime) | yes |
-| /app/tasks/:id | dependency.add | local dependency add | Task Execution tab | yes |
-| /app/tasks/:id | dependency.remove | local dependency remove | Task Execution tab | yes |
-| /app/tasks/:id | assignment.apply | apply project instructions and agent revisions | Task inspector stale started assignment row | yes |
-| /app/tasks/:id | task.stop | stop request and observation | Task header Stop… | yes |
-| /app/tasks/:id | task.resume | explicit resume | Task header Resume… | yes |
-| /app/assignments/:id/recovery | read | generation; holds; advanced recovery evidence | Assignment recovery and task Execution; advanced CLI recovery options | read subset |
-| /app/tasks/:id | task.comment.send | comment recipients; exact versions; durable comment | Task reply card (Comment on task); delegated assignment Reply | yes |
-| /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card (Message task lead, after "Ask lead about …") | yes |
-| /app/tasks/:id | result.recipient | unresolved results; destination reconciliation | Task decision card | yes |
-| /app/tasks/:id | read | retained captured history; omissions; results | Task conversation | yes |
-| /app/tasks/:id | question.answer | plain question and exact revision answer | Inbox and task request view | yes |
-| /app/tasks/:id | approval.decide | retained exact material; approve; deny | Task request view | yes |
+| /tasks/:id | dependency.add | local dependency add | Task Execution tab | yes |
+| /tasks/:id | dependency.remove | local dependency remove | Task Execution tab | yes |
+| /tasks/:id | assignment.apply | apply project instructions and agent revisions | Task inspector stale started assignment row | yes |
+| /tasks/:id | task.stop | stop request and observation | Task header Stop… | yes |
+| /tasks/:id | task.resume | explicit resume | Task header Resume… | yes |
+| /assignments/:id/recovery | read | generation; holds; advanced recovery evidence | Assignment recovery and task Execution; advanced CLI recovery options | read subset |
+| /tasks/:id | task.comment.send | comment recipients; exact versions; durable comment | Task reply card (Comment on task); delegated assignment Reply | yes |
+| /tasks/:id | message | message recipient; exact version; durable message | Task reply card (Message task lead, after "Ask lead about …") | yes |
+| /tasks/:id | result.recipient | unresolved results; destination reconciliation | Task decision card | yes |
+| /tasks/:id | read | retained captured history; omissions; results | Task conversation | yes |
+| /tasks/:id | question.answer | plain question and exact revision answer | Inbox and task request view | yes |
+| /tasks/:id | approval.decide | retained exact material; approve; deny | Task request view | yes |
 | /login | /api/operator/login | password sign-in | Sign-in | yes |
 | all authenticated views | /api/operator/logout | sign-out | Account menu | yes |
 | all views | navigation | delivered overview/project List/Board/composer; agent/Runtime Settings destinations | App shell | curated reads |
@@ -90,4 +90,4 @@ Provider timestamps are stored observations; unavailable successful sync/history
 
 ## Client
 
-The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, whose Execution tab (`?section=execution`) holds execution status, holds, recovery evidence and local dependencies, whose header offers Edit task… for a local task and whose Overview decision card offers Resume source hold for an active source hold. There is no server-rendered task page. First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.
+The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/tasks/:id`, whose Execution tab (`?section=execution`) holds execution status, holds, recovery evidence and local dependencies, whose header offers Edit task… for a local task and whose Overview decision card offers Resume source hold for an active source hold. There is no server-rendered task page. First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.

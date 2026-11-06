@@ -8,7 +8,7 @@ paused project (Resume project, the one Fix with a confirmation) at 1366 x 900 a
 390 x 844 by `test/operator/operator-unblock-work-browser.test.ts` ("unblock waiting
 work budget"), on task detail, the getting-started Project row on Home, the project page and the
 composer. It does not cover the created-task receipt or the Project row at
-`/app/getting-started`.
+`/getting-started`.
 
 ## Goal
 

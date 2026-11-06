@@ -35,47 +35,47 @@ test("tabForSection maps every task section to the panel that holds it", () => {
 
 test("tabForLocation chooses the initial tab from the query and fragment", () => {
   for (const [path, tab] of [
-    ["/app/tasks/x?section=history", "overview"],
-    ["/app/tasks/x?section=context", "overview"],
-    ["/app/tasks/x#history", "overview"],
-    ["/app/tasks/x?section=local-review", "review"],
-    ["/app/tasks/x?section=execution", "execution"],
-    ["/app/tasks/x#execution", "execution"],
-    ["/app/tasks/x?assignment=a#history", "overview"],
-    ["/app/tasks/x?assignment=a", "overview"],
-    ["/app/tasks/x?path=docs/a.md&repository=r", "files"],
-    ["/app/tasks/x?target=branch", "changes"],
-    ["/app/tasks/x?review=k", "review"],
-    ["/app/tasks/x?result=r&source=s", "overview"],
-    ["/app/tasks/x#files", "files"],
-    ["/app/tasks/x?section=files&assignment=a", "files"],
-    ["/app/tasks/x?section=review&assignment=a&result=r", "overview"],
-    ["/app/tasks/x?result=r&source=s&assignment=a", "overview"],
-    ["/app/tasks/x", null],
+    ["/tasks/x?section=history", "overview"],
+    ["/tasks/x?section=context", "overview"],
+    ["/tasks/x#history", "overview"],
+    ["/tasks/x?section=local-review", "review"],
+    ["/tasks/x?section=execution", "execution"],
+    ["/tasks/x#execution", "execution"],
+    ["/tasks/x?assignment=a#history", "overview"],
+    ["/tasks/x?assignment=a", "overview"],
+    ["/tasks/x?path=docs/a.md&repository=r", "files"],
+    ["/tasks/x?target=branch", "changes"],
+    ["/tasks/x?review=k", "review"],
+    ["/tasks/x?result=r&source=s", "overview"],
+    ["/tasks/x#files", "files"],
+    ["/tasks/x?section=files&assignment=a", "files"],
+    ["/tasks/x?section=review&assignment=a&result=r", "overview"],
+    ["/tasks/x?result=r&source=s&assignment=a", "overview"],
+    ["/tasks/x", null],
   ] as const)
     assert.equal(tabForLocation(path), tab, path);
-  assert.equal(tabForLocation("/app/tasks/x", "#changes"), "changes");
+  assert.equal(tabForLocation("/tasks/x", "#changes"), "changes");
 });
 
 test("conversationTarget reads the conversation place a link names", () => {
   for (const [path, target] of [
-    ["/app/tasks/x#history", { kind: "latest" }],
-    ["/app/tasks/x#conversation", { kind: "latest" }],
-    ["/app/tasks/x?section=history", { kind: "latest" }],
-    ["/app/tasks/x?assignment=a", { kind: "assignment", id: "a" }],
-    ["/app/tasks/x?assignment=a#history", { kind: "assignment", id: "a" }],
-    ["/app/tasks/x?request=q#history", { kind: "request", id: "q" }],
-    ["/app/tasks/x?request=q#conversation", { kind: "request", id: "q" }],
+    ["/tasks/x#history", { kind: "latest" }],
+    ["/tasks/x#conversation", { kind: "latest" }],
+    ["/tasks/x?section=history", { kind: "latest" }],
+    ["/tasks/x?assignment=a", { kind: "assignment", id: "a" }],
+    ["/tasks/x?assignment=a#history", { kind: "assignment", id: "a" }],
+    ["/tasks/x?request=q#history", { kind: "request", id: "q" }],
+    ["/tasks/x?request=q#conversation", { kind: "request", id: "q" }],
     // Without a place, ?request= opens the attention card form.
-    ["/app/tasks/x?request=q", null],
-    ["/app/tasks/x?section=context", null],
-    ["/app/tasks/x?section=files&assignment=a", null],
-    ["/app/tasks/x?section=review&assignment=a&result=r", null],
-    ["/app/tasks/x?result=r&assignment=a", null],
-    ["/app/tasks/x", null],
+    ["/tasks/x?request=q", null],
+    ["/tasks/x?section=context", null],
+    ["/tasks/x?section=files&assignment=a", null],
+    ["/tasks/x?section=review&assignment=a&result=r", null],
+    ["/tasks/x?result=r&assignment=a", null],
+    ["/tasks/x", null],
   ] as const)
     assert.deepEqual(conversationTarget(path), target, path);
-  assert.deepEqual(conversationTarget("/app/tasks/x", "#history"), {
+  assert.deepEqual(conversationTarget("/tasks/x", "#history"), {
     kind: "latest",
   });
 });
@@ -96,7 +96,7 @@ test("linkNamesInspector is true only for links to what the inspector shows", ()
   ])
     assert.equal(linkNamesInspector(path), true, path);
   for (const path of [
-    "/app/tasks/x",
+    "/tasks/x",
     "/t?section=changes",
     "/t?section=changes&result=r",
     "/t?section=files",

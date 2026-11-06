@@ -124,7 +124,7 @@ async function signInAgain(page: Page, password: string) {
 test("notifications: turn on, test, deep links through sign-in, turn off and revoke", async (_t, journey) => {
   const { f, fake, push, web, page, device, exhaustion, context } =
     await start(journey);
-  await signIn(page, web, "/app/settings#notifications");
+  await signIn(page, web, "/settings#notifications");
   const panel = section(page);
   await panel.waitFor();
 
@@ -140,23 +140,21 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   assert.equal(push.read().subscriptions.length, 0);
   assert.equal(
     await page.evaluate(
-      async () =>
-        (await navigator.serviceWorker.getRegistration("/app/")) ?? null,
+      async () => (await navigator.serviceWorker.getRegistration("/")) ?? null,
     ),
     null,
     "nothing is registered before the operator asks",
   );
 
-  // 2. Turn on: the worker is registered at /app/, the server lists one Active row for this
+  // 2. Turn on: the worker is registered at /, the server lists one Active row for this
   // browser and the subscription used the served key.
   await panel.getByRole("button", { name: "Turn on notifications" }).click();
   await panel.getByText("Notifications are on in this browser").waitFor();
   assert.equal(
     await page.evaluate(
-      async () =>
-        (await navigator.serviceWorker.getRegistration("/app/"))?.scope,
+      async () => (await navigator.serviceWorker.getRegistration("/"))?.scope,
     ),
-    `${web.origin}/app/`,
+    `${web.origin}/`,
   );
   const rows = push.read().subscriptions;
   assert.equal(rows.length, 1);
@@ -184,7 +182,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
     {
       v: 1,
       title: "Test notification from cab",
-      url: "/app/settings#notifications",
+      url: "/settings#notifications",
       tag: "test:notification",
     },
   ]);
@@ -196,7 +194,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   const sent = fake.payloads(device);
   assert.equal(sent.length, 2);
   const link = sent[1].url as string;
-  assert.equal(link, `/app/inbox?task=${q.taskId}&request=${q.interactionId}`);
+  assert.equal(link, `/inbox?task=${q.taskId}&request=${q.interactionId}`);
   assert.match(sent[1].title, /^Question in .+: 1 waiting$/);
 
   // 5. That address selects the request.
@@ -230,7 +228,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   const after = fake.payloads(device);
   assert.equal(after.length, 3);
   assert.equal(after[2].title, "Codex runtime unavailable");
-  assert.equal(after[2].url, "/app/inbox?request=runtime%3Acodex");
+  assert.equal(after[2].url, "/inbox?request=runtime%3Acodex");
   await context.clearCookies();
   await page.goto(web.origin + after[2].url);
   await page.getByLabel("Password").waitFor();
@@ -250,7 +248,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   );
 
   // 8. Turn off: the row reads Revoked, the browser unsubscribed and nothing more is sent.
-  await page.goto(`${web.origin}/app/settings#notifications`);
+  await page.goto(`${web.origin}/settings#notifications`);
   await section(page)
     .getByRole("button", { name: "Turn off for this browser" })
     .click();
@@ -304,7 +302,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
 
   // 10. On a phone the section keeps 44 px controls.
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`${web.origin}/app/settings#notifications`);
+  await page.goto(`${web.origin}/settings#notifications`);
   const turnOn = section(page).getByRole("button", {
     name: "Turn on notifications",
   });
@@ -325,11 +323,11 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
 test("notifications: a click routes an open tab in place, keeping unsaved input", async (_t, journey) => {
   const { f, web, page, context } = await start(journey);
   const q = await seedOwnQuestion(f);
-  const link = `/app/inbox?task=${q.taskId}&request=${q.interactionId}`;
-  await signIn(page, web, `/app/projects/${q.projectId}/settings`);
+  const link = `/inbox?task=${q.taskId}&request=${q.interactionId}`;
+  await signIn(page, web, `/projects/${q.projectId}/settings`);
   await page.evaluate(async () => {
-    await navigator.serviceWorker.register("/app/service-worker.js", {
-      scope: "/app/",
+    await navigator.serviceWorker.register("/service-worker.js", {
+      scope: "/",
     });
     await navigator.serviceWorker.ready;
   });
@@ -394,7 +392,7 @@ test("notifications: a click routes an open tab in place, keeping unsaved input"
 
   // A signed-out tab routes in place too, and the request opens after sign-in.
   await context.clearCookies();
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").waitFor();
   assert.equal(await click(link), true);
   await page.waitForURL(web.origin + link);
@@ -410,4 +408,146 @@ test("notifications: a click routes an open tab in place, keeping unsaved input"
   assert.equal(await click("https://evil.test/app/inbox"), false);
   assert.equal(await click("/api/operator/inbox"), false);
   assert.equal(page.url(), web.origin + link);
+});
+
+/**
+ * Like `pushStub`, but each registration has its own push subscription, keyed by its scope's
+ * path, so a registration from before the move to the root and the root one can differ.
+ */
+const scopedPushStub = (
+  devices: Record<string, { endpoint: string; p256dh: string; auth: string }>,
+) => {
+  const bytes = (b64: string) =>
+    Uint8Array.from(atob(b64.replace(/-/g, "+").replace(/_/g, "/")), (c) =>
+      c.charCodeAt(0),
+    ).buffer;
+  const encode = (key: ArrayBuffer) =>
+    btoa(String.fromCharCode(...new Uint8Array(key)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  Object.defineProperty(ServiceWorkerRegistration.prototype, "pushManager", {
+    get(this: ServiceWorkerRegistration) {
+      const scope = new URL(this.scope).pathname;
+      const device = devices[scope];
+      const stored = `fake-push-key:${scope}`;
+      if (!device) throw new Error(`No fake push device for ${scope}`);
+      const subscription = (key: ArrayBuffer) => ({
+        endpoint: device.endpoint,
+        options: { applicationServerKey: key },
+        toJSON: () => ({
+          endpoint: device.endpoint,
+          keys: { p256dh: device.p256dh, auth: device.auth },
+        }),
+        unsubscribe: async () => {
+          sessionStorage.removeItem(stored);
+          return true;
+        },
+      });
+      return {
+        getSubscription: async () => {
+          const key = sessionStorage.getItem(stored);
+          return key ? subscription(bytes(key)) : null;
+        },
+        subscribe: async (options: PushSubscriptionOptionsInit) => {
+          const key = options.applicationServerKey as Uint8Array;
+          sessionStorage.setItem(stored, encode(key.slice().buffer));
+          return subscription(key.slice().buffer);
+        },
+      };
+    },
+  });
+};
+
+/** A browser set up before the app moved to the root: a worker at /app/ subscribed and listed. */
+async function startLegacyInstall(journey: BrowserJourney) {
+  const started = await start(journey);
+  const { fake, push, web, page, device, context } = started;
+  const legacy = fake.device("Old address");
+  await context.addInitScript(scopedPushStub, {
+    "/": {
+      endpoint: device.endpoint,
+      p256dh: device.keys.p256dh,
+      auth: device.keys.auth,
+    },
+    "/app/": {
+      endpoint: legacy.endpoint,
+      p256dh: legacy.keys.p256dh,
+      auth: legacy.keys.auth,
+    },
+  });
+  const publicKey = push.read().publicKey;
+  assert.ok(publicKey);
+  // Seeded from the signed-out sign-in page: the move runs only once signed in.
+  await page.goto(`${web.origin}/login`);
+  const scopes = await page.evaluate(async (key) => {
+    await navigator.serviceWorker.register("/service-worker.js", {
+      scope: "/app/",
+    });
+    sessionStorage.setItem("fake-push-key:/app/", key);
+    return (await navigator.serviceWorker.getRegistrations()).map(
+      (r) => r.scope,
+    );
+  }, publicKey);
+  assert.deepEqual(scopes, [`${web.origin}/app/`]);
+  push.subscribe({
+    endpoint: legacy.endpoint,
+    keys: legacy.keys,
+    label: "Old address",
+  });
+  const registrations = () =>
+    page.evaluate(async () =>
+      (await navigator.serviceWorker.getRegistrations()).map((r) => r.scope),
+    );
+  const rows = () =>
+    push
+      .read()
+      .subscriptions.map(
+        (r) => `${r.label === "Old address" ? "old" : "root"}: ${r.state}`,
+      )
+      .sort();
+  return { ...started, registrations, rows };
+}
+
+test("notifications: a browser set up at /app/ moves to the root registration on sign-in", async (_t, journey) => {
+  const { web, page, registrations, rows } = await startLegacyInstall(journey);
+  await signIn(page, web, "/settings#notifications");
+  await section(page)
+    .getByText("Notifications are on in this browser")
+    .waitFor();
+  assert.deepEqual(await registrations(), [`${web.origin}/`]);
+  assert.deepEqual(rows(), ["old: revoked", "root: active"]);
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("fake-push-key:/app/")),
+    null,
+    "the old subscription was removed",
+  );
+});
+
+test("notifications: a move the service does not confirm keeps the old registration and says so", async (_t, journey) => {
+  const { web, page, registrations, rows } = await startLegacyInstall(journey);
+  let refused = 0;
+  await page.route("**/api/operator/notifications/subscriptions", (route) =>
+    route.request().method() === "POST" && refused++ === 0
+      ? route.abort()
+      : route.continue(),
+  );
+  await signIn(page, web, "/settings#notifications");
+  const panel = section(page);
+  await panel
+    .getByText("This browser is still set up at cab's old address")
+    .waitFor();
+  assert.equal(refused, 1);
+  assert.ok((await registrations()).includes(`${web.origin}/app/`));
+  assert.deepEqual(rows(), ["old: active"]);
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("fake-push-key:/")),
+    null,
+    "the unconfirmed root subscription was rolled back",
+  );
+
+  await panel.getByRole("button", { name: "Turn on again" }).click();
+  await panel.getByText("Notifications are on in this browser").waitFor();
+  assert.deepEqual(await registrations(), [`${web.origin}/`]);
+  assert.deepEqual(rows(), ["old: revoked", "root: active"]);
 });

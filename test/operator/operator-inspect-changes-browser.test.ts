@@ -125,7 +125,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/app/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}`,
     );
     const tab = s.page
       .getByRole("tablist", { name: "Task sections" })
@@ -160,7 +160,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/app/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}`,
     );
     const link = s.page
       .locator("#review")
@@ -220,18 +220,14 @@ for (const [label, viewport] of [
     const { web, page } = await launch(journey, viewport, f, (b) => {
       browser = b;
     });
-    await signIn(
-      page,
-      web,
-      `/app/inbox?task=${taskId}&request=${interactionId}`,
-    );
+    await signIn(page, web, `/inbox?task=${taskId}&request=${interactionId}`);
     const link = page.getByRole("link", { name: "Task evidence" });
     await link.waitFor();
     assert.equal(await link.count(), 1);
     let interactions = 0;
     await link.click();
     interactions++;
-    await page.waitForURL(new RegExp(`/app/tasks/${taskId}#conversation$`));
+    await page.waitForURL(new RegExp(`/tasks/${taskId}#conversation$`));
     const overview = page
       .getByRole("tablist", { name: "Task sections" })
       .getByRole("tab", { name: "Overview" });

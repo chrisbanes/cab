@@ -9,7 +9,7 @@ import {
   detailRows,
   type OutcomeTone,
 } from "./action-feedback.js";
-import { ClientError } from "./api.js";
+import { ClientError, type OperatorClient } from "./api.js";
 import { Button, StatusBadge } from "./components.js";
 import { When } from "./operator-credentials.js";
 import {
@@ -37,8 +37,10 @@ import {
   DialogTitle,
 } from "./ui/dialog.js";
 
-const WORKER_URL = "/app/service-worker.js";
-const WORKER_SCOPE = "/app/";
+const WORKER_URL = "/service-worker.js";
+const WORKER_SCOPE = "/";
+/** The push worker's scope before the app moved to the root. */
+const LEGACY_SCOPE = "/app/";
 
 interface Outcome {
   tone: OutcomeTone;
@@ -55,17 +57,139 @@ const supported = () =>
 
 /** This browser's registration for the app scope, without registering one. */
 async function registration() {
+  // Only the root scope is a prefix of "/", so this never returns the legacy registration.
   return (
     (await navigator.serviceWorker.getRegistration(WORKER_SCOPE)) ?? undefined
   );
 }
 
+/** The registration from before the move to the root, matched by exact scope: getRegistration("/app/") would return the root one. */
+async function legacyRegistration() {
+  const scope = new URL(LEGACY_SCOPE, location.origin).href;
+  return (await navigator.serviceWorker.getRegistrations()).find(
+    (r) => r.scope === scope,
+  );
+}
+
+/** The service's active row for a browser subscription, if it lists one. */
+async function activeRow(
+  client: OperatorClient,
+  subscription: PushSubscription,
+) {
+  const digest = await endpointDigestOf(subscription.endpoint);
+  const { data } = await client.notifications();
+  return {
+    data,
+    row: data.subscriptions.find(
+      (r) => r.state === "active" && r.endpointDigest === digest,
+    ),
+  };
+}
+
+/**
+ * Subscribes this browser at the root registration and records it with the service. Only after
+ * the service confirms is a registration from before the move to the root retired; a subscription
+ * the service never recorded is removed again. Failures are thrown as `ClientError`s.
+ */
+async function enrol(
+  client: OperatorClient,
+  csrf: string,
+  publicKey: string,
+  replace: boolean,
+) {
+  let created: PushSubscription | undefined;
+  try {
+    let ready: ServiceWorkerRegistration;
+    try {
+      await navigator.serviceWorker.register(WORKER_URL, {
+        scope: WORKER_SCOPE,
+        updateViaCache: "none",
+      });
+      ready = await navigator.serviceWorker.ready;
+    } catch {
+      throw new ClientError("browser-setup-failed", 0);
+    }
+    try {
+      // A subscription made under another key, or one the service dropped, is replaced.
+      if (replace)
+        await (await ready.pushManager.getSubscription())?.unsubscribe();
+      created = await ready.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToBytes(publicKey),
+      });
+    } catch {
+      throw new ClientError("browser-push-failed", 0);
+    }
+    const json = created.toJSON();
+    await client.subscribeNotifications(
+      {
+        endpoint: created.endpoint,
+        keys: {
+          p256dh: json.keys?.p256dh ?? "",
+          auth: json.keys?.auth ?? "",
+        },
+        label: browserLabel(navigator.userAgent),
+      },
+      csrf,
+    );
+    created = undefined;
+  } finally {
+    // A subscription the service never recorded would only collect dead pushes.
+    if (created) await created.unsubscribe().catch(() => undefined);
+  }
+  // Best effort: the new subscription already works, and a leftover is moved on the next sign-in.
+  const legacy = await legacyRegistration().catch(() => undefined);
+  if (!legacy) return;
+  const old = await legacy.pushManager.getSubscription().catch(() => null);
+  if (old) {
+    const { row } = await activeRow(client, old).catch(() => ({ row: null }));
+    if (row)
+      await client.revokeNotification(row.id, csrf).catch(() => undefined);
+    await old.unsubscribe().catch(() => undefined);
+  }
+  await legacy.unregister().catch(() => undefined);
+}
+
+let moving: Promise<void> | undefined;
+
+/**
+ * Moves a push subscription made before the app moved to the root onto the root registration.
+ * The old registration is removed only after the service confirms the new subscription; a move
+ * that cannot finish leaves it working, and Notifications says to turn notifications on again.
+ */
+export function migrateLegacyPush(client: OperatorClient, csrf: string) {
+  moving ??= (async () => {
+    if (!supported()) return;
+    const legacy = await legacyRegistration();
+    if (!legacy) return;
+    const old = await legacy.pushManager.getSubscription();
+    const read = old && (await activeRow(client, old));
+    if (!read?.row) {
+      // Nothing was receiving through it: the operator had turned this browser off.
+      await old?.unsubscribe();
+      await legacy.unregister();
+      return;
+    }
+    const { data } = read;
+    if (Notification.permission !== "granted" || !data.publicKey) return;
+    await enrol(client, csrf, data.publicKey, false);
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      moving = undefined;
+    });
+  return moving;
+}
+
 interface BrowserRead {
   environment: BrowserEnvironment;
   subscription: BrowserSubscription;
+  legacy: boolean;
 }
 
 async function readBrowser(publicKey: string | null): Promise<BrowserRead> {
+  // A move in flight would otherwise show its passing state.
+  await moving;
   const ok = supported();
   const environment: BrowserEnvironment = {
     secureContext: typeof window !== "undefined" && window.isSecureContext,
@@ -76,7 +200,11 @@ async function readBrowser(publicKey: string | null): Promise<BrowserRead> {
     permission: ok ? Notification.permission : "default",
   };
   let subscription: BrowserSubscription = null;
+  let legacy = false;
   if (ok) {
+    legacy = await legacyRegistration()
+      .then((r) => r?.pushManager.getSubscription())
+      .then(Boolean, () => false);
     try {
       const existing = await (
         await registration()
@@ -94,7 +222,7 @@ async function readBrowser(publicKey: string | null): Promise<BrowserRead> {
       subscription = null;
     }
   }
-  return { environment, subscription };
+  return { environment, subscription, legacy };
 }
 
 /**
@@ -159,7 +287,10 @@ const cards: Record<
 export function NotificationsSection(p: SettingsProps) {
   const csrf = p.session.csrfToken;
   const loader = useCallback(
-    (signal: AbortSignal) => p.client.notifications(signal),
+    async (signal: AbortSignal) => {
+      await moving;
+      return p.client.notifications(signal);
+    },
     [p.client],
   );
   const list = useOperatorResource(csrf, loader);
@@ -208,6 +339,7 @@ export function NotificationsSection(p: SettingsProps) {
           environment: browser.environment,
           available: read.available,
           subscription: browser.subscription,
+          legacy: browser.legacy,
           rows,
         })
       : null;
@@ -254,7 +386,6 @@ export function NotificationsSection(p: SettingsProps) {
     setBusy(true);
     setOutcome(null);
     setTest(null);
-    let created: PushSubscription | undefined;
     try {
       if (!publicKey) throw new ClientError("unavailable", 503);
       // The permission prompt can only come from this press.
@@ -270,46 +401,11 @@ export function NotificationsSection(p: SettingsProps) {
           });
         return;
       }
-      let ready: ServiceWorkerRegistration;
-      try {
-        await navigator.serviceWorker.register(WORKER_URL, {
-          scope: WORKER_SCOPE,
-          updateViaCache: "none",
-        });
-        ready = await navigator.serviceWorker.ready;
-      } catch {
-        throw new ClientError("browser-setup-failed", 0);
-      }
-      try {
-        // A subscription made under another key, or one the service dropped, is replaced.
-        if (state?.kind === "turn-on-again")
-          await (await ready.pushManager.getSubscription())?.unsubscribe();
-        created = await ready.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: base64UrlToBytes(publicKey),
-        });
-      } catch {
-        throw new ClientError("browser-push-failed", 0);
-      }
-      const json = created.toJSON();
-      await p.client.subscribeNotifications(
-        {
-          endpoint: created.endpoint,
-          keys: {
-            p256dh: json.keys?.p256dh ?? "",
-            auth: json.keys?.auth ?? "",
-          },
-          label: browserLabel(navigator.userAgent),
-        },
-        csrf,
-      );
-      created = undefined;
+      await enrol(p.client, csrf, publicKey, state?.kind === "turn-on-again");
       focusNext.current = "on";
     } catch (error) {
       setOutcome(fail(error, "turn on notifications"));
     } finally {
-      // A subscription the service never recorded would only collect dead pushes.
-      if (created) await created.unsubscribe().catch(() => undefined);
       list.refresh();
       await refreshBrowser();
       setBusy(false);
@@ -504,7 +600,9 @@ export function NotificationsSection(p: SettingsProps) {
                 <p className="metadata muted">
                   {state.why === "old-key"
                     ? "This browser was set up before the notification key changed and no longer receives anything. Turn notifications on again to use the current key."
-                    : "This browser is no longer on the list below, so it receives nothing. Turn notifications on again to restore it."}
+                    : state.why === "moved"
+                      ? "This browser is still set up at cab's old address. Turn notifications on again so it keeps receiving them."
+                      : "This browser is no longer on the list below, so it receives nothing. Turn notifications on again to restore it."}
                 </p>
               </div>
               <Button

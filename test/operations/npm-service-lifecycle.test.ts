@@ -416,7 +416,7 @@ const fingerprint = (path: string) =>
 /** Waits for the app to answer; the job's own wait is not involved in a hand restart. */
 async function appServed(origin: string) {
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    if ((await fetch(`${origin}/app`).catch(() => undefined))?.status === 200)
+    if ((await fetch(`${origin}/`).catch(() => undefined))?.status === 200)
       return;
     await new Promise((done) => setTimeout(done, 100));
   }
@@ -425,7 +425,7 @@ async function appServed(origin: string) {
 
 /** The first operator asset the app links, served from disk by the running service. */
 async function assetStatus(origin: string) {
-  const html = await (await fetch(`${origin}/app`)).text();
+  const html = await (await fetch(`${origin}/`)).text();
   const asset = html.match(/\/assets\/[^"']+/)?.[0] as string;
   assert.ok(asset, "the app links an asset");
   return (await fetch(`${origin}${asset}`)).status;
@@ -450,7 +450,7 @@ test("a service installed from a global npm package keeps running from its own c
   const job = s.launchd.jobs.get(LABEL);
   assert.ok(job?.child.pid);
   const pid = job.child.pid;
-  assert.equal((await fetch(`${s.origin}/app`)).status, 200);
+  assert.equal((await fetch(`${s.origin}/`)).status, 200);
   assert.equal(await assetStatus(s.origin), 200);
 
   const local = ["--local", "--local-installation", s.recordPath];
@@ -505,7 +505,7 @@ test("a service installed from a global npm package keeps running from its own c
       assert.equal(await treeDigest(stageA), digestA);
       assert.ok(s.launchd.alive(job.child));
       assert.equal(s.launchd.jobs.get(LABEL)?.child.pid, pid);
-      assert.equal((await fetch(`${s.origin}/app`)).status, 200);
+      assert.equal((await fetch(`${s.origin}/`)).status, 200);
       assert.equal(await assetStatus(s.origin), 200);
       // A fresh directory has nothing to snapshot or record.
       assert.ok(!existsSync(join(s.stateDir, "data", "startup-state.json")));
@@ -548,7 +548,7 @@ test("a service installed from a global npm package keeps running from its own c
       assert.deepEqual(readdirSync(join(s.stateDir, "snapshots")), []);
       assert.ok(existsSync(stageA), "the old stage stays");
       assert.equal(s.record().version, "0.2.0");
-      assert.equal((await fetch(`${s.origin}/app`)).status, 200);
+      assert.equal((await fetch(`${s.origin}/`)).status, 200);
       // Readiness ran through local access before and after the restart: same installation.
       assert.equal(await localStatus(), installationId);
       assert.equal(existsSync(join(s.configDir, "connections.json")), false);
@@ -640,7 +640,7 @@ test("a service installed from a global npm package keeps running from its own c
         authBytes,
         "the existing auth is kept",
       );
-      assert.equal((await fetch(`${s.origin}/app`)).status, 200);
+      assert.equal((await fetch(`${s.origin}/`)).status, 200);
     },
   );
 });
@@ -677,7 +677,7 @@ test("the packaged CLI works against a service with no local server files", asyn
   s.launchd.all.add(child);
   for (let attempt = 0; attempt < 600; attempt += 1) {
     if (
-      await fetch(`${s.origin}/app`).then(
+      await fetch(`${s.origin}/`).then(
         (r) => r.status === 200,
         () => false,
       )

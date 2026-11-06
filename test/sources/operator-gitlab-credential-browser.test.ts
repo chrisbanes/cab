@@ -30,7 +30,7 @@ test("Settings adds a glab credential, warns on an override, switches to a varia
   journey.cleanup(async () => glab.close(), "fake-glab.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     glabExecutable: glab.executable,
     gitlab: reader,
   });
@@ -119,7 +119,7 @@ test("Settings says a restart is needed once a running runtime has inherited the
   journey.cleanup(async () => glab.close(), "fake-glab.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     glabExecutable: glab.executable,
     gitlab: reader,
   });

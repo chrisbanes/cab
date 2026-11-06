@@ -382,12 +382,12 @@ test("assignmentRow names requester, destination, wait and short id", () => {
 });
 
 test("originLabel names the originating view", () => {
-  assert.equal(originLabel("/app/tasks?view=board"), "Board");
-  assert.equal(originLabel("/app"), "Overview");
-  assert.equal(originLabel("/app/inbox"), "Inbox");
-  assert.equal(originLabel("/app/search?query=x"), "Search");
-  assert.equal(originLabel("/app/tasks"), "Tasks");
-  assert.equal(originLabel("/app/settings"), null);
+  assert.equal(originLabel("/tasks?view=board"), "Board");
+  assert.equal(originLabel("/"), "Overview");
+  assert.equal(originLabel("/inbox"), "Inbox");
+  assert.equal(originLabel("/search?query=x"), "Search");
+  assert.equal(originLabel("/tasks"), "Tasks");
+  assert.equal(originLabel("/settings"), null);
 });
 
 test("optionalSummary counts supplied values and lets errors win", () => {

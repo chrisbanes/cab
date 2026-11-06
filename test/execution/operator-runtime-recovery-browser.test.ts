@@ -18,10 +18,7 @@ import {
 const test = browserSuite("operator-runtime-recovery-browser");
 
 test("Runtime saves a lowered capacity from a change list and lists recovery destinations", async (_t, journey) => {
-  const { f, ids, page } = await startSettings(
-    journey,
-    "/app/settings/runtime",
-  );
+  const { f, ids, page } = await startSettings(journey, "/settings/runtime");
   await page
     .getByRole("heading", { level: 1, name: "Runtime capacity and recovery" })
     .waitFor();
@@ -66,19 +63,19 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
   await card.getByText("Execution hold recorded").waitFor();
   assert.equal(
     await card.getByRole("link", { name: "Task detail" }).getAttribute("href"),
-    `/app/tasks/${ids.taskId}`,
+    `/tasks/${ids.taskId}`,
   );
   assert.equal(
     await card
       .getByRole("link", { name: "Task controls" })
       .getAttribute("href"),
-    `/app/tasks/${ids.taskId}?section=execution`,
+    `/tasks/${ids.taskId}?section=execution`,
   );
   assert.equal(
     await card
       .getByRole("link", { name: "Worker: recovery evidence" })
       .getAttribute("href"),
-    `/app/assignments/${ids.assignmentId}/recovery`,
+    `/assignments/${ids.assignmentId}/recovery`,
   );
   await captureBrowserEvidence(page, "1366-runtime");
   await page
@@ -100,7 +97,7 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
 test("Assignment recovery shows the uncertainty alert and five independent holds", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/assignments/:assignment/recovery",
+    "/assignments/:assignment/recovery",
   );
   const siblingId = randomUUID();
   f.service.domain().execute({
@@ -200,7 +197,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     await page
       .getByRole("link", { name: "Inspect execution" })
       .getAttribute("href"),
-    `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
+    `/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
   );
   const hrefs = await page
     .getByRole("complementary", {
@@ -209,9 +206,9 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .getByRole("link")
     .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
   assert.deepEqual(hrefs, [
-    `/app/tasks/${ids.taskId}?section=execution`,
-    `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
-    `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
+    `/tasks/${ids.taskId}?section=execution`,
+    `/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
+    `/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
   ]);
   assert.equal(await page.locator("main form").count(), 0);
   assert.equal(
@@ -238,7 +235,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
   await recoveryLink.waitFor();
   assert.equal(
     await recoveryLink.getAttribute("href"),
-    `/app/assignments/${ids.assignmentId}/recovery`,
+    `/assignments/${ids.assignmentId}/recovery`,
   );
   await recoveryLink.click();
   await page
@@ -249,9 +246,9 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     1,
   );
 
-  await page.goto(`${web.origin}/app/settings/runtime`);
+  await page.goto(`${web.origin}/settings/runtime`);
   await page
-    .locator(`a[href="/app/assignments/${siblingId}/recovery"]`)
+    .locator(`a[href="/assignments/${siblingId}/recovery"]`)
     .first()
     .click();
   await page.getByRole("heading", { name: "Task-wide holds" }).waitFor();
@@ -324,7 +321,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     await page
       .getByRole("link", { name: "Task detail", exact: true })
       .getAttribute("href"),
-    `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
+    `/tasks/${ids.taskId}?assignment=${siblingId}`,
   );
   const siblingHrefs = await page
     .getByRole("complementary", {
@@ -333,9 +330,9 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .getByRole("link")
     .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
   assert.deepEqual(siblingHrefs, [
-    `/app/tasks/${ids.taskId}?section=execution`,
-    `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
-    `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
+    `/tasks/${ids.taskId}?section=execution`,
+    `/tasks/${ids.taskId}?assignment=${siblingId}`,
+    `/tasks/${ids.taskId}?assignment=${siblingId}`,
   ]);
   await captureBrowserEvidence(page, "1366-recovery");
 });
@@ -343,7 +340,7 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
 test("Assignment recovery reads witnesses and missing evidence in plain words", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/assignments/:assignment/recovery",
+    "/assignments/:assignment/recovery",
   );
   await page
     .getByRole("heading", { level: 1, name: "Assignment recovery evidence" })
@@ -413,7 +410,7 @@ test("Assignment recovery reads witnesses and missing evidence in plain words", 
 test("phone recovery shows Recovery, current holds and the next step", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/assignments/:assignment/recovery",
+    "/assignments/:assignment/recovery",
     phone,
   );
   await page.getByRole("heading", { level: 1, name: "Recovery" }).waitFor();
@@ -437,7 +434,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       const { webkit, chromium } = await import("playwright");
       const { page, f, ids } = await startSettings(
         journey,
-        "/app/assignments/:assignment/recovery",
+        "/assignments/:assignment/recovery",
         { width: 1366, height: 900 },
         () => (engine === "webkit" ? webkit : chromium).launch(),
       );
@@ -646,7 +643,7 @@ for (const engine of ["chromium", "webkit"] as const) {
 test("bound recovery blocks redacted, missing and refreshed identities without transferring proof", async (_t, journey) => {
   const { page, f } = await startSettings(
     journey,
-    "/app/assignments/:assignment/recovery",
+    "/assignments/:assignment/recovery",
   );
   let mode: "redacted" | "missing" | "eligible" | "changed" = "redacted",
     posts = 0;

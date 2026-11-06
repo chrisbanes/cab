@@ -124,7 +124,7 @@ test("a fresh installation counts three required rows and makes Project the one 
   assert.deepEqual(project?.action, {
     kind: "link",
     label: "Create project",
-    href: "/app/settings/projects/new",
+    href: "/settings/projects/new",
   });
   assert.equal(first?.detail, "Needs a project first.");
   assert.deepEqual(first?.action, {
@@ -140,7 +140,7 @@ test("Project is not Done with a lead agent but no project", () => {
   assert.deepEqual(project?.action, {
     kind: "link",
     label: "Create project",
-    href: "/app/settings/projects/new",
+    href: "/settings/projects/new",
   });
 });
 
@@ -157,12 +157,12 @@ test("Project is not Done when the enabled project has no lead", () => {
   assert.deepEqual(all.project?.action, {
     kind: "link",
     label: "Choose a lead",
-    href: `/app/projects/${projectId}/settings`,
+    href: `/projects/${projectId}/settings`,
   });
   assert.deepEqual(all["first-task"]?.action, {
     kind: "link",
     label: "Create task",
-    href: `/app/tasks/new?project=${projectId}`,
+    href: `/tasks/new?project=${projectId}`,
   });
 });
 
@@ -175,7 +175,7 @@ test("Project is not Done when the lead agent is revoked", () => {
   assert.deepEqual(all.project?.action, {
     kind: "link",
     label: "Choose a lead",
-    href: `/app/projects/${projectId}/settings`,
+    href: `/projects/${projectId}/settings`,
   });
   assert.doesNotMatch(all.project?.detail ?? "", /Lead agent Ada/);
 });
@@ -267,7 +267,7 @@ test("Runtime passes on any enabled runtime and sends a missing one to Settings 
   assert.deepEqual(none?.action, {
     kind: "link",
     label: "Open runtime settings",
-    href: "/app/settings/runtime",
+    href: "/settings/runtime",
   });
   // An enabled runtime that fails (and no other) keeps the readiness link.
   assert.deepEqual(
@@ -283,7 +283,7 @@ test("Runtime passes on any enabled runtime and sends a missing one to Settings 
     {
       kind: "link",
       label: "Open readiness check",
-      href: "/app/settings#readiness",
+      href: "/settings#readiness",
     },
   );
 });
@@ -301,7 +301,7 @@ test("GitHub never offers a one-click login", () => {
   assert.deepEqual(signedIn?.action, {
     kind: "link",
     label: "Set discovery credential",
-    href: "/app/settings#github-discovery",
+    href: "/settings#github-discovery",
   });
   assert.match(signedIn?.detail ?? "", /@fixture-user/);
   assert.match(signedIn?.detail ?? "", /Project setup/);
@@ -317,7 +317,7 @@ test("GitHub never offers a one-click login", () => {
   assert.deepEqual(done?.action, {
     kind: "link",
     label: "Discovery settings",
-    href: "/app/settings#github-discovery",
+    href: "/settings#github-discovery",
   });
   // Configured but unreadable stays optional and points at the credential setting.
   assert.equal(
@@ -334,7 +334,7 @@ test("a paused project is not Done: its action is Resume (143b)", () => {
   assert.deepEqual(all.project?.action, { kind: "resume", projectId });
   assert.equal(
     all["first-task"]?.action.kind === "link" && all["first-task"].action.href,
-    `/app/tasks/new?project=${projectId}`,
+    `/tasks/new?project=${projectId}`,
   );
   const enabled = byId(rows(workspace({ profile: true, project: "enabled" })));
   assert.equal(enabled.project?.status, "done");
@@ -373,7 +373,7 @@ test("a claude that is not runnable needs attention even when the token is reada
   assert.deepEqual(failing?.action, {
     kind: "link",
     label: "Open readiness check",
-    href: "/app/settings#readiness-claude-executable",
+    href: "/settings#readiness-claude-executable",
   });
   assert.equal(failing?.primary, false);
   // Claude unused: no token and no claude is still optional; both passing is done.
@@ -407,7 +407,7 @@ test("Claude is Optional, Done, or Needs attention with Add Claude", () => {
   assert.deepEqual(failing?.action, {
     kind: "link",
     label: "Add Claude",
-    href: "/app/settings/runtime#add-claude",
+    href: "/settings/runtime#add-claude",
   });
   // A removed token returns to Home after the first turn.
   assert.deepEqual(
@@ -458,10 +458,6 @@ test("no two checklist rows open the same screen", () => {
     const hrefs = links(all);
     assert.ok(hrefs.length >= 3, name);
     assert.equal(new Set(hrefs).size, hrefs.length, `${name}: ${hrefs}`);
-    assert.equal(
-      hrefs.includes("/app/settings"),
-      false,
-      `${name}: bare Settings`,
-    );
+    assert.equal(hrefs.includes("/settings"), false, `${name}: bare Settings`);
   }
 });

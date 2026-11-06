@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 
 /**
  * Opens Search from the sidebar's Search work field (the desktop shell's only Search entry): an
- * empty submit navigates to /app/search in-app, like the drawer's Search row at narrow widths.
+ * empty submit navigates to /search in-app, like the drawer's Search row at narrow widths.
  * `keepFocus` submits without moving focus, for journeys that assert the origin's focus survives.
  */
 export async function openSearchFromSidebar(
@@ -66,7 +66,7 @@ export async function searchRecords(
   const param = (name: string, value: string) =>
     page.waitForURL(
       (url) =>
-        url.pathname === "/app/search" && url.searchParams.get(name) === value,
+        url.pathname === "/search" && url.searchParams.get(name) === value,
     );
   const apply = (name: string, value: string, act: () => Promise<unknown>) =>
     replacedSearchPage(page, async () => {
