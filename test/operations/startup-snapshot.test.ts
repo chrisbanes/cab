@@ -831,6 +831,55 @@ test("the service entry reports a refused startup in its log with nothing listen
   }
 });
 
+test("local listening migration snapshots level 14 and adds both tables empty, so every project stays off", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 14);
+    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    before.exec(
+      "DROP TABLE project_local_listening; DROP TABLE execution_intent_local_listening",
+    );
+    before.close();
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    const prior = new DatabaseSync(join(snapshot, "standalone.sqlite"), {
+      readOnly: true,
+    });
+    const current = new DatabaseSync(join(dirs.data, "standalone.sqlite"), {
+      readOnly: true,
+    });
+    try {
+      for (const table of [
+        "project_local_listening",
+        "execution_intent_local_listening",
+      ]) {
+        assert.equal(
+          prior
+            .prepare("SELECT name FROM sqlite_schema WHERE name = ?")
+            .get(table),
+          undefined,
+        );
+        assert.equal(
+          current.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n,
+          0,
+        );
+      }
+      assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      prior.close();
+      current.close();
+    }
+    assert.equal(readStartupState(dirs.data)?.snapshot?.from, 14);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, MIGRATION_LEVEL);
+    assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
 test("Unstack journal migration snapshots level 13 before creating task-owned rows and preserves retained private values", async () => {
   const dirs = layout();
   try {
