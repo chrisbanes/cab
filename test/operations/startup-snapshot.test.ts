@@ -763,6 +763,7 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  15: "8c62eb6e45b35bd0b6de4961ebdf351f23d9e9723eaa6b9d66fcebc8c740057a",
   14: "f0cc50cf3e479a85922ecfe951a4337fafbfd8af243328b38f2838e2ac328117",
   1: "70a7b6cd96317bf46d0857b2816ad74bf84046906c740923689c885c68d31d4f",
   2: "ee099e33a7150ba0bd23bdd3f46636e8847878b6c436b0919b6292d14dbc6476",
@@ -876,8 +877,8 @@ test("Unstack journal migration snapshots level 13 before creating task-owned ro
       current.close();
     }
     assert.equal(readStartupState(dirs.data)?.snapshot?.from, 13);
-    assert.equal(readStartupState(dirs.data)?.snapshot?.to, 14);
-    assert.equal(recordedLevel(dirs.data), 14);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, MIGRATION_LEVEL);
+    assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
   } finally {
     dirs.cleanup();
   }

@@ -16,6 +16,7 @@ import {
   STANDALONE_MARKER_CONTENTS,
   STANDALONE_MARKER_NAME,
 } from "../../../src/standalone/data-directory.js";
+import { MIGRATION_LEVEL } from "../../../src/standalone/startup-snapshot.js";
 import { repositoryBindingSchema } from "../../../src/standalone/workspaces.js";
 import {
   authorityHash,
@@ -52,7 +53,7 @@ export function capturePreparedStackDatabase(databasePath: string) {
       ]),
     );
     const level = z
-      .object({ level: z.literal(14) })
+      .object({ level: z.literal(MIGRATION_LEVEL) })
       .parse(
         db
           .prepare(
@@ -463,7 +464,7 @@ export async function verifyPreparedStackResources(
   const taskIds = [m.resource.lowerTask, m.resource.upperTask];
   if (
     observed.schemaFingerprint !==
-      "f0cc50cf3e479a85922ecfe951a4337fafbfd8af243328b38f2838e2ac328117" ||
+      "8c62eb6e45b35bd0b6de4961ebdf351f23d9e9723eaa6b9d66fcebc8c740057a" ||
     observed.schemaFingerprint !== host.schemaFingerprint ||
     observed.configSha256 !== host.configSha256 ||
     observed.projects.length !== 1 ||
