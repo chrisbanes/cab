@@ -35,10 +35,13 @@ why meant reassembling it across tabs, so the task view was hard to read.
 - Tool activity reaches the browser only through a curated projection: the tool
   kind, a one-line summary (for a command, the command and exit status) and, on
   request, its bounded, redacted output. Runs of consecutive tool calls are grouped
-  with a failure count. File changes are a count that opens the Changes tab. cab's
-  own coordination tool calls appear as the records they produce, not as tool rows.
-  Working directories, workspace paths, raw payloads and service or severity rows
-  still do not cross the operator UI boundary.
+  with a failure count. File changes open the Changes tab. cab's own coordination
+  tool calls appear as the records they produce, not as tool rows. Working
+  directories, workspace paths, raw payloads and service or severity rows still do not
+  cross the operator UI boundary. [ADR-1025](1025-conversation-activity-plans-and-change-notifications.md)
+  widens the projection with durations, repository-relative file paths and one
+  allowlisted target per non-command tool, and adds agent plans and push change
+  notices.
 - The Claude harness records its tool use in the same diagnostic store, with the same
   redaction, size limits and retention as Codex command items, so a conversation
   reads the same whichever harness ran it.
