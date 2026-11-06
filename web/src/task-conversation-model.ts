@@ -3,6 +3,7 @@ import type {
   taskTimelineSchema,
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
+import { outsideWorkspace } from "../../src/operator/tool-limits.js";
 import {
   compareTimelineKeys,
   parseTimelineCursor,
@@ -129,12 +130,72 @@ export function prependTimeline(
     : window;
 }
 
+/** A tool row the harness has not finished. */
+export const isUnfinishedTool = (entry: TimelineEntry): entry is ToolEntry =>
+  entry.kind === "tool" && /progress|running|started/i.test(entry.status ?? "");
+
 /** Content that can still change: streaming text, or a tool the harness has not finished. */
 const isPending = (entry: TimelineEntry) =>
   entry.kind === "assistant"
     ? entry.lifecycle !== "completed"
-    : entry.kind === "tool" &&
-      /progress|running|started/i.test(entry.status ?? "");
+    : isUnfinishedTool(entry);
+
+const working = "Working…";
+
+/**
+ * What a running assignment is doing, from its newest unfinished tool row; null when it is not
+ * running. A tool with nothing to name reads "Working…".
+ */
+export function workingStatus(
+  entries: readonly TimelineEntry[],
+  assignmentId: string,
+  state: string | undefined,
+): string | null {
+  if (state !== "running") return null;
+  const tool = entries.findLast(
+    (e): e is ToolEntry =>
+      e.assignmentId === assignmentId && isUnfinishedTool(e),
+  );
+  if (!tool) return working;
+  if (tool.tool === "command") {
+    const c = tool.command?.trim();
+    if (!c) return "Running a command";
+    return `Running ${c.length > 80 ? `${c.slice(0, 79)}…` : c}`;
+  }
+  const target = tool.target ?? tool.paths?.[0];
+  if (tool.tool === "file-change")
+    return target === outsideWorkspace
+      ? "Editing a file outside the workspace"
+      : target
+        ? `Editing ${target}`
+        : "Editing files";
+  if (!tool.label) return working;
+  if (tool.label === "Read")
+    return target ? `Reading ${target}` : "Reading a file";
+  return `Using ${tool.label}${target ? ` · ${target}` : ""}`;
+}
+
+/** The least time between two announced status texts. */
+export const statusAnnouncementGapMs = 2500;
+
+/** How long to wait before showing a new status text, given when the last one was shown. */
+export const throttleDelay = (
+  lastShownAt: number | null,
+  now: number,
+  gapMs: number,
+): number =>
+  lastShownAt === null ? 0 : Math.max(0, lastShownAt + gapMs - now);
+
+/** The newest agent entry of each assignment: the turn that keeps its Copy action visible. */
+export function latestAgentTurns(
+  entries: readonly TimelineEntry[],
+): Set<string> {
+  const latest = new Map<string, string>();
+  for (const e of entries)
+    if (e.kind === "assistant" && e.assignmentId !== null)
+      latest.set(e.assignmentId, e.entryId);
+  return new Set(latest.values());
+}
 
 /**
  * Whether an unfinished entry of a running assignment sits older than `floor`, beyond what a
