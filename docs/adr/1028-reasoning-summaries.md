@@ -61,8 +61,8 @@ debugging. They are not a live progress feed or an audit trail.
   content blocks in assistant frames; frames with a `parent_tool_use_id` belong to a subagent.
   `redacted_thinking` blocks are never stored. Thinking tokens are counted within output
   tokens. In the probes the model did not think on the task, with default or high effort, so
-  no summary shape, size or cost was observed. Until a summary is observed, Claude shows none
-  and reports `unavailable` when requested.
+  no summary shape, size or cost was observed. A requested turn that stores no summary
+  reports `unavailable`.
 - **Codex.** Requested with `summary: "auto"` on `turn/start`. Summaries arrive in the
   `summary` array of a `reasoning` thread item, with `item/reasoning/summaryTextDelta` and
   `item/reasoning/summaryPartAdded` notifications. The item's `content` array and
@@ -70,8 +70,8 @@ debugging. They are not a live progress feed or an audit trail.
   persists for the thread's later turns, so a turn admitted with the setting off on a thread
   that earlier requested summaries sends `summary: "none"`. In the probes the default model
   did no reasoning at its default `low` effort, with `auto` or `detailed` summaries, so no
-  summary shape, size or cost was observed. Until a summary is observed, Codex shows none and
-  reports `unavailable` when requested.
+  summary shape, size or cost was observed. A requested turn that stores no summary reports
+  `unavailable`.
 
 ## Considered options
 

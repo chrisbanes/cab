@@ -97,8 +97,9 @@ effort, with or without a summary request.
 **Verdict: not usable: none emitted.**
 
 The [agent plan capture probes](agent-plan-capture-probes-2026-11-06.md) recorded Codex
-`reasoning` items on other tasks with cab's `-c` flags and no summary request; their
-`summary` and `content` fields were not measured.
+`reasoning` items on other tasks with cab's `-c` flags and no summary request, using the
+operator's Codex home rather than an isolated one; their `summary` and `content` fields were
+not measured.
 
 ## Cost comparison
 
