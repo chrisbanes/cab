@@ -190,7 +190,7 @@ async function setup(t: { after(fn: () => unknown): void }) {
     toolRow("ws-1", "webSearch", { target: "how to x" });
     toolRow("mcp-1", "mcpToolCall", { target: "docs/search" });
     toolRow("fc-abs", "fileChange", {
-      paths: ["/abs/leak.ts", "../up.ts", "ok.ts", "ok.ts"],
+      paths: ["/abs/leak.ts", "../up.ts", "ok.ts", "ok.ts", "a".repeat(257)],
     });
     clock = t0 + 60;
     item("commandExecution/completed", "cmd-big", {
@@ -467,7 +467,7 @@ test("only the curated tool projection crosses the boundary", async (t) => {
   ]);
   assert.equal(tools[1]?.pathsTruncated, true);
   assert.deepEqual(tools[10]?.paths, ["outside workspace", "ok.ts"]);
-  assert.equal(tools[10]?.pathsTruncated, false);
+  assert.equal(tools[10]?.pathsTruncated, true);
   assert.deepEqual(tools[0]?.paths, []);
   const command = tools[0];
   assert.match(command?.command ?? "", /^cat \[redacted\]/);

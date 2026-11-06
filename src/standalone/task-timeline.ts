@@ -51,16 +51,19 @@ const maxCommandChars = 512;
 const maxLabelChars = 128;
 const maxStatusChars = 64;
 
-/** A stored path is relative; anything absolute, escaping or oversized reads as masked. */
+/** A stored path is relative; anything absolute or escaping reads as masked. */
 function safePath(path: string): string {
-  return path.length > maxToolPathChars ||
-    isAbsolute(path) ||
+  return isAbsolute(path) ||
     path === ".." ||
     path.startsWith("../") ||
     path.startsWith("..\\")
     ? outsideWorkspace
     : path;
 }
+
+const observedPayload = z.object({
+  observedAt: z.number().int().nonnegative(),
+});
 
 const toolPayload = z
   .object({
@@ -150,7 +153,10 @@ export function projectTool(
     return { kind: "gap", reason: "redaction-unavailable" };
   const command = typeof collapsed === "string" ? collapsed : null;
   const label = data.tool ?? data.itemType;
-  const capped = (data.paths ?? []).slice(0, maxToolPaths).map(safePath);
+  const listed = (data.paths ?? []).slice(0, maxToolPaths);
+  const capped = listed
+    .filter((path) => path.length <= maxToolPathChars)
+    .map(safePath);
   // A file path target is re-checked; a pattern or query may legitimately start with "/".
   const shown =
     tool === "file-change" || label === "Read"
@@ -164,9 +170,7 @@ export function projectTool(
         ? `${shown.slice(0, maxToolTargetChars - 1)}…`
         : shown
       : null;
-  const completedAt = z
-    .object({ observedAt: z.number().int().nonnegative() })
-    .safeParse(last?.payload);
+  const completedAt = observedPayload.safeParse(last?.payload);
   return {
     kind: "tool",
     tool,
@@ -185,7 +189,9 @@ export function projectTool(
     endedAt: completedAt.success ? completedAt.data.observedAt : null,
     paths: [...new Set(capped)],
     pathsTruncated:
-      data.pathsTruncated === true || (data.paths?.length ?? 0) > maxToolPaths,
+      data.pathsTruncated === true ||
+      listed.length < (data.paths?.length ?? 0) ||
+      capped.length < listed.length,
     target,
   };
 }

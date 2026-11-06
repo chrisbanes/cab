@@ -61,6 +61,7 @@ import {
 } from "./termination.js";
 import { resolveOnPath } from "./executable-path.js";
 import { isWithin } from "./workspace-inspection.js";
+import { maxToolPathChars } from "../operator/tool-limits.js";
 import { claudeToolTarget, workspaceRoots } from "./tool-activity.js";
 
 /** The SDK surface the runtime uses; tests inject a fake. */
@@ -1547,7 +1548,8 @@ export class ClaudeRuntime implements Runtime {
 
   /**
    * Best-effort diagnostic item for a built-in tool. Never throws, never awaits,
-   * and carries no input except a Bash command; cab's own tools are recorded as
+   * and carries no input except a Bash command and allowlisted targets (relative
+   * paths, patterns, subagent types); cab's own tools are recorded as
    * coordination records instead.
    */
   private emitTool(
@@ -1586,7 +1588,9 @@ export class ClaudeRuntime implements Runtime {
         status: done?.status ?? "inProgress",
         ...(itemType === "toolCall" ? { tool: call.tool_name } : {}),
         ...(itemType === "fileChange" && target !== undefined
-          ? { paths: [target] }
+          ? target.length > maxToolPathChars
+            ? { paths: [], pathsTruncated: true as const }
+            : { paths: [target] }
           : {}),
         ...(target !== undefined ? { target } : {}),
         ...(call.agent_id

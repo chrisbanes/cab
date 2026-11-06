@@ -1373,7 +1373,9 @@ test("file changes and allowlisted tools record a relative path or target, never
     );
     if (access === "read-only") {
       // The Write is declined here, so it records more rows; each still has the relative path.
-      for (const event of items.filter((e) => e.itemType === "fileChange"))
+      const writes = items.filter((e) => e.itemType === "fileChange");
+      assert.ok(writes.length > 0);
+      for (const event of writes)
         assert.deepEqual(event.paths, ["secret-name.txt"]);
     } else
       assert.deepEqual(

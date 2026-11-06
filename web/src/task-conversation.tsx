@@ -18,6 +18,7 @@ import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
 import { clockLabel } from "./presentation.js";
 import {
   changedFileCount,
+  distinctPaths,
   changesLabel,
   commandsDuration,
   commandsLabel,
@@ -433,15 +434,15 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
           >
             Open in Changes
           </Button>
-          <ul className="conv-paths">
-            {[...new Set(item.entries.flatMap((e) => e.paths ?? []))].map(
-              (path) => (
+          {distinctPaths(item.entries).length > 0 && (
+            <ul className="conv-paths">
+              {distinctPaths(item.entries).map((path) => (
                 <li key={path}>
                   <code>{path}</code>
                 </li>
-              ),
-            )}
-          </ul>
+              ))}
+            </ul>
+          )}
           {item.entries.some((e) => e.pathsTruncated) && (
             <p className="muted">Paths not all listed</p>
           )}

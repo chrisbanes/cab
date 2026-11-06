@@ -539,8 +539,8 @@ name, version and preview digest. The service rechecks every confirmation atomic
    changes keep up to 25 repository-relative paths (a path outside the workspace is
    stored as "outside workspace"), and allowlisted non-command tools keep one target
    (Read, Write and Edit path; Grep and Glob pattern; web search query; MCP
-   `server/tool`; Agent subagent type), dropped whole when over its cap, never absolute
-   and redacted again on every read. Accepted but not yet implemented: plan steps are a
+   `server/tool`; Agent subagent type), dropped whole when over its cap, with paths and
+   Glob patterns never absolute, and redacted again on every read. Accepted but not yet implemented: plan steps are a
    separate curated record, not diagnostic items. No message text, deltas or
    reasoning is collected and tool observation is never claimed complete.
    Payloads are redacted before storage and again with current exclusions on every

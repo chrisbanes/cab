@@ -60,6 +60,8 @@ test("only allowlisted Claude tools have a target", () => {
   assert.equal(t("Glob", { pattern: "**/*.ts" }), "**/*.ts");
   assert.equal(t("Agent", { subagent_type: "explore" }), "explore");
   assert.equal(t("mcp__srv__t", {}), "srv/t");
+  assert.equal(t("Glob", { pattern: "/w/src/**" }), "src/**");
+  assert.equal(t("Glob", { pattern: "/etc/*" }), outside);
   assert.equal(t("Grep", { pattern: "x".repeat(513) }), undefined);
   assert.equal(t("Bash", { command: "ls" }), undefined);
   assert.equal(t("Skill", { skill: "s" }), undefined);

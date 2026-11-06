@@ -342,9 +342,13 @@ export function commandsDuration(entries: readonly ToolEntry[]): number | null {
   return known.length === 0 ? null : known.reduce((a, b) => a + b, 0);
 }
 
+export const distinctPaths = (entries: readonly ToolEntry[]): string[] => [
+  ...new Set(entries.flatMap((entry) => entry.paths ?? [])),
+];
+
 /** Distinct changed paths, plus one for each entry that carries none. */
 export const changedFileCount = (entries: readonly ToolEntry[]): number =>
-  new Set(entries.flatMap((entry) => entry.paths ?? [])).size +
+  distinctPaths(entries).length +
   entries.filter((entry) => !entry.paths?.length).length;
 
 export const commandsLabel = (

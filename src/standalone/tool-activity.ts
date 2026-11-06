@@ -97,7 +97,14 @@ export function claudeToolTarget(
     case "Grep":
     case "Glob": {
       const pattern = field("pattern");
-      return pattern === undefined ? undefined : capTarget(pattern);
+      // A Glob can be an absolute path; a Grep pattern is a regex and stays as written.
+      return pattern === undefined
+        ? undefined
+        : capTarget(
+            name === "Glob" && isAbsolute(pattern)
+              ? relativeToWorkspace(roots, pattern)
+              : pattern,
+          );
     }
     case "Agent": {
       const type = field("subagent_type");
