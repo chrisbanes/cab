@@ -552,6 +552,7 @@ function Entry({
     }
     case "assistant": {
       const raw = ctx.expanded(`c:raw:${entry.entryId}`);
+      const turnName = `${who}'s entry at ${clockLabel(entry.at)}`;
       return (
         <article
           className="conv-entry conv-agent"
@@ -572,18 +573,14 @@ function Entry({
             <div className="conv-actions">
               <Button
                 variant="secondary"
-                aria-label={`${raw ? "Formatted" : "Raw text"} of ${who}'s entry at ${clockLabel(entry.at)}`}
+                aria-label={`${raw ? "Formatted" : "Raw text"} of ${turnName}`}
                 onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
               >
                 {raw ? "Formatted" : "Raw text"}
               </Button>
               {entry.lifecycle === "completed" && (
                 <span className="conv-copy">
-                  <CopyButton
-                    text={entry.text}
-                    of={`${who}'s entry at ${clockLabel(entry.at)}`}
-                    resetMs={2000}
-                  />
+                  <CopyButton text={entry.text} of={turnName} resetMs={2000} />
                 </span>
               )}
             </div>
