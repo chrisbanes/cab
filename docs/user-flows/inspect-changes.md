@@ -18,7 +18,8 @@ feedback to the lead without leaving the task.
 - Latest result on the task Overview, and a conversation's "Open in Changes" or a changed
   file path listed there. At 1024px and wider these open the Changes pane beside the
   conversation (still two interactions); below it they open the tab. A path selects that
-  file, or says it is not in the comparison.
+  file, or says it is not in the comparison. With focus mode on, these leave it for that
+  visit so the pane shows.
 - Inbox request pane evidence links.
 - Operator CLI `workspace` and `result` reads.
 

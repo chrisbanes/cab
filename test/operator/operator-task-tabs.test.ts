@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   conversationTarget,
+  linkNamesInspector,
   tabForLocation,
   tabForSection,
   tabIds,
@@ -77,4 +78,37 @@ test("conversationTarget reads the conversation place a link names", () => {
   assert.deepEqual(conversationTarget("/app/tasks/x", "#history"), {
     kind: "latest",
   });
+});
+
+test("linkNamesInspector is true only for links to what the inspector shows", () => {
+  for (const path of [
+    "/t?section=brief",
+    "/t?section=assignments",
+    "/t?section=context",
+    "/t?section=review",
+    "/t?section=result-evidence",
+    "/t#context",
+    "/t?result=r",
+    "/t?evidence=e&result=r",
+    "/t?source=s",
+    "/t?record=x",
+    "/t?inspectAssignment=a",
+  ])
+    assert.equal(linkNamesInspector(path), true, path);
+  for (const path of [
+    "/app/tasks/x",
+    "/t?section=changes",
+    "/t?section=changes&result=r",
+    "/t?section=files",
+    "/t?section=execution",
+    "/t?section=reply",
+    "/t?section=conversation",
+    "/t#conversation",
+    "/t?assignment=a",
+    "/t?request=q#conversation",
+    "/t?path=a.md",
+    "/t?section=decisions",
+  ])
+    assert.equal(linkNamesInspector(path), false, path);
+  assert.equal(linkNamesInspector("/t", "#brief"), true);
 });

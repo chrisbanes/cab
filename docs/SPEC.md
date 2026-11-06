@@ -2002,7 +2002,12 @@ actions (a conversation's "Open in Changes" and the latest result's Changes link
 the same Changes view in a resizable side pane beside the conversation, in place of
 the inspector, with Close and Open full width; below 1024px, and for every deep link,
 they select the Changes tab. The pane is page state only: it is not in the URL, nothing
-is stored on the server, and a reload opens the normal layout.
+is stored on the server, and a reload opens the normal layout. At 1024px and wider a
+`Focus mode` button in the task tools row, and the `\` key (ignored in editable fields
+and dialogs and with Ctrl, Alt or Meta held), hide the inspector and the Changes pane so
+the conversation takes the whole row; the choice is remembered per browser, and a link
+to an inspector section or a Changes action shows the panel it needs for that visit.
+Below 1024px nothing changes.
 
 - Give reviewing code changes and inspecting generated outputs equal weight,
   including repository-free task outputs.

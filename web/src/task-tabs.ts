@@ -75,3 +75,23 @@ export function conversationTarget(
     return { kind: "assignment", id: assignment };
   return place ? { kind: "latest" } : null;
 }
+
+/** The Overview cards that sit in the inspector, which focus mode hides. */
+export const inspectorTargets = [
+  "brief",
+  "assignments",
+  "context",
+  "review",
+  "result-evidence",
+];
+
+/** Whether a link names something only the inspector shows, so focus mode must step aside. */
+export function linkNamesInspector(path: string, hash = ""): boolean {
+  const [beforeHash = "", fragment = ""] = path.split("#");
+  const params = new URLSearchParams(beforeHash.split("?")[1] ?? "");
+  const section = params.get("section") ?? (fragment || hash.slice(1));
+  if (section) return inspectorTargets.includes(section);
+  return ["result", "source", "evidence", "record", "inspectAssignment"].some(
+    (p) => params.has(p),
+  );
+}
