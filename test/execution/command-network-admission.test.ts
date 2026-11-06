@@ -230,6 +230,26 @@ test("the live network run refuses to start without --live --one-attempt", () =>
   assert.equal(run.stdout, "");
 });
 
+test("the live local listening run and probe refuse to start without their flags", () => {
+  for (const [script, refusal] of [
+    [
+      "test/execution/local-listening-qualification/live-local-listening.mjs",
+      /Refusing live execution/,
+    ],
+    [
+      "test/execution/local-listening-qualification/sandbox-listen-probe.mjs",
+      /Refusing live sandbox probes/,
+    ],
+  ] as const) {
+    const run = spawnSync(process.execPath, [script, "--live"], {
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 2);
+    assert.match(run.stderr, refusal);
+    assert.equal(run.stdout, "");
+  }
+});
+
 /** A Codex runtime that records each `startTurn` call and can hold a thread start. */
 class RecordingRuntime implements Runtime {
   turns: {
