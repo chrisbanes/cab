@@ -41,7 +41,7 @@ async function open(j: BrowserJourney) {
     (response) =>
       response.url().endsWith(`${taskPath}/stream`) && response.ok(),
   );
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await connected;
