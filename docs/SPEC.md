@@ -146,8 +146,10 @@ settings and available runtime, tool and service events under bounded retention,
 unless a project reduces capture to the baseline. General conversation history retains its current
 instruction redaction; historical gaps remain explicit. The diagnostic payload
 retention policy does not delete durable safety records or change existing
-result/review evidence contracts. The design defines capture limits, credential
-lifecycle, command semantics and required acceptance evidence.
+result/review evidence contracts. Projects with enhanced capture may opt in to
+provider reasoning summaries under ADR-1028, which is not yet implemented. The
+design defines capture limits, credential lifecycle, command semantics and required
+acceptance evidence.
 
 ## First local-task journey
 

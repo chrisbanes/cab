@@ -114,11 +114,113 @@ come from prompt caching (Claude's not-requested run wrote 14083 cache tokens ag
 No summary was emitted, so there is no largest per-turn total from which to set the per-turn
 cap.
 
-## Gate result
+## Round one result
 
 Neither runtime produced a provider-designated summary in the allowed runs, because neither
 model reasoned on this task at its default settings. The evidence does not show that
 summaries are unavailable when a model does reason, and it does not show raw reasoning
 without summaries.
 
-**Gate result: proposed**
+**Round one result: proposed.** The maintainer then authorized a second round on a task that
+needs reasoning ([decision](https://github.com/chrisbanes/cab/issues/1514#issuecomment-6683602179)).
+
+## Round two
+
+Recorded 2026-11-06 on base `003266d11b8a81c0b7ce849f2cd3b0690ccc60fd`, with the same
+versions, setup and recording rules as round one, except as stated here.
+
+- **Task.** Each run used a fresh Git workspace under `/tmp` holding a small Node.js module
+  split across five source files, with one failing `node:test` test. The failure had two
+  interacting causes in different files. The prompt asked the agent to run the test, diagnose
+  the root cause across the source files, fix the source rather than the test, and write
+  `diagnosis.md` explaining the root cause and the chosen fix.
+- **Effort.** Claude ran with `effort: "high"` in both conditions. Codex ran with `medium`,
+  set as cab sets a configured effort: `config.model_reasoning_effort` on `thread/start` and
+  `effort` on `turn/start`.
+- **Conditions.** C-N and X-N as in round one; C-R and X-R requested summaries as in round
+  one (`display: "summarized"`, `summary: "auto"`). Each requested run produced summary text,
+  so no retry was allowed or used.
+
+Four model turns were used, within the grant of six. No harness failure occurred and no run
+timed out. In every run the agent fixed both causes and the test passed afterwards.
+
+### Claude
+
+| Run | Result  | SDK turns | Wall ms | `duration_ms` / `duration_api_ms` | Output tokens | Thinking tokens | Cost (USD, list) |
+| --- | ------- | --------: | ------: | --------------------------------: | ------------: | --------------: | ---------------: |
+| C-N | success |         4 |   22050 |                     21090 / 21131 |          1617 |             337 |           0.0533 |
+| C-R | success |         5 |   20416 |                     19637 / 19569 |          1912 |             285 |           0.0598 |
+
+Thinking tokens are `usage.output_tokens_details.thinking_tokens`, which equalled
+`modelUsage["claude-sonnet-5-5"].thinkingTokens`. Each run also made one `claude-haiku-5-5`
+call of 1237 input and 24 output tokens with no thinking.
+
+- **C-N.** Frames: `system/init` 1, `rate_limit_event` 1, `assistant` 6, `user` 3,
+  `system/thinking_tokens` 17 (last `estimated_tokens` 220), `result/success` 1. Blocks in
+  order: `tool_use` ×2, `thinking` ×2, `tool_use`, `text`. The first `thinking` block was
+  empty and the second had 214 characters; both had a signature. Tools used: Bash ×3.
+- **C-R.** Frames: `system/init` 1, `rate_limit_event` 1, `assistant` 7, `user` 4,
+  `system/thinking_tokens` 51 (last `estimated_tokens` 320), `result/success` 1. Blocks in
+  order: `tool_use` ×2, `thinking`, `text`, `tool_use` ×2, `text`. One `thinking` block of 593
+  characters, with a signature. Tools used: Bash ×3, Write.
+- Both runs: no `redacted_thinking` block, and every frame carrying a `thinking` block had
+  `parent_tool_use_id` null.
+- Per-turn summary totals: C-N 214 characters, C-R 593; the largest single block was the
+  same as each total.
+
+Without the option, the CLI still returned thinking text by its own default. cab does not
+treat that turn as requested, so it would store none of it.
+
+Usability (C-R): the summary, written in the first person, names both causes and explains
+why the agent chose its fix location over the alternative it considered.
+
+**Verdict: usable.**
+
+### Codex
+
+| Run | Result    | Wall ms | Total input / cached | Total output | Reasoning output | Last turn input / output |
+| --- | --------- | ------: | -------------------: | -----------: | ---------------: | -----------------------: |
+| X-N | completed |   34309 |        75214 / 65792 |         1019 |               14 |               16561 / 78 |
+| X-R | completed |   28400 |        60658 / 36992 |          929 |               18 |               16453 / 81 |
+
+`thread/start` reported effort `medium` in both runs.
+
+- **X-N.** Completed items: `userMessage` 1, `agentMessage` 3, `commandExecution` 7,
+  `reasoning` 1, `fileChange` 1. The `reasoning` item had 0 `summary` parts and 0 `content`
+  parts. No reasoning notifications arrived.
+- **X-R.** Completed items: `userMessage` 1, `agentMessage` 3, `commandExecution` 5,
+  `reasoning` 1, `fileChange` 1. The `reasoning` item, on the turn's thread and turn, had 1
+  `summary` part of 32 characters and 0 `content` parts. One `summaryPartAdded` and one
+  `summaryTextDelta` arrived, on the same thread and turn, and the completed `summary` equalled
+  the concatenated deltas. No `textDelta` (raw reasoning) arrived.
+- Per-turn summary totals: X-N 0 characters, X-R 32.
+
+Usability (X-R): the summary was only a short bold heading naming the area being fixed. It
+did not explain the causes or why the agent chose its fix.
+
+**Verdict: not usable: heading only.** The summary field works as documented, but at this
+effort it carried no explanation.
+
+### Round two cost comparison
+
+One sample per condition, indicative only.
+
+- **Claude.** Requested against not requested: 1912 against 1617 output tokens, 285 against
+  337 thinking tokens, 0.0598 against 0.0533 USD, and 19637 against 21090 `duration_ms`. The
+  request changed the thinking display, not whether the model thought, and the run-to-run
+  differences in tool calls dominate.
+- **Codex.** Requested against not requested: 929 against 1019 output tokens, 18 against 14
+  reasoning output tokens, and 28400 against 34309 wall ms. The differences follow the number
+  of commands run (5 against 7), not the request.
+
+### Round two caps
+
+The largest per-turn summary total observed was 593 characters (Claude, C-R). Codex's was 32.
+
+## Gate result
+
+Claude produced a usable provider-designated summary on the lead's turn when requested.
+Codex produced a provider-designated summary, but it was not usable. Codex `content` (raw
+reasoning) was empty in every run and was never counted.
+
+**Gate result: accepted**

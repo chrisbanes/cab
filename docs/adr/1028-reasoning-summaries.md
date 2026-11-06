@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Opt-in reasoning summaries
@@ -9,9 +9,9 @@ diagnostics are metadata only, Claude `thinking` blocks are dropped, and cab req
 reasoning summaries from neither runtime. Operators reviewing or debugging an agent's work
 cannot see why it chose an approach. Both runtimes can be asked for provider-produced
 summaries of their reasoning. This decision lets a project opt in to collecting and showing
-them. Its status is `proposed` because the
-[probes](../evidence/reasoning-summary-probes-2026-11-06.md) observed no summary from either
-runtime; see [What the evidence contradicts](#what-the-evidence-contradicts).
+them. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable summaries
+from Claude Code but not from Codex. This decision is not yet implemented: cab still collects
+no reasoning.
 
 ## Decision
 
@@ -28,8 +28,9 @@ debugging. They are not a live progress feed or an audit trail.
     `baseline` sets it to `false` in the same revision, so it never re-enables silently.
   - Like local listening ([ADR-1027](1027-local-listening-for-test-fixtures.md)), it is
     recorded when a turn is admitted, so a change reaches only later turns.
-- **Requesting.** A turn admitted with the setting on requests summaries from its runtime.
-  A turn admitted with it off sends today's requests and stores no reasoning, whatever the
+- **Requesting.** A turn admitted with the setting on requests summaries from its runtime
+  when that runtime produces usable summaries; today that is Claude Code only. A turn
+  admitted with it off sends today's requests and stores no reasoning, whatever the
   runtime emits. Projects that have not opted in run exactly as today.
 - **Lead turns only.** Summaries are stored for the lead's turn only, never for a subagent's
   frames.
@@ -50,28 +51,35 @@ debugging. They are not a live progress feed or an audit trail.
 - **Protection.** Summaries are stored with the agent turn under the same retention and
   redaction as assistant text, including deleted-project redaction
   (`DeletedProjectRedactionStore`), and are removed with the project. Each turn's summaries
-  are capped in characters, with a truncation marker when the cap applies. The cap is set
-  from evidence, at or above the largest observed per-turn total and within the 64 KiB limit
-  on stored conversation text.
+  are capped at 16,000 characters in total. A turn over the cap keeps the first 16,000
+  characters and is marked truncated, and every display of it says so. The largest observed
+  per-turn total was 593 characters, and 16,000 characters fit the 64 KiB limit on stored
+  conversation text even at four UTF-8 bytes per character.
 
 ## Runtimes
 
 - **Claude Code.** Requested with the SDK option
-  `thinking: {type: "adaptive", display: "summarized"}`. Summaries arrive as `thinking`
-  content blocks in assistant frames; frames with a `parent_tool_use_id` belong to a subagent.
-  `redacted_thinking` blocks are never stored. Thinking tokens are counted within output
-  tokens. In the probes the model did not think on the task, with default or high effort, so
-  no summary shape, size or cost was observed. A requested turn that stores no summary
-  reports `unavailable`.
-- **Codex.** Requested with `summary: "auto"` on `turn/start`. Summaries arrive in the
-  `summary` array of a `reasoning` thread item, with `item/reasoning/summaryTextDelta` and
-  `item/reasoning/summaryPartAdded` notifications. The item's `content` array and
-  `item/reasoning/textDelta` carry raw reasoning and are never stored. The `summary` override
-  persists for the thread's later turns, so a turn admitted with the setting off on a thread
-  that earlier requested summaries sends `summary: "none"`. In the probes the default model
-  did no reasoning at its default `low` effort, with `auto` or `detailed` summaries, so no
-  summary shape, size or cost was observed. A requested turn that stores no summary reports
-  `unavailable`.
+  `thinking: {type: "adaptive", display: "summarized"}`, which the SDK passes to the CLI as
+  `--thinking=adaptive --thinking-display summarized`. Summaries arrive as `thinking` content
+  blocks in assistant frames, each with a signature that is never stored. Frames with a
+  `parent_tool_use_id` belong to a subagent, and `redacted_thinking` blocks are never stored.
+  A turn may carry several blocks, some empty, interleaved with text and tool use. On a
+  diagnosis task at `effort: "high"` the requested turn returned one 593-character summary
+  that explained the agent's choice of fix. Thinking tokens are counted within output tokens;
+  in one sample each, requesting summaries did not raise them (285 against 337). The model
+  may not think at all on a simple task, even when asked, and then the turn reports
+  `unavailable`. The CLI also returns thinking text when not asked, so the off path must drop
+  it.
+- **Codex.** The App Server accepts `summary: "auto"` on `turn/start` and returns summaries in
+  the `summary` array of a `reasoning` thread item, with `item/reasoning/summaryPartAdded` and
+  `item/reasoning/summaryTextDelta` notifications; the item's `content` array and
+  `item/reasoning/textDelta` carry raw reasoning. At `medium` effort the requested turn
+  returned one 32-character heading that named what the agent was fixing but not why, which is
+  not usable for review. Codex shows none: cab sends Codex turns today's requests, stores no
+  Codex reasoning, and reports `unavailable` for a Codex turn admitted with the setting on.
+  Requesting Codex summaries later needs evidence of usable output and a revised decision; the
+  `summary` override persists for a thread's later turns, so that decision must send
+  `summary: "none"` on a turn admitted with the setting off.
 
 ## Considered options
 
@@ -85,19 +93,10 @@ debugging. They are not a live progress feed or an audit trail.
 
 - Projects that do not opt in are unchanged, and capture health reports `not-requested` for
   them.
-- An opted-in project's operators can read why an agent chose an approach, on runtimes and
-  turns that produce summaries.
+- An opted-in project's operators can read why a Claude Code agent chose an approach, on turns
+  where the model thinks. Codex turns show no summaries.
 - A turn may legitimately produce no summary when the model does not reason, so `unavailable`
   is an expected outcome, not a fault.
 - Summaries add stored text under existing retention and redaction, bounded by the per-turn
   cap, and **Delete collected reasoning** gives the operator an irreversible way to remove
   them early.
-
-## What the evidence contradicts
-
-The decisions assume that requesting summaries from at least one runtime yields usable
-summaries. In the [probes](../evidence/reasoning-summary-probes-2026-11-06.md), neither did:
-on a small decision task, both runtimes reported zero thinking or reasoning tokens in all six
-runs, so no summary, and no raw reasoning, was emitted. The probes therefore cannot confirm
-the summary shape, typical size or cost, or set the per-turn cap. They do not show that
-summaries are unavailable when a model does reason.

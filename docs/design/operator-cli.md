@@ -115,8 +115,10 @@ reconstructed from revision records. Only an actual captured submission may be
 labelled as the supplied prompt. Missing tool events, unknown effective settings
 and unavailable old prompts are explicit gaps. Tool activity is diagnostic;
 absence is not evidence that no tool ran; the wider conversation projection is in
-[ADR-1025](../adr/1025-conversation-activity-plans-and-change-notifications.md). Do not
-collect provider-private reasoning; any change to that is a separate decision.
+[ADR-1025](../adr/1025-conversation-activity-plans-and-change-notifications.md). Raw
+provider reasoning is never collected, and cab collects no reasoning today.
+[ADR-1028](../adr/1028-reasoning-summaries.md) accepts opt-in provider reasoning
+summaries for `enhanced`-capture projects; they are not yet implemented.
 
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
@@ -134,7 +136,9 @@ redact all instruction text. All four are read routes for both credential scopes
 and sessions, gated by the capabilities `execution.read` and, for `logs`,
 `diagnostics.read`. A work id identifies an execution; direct runs and unknown or
 invisible work read as not found. Every read reports capture health:
-`toolObservation: "incomplete"` and `reasoning: "not-collected"`.
+`toolObservation: "incomplete"` and `reasoning: "not-collected"`. Once implemented,
+ADR-1028 replaces that reasoning value with `collected`, `not-requested` or
+`unavailable` per execution.
 `GET /api/operator/readiness` (the `doctor` command) is a read route for both
 credential scopes and sessions, gated by `diagnostics.read`; its checks are
 read-only and value-free.
