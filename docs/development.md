@@ -544,6 +544,15 @@ name, version and preview digest. The service rechecks every confirmation atomic
    Glob patterns never absolute, and redacted again on every read. No message text,
    deltas or reasoning is collected and tool observation is never claimed complete.
 
+   Payloads are redacted before storage and again with current exclusions on every
+   read; when exclusions are unavailable an item reads as
+   `omitted/redaction-unavailable`. Capture, storage or pruning failures become
+   gaps and never change admission, holds, recovery or a turn's outcome. Gaps map
+   onto the coverage codes: omitted or size-limited items `item-omitted`, redacted
+   text `content-redacted`, failed redaction `redaction-unavailable`, expired,
+   evicted, failed, interrupted, late and limit gaps `evidence-gap`, and baseline or
+   uncaptured executions `evidence-unavailable`.
+
    Agent plans are a separate curated record per assignment, not diagnostic items
    ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)).
    Codex `turn/plan/updated` notifications and the lead's successful Claude `TodoWrite`
@@ -559,14 +568,6 @@ name, version and preview digest. The service rechecks every confirmation atomic
    and `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`, as qualified on codex-cli 0.166.0 and Claude
    Code 2.1.318. The agent decides whether to plan, so a missing plan is not evidence
    that none was made.
-   Payloads are redacted before storage and again with current exclusions on every
-   read; when exclusions are unavailable an item reads as
-   `omitted/redaction-unavailable`. Capture, storage or pruning failures become
-   gaps and never change admission, holds, recovery or a turn's outcome. Gaps map
-   onto the coverage codes: omitted or size-limited items `item-omitted`, redacted
-   text `content-redacted`, failed redaction `redaction-unavailable`, expired,
-   evicted, failed, interrupted, late and limit gaps `evidence-gap`, and baseline or
-   uncaptured executions `evidence-unavailable`.
 
    `project prepare PROJECT_ID --diagnostic-capture enhanced|baseline` previews and
    applies the mode change through the same revision-checked, replay-safe flow;
