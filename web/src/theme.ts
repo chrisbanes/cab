@@ -58,12 +58,10 @@ export function setTheme(choice: ThemeChoice) {
   apply();
   for (const listener of listeners) listener();
 }
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 export function useTheme(): ThemeChoice {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    () => current,
-  );
+  return useSyncExternalStore(subscribe, () => current);
 }

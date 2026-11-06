@@ -1117,7 +1117,7 @@ const themeState = (page: Page) =>
   }));
 
 test("System theme follows the OS before the first render and live, with no inline script", async (_t, journey) => {
-  const { web, page } = await launch(journey, viewports[0], "light");
+  const { web, page } = await launch(journey, viewports[0], "dark");
   await page.addInitScript(() => {
     new MutationObserver((_records, observer) => {
       const root = document.getElementById("root");
@@ -1131,9 +1131,9 @@ test("System theme follows the OS before the first render and live, with no inli
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   assert.deepEqual(await themeState(page), {
-    dark: false,
-    colorScheme: "light",
-    ground: "rgb(255, 255, 255)",
+    dark: true,
+    colorScheme: "dark",
+    ground: "rgb(10, 10, 11)",
     stored: null,
     inlineScripts: 0,
   });
@@ -1143,15 +1143,15 @@ test("System theme follows the OS before the first render and live, with no inli
         (window as unknown as { themeAtFirstRender: string })
           .themeAtFirstRender,
     ),
-    "",
+    "dark",
   );
-  await page.emulateMedia({ colorScheme: "dark" });
-  await page.waitForFunction(() =>
-    document.documentElement.classList.contains("dark"),
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.waitForFunction(
+    () => !document.documentElement.classList.contains("dark"),
   );
-  const dark = await themeState(page);
-  assert.equal(dark.colorScheme, "dark");
-  assert.equal(dark.ground, "rgb(10, 10, 11)");
+  const light = await themeState(page);
+  assert.equal(light.colorScheme, "light");
+  assert.equal(light.ground, "rgb(255, 255, 255)");
 });
 
 test("account menu Theme: keyboard choice overrides the OS, persists and System removes it", async (_t, journey) => {
@@ -1190,16 +1190,13 @@ test("account menu Theme: keyboard choice overrides the OS, persists and System 
   assert.equal(await light.getAttribute("aria-checked"), "true");
   assert.equal(await radio("System").getAttribute("aria-checked"), "false");
   assert.equal(await radio("Dark").getAttribute("aria-checked"), "false");
-  assert.deepEqual(
-    { ...(await themeState(page)), inlineScripts: 0 },
-    {
-      dark: false,
-      colorScheme: "light",
-      ground: "rgb(255, 255, 255)",
-      stored: "light",
-      inlineScripts: 0,
-    },
-  );
+  assert.deepEqual(await themeState(page), {
+    dark: false,
+    colorScheme: "light",
+    ground: "rgb(255, 255, 255)",
+    stored: "light",
+    inlineScripts: 0,
+  });
 
   await page.reload();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();

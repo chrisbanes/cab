@@ -36,7 +36,7 @@ operator CSP allows no inline script. The choice is a per-browser preference in
 or cross-device state, applies only to the app, and other open tabs pick it up on
 their next load. It is offered in the sidebar account menu (a Theme group of three
 radio items) and in the phone drawer's account rows (three pressed-state buttons);
-the active choice carries a check as well as the pressed state.
+the active choice carries a check as well as its checked or pressed state.
 
 ## Tokens
 
@@ -55,7 +55,7 @@ properties and maps the shadcn names onto them. Keep this table in step with it.
 | `--fg-2` | `#A6A6AE` | `#52525B` | Secondary text |
 | `--fg-3` | `#8E8E97` | `#60606A` | Muted text (at least 5.5:1 on `--raised` in both themes) |
 | `--accent-fill` | `#F4F4F5` | `#18181B` | Primary action fill (shadcn `--primary`) |
-| `--primary-foreground` | `#0A0A0B` | `#FAFAFA` | Primary action text (at least 17:1) |
+| `--primary-foreground` | `#0A0A0B` | `#FAFAFA` | Primary action text (about 17:1) |
 | `--accent-edge` | `#E4E4E7` | `#27272A` | Selected-row left edge, selected tab underline |
 | `--accent-text` | `#E4E4E7` | `#27272A` | Links, Not started state text, selection marks |
 | `--accent-border` | `#E4E4E766` | `#27272A66` | Accent-tinted borders |

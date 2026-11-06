@@ -391,11 +391,16 @@ for (const viewport of [
           page: getComputedStyle(document.body).backgroundColor,
           introduction: text("main .introduction"),
           badge: text('main [data-slot="badge"]'),
+          action: text('a[href^="/app/tasks/new"][data-slot="button"]'),
           ringColor: ring?.outlineColor ?? "",
           ringWidth: ring?.outlineWidth ?? "0px",
         };
       });
-      for (const item of [measured.introduction, measured.badge])
+      for (const item of [
+        measured.introduction,
+        measured.badge,
+        measured.action,
+      ])
         assert.ok(
           contrast(item.foreground, item.background) >= 4.5,
           `${scheme} text contrast`,
