@@ -32,7 +32,7 @@ function setup(random = 0.5) {
   const health: boolean[] = [];
   const stream = new TaskChangeStream({
     url: "/api/operator/tasks/t/stream",
-    onRead: () => calls.push("read"),
+    onRead: (opening) => calls.push(opening ? "opening read" : "read"),
     onTimeline: () => calls.push("timeline"),
     onHealthy: (healthy) => health.push(healthy),
     open: () => {
@@ -96,13 +96,13 @@ test("the first frame marks the stream healthy and refetches once per connection
   s.source().emit("heartbeat");
   s.source().emit("heartbeat");
   assert.deepEqual(s.health, [true]);
-  assert.deepEqual(s.calls, ["read"]);
+  assert.deepEqual(s.calls, ["opening read"]);
   s.source().emit("error");
   assert.deepEqual(s.health, [true, false]);
   s.advance(streamTiming.firstRetryMs);
   s.source().emit("heartbeat");
   assert.deepEqual(s.health, [true, false, true]);
-  assert.deepEqual(s.calls, ["read", "read"]);
+  assert.deepEqual(s.calls, ["opening read", "read"]);
 });
 
 test("notices are debounced, a read outranks a timeline and a busy stream still refreshes", () => {
@@ -187,7 +187,7 @@ test("a page hidden for a minute closes the stream and reopens it when visible",
   s.setHidden(false);
   assert.equal(s.sources.length, 2);
   s.source().emit("heartbeat");
-  assert.deepEqual(s.calls, ["read", "read"]);
+  assert.deepEqual(s.calls, ["opening read", "read"]);
 });
 
 test("dispose closes the source and cancels every timer", () => {
@@ -200,5 +200,5 @@ test("dispose closes the source and cancels every timer", () => {
   assert.equal(s.timers.size, 0);
   s.advance(10 * 60_000);
   assert.equal(s.sources.length, 1);
-  assert.deepEqual(s.calls, ["read"]);
+  assert.deepEqual(s.calls, ["opening read"]);
 });

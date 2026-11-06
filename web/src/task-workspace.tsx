@@ -933,7 +933,10 @@ export function TaskWorkspace({
     // After the first task read, so the connect refetch never aborts it.
     enabled:
       resource.state.status !== "empty" && resource.state.status !== "loading",
-    onRead: () => pollRef.current(true),
+    // The opening connection's refetch skips the reading capture: it can land while
+    // the page is still following its link, which a capture would undo.
+    onRead: (opening) =>
+      opening ? resource.poll({ supersede: true }) : pollRef.current(true),
     onTimeline: () => setChangeTick((tick) => tick + 1),
   });
   // The 15-second poll is the fallback while the change stream is not healthy.

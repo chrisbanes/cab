@@ -15,6 +15,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { commentReasonSentences } from "../../src/operator/github-reasons.js";
 import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
+import { withoutChangeStream } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
@@ -1824,6 +1825,8 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
     width: 1366,
     height: 700,
   });
+  // Drives the 15-second polling fallback with the page clock.
+  await withoutChangeStream(page);
   await page.clock.install();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   await page
@@ -1990,6 +1993,8 @@ test("An open approval leads Overview and stays reachable from every tab through
       await route.fulfill({ response, json });
     },
   );
+  // Drives the 15-second polling fallback with the page clock.
+  await withoutChangeStream(page);
   await page.clock.install();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
@@ -4360,6 +4365,8 @@ for (const engine of ["chromium", "webkit"] as const)
           await route.fulfill({ response, json });
         },
       );
+      // Drives the 15-second polling fallback with the page clock.
+      await withoutChangeStream(page);
       await page.clock.install();
       await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await page.locator("section#review").waitFor();

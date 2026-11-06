@@ -8,8 +8,12 @@ export interface ChangeSource {
 
 export interface TaskChangeStreamOptions {
   url: string;
-  /** Refetch the task read (and with it the timeline): a `read` notice, or a (re)connect that may have missed one. */
-  onRead: () => void;
+  /**
+   * Refetch the task read (and with it the timeline): a `read` notice, or a
+   * (re)connect that may have missed one. `opening` marks the first
+   * connection, which follows the page's opening reads.
+   */
+  onRead: (opening?: boolean) => void;
   /** Refetch only the newest timeline page. */
   onTimeline: () => void;
   onHealthy: (healthy: boolean) => void;
@@ -45,6 +49,7 @@ export class TaskChangeStream {
   private source: ChangeSource | undefined;
   private healthy = false;
   private attempt = 0;
+  private connections = 0;
   private retry: unknown;
   private silence: unknown;
   private hiding: unknown;
@@ -104,7 +109,7 @@ export class TaskChangeStream {
         this.healthy = true;
         this.attempt = 0;
         this.options.onHealthy(true);
-        this.options.onRead();
+        this.options.onRead(++this.connections === 1);
       }
       if (kind) this.notice(kind);
     };
@@ -194,7 +199,7 @@ export function useTaskChangeStream({
 }: {
   taskId: string;
   enabled: boolean;
-  onRead: () => void;
+  onRead: (opening?: boolean) => void;
   onTimeline: () => void;
 }): { healthy: boolean } {
   const [healthy, setHealthy] = useState(false);
@@ -204,7 +209,7 @@ export function useTaskChangeStream({
     if (!enabled) return;
     const stream = new TaskChangeStream({
       url: `/api/operator/tasks/${encodeURIComponent(taskId)}/stream`,
-      onRead: () => handlers.current.onRead(),
+      onRead: (opening) => handlers.current.onRead(opening),
       onTimeline: () => handlers.current.onTimeline(),
       onHealthy: setHealthy,
     });

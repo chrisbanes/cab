@@ -7,6 +7,7 @@ import {
   observedDom,
   settleReads,
   watchDom,
+  withoutChangeStream,
 } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
@@ -46,6 +47,8 @@ test("a task workspace timer poll keeps the conversation, position and status qu
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
+  // Drives the 15-second polling fallback with the page clock.
+  await withoutChangeStream(page);
   await page.clock.install();
   await page.goto(`${web.origin}/tasks/${a.taskId}?result=${r.resultId}`);
   await page.getByLabel("Password").fill(web.password);
