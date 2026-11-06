@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { taskTimelineSchema } from "../../src/operator/contracts.js";
+import { normalizePlan } from "../../src/standalone/agent-plan.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { projectTool } from "../../src/standalone/task-timeline.js";
@@ -101,6 +102,26 @@ async function setup(t: { after(fn: () => unknown): void }) {
     history.omitItem(binding, "too-big", "size-limit");
     clock = t0 + 20;
     history.recordEarlyBufferLimit({ ...binding, turnId: "turn-early" });
+    // Stored with no exclusions, so only the read's redaction protects the step.
+    const plan = (done: number, text: string) => {
+      const steps = [
+        { text: "Read the files", status: done > 0 ? "completed" : "pending" },
+        { text, status: done > 1 ? "completed" : "in_progress" },
+      ];
+      const normalized = normalizePlan(steps);
+      assert.ok(normalized);
+      return normalized;
+    };
+    clock = t0 + 30;
+    history.recordPlan(binding, plan(1, "Write it"), []);
+    clock = t0 + 40;
+    history.recordPlan(binding, plan(2, `Check ${instructionSecret}`), []);
+    clock = t0 + 50;
+    history.recordPlan(
+      { ...binding, workId: "work-delegated", assignmentId: delegated },
+      plan(0, "Delegated step"),
+      [],
+    );
 
     clock = t0 + 1;
     diagnostics.begin({
@@ -489,6 +510,7 @@ test("only the curated tool projection crosses the boundary", async (t) => {
       "delegation",
       "gap",
       "message",
+      "plan",
       "request",
       "result",
       "tool",
@@ -555,6 +577,53 @@ test("delegation entries carry assignment, profile, harness and state", async (t
   assert.equal(delegation?.at, t0);
 });
 
+test("plan changes are timeline entries and the latest plans are re-redacted", async (t) => {
+  const { get, base, readAll, seed, delegated } = await setup(t);
+  const whole = await get(`${base}?limit=100`);
+  taskTimelineSchema.parse({ data: whole, observedAt: 0 });
+  const plans = (whole.entries as Json[]).filter((e) => e.kind === "plan");
+  assert.deepEqual(
+    plans.map((e) => [e.assignmentId, e.done, e.total, e.at]),
+    [
+      [seed.assignmentA, 1, 2, t0 + 30],
+      [seed.assignmentA, 2, 2, t0 + 40],
+      [delegated, 0, 2, t0 + 50],
+    ],
+  );
+  // Change entries carry counts only; steps live in the latest plans.
+  assert.ok(plans.every((e) => !("steps" in e)));
+  assert.deepEqual(
+    (await readAll(1)).filter((e) => e.kind === "plan").map((e) => e.key),
+    plans.map((e) => e.key),
+  );
+  assert.deepEqual(whole.plans, [
+    {
+      assignmentId: seed.assignmentA,
+      updatedAt: t0 + 40,
+      done: 2,
+      total: 2,
+      omittedStepCount: 0,
+      steps: [
+        { text: "Read the files", status: "done" },
+        { text: "Check [redacted]", status: "done" },
+      ],
+      omissionReason: null,
+    },
+    {
+      assignmentId: delegated,
+      updatedAt: t0 + 50,
+      done: 0,
+      total: 2,
+      omittedStepCount: 0,
+      steps: [
+        { text: "Read the files", status: "pending" },
+        { text: "Delegated step", status: "in-progress" },
+      ],
+      omissionReason: null,
+    },
+  ]);
+});
+
 test("unavailable redaction yields gaps with no text", async (t) => {
   const ctx = await setup(t);
   const api = new OperatorApi(ctx.s.f.service, [ctx.s.f.directory]);
@@ -580,6 +649,12 @@ test("unavailable redaction yields gaps with no text", async (t) => {
     data.entries.some((e) => e.kind === "tool" && e.command !== null),
     false,
   );
+  assert.ok(data.plans.length > 0);
+  for (const plan of data.plans) {
+    assert.equal(plan.steps, null);
+    assert.equal(plan.omissionReason, "redaction-unavailable");
+  }
+  assert.equal(JSON.stringify(data.plans).includes(instructionSecret), false);
   const command = (
     await new OperatorApi(ctx.s.f.service, [
       ctx.s.f.directory,

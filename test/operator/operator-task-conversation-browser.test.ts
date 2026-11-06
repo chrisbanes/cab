@@ -5,6 +5,7 @@ import {
   browserSuite,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { normalizePlan } from "../../src/standalone/agent-plan.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -1020,4 +1021,117 @@ for (const colorScheme of ["light", "dark"] as const)
       });
       assert.notEqual(color, background, `${colorScheme} text is distinct`);
     }
+  });
+
+for (const colorScheme of ["light", "dark"] as const)
+  test(`the lead's plan card appears only with a plan, works from the keyboard and a plan line shows the current plan (${colorScheme})`, async (_t, j) => {
+    const f = await j.start("fixture.create", () =>
+      createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+    );
+    let browser: Browser | undefined;
+    j.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const started = await startOwnWork(f, "Plan card", "Atlas");
+    await finishOwnWork(f, started);
+    const { a } = started;
+    const web = await j.start("fixture.web", () => f.startWeb());
+    browser = await j.start("browser.launch", () => chromium.launch());
+    const page = await browser.newPage({ viewport: desktop, colorScheme });
+    j.observe(page);
+    page.setDefaultTimeout(5000);
+    await stubReadiness(page);
+    await signIn(page, web, `/app/tasks/${a.taskId}`);
+    await page.getByRole("log", { name: "Task conversation" }).waitFor();
+    const heading = page.getByRole("heading", { name: "Agent's plan" });
+    assert.equal(await heading.count(), 0, "no card without a plan");
+
+    f.seedPersistedState((db) => {
+      db.exec("PRAGMA foreign_keys = OFF");
+      const plan = normalizePlan([
+        { text: "Read the menu code", status: "completed" },
+        { text: "Add keyboard support", status: "in_progress" },
+        { text: "Write the tests", status: "pending" },
+      ]);
+      assert.ok(plan);
+      new ConversationHistoryStore(db).recordPlan(
+        {
+          workId: "work-plan-lead",
+          taskId: a.taskId,
+          assignmentId: a.assignmentId,
+          assignmentVersion: 1,
+          instructionsRevision: 1,
+          profileRevision: 1,
+          conversationRevision: 1,
+          workRevision: 1,
+          threadId: "thread-plan",
+          turnId: "turn-plan",
+        },
+        plan,
+        [],
+      );
+    });
+    await refresh(page);
+    await heading.waitFor();
+    const card = page.locator("section.plan-card");
+    assert.match(
+      (await card.textContent()) ?? "",
+      /working plan, not a requirement or the brief/,
+    );
+    const reply = page.getByRole("heading", { name: "Reply", exact: true });
+    const [cardBox, replyBox] = await Promise.all([
+      card.boundingBox(),
+      reply.boundingBox(),
+    ]);
+    assert.ok(cardBox && replyBox && cardBox.y < replyBox.y, "above Reply");
+    const steps = card.locator(".plan-steps li");
+    assert.deepEqual(
+      (await steps.allTextContents()).map((t) => t.replace(/\s+/g, " ")),
+      [
+        "✓ DoneRead the menu code",
+        "◐ In progressAdd keyboard support",
+        "○ PendingWrite the tests",
+      ],
+    );
+    // Step text is legible against the card in this theme.
+    const contrast = await steps.first().evaluate((li) => {
+      const card = li.closest("section") as HTMLElement;
+      return [
+        getComputedStyle(li).color,
+        getComputedStyle(card).backgroundColor,
+      ];
+    });
+    assert.notEqual(contrast[0], contrast[1]);
+
+    // Keyboard: Tab reaches the toggle; Enter collapses, Space expands.
+    const toggle = card.getByRole("button", {
+      name: "Agent's plan · 1/3 done",
+    });
+    await card.locator(".metadata").evaluate((e) => {
+      e.setAttribute("tabindex", "-1");
+      (e as HTMLElement).focus();
+    });
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await toggle.evaluate((e) => e === document.activeElement),
+      true,
+    );
+    await page.keyboard.press("Enter");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await steps.count(), 0);
+    await page.keyboard.press("Space");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(await steps.count(), 3);
+
+    // The conversation's plan line reveals the current plan.
+    const line = page
+      .getByRole("log", { name: "Task conversation" })
+      .getByRole("button", { name: "Plan updated · 1/3 done" });
+    await line.click();
+    assert.equal(await line.getAttribute("aria-expanded"), "true");
+    const current = page.locator(".plan-current");
+    assert.match((await current.textContent()) ?? "", /^Current plan of /);
+    assert.equal(await current.locator(".plan-steps li").count(), 3);
   });

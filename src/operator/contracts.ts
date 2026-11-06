@@ -148,6 +148,7 @@ export const resetReasonSchema = z.enum([
 ]);
 export type ResetReason = z.infer<typeof resetReasonSchema>;
 const time = z.number().int().nonnegative().safe();
+const count = z.number().int().nonnegative().safe();
 /** The most Unicode characters (code points, as zod counts them) any operator text field takes. */
 export const textMaxLength = 16000;
 const text = z.string().max(textMaxLength);
@@ -2330,9 +2331,44 @@ export const taskTimelineSchema = envelope(
                   .strict(),
               })
               .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("plan"),
+                done: count,
+                total: count,
+              })
+              .strict(),
           ]),
         )
         .max(100),
+      /** Each assignment's latest plan: the agent's working plan, not a requirement. */
+      plans: z
+        .array(
+          z
+            .object({
+              assignmentId: uuid,
+              updatedAt: time,
+              done: count,
+              total: count,
+              omittedStepCount: count,
+              steps: z
+                .array(
+                  z
+                    .object({
+                      // Redaction markers can lengthen a 1,024-byte step.
+                      text: z.string().max(textMaxLength).nullable(),
+                      status: z.enum(["pending", "in-progress", "done"]),
+                    })
+                    .strict(),
+                )
+                .max(50)
+                .nullable(),
+              omissionReason: z.literal("redaction-unavailable").nullable(),
+            })
+            .strict(),
+        )
+        .max(200),
     })
     .strict(),
 );

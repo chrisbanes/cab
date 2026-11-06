@@ -59,6 +59,28 @@ export const projectDeletionInventory = {
     ],
     ownership: "taskId in T OR workId in W OR assignmentId in A",
   },
+  conversation_plan_updates: {
+    columns: [
+      "sequence",
+      "workId",
+      "taskId",
+      "assignmentId",
+      "assignmentVersion",
+      "instructionsRevision",
+      "profileRevision",
+      "conversationRevision",
+      "workRevision",
+      "threadId",
+      "turnId",
+      "steps",
+      "omissionReason",
+      "omittedStepCount",
+      "done",
+      "total",
+      "createdAt",
+    ],
+    ownership: "taskId in T OR workId in W OR assignmentId in A",
+  },
   coordination_completion_requests: {
     columns: [
       "requestId",

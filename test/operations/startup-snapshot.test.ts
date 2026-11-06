@@ -763,6 +763,7 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  16: "1beeceba2ba659c1f1d49fb2ec194f0b7eed75d8a70c14255a03ec497c1ecd32",
   15: "8c62eb6e45b35bd0b6de4961ebdf351f23d9e9723eaa6b9d66fcebc8c740057a",
   14: "f0cc50cf3e479a85922ecfe951a4337fafbfd8af243328b38f2838e2ac328117",
   1: "70a7b6cd96317bf46d0857b2816ad74bf84046906c740923689c885c68d31d4f",
@@ -826,6 +827,49 @@ test("the service entry reports a refused startup in its log with nothing listen
     // The log carries only the stable name and code before the database is open.
     assert.equal(records[0].error.name, "StartupRefusedError");
     assert.equal(records[0].error.code, "startup-schema-newer");
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("agent plan migration snapshots level 15 and adds the plan table empty", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 15);
+    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    before.exec("DROP TABLE conversation_plan_updates");
+    before.close();
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    const prior = new DatabaseSync(join(snapshot, "standalone.sqlite"), {
+      readOnly: true,
+    });
+    const current = new DatabaseSync(join(dirs.data, "standalone.sqlite"), {
+      readOnly: true,
+    });
+    try {
+      assert.equal(
+        prior
+          .prepare("SELECT name FROM sqlite_schema WHERE name = ?")
+          .get("conversation_plan_updates"),
+        undefined,
+      );
+      assert.equal(
+        current
+          .prepare("SELECT COUNT(*) AS n FROM conversation_plan_updates")
+          .get()?.n,
+        0,
+      );
+    } finally {
+      prior.close();
+      current.close();
+    }
+    assert.equal(readStartupState(dirs.data)?.snapshot?.from, 15);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, MIGRATION_LEVEL);
+    assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
   } finally {
     dirs.cleanup();
   }

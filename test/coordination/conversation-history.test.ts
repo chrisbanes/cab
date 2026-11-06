@@ -22,6 +22,7 @@ import {
   ConversationHistoryStore,
   sanitizeConversationText,
 } from "../../src/standalone/conversation-history.js";
+import { normalizePlan } from "../../src/standalone/agent-plan.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { until } from "../fixtures/until.js";
@@ -1193,4 +1194,206 @@ test("a raw @ in a URL password is redacted through the last @ before the path",
     "postgres://[redacted]@db/x and https://[redacted]@example.test/path?q=a@b#f@g",
   );
   assert.equal(redacted.includes("ss@"), false);
+});
+
+function plan(...statuses: ("pending" | "in_progress" | "completed")[]) {
+  const normalized = normalizePlan(
+    statuses.map((status, index) => ({ text: `Step ${index + 1}`, status })),
+  );
+  assert.ok(normalized);
+  return normalized;
+}
+
+function planRows(root: string, workId: string) {
+  return query<{
+    steps: string | null;
+    omissionReason: string | null;
+    done: number;
+    total: number;
+  }>(
+    root,
+    "SELECT steps, omissionReason, done, total FROM conversation_plan_updates WHERE workId = ? ORDER BY sequence",
+    workId,
+  );
+}
+
+test("plan updates of the bound turn are redacted, deduplicated and keep steps only on the newest row", async () => {
+  const runtime = new HistoryRuntime();
+  const f = await fixture(runtime, {
+    exclusions: () => ["FIXTURE_SECRET_CANARY"],
+  });
+  runtime.plan({ id: "plan-turn" });
+  try {
+    f.activate();
+    const bound = await runtime.waitForTurnStart();
+    const at = { threadId: bound.threadId, turnId: bound.turnId };
+    runtime.emit({
+      ...at,
+      kind: "plan",
+      plan: plan("completed", "in_progress", "pending"),
+    });
+    const second = normalizePlan([
+      {
+        text: `Use token=hunter2, ${profileInstructions} and FIXTURE_SECRET_CANARY`,
+        status: "completed",
+      },
+      { text: "Step 2", status: "completed" },
+      { text: "Step 3", status: "in_progress" },
+    ]);
+    assert.ok(second);
+    runtime.emit({ ...at, kind: "plan", plan: second });
+    runtime.emit({ ...at, kind: "plan", plan: second });
+    // A plan for a turn this execution never returned is never attached.
+    runtime.emit({ ...at, turnId: "unbound-turn", kind: "plan", plan: second });
+    await until(() => planRows(f.root, f.workId).length === 2);
+    runtime.complete(bound.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+
+    const rows = planRows(f.root, f.workId);
+    assert.deepEqual(
+      rows.map(({ done, total, steps, omissionReason }) => ({
+        done,
+        total,
+        steps: steps && JSON.parse(steps),
+        omissionReason,
+      })),
+      [
+        { done: 1, total: 3, steps: null, omissionReason: null },
+        {
+          done: 2,
+          total: 3,
+          steps: [
+            {
+              text: "Use token=[redacted], [redacted] and [redacted]",
+              status: "done",
+            },
+            { text: "Step 2", status: "done" },
+            { text: "Step 3", status: "in-progress" },
+          ],
+          omissionReason: null,
+        },
+      ],
+    );
+    assert.equal(
+      query(f.root, "SELECT * FROM conversation_plan_updates").length,
+      2,
+    );
+  } finally {
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a captured plan step is redacted before storage", () => {
+  const db = new DatabaseSync(":memory:");
+  const history = new ConversationHistoryStore(db);
+  const binding = {
+    workId: "work-1",
+    taskId: "task-1",
+    assignmentId: "assignment-1",
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    workRevision: 1,
+    threadId: "thread-1",
+    turnId: "turn-1",
+  };
+  try {
+    const secret = normalizePlan([
+      { text: "Use token=hunter2 with INSTRUCTION_SECRET", status: "pending" },
+    ]);
+    assert.ok(secret);
+    history.recordPlan(binding, secret, ["INSTRUCTION_SECRET"]);
+    const [latest] = history.latestPlans("task-1");
+    assert.deepEqual(latest?.steps, [
+      { text: "Use token=[redacted] with [redacted]", status: "pending" },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(
+        db.prepare("SELECT * FROM conversation_plan_updates").all(),
+      ),
+      /hunter2|INSTRUCTION_SECRET/,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("plan caps, unavailable redaction and corrupt rows are handled at the store", () => {
+  const db = new DatabaseSync(":memory:");
+  const history = new ConversationHistoryStore(db);
+  const binding = (assignmentId: string) => ({
+    workId: `work-${assignmentId}`,
+    taskId: "task-1",
+    assignmentId,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    workRevision: 1,
+    threadId: "thread-1",
+    turnId: "turn-1",
+  });
+  try {
+    const long = normalizePlan(
+      Array.from({ length: 51 }, (_, index) => ({
+        text: index === 0 ? "x".repeat(1025) : `Step ${index + 1}`,
+        status: index < 2 ? "completed" : "pending",
+      })),
+    );
+    assert.ok(long);
+    history.recordPlan(binding("capped"), long, []);
+    history.recordPlan(binding("unredacted"), plan("pending"), undefined);
+    const [capped, unredacted] = history.latestPlans("task-1");
+    assert.equal(capped?.steps?.length, 50);
+    assert.deepEqual(capped?.steps?.[0], { text: null, status: "done" });
+    assert.equal(capped?.omittedStepCount, 1);
+    assert.equal(capped?.done, 2);
+    assert.equal(capped?.total, 51);
+    assert.equal(unredacted?.steps, null);
+    assert.equal(unredacted?.omissionReason, "redaction-unavailable");
+    assert.equal(unredacted?.total, 1);
+    assert.equal(
+      history.readPlanUpdatesBefore("task-1", undefined, 10).length,
+      2,
+    );
+
+    db.prepare(
+      "UPDATE conversation_plan_updates SET steps = ? WHERE assignmentId = 'capped'",
+    ).run(JSON.stringify([{ text: "Leaked", status: "unknown" }]));
+    assert.throws(() => history.latestPlans("task-1"), { name: "ZodError" });
+  } finally {
+    db.close();
+  }
+});
+
+test("normalizePlan maps both runtimes' statuses and rejects invalid or oversized plans", () => {
+  assert.deepEqual(
+    normalizePlan([
+      { text: "a", status: "pending" },
+      { text: "b", status: "inProgress" },
+      { text: "c", status: "in_progress" },
+      { text: "d", status: "completed" },
+    ]),
+    {
+      steps: [
+        { text: "a", status: "pending" },
+        { text: "b", status: "in-progress" },
+        { text: "c", status: "in-progress" },
+        { text: "d", status: "done" },
+      ],
+      omittedStepCount: 0,
+      done: 1,
+      total: 4,
+    },
+  );
+  assert.equal(
+    normalizePlan(
+      Array.from({ length: 1001 }, () => ({ text: "a", status: "pending" })),
+    ),
+    undefined,
+  );
+  assert.equal(normalizePlan([{ text: 1, status: "pending" }]), undefined);
+  assert.equal(normalizePlan([{ text: "a", status: "done" }]), undefined);
 });

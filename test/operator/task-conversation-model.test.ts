@@ -24,6 +24,7 @@ import {
   pendingBelow,
   prependTimeline,
   type ConversationItem,
+  type AgentPlan,
   type ToolEntry,
   type TimelineEntry,
 } from "../../web/src/task-conversation-model.js";
@@ -71,7 +72,12 @@ function entry(
     ...body,
   };
   const page = taskTimelineSchema.parse({
-    data: { visibilityRevision: v1, olderCursor: null, entries: [raw] },
+    data: {
+      visibilityRevision: v1,
+      olderCursor: null,
+      entries: [raw],
+      plans: [],
+    },
     observedAt: 1,
   });
   return page.data.entries[0] as TimelineEntry;
@@ -118,17 +124,27 @@ const delegation = (assignmentId: string, requesterAssignmentId: string) =>
     },
     { assignmentId, rank: timelineRank.delegation, id: `d-${assignmentId}` },
   );
-const window = (entries: TimelineEntry[], visibilityRevision = v1) => ({
+const window = (
+  entries: TimelineEntry[],
+  visibilityRevision = v1,
+  plans: AgentPlan[] = [],
+) => ({
   visibilityRevision,
   entries,
+  plans,
 });
 const page = (
   entries: TimelineEntry[],
-  o: { visibilityRevision?: string; olderCursor?: string | null } = {},
+  o: {
+    visibilityRevision?: string;
+    olderCursor?: string | null;
+    plans?: AgentPlan[];
+  } = {},
 ) => ({
   visibilityRevision: o.visibilityRevision ?? v1,
   olderCursor: o.olderCursor ?? null,
   entries,
+  plans: o.plans ?? [],
 });
 const ids = (entries: readonly TimelineEntry[]) =>
   entries.map((e) => e.entryId);
@@ -466,4 +482,35 @@ test("hasDelegation finds an assignment's place at any depth, and none when noth
 test("every gap reason has copy", () => {
   for (const reason of timelineGapReasons)
     assert.ok(gapCopy(reason).length > 10, reason);
+});
+
+test("the newest page's plans replace the window's, and older pages keep them", () => {
+  const a = text("one");
+  const plan = (done: number): AgentPlan => ({
+    assignmentId: lead,
+    updatedAt: 1,
+    done,
+    total: 2,
+    omittedStepCount: 0,
+    steps: [
+      { text: "Read", status: done > 0 ? "done" : "in-progress" },
+      { text: "Write", status: "pending" },
+    ],
+    omissionReason: null,
+  });
+  const held = window([a], v1, [plan(0)]);
+  // Only the plan changed: the window still changes, so the card updates.
+  const merged = mergeTimeline(held, page([a], { plans: [plan(1)] }));
+  assert.equal(merged.changed, true);
+  assert.deepEqual(merged.window.plans, [plan(1)]);
+  assert.equal(
+    mergeTimeline(merged.window, page([a], { plans: [plan(1)] })).window,
+    merged.window,
+  );
+  assert.deepEqual(
+    mergeTimeline(null, page([a], { plans: [plan(0)] })).window.plans,
+    [plan(0)],
+  );
+  const older = prependTimeline(merged.window, page([text("zero")]));
+  assert.deepEqual(older?.plans, [plan(1)]);
 });

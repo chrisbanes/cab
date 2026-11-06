@@ -28,6 +28,12 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM conversation_history_turn_omissions WHERE taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
   },
   {
+    table: "conversation_plan_updates",
+    where:
+      "taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
+    sql: "DELETE FROM conversation_plan_updates WHERE taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
+  },
+  {
     table: "coordination_completion_requests",
     where: "taskId IN (SELECT value FROM json_each(:tasks))",
     sql: "DELETE FROM coordination_completion_requests WHERE taskId IN (SELECT value FROM json_each(:tasks))",

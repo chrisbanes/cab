@@ -534,15 +534,16 @@ name, version and preview digest. The service rechecks every confirmation atomic
    Claude records Bash as command executions (command, status, exit code and
    bounded output, with no working directory), `Write` and `Edit` as file changes,
    and other tools by name and status; its `cab_*` tools appear as coordination
-   records, not runtime items. Every runtime item is stamped with its observation time
+   records, not runtime items, and its `TodoWrite` calls only as plan updates. Every
+   runtime item is stamped with its observation time
    ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)); file
    changes keep up to 25 repository-relative paths (a path outside the workspace is
    stored as "outside workspace"), and allowlisted non-command tools keep one target
    (Read, Write and Edit path; Grep and Glob pattern; web search query; MCP
    `server/tool`; Agent subagent type), dropped whole when over its cap, with paths and
-   Glob patterns never absolute, and redacted again on every read. Accepted but not yet implemented: plan steps are a
-   separate curated record, not diagnostic items. No message text, deltas or
-   reasoning is collected and tool observation is never claimed complete.
+   Glob patterns never absolute, and redacted again on every read. No message text,
+   deltas or reasoning is collected and tool observation is never claimed complete.
+
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as
    `omitted/redaction-unavailable`. Capture, storage or pruning failures become
@@ -551,6 +552,22 @@ name, version and preview digest. The service rechecks every confirmation atomic
    text `content-redacted`, failed redaction `redaction-unavailable`, expired,
    evicted, failed, interrupted, late and limit gaps `evidence-gap`, and baseline or
    uncaptured executions `evidence-unavailable`.
+
+   Agent plans are a separate curated record per assignment, not diagnostic items
+   ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)).
+   Codex `turn/plan/updated` notifications and the lead's successful Claude `TodoWrite`
+   calls each record the plan's steps (text, and pending, in progress or done) with done
+   and total counts; `explanation`, `activeForm` and subagent calls are dropped. At most
+   50 steps are kept, a step over 1,024 UTF-8 bytes keeps only its status, and a payload
+   of more than 1,000 steps or one that fails validation records nothing. Step text is
+   redacted before storage and again on every read; without exclusions the snapshot is
+   omitted and its counts kept. Only the assignment's newest change keeps its steps, an
+   unchanged plan records nothing, and the rows are deleted with the project. Each plan
+   tool is behind a CLI gate that cab sets: Codex starts with
+   `tools.update_plan.enabled=true`, and Claude turns set `CLAUDE_CODE_ENABLE_TASKS=0`
+   and `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`, as qualified on codex-cli 0.166.0 and Claude
+   Code 2.1.318. The agent decides whether to plan, so a missing plan is not evidence
+   that none was made.
 
    `project prepare PROJECT_ID --diagnostic-capture enhanced|baseline` previews and
    applies the mode change through the same revision-checked, replay-safe flow;

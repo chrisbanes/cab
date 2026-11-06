@@ -55,7 +55,13 @@ export class CaptureObserver {
   }
 
   observe(event: RuntimeConversationEvent): void {
-    if (!this.threadId || event.threadId !== this.threadId) return;
+    // Plans are not text capture; this observer qualifies text items only.
+    if (
+      !this.threadId ||
+      event.threadId !== this.threadId ||
+      event.kind === "plan"
+    )
+      return;
 
     let capture = this.turns.get(event.turnId);
     if (!capture) {

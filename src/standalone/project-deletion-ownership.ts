@@ -115,6 +115,7 @@ const workRoots = [
   ["diagnostic_executions", "workId"],
   ["conversation_history_items", "workId"],
   ["conversation_history_turn_omissions", "workId"],
+  ["conversation_plan_updates", "workId"],
   ["lead_text_submissions", "workId"],
   ["retained_result_evidence", "workId"],
   ["retained_review_anchor_contexts", "workId"],
@@ -568,6 +569,10 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
       `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
     ],
     [
+      "conversation_plan_updates",
+      `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
+    ],
+    [
       "retained_result_evidence",
       `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
     ],
@@ -609,6 +614,7 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
     "diagnostic_executions",
     "conversation_history_items",
     "conversation_history_turn_omissions",
+    "conversation_plan_updates",
     "retained_result_evidence",
     "retained_review_anchor_contexts",
     "runtime_terminal_evidence",

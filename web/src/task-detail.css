@@ -886,6 +886,7 @@ a.task-source-chip:hover {
    attention card whenever the page header filled the first screen. The browser must not
    anchor scrolling to it: a linked inspector record would otherwise leave the view when the
    conversation loads above the composer. */
+.task-workspace .task-columns > section.plan-card,
 .task-workspace .task-columns > section.reply-card {
   overflow-anchor: none;
 }
@@ -916,6 +917,7 @@ a.task-source-chip:hover {
     order: 2;
   }
 
+  .task-columns > .plan-card,
   .task-columns > .reply-card {
     order: 3;
   }
@@ -1051,6 +1053,41 @@ a.task-source-chip:hover {
   overflow-wrap: anywhere;
 }
 
+/* The agent's plan: the pinned card and a plan line's current steps. Status is a symbol and a
+   word, so it never rests on colour. */
+.plan-current {
+  width: 100%;
+}
+
+.plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-8) 0 0;
+  padding-left: var(--space-16);
+  color: var(--fg);
+  font-size: var(--type-xs);
+}
+
+.plan-steps li {
+  overflow-wrap: anywhere;
+}
+
+.plan-status {
+  display: inline-block;
+  min-width: 11ch;
+  margin-right: var(--space-8);
+  color: var(--fg-2);
+}
+
+.plan-steps li[data-status="done"] .plan-status {
+  color: var(--ok);
+}
+
+.plan-steps li[data-status="in-progress"] .plan-status {
+  color: var(--run);
+}
+
 .conv-failed {
   color: var(--risk);
 }
@@ -1137,7 +1174,8 @@ a.task-source-chip:hover {
   .conversation-status [data-slot="button"],
   .conv-entry [data-slot="button"],
   .conv-tools [data-slot="button"],
-  .conv-gap [data-slot="button"] {
+  .conv-gap [data-slot="button"],
+  .plan-card [data-slot="button"] {
     min-height: 44px;
   }
 }
