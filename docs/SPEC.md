@@ -373,7 +373,28 @@ absence on a later read does not prove that a possibly sent request cannot land.
 Task detail, list and the operator API expose the same recorded blocker PR identity, nullable
 observed stack id/number/position/size, membership-known flag and bounded link reason.
 
-For a bound GitHub stacked dependent, a refresh can adopt an outside head after the
+On GitLab a stack is the chain of merge request target branches; GitLab detects it, so there
+is no stack object and no link step. A stacked dependent's `pr.create` targets the blocker's
+task branch, under the same base rule. cab's credential authors every merge request, which
+meets GitLab's same-author rule. A GitLab stack holds at most 20 merge requests: the blocker
+and each recorded lower layer that is not retired or merged count, and a dependent that would
+make the stack exceed 20 is not stacked and waits until its blocker is Done, with the reason
+`gitlab-stack-limit` shown. A dependent already recorded keeps its decision. Merging a
+stacked blocker asks GitLab to remove its source branch (`should_remove_source_branch: true`)
+only when its active stacked dependent has an open, bound merge request whose observed and
+accepted base is the blocker's task branch; GitLab then retargets that merge request to the
+blocker's target, and the retarget is accepted under the rule for bound change requests
+below. Every other merge, including a merge-train merge, sends no removal flag, and cab
+neither requests nor relies on removal by project or merge request defaults. The decision is
+made before preflight, recorded with the attempt and rechecked at the effect boundary. A
+stacked dependent whose lower layers are all merged but whose accepted base is not the
+repository link's base is held before any request as `stacked-pr-retarget-pending`, so it
+never merges into a merged layer's branch; GitLab's retarget or Unstack lifts the hold.
+Unstack is one target-branch edit (below), and the outside-rebase adoption rule applies to a
+GitLab dependent after an accepted retarget. A GitLab dependent's head does not move when
+GitLab retargets it, so normally nothing is adopted and the dependent merges as it is.
+
+For a bound stacked dependent, a refresh can adopt an outside head after the
 exact lower PR is freshly proven merged and the dependent's retarget to the linked base
 is accepted. Cab fetches that head under the existing bounded isolated fetch, proves
 ancestry from the provider's fresh base object, and compares the ordered commit ranges:
@@ -407,6 +428,16 @@ operation key, queue cancellation, retarget, accepted-base advancement, edge ret
 or restack follows. Cab does not infer a queue/lock reason from that partial result.
 Only later validated complete-removal readback under the original identity fences can
 continue. This partial outcome is not successful live acceptance.
+
+GitLab has no stack object: a merge request is stacked because it targets its blocker's
+branch. GitLab Unstack captures the blocker's single unmerged merge request from that branch
+(open, or closed for a failed blocker) and the selected one, with no stack id or number, and
+is one `PUT /projects/:id/merge_requests/:iid {target_branch}` to the repository link's base
+under the same journal. A read that still shows the blocker's branch is membership, the link's
+base is removal and its retarget at once, and any other target is an identity change. The
+journal goes from unstack intent through confirmed removal and retarget to confirmation
+without a second edit. The new base SHA is the target branch's tip. Merge requests stacked on
+the selected one stay on its branch. A 400 or 422 is a definite refusal.
 
 Both effects have separate intent and fresh
 identity-bound readback phases. Unknown sends are read back after restart and never
@@ -2732,7 +2763,8 @@ ref. The merge methods follow the project's squash setting: `merge` unless it is
 shape. The merge is held as `provider-preflight-held` when a blocker or the method refuses it or the
 head moved. The store alone allows it in through-merge mode and only at the commit cab last pushed to
 the task branch, and the request carries that commit as `sha`, so GitLab refuses a head that moved.
-cab never sets auto-merge: every merge sends `auto_merge: false`. When the project uses merge trains,
+cab never sets auto-merge: every merge sends `auto_merge: false`, and only a stacked blocker's merge adds
+`should_remove_source_branch: true` (see stacking). When the project uses merge trains,
 the request is added to the train instead and the action stays unproved as `provider-merge-train-pending`
 while a car holds it (`idle`, `fresh`, `stale` or `merging`). A later read settles it as merged, or as
 `provider-merge-train-dropped` when the car is gone, merged without the merge request being merged,

@@ -12,8 +12,11 @@ export const stackReasons = [
   "blocker-unpublished",
   "blocker-unknown",
   "blocker-failed",
+  "gitlab-stack-limit",
 ] as const;
 export type StackReason = (typeof stackReasons)[number];
+/** GitLab stacks at most this many merge requests. */
+export const gitLabStackLimit = 20;
 
 export interface StackFacts {
   state: "stacked" | "waiting";

@@ -47,9 +47,12 @@ export const unstackPreviewSchema = z
     taskId: uuid,
     expectedVersion: revision,
     materialHash: digest,
+    // A preview retained before GitLab stacking is a GitHub one.
+    codeHost: z.enum(["github", "gitlab"]).default("github"),
     repository: z.string().min(1).max(512),
     selectedPr: revision,
-    stackNumber: revision,
+    // GitLab has no stack object to number.
+    stackNumber: revision.nullable(),
     targetBase: z.string().min(1).max(512),
     members: z
       .array(

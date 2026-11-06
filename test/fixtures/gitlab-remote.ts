@@ -139,6 +139,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
     tokenKinds: new Map<string, "oauth" | "pat">(),
     /** Commits made through the commits API so far. */
     commits: 0,
+    /** A merge ignores `should_remove_source_branch`, as a project that keeps branches would. */
+    ignoreRemoval: false,
   };
   const headOf = (branch: string) => state.heads.get(branch) ?? state.head;
   /** The merge and train writes, with their bodies. */
@@ -315,6 +317,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       }
       if (body.description !== undefined)
         mr.description = saved(String(body.description));
+      if (body.target_branch !== undefined)
+        mr.target_branch = body.target_branch;
       return json(mr);
     }
     if (rest === "merge" && method === "PUT") {
@@ -324,6 +328,16 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       if (mr.state !== "opened" || mr.detailed_merge_status !== "mergeable")
         return json({}, 405);
       mr.state = "merged";
+      // Removing the source branch makes GitLab retarget the merge requests that targeted it.
+      if (body.should_remove_source_branch === true && !state.ignoreRemoval) {
+        state.heads.delete(mr.source_branch);
+        for (const next of state.mergeRequests)
+          if (
+            next.state === "opened" &&
+            next.target_branch === mr.source_branch
+          )
+            next.target_branch = mr.target_branch;
+      }
       if (state.loseMergeResponse) throw new TypeError("fetch failed");
       return json(mr);
     }

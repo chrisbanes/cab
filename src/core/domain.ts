@@ -93,6 +93,7 @@ import {
 import { type Database, transaction } from "./store.js";
 import {
   dependencyRecordsTable,
+  gitLabStackLimit,
   seedDependencyRecords,
   stackingTables,
   type StackFacts,
@@ -2726,6 +2727,12 @@ export class DomainStore {
       )
         return waiting("sibling-stacked", blocker);
     }
+    if (
+      repositoryId !== null &&
+      this.gitLabStackSize(projectId, blocker, repositoryId) + 1 >
+        gitLabStackLimit
+    )
+      return waiting("gitlab-stack-limit", blocker);
     if (!enabled)
       return {
         facts: {
@@ -2750,6 +2757,38 @@ export class DomainStore {
       },
       gate,
     };
+  }
+
+  /**
+   * The merge requests a GitLab stack ending at `blocker` holds: the blocker and each recorded lower
+   * layer that is neither retired nor merged. Zero when the repository is not linked to GitLab.
+   */
+  private gitLabStackSize(
+    projectId: string,
+    blocker: string,
+    repositoryId: string,
+  ): number {
+    const links = this.one(
+      "SELECT links FROM project_repository_links WHERE projectId = ?",
+      projectId,
+    );
+    if (
+      !links ||
+      !repositoryLinkListSchema
+        .parse(JSON.parse(String(links.links)))
+        .some((l) => l.repositoryId === repositoryId && l.codeHost === "gitlab")
+    )
+      return 0;
+    const delivery = new DeliveryStore(this.db);
+    const seen = new Set([blocker]);
+    let size = 1;
+    for (let current = blocker; ; ) {
+      const lower = this.activeStackedDependency(current)?.blockerTaskId;
+      if (!lower || seen.has(lower)) return size;
+      seen.add(lower);
+      if (delivery.delivery(lower)?.observation.state !== "MERGED") size++;
+      current = lower;
+    }
   }
 
   /** Dependencies that still block: a local task not done, or an imported one whose issue is not closed. */

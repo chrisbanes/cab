@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import {
   unstackConfirmation,
+  unstackConfirmationFor,
   unstackRecovery,
   unstackStatus,
   cancelStackedConfirmation,
@@ -31,6 +32,16 @@ test("shared Unstack copy states full captured provider effect, conditional rest
     cancelStackedConfirmation,
     /closes no external issue or pull request/,
   );
+});
+
+test("GitLab Unstack copy retargets only the selected merge request; GitHub copy is unchanged", () => {
+  assert.equal(unstackConfirmationFor("github"), unstackConfirmation);
+  const gitlab = unstackConfirmationFor("gitlab");
+  assert.match(gitlab, /retargets only this merge request/);
+  assert.match(gitlab, /stacked on it stay on its branch/);
+  assert.match(gitlab, /restack follows only after the retarget is confirmed/);
+  assert.match(gitlab, /Merged layers are unaffected/);
+  assert.match(gitlab, /cannot undo merges or automatic adoption/);
 });
 
 test("typed status distinguishes a recorded intent from provider success for every durable phase", () => {

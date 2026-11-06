@@ -22,6 +22,8 @@ export const cleanupWrites = 4;
 export const livePaceMs = 750;
 /** Provider writes (API writes and Git pushes) one run may make. */
 export const maxWrites = 16;
+/** The stack journey's tasks: three pushes and three merge requests. */
+const stackLayers = 3;
 
 const project = `/api/v4/projects/${qualificationProject.id}`;
 const iidPattern = "([1-9][0-9]{0,8})";
@@ -41,6 +43,11 @@ interface Created {
  * writes only to the branches and merge requests this run recorded, with one setup discussion, one setup
  * commit and one merge, at most `maxWrites` in all. Nothing is logged but the method, the route shape and
  * the status; never a header, a body or a token.
+ *
+ * The `stack` mode is the stacking journey's scope instead: three pushes and three merge requests, each
+ * on `main` or a branch of the run; one merge of each allowed merge request, with the source-branch
+ * removal flag exactly when allowed; one retarget of an allowed merge request to `main`; and cleanup.
+ * It permits no discussion, commit or ready request. Merge bodies are kept, as they carry no credential.
  */
 export class GitLabGuard {
   readonly branches = new Set<string>();
@@ -53,19 +60,30 @@ export class GitLabGuard {
   /** Each 429 GitLab answered: the rate-limit headers it carried (name and value: the limit's name, its quota, what was observed and when it resets, and the wait it named) and its text. */
   readonly rateLimited: RateLimitEvidence[];
   private readonly mechanics: GuardMechanics;
-  /** The one-shot write the request being checked would spend, released if GitLab answers 429. */
-  private oneShot: "merge" | "discussion" | "commit" | null = null;
+  /** Gives back the one-shot write the request being checked spent, if GitLab answers 429. */
+  private undo: (() => void) | null = null;
   private merges = 0;
   private setupDiscussions = 0;
   private setupCommits = 0;
-  /** Merge requests whose merge the guard may let through, each once. */
-  private readonly mergeable = new Set<number>();
+  private stackCreates = 0;
+  private stackPushes = 0;
+  /** Merge requests whose merge the guard may let through, each once, and whether it removes the source branch. */
+  private readonly mergeable = new Map<
+    number,
+    { removeSourceBranch: boolean }
+  >();
+  /** Merge requests the stack journey may retarget to `main`, each once. */
+  private readonly retargetable = new Set<number>();
+  /** The body of every merge the guard let through. */
+  readonly mergeBodies: Array<{ iid: number; body: Record<string, unknown> }> =
+    [];
   /** `paceMs` is the least time between two requests, so the run's own rate stays well below GitLab's limits. */
   constructor(
     limit = maxWrites,
     paceMs = 0,
     /** Writes kept for cleanup: a journey write that would leave fewer is refused, so retries cannot starve it. */
     cleanupReserve = cleanupWrites,
+    readonly mode: "delivery" | "stack" = "delivery",
   ) {
     this.mechanics = new GuardMechanics(limit, paceMs, cleanupReserve);
     this.log = this.mechanics.log;
@@ -85,9 +103,13 @@ export class GitLabGuard {
     this.requests.set(iid, { id, iid });
     this.branches.add(branch);
   }
-  /** Allows the one merge of this merge request. */
-  allowMerge(iid: number) {
-    this.mergeable.add(iid);
+  /** Allows the one merge of this merge request; in stack mode, with removal of its source branch or without. */
+  allowMerge(iid: number, removeSourceBranch = false) {
+    this.mergeable.set(iid, { removeSourceBranch });
+  }
+  /** Allows one `target_branch` edit of this merge request, to `main` (stack mode). */
+  allowRetarget(iid: number) {
+    this.retargetable.add(iid);
   }
 
   private deny(reason: string): never {
@@ -126,10 +148,11 @@ export class GitLabGuard {
         typeof init?.body === "string"
           ? (JSON.parse(init.body) as Record<string, unknown>)
           : {};
-      this.oneShot = null;
+      this.undo = null;
       if (method === "GET") this.readAllowed(url);
       else this.writeAllowed(method, url, body);
-      const oneShot = this.oneShot;
+      // Set by the check above; TypeScript cannot see that through the call.
+      const undo = this.undo as (() => void) | null;
       await this.mechanics.admit(this.shape(method, url));
       const response = await next(input, init);
       if (response.status === 429) {
@@ -139,9 +162,7 @@ export class GitLabGuard {
           rateHeaders(response, /^(ratelimit|retry-after)/),
         );
         // A request answered 429 was not processed: it may be sent again, though the write stays counted.
-        if (oneShot === "merge") this.merges--;
-        if (oneShot === "discussion") this.setupDiscussions--;
-        if (oneShot === "commit") this.setupCommits--;
+        undo?.();
       }
       if (method !== "GET") {
         this.mechanics.settle(response.status);
@@ -202,20 +223,44 @@ export class GitLabGuard {
     const mr = rest.match(new RegExp(`^/merge_requests/${iidPattern}(/.*)?$`));
     const iid = mr ? Number(mr[1]) : null;
     const known = iid !== null && this.requests.has(iid);
+    const stack = this.mode === "stack";
     if (method === "POST" && rest === "/merge_requests") {
+      const target = String(body.target_branch);
       if (
         !this.branches.has(String(body.source_branch)) ||
-        body.target_branch !== qualificationProject.defaultBranch
+        (target !== qualificationProject.defaultBranch &&
+          !(
+            stack &&
+            this.branches.has(target) &&
+            target !== body.source_branch
+          )) ||
+        (stack && this.stackCreates >= stackLayers)
       )
         this.deny("merge-request-create");
+      if (stack) this.stackCreates++;
       return this.spend("POST merge_requests");
     }
     if (method === "PUT" && mr && !mr[2]) {
       const keys = Object.keys(body);
+      if (stack && keys.join() === "target_branch") {
+        if (
+          iid === null ||
+          !known ||
+          !this.retargetable.has(iid) ||
+          body.target_branch !== qualificationProject.defaultBranch
+        )
+          this.deny("merge-request-retarget");
+        this.retargetable.delete(iid);
+        this.undo = () => this.retargetable.add(iid);
+        return this.spend("PUT retarget merge_request");
+      }
       if (
         !known ||
         keys.some(
-          (k) => !["title", "description", "state_event"].includes(k),
+          (k) =>
+            !(
+              stack ? ["state_event"] : ["title", "description", "state_event"]
+            ).includes(k),
         ) ||
         (body.state_event !== undefined && body.state_event !== "close")
       )
@@ -228,23 +273,45 @@ export class GitLabGuard {
       );
     }
     if (method === "PUT" && mr?.[2] === "/merge") {
+      const allowed = iid === null ? undefined : this.mergeable.get(iid);
+      const removal = stack && allowed?.removeSourceBranch === true;
+      const keys = Object.keys(body);
       if (
         !known ||
         iid === null ||
-        !this.mergeable.has(iid) ||
-        this.merges > 0 ||
+        !allowed ||
+        this.merges >= (stack ? stackLayers - 1 : 1) ||
         !sha.test(String(body.sha)) ||
         body.auto_merge !== false ||
-        Object.keys(body).some(
-          (k) => !["sha", "squash", "auto_merge"].includes(k),
-        )
+        keys.some(
+          (k) =>
+            ![
+              "sha",
+              "squash",
+              "auto_merge",
+              ...(removal ? ["should_remove_source_branch"] : []),
+            ].includes(k),
+        ) ||
+        (removal && body.should_remove_source_branch !== true)
       )
         this.deny("merge");
       this.spend("PUT merge");
       this.merges++;
-      this.oneShot = "merge";
+      this.mergeable.delete(iid);
+      this.mergeBodies.push({ iid, body });
+      this.undo = () => {
+        this.merges--;
+        this.mergeable.set(iid, allowed);
+        this.mergeBodies.pop();
+      };
       return;
     }
+    // The stack journey writes nothing else but cleanup.
+    if (
+      stack &&
+      !(method === "DELETE" && rest.startsWith("/repository/branches/"))
+    )
+      this.deny("write");
     if (method === "POST" && mr?.[2] === "/discussions") {
       if (
         !known ||
@@ -254,7 +321,7 @@ export class GitLabGuard {
         this.deny("discussion");
       this.spend("POST discussion");
       this.setupDiscussions++;
-      this.oneShot = "discussion";
+      this.undo = () => this.setupDiscussions--;
       return;
     }
     if (
@@ -282,7 +349,7 @@ export class GitLabGuard {
         this.deny("commit");
       this.spend("POST commit");
       this.setupCommits++;
-      this.oneShot = "commit";
+      this.undo = () => this.setupCommits--;
       return;
     }
     const branch = rest.match(/^\/repository\/branches\/(.+)$/);
@@ -334,6 +401,8 @@ export class GitLabGuard {
       this.verified(request);
       // Only a task branch (`cab/` prefix), never the default branch.
       if (!request.branch.startsWith("cab/")) this.deny("git-branch");
+      if (this.mode === "stack" && this.stackPushes++ >= stackLayers)
+        this.deny("git-push-count");
       this.spend("git push");
       this.branches.add(request.branch);
       return next(request);
@@ -360,6 +429,8 @@ export class GitLabGuard {
 export function liveInvocation(
   args: readonly string[],
   env: NodeJS.ProcessEnv,
+  /** Whether the run needs `CAB_GITLAB_TOKEN`: the stack journey uses the `glab` login alone. */
+  envToken = true,
 ): { resultPath: string | undefined } {
   const at = args.indexOf("--result");
   const resultPath = at < 0 ? undefined : args[at + 1];
@@ -368,10 +439,10 @@ export function liveInvocation(
     args.length !== (at < 0 ? 1 : 3) ||
     (at >= 0 && !isAbsolute(resultPath ?? "")) ||
     glabTokenVariables.some((name) => env[name]) ||
-    !env.CAB_GITLAB_TOKEN
+    (envToken && !env.CAB_GITLAB_TOKEN)
   )
     throw new Error(
-      "Refusing execution: require --live [--result ABSOLUTE_PATH], CAB_GITLAB_TOKEN set, and none of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN",
+      `Refusing execution: require --live [--result ABSOLUTE_PATH]${envToken ? ", CAB_GITLAB_TOKEN set," : ""} and none of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN`,
     );
   return { resultPath };
 }

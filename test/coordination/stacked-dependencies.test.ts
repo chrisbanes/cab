@@ -821,3 +821,79 @@ test("native refresh cannot recreate retired admission; independent and unknown 
     .run(D);
   assert.ok(f.reasons(D).includes("imported-blockers-unknown"));
 });
+
+test("a GitLab stack stacks no dependent past 20 open merge requests", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  const link = (codeHost: "github" | "gitlab") =>
+    f.db
+      .prepare(
+        "UPDATE project_repository_links SET links = ? WHERE projectId = ?",
+      )
+      .run(
+        JSON.stringify([
+          {
+            repositoryId: "42",
+            path: "/tmp/42",
+            ref: "main",
+            gitCommonDirectory: "/tmp/42/.git",
+            ...(codeHost === "gitlab"
+              ? {
+                  codeHost,
+                  host: "gitlab.example.com",
+                  projectPath: "group/app",
+                }
+              : { codeHost, host: "github.com" }),
+          },
+        ]),
+        p,
+      );
+  link("gitlab");
+  // Twenty layers: the bottom task and 19 recorded stacked edges above it.
+  const layers = Array.from({ length: 20 }, () => randomUUID());
+  for (const [i, taskId] of layers.entries()) {
+    f.run({
+      type: "task.create",
+      actor: "operator",
+      projectId: p,
+      taskId,
+      title: `Layer ${i}`,
+      outcome: "Work",
+      ready: true,
+    });
+    f.publish(taskId, { repositoryId: "42" });
+    if (i > 0)
+      f.db
+        .prepare(
+          "INSERT INTO stacked_dependencies(taskId,blockerTaskId,repositoryId,parentHead,restack,recordedAt) VALUES (?,?,?,?, 'current',1)",
+        )
+        .run(taskId, layers[i - 1]!, "42", head("a"));
+  }
+  f.depend(D, layers.at(-1)!);
+  assert.deepEqual(f.domain.stackFacts(D), {
+    state: "waiting",
+    reason: "gitlab-stack-limit",
+    blockerTaskId: layers.at(-1),
+    repositoryId: null,
+    parentHead: null,
+    restack: null,
+  });
+  assert.deepEqual(f.reasons(D), ["local-dependency"]);
+  assert.throws(
+    () => f.domain.recordStackedDependency(D),
+    /gitlab-stack-limit/,
+  );
+  assert.equal(f.domain.stackedDependency(D), null);
+  // The same shape on GitHub has no limit.
+  link("github");
+  assert.equal(f.domain.stackFacts(D)?.state, "stacked");
+  link("gitlab");
+  // A merged bottom layer leaves 19 open, so the dependent is the 20th.
+  f.publish(layers[0]!, { repositoryId: "42", state: "MERGED" });
+  assert.equal(f.domain.stackFacts(D)?.state, "stacked");
+  f.domain.recordStackedDependency(D);
+  // A recorded dependent keeps its decision.
+  f.publish(layers[0]!, { repositoryId: "42" });
+  assert.equal(f.domain.stackFacts(D)?.state, "stacked");
+  assert.equal(f.domain.stackFacts(D)?.reason, null);
+});

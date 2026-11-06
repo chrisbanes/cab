@@ -973,3 +973,22 @@ verified adoption and complete Unstack. Guard primitives, offline passes or a pa
 result do not constitute live acceptance. Required integrated full check, browser engines,
 independent integrated review and final-head CI remain gates; no live success is claimed
 by these offline contracts.
+
+### GitLab stacking
+
+Assembled delivery-service tests over the real GitLab provider and a scripted instance must
+show: a stacked dependent's merge request is refused before any request unless it targets
+the blocker's task branch; a stacked blocker's merge, and only that merge, requests source
+branch removal, and GitLab's retarget of the dependent is accepted; bottom-up refusal, a
+retarget still pending, and a dependency change during merge preflight send nothing; a
+closed blocker holds the dependent as failed; the 20-merge-request limit stacks no further
+dependent and shows its reason; unchanged outside rebases are adopted with their proof
+after an accepted retarget and reworded ones keep the outside-change hold. GitLab Unstack
+must show the per-host confirmation (only this merge request is retargeted to the link's
+base, merge requests stacked on it stay on its branch, a restack follows only after the
+retarget is confirmed, merged layers are unaffected, cab cannot undo merges or adoption),
+one target-branch edit, read-back recovery of a lost response without a second edit, a
+422 refusal without further writes, and no edit after an outside retarget.
+
+Bounded live evidence on gitlab.com must cover a two-layer stack, bottom-up merge with
+source-branch removal, GitLab's retarget and its acceptance, and Unstack of the top layer.

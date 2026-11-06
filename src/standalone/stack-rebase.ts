@@ -54,7 +54,7 @@ export async function adoptMergedStackRebase(input: {
     );
   if (!/^[0-9a-f]{40}$/.test(edge.parentHead)) return false;
   if (
-    link?.codeHost !== "github" ||
+    !link ||
     p.repositoryId !== edge.repositoryId ||
     p.state !== "OPEN" ||
     p.merged ||

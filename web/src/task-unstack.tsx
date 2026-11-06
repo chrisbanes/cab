@@ -11,7 +11,7 @@ import {
   type UnstackRead,
 } from "../../src/operator/unstack-contracts.js";
 import {
-  unstackConfirmation,
+  unstackConfirmationFor,
   unstackRecovery,
   unstackStatus,
   cancelStackedConfirmation,
@@ -327,14 +327,19 @@ export function TaskUnstack({
           <DialogDescription>
             {mode === "cancel"
               ? cancelStackedConfirmation
-              : unstackConfirmation}
+              : unstackConfirmationFor(
+                  captured?.codeHost ?? view?.preview?.codeHost ?? "github",
+                )}
           </DialogDescription>
           {mode === "unstack" && (
             <>
               {discloseCapture && captured && (
                 <p>
-                  Captured stack #{captured.stackNumber} in{" "}
-                  {captured.repository}:{" "}
+                  Captured stack
+                  {captured.stackNumber === null
+                    ? ""
+                    : ` #${captured.stackNumber}`}{" "}
+                  in {captured.repository}:{" "}
                   {captured.members
                     .map((m) => `#${m.number} (${m.state})`)
                     .join(", ")}

@@ -27,7 +27,7 @@ export interface CodeHostDeliveryProvider {
   unstackProvider?(
     policy: DeliveryPolicy,
   ): import("./unstack.js").UnstackProvider;
-  /** Optional GitHub-only unchanged-rebase proof; verifies the exact remote ref before and after fetch. */
+  /** Optional unchanged-rebase proof; verifies the exact remote ref before and after fetch. */
   readRebaseHead?(repositoryId: string, branch: string): Promise<string | null>;
   proveRebase?(input: {
     repositoryId: string;
@@ -48,6 +48,8 @@ export interface CodeHostDeliveryProvider {
     policy: DeliveryPolicy,
     publication?: PublicationContext,
     adoption?: AdoptionContext,
+    /** For a merge: whether to ask the host to remove the source branch, for a stacked blocker. */
+    merge?: { removeSourceBranch: boolean },
   ): Promise<Record<string, z.output<ReturnType<typeof z.json>>>>;
   performAction(
     record: DeliveryActionRecord,

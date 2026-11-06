@@ -6703,9 +6703,21 @@ export class OperatorApi {
       if (!unavailable) {
         try {
           const identity = await this.service.previewTaskUnstack(taskId);
+          const link = this.domain()
+            .repositoryLinks(projectId)
+            .links.find((l) => l.repositoryId === identity.repositoryId);
+          // GitLab names a project by its numeric ID, so the preview shows the link's project path.
+          const repository =
+            link?.codeHost === "gitlab"
+              ? link.projectPath
+              : identity.repositoryPath.slice("/repos/".length);
           if (
             excluded === undefined ||
-            !this.disclosable(JSON.stringify(identity), excluded)
+            !link ||
+            !this.disclosable(
+              JSON.stringify({ identity, repository }),
+              excluded,
+            )
           )
             unavailable = "unproved";
           else
@@ -6713,7 +6725,8 @@ export class OperatorApi {
               taskId,
               expectedVersion: identity.taskVersion,
               materialHash: materialDigest(identity),
-              repository: identity.repositoryPath.slice("/repos/".length),
+              codeHost: link.codeHost,
+              repository,
               selectedPr: identity.pr.number,
               stackNumber: identity.stack.number,
               targetBase: identity.targetBaseRef,

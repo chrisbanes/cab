@@ -538,7 +538,10 @@ and material hash. `task unstack TASK_ID --expected-version N --material-hash SH
 GitHub removes all removable unmerged members of the captured provider stack, not just
 the selected PR. Only the selected PR is retargeted to the link's base, and a restack is
 queued only after complete removal and exact retarget are confirmed. Merged layers stay
-unaffected; cab cannot undo merges or automatic adoption.
+unaffected; cab cannot undo merges or automatic adoption. On GitLab, which has no stack object,
+Unstack retargets only the selected merge request to the link's base, merge requests stacked on
+it stay on its branch, and the preview names no stack number; the CLI and web show the wording
+for the change request's code host.
 
 A typed `task-unstack` receipt records the intent and phase, not unconditional success.
 For an unknown response or unfinished phase use `operation get REQUEST_ID --scope

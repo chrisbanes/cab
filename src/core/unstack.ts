@@ -38,7 +38,10 @@ export const unstackIdentitySchema = z
     deliveryRevision: z.number().int().positive(),
     authorityDigest: digest,
     repositoryId: text,
-    repositoryPath: z.string().regex(/^\/repos\/[^/?#]+\/[^/?#]+$/),
+    // A GitHub repository, or a GitLab project by numeric ID.
+    repositoryPath: z
+      .string()
+      .regex(/^(?:\/repos\/[^/?#]+\/[^/?#]+|\/projects\/[1-9][0-9]{0,18})$/),
     pr: z
       .object({
         nodeId: text,
@@ -64,8 +67,9 @@ export const unstackIdentitySchema = z
       .strict(),
     stack: z
       .object({
-        id: z.number().int().positive(),
-        number: z.number().int().positive(),
+        // GitLab has no stack object, so no stack ID or number.
+        id: z.number().int().positive().nullable(),
+        number: z.number().int().positive().nullable(),
         baseRef: text,
         members: z
           .array(
@@ -87,8 +91,16 @@ export const unstackIdentitySchema = z
   .strict()
   .superRefine((i, c) => {
     const members = i.stack.members;
+    const gitlab = i.repositoryPath.startsWith("/projects/");
     if (
       i.edge.repositoryId !== i.repositoryId ||
+      // GitLab: no stack object, and the stack is the blocker's merge request then this one.
+      (gitlab
+        ? i.stack.id !== null ||
+          i.stack.number !== null ||
+          members.length !== 2 ||
+          members[1]?.nodeId !== i.pr.nodeId
+        : i.stack.id === null || i.stack.number === null) ||
       new Set(members.map((m) => m.nodeId)).size !== members.length ||
       new Set(members.map((m) => m.number)).size !== members.length ||
       !members.some(
