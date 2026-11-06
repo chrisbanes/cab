@@ -74,8 +74,11 @@ export class TaskStreams {
     const stop = this.feed.watch(resolve, (event) =>
       event === "gone" ? this.end(stream) : response.write(frame(event)),
     );
-    if (this.streams.has(stream)) stream.stop = stop;
-    else stop();
+    if (!this.streams.has(stream)) {
+      stop();
+      return;
+    }
+    stream.stop = stop;
     this.timer ??= setInterval(() => this.beat(), this.heartbeatMs).unref();
   }
 

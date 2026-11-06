@@ -939,10 +939,13 @@ export function TaskWorkspace({
       opening ? resource.poll({ supersede: true }) : pollRef.current(true),
     onTimeline: () => setChangeTick((tick) => tick + 1),
   });
-  // The 15-second poll is the fallback while the change stream is not healthy.
+  // The 15-second poll is the fallback while the change stream is not healthy. While it is,
+  // a minute's poll still catches a change no notice was attributed to.
   useEffect(() => {
-    if (streaming) return;
-    const timer = setInterval(() => pollRef.current(), 15000);
+    const timer = setInterval(
+      () => pollRef.current(),
+      streaming ? 60_000 : 15_000,
+    );
     return () => clearInterval(timer);
   }, [streaming]);
   const captureRef = useRef(capture);

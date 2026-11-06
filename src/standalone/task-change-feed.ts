@@ -103,7 +103,12 @@ export class TaskChangeFeed {
       for (const watch of this.watches)
         this.markWatch(this.marks, watch, "read");
     }
-    if (!inTransaction) this.commit();
+    if (inTransaction) return;
+    try {
+      this.commit();
+    } catch {
+      // A notice must never fail the write that has already committed.
+    }
   };
 
   /**

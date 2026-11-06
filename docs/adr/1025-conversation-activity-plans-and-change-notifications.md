@@ -50,11 +50,14 @@ notices are implemented.
   session, Host check and task visibility of the reads, refuses a foreign `Origin`, and
   sends only `read`, `timeline` and `heartbeat` events with `data: {}`. Notices come from
   committed writes observed at the shared database facade and attributed to the task by
-  the ids they bind; an unattributable write notifies every watched task. A heartbeat
+  the ids they bind; a parameterless write that changed rows and names no watched id
+  notifies every watched task. A write keyed only by another identifier, such as a
+  delivery operation, a runtime question or another task, is not attributed. A heartbeat
   every 15 seconds keeps the session current and ends the stream when it is not; sign-out,
   shutdown and the task leaving the readable set also end it. The browser reconnects with
-  jittered back-off from 1 to 30 seconds and polls every 15 seconds only while the stream
-  is not healthy.
+  jittered back-off from 1 to 30 seconds and polls every 15 seconds while the stream is
+  not healthy, and every 60 seconds while it is, so an unattributed change still appears
+  within a minute.
 - **Reasoning stays uncollected.** A separate ADR decides on it.
 
 ## Considered options

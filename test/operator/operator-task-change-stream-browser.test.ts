@@ -145,7 +145,10 @@ test("a dropped stream falls back to polling and recovers", async (_t, j) => {
       atConnect = taskReads();
   });
   await page.clock.runFor(40_000);
-  while (atConnect < 0) await page.waitForTimeout(50);
+  for (let waited = 0; atConnect < 0; waited += 50) {
+    assert.ok(waited < 10_000, "the stream reconnects");
+    await page.waitForTimeout(50);
+  }
   await page.waitForTimeout(1_500);
   assert.equal(taskReads() - atConnect, 1, "one refetch on reconnect");
   capture("Recovered assistant entry");

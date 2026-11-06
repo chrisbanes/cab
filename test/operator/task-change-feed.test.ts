@@ -210,3 +210,24 @@ test("a project write notifies the project's tasks unless the commit wrote a tas
   assert.deepEqual(f.events("task-a"), ["read", "read"]);
   assert.deepEqual(f.events("task-b"), ["read"]);
 });
+
+test("a failing listener never fails the committed write", () => {
+  const f = setup();
+  let present = true;
+  f.feed.watch(
+    () => (present ? { own: ["task-a"], project: "project-1" } : undefined),
+    () => {
+      throw new Error("listener failed");
+    },
+  );
+  present = false;
+  f.db.prepare("INSERT INTO tasks VALUES (?, ?)").run("task-a", "Title");
+  assert.equal(
+    (
+      f.db.prepare("SELECT title FROM tasks WHERE id = ?").get("task-a") as {
+        title: string;
+      }
+    ).title,
+    "Title",
+  );
+});

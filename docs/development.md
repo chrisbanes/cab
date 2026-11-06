@@ -594,7 +594,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
    reader stalled for two heartbeats is disconnected. The browser
    (`web/src/task-change-stream.ts`) debounces notices for 300 ms (2 s at most), treats
    45 s without a frame as a dropped stream, reconnects after 1 s doubling to 30 s with
-   ±20% jitter, refetches once per connection and closes after 60 s hidden. Browser
+   ±20% jitter, refetches once per connection and closes after 60 s hidden. A write
+   keyed only by another identifier (a delivery operation, a runtime question, another
+   task) is not attributed, so the page polls every 60 s while the stream is healthy
+   and every 15 s otherwise. Browser
    tests that drive the 15-second poll with the page clock call
    `withoutChangeStream(page)` from `test/fixtures/background-refresh.ts`.
 

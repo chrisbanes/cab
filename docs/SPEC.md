@@ -1816,8 +1816,10 @@ steps, which are redacted and capped.
 The task view follows changes through an authenticated per-task stream of content-free
 notices ([ADR-1025](adr/1025-conversation-activity-plans-and-change-notifications.md)):
 a notice says the task read or its timeline changed, and the page refetches through the
-same reads, which stay authoritative. The 15-second poll runs only while the stream is
-not healthy, including after the page has been hidden for a minute, which closes it.
+same reads, which stay authoritative. The page polls every 15 seconds while the stream
+is not healthy, including after the page has been hidden for a minute, which closes it,
+and every 60 seconds while it is, because a change keyed only by another record, such as
+a delivery operation or a runtime question, carries no notice.
 
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
