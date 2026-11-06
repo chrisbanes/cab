@@ -221,7 +221,7 @@ test("a link to an inspector section shows it and the choice returns on Back", a
   assert.equal(await inspector(page).count(), 0);
   // A full load of a deep link shows its section too.
   await page.goto(
-    `${page.url().split("/")[0]}/tasks/${task.taskId}?section=context`,
+    `${new URL(page.url()).origin}/tasks/${task.taskId}?section=context`,
   );
   await page.locator("#context").waitFor();
   assert.equal(await pressed(page), "false");

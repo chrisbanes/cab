@@ -427,6 +427,11 @@ export class LocalOperatorHttp {
             await this.handleBearer(request, response, url, context);
             return;
           }
+          // Unknown pages get the 404 shell before any session lookup.
+          if (!this.web.owns(url.pathname) && url.pathname !== "/favicon.svg") {
+            await this.handleWeb(request, response, url, undefined, context);
+            return;
+          }
           if (url.pathname === "/favicon.svg") {
             request.resume();
             const allowed =
@@ -569,7 +574,6 @@ export class LocalOperatorHttp {
     const web = this.web;
     const path = url.pathname,
       method = request.method;
-    if (!web.owns(path) && method !== "GET" && method !== "HEAD") return false;
     const headers = API_HEADERS;
     const json = (
       status: number,

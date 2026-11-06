@@ -291,8 +291,8 @@ try {
           type: "window",
           includeUncontrolled: true,
         });
-        const target = windows.find((c) =>
-          new URL(c.url).pathname.startsWith("/"),
+        const target = windows.find(
+          (c) => new URL(c.url).origin === self.location.origin,
         );
         if (!target) return { found: false };
         let focus = "focused";

@@ -462,12 +462,7 @@ function parentRoute(
     return { href: "/settings", label: "Settings" };
   return null;
 }
-/**
- * Whether an address matches a client route; mirrors the view chosen in `App` and the
- * service's `shell()` routes. Task ids are not checked here: the task workspace owns its own
- * not-found state for a malformed id.
- */
-/** A same-origin root path the client router handles: not another origin, the API or a file. */
+/** A same-origin root path the client router handles: not another origin, the API or its assets. */
 function isInAppHref(href: string | null | undefined): href is string {
   return (
     href?.startsWith("/") === true &&
@@ -475,6 +470,11 @@ function isInAppHref(href: string | null | undefined): href is string {
     !/^\/(?:api|assets)(?:[/?#]|$)/.test(href)
   );
 }
+/**
+ * Whether an address matches a client route; mirrors the view chosen in `App` and the
+ * service's `shell()` routes. Task ids are not checked here: the task workspace owns its own
+ * not-found state for a malformed id.
+ */
 function knownRoute(pathname: string) {
   const id = "[a-f0-9-]{36}";
   return (
@@ -1242,7 +1242,7 @@ export function App() {
                 workspace={workspace.state.data}
                 refresh={workspace.refresh}
                 refreshNonce={refreshNonce}
-                assignmentId={pathname.split("/")[3] ?? ""}
+                assignmentId={pathname.split("/")[2] ?? ""}
               />
             ) : pathname === "/settings" ? (
               <SettingsWorkspace
@@ -1286,7 +1286,7 @@ export function App() {
                 workspace={workspace.state.data}
                 refresh={workspace.refresh}
                 refreshNonce={refreshNonce}
-                profileId={pathname.split("/")[3] ?? ""}
+                profileId={pathname.split("/")[2] ?? ""}
               />
             ) : /^\/projects\/[^/]+\/settings$/.test(pathname) ? (
               <ProjectConfiguration
@@ -1297,7 +1297,7 @@ export function App() {
                 workspace={workspace.state.data}
                 refresh={workspace.refresh}
                 refreshNonce={refreshNonce}
-                projectId={pathname.split("/")[3] ?? ""}
+                projectId={pathname.split("/")[2] ?? ""}
                 query={query}
               />
             ) : pathname === "/tasks/new" ? (
@@ -1367,7 +1367,7 @@ export function App() {
                 client={client}
                 session={session}
                 drafts={drafts.current}
-                taskId={pathname.split("/")[3] ?? ""}
+                taskId={pathname.split("/")[2] ?? ""}
                 path={path}
                 onRefresh={refreshAll}
                 workspace={workspace.state.data}
@@ -1375,7 +1375,7 @@ export function App() {
                 releaseDraft={releaseDraft}
                 questionStates={questionStates.current}
                 state={taskStates.current.forTask(
-                  pathname.split("/")[3] ?? "",
+                  pathname.split("/")[2] ?? "",
                   entryKey,
                 )}
               />

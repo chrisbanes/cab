@@ -59,7 +59,7 @@ credential reference or submitted value, and the adapter logs no request data.
 
 ## Routes and command ownership
 
-`/` serves the shell without reading or creating a session. `GET`/`HEAD` of `/app` or
+`/` serves the shell without creating a session. `GET`/`HEAD` of `/app` or
 `/app/<path>` permanently redirects (308) to `/<path>` with the same query, before any
 session handling; leading slashes are collapsed so the location is never
 protocol-relative. Legacy POST `/login` and `/logout`, `/command`, capacity forms and
