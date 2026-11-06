@@ -247,7 +247,7 @@ async function startChangesJourney(
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const changes = page.locator("#changes");
-  const directPath = `/app/tasks/${task.taskId}?section=changes`;
+  const directPath = `/tasks/${task.taskId}?section=changes`;
   await page.goto(web.origin + directPath);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -516,7 +516,7 @@ test("production Changes preserves exact repository baselines and last-good refr
 
   await page.goto(
     web.origin +
-      "/app/tasks/" +
+      "/tasks/" +
       task.taskId +
       "?section=changes" +
       (result ? `&result=${result.resultId}` : ""),

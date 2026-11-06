@@ -82,7 +82,7 @@ test("the task view delivers an undelivered result and messages a delegated assi
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/tasks/${a.taskId}`);
+  await signIn(page, web, `/tasks/${a.taskId}`);
 
   // The decision card names the result and offers only the permitted recipient.
   const row = page.locator(
@@ -164,7 +164,7 @@ async function openTask(
     )
       commands.push({ ...JSON.parse(raw), raw });
   });
-  await signIn(page, web, `/app/tasks/${taskId}`);
+  await signIn(page, web, `/tasks/${taskId}`);
   return { page, web, commands };
 }
 
@@ -196,7 +196,7 @@ test("an unconfirmed result delivery is still checkable after leaving the task a
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.goBack();
   await check(row).waitFor();
   assert.equal(
@@ -247,7 +247,7 @@ test("a result delivery the service already recorded is still checkable after re
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.goBack();
   // The result is no longer listed as undelivered, yet its check is still on the task page.
   await check(page).waitFor();
@@ -287,7 +287,7 @@ test("a retained check that the service refuses shows the refusal and can be dis
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await page.waitForURL(/\/app\/inbox/);
+  await page.waitForURL(/\/inbox/);
   await page.goBack();
   await check(page).waitFor();
   assert.equal(await row.count(), 0);
@@ -407,7 +407,7 @@ test("a check settles as refused only on a definite refusal, and a new session s
   await page.getByRole("button", { name: "Send comment" }).click();
   await check(page).waitFor();
   await signOutFromSidebar(page);
-  await signIn(page, web, `/app/tasks/${a.taskId}`);
+  await signIn(page, web, `/tasks/${a.taskId}`);
   assert.equal(await check(page).count(), 0);
   assert.equal(await box.inputValue(), "");
 });

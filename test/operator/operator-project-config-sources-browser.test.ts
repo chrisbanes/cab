@@ -37,7 +37,7 @@ const test = browserSuite("operator-project-config-sources-browser");
 test("GitHub source shows search queries plainly and edits them in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   await page.getByRole("heading", { name: "1 · Discovery sources" }).waitFor();
@@ -128,7 +128,7 @@ test("GitHub source shows search queries plainly and edits them in place", async
 test("repositories show local paths plainly and edit them in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const d = f.service.domain();
   await page.getByRole("heading", { name: "acme/atlas" }).waitFor();
@@ -198,7 +198,7 @@ test("repositories show local paths plainly and edit them in place", async (_t, 
 test("GitHub source private values unavailable keeps rows kept and saveable", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   await page.route("**/private-values", (route) =>
     route.fulfill({
@@ -260,7 +260,7 @@ test("GitHub source private values unavailable keeps rows kept and saveable", as
 test("repository private values unavailable keeps rows kept and saveable", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   await page.route("**/private-values", (route) =>
     route.fulfill({
@@ -315,7 +315,7 @@ test("repository private values unavailable keeps rows kept and saveable", async
 test("removing all repository access needs confirmation and Discard restores the row", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   await page
@@ -349,7 +349,7 @@ test("removing all repository access needs confirmation and Discard restores the
 test("repository errors name the exact row without echo", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   await page.getByRole("button", { name: "Add repository" }).click();
   await page
@@ -440,7 +440,7 @@ test("a new GitLab repository link is chosen from configured hosts and their pro
   const host = "gitlab.example.com";
   const { f, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
     undefined,
     undefined,
     {
@@ -540,7 +540,7 @@ test("new repository and GitHub Project sources are chosen from discovery", asyn
 test("GitHub source conflict keeps rows and an unknown save is checked once", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   await page
@@ -604,7 +604,7 @@ test("GitHub source conflict keeps rows and an unknown save is checked once", as
 test("an edited query survives adopting a newer source version unless the row was removed elsewhere", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -661,7 +661,7 @@ test("an edited query survives adopting a newer source version unless the row wa
 test("an edited path survives adopting newer repository links unless the link was removed elsewhere", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -716,7 +716,7 @@ test("an edited path survives adopting newer repository links unless the link wa
 test("a reverted query is kept again, and an edit survives leaving the tab", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -828,7 +828,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
 test("a path edit says so when another writer replaced the path, and typing the saved path is no edit", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -896,7 +896,7 @@ test("a path edit says so when another writer replaced the path, and typing the 
 test("a query edit says so when the private read is older than the source version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -947,7 +947,7 @@ test("a query edit says so when the private read is older than the source versio
 test("Save waits for saved queries and paths to be read again, and an edit never changes a row's kind", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1040,7 +1040,7 @@ test("Save waits for saved queries and paths to be read again, and an edit never
 test("Save waits for a query to be read again, and a same-kind replacement drops a pending removal", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1100,7 +1100,7 @@ test("Save waits for a query to be read again, and a same-kind replacement drops
 test("Save waits for a local path to be read again", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1150,7 +1150,7 @@ test("Save waits for a local path to be read again", async (_t, journey) => {
 test("a pending removal is dropped when the source was replaced under the same id", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1186,7 +1186,7 @@ test("a pending removal is dropped when the source was replaced under the same i
 test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   await page
     .getByRole("button", { name: "Remove GitHub Project (S-3)" })
@@ -1232,7 +1232,7 @@ test("an unknown source save with rows removed elsewhere keeps its one action an
 test("Sync & placement shows the import offer, observations and the placement status line", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=sync",
+    "/projects/:atlas/settings?tab=sync",
   );
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
   await page
@@ -1254,7 +1254,7 @@ test("Sync & placement shows the import offer, observations and the placement st
 test("a repository link saved elsewhere under the same id needs an explicit choice", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const d = f.service.domain();
   const mine = await createCheckout(f.directory, "mine-checkout"),
@@ -1351,7 +1351,7 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
   });
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
     undefined,
     undefined,
     { readerFactory: reader },
@@ -1370,7 +1370,7 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
   const warning =
     "No open item matches the readiness rule (label `ready`); imported tasks stay Draft until one does.";
   await page.goto(
-    web.origin + resolve("/app/projects/:atlas/settings?tab=sync", ids),
+    web.origin + resolve("/projects/:atlas/settings?tab=sync", ids),
   );
   const row = page
     .locator("article.settings-row")
@@ -1406,7 +1406,7 @@ test("source conflict review replaces an unsaved ID when a concurrent saved iden
   }, "restore-review-source-exclusion");
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   d.execute({
@@ -1504,7 +1504,7 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   }, "restore-hidden-source-exclusion");
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
     phone,
   );
   const d = f.service.domain();
@@ -1601,7 +1601,7 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
     ],
   });
   await page.goto(
-    `${web.origin}/app/projects/${ids.atlas}/settings?tab=repositories`,
+    `${web.origin}/projects/${ids.atlas}/settings?tab=repositories`,
   );
   const linkRemove = () =>
     page.getByRole("button", {

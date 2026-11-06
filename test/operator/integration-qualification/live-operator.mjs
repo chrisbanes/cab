@@ -346,7 +346,7 @@ async function run() {
 
   progress("chromium-live-runtime-and-coordination-views");
   // The task's Execution tab reports the running execution.
-  const executionTab = `${origin}/app/tasks/${taskId}?section=execution`;
+  const executionTab = `${origin}/tasks/${taskId}?section=execution`;
   const execution = page.locator("section#execution");
   await page.goto(executionTab);
   assert.equal(new URL(page.url()).origin, origin);
@@ -355,7 +355,7 @@ async function run() {
     .getByText("Running", { exact: true })
     .waitFor();
   // The app recovery view of the assignment that asked the live question.
-  const callbackAssignmentHref = `/app/assignments/${encodeURIComponent(question.requestingAssignmentId)}/recovery`;
+  const callbackAssignmentHref = `/assignments/${encodeURIComponent(question.requestingAssignmentId)}/recovery`;
   await page.goto(`${origin}${callbackAssignmentHref}`);
   await page
     .getByRole("heading", { name: "Execution and assignment" })
@@ -371,7 +371,7 @@ async function run() {
   assert.match(coordinationQuestion.prompt, /S04D_OPERATOR_QUESTION_V1/);
   assert.equal(coordinationQuestion.status, "open");
   assert.equal(
-    (await page.locator('a[href="/app/settings/runtime"]').count()) > 0,
+    (await page.locator('a[href="/settings/runtime"]').count()) > 0,
     true,
   );
 
@@ -448,7 +448,7 @@ async function run() {
   await startOperator(port, origin);
 
   progress("restart-invalidates-session-and-retains-history-holds");
-  await page.goto(`${origin}/app/settings/runtime`);
+  await page.goto(`${origin}/settings/runtime`);
   await waitForOperatorSignIn(page);
   const afterRestartLogin = await page.locator("body").innerText();
   assert.match(afterRestartLogin, /Sign in/);
@@ -479,7 +479,7 @@ async function run() {
   assert.equal(runtime.callbacks.length, 0);
 
   progress("browser-logout");
-  await page.goto(`${origin}/app`);
+  await page.goto(`${origin}/`);
   await signOutOperator(page, origin);
 }
 

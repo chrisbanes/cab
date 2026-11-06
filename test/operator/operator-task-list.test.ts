@@ -361,17 +361,17 @@ test("a complete task aggregate rejects changing membership and repeated page cu
   const filtered = filterTasks(all.tasks, filters);
   assert.equal(filtered.length, 12);
   assert.ok(filtered.every((t) => taskColumn(t) === "Paused"));
-  assert.ok(filtered.every((t) => taskDetailHref(t) === `/app/tasks/${t.id}`));
+  assert.ok(filtered.every((t) => taskDetailHref(t) === `/tasks/${t.id}`));
   assert.deepEqual(
     parseTaskFilters("?project=bad&source=bad&state=bad&ready=bad&view=bad"),
     defaultTaskFilters,
   );
   assert.equal(parseTaskFilters("?ready=any").ready, "any");
   assert.equal(parseTaskFilters("?ready=").ready, "yes");
-  assert.equal(taskFiltersUrl("/app/tasks", defaultTaskFilters), "/app/tasks");
+  assert.equal(taskFiltersUrl("/tasks", defaultTaskFilters), "/tasks");
   assert.equal(
-    taskFiltersUrl("/app/tasks", { ...defaultTaskFilters, ready: "any" }),
-    "/app/tasks?ready=any",
+    taskFiltersUrl("/tasks", { ...defaultTaskFilters, ready: "any" }),
+    "/tasks?ready=any",
   );
   const readiness = (ready: TaskFilters["ready"]) =>
     filterTasks(all.tasks, { ...defaultTaskFilters, state: "all", ready });

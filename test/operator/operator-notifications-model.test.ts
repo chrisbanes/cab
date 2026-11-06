@@ -35,6 +35,7 @@ const state = (
     environment: environment(),
     available: true,
     subscription: null,
+    legacy: false,
     rows: [],
     ...overrides,
   });
@@ -127,6 +128,29 @@ test("a subscription made under another key is turn on again even when its row i
       rows: [row("this", "mine")],
     }),
     { kind: "turn-on-again", why: "old-key" },
+  );
+});
+
+test("a browser still subscribed only at the old /app/ registration is turn on again until it moves", () => {
+  assert.deepEqual(
+    state({
+      environment: environment({ permission: "granted" }),
+      legacy: true,
+    }),
+    { kind: "turn-on-again", why: "moved" },
+  );
+  assert.deepEqual(
+    state({ environment: environment({ permission: "denied" }), legacy: true }),
+    { kind: "blocked" },
+  );
+  assert.deepEqual(
+    state({
+      environment: environment({ permission: "granted" }),
+      legacy: true,
+      subscription: { digest: "mine", keyMatches: true },
+      rows: [row("this", "mine")],
+    }),
+    { kind: "on", id: "this" },
   );
 });
 
@@ -232,34 +256,47 @@ test("row and test copy cover every reason, failure and outcome", () => {
     assert.equal(testOutcomeText(outcome).ok, false, outcome);
 });
 
-test("a worker message opens only a same-origin /app/ address from this origin", () => {
+test("a worker message opens only a same-origin app address from this origin", () => {
   const origin = "http://127.0.0.1:8787";
   const message = (url: unknown, type: unknown = "cab.notification-open") => ({
     origin,
     data: { type, url },
   });
   assert.equal(
-    notificationOpenPath(message("/app/inbox?task=T&request=Q"), origin),
-    "/app/inbox?task=T&request=Q",
+    notificationOpenPath(message("/inbox?task=T&request=Q"), origin),
+    "/inbox?task=T&request=Q",
   );
   assert.equal(
-    notificationOpenPath(message("/app/settings#notifications"), origin),
-    "/app/settings#notifications",
+    notificationOpenPath(message("/settings#notifications"), origin),
+    "/settings#notifications",
+  );
+  // A message from a worker installed before the app moved to the root.
+  assert.equal(
+    notificationOpenPath(message("/app/inbox?task=T&request=Q"), origin),
+    "/inbox?task=T&request=Q",
+  );
+  assert.equal(
+    notificationOpenPath(
+      message(`${origin}/app/settings#notifications`),
+      origin,
+    ),
+    "/settings#notifications",
   );
   const refused = [
-    { origin: "https://evil.test", data: message("/app/inbox").data },
-    message("/app/inbox", "other"),
-    { origin, data: { url: "/app/inbox" } },
+    { origin: "https://evil.test", data: message("/inbox").data },
+    message("/inbox", "other"),
+    { origin, data: { url: "/inbox" } },
     message(42),
     message(undefined),
     { origin, data: null },
-    { origin, data: "/app/inbox" },
+    { origin, data: "/inbox" },
     message("https://evil.test/app/x"),
     message("//evil.test/app/x"),
     message("/\\evil.test/app/x"),
     message("/api/operator/inbox"),
     message("/app/../api/operator/inbox"),
-    message("/appx"),
+    message("/app/api/operator/inbox"),
+    message("/assets/main.js"),
     message("javascript:alert(1)"),
   ];
   for (const event of refused)

@@ -167,13 +167,10 @@ test("Setup creates a paused project from discovered repositories and Projects",
     await ready
       .getByRole("link", { name: "Keep paused", exact: true })
       .getAttribute("href"),
-    `/app/projects/${body.projectId}/settings`,
+    `/projects/${body.projectId}/settings`,
   );
   // The new project joins the sidebar once the workspace re-reads.
-  await page
-    .locator(`a[href="/app/projects/${body.projectId}"]`)
-    .first()
-    .waitFor();
+  await page.locator(`a[href="/projects/${body.projectId}"]`).first().waitFor();
   // Choosing New project again starts a clean form.
   await page.getByRole("link", { name: "New project", exact: true }).click();
   await page
@@ -363,7 +360,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
     await page
       .getByRole("link", { name: "Set discovery credential" })
       .getAttribute("href"),
-    "/app/settings#github-discovery",
+    "/settings#github-discovery",
   );
   // With no profiles the lead is chosen by creating one in place, never by leaving setup.
   await page.getByRole("group", { name: "New lead agent" }).waitFor();
@@ -1122,7 +1119,7 @@ test("Setup's inline lead agent asks only for a name and runtime, and Settings â
   const project = sent.find((c) => c.type === "project.create");
   assert.equal(project?.leadProfileId, profile?.profileId);
   // The deferred fields are offered where the profile is configured.
-  await page.goto(`${web.origin}/app/profiles/${profile?.profileId}/settings`);
+  await page.goto(`${web.origin}/profiles/${profile?.profileId}/settings`);
   await page.getByLabel("Summary", { exact: true }).waitFor();
   await page
     .getByLabel(/instructions/i)
@@ -1357,7 +1354,7 @@ test("Setup replaces the form with the ready check, focuses it and keeps the fir
   const projectId = String(
     sent.find((c) => c.type === "project.create")?.projectId,
   );
-  await page.locator(`a[href="/app/projects/${projectId}"]`).first().waitFor();
+  await page.locator(`a[href="/projects/${projectId}"]`).first().waitFor();
   assert.equal(await heading.innerText(), "Set up your first project");
   assert.equal(
     await page

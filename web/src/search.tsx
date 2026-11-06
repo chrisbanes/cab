@@ -79,9 +79,8 @@ const returnsToItem = (origin: unknown) => {
   if (typeof origin !== "string") return false;
   const url = new URL(origin, location.origin);
   return (
-    (/^\/app\/tasks\/[^/]+$/.test(url.pathname) &&
-      url.pathname !== "/app/tasks/new") ||
-    (url.pathname === "/app/inbox" && Boolean(url.searchParams.get("request")))
+    (/^\/tasks\/[^/]+$/.test(url.pathname) && url.pathname !== "/tasks/new") ||
+    (url.pathname === "/inbox" && Boolean(url.searchParams.get("request")))
   );
 };
 type Filters = {
@@ -202,7 +201,7 @@ export function Search({
       p.set("after", String(new Date(`${f.after}T00:00:00`).getTime()));
     if (f.before)
       p.set("before", String(new Date(`${f.before}T23:59:59.999`).getTime()));
-    const next = `/app/search?${p}`;
+    const next = `/search?${p}`;
     // The same search again (a repeated Enter or click) re-reads instead of stacking identical entries.
     if (next === path) {
       resource.refresh();
@@ -471,7 +470,7 @@ export function Search({
                       const p = new URLSearchParams(path.split("?")[1]);
                       if (!data.data.nextCursor) return;
                       p.set("cursor", data.data.nextCursor);
-                      navigate(`/app/search?${p}`);
+                      navigate(`/search?${p}`);
                     }}
                   >
                     Next retained matches

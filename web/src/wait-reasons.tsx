@@ -40,15 +40,15 @@ export interface WaitProps {
 
 const linkHref = (link: WaitLink, taskId: string | null) =>
   link.kind === "task"
-    ? `/app/tasks/${link.id}`
+    ? `/tasks/${link.id}`
     : link.kind === "request"
       ? // Request waits are approvals; they are decided in the task's request view.
-        `/app/tasks/${taskId}?request=${encodeURIComponent(link.id)}`
+        `/tasks/${taskId}?request=${encodeURIComponent(link.id)}`
       : link.kind === "source"
         ? link.url
         : link.kind === "recovery"
-          ? `/app/assignments/${link.assignmentId}/recovery`
-          : "/app/tasks?state=Running&ready=any";
+          ? `/assignments/${link.assignmentId}/recovery`
+          : "/tasks?state=Running&ready=any";
 
 /** An assignment whose recovery page a hold line links. */
 export interface RecoveryAssignment {
@@ -141,7 +141,7 @@ function HoldList({
               assignments.map((a) => (
                 <a
                   key={a.assignmentId}
-                  href={`/app/assignments/${a.assignmentId}/recovery`}
+                  href={`/assignments/${a.assignmentId}/recovery`}
                 >
                   {assignments.length === 1
                     ? "Recovery evidence"

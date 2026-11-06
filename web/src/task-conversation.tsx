@@ -618,7 +618,7 @@ function Entry({
           </p>
           <ActionLink
             variant="secondary"
-            href={`/app/tasks/${ctx.taskId}?section=review&result=${entry.resultId}`}
+            href={`/tasks/${ctx.taskId}?section=review&result=${entry.resultId}`}
           >
             Open result
           </ActionLink>

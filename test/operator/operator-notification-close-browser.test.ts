@@ -57,7 +57,7 @@ test("Inbox read closes notifications for resolved requests by tag and nothing e
   const page = await context.newPage();
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator(".inbox-row").first().waitFor();

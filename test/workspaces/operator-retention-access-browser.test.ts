@@ -193,7 +193,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page.clock.pauseAt(new Date(clockStart.getTime() + 1000));
   } else await page.clock.install();
   page.setDefaultTimeout(retentionActionMs);
-  await page.goto(`${web.origin}/app/search`);
+  await page.goto(`${web.origin}/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await searchRecords(page, "Ancient decision", {

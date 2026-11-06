@@ -933,7 +933,7 @@ export function TaskWorkspace({
     const leave = (event: Event) => {
       if (
         (event.target as Element | null)?.closest(
-          event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/app"]',
+          event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/"]',
         )
       ) {
         captureRef.current();
@@ -1530,7 +1530,7 @@ export function TaskWorkspace({
           Task material is unavailable. Exact historical targets are not
           replaced with current records.
         </p>
-        <ActionLink href="/app/tasks">All tasks</ActionLink>
+        <ActionLink href="/tasks">All tasks</ActionLink>
       </section>
     );
   const review = data.review,
@@ -1677,7 +1677,7 @@ export function TaskWorkspace({
           .map((r) => (
             <p key={r.resultId}>
               <ActionLink
-                href={`/app/tasks/${taskId}?section=review&assignment=${a.assignmentId}&result=${r.resultId}`}
+                href={`/tasks/${taskId}?section=review&assignment=${a.assignmentId}&result=${r.resultId}`}
               >
                 Open exact assignment result {r.resultId}
               </ActionLink>
@@ -2319,7 +2319,7 @@ export function TaskWorkspace({
               ) : (
                 <ActionLink
                   variant="secondary"
-                  href={`/app/tasks/${taskId}?request=${q.interactionId}`}
+                  href={`/tasks/${taskId}?request=${q.interactionId}`}
                 >
                   {q.kind === "approval"
                     ? "Review material & decide"
@@ -2349,7 +2349,7 @@ export function TaskWorkspace({
               ) && (
                 <ActionLink
                   variant="secondary"
-                  href={`/app/tasks/${taskId}?section=changes`}
+                  href={`/tasks/${taskId}?section=changes`}
                 >
                   Settle handback
                 </ActionLink>
@@ -2375,7 +2375,7 @@ export function TaskWorkspace({
             </p>
             <ActionLink
               variant="secondary"
-              href={`/app/tasks/${taskId}?section=reply`}
+              href={`/tasks/${taskId}?section=reply`}
             >
               Message the lead
             </ActionLink>
@@ -2411,7 +2411,7 @@ export function TaskWorkspace({
           !data.execution.holds.uncertainty && (
             <ActionLink
               variant="secondary"
-              href={`/app/tasks/${taskId}?section=execution`}
+              href={`/tasks/${taskId}?section=execution`}
             >
               Inspect uncertain execution
             </ActionLink>
@@ -2452,7 +2452,7 @@ export function TaskWorkspace({
           workspace={workspace ?? null}
           onChanged={refreshAll}
           holds={holdLines(data.execution.holds, data.taskHold)}
-          executionHref={`/app/tasks/${taskId}?section=execution`}
+          executionHref={`/tasks/${taskId}?section=execution`}
           assignments={data.assignments}
         />
         <TaskUnstack
@@ -2575,7 +2575,7 @@ export function TaskWorkspace({
             {data.project?.archived
               ? "This project is archived. Tasks and history are read-only."
               : "Project lifecycle is unavailable; writes are disabled."}{" "}
-            <a href={`/app/projects/${data.task.projectId}/settings`}>
+            <a href={`/projects/${data.task.projectId}/settings`}>
               Project settings
             </a>
           </p>
@@ -2751,7 +2751,7 @@ export function TaskWorkspace({
                           <p className="metadata">
                             <ActionLink
                               variant="secondary"
-                              href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
+                              href={`/tasks/${taskId}?section=changes&result=${selected.resultId}`}
                               onClick={(event) => {
                                 if (!wide || !isPlainClick(event)) return;
                                 event.preventDefault();

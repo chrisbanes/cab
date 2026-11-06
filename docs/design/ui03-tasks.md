@@ -1,9 +1,9 @@
 # UI03 task views and composer
 
-The React operator provides the `/app` attention overview, `/app/tasks` and
-`/app/projects/:id` List/Board views, and the `/app/tasks/new` composer. One
+The React operator provides the `/` attention overview, `/tasks` and
+`/projects/:id` List/Board views, and the `/tasks/new` composer. One
 complete aggregate feeds both presentations and their shared URL filters. Rows and
-cards open the task workspace at `/app/tasks/:id`; Inbox is `/app/inbox`. Project
+cards open the task workspace at `/tasks/:id`; Inbox is `/inbox`. Project
 controls, local task configuration, Runtime and Coordination remain reachable at
 their retained destinations.
 

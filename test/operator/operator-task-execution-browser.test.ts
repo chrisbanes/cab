@@ -73,7 +73,7 @@ for (const engine of [
       });
 
       // The header's Execution opens the tab in place.
-      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
       await page
         .locator(".task-header-actions")
         .getByRole("link", { name: "Execution", exact: true })
@@ -88,9 +88,7 @@ for (const engine of [
         await execution
           .getByRole("link", { name: "Task-scoped lead execution" })
           .getAttribute("href")
-          .then(
-            (h) => h === `/app/tasks/${a.taskId}?assignment=${a.assignmentId}`,
-          ),
+          .then((h) => h === `/tasks/${a.taskId}?assignment=${a.assignmentId}`),
       );
       await execution
         .getByText("No recovery records are recorded for this task.", {
@@ -305,7 +303,7 @@ for (const engine of [
         page,
         web.origin,
         web.password,
-        `/app/tasks/${a.taskId}?section=execution`,
+        `/tasks/${a.taskId}?section=execution`,
       );
       const execution = page.locator("section#execution");
       await execution.getByText("Stopping; effects may continue").waitFor();
@@ -419,7 +417,7 @@ for (const engine of [
         if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
           commands.push(r.postDataJSON());
       });
-      const recovery = `/app/assignments/${a.assignmentId}/recovery`;
+      const recovery = `/assignments/${a.assignmentId}/recovery`;
       await signIn(page, web.origin, web.password, recovery);
       const inspect = page.getByRole("link", {
         name: "Inspect assignment to apply current instructions",
@@ -485,9 +483,7 @@ for (const engine of [
       assert.equal(await facts.getAttribute("open"), null);
       assert.deepEqual(commands, []);
 
-      await page.goto(
-        `${web.origin}/app/tasks/${a.taskId}?section=assignments`,
-      );
+      await page.goto(`${web.origin}/tasks/${a.taskId}?section=assignments`);
       await page.locator("#assignments").waitFor();
       assert.equal(
         await page
@@ -501,7 +497,7 @@ for (const engine of [
       );
       for (const id of ["", foreignAssignment]) {
         await page.goto(
-          `${web.origin}/app/tasks/${a.taskId}?section=assignments&inspectAssignment=${id}`,
+          `${web.origin}/tasks/${a.taskId}?section=assignments&inspectAssignment=${id}`,
         );
         await page
           .getByText("The linked assignment is unavailable in this task.")

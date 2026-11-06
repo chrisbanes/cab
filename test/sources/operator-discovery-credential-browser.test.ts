@@ -22,7 +22,7 @@ test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) =
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, web, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
@@ -67,13 +67,13 @@ test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) =
   );
   await captureBrowserEvidence(page, "1366-settings-discovery-gh");
   // Setup lists repositories read with the gh login.
-  await page.goto(`${web.origin}/app/settings/projects/new`);
+  await page.goto(`${web.origin}/settings/projects/new`);
   await page
     .getByText(
       "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   // Clear is the reverse path.
   const clear = commandRequest(page);
   await row.getByRole("button", { name: "Clear", exact: true }).click();
@@ -88,7 +88,7 @@ test("Settings shows each GitHub CLI detection state without an action", async (
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
@@ -119,7 +119,7 @@ test("Settings reports a missing gh as not installed", async (_t, journey) => {
   // The fixture's default gh path does not exist.
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
   await row.getByText("GitHub discovery credential · not configured").waitFor();
@@ -139,7 +139,7 @@ test("Settings reports a missing gh as not installed", async (_t, journey) => {
 test("Settings sets an environment variable by name and reconciles an unknown clear", async (_t, journey) => {
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
   let sent = 0;
@@ -330,7 +330,7 @@ test("The discovery credential row fits a phone", async (_t, journey) => {
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
     viewport: { width: 390, height: 844 },
   });
@@ -400,7 +400,7 @@ test("Settings offers the signed-in GitHub CLI login in one click", async (_t, j
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = credentialRow(page);
@@ -483,7 +483,7 @@ test("Settings holds Set while the one-click save is pending", async (_t, journe
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = credentialRow(page);
@@ -527,7 +527,7 @@ test("Settings reconciles an unknown one-click outcome", async (_t, journey) => 
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = credentialRow(page);
@@ -568,7 +568,7 @@ test("Readiness offers the detected GitHub CLI login and Run again changes nothi
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = readinessRow(page);
@@ -656,7 +656,7 @@ test("Readiness keeps the existing fix line unless a gh login is signed in", asy
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = readinessRow(page);
@@ -682,7 +682,7 @@ test("Readiness keeps the existing fix line unless a gh login is signed in", asy
 test("Readiness keeps the fix line when gh is not installed", async (_t, journey) => {
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
   });
   const row = readinessRow(page);
   await row.getByText("Not configured", { exact: true }).waitFor();
@@ -695,7 +695,7 @@ test("Readiness keeps the fix line for a configured but unreadable credential", 
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   f.service.domain().execute({
@@ -718,7 +718,7 @@ test("Readiness reconciles an unknown GitHub CLI login outcome", async (_t, jour
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = readinessRow(page);
@@ -735,7 +735,7 @@ test("Readiness reconciles an unknown GitHub CLI login outcome", async (_t, jour
     assert.equal(await offerButton(page).count(), 0);
     // Leaving and returning keeps the unknown outcome and offers nothing to resend.
     await page.getByRole("link", { name: "Tasks", exact: true }).click();
-    await page.waitForURL("**/app/tasks");
+    await page.waitForURL("**/tasks");
     await page.goBack();
     await row.getByRole("button", { name: "Check whether it saved" }).waitFor();
     assert.equal(await offerButton(page).count(), 0);
@@ -758,7 +758,7 @@ test("Readiness keeps the fix line when the discovery read fails", async (_t, jo
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = readinessRow(page);
@@ -781,7 +781,7 @@ test("Readiness finishes an offer sent before the page was left and re-entered",
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = readinessRow(page);
@@ -796,7 +796,7 @@ test("Readiness finishes an offer sent before the page was left and re-entered",
   await offerButton(page).click();
   // The page is left and re-entered while the save is still in flight.
   await page.getByRole("link", { name: "Tasks", exact: true }).click();
-  await page.waitForURL("**/app/tasks");
+  await page.waitForURL("**/tasks");
   await page.goBack();
   await row.waitFor();
   release();
@@ -815,7 +815,7 @@ test("Readiness leaves focus alone when the reader moved on before the offer fin
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = readinessRow(page);
@@ -855,7 +855,7 @@ test("A Settings one-click save that is not confirmed holds the Readiness offer"
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const posts = commandPosts(page);
@@ -888,7 +888,7 @@ test("A Readiness one-click save that is not confirmed holds the Settings creden
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = credentialRow(page);
@@ -936,7 +936,7 @@ test("A Settings form save that is not confirmed holds the Readiness offer", asy
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const row = credentialRow(page);
@@ -970,7 +970,7 @@ test("A Settings one-click save that is not confirmed holds the setup offer", as
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
     discovery: false,
-    path: "/app/settings",
+    path: "/settings",
     ghExecutable: gh.executable,
   });
   const posts = commandPosts(page);

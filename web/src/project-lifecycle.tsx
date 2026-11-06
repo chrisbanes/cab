@@ -367,7 +367,7 @@ export function DeletedProject(
         check={() => deletion.reconcile(p.client, p.session.csrfToken)}
         success="Original deletion receipt confirmed."
       />
-      <a href="/app/settings">Projects</a>
+      <a href="/settings">Projects</a>
     </section>
   );
 }

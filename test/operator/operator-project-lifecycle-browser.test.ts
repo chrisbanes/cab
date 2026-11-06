@@ -27,8 +27,8 @@ for (const engine of ["chromium", "webkit"] as const) {
       const page = await browser.newPage();
       journey.observe(page);
       page.setDefaultTimeout(5000);
-      const settings = `${web.origin}/app/projects/${f.projectId}/settings`;
-      await signIn(page, web, "/app/settings#projects");
+      const settings = `${web.origin}/projects/${f.projectId}/settings`;
+      await signIn(page, web, "/settings#projects");
       const projects = page.locator("section#projects");
       assert.equal(
         await projects
@@ -40,7 +40,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       await projects
         .getByRole("heading", { name: /^Archive fixture(?:\s|$)/ })
         .waitFor();
-      await page.goto(`${web.origin}/app/tasks/${f.taskId}?section=execution`);
+      await page.goto(`${web.origin}/tasks/${f.taskId}?section=execution`);
       await page
         .getByText(
           "This project is archived. Tasks and history are read-only.",

@@ -81,7 +81,7 @@ const entries: Record<string, Entry> = {
         expectedVersion: Number(d.task(taskId).version),
       });
     },
-    path: ({ taskId }) => `/app/tasks/${taskId}`,
+    path: ({ taskId }) => `/tasks/${taskId}`,
     first: (page) => [
       waits(page).getByText("Waiting · Project paused", { exact: true }),
       waits(page).getByRole("button", { name: "Fix: Resume project" }),
@@ -99,7 +99,7 @@ const entries: Record<string, Entry> = {
   },
   "getting-started Project row": {
     // No task: no turn starts, so the card and its outcome line stay mounted.
-    path: () => "/app",
+    path: () => "/",
     first: (page) => [
       checklist(page),
       checklist(page).getByText(
@@ -128,7 +128,7 @@ const entries: Record<string, Entry> = {
         ready: true,
       });
     },
-    path: ({ projectId }) => `/app/projects/${projectId}`,
+    path: ({ projectId }) => `/projects/${projectId}`,
     first: (page) => [
       banner(page),
       page.getByRole("button", { name: "Resume project", exact: true }),
@@ -141,7 +141,7 @@ const entries: Record<string, Entry> = {
     },
   },
   composer: {
-    path: ({ projectId }) => `/app/tasks/new?project=${projectId}`,
+    path: ({ projectId }) => `/tasks/new?project=${projectId}`,
     first: (page) => [
       verdict(page),
       verdict(page).getByText("Will wait", { exact: true }),

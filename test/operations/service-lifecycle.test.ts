@@ -952,7 +952,7 @@ test("upgrade stops, re-renders, starts and checks readiness in order, reporting
   assert.equal(report.version, "0.2.0");
   assert.deepEqual(
     new Set(f.launchd.fetched),
-    new Set([`http://127.0.0.1:${f.options.port}/app`]),
+    new Set([`http://127.0.0.1:${f.options.port}/`]),
   );
   assert.deepEqual(report.readiness, [
     { id: "codex-login", status: "pass" },
@@ -1235,7 +1235,7 @@ test("a stalled readiness read fails at readiness on the deadline and stops the 
   assert.ok(signals.length > 2 && signals.slice(1).every((s) => s.aborted));
 });
 
-test("a stalled /app response fails install at health on the deadline", {
+test("a stalled / response fails install at health on the deadline", {
   timeout: 20_000,
 }, async (t) => {
   const f = await setup(t);
@@ -1721,11 +1721,11 @@ test("install TARBALL unpacks, asks for the password, signs in, runs doctor and 
   assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, undefined]]);
   assert.ok(result.cli.signals[0] instanceof AbortSignal);
   assert.deepEqual(result.cli.calls, ["login", "doctor local"]);
-  assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+  assert.deepEqual(f.launchd.opened, [`${f.origin}/`]);
   const output = JSON.parse(result.stdout);
   assert.equal(output.ok, true);
   assert.equal(output.connection, "local");
-  assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
+  assert.match(result.stderr, new RegExp(`Open ${f.origin}/`));
   assert.doesNotMatch(result.stderr + result.stdout, /test-password|ens_/);
 });
 
@@ -1749,7 +1749,7 @@ test("a default install uses local access: no sign-in, mint or Keychain, doctor 
     assert.deepEqual(cli.logins, []);
     assert.deepEqual(cli.calls, [`doctor local ${f.recordPath}`]);
     assert.deepEqual(cli.selections, [undefined]);
-    assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+    assert.deepEqual(f.launchd.opened, [`${f.origin}/`]);
     const output = JSON.parse(result.stdout);
     assert.equal(output.accessMode, "local");
     assert.equal(output.connection, null);
@@ -1802,7 +1802,7 @@ test("a local install uses a saved selection unchanged and reports one it cannot
     assert.match(result.stderr, /was not used or changed/);
     assert.match(result.stderr, /--local-installation /);
     assert.ok(result.stderr.includes(f.recordPath));
-    assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+    assert.deepEqual(f.launchd.opened, [`${f.origin}/`]);
   }
 });
 
@@ -2062,8 +2062,8 @@ test("a doctor that never answers is abandoned on its bound and the URL is still
   t.after(() => cli.releaseDoctor());
   const result = await f.run({}, cli);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
-  assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+  assert.match(result.stderr, new RegExp(`Open ${f.origin}/`));
+  assert.deepEqual(f.launchd.opened, [`${f.origin}/`]);
 });
 
 test("an interrupt while signing in leaves the service installed", async (t) => {
@@ -2515,14 +2515,12 @@ test("daemon mode re-run verifies the installed plist and job against the record
   assert.equal(output.started, true);
   assert.deepEqual(output.steps, []);
   assert.equal(output.plist, f.installed);
-  assert.deepEqual(f.launchd.fetched, [
-    `http://127.0.0.1:${f.options.port}/app`,
-  ]);
+  assert.deepEqual(f.launchd.fetched, [`http://127.0.0.1:${f.options.port}/`]);
   // A verified daemon completes with local access to its own record; it never signs in.
   assert.match(verified.stderr, /local access through this OS account/);
   assert.ok(verified.stderr.includes(f.recordPath));
   assert.doesNotMatch(verified.stderr, /auth login/);
-  assert.match(verified.stderr, /Open http:\/\/127\.0\.0\.1:\d+\/app/);
+  assert.match(verified.stderr, /Open http:\/\/127\.0\.0\.1:\d+\//);
   assert.deepEqual(f.launchd.mutations(), []);
   assert.deepEqual(f.launchd.requests, []);
   // Verifying never opens the browser, even when open is the default.
@@ -3380,7 +3378,7 @@ test("daemon mode record update failure leaves the record intact, fails with a f
   );
   assert.doesNotMatch(verify.stderr, /EISDIR|EACCES|EPERM|permission denied/i);
   assert.equal(verify.stderr.includes(f.stateDir), false);
-  assert.deepEqual(f.launchd.fetched, [], "it did not go on to wait for /app");
+  assert.deepEqual(f.launchd.fetched, [], "it did not go on to wait for /");
 
   const uninstall = await f.uninstall();
   assert.equal(uninstall.code, 1);
@@ -3509,7 +3507,7 @@ test("daemon mode verify never reports started for a loaded job without a proces
     assert.equal(existsSync(f.recordPath), true, name);
     assert.deepEqual(f.launchd.mutations(), [], name);
   }
-  // A foreign listener never gets /app asked of it: only the job's own pid is probed.
+  // A foreign listener never gets / asked of it: only the job's own pid is probed.
   const f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   runSudoSteps(f);
@@ -3545,11 +3543,11 @@ test("daemon mode a pid that appears after the job was seen without one is recor
   assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
 });
 
-test("daemon mode verify holds when the job's process changes while it waits for /app", async (t) => {
+test("daemon mode verify holds when the job's process changes while it waits for /", async (t) => {
   const f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   runSudoSteps(f);
-  // The job exits and launchd starts another process while the first /app answer is read.
+  // The job exits and launchd starts another process while the first / answer is read.
   f.launchd.overrides = {
     fetch: async () => {
       f.launchd.systemJobs.set(f.options.label, {
@@ -3568,7 +3566,7 @@ test("daemon mode verify holds when the job's process changes while it waits for
   );
 });
 
-test("daemon mode verify fails when the job's own process listens but never serves /app", async (t) => {
+test("daemon mode verify fails when the job's own process listens but never serves /", async (t) => {
   const f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   runSudoSteps(f);
@@ -3578,7 +3576,7 @@ test("daemon mode verify fails when the job's own process listens but never serv
   assert.equal(result.stdout, "", "never reported started");
   assert.match(
     JSON.parse(result.stderr).error,
-    /did not serve \/app within 120 s/,
+    /did not serve \/ within 120 s/,
   );
   assert.equal(existsSync(f.recordPath), true);
   assert.ok(f.launchd.fetched.length > 0, "its own process was asked");
@@ -3976,7 +3974,7 @@ test("daemon mode verify re-reads the full identity after the last wait and neve
     const f = await setup(t);
     assert.equal((await f.installDaemon()).code, 0, name);
     runSudoSteps(f);
-    // The change happens while /app is being read, after the identity was first observed.
+    // The change happens while / is being read, after the identity was first observed.
     f.launchd.overrides = {
       fetch: async () => {
         change(f);
@@ -4013,7 +4011,7 @@ test("daemon mode verify re-reads the full identity after the last wait and neve
   assert.deepEqual(
     early.launchd.fetched,
     [],
-    "the replacement was never asked for /app",
+    "the replacement was never asked for /",
   );
 
   // A reused pid is recorded as the process the job runs now; the original, whose exit the

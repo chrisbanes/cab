@@ -93,13 +93,13 @@ test("long approval material stays within the phone app viewport", async (_t, jo
   });
   journey.observe(phone);
   phone.setDefaultTimeout(5000);
-  await phone.goto(`${web.origin}/app`);
+  await phone.goto(`${web.origin}/`);
   await phone.getByLabel("Password", { exact: true }).fill(web.password);
   await phone.getByRole("button", { name: "Sign in", exact: true }).click();
   await phone.locator("main.page h1").waitFor();
   // The approval's long material stays inside a phone viewport on its in-app review.
   await phone.goto(
-    `${web.origin}/app/tasks/${taskId}?request=${approvalInteractionId}`,
+    `${web.origin}/tasks/${taskId}?request=${approvalInteractionId}`,
   );
   await phone
     .getByRole("button", { name: "Approve this exact material" })
@@ -148,7 +148,7 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks?view=board&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&ready=any`);
   await page.getByLabel("Password", { exact: true }).fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator('[data-slot="card"]').first().waitFor();

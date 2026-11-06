@@ -181,7 +181,7 @@ for (const viewport of viewports)
       await page
         .getByRole("heading", { name: "Overview", exact: true })
         .waitFor();
-      assert.equal(new URL(page.url()).pathname, "/app");
+      assert.equal(new URL(page.url()).pathname, "/");
     } finally {
       release();
     }
@@ -199,14 +199,14 @@ for (const viewport of viewports)
       leadProfileId: null,
     });
     // Cold visit: sign-in without any expiry text.
-    await page.goto(`${web.origin}/app/tasks`);
+    await page.goto(`${web.origin}/tasks`);
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     assert.equal(await page.getByText(/session expired/i).count(), 0);
     await submitPassword(page, web.password);
     await page
       .getByRole("heading", { name: "All tasks", exact: true })
       .waitFor();
-    await page.goto(`${web.origin}/app/tasks/new`);
+    await page.goto(`${web.origin}/tasks/new`);
     const title = page.getByLabel("Task title");
     await title.fill("Private draft title that must not survive expiry");
     f.advanceClock(61_000);
@@ -230,7 +230,7 @@ for (const viewport of viewports)
         "Unfinished task input is offered for recovery on this device.",
       )
       .waitFor();
-    assert.equal(new URL(page.url()).pathname, "/app/tasks/new");
+    assert.equal(new URL(page.url()).pathname, "/tasks/new");
     assert.doesNotMatch(await page.content(), /Private draft title/);
     await captureBrowserEvidence(page, `${viewport.name}-signin-expired`);
     await submitPassword(page, web.password);
@@ -238,7 +238,7 @@ for (const viewport of viewports)
     await page
       .getByRole("button", { name: "Discard unfinished input", exact: true })
       .click();
-    assert.equal(new URL(page.url()).pathname, "/app/tasks/new");
+    assert.equal(new URL(page.url()).pathname, "/tasks/new");
     assert.equal(await page.getByLabel("Task title").inputValue(), "");
     assert.equal(await page.getByText(/session expired/i).count(), 0);
   });
@@ -247,7 +247,7 @@ for (const viewport of viewports)
   test(`unknown addresses render Page not found inside the shell ${viewport.name}`, async (_t, journey) => {
     const { web, page } = await launch(journey, viewport);
     // Signed out: sign-in first, then the same address shows Page not found.
-    await page.goto(`${web.origin}/app/no-such-page`);
+    await page.goto(`${web.origin}/no-such-page`);
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     await submitPassword(page, web.password);
     const heading = page.getByRole("heading", {
@@ -255,9 +255,9 @@ for (const viewport of viewports)
       exact: true,
     });
     await heading.waitFor();
-    assert.equal(new URL(page.url()).pathname, "/app/no-such-page");
+    assert.equal(new URL(page.url()).pathname, "/no-such-page");
 
-    const response = await page.goto(`${web.origin}/app/no-such-page`);
+    const response = await page.goto(`${web.origin}/no-such-page`);
     assert.equal(response?.status(), 404);
     await heading.waitFor();
     await page
@@ -293,11 +293,11 @@ for (const viewport of viewports)
     await page
       .getByRole("heading", { name: "Overview", exact: true })
       .waitFor();
-    assert.equal(new URL(page.url()).pathname, "/app");
+    assert.equal(new URL(page.url()).pathname, "/");
     assert.equal(await page.title(), "Overview · cab");
 
     // A well-formed address for a task that does not exist names the task, not projects.
-    await page.goto(`${web.origin}/app/tasks/${randomUUID()}`);
+    await page.goto(`${web.origin}/tasks/${randomUUID()}`);
     await page.getByText("Task not found.", { exact: true }).waitFor();
     assert.equal(await page.title(), "Task · cab");
 
@@ -306,15 +306,15 @@ for (const viewport of viewports)
     await page
       .getByRole("heading", { name: "Overview", exact: true })
       .waitFor();
-    assert.equal(new URL(page.url()).pathname, "/app");
+    assert.equal(new URL(page.url()).pathname, "/");
   });
 
 test("a malformed project id renders Page not found without a task action", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[0]);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
-  await page.goto(`${web.origin}/app/projects/not-a-uuid`);
+  await page.goto(`${web.origin}/projects/not-a-uuid`);
   await page
     .getByRole("heading", { name: "Page not found", exact: true })
     .waitFor();
@@ -329,10 +329,10 @@ test("a malformed project id renders Page not found without a task action", asyn
 
 test("an unknown settings address keeps the phone menu header, not a detail header", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[1]);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
-  await page.goto(`${web.origin}/app/settings/typo`);
+  await page.goto(`${web.origin}/settings/typo`);
   await page
     .getByRole("heading", { name: "Page not found", exact: true })
     .waitFor();
@@ -345,7 +345,7 @@ const menuNames = async (menu: import("playwright").Locator) =>
 
 test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-out", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[0]);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   const sidebar = page.locator(".sidebar");
@@ -379,7 +379,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     await menu
       .getByRole("menuitem", { name: "Settings", exact: true })
       .getAttribute("href"),
-    "/app/settings",
+    "/settings",
   );
   // Runtime is reached from Settings, not from the account menu.
   assert.equal(
@@ -390,7 +390,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     await menu
       .getByRole("menuitem", { name: "Getting started", exact: true })
       .getAttribute("href"),
-    "/app/getting-started",
+    "/getting-started",
   );
   await menu.getByRole("menuitem", { name: "Sign out", exact: true }).waitFor();
   assert.deepEqual(
@@ -491,7 +491,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await menu.waitFor();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  await page.waitForURL("**/app/getting-started");
+  await page.waitForURL("**/getting-started");
   await menu.waitFor({ state: "detached" });
   await page.keyboard.press("Tab");
   assert.equal(
@@ -568,7 +568,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
 
 test("phone drawer shows the account group with Settings, Getting started and Sign out", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[1]);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   const open = () =>
@@ -594,16 +594,16 @@ test("phone drawer shows the account group with Settings, Getting started and Si
     0,
   );
   await dialog.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.waitForURL("**/app/settings");
+  await page.waitForURL("**/settings");
   // Runtime stays reachable from Settings, and Back returns there.
   await page.getByRole("link", { name: "Open runtime", exact: true }).click();
-  await page.waitForURL("**/app/settings/runtime");
+  await page.waitForURL("**/settings/runtime");
   const back = page.getByRole("link", {
     name: "Back to Settings",
     exact: true,
   });
   await back.click();
-  await page.waitForURL("**/app/settings");
+  await page.waitForURL("**/settings");
   await open();
   await page
     .getByRole("dialog")
@@ -632,7 +632,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
         Object.assign(check, { status: "pass", reason: null, fix: null });
     await route.fulfill({ response, json: body });
   });
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   const checklist = page.getByRole("region", { name: "Get cab running" });
   await checklist.waitFor();
@@ -645,7 +645,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   await menu
     .getByRole("menuitem", { name: "Getting started", exact: true })
     .click();
-  await page.waitForURL("**/app/getting-started");
+  await page.waitForURL("**/getting-started");
   await page
     .getByRole("heading", { name: "Getting started", exact: true })
     .waitFor();
@@ -766,7 +766,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   while (f.runtime.turns < 1 && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(f.runtime.turns, 1);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   await page.getByRole("link", { name: "First task" }).first().waitFor();
   assert.equal(await checklist.count(), 0);
@@ -787,7 +787,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   assert.equal(await checklist.getByRole("listitem").count(), 1);
   assert.equal(
     await claude.getByRole("link", { name: "Add Claude" }).getAttribute("href"),
-    "/app/settings/runtime#add-claude",
+    "/settings/runtime#add-claude",
   );
   await f.service.stopTask(taskId);
 });
@@ -842,7 +842,7 @@ for (const viewport of viewports)
   test(`Home first run shows only the getting-started card at ${viewport.width}`, async (_t, journey) => {
     const { web, page } = await launch(journey, viewport);
     await routeReadiness(page, { pass: true });
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     await submitPassword(page, web.password);
     const card = await assertOnlyCard(page);
     await card.getByText("1 of 3 required steps done").waitFor();
@@ -850,7 +850,7 @@ for (const viewport of viewports)
       await row(card, "Project")
         .getByRole("link", { name: "Create project" })
         .getAttribute("href"),
-      "/app/settings/projects/new",
+      "/settings/projects/new",
     );
     const first = row(card, "First task").getByRole("button", {
       name: "Create task",
@@ -884,7 +884,7 @@ for (const viewport of viewports)
     );
     // Playwright treats aria-disabled as not actionable; force the click a pointer user makes.
     await first.click({ force: true });
-    assert.equal(new URL(page.url()).pathname, "/app");
+    assert.equal(new URL(page.url()).pathname, "/");
     // The action sits below its explanation on a phone and nothing scrolls sideways.
     const boxes = await page.evaluate(() => {
       const li = document.querySelector<HTMLElement>(
@@ -907,7 +907,7 @@ for (const viewport of viewports)
 test("Home keeps the card until a task starts a turn, then shows the board", async (_t, journey) => {
   const { f, web, page } = await launch(journey, viewports[0]);
   await routeReadiness(page, { pass: true });
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await assertOnlyCard(page);
 
@@ -920,7 +920,7 @@ test("Home keeps the card until a task starts a turn, then shows the board", asy
     await row(card, "First task")
       .getByRole("link", { name: "Create task" })
       .getAttribute("href"),
-    `/app/tasks/new?project=${firstProject}`,
+    `/tasks/new?project=${firstProject}`,
   );
   // A second project without a lead does not undo Done, and still no board.
   addProject(f, "second-app", null);
@@ -951,7 +951,7 @@ test("Home keeps the card until a task starts a turn, then shows the board", asy
   journey.observe(other);
   other.setDefaultTimeout(5000);
   await routeReadiness(other, { pass: true });
-  await other.goto(`${web.origin}/app`);
+  await other.goto(`${web.origin}/`);
   await submitPassword(other, web.password);
   await other.getByRole("region", { name: "Across your projects" }).waitFor();
   assert.equal(
@@ -979,7 +979,7 @@ for (const viewport of viewports)
       });
       await route.fulfill({ response, json: body });
     });
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     await submitPassword(page, web.password);
     const card = await assertOnlyCard(page);
     const github = row(card, "GitHub");
@@ -992,9 +992,9 @@ for (const viewport of viewports)
       await github
         .getByRole("link", { name: "Set discovery credential" })
         .getAttribute("href"),
-      "/app/settings#github-discovery",
+      "/settings#github-discovery",
     );
-    await page.goto(`${web.origin}/app/getting-started`);
+    await page.goto(`${web.origin}/getting-started`);
     await page
       .getByRole("region", { name: "Get cab running" })
       .getByText(/@fixture-user/)
@@ -1003,7 +1003,7 @@ for (const viewport of viewports)
       await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
       0,
     );
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     const homeCard = await assertOnlyCard(page);
     // Home's own login read has landed, so only setup's reads count below.
     await row(homeCard, "GitHub")
@@ -1012,7 +1012,7 @@ for (const viewport of viewports)
     const project = row(homeCard, "Project");
     await settleGhRead(page, async () => {
       await project.getByRole("link", { name: "Create project" }).click();
-      await page.waitForURL("**/app/settings/projects/new");
+      await page.waitForURL("**/settings/projects/new");
     });
     // Step 3 starts collapsed and already offers the login once, without Add a repository.
     await page
@@ -1033,7 +1033,7 @@ test("Home first run when the checklist reads fail", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[0]);
   // The workspace read decides what Home shows: without it, neither the card nor the board.
   await page.route("**/api/operator/workspace", (route) => route.abort());
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByText("Projects are unavailable. Try again.").waitFor();
   assert.equal(
@@ -1075,7 +1075,7 @@ test("Home first run follows readiness and project changes", async (_t, journey)
   const { f, web, page } = await launch(journey, viewports[0]);
   const codex = { pass: false };
   await routeReadiness(page, codex);
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   let card = await assertOnlyCard(page);
   await row(card, "Runtime").getByText("Next", { exact: true }).waitFor();
@@ -1127,7 +1127,7 @@ test("System theme follows the OS before the first render and live, with no inli
       observer.disconnect();
     }).observe(document, { childList: true, subtree: true });
   });
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   assert.deepEqual(await themeState(page), {
@@ -1156,7 +1156,7 @@ test("System theme follows the OS before the first render and live, with no inli
 
 test("account menu Theme: keyboard choice overrides the OS, persists and System removes it", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[0], "dark");
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   const trigger = page.getByRole("button", {
@@ -1222,7 +1222,7 @@ test("account menu Theme: keyboard choice overrides the OS, persists and System 
 
 test("phone drawer Theme group sets, stores and keeps the choice", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[1], "light");
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   const open = async () => {

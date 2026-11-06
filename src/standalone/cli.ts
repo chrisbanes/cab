@@ -248,7 +248,7 @@ export async function main(
         web: new OperatorWebBoundary(bundle, api, readiness),
       });
       const boundPort = await ui.start(port);
-      process.stdout.write(`${operatorAuth.origin}/app\n`);
+      process.stdout.write(`${operatorAuth.origin}/\n`);
       try {
         fatalBackgroundFailure =
           (await waitForServiceExit(service, failureNotification, {

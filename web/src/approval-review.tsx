@@ -115,7 +115,7 @@ export function ApprovalReview({
         {open && (
           <a
             className="metadata approval-review-close"
-            href={`/app/tasks/${taskId}`}
+            href={`/tasks/${taskId}`}
           >
             Leave pending
           </a>
@@ -211,7 +211,7 @@ export function ApprovalReview({
         </div>
       )}
       {!open && (
-        <ActionLink variant="secondary" href={`/app/tasks/${taskId}`}>
+        <ActionLink variant="secondary" href={`/tasks/${taskId}`}>
           Back to overview
         </ActionLink>
       )}

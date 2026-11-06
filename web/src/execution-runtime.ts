@@ -158,7 +158,7 @@ export interface ExecutionNoticeModel {
 
 const runtimeStatusRoute = {
   label: "Runtime status",
-  href: "/app/settings/runtime",
+  href: "/settings/runtime",
 };
 // The Claude token reference is set in the Runtime and recovery section.
 const settingsRoute = {
@@ -167,7 +167,7 @@ const settingsRoute = {
 };
 const recoveryRoute = (a: Assignment) => ({
   label: "Recovery",
-  href: `/app/assignments/${a.assignmentId}/recovery`,
+  href: `/assignments/${a.assignmentId}/recovery`,
 });
 
 /**
@@ -189,7 +189,7 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
       routes: [
         {
           label: "Edit agent",
-          href: `/app/profiles/${a.profileId}/settings`,
+          href: `/profiles/${a.profileId}/settings`,
         },
         runtimeStatusRoute,
       ],

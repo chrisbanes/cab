@@ -37,7 +37,7 @@ export function InboxContext({
     <aside className="inbox-context" aria-label="Task context">
       <section>
         <h2>Task</h2>
-        <a className="inbox-context-task" href={`/app/tasks/${item.taskId}`}>
+        <a className="inbox-context-task" href={`/tasks/${item.taskId}`}>
           {item.taskTitle ?? "Unavailable task"}{" "}
           <ArrowUpRight aria-hidden="true" size={12} />
         </a>

@@ -1238,7 +1238,7 @@ class Service {
   }
 
   /**
-   * Waits for `/app` on the daemon's origin answering 200 while the listener on its port is
+   * Waits for `/` on the daemon's origin answering 200 while the listener on its port is
    * the job's own pid; returns who holds the port when that never happens, and throws the
    * usual health failure when the job's process listens but does not serve.
    */
@@ -1249,17 +1249,14 @@ class Service {
     let listener = "free" as Listener;
     try {
       await this.waitFor(
-        "The service did not serve /app within 120 s",
+        "The service did not serve / within 120 s",
         HEALTH_PROBE_MS,
         async (signal) => {
           listener = await this.listenersAre(expected, configuration.port);
           if (listener !== "ours") return undefined;
-          const response = await this.host.fetch(
-            `${configuration.origin}/app`,
-            {
-              signal,
-            },
-          );
+          const response = await this.host.fetch(`${configuration.origin}/`, {
+            signal,
+          });
           await response.body?.cancel();
           return response.status === 200 ? true : undefined;
         },
@@ -1273,10 +1270,10 @@ class Service {
 
   waitForApp(origin: string) {
     return this.waitFor(
-      "The service did not serve /app within 120 s",
+      "The service did not serve / within 120 s",
       HEALTH_PROBE_MS,
       async (signal) => {
-        const response = await this.host.fetch(`${origin}/app`, { signal });
+        const response = await this.host.fetch(`${origin}/`, { signal });
         await response.body?.cancel();
         return response.status === 200 ? true : undefined;
       },
@@ -1929,7 +1926,7 @@ async function finishDaemonInstall(
 /**
  * Re-run of a daemon install: confirms what launchd and /Library hold against the record.
  * It changes nothing there and writes only the install record, to note the running service
- * process. Running and matching: wait for /app. Otherwise reprint the steps.
+ * process. Running and matching: wait for /. Otherwise reprint the steps.
  */
 async function verifyDaemon(
   service: Service,
@@ -2129,7 +2126,7 @@ async function finishLocalInstall(
   first: FirstRun,
   { selected, problem }: LocalChoice,
 ) {
-  const app = `${service.origin}/app`;
+  const app = `${service.origin}/`;
   const line = (text: string) => service.io.stderr.write(`${text}\n`);
   const interrupted = () => service.io.signal?.aborted === true;
   const local = `--local --local-installation ${shellWord(service.recordPath)}`;
@@ -2183,7 +2180,7 @@ async function finishInstall(
   first: FirstRun,
   { connection, credentialName, credentialActive, sessionOpen }: SignIn,
 ) {
-  const app = `${service.origin}/app`;
+  const app = `${service.origin}/`;
   const line = (text: string) => service.io.stderr.write(`${text}\n`);
   const interrupted = () => service.io.signal?.aborted === true;
   try {

@@ -26,7 +26,7 @@ test("bounded retained provider lists disclose partial coverage on desktop and p
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks/${task.taskId}`);
+  await page.goto(`${web.origin}/tasks/${task.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   // Delivery observation is on the Changes tab.

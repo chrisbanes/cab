@@ -63,7 +63,7 @@ async function start(
         throw new Error("blocked");
       };
     });
-  await signIn(page, web, options.path ?? `/app/tasks/${task.taskId}`);
+  await signIn(page, web, options.path ?? `/tasks/${task.taskId}`);
   return { page, errors, task, other, web };
 }
 
@@ -187,7 +187,7 @@ test("the choice carries to another task without a reload", async (_t, j) => {
   // An in-app link, so the shell navigates without a reload.
   await page.evaluate((id) => {
     const a = document.createElement("a");
-    a.href = `/app/tasks/${id}`;
+    a.href = `/tasks/${id}`;
     a.id = "to-other";
     a.textContent = "to other";
     document.body.append(a);
@@ -206,7 +206,7 @@ test("a link to an inspector section shows it and the choice returns on Back", a
   assert.equal(await inspector(page).count(), 0);
   await page.evaluate((id) => {
     const a = document.createElement("a");
-    a.href = `/app/tasks/${id}?section=brief`;
+    a.href = `/tasks/${id}?section=brief`;
     a.id = "to-brief";
     a.textContent = "to brief";
     document.body.append(a);
@@ -221,7 +221,7 @@ test("a link to an inspector section shows it and the choice returns on Back", a
   assert.equal(await inspector(page).count(), 0);
   // A full load of a deep link shows its section too.
   await page.goto(
-    `${page.url().split("/app/")[0]}/app/tasks/${task.taskId}?section=context`,
+    `${new URL(page.url()).origin}/tasks/${task.taskId}?section=context`,
   );
   await page.locator("#context").waitFor();
   assert.equal(await pressed(page), "false");

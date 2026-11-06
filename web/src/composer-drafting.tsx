@@ -489,7 +489,7 @@ export function DraftWithLead({
                 <>
                   {draftingCopy.noLead}{" "}
                   <a
-                    href={`/app/projects/${encodeURIComponent(input.projectId)}/settings`}
+                    href={`/projects/${encodeURIComponent(input.projectId)}/settings`}
                   >
                     Open project configuration
                   </a>

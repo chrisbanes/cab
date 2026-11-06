@@ -183,7 +183,7 @@ test("the launcher runs the bundled Node from a path with spaces", (t) => {
 
 test("checkOperatorUi fails within its request bound when an asset stalls", async (t) => {
   const server = createServer((request, response) => {
-    if (request.url === "/app")
+    if (request.url === "/")
       response.end('<script src="/assets/index.js"></script>');
     // The asset request never receives a response.
   });
@@ -204,7 +204,7 @@ test("checkOperatorUi fails within its request bound when an asset stalls", asyn
   assert.ok(Date.now() - started < 5000);
 });
 
-test("checkOperatorUi requires the push worker at /app/ with the right headers", async (t) => {
+test("checkOperatorUi requires the push worker at /service-worker.js with the right headers", async (t) => {
   const good = {
     status: 200,
     headers: {
@@ -215,10 +215,10 @@ test("checkOperatorUi requires the push worker at /app/ with the right headers",
   };
   let worker = good;
   const server = createServer((request, response) => {
-    if (request.url === "/app")
+    if (request.url === "/")
       response.end('<script src="/assets/index.js"></script>');
     else if (request.url === "/assets/index.js") response.end("");
-    else if (request.url === "/app/service-worker.js") {
+    else if (request.url === "/service-worker.js") {
       response.writeHead(worker.status, worker.headers);
       response.end(worker.body);
     } else response.writeHead(404).end();
@@ -236,7 +236,7 @@ test("checkOperatorUi requires the push worker at /app/ with the right headers",
   assert.equal(await check(), "/assets/index.js");
   worker = {
     ...good,
-    headers: { ...good.headers, "service-worker-allowed": "/app/" },
+    headers: { ...good.headers, "service-worker-allowed": "/" },
   };
   assert.equal(await check(), "/assets/index.js");
   const bad: [RegExp, typeof good][] = [
@@ -250,8 +250,11 @@ test("checkOperatorUi requires the push worker at /app/ with the right headers",
       { ...good, headers: { ...good.headers, "cache-control": "max-age=60" } },
     ],
     [
-      /wider than \/app\//,
-      { ...good, headers: { ...good.headers, "service-worker-allowed": "/" } },
+      /unexpected scope/,
+      {
+        ...good,
+        headers: { ...good.headers, "service-worker-allowed": "/other/" },
+      },
     ],
     [/no push handler/, { ...good, body: "// empty" }],
   ];

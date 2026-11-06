@@ -25,7 +25,7 @@ const test = browserSuite("operator-project-readiness-browser");
 test("GitHub source readiness errors focus the exact row without echo", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   await page
     .getByLabel("Readiness matching", { exact: true })
@@ -53,7 +53,7 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
   });
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=github",
+    "/projects/:relay/settings?tab=github",
   );
   const d = f.service.domain();
   const noRule = page.getByText("No readiness rule:", { exact: false });
@@ -273,7 +273,7 @@ test("a Project source lists each option's open items without add buttons, and a
   });
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
     undefined,
     undefined,
     { readerFactory: reader, setup: { discovery: fakeDiscovery({}) } },
@@ -472,7 +472,7 @@ async function startGhOffer(
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const started = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
     undefined,
     undefined,
     {
@@ -1046,7 +1046,7 @@ test("choosing another Project starts from Nothing, cannot be saved until its St
 test("a project without a Project source shows the mapping as unavailable", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=github",
+    "/projects/:relay/settings?tab=github",
   );
   const panel = statusPanel(page);
   await panel
@@ -1059,7 +1059,7 @@ test("a project without a Project source shows the mapping as unavailable", asyn
 test("Status mapping is keyboard operable at phone width", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
     phone,
     undefined,
     { setup: { discovery: fakeDiscovery({}) } },

@@ -222,9 +222,7 @@ export function TaskInspector({
                     ) : (
                       <Clock aria-hidden="true" />
                     )}
-                    <a href={`/app/tasks/${d.id}`}>
-                      {d.title ?? "Unavailable"}
-                    </a>
+                    <a href={`/tasks/${d.id}`}>{d.title ?? "Unavailable"}</a>
                     <span className="muted">{d.state}</span>
                   </li>
                 ))}

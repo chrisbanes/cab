@@ -33,18 +33,14 @@ test("built React assets and JSON share one service listener and receipts surviv
   cookie = r.headers.get("set-cookie")?.split(";")[0] ?? "";
   session = (await r.json()) as { csrfToken: string };
   assert.equal(r.status, 200);
-  const shell = await (await fetch(`${web.origin}/app`)).text();
+  const shell = await (await fetch(`${web.origin}/`)).text();
   const assets = [...shell.matchAll(/(?:src|href)="([^"]+)"/g)].map(
     (m) => m[1],
   );
   assert.ok(assets.length >= 2);
   for (const asset of assets)
     assert.equal((await fetch(`${web.origin}${asset}`)).status, 200);
-  for (const path of [
-    "/app",
-    `/app/projects/${projectId}`,
-    "/api/operator/workspace",
-  ])
+  for (const path of ["/", `/projects/${projectId}`, "/api/operator/workspace"])
     assert.equal(
       (await fetch(`${web.origin}${path}`, { headers: { cookie } })).status,
       200,

@@ -60,7 +60,7 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
         {data.source.credential?.usable === false && (
           <Alert role="alert" id={credentialReasonId}>
             {sourceCredentialCopy(data.source.credential.reason)}{" "}
-            <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+            <a href={`/projects/${p.projectId}/settings?tab=github`}>
               Set or change source credential
             </a>
           </Alert>
@@ -176,7 +176,7 @@ function SourceObservations(
               {s.credentialReason && (
                 <p className="body">
                   {sourceCredentialCopy(s.credentialReason)}{" "}
-                  <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+                  <a href={`/projects/${p.projectId}/settings?tab=github`}>
                     Set or change source credential
                   </a>
                 </p>

@@ -50,7 +50,7 @@ export function AttentionBar({
       >
         {uncertain ? "Inspect execution" : "Open task"}
       </ActionLink>
-      <a className="control work-link" href="/app/inbox">
+      <a className="control work-link" href="/inbox">
         Inbox{count === undefined ? "" : ` · ${count}`}{" "}
         <ArrowRight aria-hidden="true" />
       </a>

@@ -397,7 +397,7 @@ async function main() {
   );
   assert.equal(result.connection, "live");
   assert.match(installed.output, /Check\s+Status\s+Reason/, "doctor table");
-  assert.ok(installed.output.includes(`Open ${origin}/app`));
+  assert.ok(installed.output.includes(`Open ${origin}/`));
   assert.equal(
     statSync(authFile).mode & 0o777,
     0o600,
@@ -416,7 +416,7 @@ async function main() {
   const jobA = await until(() => print()?.pid && print(), 60_000, "job A pid");
   assert.equal(jobA.path, activation);
   pids.add(jobA.pid);
-  const app = await fetch(`${origin}/app`);
+  const app = await fetch(`${origin}/`);
   assert.equal(app.status, 200);
   const status = cab(a, [
     "auth",
@@ -659,7 +659,7 @@ async function npmMain() {
   const jobA = await until(() => print()?.pid && print(), 60_000, "job A pid");
   assert.equal(jobA.path, activation);
   pids.add(jobA.pid);
-  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  assert.equal((await fetch(`${origin}/`)).status, 200);
   const auth = cab([
     "auth",
     "status",
@@ -691,7 +691,7 @@ async function npmMain() {
     "the stage is unchanged",
   );
   assert.equal(print()?.pid, jobA.pid, "the same process still runs");
-  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  assert.equal((await fetch(`${origin}/`)).status, 200);
   assert.ok(
     processCommand(jobA.pid).includes(stageDir(a.version)),
     "the process runs from the stage",
@@ -768,7 +768,7 @@ async function npmMain() {
   );
   const jobC = await until(() => print()?.pid && print(), 60_000, "job C pid");
   pids.add(jobC.pid);
-  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  assert.equal((await fetch(`${origin}/`)).status, 200);
   step("7-reinstall", {
     output: again,
     authFileUnchanged: true,
@@ -971,7 +971,7 @@ async function localAccessMain() {
   const jobA = await until(() => print()?.pid && print(), 60_000, "job A pid");
   assert.equal(jobA.path, activation);
   pids.add(jobA.pid);
-  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  assert.equal((await fetch(`${origin}/`)).status, 200);
   bounded("3-install-local", {
     output: report,
     doctorRan: true,

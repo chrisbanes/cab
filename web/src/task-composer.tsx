@@ -239,10 +239,7 @@ export function TaskComposer({
           message={state.notice}
           details={detailRows(state.details)}
         >
-          <ActionLink
-            variant="primary"
-            href={`/app/tasks/${state.frozen?.taskId}`}
-          >
+          <ActionLink variant="primary" href={`/tasks/${state.frozen?.taskId}`}>
             Open task
           </ActionLink>
         </ActionOutcome>
@@ -282,7 +279,7 @@ export function TaskComposer({
             />
           </>
         )}
-        <a className="control" href="/app/tasks">
+        <a className="control" href="/tasks">
           Back to tasks
         </a>
       </section>
@@ -684,7 +681,7 @@ export function TaskComposer({
                     </p>
                     <a
                       className="body"
-                      href={`/app/projects/${encodeURIComponent(input.projectId)}/settings`}
+                      href={`/projects/${encodeURIComponent(input.projectId)}/settings`}
                     >
                       View project instructions
                     </a>

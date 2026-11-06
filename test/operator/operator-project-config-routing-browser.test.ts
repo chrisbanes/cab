@@ -24,7 +24,7 @@ const test = browserSuite("operator-project-config-routing-browser");
 test("Routing saves candidates in place without sending guidance, and edits revealed guidance in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   await page.getByRole("switch", { name: "Enable routing" }).waitFor();
@@ -147,7 +147,7 @@ test("Routing saves candidates in place without sending guidance, and edits reve
 test("routing guidance reverted or edited keeps its state after leaving the tab", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   const field = page.getByRole("textbox", {
@@ -179,7 +179,7 @@ test("routing guidance reverted or edited keeps its state after leaving the tab"
 test("Routing names TypeSafe availability in words and who allocates when it can't choose", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   // The fixture service has no TypeSafe client, so Relay's configured reference can't be used.
@@ -271,7 +271,7 @@ test("Routing names TypeSafe availability in words and who allocates when it can
 test("Routing conflict keeps the checked candidates and a revealed guidance edit until the newer version is reviewed", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
   await revealButton(page, "routing guidance").click();
@@ -321,7 +321,7 @@ test("Routing conflict keeps the checked candidates and a revealed guidance edit
 test("a re-read of another writer's routing retires the saved line", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
   await page.getByRole("button", { name: "Save routing", exact: true }).click();
@@ -363,7 +363,7 @@ test("a re-read of another writer's routing retires the saved line", async (_t, 
 test("another writer committing between a routing save and its re-read is not described as saved", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   await page.getByRole("checkbox", { name: /^Nora ·/ }).check();

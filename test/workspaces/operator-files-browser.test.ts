@@ -198,7 +198,7 @@ test("production Files reads service PDF bytes and bounds page, canvas and cance
   page.on("worker", (worker) => workerUrls.push(worker.url()));
 
   const appResponse = await page.goto(
-    `${web.origin}/app/tasks/${task.taskId}?section=files`,
+    `${web.origin}/tasks/${task.taskId}?section=files`,
   );
   const policy = appResponse?.headers()["content-security-policy"] ?? "";
   assert.match(policy, /worker-src 'self'/);
@@ -463,7 +463,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   });
 
   const appResponse = await page.goto(
-    `${web.origin}/app/tasks/${task.taskId}?section=files`,
+    `${web.origin}/tasks/${task.taskId}?section=files`,
   );
   assert.match(
     appResponse?.headers()["content-security-policy"] ?? "",
@@ -1236,7 +1236,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
       response.url().includes("&path=docs/child.txt"),
   );
   await page.goto(
-    `${web.origin}/app/tasks/${task.taskId}?section=files&repository=alpha&path=docs/child.txt`,
+    `${web.origin}/tasks/${task.taskId}?section=files&repository=alpha&path=docs/child.txt`,
   );
   assert.equal((await nestedRead).status(), 200);
   await page
@@ -1368,7 +1368,7 @@ async function startMarkedFiles(
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
-  await page.goto(`${web.origin}/app/tasks/${task.taskId}${path}`);
+  await page.goto(`${web.origin}/tasks/${task.taskId}${path}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Files", exact: true }).waitFor();

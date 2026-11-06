@@ -675,7 +675,7 @@ export async function runQualification(options = {}) {
     );
     page.setDefaultTimeout(5000);
     await step(async () => {
-      await page.goto(`${origin}/app/tasks/${taskId}`);
+      await page.goto(`${origin}/tasks/${taskId}`);
       await page.getByLabel("Password").fill(password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page

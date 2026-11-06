@@ -26,7 +26,7 @@ async function signIn(
   origin: string,
   password: string,
   // The seeded Draft, Done and Cancelled tasks are not Ready, so open with Any readiness.
-  path = "/app/tasks?ready=any",
+  path = "/tasks?ready=any",
 ) {
   await page.goto(origin + path);
   await page.getByLabel("Password").fill(password);
@@ -88,7 +88,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
       })),
     );
   const list = await links();
-  assert.deepEqual(list, [{ id: ids[0], href: `/app/tasks/${ids[0]}` }]);
+  assert.deepEqual(list, [{ id: ids[0], href: `/tasks/${ids[0]}` }]);
   const rowGeometry = await page
     .locator(`[data-task-id="${ids[0]}"]`)
     .evaluate((el) => ({
@@ -268,7 +268,7 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
   );
   // The strip's readiness renders once the task read loads, so wait for it by text.
   const statusLine = async (taskId: string, text: RegExp) => {
-    await page.goto(`${web.origin}/app/tasks/${taskId}`);
+    await page.goto(`${web.origin}/tasks/${taskId}`);
     const line = page
       .locator("[data-task-strip] [data-task-readiness]")
       .filter({ hasText: text });
@@ -369,7 +369,7 @@ test("Save draft and Create and start record real task outcomes without claiming
     page,
     web.origin,
     web.password,
-    `/app/tasks/new?project=${projectId}`,
+    `/tasks/new?project=${projectId}`,
   );
   await page.getByLabel("Task title").fill("Saved outcome");
   await page.getByLabel("Desired outcome").fill("Ship a useful result");
@@ -399,7 +399,7 @@ test("Save draft and Create and start record real task outcomes without claiming
     "Ship a useful result\n\nContext:\nReview supplied evidence\n\nReference links (passive context; no repository access):\nhttps://example.com/one\nhttps://example.com/two",
   );
   await screenshot(page, "1366-confirmed-draft");
-  await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
+  await page.goto(`${web.origin}/tasks/new?project=${projectId}`);
   await page.getByLabel("Task title").fill("Ready dependent");
   await page.getByLabel("Desired outcome").fill("Ship after blocker");
   await expandComposer(page);
@@ -523,7 +523,7 @@ test("composer disclosures keep supplied values and open the section of each val
     page,
     web.origin,
     web.password,
-    `/app/tasks/new?project=${projectId}`,
+    `/tasks/new?project=${projectId}`,
   );
   const sections = page.locator(".composer-disclosure");
   const summaries = () =>
@@ -658,7 +658,7 @@ test("browser frozen storage failure sends zero commands and restores only last 
     page,
     web.origin,
     web.password,
-    `/app/tasks/new?project=${projectId}`,
+    `/tasks/new?project=${projectId}`,
   );
   await page.getByLabel("Task title", { exact: true }).fill("Last saved input");
   await page
@@ -761,7 +761,7 @@ test("committed lost-response creation survives reload expiry and exact reconcil
     page,
     web.origin,
     web.password,
-    `/app/tasks/new?project=${projectId}`,
+    `/tasks/new?project=${projectId}`,
   );
   await page
     .getByLabel("Task title", { exact: true })
@@ -1058,7 +1058,7 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
   }
 
   await page.setViewportSize({ width: 800, height: 768 });
-  await page.goto(`${web.origin}/app/tasks?state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?state=all&ready=any`);
   await page
     .locator(`.task-list [data-task-id="${ids.paused}"]`)
     .waitFor({ state: "visible" });
@@ -1187,7 +1187,7 @@ for (const viewport of [
     await page
       .getByRole("link", { name: "See getting started", exact: true })
       .waitFor();
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     await checklist.waitFor();
     // Codex is not on every test host's PATH; the Runtime row reads the check as given.
     await page.route("**/api/operator/readiness", async (route) => {
@@ -1198,14 +1198,14 @@ for (const viewport of [
           Object.assign(check, { status: "pass", reason: null, fix: null });
       await route.fulfill({ response, json: body });
     });
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     await row("Runtime").getByText("Done", { exact: true }).waitFor();
     await row("Project").getByText("Next", { exact: true }).waitFor();
     assert.equal(
       await row("Project")
         .getByRole("link", { name: "Create project" })
         .getAttribute("href"),
-      "/app/settings/projects/new",
+      "/settings/projects/new",
     );
     // Until a task starts a turn Home is only the card: no board, no empty-state line.
     assert.equal(
@@ -1233,7 +1233,7 @@ for (const viewport of [
         response.url() === `${web.origin}/api/operator/task-list` &&
         response.request().method() === "GET",
     );
-    await page.goto(`${web.origin}/app/projects/${emptyProject}`);
+    await page.goto(`${web.origin}/projects/${emptyProject}`);
     assert.equal(
       (await emptyRead).status(),
       200,
@@ -1246,7 +1246,7 @@ for (const viewport of [
       )
       .waitFor();
     await screenshot(page, `${viewport.width}-empty-project`);
-    await page.goto(`${web.origin}/app`);
+    await page.goto(`${web.origin}/`);
     await page
       .getByRole("link", { name: "Normal Stop observation", exact: true })
       .waitFor();
@@ -1303,7 +1303,7 @@ for (const viewport of [
         commandPosts++;
     });
     await page.getByRole("link", { name: /^Open Inbox/ }).click();
-    await page.goto(`${web.origin}/app/tasks`);
+    await page.goto(`${web.origin}/tasks`);
     await page
       .locator(`[data-task-id="${ids.question.id}"]`)
       .getByText("Question needs an answer", { exact: true })
@@ -1323,7 +1323,7 @@ for (const viewport of [
       0,
     );
     await screenshot(page, `${viewport.width}-list-interventions`);
-    await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
+    await page.goto(`${web.origin}/tasks?view=board&state=all&ready=any`);
     await page
       .getByRole("heading", { name: "All tasks", exact: true })
       .waitFor();
@@ -1505,20 +1505,20 @@ for (const viewport of [
     await page.goForward();
     assert.ok(page.url().includes("state=Stopping"));
     assert.equal(commandPosts, 0);
-    await page.goto(`${web.origin}/app/projects/${ids.projectId}?ready=any`);
+    await page.goto(`${web.origin}/projects/${ids.projectId}?ready=any`);
     await page
       .locator(`[data-task-id="${ids.question.id}"]`)
       .getByText("Question needs an answer", { exact: true })
       .waitFor();
     await page.goto(
-      `${web.origin}/app/projects/${ids.projectId}?source=github&ready=any`,
+      `${web.origin}/projects/${ids.projectId}?source=github&ready=any`,
     );
     await page
       .getByRole("link", { name: ids.importedTitle, exact: true })
       .waitFor();
     assert.equal(
       await page
-        .locator(`a[href="/app/projects/${ids.projectId}"]`)
+        .locator(`a[href="/projects/${ids.projectId}"]`)
         .first()
         .getAttribute("aria-current"),
       "page",
@@ -1526,10 +1526,10 @@ for (const viewport of [
     await page
       .getByRole("link", { name: ids.importedTitle, exact: true })
       .click();
-    assert.ok(page.url().endsWith(`/app/tasks/${ids.importedId}`));
+    assert.ok(page.url().endsWith(`/tasks/${ids.importedId}`));
     // Below 760px Execution sits in the closed Task actions disclosure, which role queries skip.
     const execution = page.locator(
-      `.task-header-actions a[href="/app/tasks/${ids.importedId}?section=execution"]`,
+      `.task-header-actions a[href="/tasks/${ids.importedId}?section=execution"]`,
     );
     await execution.waitFor({ state: "attached" });
     assert.equal(
@@ -1551,14 +1551,14 @@ for (const viewport of [
     assert.ok(page.url().includes("source=github"));
     // An unavailable retained source revision keeps the imported task's provenance.
     await page.goto(
-      `${web.origin}/app/tasks/${ids.importedId}?source=${randomUUID()}`,
+      `${web.origin}/tasks/${ids.importedId}?source=${randomUUID()}`,
     );
     await page.getByText(/^Selected source revision is unavailable/).waitFor();
     assert.equal(
       await page.locator("#brief > details > summary .metadata").textContent(),
       "Requirements · GitHub · Retained source unavailable",
     );
-    await page.goto(`${web.origin}/app/tasks?ready=any`);
+    await page.goto(`${web.origin}/tasks?ready=any`);
     await page
       .getByRole("link", { name: "Normal Stop observation", exact: true })
       .waitFor();
@@ -1604,7 +1604,7 @@ for (const viewport of [
       .getByText("No tasks match these filters", { exact: true })
       .waitFor();
     await screenshot(page, `${viewport.width}-no-match`);
-    await page.goto(`${web.origin}/app/tasks/new?project=${ids.projectId}`);
+    await page.goto(`${web.origin}/tasks/new?project=${ids.projectId}`);
     await page.getByText(/^Capacity: \d+\/10 project/).waitFor();
     f.service.domain().execute({
       type: "capacity.configure",
@@ -1766,7 +1766,7 @@ test("composer switches scoped options despite delayed prior response and preser
     },
   );
   journey.cleanup(async () => release(), "pending-request.release");
-  await signIn(page, web.origin, web.password, `/app/tasks/new?project=${a}`);
+  await signIn(page, web.origin, web.password, `/tasks/new?project=${a}`);
   await entered;
   await page
     .getByLabel("Task title", { exact: true })
@@ -1888,7 +1888,7 @@ test("replacement composer owns recovery before a detached committed receipt or 
       page,
       web.origin,
       web.password,
-      `/app/tasks/new?project=${projectId}`,
+      `/tasks/new?project=${projectId}`,
     );
     await page
       .getByLabel("Task title", { exact: true })
@@ -2053,12 +2053,7 @@ test("List and Board name an imported Draft task's unmet readiness condition", a
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(
-    page,
-    web.origin,
-    web.password,
-    "/app/tasks?state=all&ready=any",
-  );
+  await signIn(page, web.origin, web.password, "/tasks?state=all&ready=any");
   for (const surface of [".task-list", ".board-columns"]) {
     if (surface === ".board-columns")
       await page.getByRole("button", { name: "Board", exact: true }).click();

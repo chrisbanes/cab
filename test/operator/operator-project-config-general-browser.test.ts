@@ -42,7 +42,7 @@ const test = browserSuite("operator-project-config-general-browser");
 test("General tab edits in place with Kept · Reveal instructions, a change list, a saved line and tabs that keep drafts", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await page
@@ -105,25 +105,25 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
     await references
       .getByRole("link", { name: "Change in Routing" })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}/settings?tab=routing`,
+    `/projects/${ids.atlas}/settings?tab=routing`,
   );
   assert.equal(
     await references
       .getByRole("link", { name: "Change in GitHub source" })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}/settings?tab=github`,
+    `/projects/${ids.atlas}/settings?tab=github`,
   );
   assert.equal(
     await references
       .getByRole("link", { name: "Change in Delivery" })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}/settings?tab=delivery`,
+    `/projects/${ids.atlas}/settings?tab=delivery`,
   );
   assert.equal(
     await page
       .getByRole("link", { name: "Project tasks" })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}`,
+    `/projects/${ids.atlas}`,
   );
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await captureBrowserEvidence(page, "1366-project-general");
@@ -186,7 +186,7 @@ const bumpProject = (
 test("revealed instructions edit in place and save as a versioned change", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -227,7 +227,7 @@ test("revealed instructions edit in place and save as a versioned change", async
 test("a stale reveal conflicts and an unedited reveal resets on the newer version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -281,7 +281,7 @@ test("a stale reveal conflicts and an unedited reveal resets on the newer versio
 test("revealed instructions clear on navigation, sign-out and project switch", async (_t, journey) => {
   const { ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
@@ -315,7 +315,7 @@ test("revealed instructions clear on navigation, sign-out and project switch", a
     .getByRole("heading", { name: "Relay · project configuration" })
     .waitFor();
   assert.equal(await showsText(page, SENTINEL), false);
-  await page.goto(`${web.origin}/app/projects/${ids.atlas}/settings`);
+  await page.goto(`${web.origin}/projects/${ids.atlas}/settings`);
   await revealButton(page, "instructions").waitFor();
 
   // An edit stays, like any unsaved input, across in-app navigation.
@@ -327,7 +327,7 @@ test("revealed instructions clear on navigation, sign-out and project switch", a
   assert.equal(await instructionsField(page).inputValue(), "UNSAVED EDIT");
 
   // Navigating away before the read resolves never renders the text.
-  await page.goto(`${web.origin}/app/projects/${ids.atlas}/settings`);
+  await page.goto(`${web.origin}/projects/${ids.atlas}/settings`);
   await revealButton(page, "instructions").waitFor();
   await page.route("**/private-values", async (route) => {
     await held;
@@ -354,7 +354,7 @@ test("revealed instructions clear on navigation, sign-out and project switch", a
   await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
   await page.getByLabel("Password").waitFor();
   assert.equal(await showsText(page, SENTINEL), false);
-  await signIn(page, web, `/app/projects/${ids.atlas}/settings`);
+  await signIn(page, web, `/projects/${ids.atlas}/settings`);
   await revealButton(page, "instructions").waitFor();
   assert.equal(await showsText(page, SENTINEL), false);
 
@@ -386,7 +386,7 @@ test("revealed instructions clear on navigation, sign-out and project switch", a
 test("a reveal leaves no trace in the URL, history or storage", async (_t, journey) => {
   const { ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const url = page.url();
   const historyLength = await page.evaluate(() => window.history.length);
@@ -442,7 +442,7 @@ test("a reveal leaves no trace in the URL, history or storage", async (_t, journ
 test("a form whose edits were all reverted is clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const name = page.getByLabel("Project name", { exact: true });
   const pause = page.getByRole("switch", { name: "Pause project" });
@@ -493,7 +493,7 @@ test("a form whose edits were all reverted is clean and picks up a later read", 
 test("a read that arrived during an edit is applied when the edit is undone, and a stale outcome goes with it", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const name = page.getByLabel("Project name", { exact: true });
   await name.waitFor();
@@ -555,7 +555,7 @@ test("a read that arrived during an edit is applied when the edit is undone, and
 test("an edit that parses to the same JSON as the saved text is still an edit and survives a read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/profiles/:reviewer/settings",
+    "/profiles/:reviewer/settings",
   );
   const reviewer = ids.profiles.Reviewer as string;
   const d = f.service.domain();
@@ -597,7 +597,7 @@ test("an edit that parses to the same JSON as the saved text is still an edit an
 test("readiness matching with no condition is no edit, and the adopted note goes when the input is undone", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -683,7 +683,7 @@ const privateBody = (page: Page, path: string) =>
 test("the source tab reads again by itself when the first read settles older than the version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -735,7 +735,7 @@ test("the source tab reads again by itself when the first read settles older tha
 test("a read that fails after a refresh advanced the version is read again once", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -781,7 +781,7 @@ test("a read that fails after a refresh advanced the version is read again once"
 test("an older read is retried at most twice per version, and a failure waits for a new version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -864,7 +864,7 @@ test("an older read is retried at most twice per version, and a failure waits fo
 test("a Reveal that settles older than the form is read again by itself, and leaving cancels it", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const stale = await privateBody(
     page,
@@ -906,7 +906,7 @@ test("a Reveal that settles older than the form is read again by itself, and lea
 test("a failed Reveal is not remembered: a later save leaves the field kept", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const stale = await privateBody(
     page,
@@ -937,7 +937,7 @@ test("a failed Reveal is not remembered: a later save leaves the field kept", as
 test("routing and profile Reveal wait for a current read, and a newer read reloads the profile", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   const stale = await privateBody(
@@ -972,7 +972,7 @@ test("routing and profile Reveal wait for a current read, and a newer read reloa
   // The profile page: a read newer than the loaded form reloads the configuration, then opens.
   await page.unrouteAll({ behavior: "ignoreErrors" });
   const reviewer = ids.profiles.Reviewer as string;
-  await page.goto(`${web.origin}/app/profiles/${reviewer}/settings`);
+  await page.goto(`${web.origin}/profiles/${reviewer}/settings`);
   await page.getByLabel("Summary", { exact: true }).waitFor();
   d.execute({
     type: "profile.configure",
@@ -1001,7 +1001,7 @@ test("routing and profile Reveal wait for a current read, and a newer read reloa
 test("an edit that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const save = async (instructions: string) =>
@@ -1036,7 +1036,7 @@ test("an edit that another writer saved identically is dropped, and later reads 
 test("a query that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1080,7 +1080,7 @@ test("a query that another writer saved identically is dropped, and later reads 
 test("a path that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1128,7 +1128,7 @@ test("a path that another writer saved identically is dropped, and later reads a
 test("a GitLab link is added, refused with its reason, changed and removed in Settings", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=repositories",
+    "/projects/:atlas/settings?tab=repositories",
   );
   const lab = join(f.directory, "lab"),
     other = join(f.directory, "other");
@@ -1205,7 +1205,7 @@ test("a GitLab link is added, refused with its reason, changed and removed in Se
 test("Save waits for the saved text to be read again after Review changes", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -1246,7 +1246,7 @@ test("Save waits for the saved text to be read again after Review changes", asyn
 test("Save stays on hold with a way out when the comparison read fails", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -1291,7 +1291,7 @@ test("Save stays on hold with a way out when the comparison read fails", async (
 test("routing and profile saves wait for the comparison read after Review changes", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   const field = page.getByRole("textbox", {
@@ -1329,7 +1329,7 @@ test("routing and profile saves wait for the comparison read after Review change
 
   // The same on the profile page.
   const reviewer = ids.profiles.Reviewer as string;
-  await page.goto(`${web.origin}/app/profiles/${reviewer}/settings`);
+  await page.goto(`${web.origin}/profiles/${reviewer}/settings`);
   await page.getByRole("button", { name: "Reveal instructions" }).click();
   const instructions = page.getByRole("textbox", {
     name: "Instructions",
@@ -1360,7 +1360,7 @@ test("routing and profile saves wait for the comparison read after Review change
 test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=routing",
   );
   const d = f.service.domain();
   const candidate = (n: string) =>
@@ -1423,7 +1423,7 @@ test("a reverted routing edit leaves the form clean and picks up a later read", 
 test("a reverted source edit leaves the form clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    "/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
@@ -1475,7 +1475,7 @@ test("a reverted source edit leaves the form clean and picks up a later read", a
 test("a reverted private edit is no edit after leaving the page or adopting a newer version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const name = page.getByLabel("Project name", { exact: true });
@@ -1528,7 +1528,7 @@ test("a reverted private edit is no edit after leaving the page or adopting a ne
 test("an edited private text stays edited after leaving the page and can still be reverted", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -1559,7 +1559,7 @@ test("an edited private text stays edited after leaving the page and can still b
 test("an edit made against older text says it was changed elsewhere before it replaces it", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -1605,7 +1605,7 @@ test("an edit made against older text says it was changed elsewhere before it re
 test("an edit says so when it cannot check whether the text changed elsewhere", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   await revealButton(page, "instructions").click();
@@ -1658,7 +1658,7 @@ test("an edit says so when it cannot check whether the text changed elsewhere", 
 test("a private read older than the loaded version is flagged on an edit", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   // Serve the first read again for every later one, so it is always older than the form.
@@ -1701,7 +1701,7 @@ test("a private read older than the loaded version is flagged on an edit", async
 test("line breaks saved as CRLF do not turn typing and deleting a character into an edit", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   d.execute({
@@ -1730,7 +1730,7 @@ test("line breaks saved as CRLF do not turn typing and deleting a character into
 test("revealing after another writer saved opens the newer version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   await page.getByLabel("Project name", { exact: true }).waitFor();
   bumpProject(f, ids.atlas, "Atlas elsewhere");
@@ -1750,10 +1750,7 @@ test("revealing after another writer saved opens the newer version", async (_t, 
 });
 
 test("a failed reveal keeps focus and explains without the text", async (_t, journey) => {
-  const { page } = await startSettings(
-    journey,
-    "/app/projects/:atlas/settings",
-  );
+  const { page } = await startSettings(journey, "/projects/:atlas/settings");
   await page.route("**/private-values", (route) =>
     route.fulfill({
       status: 503,
@@ -1793,7 +1790,7 @@ test("a failed reveal keeps focus and explains without the text", async (_t, jou
 test("two tabs: a reveal never sends unedited text and a stale edit conflicts", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   // A second signed-in browser context is the other tab.
@@ -1802,7 +1799,7 @@ test("two tabs: a reveal never sends unedited text and a stale edit conflicts", 
   const other = await context.newPage();
   other.setDefaultTimeout(5000);
   try {
-    await signIn(other, web, `/app/projects/${ids.atlas}/settings`);
+    await signIn(other, web, `/projects/${ids.atlas}/settings`);
     await revealButton(page, "instructions").click();
     await instructionsField(page).waitFor();
     await revealButton(other, "instructions").click();
@@ -1846,7 +1843,7 @@ test("two tabs: a reveal never sends unedited text and a stale edit conflicts", 
 test("empty and very large instructions reveal and save exactly", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
-    "/app/projects/:fieldnotes/settings",
+    "/projects/:fieldnotes/settings",
   );
   const d = f.service.domain();
   const set = (instructions: string) =>
@@ -1902,7 +1899,7 @@ test("empty and very large instructions reveal and save exactly", async (_t, jou
 test("General tab validation, conflict and revoked-lead failures keep input", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const name = page.getByLabel("Project name", { exact: true });
   await name.waitFor();
@@ -1962,7 +1959,7 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
 test("an unknown save freezes the form until the exact submission is reconciled", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const name = page.getByLabel("Project name", { exact: true });
   await name.waitFor();
@@ -2000,7 +1997,7 @@ test("an unknown save freezes the form until the exact submission is reconciled"
 test("phone project settings lead with state and next step and keep the form usable", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
     phone,
   );
   await page.getByRole("link", { name: "Back to Settings" }).waitFor();
@@ -2037,7 +2034,7 @@ test("phone project settings lead with state and next step and keep the form usa
 test("renaming a project into another project's name shows the service's message and keeps the form; its own name saves", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const name = page.getByLabel("Project name", { exact: true });
@@ -2075,7 +2072,7 @@ test("renaming a project into another project's name shows the service's message
 test("command network access is a switch with its disclosure that saves as a versioned change", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const network = page.getByRole("switch", { name: "Command network access" });
@@ -2122,7 +2119,7 @@ test("command network access is a switch with its disclosure that saves as a ver
 test("local listening is a switch with its disclosure that saves as a versioned change", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   const d = f.service.domain();
   const listening = page.getByRole("switch", { name: "Local listening" });
@@ -2165,7 +2162,7 @@ test("local listening is a switch with its disclosure that saves as a versioned 
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=general",
+    "/projects/:atlas/settings?tab=general",
   );
   const d = f.service.domain();
   const capture = page.getByRole("combobox", { name: "Diagnostic capture" });
@@ -2213,9 +2210,7 @@ test("diagnostic capture sits beside command network access and saves both modes
   assert.equal(d.diagnosticCaptureMode(ids.atlas), "enhanced");
 
   // One Save carries both settings and nothing else; the Settings route reaches the same form.
-  await page.goto(
-    new URL(`/app/projects/${ids.atlas}/settings`, page.url()).href,
-  );
+  await page.goto(new URL(`/projects/${ids.atlas}/settings`, page.url()).href);
   await capture.waitFor();
   await capture.selectOption("baseline");
   await network.click();
@@ -2237,7 +2232,7 @@ test("diagnostic capture sits beside command network access and saves both modes
 test("an unreported diagnostic capture is shown as not reported, selects no mode and stays out of other saves", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/app/projects/:atlas/settings",
+    "/projects/:atlas/settings",
   );
   await page.route("**/configuration", async (route) => {
     const response = await route.fetch();

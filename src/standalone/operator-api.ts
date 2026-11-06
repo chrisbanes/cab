@@ -3872,7 +3872,7 @@ export class OperatorApi {
           projectId: String(task.projectId),
           projectName: summary.project.name,
           taskTitle: summary.title,
-          evidence: `/app/tasks/${taskId}#conversation`,
+          evidence: `/tasks/${taskId}#conversation`,
         };
         const attentionCode = interventionCode(summary.attention.codes);
         if (attentionCode)
@@ -3888,7 +3888,7 @@ export class OperatorApi {
             revision: null,
             reason: attentionNext[attentionCode].reason,
             attentionCode,
-            destination: `/app/tasks/${taskId}?section=decisions`,
+            destination: `/tasks/${taskId}?section=decisions`,
             conversation: null,
             headline: null,
           });
@@ -3930,8 +3930,8 @@ export class OperatorApi {
                   ? "Answer recorded; native delivery remains unresolved"
                   : "Operator answer requested",
             attentionCode: delivering ? "question-delivery" : null,
-            destination: `/app/tasks/${taskId}?request=${q.interactionId}`,
-            conversation: `/app/tasks/${taskId}?assignment=${q.requestingAssignmentId}`,
+            destination: `/tasks/${taskId}?request=${q.interactionId}`,
+            conversation: `/tasks/${taskId}?assignment=${q.requestingAssignmentId}`,
           });
         }
         if (this.requireTask(taskId).version !== task.version)
@@ -6473,7 +6473,7 @@ export class OperatorApi {
           excerpt,
           createdAt: Number(row.createdAt),
           historical,
-          href: `/app/tasks/${taskId}?section=${row.type === "task" ? "brief" : "review"}&record=${encodeURIComponent(String(row.recordId))}${resultId ? `&result=${resultId}` : ""}${sourceId ? `&source=${sourceId}` : ""}`,
+          href: `/tasks/${taskId}?section=${row.type === "task" ? "brief" : "review"}&record=${encodeURIComponent(String(row.recordId))}${resultId ? `&result=${resultId}` : ""}${sourceId ? `&source=${sourceId}` : ""}`,
         });
       } catch (error) {
         if (

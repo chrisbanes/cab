@@ -93,7 +93,7 @@ async function start(
       [],
     );
   });
-  await signIn(page, web, `/app/tasks/${task.taskId}`);
+  await signIn(page, web, `/tasks/${task.taskId}`);
   return { page, ...task };
 }
 
@@ -274,13 +274,13 @@ test("navigation to a tab or the inspector shows it without the pane, and reload
     await page.locator("#test-link").evaluate((a) => a.remove());
   };
   await openPane(page);
-  await follow(`/app/tasks/${taskId}?section=changes`);
+  await follow(`/tasks/${taskId}?section=changes`);
   assert.equal(await changesTab(page).getAttribute("aria-selected"), "true");
   assert.equal(await pane(page).count(), 0);
   assert.equal(await page.locator("section#changes").count(), 1);
   await page.goto(page.url().split("?")[0] ?? "");
   await openPane(page);
-  await follow(`/app/tasks/${taskId}?section=review#review`);
+  await follow(`/tasks/${taskId}?section=review#review`);
   await page.locator(".task-inspector").waitFor();
   assert.equal(await pane(page).count(), 0);
   await openPane(page);

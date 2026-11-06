@@ -348,7 +348,7 @@ export const fakeCodex = [
 ].join("\n");
 
 /**
- * Wait for the service to serve /app, then one of its assets. Every request is
+ * Wait for the service to serve /, then one of its assets. Every request is
  * bounded so a stalled response cannot keep verify (and the service) alive.
  */
 export async function checkOperatorUi(
@@ -374,10 +374,10 @@ export async function checkOperatorUi(
 
 /**
  * The push worker is optional to the service (a build without one serves a 404), so a release
- * that lost it would otherwise pass: it must be served as JavaScript, uncached, at /app/ scope.
+ * that lost it would otherwise pass: it must be served as JavaScript, uncached, at / scope.
  */
 async function checkServiceWorker(origin, requestMs) {
-  const response = await fetch(`${origin}/app/service-worker.js`, {
+  const response = await fetch(`${origin}/service-worker.js`, {
     signal: AbortSignal.timeout(requestMs),
   });
   const problem =
@@ -387,25 +387,24 @@ async function checkServiceWorker(origin, requestMs) {
         ? "a non-JavaScript content type"
         : response.headers.get("cache-control") !== "no-store"
           ? "a cacheable response"
-          : ![null, "/app/"].includes(
+          : ![null, "/"].includes(
                 response.headers.get("service-worker-allowed"),
               )
-            ? "a scope wider than /app/"
+            ? "an unexpected scope"
             : !(await response.text()).includes('addEventListener("push"')
               ? "no push handler"
               : undefined;
-  if (problem)
-    throw new Error(`/app/service-worker.js was served with ${problem}`);
+  if (problem) throw new Error(`/service-worker.js was served with ${problem}`);
 }
 
 async function waitForApp(origin, child, deadline, requestMs) {
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null)
       throw new Error(
-        `Service exited (${child.signalCode ?? child.exitCode}) before serving /app`,
+        `Service exited (${child.signalCode ?? child.exitCode}) before serving /`,
       );
     try {
-      const response = await fetch(`${origin}/app`, {
+      const response = await fetch(`${origin}/`, {
         signal: AbortSignal.timeout(requestMs),
       });
       if (response.status === 200) return await response.text();
@@ -414,7 +413,7 @@ async function waitForApp(origin, child, deadline, requestMs) {
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error("Service did not serve /app within 120 s");
+  throw new Error("Service did not serve / within 120 s");
 }
 
 async function verify(tarballPath) {
@@ -470,7 +469,7 @@ async function verify(tarballPath) {
       isolatedPath: true,
     });
     process.stdout.write(
-      `Verified ${name} (${manifest.commit})\nTree digest: ${digest}\nServed ${origin}/app and ${asset}\n`,
+      `Verified ${name} (${manifest.commit})\nTree digest: ${digest}\nServed ${origin}/ and ${asset}\n`,
     );
   } finally {
     await rm(temp, { recursive: true, force: true });
@@ -692,7 +691,7 @@ async function verifyNpm(tarballPath) {
       isolatedPath: false,
     });
     process.stdout.write(
-      `Verified ${record.name}@${record.version} (${record.commit})\nIntegrity: ${record.integrity}\nServed ${origin}/app and ${asset}\n`,
+      `Verified ${record.name}@${record.version} (${record.commit})\nIntegrity: ${record.integrity}\nServed ${origin}/ and ${asset}\n`,
     );
   } finally {
     await rm(temp, { recursive: true, force: true });

@@ -86,7 +86,7 @@ async function assertFirstScreen(page: Page, targets: Locator[]) {
 async function arriveAtApproval(s: Awaited<ReturnType<typeof start>>) {
   await s.page.waitForURL(
     (url) =>
-      url.pathname === `/app/tasks/${s.taskId}` &&
+      url.pathname === `/tasks/${s.taskId}` &&
       url.searchParams.get("request") === s.interactionId,
   );
   const item = s.page.locator(
@@ -146,7 +146,7 @@ for (const [label, viewport] of [
   ["390 x 844", phone],
 ] as const) {
   test(`approve an exact action budget: two interactions from the Home card (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, () => "/app");
+    const s = await start(journey, viewport, () => "/");
     const card = s.page.locator(
       `.overview-card[data-request-id="${s.interactionId}"]`,
     );
@@ -166,7 +166,7 @@ for (const [label, viewport] of [
   });
 
   test(`approve an exact action budget: three interactions from the Inbox row (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, () => "/app/inbox");
+    const s = await start(journey, viewport, () => "/inbox");
     const row = s.page.locator(".inbox-row").filter({ hasText: task });
     await assertFirstScreen(s.page, [row, row.getByText(action)]);
     let interactions = 0;
@@ -187,7 +187,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/app/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}`,
     );
     const decision = s.page.locator(
       `#decisions .decision[data-record-id="${s.interactionId}"]`,
@@ -210,15 +210,14 @@ for (const [label, viewport] of [
 }
 
 const denied = /^Denied\. Nothing was approved/;
-const taskPath = (s: Awaited<ReturnType<typeof start>>) =>
-  `/app/tasks/${s.taskId}`;
+const taskPath = (s: Awaited<ReturnType<typeof start>>) => `/tasks/${s.taskId}`;
 /** Leaves the task through the Inbox link, then reopens it by its plain address. */
 async function leaveAndReopen(s: Awaited<ReturnType<typeof start>>) {
   await s.page
     .getByRole("link", { name: /^Inbox/ })
     .first()
     .click();
-  await s.page.waitForURL(/\/app\/inbox/);
+  await s.page.waitForURL(/\/inbox/);
   return async () => {
     await s.page.evaluate((path) => {
       history.pushState(null, "", path);
@@ -229,11 +228,7 @@ async function leaveAndReopen(s: Awaited<ReturnType<typeof start>>) {
 }
 
 test("a denial sent before leaving the task reads as a denial when its response lands while away", async (_t, journey) => {
-  const s = await start(
-    journey,
-    desktop,
-    ({ taskId }) => `/app/tasks/${taskId}`,
-  );
+  const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
   const open = s.page
     .locator(`#decisions .decision[data-record-id="${s.interactionId}"]`)
     .getByRole("link", { name: review, exact: true });
@@ -267,11 +262,7 @@ test("a denial sent before leaving the task reads as a denial when its response 
 });
 
 test("a denial whose response was lost reads as a denial when checked after returning", async (_t, journey) => {
-  const s = await start(
-    journey,
-    desktop,
-    ({ taskId }) => `/app/tasks/${taskId}`,
-  );
+  const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
   await s.page
     .locator(`#decisions .decision[data-record-id="${s.interactionId}"]`)
     .getByRole("link", { name: review, exact: true })

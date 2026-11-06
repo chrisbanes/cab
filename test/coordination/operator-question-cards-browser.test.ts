@@ -47,7 +47,7 @@ async function openQuestions(
   const page = await browser.newPage({ viewport });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   return { f, page, web, group, more };
@@ -502,7 +502,7 @@ for (const [name, engine] of engines) {
           return top;
         });
         assert.ok(departure > 60);
-        await page.waitForURL(/\/app\/tasks\//);
+        await page.waitForURL(/\/tasks\//);
         // The same question can mount in the task page before Back. Its scroller
         // must not replace the Inbox's saved departure position.
         await page.locator(".question-content").waitFor({ state: "attached" });
@@ -516,7 +516,7 @@ for (const [name, engine] of engines) {
         });
         const taskUrl = `${web.origin}/api/operator/tasks/${group.taskId}`;
         await page.route(taskUrl, async (route) => {
-          if (new URL(page.url()).pathname === "/app/inbox") {
+          if (new URL(page.url()).pathname === "/inbox") {
             requested();
             await pending;
           }
@@ -627,7 +627,7 @@ for (const [name, engine] of engines) {
       await evidence.evaluate((el) => el.focus({ preventScroll: true }));
       assert.equal(await detail.evaluate((el) => el.scrollTop), 60);
       await page.keyboard.press("Enter");
-      await page.waitForURL(/\/app\/tasks\//);
+      await page.waitForURL(/\/tasks\//);
       await page.locator(".question-content").waitFor({ state: "attached" });
       await page.goBack();
       await form.getByRole("radio", { name: /^Workspace owners/ }).waitFor();
@@ -703,7 +703,7 @@ for (const [name, engine] of engines) {
                 exact: true,
               })
               .getAttribute("href"),
-            `/app/tasks/${group.taskId}`,
+            `/tasks/${group.taskId}`,
           );
           continue;
         }

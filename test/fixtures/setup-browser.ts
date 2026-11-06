@@ -137,7 +137,7 @@ export async function setupJourney(
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(web.origin + (options.path ?? "/app/settings/projects/new"));
+  await page.goto(web.origin + (options.path ?? "/settings/projects/new"));
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
@@ -288,7 +288,7 @@ export async function createProject(
     composer: (id = projectId) =>
       page.waitForURL(
         (url) =>
-          url.pathname === "/app/tasks/new" &&
+          url.pathname === "/tasks/new" &&
           url.searchParams.get("project") === id,
       ),
   };

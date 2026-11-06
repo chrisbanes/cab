@@ -37,13 +37,13 @@ test("the task header offers Stop… only on an open task and Resume… on a sto
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks/${open.taskId}`);
+  await page.goto(`${web.origin}/tasks/${open.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
 
   const actions = async (taskId: string, title: string) => {
-    await page.goto(`${web.origin}/app/tasks/${taskId}`);
+    await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByRole("heading", { name: title, level: 1 }).waitFor();
     const header = page.locator(".page-header .task-header-actions");
     await header.getByRole("link", { name: "Execution" }).waitFor();

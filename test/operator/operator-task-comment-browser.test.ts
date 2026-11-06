@@ -80,7 +80,7 @@ async function open(
     if (request.url().includes("/api/operator/operations?"))
       operations.push(request.url());
   });
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel("Editable reply").waitFor();

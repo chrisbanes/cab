@@ -145,7 +145,7 @@ for (const [name, viewport] of [
     const page = await browser.newPage({ viewport });
     journey.observe(page);
     page.setDefaultTimeout(5000);
-    await signIn(page, web, `/app/tasks/${taskId}`);
+    await signIn(page, web, `/tasks/${taskId}`);
 
     await openOverviewCard(page, "assignments");
     const row = page.locator(".assignment-row", { hasText: "Claude work" });
@@ -164,7 +164,7 @@ for (const [name, viewport] of [
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-neutral-wait-reason`);
 
-    await page.goto(`${web.origin}/app/assignments/${workerId}/recovery`);
+    await page.goto(`${web.origin}/assignments/${workerId}/recovery`);
     await page
       .getByText("Execution runtime: Claude · sonnet · high.")
       .waitFor();

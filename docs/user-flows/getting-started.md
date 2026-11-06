@@ -9,9 +9,9 @@ and each step opens the screen that completes it.
 
 ## Entry points
 
-- Home (`/app`) until a task starts a turn; the card is then the only content
+- Home (`/`) until a task starts a turn; the card is then the only content
   below the page heading (no board, stat strip or task filters).
-- Account menu → Getting started (`/app/getting-started`), until it is dismissed.
+- Account menu → Getting started (`/getting-started`), until it is dismissed.
 
 ## Checklist
 
@@ -34,8 +34,8 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
   credential row and the Settings → Readiness GitHub discovery row
   ([readiness check](readiness-check.md)).
 - Settings actions open their own section, so no two rows open the same place:
-  `/app/settings#readiness`, `#github-discovery`, `#readiness-claude-executable`
-  and `/app/settings/runtime#add-claude`.
+  `/settings#readiness`, `#github-discovery`, `#readiness-claude-executable`
+  and `/settings/runtime#add-claude`.
 - Create task is shown but unavailable while no project exists: it stays focusable
   and its reason ("Needs a project first.") is announced.
 - A required row (Runtime, Project, First task) that is not done

@@ -146,7 +146,7 @@ test("production workspace retains literal captured text, pending request, focus
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.clock.install();
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}?result=${r.resultId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?result=${r.resultId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -899,7 +899,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
   page.setDefaultTimeout(5000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}?result=${r.resultId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?result=${r.resultId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -1064,7 +1064,7 @@ test("mounted Inbox discovers new requests and holds through timer and header re
   j.observe(page);
   page.setDefaultTimeout(5000);
   await page.clock.install();
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -1145,7 +1145,7 @@ test("mounted Inbox discovers new requests and holds through timer and header re
     await page
       .getByRole("link", { name: "Review material & decide", exact: true })
       .getAttribute("href"),
-    `/app/tasks/${b.taskId}?request=${approval.interactionId}`,
+    `/tasks/${b.taskId}?request=${approval.interactionId}`,
   );
   // A wide layout has no back control: the queue stays beside the detail.
   assert.equal(

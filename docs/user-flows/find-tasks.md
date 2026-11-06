@@ -9,7 +9,7 @@ list or reloading, and always sees which filters are hiding work.
 
 ## Entry points
 
-- Sidebar Tasks, the All tasks links and a task's Back link open `/app/tasks`.
+- Sidebar Tasks, the All tasks links and a task's Back link open `/tasks`.
 - Overview and project pages show the same work list, so they share the filters.
 - App links that name a state or an import (View completed, a Running wait link and
   View imported tasks) carry their own filters, including Any readiness, so the list

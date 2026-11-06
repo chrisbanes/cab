@@ -340,7 +340,7 @@ test("a new question sends one push per device with the exact minimal payload, a
     const expected = {
       v: 1,
       title: `Question in ${item.projectName}: 1 waiting`,
-      url: `/app/inbox?task=${q.taskId}&request=${q.interactionId}`,
+      url: `/inbox?task=${q.taskId}&request=${q.interactionId}`,
       tag: q.interactionId,
     };
     assert.deepEqual(sent(x.fake, a.device), [expected]);
@@ -377,7 +377,7 @@ test("a new approval sends one push titled as an approval", async () => {
       {
         v: 1,
         title: `Approval in ${item.projectName}: 1 waiting`,
-        url: `/app/inbox?task=${approval.taskId}&request=${approval.interactionId}`,
+        url: `/inbox?task=${approval.taskId}&request=${approval.interactionId}`,
         tag: approval.interactionId,
       },
     ]);
@@ -511,8 +511,8 @@ const intervention = (code: TaskInboxItem["attentionCode"]): TaskInboxItem => ({
   headline: null,
   reason: "Execution ownership is uncertain",
   attentionCode: code,
-  destination: `/app/tasks/${taskId}?section=decisions`,
-  evidence: `/app/tasks/${taskId}#conversation`,
+  destination: `/tasks/${taskId}?section=decisions`,
+  evidence: `/tasks/${taskId}#conversation`,
   conversation: null,
 });
 const interventionFor = (id: string): TaskInboxItem => ({
@@ -534,7 +534,7 @@ const runtimeItem = (
   reason: "Restart retries exhausted",
   lastFailure: "start-failed",
   attempts: [],
-  destination: "/app/settings/runtime",
+  destination: "/settings/runtime",
 });
 
 /** A scripted Inbox: the test says what each read returns. */
@@ -1198,7 +1198,7 @@ test("exhausting a runtime sends exactly one push with only its name", async () 
       {
         v: 1,
         title: "Codex runtime unavailable",
-        url: "/app/inbox?request=runtime%3Acodex",
+        url: "/inbox?request=runtime%3Acodex",
         tag: `runtime:codex:${runtime.since}`,
       },
     ]);
@@ -1373,7 +1373,7 @@ test("a runtime push carries no failure detail and does not count as a waiting t
     assert.deepEqual(question, {
       v: 1,
       title: `Question in ${task.projectName}: 1 waiting`,
-      url: `/app/inbox?task=${q.taskId}&request=${q.interactionId}`,
+      url: `/inbox?task=${q.taskId}&request=${q.interactionId}`,
       tag: q.interactionId,
     });
   } finally {
@@ -1477,7 +1477,7 @@ test("subscribe, list, test and revoke round trip through the session routes", a
     {
       v: 1,
       title: "Test notification from cab",
-      url: "/app/settings#notifications",
+      url: "/settings#notifications",
       tag: "test:notification",
     },
   ]);
@@ -1714,7 +1714,7 @@ test("the service worker is served publicly with its scope and without caching",
   const f = await createOperatorFixture();
   try {
     const web = await f.startWeb();
-    const response = await fetch(`${web.origin}/app/service-worker.js`);
+    const response = await fetch(`${web.origin}/service-worker.js`);
     assert.equal(response.status, 200);
     assert.match(
       response.headers.get("content-type") ?? "",
@@ -1723,19 +1723,19 @@ test("the service worker is served publicly with its scope and without caching",
     assert.equal(response.headers.get("cache-control"), "no-store");
     const text = await response.text();
     assert.match(text, /addEventListener\("push"/);
-    const head = await fetch(`${web.origin}/app/service-worker.js`, {
+    const head = await fetch(`${web.origin}/service-worker.js`, {
       method: "HEAD",
     });
     assert.equal(head.status, 200);
     assert.equal(await head.text(), "");
-    const post = await fetch(`${web.origin}/app/service-worker.js`, {
+    const post = await fetch(`${web.origin}/service-worker.js`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
     });
     assert.equal(post.status, 405);
-    // An unknown address under /app is still the 404 shell, not the worker.
-    const unknown = await fetch(`${web.origin}/app/service-worker.js/extra`);
+    // An unknown address is still the 404 shell, not the worker.
+    const unknown = await fetch(`${web.origin}/service-worker.js/extra`);
     assert.equal(unknown.status, 404);
     assert.equal((await unknown.text()).includes("addEventListener"), false);
   } finally {

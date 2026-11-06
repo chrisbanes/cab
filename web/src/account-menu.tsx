@@ -206,10 +206,10 @@ export function AccountMenu({
             Signed in as {OPERATOR_LABEL}
           </p>
           <hr />
-          {link("/app/settings", <Settings aria-hidden="true" />, "Settings")}
+          {link("/settings", <Settings aria-hidden="true" />, "Settings")}
           {gettingStartedDismissed === false &&
             link(
-              "/app/getting-started",
+              "/getting-started",
               <ListChecks aria-hidden="true" />,
               "Getting started",
             )}

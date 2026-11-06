@@ -155,9 +155,7 @@ function Dependencies({
         <ul className="execution-list">
           {data.localDependencies.map((b) => (
             <li key={b.id}>
-              <a href={`/app/tasks/${b.id}`}>
-                {b.title ?? "Title unavailable"}
-              </a>{" "}
+              <a href={`/tasks/${b.id}`}>{b.title ?? "Title unavailable"}</a>{" "}
               <span className="metadata muted">{b.state}</span>
               <ConfirmCommand
                 trigger="Remove"
@@ -276,7 +274,7 @@ export function TaskExecution({
                 <>
                   {" · "}
                   <a
-                    href={`/app/tasks/${taskId}?assignment=${data.leadAssignmentId}`}
+                    href={`/tasks/${taskId}?assignment=${data.leadAssignmentId}`}
                   >
                     Task-scoped lead execution
                   </a>
@@ -314,9 +312,7 @@ export function TaskExecution({
               <li key={r.workId ?? r.generation.requestSequence}>
                 <ShortId value={r.workId ?? "withheld"} />{" "}
                 {r.binding ? (
-                  <a
-                    href={`/app/assignments/${r.binding.assignmentId}/recovery`}
-                  >
+                  <a href={`/assignments/${r.binding.assignmentId}/recovery`}>
                     {name(r.binding.assignmentId)}
                   </a>
                 ) : (
@@ -336,7 +332,7 @@ export function TaskExecution({
               <li key={a.assignmentId}>
                 <ActionLink
                   variant="secondary"
-                  href={`/app/assignments/${a.assignmentId}/recovery`}
+                  href={`/assignments/${a.assignmentId}/recovery`}
                 >
                   {a.name ?? "Assignment"}: recovery
                 </ActionLink>

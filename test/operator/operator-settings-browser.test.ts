@@ -53,7 +53,7 @@ test("Settings guides empty workspace through profile and paused project creatio
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Create agent", exact: true }).waitFor();
@@ -230,7 +230,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings`);
 
   const ordinary = page.getByRole("link", {
     name: "Project tasks",
@@ -243,7 +243,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   assert.equal(ordinaryStyle.decoration, "underline");
   assert.equal(ordinaryStyle.color, "rgb(244, 244, 245)");
 
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   const navigation = page.locator(".sidebar .nav-link").first();
   assert.equal(
     await navigation.evaluate(
@@ -271,7 +271,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   assert.ok(contrast(actionStyle.foreground, actionStyle.background) >= 4.5);
 
   await page.goto(
-    `${web.origin}/app/projects/${ids.projectId}/settings?tab=github`,
+    `${web.origin}/projects/${ids.projectId}/settings?tab=github`,
   );
   // Ordinary navigation remains distinct from styled command buttons.
   assert.equal(
@@ -280,9 +280,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
       .count(),
     0,
   );
-  await page.goto(
-    `${web.origin}/app/projects/${ids.projectId}/settings?tab=sync`,
-  );
+  await page.goto(`${web.origin}/projects/${ids.projectId}/settings?tab=sync`);
   const observationButton = page.getByRole("button", {
     name: "Refresh all sources",
     exact: true,
@@ -365,7 +363,7 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     )
       readBodies.push(await r.text().catch(() => ""));
   });
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings`);
   assert.equal(reveals.length, 0, "nothing is read before Reveal");
   await typeInstructions(page, "PRIVATE WRITE ONLY DRAFT");
   assert.equal(reveals.length, 1);
@@ -486,7 +484,7 @@ test("configuration inline validation stale revision and revoked lead failures r
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings`);
   await page.getByLabel("Project name", { exact: true }).fill("");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await page.getByText("Enter a project name.", { exact: true }).waitFor();
@@ -638,7 +636,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
   await signIn(
     page,
     web,
-    `/app/projects/${ids.projectId}/settings?tab=repositories`,
+    `/projects/${ids.projectId}/settings?tab=repositories`,
   );
   await page
     .getByRole("button", { name: "Add repository", exact: true })
@@ -838,7 +836,7 @@ for (const layout of [
       if (!r.url().startsWith(web.origin)) external.push(r.url());
     });
     page.on("pageerror", (e) => errors.push(e.message));
-    await signIn(page, web, "/app/settings");
+    await signIn(page, web, "/settings");
     await capture(page, `${layout.name}-populated-settings`);
     await page
       .getByRole("link", {
@@ -853,7 +851,7 @@ for (const layout of [
       await page
         .getByRole("link", { name: "Change in Delivery", exact: true })
         .getAttribute("href"),
-      `/app/projects/${ids.projectId}/settings?tab=delivery`,
+      `/projects/${ids.projectId}/settings?tab=delivery`,
     );
     await capture(page, `${layout.name}-paused-configuration`);
     await page.getByLabel("Project name", { exact: true }).focus();
@@ -873,7 +871,7 @@ for (const layout of [
     );
     if (layout.width < 768) {
       // Project configuration is a nested screen (Back header); the drawer is on Settings.
-      await page.goto(`${web.origin}/app/settings`);
+      await page.goto(`${web.origin}/settings`);
       await page
         .getByRole("button", { name: "Projects and navigation", exact: true })
         .click();
@@ -899,9 +897,7 @@ for (const layout of [
         true,
       );
     }
-    await page.goto(
-      `${web.origin}/app/assignments/${ids.assignmentId}/recovery`,
-    );
+    await page.goto(`${web.origin}/assignments/${ids.assignmentId}/recovery`);
     await page
       .getByText(
         "1 older recovery record for this assignment omitted; task-wide holds above include verified sibling and omitted generations.",
@@ -926,7 +922,7 @@ for (const layout of [
           exact: true,
         })
         .getAttribute("href"),
-      `/app/tasks/${ids.taskId}?section=execution`,
+      `/tasks/${ids.taskId}?section=execution`,
     );
     assert.equal(
       await page
@@ -999,7 +995,7 @@ test("Runtime Settings records lowered capacity separately from usage and retain
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, "/app/settings/runtime");
+  await signIn(page, web, "/settings/runtime");
   await page
     .getByText("2 of 4 active turns in use; projects default to 2.", {
       exact: false,
@@ -1153,7 +1149,7 @@ test("actual source placement retains its original receipt after transfer remove
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=sync`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption({ label: "Actual membership target" });
@@ -1216,7 +1212,7 @@ test("unknown committed placement stays reachable after conflict disappearance a
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=sync`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption(target);
@@ -1369,7 +1365,7 @@ test("mounted reference and placement fields have unique associated controls", a
     await route.fulfill({ response });
   });
   try {
-    await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=sync`);
+    await signIn(page, web, `/projects/${ids.projectId}/settings?tab=sync`);
     await configurationEntry;
     // Authentication shell readiness precedes this independently loaded resource.
     assert.equal(await placements.count(), 0);
@@ -1478,7 +1474,7 @@ test("readiness validation focuses the exact invalid row with a real description
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=github`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings?tab=github`);
   const labels = page.getByLabel("Ready label", { exact: true });
   // A new project has no readiness rule; an added condition starts empty.
   await page
@@ -1638,7 +1634,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
     if (!r.url().startsWith(web.origin)) external.push(r.url());
   });
   page.on("pageerror", (e) => errors.push(e.message));
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings`);
   await page
     .getByRole("link", { name: "Change in Delivery", exact: true })
     .click();
@@ -1660,7 +1656,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
     ["Accept handback", "accepted"],
     ["Settle as closed", "closed"],
   ] as const) {
-    await page.goto(`${web.origin}/app/tasks/${ids.taskId}?section=changes`);
+    await page.goto(`${web.origin}/tasks/${ids.taskId}?section=changes`);
     await delivery
       .getByText("Reviewable PR handed back.", { exact: true })
       .waitFor();
@@ -1682,7 +1678,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
     assert.equal(posted.expectedHeadSha, "1".repeat(40));
     assert.equal(posted.decision, decision);
   }
-  await page.goto(`${web.origin}/app/tasks/${ids.taskId}?section=changes`);
+  await page.goto(`${web.origin}/tasks/${ids.taskId}?section=changes`);
   await delivery.getByText(/PR #7/).first().waitFor();
   for (const fact of ["Open", "No checks or repair owner were observed"])
     assert.equal((await delivery.innerText()).includes(fact), true, fact);
@@ -1729,7 +1725,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${target}/settings?tab=sync`);
+  await signIn(page, web, `/projects/${target}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption(destination);
@@ -1936,7 +1932,7 @@ test("initial placement conflict requires explicit loaded revision adoption whil
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${target}/settings?tab=sync`);
+  await signIn(page, web, `/projects/${target}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption(target);
@@ -2057,7 +2053,7 @@ test("agent configuration reload observes its current revision without replacing
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/profiles/${ids.profileId}/settings`);
+  await signIn(page, web, `/profiles/${ids.profileId}/settings`);
   await page
     .getByLabel("Agent name", { exact: true })
     .fill("Retained profile edit");
@@ -2151,7 +2147,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
       )
         publicBodies.push(await r.text().catch(() => ""));
     });
-    await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+    await signIn(page, web, `/projects/${ids.projectId}/settings`);
     await typeInstructions(page, "PRIVATE OLD DELAYED INPUT");
     let release!: () => void, committed!: () => void;
     const held = new Promise<void>((done) => {
@@ -2204,7 +2200,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     if (mode === "401-logout")
       await page
-        .locator(`a[href="/app/projects/${ids.projectId}/settings"]`)
+        .locator(`a[href="/projects/${ids.projectId}/settings"]`)
         .click();
     await page
       .getByRole("navigation", { name: "Project configuration sections" })
@@ -2323,7 +2319,7 @@ test("aborted old configuration read preserves new input and a current logout 40
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) posts++;
   });
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/projects/${ids.projectId}/settings`);
   let release!: () => void, arrived!: () => void, completed!: () => void;
   const handled = new Promise<void>((done) => {
     completed = done;

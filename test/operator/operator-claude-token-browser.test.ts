@@ -38,7 +38,7 @@ function environment(t: { after: (fn: () => void) => void }) {
 test("Settings sets, shows and clears the Claude token reference without showing it", async (t, journey) => {
   environment(t);
   delete process.env[NAME];
-  const { f, web, page } = await startSettings(journey, "/app/settings");
+  const { f, web, page } = await startSettings(journey, "/settings");
   const row = page.getByRole("region", { name: "Claude subscription token" });
   await row.getByText("Claude subscription token · not configured").waitFor();
   let sent = 0;
@@ -109,14 +109,14 @@ test("Settings sets, shows and clears the Claude token reference without showing
   await row.getByText("Claude subscription token · not configured").waitFor();
   await savedOutcome(page);
   assert.equal(f.service.domain().claudeTokenReference(), null);
-  await page.goto(`${web.origin}/app/settings`);
+  await page.goto(`${web.origin}/settings`);
   await row.getByText("Claude subscription token · not configured").waitFor();
 });
 
 test("A Claude token already in the service environment needs a restart, and the row fits a phone", async (t, journey) => {
   environment(t);
   process.env[NAME] = VALUE;
-  const { f, page } = await startSettings(journey, "/app/settings", phone);
+  const { f, page } = await startSettings(journey, "/settings", phone);
   f.service.domain().execute({
     type: "claude-token.configure",
     actor: "operator",
@@ -154,7 +154,7 @@ test("Settings sets a file: Claude token reference and shows it unavailable when
   const path = join(directory, "claude-token"),
     canary = "fixture-claude-file-token-7702";
   writeFileSync(path, `${canary}\n`, { mode: 0o600 });
-  const { f, page } = await startSettings(journey, "/app/settings");
+  const { f, page } = await startSettings(journey, "/settings");
   const row = page.getByRole("region", { name: "Claude subscription token" });
   await row.getByText("Claude subscription token · not configured").waitFor();
   let sent = 0;
@@ -203,7 +203,7 @@ test("the Settings overview Claude row is not prefilled and refuses ~", async (t
   mkdirSync(home);
   const { page } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     undefined,
     undefined,
     { setup: { home } },

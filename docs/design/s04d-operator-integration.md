@@ -34,7 +34,7 @@ mask a queued continuation.
 ## Coordination and approval evidence
 
 The server-rendered Coordination pages are retired. The React task view
-(`/app/tasks/:id`) presents task-scoped assignments, runtime history, durable
+(`/tasks/:id`) presents task-scoped assignments, runtime history, durable
 messages, questions, exact approval materials, results/destinations and
 completion attention through the operator API. Its controls answer open
 questions, decide an approval, queue a durable message for the next eligible

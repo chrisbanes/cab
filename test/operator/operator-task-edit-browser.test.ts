@@ -45,7 +45,7 @@ async function signIn(
   web: { origin: string; password: string },
   taskId: string,
 ) {
-  await page.goto(`${web.origin}/app/tasks/${taskId}`);
+  await page.goto(`${web.origin}/tasks/${taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
@@ -198,7 +198,7 @@ test("an imported task has no Edit task… and a phone keeps it in Task actions"
     .waitFor({ state: "attached" });
   assert.equal(await trigger(page).count(), 0);
 
-  await page.goto(`${web.origin}/app/tasks/${local.taskId}`);
+  await page.goto(`${web.origin}/tasks/${local.taskId}`);
   await page.locator("main.page h1").waitFor();
   const header = page.locator(".page-header");
   // Closed on a phone, the action is not reachable until the disclosure opens.
@@ -259,7 +259,7 @@ test("a title or outcome the read redacts is never offered for editing, and Read
     if (request.method() === "POST" && body.includes('"task.configure"'))
       configures.push(JSON.parse(body));
   });
-  await page.goto(`${web.origin}/app/tasks/${plain.taskId}`);
+  await page.goto(`${web.origin}/tasks/${plain.taskId}`);
   await trigger(page).click();
   const dialog = page.getByRole("dialog", { name: "Edit task" });
   // Nothing changed yet: there is nothing to save.

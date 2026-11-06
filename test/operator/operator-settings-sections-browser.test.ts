@@ -76,7 +76,7 @@ const current = (page: Page) =>
   nav(page).locator('a[aria-current="true"]').allInnerTexts();
 
 test("Settings section links land on each section with its heading focused", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   assert.deepEqual(
     await nav(page).getByRole("link").allInnerTexts(),
@@ -85,7 +85,7 @@ test("Settings section links land on each section with its heading focused", asy
   for (const [label, id, heading] of sections) {
     await nav(page).getByRole("link", { name: label, exact: true }).click();
     onScreen(await landed(page, "H2", heading));
-    assert.ok(page.url().endsWith(`/app/settings#${id}`), page.url());
+    assert.ok(page.url().endsWith(`/settings#${id}`), page.url());
     assert.deepEqual(await current(page), [label]);
   }
   // Reduced motion has no animation to wait for: landing is instant.
@@ -98,11 +98,11 @@ test("Settings section links land on each section with its heading focused", asy
 
 test("a Settings fragment lands after the reads load and again on reload", async (_t, journey) => {
   // A short window puts the deep sections below the fold, so landing has to scroll.
-  const { page, web } = await startSettings(journey, "/app/settings", {
+  const { page, web } = await startSettings(journey, "/settings", {
     width: 1366,
     height: 500,
   });
-  await coldGoto(page, `${web.origin}/app/settings#cli-credentials`);
+  await coldGoto(page, `${web.origin}/settings#cli-credentials`);
   onScreen(await landed(page, "H2", "CLI credentials"));
   // Let the reads above the target finish growing; the heading stays where it landed.
   await page.getByRole("article", { name: "GitHub discovery" }).waitFor();
@@ -114,7 +114,7 @@ test("a Settings fragment lands after the reads load and again on reload", async
 });
 
 test("a landed section holds while the content above it grows, until the reader scrolls", async (_t, journey) => {
-  const { page, web } = await startSettings(journey, "/app/settings");
+  const { page, web } = await startSettings(journey, "/settings");
   // Safari has no scroll anchoring; switch it off so Chromium behaves the same way.
   await page.addInitScript(() => {
     addEventListener("DOMContentLoaded", () => {
@@ -123,7 +123,7 @@ test("a landed section holds while the content above it grows, until the reader 
       document.head.append(style);
     });
   });
-  await coldGoto(page, `${web.origin}/app/settings#profiles`);
+  await coldGoto(page, `${web.origin}/settings#profiles`);
   // Grow as soon as the heading has focus: the settle window is a few seconds, so the
   // first growth must not wait on anything else.
   await page.waitForFunction(
@@ -151,7 +151,7 @@ test("a landed section holds while the content above it grows, until the reader 
 });
 
 test("Back and Forward restore Settings sections", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   const link = (name: string) =>
     nav(page).getByRole("link", { name, exact: true });
   await link("Agents").click();
@@ -200,13 +200,9 @@ test("Back and Forward restore Settings sections", async (_t, journey) => {
 });
 
 test("first run puts Readiness first and an established install keeps the designed order", async (_t, journey) => {
-  const first = await startSettings(
-    journey,
-    "/app/settings",
-    desktop,
-    undefined,
-    { turnStarted: false },
-  );
+  const first = await startSettings(journey, "/settings", desktop, undefined, {
+    turnStarted: false,
+  });
   const headings = (page: Page) => page.locator("main h2").allInnerTexts();
   await nav(first.page).waitFor();
   assert.deepEqual(await headings(first.page), firstRunHeadings);
@@ -224,7 +220,7 @@ test("first run puts Readiness first and an established install keeps the design
   assert.deepEqual(await current(first.page), ["Readiness"]);
   for (const viewport of [desktop, phone]) {
     await first.page.setViewportSize(viewport);
-    await first.page.goto(`${first.web.origin}/app/settings`);
+    await first.page.goto(`${first.web.origin}/settings`);
     await first.page.getByRole("heading", { name: "Readiness" }).waitFor();
     const box = await first.page
       .getByRole("heading", { name: "Readiness", level: 2 })
@@ -237,7 +233,7 @@ test("first run puts Readiness first and an established install keeps the design
 
 test("an empty install puts Readiness first from the service's own first-run signal", async (_t, journey) => {
   // No route override: the real workspace read says no turn has started.
-  const { page } = await setupJourney(journey, { path: "/app/settings" });
+  const { page } = await setupJourney(journey, { path: "/settings" });
   await nav(page).waitFor();
   assert.equal(await page.locator("main h2").first().innerText(), "Readiness");
   assert.deepEqual(await current(page), ["Readiness"]);
@@ -250,7 +246,7 @@ test("an empty install puts Readiness first from the service's own first-run sig
 test("a first-run flip while Settings is open reorders the sections and keeps focus", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     desktop,
     undefined,
     { turnStarted: false },
@@ -299,7 +295,7 @@ test("a first-run flip while Settings is open reorders the sections and keeps fo
 test("an established install keeps Readiness last with the first section current", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     desktop,
     undefined,
     { turnStarted: true },
@@ -313,7 +309,7 @@ test("an established install keeps Readiness last with the first section current
 });
 
 test("Settings section navigation is reachable by keyboard in order", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.locator("main.page h1").evaluate((h) => {
     h.tabIndex = -1;
@@ -339,12 +335,12 @@ test("Settings section navigation is reachable by keyboard in order", async (_t,
 });
 
 test("a check anchor marks Readiness current and a hash-only change lands with focus", async (_t, journey) => {
-  const { page, web } = await startSettings(journey, "/app/settings");
-  await coldGoto(page, `${web.origin}/app/settings#readiness-codex-login`);
+  const { page, web } = await startSettings(journey, "/settings");
+  await coldGoto(page, `${web.origin}/settings#readiness-codex-login`);
   onScreen(await landed(page, "H3", "Codex login"));
   assert.deepEqual(await current(page), ["Readiness"]);
   // Typing a new fragment into the address bar is a hash-only navigation.
-  await page.goto(`${web.origin}/app/settings#profiles`);
+  await page.goto(`${web.origin}/settings#profiles`);
   onScreen(await landed(page, "H2", "Agents"));
   assert.deepEqual(await current(page), ["Agents"]);
 });
@@ -387,21 +383,21 @@ const focusedHeading = (page: Page) =>
   });
 
 test("Back to a route with a fragment and no saved position still scrolls to the top", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/tasks");
+  const { page } = await startSettings(journey, "/tasks");
   await page.locator("main.page h1").waitFor();
-  assert.deepEqual(await forwardInto(page, "/app/tasks#elsewhere"), [[0, 0]]);
+  assert.deepEqual(await forwardInto(page, "/tasks#elsewhere"), [[0, 0]]);
 });
 
 test("Back or Forward into a Settings fragment skips the top restore only for a target the page lands on", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   // A section on this page: the page lands on it and the shell leaves the scroll alone.
-  assert.deepEqual(await forwardInto(page, "/app/settings#profiles"), []);
+  assert.deepEqual(await forwardInto(page, "/settings#profiles"), []);
   assert.equal(await focusedHeading(page), "Agents");
   // A check anchor whose article is drawn is a target too.
   assert.deepEqual(
-    await forwardInto(page, "/app/settings#readiness-codex-login"),
+    await forwardInto(page, "/settings#readiness-codex-login"),
     [],
   );
   assert.equal(await focusedHeading(page), "Codex login");
@@ -413,7 +409,7 @@ test("Back or Forward into a Settings fragment skips the top restore only for a 
     "add-claude",
   ]) {
     assert.deepEqual(
-      await forwardInto(page, `/app/settings#${hash}`),
+      await forwardInto(page, `/settings#${hash}`),
       [[0, 0]],
       hash,
     );
@@ -422,7 +418,7 @@ test("Back or Forward into a Settings fragment skips the top restore only for a 
 });
 
 test("Back or Forward into a check anchor restores the top while its read has failed, and lands once it is drawn", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.route("**/api/operator/readiness", (route) =>
     route.fulfill({
@@ -435,10 +431,9 @@ test("Back or Forward into a check anchor restores the top while its read has fa
   await nav(page).waitFor();
   await page.getByRole("button", { name: "Run again" }).waitFor();
   await page.getByText("Readiness checks are unavailable").waitFor();
-  assert.deepEqual(
-    await forwardInto(page, "/app/settings#readiness-codex-login"),
-    [[0, 0]],
-  );
+  assert.deepEqual(await forwardInto(page, "/settings#readiness-codex-login"), [
+    [0, 0],
+  ]);
   assert.equal(await focusedHeading(page), null);
   // The read recovers: the article appears and the page lands on it.
   await page.unroute("**/api/operator/readiness");
@@ -449,14 +444,11 @@ test("Back or Forward into a check anchor restores the top while its read has fa
 });
 
 test("Back or Forward into an add-claude anchor on the Runtime page skips the restore once the panel is drawn", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings/runtime");
+  const { page } = await startSettings(journey, "/settings/runtime");
   await page.getByRole("heading", { name: "Add Claude" }).waitFor();
-  assert.deepEqual(
-    await forwardInto(page, "/app/settings/runtime#add-claude"),
-    [],
-  );
+  assert.deepEqual(await forwardInto(page, "/settings/runtime#add-claude"), []);
   assert.equal(await focusedHeading(page), "Add Claude");
-  assert.deepEqual(await forwardInto(page, "/app/settings/runtime#unknown"), [
+  assert.deepEqual(await forwardInto(page, "/settings/runtime#unknown"), [
     [0, 0],
   ]);
 });
@@ -479,7 +471,7 @@ const setHash = (page: Page, hash: string) =>
   }, hash);
 
 test("native hash-only navigation lands, switches targets and leaves unsupported fragments alone", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   await trackFocus(page);
@@ -531,7 +523,7 @@ test("native hash-only navigation lands, switches targets and leaves unsupported
 });
 
 test("traversal between entries that share one entry key lands each fragment", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   // pushState copies the state, as a browser that copies it for a fragment navigation would.
@@ -543,7 +535,7 @@ test("traversal between entries that share one entry key lands each fragment", a
   await page.goBack();
   onScreen(await landed(page, "H2", "Agents"));
   await page.goBack();
-  await page.waitForURL(/\/app\/settings$/);
+  await page.waitForURL(/\/settings$/);
   await page.goForward();
   onScreen(await landed(page, "H2", "Agents"));
   await page.goForward();
@@ -551,22 +543,22 @@ test("traversal between entries that share one entry key lands each fragment", a
 });
 
 test("leaving Settings and coming back to the same entry lands again, and a re-render does not", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/tasks");
+  const { page } = await startSettings(journey, "/tasks");
   await page.locator("main.page h1").waitFor();
   await page.evaluate(() => {
     const { scrollY, ...state } = history.state;
     history.pushState(
       { ...state, navKey: crypto.randomUUID() },
       "",
-      "/app/settings#profiles",
+      "/settings#profiles",
     );
     history.back();
   });
-  await page.waitForURL(/\/app\/tasks$/);
+  await page.waitForURL(/\/tasks$/);
   await page.goForward();
   onScreen(await landed(page, "H2", "Agents"));
   await page.goBack();
-  await page.waitForURL(/\/app\/tasks$/);
+  await page.waitForURL(/\/tasks$/);
   await page.goForward();
   onScreen(await landed(page, "H2", "Agents"));
   // A re-render of the same landing leaves the reader's focus where they put it.
@@ -585,14 +577,14 @@ test("leaving Settings and coming back to the same entry lands again, and a re-r
 });
 
 test("a second hook becoming ready later does not land again or take focus from the reader", async (_t, journey) => {
-  const { page, web } = await startSettings(journey, "/app/settings");
+  const { page, web } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   // The checks arrive well after the sections land, which readies the Readiness hook too.
   await page.route("**/api/operator/readiness", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.continue();
   });
-  await coldGoto(page, `${web.origin}/app/settings#profiles`);
+  await coldGoto(page, `${web.origin}/settings#profiles`);
   onScreen(await landed(page, "H2", "Agents"));
   await page.getByRole("link", { name: "Create agent" }).focus();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
@@ -631,7 +623,7 @@ const forwardMethods: [
   [
     "an address-bar edit",
     async (page, origin, hash) => {
-      await page.goto(`${origin}/app/settings#${hash}`);
+      await page.goto(`${origin}/settings#${hash}`);
     },
   ],
   ["a script hash assignment", (page, _origin, hash) => setHash(page, hash)],
@@ -655,7 +647,7 @@ const forwardMethods: [
       await page.evaluate((h) => {
         const a = document.createElement("a");
         a.id = "applink";
-        a.href = `/app/settings#${h}`;
+        a.href = `/settings#${h}`;
         a.textContent = "app link";
         a.style.cssText = "position:fixed;top:0;left:0;z-index:99";
         document.querySelector("main")?.prepend(a);
@@ -672,7 +664,7 @@ for (const [method, go] of forwardMethods)
     ["bogus", false],
   ] as const)
     test(`a new entry from ${method} to #${hash} after Back to a saved position ${supported ? "lands" : "does not land"}`, async (_t, journey) => {
-      const { page, web } = await startSettings(journey, "/app/settings");
+      const { page, web } = await startSettings(journey, "/settings");
       await nav(page).waitFor();
       await page.getByRole("article", { name: "Codex login" }).waitFor();
       const saved = await backToSavedEntry(page);
@@ -697,7 +689,7 @@ for (const [method, go] of forwardMethods)
     });
 
 test("an entry that copies a saved position is a new entry, and its source still restores", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   const saved = await backToSavedEntry(page);
@@ -717,13 +709,13 @@ test("an entry that copies a saved position is a new entry, and its source still
 });
 
 test("Forward to an entry the page landed on lands again after passing an entry with no target", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   await setHash(page, "profiles");
   onScreen(await landed(page, "H2", "Agents"));
   await page.goBack();
-  await page.waitForURL(/\/app\/settings$/);
+  await page.waitForURL(/\/settings$/);
   await nextFrames(page);
   // The reader moves on before coming forward again.
   await page.getByRole("link", { name: "Create project" }).focus();
@@ -734,7 +726,7 @@ test("Forward to an entry the page landed on lands again after passing an entry 
 });
 
 test("the first entry and a natively made entry restore their own saved positions", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   const click = (name: string) =>
@@ -746,7 +738,7 @@ test("the first entry and a natively made entry restore their own saved position
   await click("Agents");
   await landed(page, "H2", "Agents");
   await page.goBack();
-  await page.waitForURL(/\/app\/settings$/);
+  await page.waitForURL(/\/settings$/);
   await nextFrames(page);
   await nextFrames(page);
   assert.equal(await page.evaluate(() => scrollY), 300);
@@ -766,7 +758,7 @@ test("the first entry and a natively made entry restore their own saved position
 });
 
 test("entries made before a reload start clean in the new document and land their fragment", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   const click = (name: string) =>
@@ -802,7 +794,7 @@ test("entries made before a reload start clean in the new document and land thei
 });
 
 test("leaving through the sidebar keeps the position Back restores", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   await page.evaluate(() => scrollTo(0, 150));
@@ -811,20 +803,20 @@ test("leaving through the sidebar keeps the position Back restores", async (_t, 
     .getByRole("link", { name: "Tasks", exact: true })
     .first()
     .evaluate((a) => (a as HTMLElement).click());
-  await page.waitForURL("**/app/tasks");
+  await page.waitForURL("**/tasks");
   await page.goBack();
-  await page.waitForURL(/\/app\/settings$/);
+  await page.waitForURL(/\/settings$/);
   await nextFrames(page);
   await nextFrames(page);
   assert.equal(await page.evaluate(() => scrollY), 150);
 });
 
 test("a state without this load's scope is not adopted as an owned entry", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings");
+  const { page } = await startSettings(journey, "/settings");
   await nav(page).waitFor();
   // A foreign state with a saved position, as an old build or another script could leave.
   await page.evaluate(() => {
-    history.replaceState({ scrollY: 500 }, "", "/app/settings#profiles");
+    history.replaceState({ scrollY: 500 }, "", "/settings#profiles");
   });
   await page.reload();
   onScreen(await landed(page, "H2", "Agents"));
@@ -836,13 +828,13 @@ test("a state without this load's scope is not adopted as an owned entry", async
 
 for (const fragment of ["bogus", "readiness-unknown"])
   test(`an unknown Settings fragment #${fragment} leaves the page at the top`, async (_t, journey) => {
-    const { page, web } = await startSettings(journey, "/app/settings");
+    const { page, web } = await startSettings(journey, "/settings");
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (m) => {
       if (m.type() === "error") errors.push(m.text());
     });
-    await coldGoto(page, `${web.origin}/app/settings#${fragment}`);
+    await coldGoto(page, `${web.origin}/settings#${fragment}`);
     // Every read has finished once the last check row is drawn.
     await page.getByRole("article", { name: "GitHub discovery" }).waitFor();
     assert.equal(await page.evaluate(() => scrollY), 0);
@@ -851,12 +843,12 @@ for (const fragment of ["bogus", "readiness-unknown"])
       "BODY",
     );
     assert.deepEqual(await current(page), ["Projects"]);
-    assert.ok(page.url().endsWith(`/app/settings#${fragment}`), page.url());
+    assert.ok(page.url().endsWith(`/settings#${fragment}`), page.url());
     assert.deepEqual(errors, []);
   });
 
 test("Settings section select chooses and Go lands on a phone", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/settings", phone);
+  const { page } = await startSettings(journey, "/settings", phone);
   await page.getByRole("combobox", { name: "Settings section" }).waitFor();
   // The select replaces the section links; Go is the one link in the navigation.
   assert.deepEqual(await nav(page).getByRole("link").allInnerTexts(), ["Go"]);
@@ -875,7 +867,7 @@ test("Settings section select chooses and Go lands on a phone", async (_t, journ
   assert.equal(await select.inputValue(), "github-discovery");
   await go.click();
   onScreen(await landed(page, "H2", "GitHub discovery"));
-  assert.ok(page.url().endsWith("/app/settings#github-discovery"), page.url());
+  assert.ok(page.url().endsWith("/settings#github-discovery"), page.url());
   assert.equal(await select.inputValue(), "github-discovery");
   await noPageOverflow(page);
   // From the keyboard: the select, then Go, then Enter; the same section again lands again.
@@ -892,21 +884,15 @@ test("Settings section select chooses and Go lands on a phone", async (_t, journ
   await select.selectOption({ label: "Routing" });
   await page.goBack();
   await page.goBack();
-  await page.waitForURL(/\/app\/settings$/);
+  await page.waitForURL(/\/settings$/);
   await nextFrames(page);
   assert.equal(await select.inputValue(), "projects");
 });
 
 test("Home checklist Settings actions land on their sections", async (_t, journey) => {
-  const { page, web } = await startSettings(
-    journey,
-    "/app",
-    desktop,
-    undefined,
-    {
-      turnStarted: false,
-    },
-  );
+  const { page, web } = await startSettings(journey, "/", desktop, undefined, {
+    turnStarted: false,
+  });
   const card = page.getByRole("region", { name: "Get cab running" });
   const action = (row: string, name: string) =>
     card
@@ -916,20 +902,17 @@ test("Home checklist Settings actions land on their sections", async (_t, journe
 
   await action("Runtime", "Open readiness check").click();
   onScreen(await landed(page, "H2", "Readiness"));
-  assert.ok(page.url().endsWith("/app/settings#readiness"), page.url());
+  assert.ok(page.url().endsWith("/settings#readiness"), page.url());
   await page.goBack();
 
   await action("GitHub", "Set discovery credential").click();
   onScreen(await landed(page, "H2", "GitHub discovery"));
-  assert.ok(page.url().endsWith("/app/settings#github-discovery"), page.url());
+  assert.ok(page.url().endsWith("/settings#github-discovery"), page.url());
   await page.goBack();
 
   await action("Claude (optional)", "Add Claude").click();
   onScreen(await landed(page, "H2", "Add Claude"));
-  assert.ok(
-    page.url().endsWith("/app/settings/runtime#add-claude"),
-    page.url(),
-  );
+  assert.ok(page.url().endsWith("/settings/runtime#add-claude"), page.url());
 
   // A Claude that cannot run opens its own check, not the whole section.
   await page.route("**/api/operator/readiness", async (route) => {
@@ -944,12 +927,12 @@ test("Home checklist Settings actions land on their sections", async (_t, journe
         });
     await route.fulfill({ response, json: body });
   });
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/`);
   await card.waitFor();
   await action("Claude (optional)", "Open readiness check").click();
   onScreen(await landed(page, "H3", "Claude executable"));
   assert.ok(
-    page.url().endsWith("/app/settings#readiness-claude-executable"),
+    page.url().endsWith("/settings#readiness-claude-executable"),
     page.url(),
   );
 });

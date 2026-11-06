@@ -22,18 +22,21 @@ export type NotificationState =
   | { kind: "blocked" }
   | { kind: "off" }
   | { kind: "on"; id: string }
-  | { kind: "turn-on-again"; why: "revoked" | "old-key" };
+  | { kind: "turn-on-again"; why: "revoked" | "old-key" | "moved" };
 
 /**
  * The one answer to "what does this browser's Notifications section show": derived from the
  * browser and the service's list, and never stored. A subscription the service no longer lists
  * as active (revoked elsewhere, removed by the push service, or never recorded) and one made
- * under another key both end in Turn on again.
+ * under another key both end in Turn on again, as does a browser whose only subscription is still
+ * on the registration from before the app moved to the root.
  */
 export function notificationState(input: {
   environment: BrowserEnvironment;
   available: boolean;
   subscription: BrowserSubscription;
+  /** A registration from before the app moved to the root still holds a push subscription. */
+  legacy: boolean;
   rows: readonly Pick<
     PushSubscriptionRecord,
     "id" | "endpointDigest" | "state"
@@ -44,7 +47,10 @@ export function notificationState(input: {
     return { kind: "unsupported" };
   if (!input.available) return { kind: "service-unavailable" };
   if (e.permission === "denied") return { kind: "blocked" };
-  if (!subscription) return { kind: "off" };
+  if (!subscription)
+    return input.legacy
+      ? { kind: "turn-on-again", why: "moved" }
+      : { kind: "off" };
   if (!subscription.keyMatches)
     return { kind: "turn-on-again", why: "old-key" };
   const row = input.rows.find(
@@ -204,7 +210,8 @@ export const NOTIFICATION_OPEN_MESSAGE = "cab.notification-open";
 
 /**
  * The in-app address a worker message asks this tab to open, or null. Only this origin's own
- * worker message with a same-origin /app/ address counts; the page never trusts the shape.
+ * worker message with a same-origin app address counts; the page never trusts the shape. An
+ * address from before the app moved to the root loses its old /app prefix.
  */
 export function notificationOpenPath(
   event: { origin: string; data: unknown },
@@ -221,8 +228,9 @@ export function notificationOpenPath(
     return null;
   try {
     const target = new URL(data.url, origin);
-    return target.origin === origin && target.pathname.startsWith("/app/")
-      ? target.pathname + target.search + target.hash
+    const path = target.pathname.replace(/^\/app(?=\/|$)/, "") || "/";
+    return target.origin === origin && !/^\/(?:api|assets)(?:\/|$)/.test(path)
+      ? path + target.search + target.hash
       : null;
   } catch {
     return null;

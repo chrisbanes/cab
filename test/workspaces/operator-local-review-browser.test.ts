@@ -198,7 +198,7 @@ async function startReview(
 test("production local review composes exact multi-origin anchors and sends one receipt", async (_t, j) => {
   const { fixture, task, web, page, consoleErrors, pageErrors, events } =
     await startReview(j);
-  const taskPath = `/app/tasks/${task.taskId}?section=files`;
+  const taskPath = `/tasks/${task.taskId}?section=files`;
   await signIn(page, web.origin, taskPath, web.password);
 
   // Current file: select lines 2–3 and comment.
@@ -382,7 +382,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=local-review`,
+    `/tasks/${task.taskId}?section=local-review`,
     web.password,
   );
   await review
@@ -672,7 +672,7 @@ test("a refused comment save shows one plain alert, keeps the text and puts the 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   const files = page.locator("#files");
@@ -725,7 +725,7 @@ test("a comment save whose response is lost stays one exact request until it is 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   const files = page.locator("#files");
@@ -822,7 +822,7 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -886,7 +886,7 @@ test("a draft write still waiting when its page goes away is kept as one exact c
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -977,7 +977,7 @@ test("a draft write answered after its page went away keeps its check and replay
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1039,7 +1039,7 @@ test("every draft write reports one plain success line with its receipt, cleared
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   const review = page.locator("#local-review");
@@ -1075,7 +1075,7 @@ test("the review controls stay off until the refresh after a draft write has fin
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1130,7 +1130,7 @@ test("the review controls are off from the first request of a new comment until 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1193,7 +1193,7 @@ async function loseStageAnswer(
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   const files = page.locator("#files");
@@ -1331,7 +1331,7 @@ test("a late answer to a save chained after a stage does not unlock the controls
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   const files = page.locator("#files");
@@ -1484,7 +1484,7 @@ test("a review send in flight when its page goes away is left for the next page 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1554,7 +1554,7 @@ test("local review keeps focus on the selection, the next comment and the headin
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1640,7 +1640,7 @@ test("local review focus survives frame callbacks that run before the page commi
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1724,7 +1724,7 @@ test("a write answered after local review is left queues no focus", async (_t, j
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 1: first", "First note");
@@ -1759,7 +1759,7 @@ test("phone local review comments and sends to a receipt using the keyboard", as
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   const files = page.locator("#files");
@@ -1837,7 +1837,7 @@ test("a completed lead is resumed by a review, with the status line before sendi
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Comment for a finished lead");
@@ -1883,7 +1883,7 @@ test("a lead that completes after the page loaded is resumed; a held lead is a d
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Comment for a stale lead");
@@ -1942,7 +1942,7 @@ test("phone keyboard review to a completed lead shows the status line and resume
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Phone follow-up comment");
@@ -1987,7 +1987,7 @@ test("the recovery-continuation copy appears only while the lead awaits an opera
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Recovery comment");
@@ -2017,7 +2017,7 @@ test("sent reviews stay inspectable after reload and Start a new review", async 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Durable sent comment");
@@ -2053,7 +2053,7 @@ test("a stored comment without line context can be removed so the review can be 
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Anchored comment");
@@ -2137,7 +2137,7 @@ test("preview diagnostics distinguish a held read, an obsolete selection and an 
     await signIn(
       page,
       web.origin,
-      `/app/tasks/${task.taskId}?section=files`,
+      `/tasks/${task.taskId}?section=files`,
       web.password,
     );
     const files = page.locator("#files");
@@ -2194,7 +2194,7 @@ test("a comparison settling during a file click keeps the file under the pointer
     await signIn(
       page,
       web.origin,
-      `/app/tasks/${task.taskId}?section=files`,
+      `/tasks/${task.taskId}?section=files`,
       web.password,
     );
     const files = page.locator("#files");
@@ -2237,7 +2237,7 @@ test("an existing preview cannot satisfy a file click that did not select its ta
   await signIn(
     page,
     web.origin,
-    `/app/tasks/${task.taskId}?section=files`,
+    `/tasks/${task.taskId}?section=files`,
     web.password,
   );
   await openFile(page, /diff\.txt/);

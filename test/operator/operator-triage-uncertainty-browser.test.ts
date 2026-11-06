@@ -81,7 +81,7 @@ async function assertInView(page: Page, targets: Locator[], scrolled = false) {
 
 /** The result is the assignment's recovery page, held, with no command sent. */
 async function assertRecovery(s: Awaited<ReturnType<typeof start>>) {
-  await s.page.waitForURL(`**/app/assignments/${s.assignmentId}/recovery`);
+  await s.page.waitForURL(`**/assignments/${s.assignmentId}/recovery`);
   await assertInView(
     s.page,
     [
@@ -103,7 +103,7 @@ for (const [label, viewport] of [
   ["390 x 844", phone],
 ] as const) {
   test(`triage an uncertain execution budget: two interactions from the Home card (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, () => "/app");
+    const s = await start(journey, viewport, () => "/");
     const card = s.page.locator(".overview-card[data-kind='intervention']");
     const inspect = card.getByRole("link", {
       name: "Inspect execution",
@@ -126,7 +126,7 @@ for (const [label, viewport] of [
   });
 
   test(`triage an uncertain execution budget: three interactions from the Inbox row (${label})`, async (_t, journey) => {
-    const s = await start(journey, viewport, () => "/app/inbox");
+    const s = await start(journey, viewport, () => "/inbox");
     const row = s.page.locator(".inbox-row[data-kind='intervention']");
     await assertInView(s.page, [
       row,
@@ -159,7 +159,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/app/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}`,
     );
     const line = s.page
       .getByRole("list", { name: "Also held", exact: true })
@@ -176,11 +176,7 @@ for (const [label, viewport] of [
 }
 
 test("hold lines name each assignment's recovery page when the task has several", async (_t, journey) => {
-  const s = await start(
-    journey,
-    desktop,
-    ({ taskId }) => `/app/tasks/${taskId}`,
-  );
+  const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
   const taskUrl = `**/api/operator/tasks/${s.taskId}`;
   let served: TaskRead["data"]["assignments"] = [];
   await s.page.route(taskUrl, async (route) => {
@@ -212,8 +208,8 @@ test("hold lines name each assignment's recovery page when the task has several"
     assert.deepEqual(
       await links.evaluateAll((l) => l.map((x) => x.getAttribute("href"))),
       [
-        `/app/assignments/${a!.assignmentId}/recovery`,
-        `/app/assignments/${b!.assignmentId}/recovery`,
+        `/assignments/${a!.assignmentId}/recovery`,
+        `/assignments/${b!.assignmentId}/recovery`,
       ],
     );
   }

@@ -27,7 +27,7 @@ test("direct LAN UI loads its sign-in screen", async (_t, journey) => {
   journey.observe(page);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`${web.lanOrigin}/app`);
+  await page.goto(`${web.lanOrigin}/`);
   const observed = await page.evaluate(() => ({
     secure: window.isSecureContext,
     randomUUID: typeof crypto.randomUUID,
@@ -77,7 +77,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       journey.observe(page);
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
-      await page.goto(`${web.lanOrigin}/app/settings`);
+      await page.goto(`${web.lanOrigin}/settings`);
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       const panel = page.locator("section.settings-panel").filter({
@@ -154,7 +154,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       const login = async (
         page: typeof lanPage,
         origin: string,
-        path = "/app",
+        path = "/",
       ) => {
         await page.goto(`${origin}${path}`);
         await page.getByLabel("Password", { exact: true }).fill(web.password);
@@ -162,7 +162,7 @@ for (const engine of ["chromium", "webkit"] as const) {
           .getByRole("button", { name: "Sign in", exact: true })
           .click();
       };
-      await login(lanPage, web.lanOrigin, `/app/tasks/${task.taskId}`);
+      await login(lanPage, web.lanOrigin, `/tasks/${task.taskId}`);
       assert.equal(await lanPage.evaluate(() => window.isSecureContext), false);
       const commands: Array<Record<string, unknown>> = [];
       lanPage.on("request", (request) => {
@@ -198,7 +198,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         .getByRole("log", { name: "Task conversation" })
         .getByText("LAN fixture comment é")
         .waitFor();
-      await lanPage.goto(`${web.lanOrigin}/app/settings#notifications`);
+      await lanPage.goto(`${web.lanOrigin}/settings#notifications`);
       const notifications = lanPage.locator("section.settings-panel").filter({
         has: lanPage.getByRole("heading", {
           name: "Notifications",
@@ -244,7 +244,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         const page = await context.newPage();
         page.setDefaultTimeout(5000);
         journey.observe(page);
-        await page.goto(`${origin}/app`);
+        await page.goto(`${origin}/`);
         await page.getByLabel("Password", { exact: true }).waitFor();
         await page.close();
       }
@@ -360,7 +360,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         journey.observe(page);
       }
       const login = async (page: typeof local, origin: string) => {
-        await page.goto(`${origin}/app`);
+        await page.goto(`${origin}/`);
         await page.getByLabel("Password", { exact: true }).fill(web.password);
         await page
           .getByRole("button", { name: "Sign in", exact: true })

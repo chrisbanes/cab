@@ -123,7 +123,7 @@ export class OperatorWebBundle {
     if (!index.isFile() || index.isSymbolicLink())
       throw Error("Operator build unavailable");
     const html = await readFile(indexPath);
-    files.set("/app", { body: html, type: "text/html; charset=utf-8" });
+    files.set("/", { body: html, type: "text/html; charset=utf-8" });
     const assetPath = join(directory, "assets"),
       assets = await lstat(assetPath);
     if (!assets.isDirectory() || assets.isSymbolicLink())
@@ -139,7 +139,7 @@ export class OperatorWebBundle {
       if (!type) throw Error("Unsupported operator build asset");
       files.set(`/assets/${name}`, { body: await readFile(path), type });
     }
-    // The push worker is served at /app/service-worker.js so its scope is /app/. A build without
+    // The push worker is served at /service-worker.js so its scope is /. A build without
     // one serves none: the worker route answers 404 and turning notifications on fails in the browser.
     const workerPath = join(directory, "service-worker.js"),
       worker = await lstat(workerPath).catch((error: NodeJS.ErrnoException) => {
@@ -149,7 +149,7 @@ export class OperatorWebBundle {
     if (worker) {
       if (!worker.isFile() || worker.isSymbolicLink())
         throw Error("Unsafe operator build asset");
-      files.set("/app/service-worker.js", {
+      files.set("/service-worker.js", {
         body: await readFile(workerPath),
         type: mime.js ?? "text/javascript; charset=utf-8",
       });
@@ -192,25 +192,25 @@ export class OperatorWebBoundary {
   ) {}
   shell(path: string) {
     return (
-      path === "/app" ||
-      path === "/app/tasks" ||
-      path === "/app/tasks/new" ||
-      path === "/app/inbox" ||
-      path === "/app/search" ||
-      path === "/app/getting-started" ||
-      /^\/app\/tasks\/[a-f0-9-]{36}$/.test(path) ||
-      path === "/app/settings" ||
-      /^\/app\/assignments\/[a-f0-9-]{36}\/recovery$/.test(path) ||
-      /^\/app\/settings\/(?:projects\/new|profiles\/new|runtime)$/.test(path) ||
-      /^\/app\/(?:projects|profiles)\/[a-f0-9-]{36}\/settings$/.test(path) ||
+      path === "/" ||
+      path === "/tasks" ||
+      path === "/tasks/new" ||
+      path === "/inbox" ||
+      path === "/search" ||
+      path === "/getting-started" ||
+      /^\/tasks\/[a-f0-9-]{36}$/.test(path) ||
+      path === "/settings" ||
+      /^\/assignments\/[a-f0-9-]{36}\/recovery$/.test(path) ||
+      /^\/settings\/(?:projects\/new|profiles\/new|runtime)$/.test(path) ||
+      /^\/(?:projects|profiles)\/[a-f0-9-]{36}\/settings$/.test(path) ||
       path === "/login" ||
-      /^\/app\/projects\/[a-f0-9-]{36}$/.test(path)
+      /^\/projects\/[a-f0-9-]{36}$/.test(path)
     );
   }
   owns(path: string) {
     return (
       this.shell(path) ||
-      path.startsWith("/app/") ||
+      path === "/service-worker.js" ||
       path.startsWith("/assets/") ||
       path === "/api" ||
       path.startsWith("/api/")

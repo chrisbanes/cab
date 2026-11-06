@@ -5,5 +5,5 @@ export const notFoundSubtitle =
 
 /** Body of the "Page not found" route; the title and subtitle live in the page header. */
 export function NotFound() {
-  return <ActionLink href="/app">Go to Overview</ActionLink>;
+  return <ActionLink href="/">Go to Overview</ActionLink>;
 }

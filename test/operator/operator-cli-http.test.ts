@@ -282,7 +282,7 @@ test("bearer credentials read through the service under server-side route author
     ["POST", "/api/operator/credentials", { name: "x", scope: "read-write" }],
     ["POST", `/api/operator/credentials/${read.credential.id}/rotate`, {}],
     ["POST", `/api/operator/credentials/${read.credential.id}/revoke`, {}],
-    ["GET", "/app"],
+    ["GET", "/"],
     ["GET", "/assets/main.js"],
   ];
   for (const token of [read.token, write.token])

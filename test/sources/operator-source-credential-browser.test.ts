@@ -85,9 +85,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
-  );
+  await page.goto(`${web.origin}/projects/${projectId}/settings?tab=github`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -311,9 +309,7 @@ test("Source and sync recover from an explicitly missing GitHub CLI executable",
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
-  );
+  await page.goto(`${web.origin}/projects/${projectId}/settings?tab=github`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
@@ -355,7 +351,7 @@ test("Source and sync recover from an explicitly missing GitHub CLI executable",
     .first();
   assert.equal(
     await recovery.getAttribute("href"),
-    `/app/projects/${projectId}/settings?tab=github`,
+    `/projects/${projectId}/settings?tab=github`,
   );
   await recovery.click();
   await page
@@ -407,9 +403,7 @@ test("A setup-defaulted GitHub CLI source credential can be cancelled, cleared w
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
-  );
+  await page.goto(`${web.origin}/projects/${projectId}/settings?tab=github`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const change = page.getByRole("button", { name: "Change source credential" });

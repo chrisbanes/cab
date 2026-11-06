@@ -48,7 +48,7 @@ test("inspection sections are reached from task origins and exact direct links w
   const files = page.locator("#files");
 
   // Board origin → task → Files → back restores the board and its filter.
-  await page.goto(`${web.origin}/app/tasks?view=board&q=Navigable&ready=any`);
+  await page.goto(`${web.origin}/tasks?view=board&q=Navigable&ready=any`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
@@ -90,7 +90,7 @@ test("inspection sections are reached from task origins and exact direct links w
   await captureBrowserEvidence(page, "1366-search-return-after-files");
 
   // Exact direct links resolve their context; missing material is explained.
-  const base = `${web.origin}/app/tasks/${task.taskId}`;
+  const base = `${web.origin}/tasks/${task.taskId}`;
   await page.goto(`${base}?section=files&path=notes.md`);
   await files.getByText("navigation notes", { exact: true }).waitFor();
   await page.goto(`${base}?section=files&path=/notes.md`);
@@ -170,7 +170,7 @@ test("overview, project list and inbox origins return correctly from Files", asy
   };
 
   // Overview → task → Files → back.
-  await page.goto(`${web.origin}/app?ready=any`);
+  await page.goto(`${web.origin}/?ready=any`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
@@ -184,7 +184,7 @@ test("overview, project list and inbox origins return correctly from Files", asy
   assert.equal(page.url(), overviewURL);
 
   // Project list → task → Files → back.
-  const projectURL = `${web.origin}/app/projects/${task.projectId}?ready=any`;
+  const projectURL = `${web.origin}/projects/${task.projectId}?ready=any`;
   await page.goto(projectURL);
   await page
     .getByRole("link", { name: /Origin inspection/ })
@@ -201,13 +201,13 @@ test("overview, project list and inbox origins return correctly from Files", asy
   const interactionId = f.service.coordinationView().readTask(question.taskId)
     .questions[0]?.interactionId;
   assert.ok(interactionId);
-  await page.goto(`${web.origin}/app/inbox`);
+  await page.goto(`${web.origin}/inbox`);
   // The first request opens by itself on a wide layout, so address the queue row.
   await page.locator(`.inbox-row[data-record-id="${interactionId}"]`).click();
   await page.getByRole("link", { name: "Task evidence", exact: true }).click();
   await inspectAndReturn();
   await page.getByRole("region", { name: "Selected request" }).waitFor();
-  assert.ok(page.url().includes("/app/inbox"));
+  assert.ok(page.url().includes("/inbox"));
   assert.ok(page.url().includes(interactionId));
 
   assert.equal(f.service.taskHold(task.taskId), undefined);

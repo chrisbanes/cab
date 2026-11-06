@@ -290,7 +290,7 @@ for (const [label, viewport] of [
         answers.push(request.postDataJSON());
     });
     await stubReadiness(page);
-    await signIn(page, web, `/app/tasks/${s.taskId}`);
+    await signIn(page, web, `/tasks/${s.taskId}`);
     const log = page.getByRole("log", { name: "Task conversation" });
     await log.getByText("Second: all steps ran.").waitFor();
 
@@ -606,21 +606,21 @@ for (const [label, viewport] of [
     assert.ok(Math.abs(held - shown.top) <= 2, "visible entry held");
 
     // 8. Search targets still reveal their inspector cards: a closed card opens, even on a phone.
-    await page.goto(`${web.origin}/app/tasks/${s.taskId}?section=brief`);
+    await page.goto(`${web.origin}/tasks/${s.taskId}?section=brief`);
     await page.locator("#brief > details[open]").waitFor();
     assert.equal(
       await page.getByRole("heading", { name: "Shared brief" }).isVisible(),
       true,
     );
     await page.goto(
-      `${web.origin}/app/tasks/${s.taskId}?section=review&result=${s.result.resultId}`,
+      `${web.origin}/tasks/${s.taskId}?section=review&result=${s.result.resultId}`,
     );
     const latest = page
       .locator("#review")
       .getByText("Keyboard support ready", { exact: true });
     await latest.waitFor();
     assert.equal(await latest.isVisible(), true);
-    await page.goto(`${web.origin}/app/tasks/${s.taskId}?section=context`);
+    await page.goto(`${web.origin}/tasks/${s.taskId}?section=context`);
     await page.locator("#context > details[open]").waitFor();
     assert.equal(await page.locator("#context h3").isVisible(), true);
   });
@@ -713,7 +713,7 @@ test("the conversation and the composer heading are readable on first load when 
     width: 1280,
     height: 800,
   });
-  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  await signIn(page, web, `/tasks/${s.taskId}`);
   await page.getByRole("log", { name: "Task conversation" }).waitFor();
   for (const name of ["Conversation", "Reply"]) {
     const heading = page.getByRole("heading", { name, exact: true });
@@ -730,7 +730,7 @@ test("the conversation and the composer heading are readable on first load when 
 
 test("every former History link lands at its place in the conversation", async (_t, j) => {
   const { f, s, web, page } = await openFixture(j);
-  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  await signIn(page, web, `/tasks/${s.taskId}`);
   const log = page.getByRole("log", { name: "Task conversation" });
   await log.getByText("Second: all steps ran.").waitFor();
   const question = f.service.coordinationView().readTask(s.taskId).questions[0];
@@ -753,7 +753,7 @@ test("every former History link lands at its place in the conversation", async (
 
   // The conversation's newest entry, however the former History link was written.
   for (const link of ["#history", "?section=history", "#conversation"]) {
-    await page.goto(`${web.origin}/app/tasks/${s.taskId}${link}`);
+    await page.goto(`${web.origin}/tasks/${s.taskId}${link}`);
     await log.getByText("Second: all steps ran.").waitFor();
     for (let i = 0; i < 50 && !(await atBottom(page)); i++)
       await page.waitForTimeout(100);
@@ -762,7 +762,7 @@ test("every former History link lands at its place in the conversation", async (
   }
 
   // Captured context sits in the inspector.
-  await page.goto(`${web.origin}/app/tasks/${s.taskId}?section=context`);
+  await page.goto(`${web.origin}/tasks/${s.taskId}?section=context`);
   await page.locator("#context > details[open]").waitFor();
 
   // An assignment opens its delegation, and those above it.
@@ -770,24 +770,24 @@ test("every former History link lands at its place in the conversation", async (
     `?assignment=${s.worker}`,
     `?assignment=${s.worker}#history`,
   ]) {
-    await page.goto(`${web.origin}/app/tasks/${s.taskId}${link}`);
+    await page.goto(`${web.origin}/tasks/${s.taskId}${link}`);
     await landsOn(j, page, delegation(s.worker), link);
     await open(s.worker);
   }
-  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.nested}`);
+  await page.goto(`${web.origin}/tasks/${s.taskId}?assignment=${s.nested}`);
   await landsOn(j, page, delegation(s.nested), "a nested delegation");
   await open(s.worker);
   await open(s.nested);
 
   // The lead's own place is the conversation.
   await page.goto(
-    `${web.origin}/app/tasks/${s.taskId}?assignment=${s.assignmentId}`,
+    `${web.origin}/tasks/${s.taskId}?assignment=${s.assignmentId}`,
   );
   await landsOn(j, page, page.locator("#conversation-heading"), "the lead");
 
   // A request is reached in the conversation when the link names it.
   await page.goto(
-    `${web.origin}/app/tasks/${s.taskId}?request=${question.interactionId}#history`,
+    `${web.origin}/tasks/${s.taskId}?request=${question.interactionId}#history`,
   );
   await landsOn(
     j,
@@ -798,7 +798,7 @@ test("every former History link lands at its place in the conversation", async (
 
   // An assignment older than the loaded window: earlier pages are read until it is found.
   reads.length = 0;
-  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
+  await page.goto(`${web.origin}/tasks/${s.taskId}?assignment=${s.elder}`);
   await landsOn(
     j,
     page,
@@ -821,7 +821,7 @@ test("every former History link lands at its place in the conversation", async (
       .run(s.elder),
   );
   reads.length = 0;
-  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
+  await page.goto(`${web.origin}/tasks/${s.taskId}?assignment=${s.elder}`);
   await log.getByText("Elder note from before.").waitFor();
   await landsOn(
     j,
@@ -844,10 +844,10 @@ test("a link to a nested delegation lands even when the frame callback runs befo
       return 0;
     };
   });
-  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  await signIn(page, web, `/tasks/${s.taskId}`);
   const log = page.getByRole("log", { name: "Task conversation" });
   await log.getByText("Second: all steps ran.").waitFor();
-  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.nested}`);
+  await page.goto(`${web.origin}/tasks/${s.taskId}?assignment=${s.nested}`);
   const delegation = (id: string) =>
     log.locator(`[data-record-id="delegation:${id}"]`);
   await landsOn(j, page, delegation(s.nested), "a nested delegation");
@@ -865,7 +865,7 @@ test("a link to a nested delegation lands even when the frame callback runs befo
 test("a link to a record beyond the ten-page bound stops at the conversation's top with Load earlier", async (_t, j) => {
   // 560 older notes put the elder delegation 11 pages below the newest.
   const { s, web, page } = await openFixture(j, 560);
-  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  await signIn(page, web, `/tasks/${s.taskId}`);
   const log = page.getByRole("log", { name: "Task conversation" });
   await log.getByText("Second: all steps ran.").waitFor();
   const earlierReads: string[] = [];
@@ -876,7 +876,7 @@ test("a link to a record beyond the ten-page bound stops at the conversation's t
     )
       earlierReads.push(request.url());
   });
-  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
+  await page.goto(`${web.origin}/tasks/${s.taskId}?assignment=${s.elder}`);
   const notice = page
     .getByRole("status")
     .filter({ hasText: "is older than the part" });
@@ -930,7 +930,7 @@ test("a delegate is replied to from its sub-conversation header through the shar
     if (request.url().includes("/api/operator/operations?"))
       reads.push(`${sent.length}`);
   });
-  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  await signIn(page, web, `/tasks/${s.taskId}`);
   const log = page.getByRole("log", { name: "Task conversation" });
   await log.getByText("Second: all steps ran.").waitFor();
   // The older direct form is gone: Reply is the only entry, and it never holds a second composer.
@@ -1003,7 +1003,7 @@ for (const colorScheme of ["light", "dark"] as const)
     j.observe(page);
     page.setDefaultTimeout(5000);
     await stubReadiness(page);
-    await signIn(page, web, `/app/tasks/${s.taskId}`);
+    await signIn(page, web, `/tasks/${s.taskId}`);
     const log = page.getByRole("log", { name: "Task conversation" });
     await log.getByText("Second: all steps ran.").waitFor();
     await log
@@ -1050,7 +1050,7 @@ for (const colorScheme of ["light", "dark"] as const)
     j.observe(page);
     page.setDefaultTimeout(5000);
     await stubReadiness(page);
-    await signIn(page, web, `/app/tasks/${a.taskId}`);
+    await signIn(page, web, `/tasks/${a.taskId}`);
     await page.getByRole("log", { name: "Task conversation" }).waitFor();
     const heading = page.getByRole("heading", { name: "Agent's plan" });
     assert.equal(await heading.count(), 0, "no card without a plan");

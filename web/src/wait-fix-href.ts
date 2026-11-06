@@ -6,11 +6,11 @@ export const waitFixHref = (
   fix: Exclude<WaitFix, { kind: "resume-project" }>,
 ) =>
   fix.kind === "choose-lead"
-    ? `/app/projects/${fix.projectId}/settings`
+    ? `/projects/${fix.projectId}/settings`
     : fix.kind === "readiness"
       ? settingsSectionHref("readiness")
       : fix.kind === "add-claude"
         ? addClaudeHref
         : fix.kind === "open-repositories"
-          ? `/app/projects/${fix.projectId}/settings?tab=repositories`
-          : `/app/profiles/${fix.profileId}/settings`;
+          ? `/projects/${fix.projectId}/settings?tab=repositories`
+          : `/profiles/${fix.profileId}/settings`;

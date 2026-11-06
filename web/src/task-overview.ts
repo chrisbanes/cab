@@ -326,10 +326,10 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
 /** The view a task was opened from, for the header Back label. */
 export function originLabel(origin: string) {
   const [pathname, search = ""] = origin.split("?");
-  if (pathname === "/app") return "Overview";
-  if (pathname === "/app/inbox") return "Inbox";
-  if (pathname === "/app/search") return "Search";
-  if (pathname === "/app/tasks")
+  if (pathname === "/") return "Overview";
+  if (pathname === "/inbox") return "Inbox";
+  if (pathname === "/search") return "Search";
+  if (pathname === "/tasks")
     return new URLSearchParams(search).get("view") === "board"
       ? "Board"
       : "Tasks";

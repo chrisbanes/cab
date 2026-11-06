@@ -86,7 +86,7 @@ for (const schedule of [
     });
     f.service.jiraJqlErrors = async () => [];
     await page.goto(
-      `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+      `${web.origin}/projects/${projectId}/settings?tab=github&tracker=jira`,
     );
     await waitForQueries(page, original.map((row) => row.jql).join("\n"));
     if (schedule === "untouched query")
@@ -250,7 +250,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   });
   const projectId = String(f.service.domain().projects()[0]?.id);
   await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+    `${web.origin}/projects/${projectId}/settings?tab=github&tracker=jira`,
   );
   const credentials = page.getByRole("region", { name: "Jira credentials" });
   await credentials
@@ -335,9 +335,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   await page.getByLabel("JQL queries, one per line").waitFor();
   assert.equal(await closedIssues.inputValue(), "done");
   // The ordinary Jira settings route mounts the same control as the setup route.
-  await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
-  );
+  await page.goto(`${web.origin}/projects/${projectId}/settings?tab=github`);
   await page.getByLabel("JQL queries, one per line").waitFor();
   assert.equal(await closedIssues.inputValue(), "done");
   await closedIssues.selectOption("skip");
@@ -453,7 +451,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     .githubSources()
     .forTracker({ provider: "jira", instance: site });
   const taskId = String(stores.issue("10001")?.taskId);
-  await page.goto(`${web.origin}/app/tasks/${taskId}`);
+  await page.goto(`${web.origin}/tasks/${taskId}`);
   const chip = page.locator(".task-source-chip");
   await chip.waitFor();
   assert.equal(await chip.getAttribute("href"), `https://${site}/browse/ABC-1`);
@@ -481,7 +479,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     outcome: "Do it",
     ready: false,
   });
-  await page.goto(`${web.origin}/app/tasks/${localId}`);
+  await page.goto(`${web.origin}/tasks/${localId}`);
   await page
     .getByRole("button", { name: /Publish/ })
     .first()
@@ -548,7 +546,7 @@ test("a Jira readiness rule is edited in settings, explains a Draft task, and a 
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
   });
   await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+    `${web.origin}/projects/${projectId}/settings?tab=github&tracker=jira`,
   );
   const conditions = page.getByLabel("Readiness conditions, one per line");
   await conditions.fill("status in 1, 7");
@@ -579,14 +577,14 @@ test("a Jira readiness rule is edited in settings, explains a Draft task, and a 
     .forTracker({ provider: "jira", instance: site });
   const draft = String(stores.issue("10002")?.taskId);
   const blocked = String(stores.issue("10001")?.taskId);
-  await page.goto(`${web.origin}/app/tasks?state=all&ready=any`);
+  await page.goto(`${web.origin}/tasks?state=all&ready=any`);
   await page
     .locator(`.task-list [data-task-id="${draft}"]`)
     .getByText("Not Ready: needs Jira status is one of To Do, 7", {
       exact: true,
     })
     .waitFor();
-  await page.goto(`${web.origin}/app/tasks/${blocked}`);
+  await page.goto(`${web.origin}/tasks/${blocked}`);
   const link = page.getByRole("link", { name: "ABC-3" }).first();
   assert.equal(await link.getAttribute("href"), `https://${site}/browse/ABC-3`);
 });
@@ -634,7 +632,7 @@ test("a Jira status mapping is typed on the Jira tab with no grant, states what 
     },
   });
   await page.goto(
-    `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+    `${web.origin}/projects/${projectId}/settings?tab=github&tracker=jira`,
   );
   const panel = page.locator("#status-mapping");
   await panel

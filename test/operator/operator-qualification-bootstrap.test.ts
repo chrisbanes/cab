@@ -120,7 +120,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       assert.equal(f.service.capacityLimits().globalLimit, 3);
       await helpers.signOutOperator(page, web.origin);
       await page.getByLabel("Password", { exact: true }).waitFor();
-      await expectAnonymousSignIn("/app/settings/runtime");
+      await expectAnonymousSignIn("/settings/runtime");
       assert.equal(
         (
           await page.request.get(`${web.origin}/api/operator/workspace`)

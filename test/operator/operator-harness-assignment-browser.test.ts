@@ -134,7 +134,7 @@ for (const [name, viewport] of [
     const page = await browser.newPage({ viewport });
     journey.observe(page);
     page.setDefaultTimeout(5000);
-    await signIn(page, web, `/app/tasks/${ids.taskId}`);
+    await signIn(page, web, `/tasks/${ids.taskId}`);
 
     await openOverviewCard(page, "assignments");
     const worker = page.locator(".assignment-row", { hasText: "Claude work" });
@@ -152,13 +152,13 @@ for (const [name, viewport] of [
       await worker
         .getByRole("link", { name: "Edit agent" })
         .getAttribute("href"),
-      `/app/profiles/${ids.claude}/settings`,
+      `/profiles/${ids.claude}/settings`,
     );
     assert.equal(
       await worker
         .getByRole("link", { name: "Runtime status" })
         .getAttribute("href"),
-      "/app/settings/runtime",
+      "/settings/runtime",
     );
     await page
       .locator(".assignment-row", { hasText: "Codex work" })
@@ -208,7 +208,7 @@ for (const [name, viewport] of [
         }),
       );
     });
-    await page.goto(`${web.origin}/app/assignments/${ids.workerId}/recovery`);
+    await page.goto(`${web.origin}/assignments/${ids.workerId}/recovery`);
     await page
       .getByText("Execution runtime: Claude · sonnet · high.")
       .waitFor();
@@ -244,7 +244,7 @@ test("assignment facts state the command network access or local listening each 
   // The assignment facts stay collapsed, so the lines are attached rather than visible.
   const attached = { state: "attached" } as const;
 
-  await signIn(page, web, `/app/tasks/${ids.taskId}`);
+  await signIn(page, web, `/tasks/${ids.taskId}`);
   await openOverviewCard(page, "assignments");
   await line("Admitted with command network access disabled.").waitFor(
     attached,

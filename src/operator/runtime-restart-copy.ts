@@ -81,5 +81,5 @@ export const unavailableNote = (harness: Harness) =>
 export const runtimeInboxHeadline = (harness: Harness) =>
   `${executionHarnessLabels[harness]} runtime unavailable`;
 export const runtimeInboxReason = "Restart retries exhausted";
-export const runtimeSettingsPath = "/app/settings/runtime";
+export const runtimeSettingsPath = "/settings/runtime";
 export const runtimeSettingsAction = "Open runtime settings";

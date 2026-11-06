@@ -96,10 +96,10 @@ export async function reenterHome(page: Page) {
   };
   await open();
   await page.getByRole("link", { name: "Tasks", exact: true }).click();
-  await page.waitForURL("**/app/tasks");
+  await page.waitForURL("**/tasks");
   await open();
   await page.getByRole("link", { name: "Overview", exact: true }).click();
-  await page.waitForURL(/\/app$/);
+  await page.waitForURL(/\/$/);
 }
 
 /**

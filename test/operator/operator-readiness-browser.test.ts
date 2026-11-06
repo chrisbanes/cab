@@ -38,7 +38,7 @@ for (const [name, viewport] of [
   test(`Settings shows the service readiness checks with fix lines on ${name}`, async (t, journey) => {
     const { f, page } = await startSettings(
       journey,
-      "/app/settings",
+      "/settings",
       viewport,
       undefined,
       {
@@ -139,7 +139,7 @@ for (const [name, viewport] of [
   ["phone", phone],
 ] as const) {
   test(`Run again announces the pending read, keeps focus and marks results stale after a failed read on ${name}`, async (_t, journey) => {
-    const { page } = await startSettings(journey, "/app/settings", viewport);
+    const { page } = await startSettings(journey, "/settings", viewport);
     const panel = page.locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Readiness", exact: true }),
     });
@@ -188,7 +188,7 @@ for (const [name, viewport] of [
 test("the panel never shows the name of a profile the runtime rejects", async (_t, journey) => {
   const { f, page } = await startSettings(
     journey,
-    "/app/settings",
+    "/settings",
     desktop,
     undefined,
     {

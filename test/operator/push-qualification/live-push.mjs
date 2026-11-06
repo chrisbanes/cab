@@ -145,7 +145,7 @@ try {
     page.evaluate(async () =>
       (
         (await (
-          await navigator.serviceWorker.getRegistration("/app/")
+          await navigator.serviceWorker.getRegistration("/")
         )?.getNotifications()) ?? []
       ).map((n) => ({ title: n.title, tag: n.tag })),
     );
@@ -161,7 +161,7 @@ try {
     }
   };
   const goSettings = async () => {
-    await page.goto(`${web.origin}/app/settings#notifications`);
+    await page.goto(`${web.origin}/settings#notifications`);
   };
 
   await step("sign in to a fresh profile", async () => {
@@ -180,7 +180,7 @@ try {
       },
     );
     assert.equal(login.status(), 200);
-    await page.goto(`${web.origin}/app/settings#notifications`);
+    await page.goto(`${web.origin}/settings#notifications`);
     await page.locator("main.page h1").waitFor();
     browserVersion = (await page.evaluate(() => navigator.userAgent)).match(
       /Chrome\/([\d.]+)/,
@@ -277,22 +277,22 @@ try {
     async () => {
       // A native notification cannot be clicked from automation, and Chrome refuses WindowClient.focus()
       // and clients.openWindow() outside a real click. What this proves is the part that needs no
-      // gesture: in Chrome's own worker, matchAll finds the controlled /app window and navigate()
+      // gesture: in Chrome's own worker, matchAll finds the controlled / window and navigate()
       // sends it to the exact link. The operating system's click delivery, focus and openWindow are not proven.
-      const link = `/app/inbox?task=${question.taskId}&request=${question.interactionId}`;
-      await page.goto(`${web.origin}/app/inbox`);
+      const link = `/inbox?task=${question.taskId}&request=${question.interactionId}`;
+      await page.goto(`${web.origin}/inbox`);
       await page.locator("main.page h1").waitFor();
       const worker = context
         .serviceWorkers()
-        .find((w) => w.url().endsWith("/app/service-worker.js"));
+        .find((w) => w.url().endsWith("/service-worker.js"));
       assert.ok(worker, "the worker is running");
       const outcome = await worker.evaluate(async (url) => {
         const windows = await self.clients.matchAll({
           type: "window",
           includeUncontrolled: true,
         });
-        const target = windows.find((c) =>
-          new URL(c.url).pathname.startsWith("/app/"),
+        const target = windows.find(
+          (c) => new URL(c.url).origin === self.location.origin,
         );
         if (!target) return { found: false };
         let focus = "focused";
@@ -311,7 +311,7 @@ try {
   await step(
     "6 answer the question: no further push and the notification closes after the next read",
     async () => {
-      await page.goto(`${web.origin}/app/inbox`);
+      await page.goto(`${web.origin}/inbox`);
       await page.locator("main.page h1").waitFor();
       await api.execute({
         type: "question.form.answer",
@@ -364,7 +364,7 @@ try {
         harness: "codex",
         enabled: true,
       });
-      await page.goto(`${web.origin}/app/inbox`);
+      await page.goto(`${web.origin}/inbox`);
       await page.locator("main.page h1").waitFor();
       const started = Date.now();
       let closed = false;
@@ -389,7 +389,7 @@ try {
         .waitFor();
       // Unsubscribing in the browser alone, without telling the service, is the case being exercised.
       await page.evaluate(async () => {
-        const r = await navigator.serviceWorker.getRegistration("/app/");
+        const r = await navigator.serviceWorker.getRegistration("/");
         await (await r.pushManager.getSubscription()).unsubscribe();
       });
       const row = push.read().subscriptions[0];

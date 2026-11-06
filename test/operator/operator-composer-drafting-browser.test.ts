@@ -62,7 +62,7 @@ async function launch(
   page.setDefaultTimeout(8000);
   const commands = recordCommands(page);
   const open = async () => {
-    await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
+    await page.goto(`${web.origin}/tasks/new?project=${projectId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.locator("main.page h1").waitFor();
@@ -505,7 +505,7 @@ for (const [name, viewport] of viewports.slice(0, 1)) {
     await until(() => lost);
     // Leave the composer without a reload; nothing mounted there can resend the stop.
     await page.evaluate(() => {
-      history.pushState({}, "", "/app/inbox");
+      history.pushState({}, "", "/inbox");
       dispatchEvent(new PopStateEvent("popstate"));
     });
     await page.getByLabel("Rough idea").waitFor({ state: "detached" });

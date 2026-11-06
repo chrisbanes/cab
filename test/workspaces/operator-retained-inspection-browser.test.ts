@@ -144,7 +144,7 @@ test("production retained result evidence keeps original bytes and opens current
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
-  const direct = `/app/tasks/${seeded.taskId}?section=review&result=${result.resultId}&evidence=${textItem.itemId}`;
+  const direct = `/tasks/${seeded.taskId}?section=review&result=${result.resultId}&evidence=${textItem.itemId}`;
   await page.goto(web.origin + direct);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -269,7 +269,7 @@ test("production retained result evidence keeps original bytes and opens current
   // An unknown evidence item explains unavailability without current bytes.
   await page.goto(
     web.origin +
-      `/app/tasks/${seeded.taskId}?section=review&result=${result.resultId}&evidence=${randomUUID()}`,
+      `/tasks/${seeded.taskId}?section=review&result=${result.resultId}&evidence=${randomUUID()}`,
   );
   await retained
     .getByText(/Retained item is unavailable|Retained item could not be read/)
@@ -415,7 +415,7 @@ test("production retained diff evidence renders its original Before and After re
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   await page.goto(
-    `${web.origin}/app/tasks/${seeded.taskId}?section=review&result=${result.resultId}&evidence=${itemId}`,
+    `${web.origin}/tasks/${seeded.taskId}?section=review&result=${result.resultId}&evidence=${itemId}`,
   );
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
