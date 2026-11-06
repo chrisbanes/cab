@@ -1,6 +1,6 @@
 # Task Git access live qualification
 
-Recorded 2026-11-05 for [#1532](https://github.com/chrisbanes/cab/issues/1532). Both runs used the candidate working tree on base `00d262caef5b73582316276aa9ff9096ac1166c6`; the `candidate` field in the JSON is that base, because the change was not yet committed. The pull request's head holds the same runtime code. No credential, token or account data is recorded, and the data-directory path is replaced by `<managed>`.
+Recorded 2026-11-06 for [#1532](https://github.com/chrisbanes/cab/issues/1532), at candidate `603a2277d192f6e128a4d8cb6630afdde78d0aa2`, a clean checkout; this record is the only later change. No credential, token or account data is recorded, and the data-directory path is replaced by `<managed>`.
 
 Commands: `npm run git-access:live -- --harness=codex` and `npm run git-access:live -- --harness=claude`, the second with `CLAUDE_CODE_OAUTH_TOKEN` set from the operator's environment. The harness reads only that variable, hands it to the service through an `env:` reference after the first service generation has stopped, and never reads operator data.
 
@@ -15,7 +15,7 @@ Both harnesses pass every check:
 - The three forbidden writes were denied. The managed config has no added section and no `hooks/`. The source's refs, config and hooks digest is unchanged, and the source's worktree list does not hold the workspace.
 - The service stopped and the fixture was removed. Codex's App Server exit was verified by exact process identity; Claude runs one `claude` process per turn and has no long-lived identity to verify.
 
-The first Claude run stopped before any turn with `Database facade is closed`: the harness kept the domain from the service generation it had stopped. The harness was fixed to read the domain after the restart and run once more.
+Earlier runs on 2026-11-05, against the uncommitted candidate, also passed for both harnesses. Before them, one Claude run stopped before any turn with `Database facade is closed`, because the harness kept the domain from the service generation it had stopped; the harness was fixed to read the domain after the restart. These runs repeat both at the committed head, after the review repairs.
 
 | Harness | Runtime | Result |
 | --- | --- | --- |

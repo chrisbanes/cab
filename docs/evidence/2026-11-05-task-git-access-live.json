@@ -1,6 +1,6 @@
 {
   "codex": {
-    "candidate": "00d262caef5b73582316276aa9ff9096ac1166c6",
+    "candidate": "603a2277d192f6e128a4d8cb6630afdde78d0aa2",
     "harness": "codex",
     "node": "v26.13.0",
     "git": "git version 2.54.0 (Apple Git-157)",
@@ -59,7 +59,7 @@
     "failure": null
   },
   "claude": {
-    "candidate": "00d262caef5b73582316276aa9ff9096ac1166c6",
+    "candidate": "603a2277d192f6e128a4d8cb6630afdde78d0aa2",
     "harness": "claude",
     "node": "v26.13.0",
     "git": "git version 2.54.0 (Apple Git-157)",
