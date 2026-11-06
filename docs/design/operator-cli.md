@@ -114,7 +114,9 @@ Historical instruction revisions can be displayed when retained, labelled as
 reconstructed from revision records. Only an actual captured submission may be
 labelled as the supplied prompt. Missing tool events, unknown effective settings
 and unavailable old prompts are explicit gaps. Tool activity is diagnostic;
-absence is not evidence that no tool ran. Do not collect provider-private reasoning.
+absence is not evidence that no tool ran; the wider conversation projection is in
+[ADR-1025](../adr/1025-conversation-activity-plans-and-change-notifications.md). Do not
+collect provider-private reasoning; any change to that is a separate decision.
 
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
