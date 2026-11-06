@@ -902,11 +902,10 @@ export function TaskWorkspace({
     if (target) showSection(target);
   };
   // The timer and change-notice read: nothing blanks or announces progress unless it fails.
-  // A notice supersedes an in-flight read, which may predate the change.
-  const poll = (supersede = false) => {
-    capture();
-    resource.poll({ supersede });
-  };
+  // A notice supersedes an in-flight read, which may predate the change. The reading position
+  // is captured as the read lands, so scrolling while it is in flight is not undone.
+  const poll = (supersede = false) =>
+    resource.poll({ supersede, beforeApply: () => captureRef.current() });
   // Manual re-reads also refresh the shell's workspace and Inbox count; the poll below does not.
   const refreshAll = () => {
     refresh();

@@ -1031,7 +1031,8 @@ test("an approval for a GitLab discussion names the code host in the Inbox and i
       hasText: "Create a pull request. No merge or deployment.",
     })
     .waitFor();
-  await page.unroute(taskUrl);
+  // The stream's opening refetch may still be in its handler when the page closes.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("an intervention shows its recorded reason and links to the execution", async (_t, j) => {

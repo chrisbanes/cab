@@ -174,3 +174,37 @@ test("a superseding background read replaces an in-flight one and follows a fore
   await explicit;
   assert.equal(controller.state.data, "after");
 });
+
+test("beforeApply runs as a successful read lands, before it is published", async () => {
+  const order: string[] = [];
+  const controller = new ResourceController<string>((state) =>
+    order.push(`publish ${state.data}`),
+  );
+  await controller.load(async () => "first");
+  order.length = 0;
+  const slow = deferred<string>();
+  const loading = controller.load(() => slow.promise, {
+    background: true,
+    beforeApply: () => order.push("capture"),
+  });
+  assert.deepEqual(
+    [...order],
+    [],
+    "nothing is captured while the read is in flight",
+  );
+  slow.resolve("second");
+  await loading;
+  assert.deepEqual([...order], ["capture", "publish second"]);
+  order.length = 0;
+  await controller.load(
+    async () => {
+      throw new Error("unavailable");
+    },
+    { background: true, beforeApply: () => order.push("capture") },
+  );
+  assert.deepEqual(
+    [...order],
+    ["publish second"],
+    "a failed read captures nothing",
+  );
+});

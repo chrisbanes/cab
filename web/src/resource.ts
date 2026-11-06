@@ -18,7 +18,9 @@ export class ResourceController<T> {
   private abort: AbortController | undefined;
   private polling = false;
   /** A superseding read that arrived during a foreground read; it runs once that settles. */
-  private rerun: ((signal: AbortSignal) => Promise<T>) | undefined;
+  private rerun:
+    | { loader: (signal: AbortSignal) => Promise<T>; beforeApply?: () => void }
+    | undefined;
   constructor(
     private readonly changed: (state: ResourceState<T>) => void = () => {},
   ) {}
@@ -44,13 +46,24 @@ export class ResourceController<T> {
    * flash progress. It never interrupts a read that is already in flight,
    * unless it supersedes one: a change notice replaces an in-flight background
    * read, which may predate the change, and follows a foreground read.
+   * `beforeApply` runs just before a successful read is published, so a page
+   * can capture its reading position as it is when the change lands.
    */
   async load(
     loader: (signal: AbortSignal) => Promise<T>,
-    { background = false, supersede = false } = {},
+    {
+      background = false,
+      supersede = false,
+      beforeApply,
+    }: {
+      background?: boolean;
+      supersede?: boolean;
+      beforeApply?: () => void;
+    } = {},
   ) {
     if (background && this.state.pending) {
-      if (supersede) this.rerun = loader;
+      if (supersede)
+        this.rerun = { loader, ...(beforeApply ? { beforeApply } : {}) };
       return;
     }
     if (background && this.polling && !supersede) return;
@@ -70,6 +83,7 @@ export class ResourceController<T> {
       const data = await loader(abort.signal);
       if (generation !== this.generation || abort.signal.aborted) return;
       this.polling = false;
+      beforeApply?.();
       this.publish({
         status: "fresh",
         data,
@@ -94,7 +108,11 @@ export class ResourceController<T> {
     }
     const rerun = this.rerun;
     this.rerun = undefined;
-    if (rerun) await this.load(rerun, { background: true });
+    if (rerun)
+      await this.load(rerun.loader, {
+        background: true,
+        ...(rerun.beforeApply ? { beforeApply: rerun.beforeApply } : {}),
+      });
   }
   dispose() {
     this.generation++;
@@ -134,7 +152,7 @@ export function useOperatorResource<T>(
   return {
     state: snapshot.scope === scope ? snapshot.state : resource.state,
     refresh: () => resource.load(loader),
-    poll: (options: { supersede?: boolean } = {}) =>
+    poll: (options: { supersede?: boolean; beforeApply?: () => void } = {}) =>
       resource.load(loader, { background: true, ...options }),
   };
 }
