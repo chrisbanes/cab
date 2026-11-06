@@ -156,6 +156,15 @@ fixed application dimensions.
   Home and End resize, and keeps its width per browser in `localStorage`. Opening
   moves focus into the pane; Close returns it to the opener. It is page state, not a
   route, and below 1024px the same actions select the Changes tab.
+- **Focus mode:** from 1024px a `Focus mode` button in the task tools row, and the `\`
+  key, hide the inspector and the Changes pane so the conversation takes the whole row.
+  The button is a pressed toggle (`aria-pressed`, `--primary` fill when on). The key is
+  ignored in editable fields and dialogs and with Ctrl, Alt or Meta held, so layouts
+  that type `\` through AltGr use the button; this is the workspace's only keyboard
+  shortcut, beside the sidebar's ⌘K. The choice is remembered per browser in
+  `localStorage`. A link or Changes action that needs a hidden panel shows it for that
+  visit without changing the choice. Leaving focus mode restores the inspector fold as
+  it was and the pane with its selection. Below 1024px nothing changes.
 
 ## Shared components
 

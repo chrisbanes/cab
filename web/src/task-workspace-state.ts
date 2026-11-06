@@ -340,6 +340,8 @@ export class TaskWorkspaceState {
   inspectorOpen: boolean | null = null;
   /** The Changes side pane beside the conversation (1024px and wider); `opener` is the selector that gets focus back on Close. */
   changesPane: { opener: string } | null = null;
+  /** A link or opener needed a panel focus mode hides, so this history entry shows it; the remembered choice is untouched. */
+  focusYielded = false;
   /** The phone banner's collapsed attention card; it opens on arrival so the first screen holds the decision. */
   attentionCollapsed = false;
   get sourceObservation() {

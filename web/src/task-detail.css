@@ -356,6 +356,17 @@ a.task-source-chip:hover {
   }
 }
 
+/* Focus mode: the inspector is not rendered, so the conversation takes the whole row. */
+.task-overview[data-focus] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-tools [aria-pressed="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: var(--weight-semibold);
+}
+
 .task-columns {
   display: flex;
   flex-direction: column;

@@ -470,3 +470,17 @@ test("a changed file in the conversation opens in the Changes tab at 800px", asy
     .filter({ hasText: /guide\.md/ })
     .waitFor();
 });
+
+test("a changed file in the conversation leaves focus mode and opens the pane", async (_t, j) => {
+  const { page } = await start(j);
+  await page.keyboard.press("\\");
+  await page.locator(".task-inspector").waitFor({ state: "detached" });
+  await filePath(page, "guide.md").click();
+  await pane(page).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Focus mode", exact: true })
+      .getAttribute("aria-pressed"),
+    "false",
+  );
+});

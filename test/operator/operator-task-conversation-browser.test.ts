@@ -446,10 +446,17 @@ for (const [label, viewport] of [
     const changesTab = page.getByRole("tab", { name: "Changes", exact: true });
     const pane = page.locator("aside[aria-label='Changes']");
     const url = page.url();
+    const focusMode = page.getByRole("button", {
+      name: "Focus mode",
+      exact: true,
+    });
+    if (viewport === desktop) await focusMode.click();
     await opener.click();
     if (viewport === desktop) {
       // Wide screens open the pane beside the conversation, with focus inside it.
       await pane.waitFor();
+      // Asking for Changes leaves focus mode.
+      assert.equal(await focusMode.getAttribute("aria-pressed"), "false");
       assert.equal(page.url(), url);
       assert.equal(await changesTab.getAttribute("aria-selected"), "false");
       assert.equal(

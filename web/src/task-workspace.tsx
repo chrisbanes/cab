@@ -121,6 +121,11 @@ import { AssignmentRows, openDisclosures, showSection } from "./task-detail.js";
 import { TaskInspector } from "./task-inspector.js";
 import { useMediaQuery } from "./use-media-query.js";
 import {
+  focusShortcutApplies,
+  setFocusMode,
+  useFocusMode,
+} from "./focus-mode.js";
+import {
   type RequestPlaces,
   TaskConversation,
   useTaskTimeline,
@@ -143,6 +148,7 @@ import {
   type ConversationTarget,
   type TaskTab,
   conversationTarget,
+  linkNamesInspector,
   tabForLocation,
   tabForSection,
   tabIds,
@@ -486,10 +492,11 @@ export function TaskWorkspace({
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const wide = useMediaQuery("(min-width: 1024px)");
-  const paneVisible = state.changesPane !== null && wide;
   const selectedPath = useRef<string | null>(null);
   if (selectedPath.current !== path) {
     selectedPath.current = path;
+    // A link to something only the inspector shows steps focus mode aside for this entry.
+    if (linkNamesInspector(path, location.hash)) state.focusYielded = true;
     if (!state.selectionInitialized) {
       state.selectionInitialized = true;
       // The first paint already shows the linked tab.
@@ -552,6 +559,9 @@ export function TaskWorkspace({
       if (params.has("review")) state.review.inspectKey = params.get("review");
     }
   }
+  const focusRemembered = useFocusMode();
+  const focus = wide && focusRemembered && !state.focusYielded;
+  const paneVisible = state.changesPane !== null && wide && !focus;
   const selectionQuery = new URLSearchParams();
   if (state.selectedResult)
     selectionQuery.set("resultId", state.selectedResult);
@@ -807,7 +817,8 @@ export function TaskWorkspace({
   const reflow = useRef(false);
   const openPane = (opener: string) => {
     capture();
-    reflow.current = state.changesPane === null;
+    reflow.current = !paneVisible;
+    state.focusYielded = true;
     state.changesPane = { opener };
     changed();
     requestAnimationFrame(() =>
@@ -816,6 +827,40 @@ export function TaskWorkspace({
         ?.focus({ preventScroll: true }),
     );
   };
+  const focusToggle = useRef<HTMLButtonElement>(null);
+  const toggleFocus = () => {
+    capture();
+    reflow.current = true;
+    state.focusYielded = false;
+    setFocusMode(!focus);
+    changed();
+    // Focus inside a panel that is about to unmount would fall to the page; elsewhere it stays put.
+    const inPanel = document.activeElement?.closest(
+      ".task-inspector, aside[aria-label='Changes']",
+    );
+    if (inPanel)
+      requestAnimationFrame(() =>
+        focusToggle.current?.focus({ preventScroll: true }),
+      );
+  };
+  const toggleFocusRef = useRef(toggleFocus);
+  toggleFocusRef.current = toggleFocus;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        !matchMedia("(min-width: 1024px)").matches ||
+        !focusShortcutApplies(
+          event,
+          event.target instanceof HTMLElement ? event.target : null,
+        )
+      )
+        return;
+      event.preventDefault();
+      toggleFocusRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const closePane = () => {
     const opener = state.changesPane?.opener;
     capture();
@@ -848,7 +893,7 @@ export function TaskWorkspace({
         )
       : null;
     if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
-  }, [paneVisible]);
+  }, [paneVisible, focus]);
   /** Move to a section in place, on its tab. */
   const reveal = (id: string) => {
     selectTab(tabForSection(id));
@@ -2576,6 +2621,18 @@ export function TaskWorkspace({
             <Button variant="secondary" onClick={refreshAll}>
               Refresh task
             </Button>
+            {wide && (
+              <Button
+                ref={focusToggle}
+                variant="secondary"
+                aria-pressed={focus}
+                aria-keyshortcuts={"\\"}
+                title={"Focus mode (\\)"}
+                onClick={toggleFocus}
+              >
+                Focus mode
+              </Button>
+            )}
           </div>
         </TaskStrip>
         {!projectReadOnly && publishPolicy && publishShown && (
@@ -2631,7 +2688,10 @@ export function TaskWorkspace({
           </Button>
         )}
         <TabPanel tab="overview" active={state.tab}>
-          <div className={paneVisible ? undefined : "task-overview"}>
+          <div
+            className={paneVisible ? undefined : "task-overview"}
+            data-focus={focus || undefined}
+          >
             <IssueChangedSinceHandback
               changed={data.task.issueChangedSinceHandback}
             />
@@ -2650,7 +2710,7 @@ export function TaskWorkspace({
             ) : (
               columns
             )}
-            {!paneVisible && (
+            {!paneVisible && !focus && (
               <TaskInspector
                 data={data}
                 deciding={deciding}
