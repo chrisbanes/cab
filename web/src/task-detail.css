@@ -998,19 +998,18 @@ a.task-source-chip:hover {
   gap: var(--space-8);
 }
 
-/* Opacity, not display, keeps Copy in the tab order and the entry's height steady. */
-.conv-agent:not([data-latest]) .conv-copy {
-  opacity: 0;
-}
+/*
+ * Opacity, not display, keeps Copy in the tab order and the entry's height steady. Only a
+ * pointer that hovers hides it; touch devices always show it.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .conv-agent:not([data-latest]) .conv-copy {
+    opacity: 0;
+  }
 
-.conv-agent:not([data-latest]):hover .conv-copy,
-.conv-agent:not([data-latest]):focus-within .conv-copy {
-  opacity: 1;
-}
-
-@media (hover: none), (pointer: coarse) {
-  .conv-agent .conv-copy {
-    opacity: 1 !important;
+  .conv-agent:not([data-latest]):hover .conv-copy,
+  .conv-agent:not([data-latest]):focus-within .conv-copy {
+    opacity: 1;
   }
 }
 
