@@ -17,6 +17,8 @@ export class ResourceController<T> {
   private generation = 0;
   private abort: AbortController | undefined;
   private polling = false;
+  /** A superseding read that arrived during a foreground read; it runs once that settles. */
+  private rerun: ((signal: AbortSignal) => Promise<T>) | undefined;
   constructor(
     private readonly changed: (state: ResourceState<T>) => void = () => {},
   ) {}
@@ -28,6 +30,7 @@ export class ResourceController<T> {
     this.generation++;
     this.abort?.abort();
     this.polling = false;
+    this.rerun = undefined;
     this.publish({
       status: "empty",
       data: null,
@@ -38,13 +41,19 @@ export class ResourceController<T> {
   }
   /**
    * A background load publishes nothing until it settles, so timers do not
-   * flash progress. It never interrupts a read that is already in flight.
+   * flash progress. It never interrupts a read that is already in flight,
+   * unless it supersedes one: a change notice replaces an in-flight background
+   * read, which may predate the change, and follows a foreground read.
    */
   async load(
     loader: (signal: AbortSignal) => Promise<T>,
-    { background = false } = {},
+    { background = false, supersede = false } = {},
   ) {
-    if (background && (this.state.pending || this.polling)) return;
+    if (background && this.state.pending) {
+      if (supersede) this.rerun = loader;
+      return;
+    }
+    if (background && this.polling && !supersede) return;
     this.abort?.abort();
     const generation = ++this.generation;
     const abort = new AbortController();
@@ -83,11 +92,15 @@ export class ResourceController<T> {
         pending: false,
       });
     }
+    const rerun = this.rerun;
+    this.rerun = undefined;
+    if (rerun) await this.load(rerun, { background: true });
   }
   dispose() {
     this.generation++;
     this.abort?.abort();
     this.polling = false;
+    this.rerun = undefined;
   }
 }
 
@@ -121,6 +134,7 @@ export function useOperatorResource<T>(
   return {
     state: snapshot.scope === scope ? snapshot.state : resource.state,
     refresh: () => resource.load(loader),
-    poll: () => resource.load(loader, { background: true }),
+    poll: (options: { supersede?: boolean } = {}) =>
+      resource.load(loader, { background: true, ...options }),
   };
 }
