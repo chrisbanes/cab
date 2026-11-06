@@ -163,6 +163,7 @@ function fixture(
     access?: "read-only",
     skills?: RuntimeTurnSettings["skills"],
     gitWritableRoots?: string[],
+    localListening?: boolean,
   ) => {
     const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
@@ -174,11 +175,12 @@ function fixture(
       workspace,
       "Do the work",
       turnSettings,
-      access || gitWritableRoots
+      access || gitWritableRoots || localListening
         ? {
             networkAccess: false,
             ...(access ? { access } : {}),
             ...(gitWritableRoots ? { gitWritableRoots } : {}),
+            ...(localListening ? { localListening } : {}),
           }
         : undefined,
     );
@@ -900,6 +902,45 @@ test("a task turn's Git roots are writable to sandboxed commands but not to file
         .hookSpecificOutput?.permissionDecision,
       "deny",
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a task turn with local listening can bind loopback ports and keeps network denied", async () => {
+  const turnScript = async function* (
+    session: Parameters<typeof sessionOf>[0],
+  ) {
+    yield init(sessionOf(session));
+    yield result(sessionOf(session));
+  };
+  const f = fixture({ scripts: [turnScript, turnScript, turnScript] });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    for (const [access, listening] of [
+      [undefined, true],
+      [undefined, undefined],
+      ["read-only", true],
+    ] as const) {
+      const turnId = await f.turn(
+        threadId,
+        access,
+        undefined,
+        undefined,
+        listening,
+      );
+      assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    }
+    const network = (index: number) =>
+      f.sessions[index]?.options.sandbox?.network;
+    assert.deepEqual(network(0), {
+      allowedDomains: [],
+      allowLocalBinding: true,
+    });
+    assert.deepEqual(network(1), { allowedDomains: [] });
+    // A read-only (draft) turn never listens, whatever the policy carries.
+    assert.deepEqual(network(2), { allowedDomains: [] });
   } finally {
     await f.cleanup();
   }

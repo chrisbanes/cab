@@ -1107,7 +1107,13 @@ export class ClaudeRuntime implements Runtime {
         failIfUnavailable: true,
         allowUnsandboxedCommands: false,
         autoAllowBashIfSandboxed: true,
-        network: { allowedDomains: [] },
+        network: {
+          allowedDomains: [],
+          // macOS only: lets sandboxed commands bind local ports; outbound stays denied.
+          ...(policy?.localListening && policy.access !== "read-only"
+            ? { allowLocalBinding: true }
+            : {}),
+        },
         filesystem: { allowWrite: sandboxWritable },
       },
       mcpServers: {

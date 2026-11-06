@@ -814,6 +814,28 @@ does not repeat.
 | Delivery pushes a managed worktree's commit, whose base objects exist only in the source, through the nested alternate | `git-push.test.ts` |
 | Comparisons against a base branch read the operator's branches from the source checkout | `operator-comparisons.test.ts` |
 
+## Local listening
+
+A project's local listening lets Claude Code task turns bind local ports with outbound
+network denied; Codex turns are unchanged and listen only with command network access
+([ADR-1027](adr/1027-local-listening-for-test-fixtures.md)). The service and both runtimes
+are covered by deterministic suites; the sandboxes are proved by the
+[probe](evidence/local-listening-probe-2026-11-06.md) and one
+[live service turn per harness](evidence/2026-11-06-local-listening-live.md), which CI
+does not repeat.
+
+| Criteria | Evidence |
+| --- | --- |
+| Without the option Claude's sandbox denies binding `127.0.0.1`; with it Claude binds and serves while outbound stays denied; Codex binds only with network access on | [probe](evidence/local-listening-probe-2026-11-06.md) |
+| The setting is off by default, versioned and operator-only through the API and `project prepare --local-listening`; no coordination tool names it | `operator-command-network.test.ts` |
+| Settings shows it as a switch with its disclosure and saves it as a versioned change; the change list and wording come from shared copy | `operator-project-config-general-browser.test.ts`, `operator-settings-presentation.test.ts` |
+| A Claude task turn records the setting at its own admission; Codex turns, drafting runs and draft turns record it off, and unadmitted turns read none | `command-network-admission.test.ts`, `draft-turn.test.ts` |
+| Each harness gets the expected policy for every combination of local listening and command network access | `command-network-admission.test.ts` |
+| Claude adds `allowLocalBinding` only on a non-read-only turn with local listening; Codex's `sandboxPolicy` never changes for it | `claude-runtime.test.ts`, `codex-runtime.test.ts` |
+| Both disclosures state local listening within the disclosure caps; the CLI and task page show a Claude turn's admitted value | `operator-execution-runtime.test.ts`, `operator-cli-browse.test.ts`, `operator-harness-assignment-browser.test.ts` |
+| Project deletion removes both tables | `project-deletion.test.ts` |
+| A live task turn in each harness binds and serves on `127.0.0.1`, and Claude's outbound stays denied | [live evidence](evidence/2026-11-06-local-listening-live.md) |
+
 ## Draft turns
 
 A draft turn is a read-only turn of the project lead on a task that is not Ready. The

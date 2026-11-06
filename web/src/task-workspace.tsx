@@ -25,7 +25,11 @@ import {
   sentText,
 } from "./task-comment-model.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
-import { CommandNetworkLine, PolicyDisclosure } from "./execution-notice.js";
+import {
+  CommandNetworkLine,
+  LocalListeningLine,
+  PolicyDisclosure,
+} from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
@@ -1607,6 +1611,9 @@ export function TaskWorkspace({
           </summary>
           {execution.harness === "codex" && (
             <CommandNetworkLine generation={a.executionGeneration} />
+          )}
+          {execution.harness === "claude" && (
+            <LocalListeningLine generation={a.executionGeneration} />
           )}
           <PolicyDisclosure harness={execution.harness} workspace={workspace} />
         </details>

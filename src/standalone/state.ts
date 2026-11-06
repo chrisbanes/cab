@@ -598,6 +598,13 @@ export class ExecutionState {
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
+    CREATE TABLE IF NOT EXISTS project_local_listening (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_local_listening (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       cabRetriesUsed INTEGER NOT NULL CHECK(cabRetriesUsed >= 0),
@@ -1855,6 +1862,16 @@ export class ExecutionState {
     const row = this.db
       .prepare(
         "SELECT enabled FROM execution_intent_network_access WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
+  }
+
+  /** Local listening the turn was admitted with; null when no admission recorded it. */
+  localListening(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_local_listening WHERE intentId = ?",
       )
       .get(intentId) as { enabled: number } | undefined;
     return row ? row.enabled === 1 : null;
@@ -5366,26 +5383,40 @@ export class ExecutionState {
             .prepare("SELECT workId FROM execution_intents WHERE id = ?")
             .get(id) as { workId: string }
         ).workId;
-        // Only a Codex task turn can run with command network access: drafting
-        // runs and Claude turns have no qualifying binding and stay off.
-        this.db
-          .prepare(`INSERT OR REPLACE INTO execution_intent_network_access (intentId, enabled)
+        // Only a Codex task turn can run with command network access, and only a
+        // Claude task turn with local listening: drafting runs have no binding and
+        // stay off, as does the other harness. Writes execution_intent_network_access
+        // and execution_intent_local_listening.
+        for (const [intentTable, projectTable, harness] of [
+          [
+            "execution_intent_network_access",
+            "project_command_network_access",
+            "codex",
+          ],
+          [
+            "execution_intent_local_listening",
+            "project_local_listening",
+            "claude",
+          ],
+        ] as const)
+          this.db
+            .prepare(`INSERT OR REPLACE INTO ${intentTable} (intentId, enabled)
           SELECT ?, EXISTS (
-            SELECT 1 FROM project_command_network_access p
+            SELECT 1 FROM ${projectTable} p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = 'codex')
+            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = '${harness}')
             ${
-              // A draft turn never gets command network access.
+              // A draft turn never gets either expansion.
               this.hasTurnRequests
                 ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)"
                 : ""
             }`)
-          .run(
-            id,
-            workId,
-            options.projectId,
-            ...(this.hasTurnRequests ? [workId] : []),
-          );
+            .run(
+              id,
+              workId,
+              options.projectId,
+              ...(this.hasTurnRequests ? [workId] : []),
+            );
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations
           WHERE workId = ?`)

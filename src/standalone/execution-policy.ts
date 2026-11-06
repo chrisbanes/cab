@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
+import {
+  claudeLocalListeningLine,
+  codexLocalListeningLine,
+  localListeningLimit,
+} from "../operator/local-listening-copy.js";
 
 export interface PolicyDisclosure {
   lines: string[];
@@ -22,6 +27,8 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
     lines: [
       "Default policy: workspace writes with broad host-permitted reads.",
       "Command network access is disabled unless the project enables it. Approval policy is never.",
+      codexLocalListeningLine,
+      localListeningLimit,
       taskGitDisclosure,
     ],
     limits: [
@@ -67,6 +74,8 @@ export function claudePolicyDisclosure(
           ]
         : []),
       "Command network access is denied. There are no interactive approvals.",
+      claudeLocalListeningLine,
+      localListeningLimit,
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
       taskGitDisclosure,
     ],

@@ -95,6 +95,12 @@ export function projectChanges(
     lines.push(
       `Command network access ${v.commandNetworkAccess ? "enabled" : "disabled"}`,
     );
+  if (
+    v.localListening !== undefined &&
+    data.localListening !== undefined &&
+    Boolean(v.localListening) !== data.localListening
+  )
+    lines.push(`Local listening ${v.localListening ? "enabled" : "disabled"}`);
   const mode = diagnosticCaptureLabels;
   if (
     data.diagnosticCapture !== undefined &&

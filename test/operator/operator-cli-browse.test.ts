@@ -613,6 +613,38 @@ test("assignment get states the turn's command network access with its disclosur
   );
 });
 
+test("assignment get states local listening for a Claude assignment only", async (t) => {
+  const { s, seed, h, ok } = await setup(t);
+  const get = async (assignmentId: string) =>
+    (await h.run(["assignment", "get", assignmentId])).out;
+  const lines = async (taskId: string) =>
+    get((await ok(["task", "get", taskId])).data.leadAssignmentId as string);
+  // An assignment on Alpha's Claude lead profile, not yet admitted.
+  const assignmentId = randomUUID();
+  s.f.service.domain().execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: seed.alphaId,
+    taskId: seed.alphaSharedTaskId,
+    assignmentId,
+    profileId: seed.alphaLeadId,
+    brief: "Listen",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const claude = await get(assignmentId);
+  assert.ok(
+    claude.includes(
+      "No local listening admission recorded; the project's setting at admission applies.",
+    ),
+    claude,
+  );
+  assert.match(claude, /connect to a listening port/);
+  assert.doesNotMatch(claude, /command network access/i);
+  assert.doesNotMatch(await lines(seed.betaSharedTaskId), /local listening/i);
+});
+
 test("task get names the lead assignment, execution and who acts next", async (t) => {
   const { s, seed, h, ok, api } = await setup(t);
   const line = (out: string, label: string) =>

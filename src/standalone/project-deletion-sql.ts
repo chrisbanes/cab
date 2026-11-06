@@ -247,6 +247,11 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM execution_capacity_reservations WHERE projectId = :projectId OR workId IN (SELECT value FROM json_each(:work))",
   },
   {
+    table: "execution_intent_local_listening",
+    where: "intentId IN (SELECT value FROM json_each(:intents))",
+    sql: "DELETE FROM execution_intent_local_listening WHERE intentId IN (SELECT value FROM json_each(:intents))",
+  },
+  {
     table: "execution_intent_network_access",
     where: "intentId IN (SELECT value FROM json_each(:intents))",
     sql: "DELETE FROM execution_intent_network_access WHERE intentId IN (SELECT value FROM json_each(:intents))",
@@ -379,6 +384,11 @@ export const projectDeletionStatements = [
     table: "project_instruction_revisions",
     where: "projectId = :projectId",
     sql: "DELETE FROM project_instruction_revisions WHERE projectId = :projectId",
+  },
+  {
+    table: "project_local_listening",
+    where: "projectId = :projectId",
+    sql: "DELETE FROM project_local_listening WHERE projectId = :projectId",
   },
   {
     table: "project_repository_links",

@@ -90,7 +90,7 @@ test("a draft turn runs read-only with network off and leaves the lead pending",
   t.after(() => f.close());
   const task = await draftTask(f, "Draft turn basics");
   const domain = f.service.domain();
-  // The project setting must not reach a draft turn.
+  // The project settings must not reach a draft turn.
   domain.execute({
     type: "project.configure",
     actor: "operator",
@@ -98,6 +98,7 @@ test("a draft turn runs read-only with network off and leaves the lead pending",
     projectId: task.projectId,
     expectedVersion: Number(domain.project(task.projectId).version),
     commandNetworkAccess: true,
+    localListening: true,
   });
   const before = await task.api.readTask(task.taskId);
   assert.deepEqual(before.data.draftTurn, { available: true });
@@ -122,6 +123,7 @@ test("a draft turn runs read-only with network off and leaves the lead pending",
   const running = f.service.list().find((work) => work.state === "running");
   assert.ok(running);
   assert.equal(f.service.commandNetworkAccessFor(running.workId), false);
+  assert.equal(f.service.localListeningFor(running.workId), false);
   // Never activated: the lead stays pending and has no ordinary work.
   assert.equal(domain.assignment(task.assignmentId).state, "pending");
   assert.equal(

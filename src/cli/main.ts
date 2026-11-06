@@ -369,6 +369,7 @@ export const OPTIONS = {
   "lead-profile": { type: "string" },
   "diagnostic-capture": { type: "string" },
   "command-network-access": { type: "string" },
+  "local-listening": { type: "string" },
   stacking: { type: "string" },
   id: { type: "string" },
   enabled: { type: "string" },

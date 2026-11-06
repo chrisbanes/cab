@@ -122,7 +122,7 @@ for (const [name, viewport] of [
       .waitFor();
     // The third Claude line sits in the closed limits disclosure.
     await runtimeRow(page, "Claude")
-      .getByText("Limits and untested surfaces · 21")
+      .getByText("Limits and untested surfaces · 23")
       .click();
     await runtimes
       .getByText("confined to the same roots by cab's hook", {
@@ -726,8 +726,8 @@ for (const [name, viewport] of [
       claudeEnabled,
     );
     for (const [runtime, count] of [
-      ["Codex", 8],
-      ["Claude", 21],
+      ["Codex", 10],
+      ["Claude", 23],
     ] as const) {
       const row = runtimeRow(page, runtime),
         details = runtimeLimits(page, runtime),

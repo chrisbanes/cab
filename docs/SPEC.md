@@ -944,17 +944,27 @@ New projects default to Codex `workspaceWrite` with explicit task writable roots
 command network access disabled and approval policy `never`. Broader command
 sandbox escalation is denied; expanding that policy requires separate operator
 approval and fresh admission.
-Command network access is the one operator setting that expands it: a per-project,
-versioned `project.configure` field, off by default, that only the operator can
-change through project configuration or the operator CLI; agents have no tool for it.
-Each Codex task turn records the setting when it is admitted and sends it as that
-turn's `networkAccess`, so a change reaches only later admissions and a running turn
-keeps its policy. Claude Code turns, drafting runs and any turn without a task
-binding always run with it denied. Every place the effective policy is shown states
-the setting and that network-enabled commands can reach whatever credentials and
-logins the host exposes. cab enforces only what it sends the runtime; it is not
-an allow-list, a proxy or a host filter, and MCP and app tools, web tools and model
-transport are separate surfaces.
+Two operator settings expand it, command network access and local listening. Each is
+a per-project, versioned `project.configure` field, off by default, that only the
+operator can change through project configuration or the operator CLI; agents have
+no tool for either. A turn records them when it is admitted, so a change reaches only
+later admissions and a running turn keeps its policy.
+Each Codex task turn sends command network access as that turn's `networkAccess`.
+Claude Code turns, drafting runs and any turn without a task binding always run with
+it denied. Every place the effective policy is shown states the setting and that
+network-enabled commands can reach whatever credentials and logins the host exposes.
+Local listening ([ADR-1027](adr/1027-local-listening-for-test-fixtures.md)) lets a
+Claude Code task turn's commands bind local ports, for test fixtures, while outbound
+network stays denied. Claude Code does not limit the bind address, its control is
+macOS only, and a listening command can also connect to other services on the host's
+loopback interface. Codex has no loopback-only control: a Codex command can listen
+only when command network access is on, and then on any interface, so local listening
+never changes a Codex turn. Draft turns, drafting runs and turns without a task binding
+never listen. Every place the effective policy is shown states what local listening does
+in that harness and that other processes on the host can reach a listening port.
+cab enforces only what it sends the runtime; neither setting is an allow-list, a proxy
+or a host filter, and MCP and app tools, web tools and model transport are separate
+surfaces.
 Reads retain Codex full read access subject to host permissions; outside-read
 denial is not implied. Runtime temporary write roots and protected paths must be
 disclosed with the effective policy. See the [default execution policy](design/standalone.md#default-execution-policy)

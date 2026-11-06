@@ -214,7 +214,7 @@ export const profileSummarySchema = z
 const envelope = <T extends z.ZodType>(schema: T) =>
   z.object({ data: schema, observedAt: time }).strict();
 /** What a harness enforces and its disclosed limits; null until disclosable. */
-const policyDisclosureSchema = z
+export const policyDisclosureSchema = z
   .object({
     lines: z.array(z.string().max(300)).max(10),
     limits: z.array(z.string().max(300)).max(20),
@@ -1290,6 +1290,8 @@ const generation = z
     harness: executionHarnessSchema.nullable(),
     /** Optional so older services still parse; null until the turn is admitted. */
     commandNetworkAccess: z.boolean().nullable().optional(),
+    /** Optional so older services still parse; null until the turn is admitted, true only for a Claude task turn. */
+    localListening: z.boolean().nullable().optional(),
     /** The latest failed turn's bounded classification; null when none failed. */
     failure: z
       .object({
@@ -2959,6 +2961,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       instructions: text.optional(),
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       commandNetworkAccess: z.boolean().optional(),
+      localListening: z.boolean().optional(),
       stacking: z.boolean().optional(),
     })
     .strict(),
@@ -4013,6 +4016,7 @@ export const projectConfigurationSchema = envelope(
       /** Optional so older services still parse; absent means not reported. */
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       commandNetworkAccess: z.boolean().optional(),
+      localListening: z.boolean().optional(),
       stacking: z.boolean().optional(),
       routing: z
         .object({

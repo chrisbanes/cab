@@ -3198,6 +3198,12 @@ export class StandaloneService {
     return intent ? this.started().state.commandNetworkAccess(intent.id) : null;
   }
 
+  /** Local listening a work's turn was admitted with; null when no admission recorded it. */
+  localListeningFor(workId: string): boolean | null {
+    const intent = this.executionForWork(workId);
+    return intent ? this.started().state.localListening(intent.id) : null;
+  }
+
   recoveryFor(
     assignmentId: string,
     assignmentVersion: number,
@@ -9133,8 +9139,8 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
-      // Passed only when network access or Git roots apply, so otherwise keeps today's call shapes.
-      // A draft turn is always read-only with network off, whatever the project sets.
+      // Passed only when network access, local listening or Git roots apply, so otherwise keeps
+      // today's call shapes. A draft turn is always read-only with network and listening off.
       const binding = request.taskId
         ? this.started().workspaceBindings.get(request.taskId)
         : undefined;
@@ -9143,11 +9149,13 @@ export class StandaloneService {
           ? taskGitWritableRoots(binding)
           : [];
       const networkAccess = state.commandNetworkAccess(intent.id) === true;
+      const localListening = state.localListening(intent.id) === true;
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
-        : networkAccess || gitWritableRoots.length > 0
+        : networkAccess || localListening || gitWritableRoots.length > 0
           ? {
               networkAccess,
+              ...(localListening ? { localListening: true } : {}),
               ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
             }
           : undefined;

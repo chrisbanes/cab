@@ -43,7 +43,7 @@ Root must capture these actual inputs for each independent pair:
   offline Git before service construction. Loose and packed refs and an explicitly
   pinned detached HEAD are supported; a later loose override of a packed ref
   invalidates its capture.
-- Checkpointed SQLite bytes, migration level 14 and schema fingerprint, exact
+- Checkpointed SQLite bytes, the build's migration level and schema fingerprint, exact
   project/task/lead/assignment configuration and immutable profile settings.
   `capturePreparedStackDatabase` computes the same readonly material. Unrelated
   projects, sources, workspaces, pending delivery/publication work or ownership

@@ -300,13 +300,20 @@ before harness selection read as Codex through the `harness` column default of
 
 Select supported App Server `workspaceWrite` controls with task working directory
 and explicit task writable roots, `networkAccess: false`, and `approvalPolicy: never`.
-A project's operator-owned `commandNetworkAccess` setting, off by default, is the one
-policy expansion: a Codex task turn admitted while it is on sends `networkAccess: true`
-in `turn/start.sandboxPolicy`. The value is recorded at admission, so a later change
-reaches only later admissions and a running turn keeps its policy. Claude Code turns,
-drafting runs and requests without a task binding always run with command network access
-denied. The setting is not an allow-list, proxy or host filter: it enables whatever the
-runtime then permits, including the credentials and logins the host exposes.
+Two operator-owned project settings, both off by default, expand it. A Codex task turn
+admitted while `commandNetworkAccess` is on sends `networkAccess: true` in
+`turn/start.sandboxPolicy`. A Claude Code task turn admitted while `localListening` is on
+adds `allowLocalBinding: true` to its sandbox `network` options, so its commands can bind
+local ports while outbound network stays denied ([ADR-1027](../adr/1027-local-listening-for-test-fixtures.md)).
+Both values are recorded at admission (`execution_intent_network_access` and
+`execution_intent_local_listening`), so a later change reaches only later admissions and a
+running turn keeps its policy. Claude Code turns, drafting runs and requests without a task
+binding always run with command network access denied. Codex has no loopback-only per-turn
+control, so a Codex command listens only with command network access, on any interface, and
+a Codex turn's admission always records local listening off. Draft turns and drafting runs never
+listen. Neither setting is an allow-list, proxy or host filter: network access enables
+whatever the runtime then permits, including the credentials and logins the host exposes,
+and Claude Code's local binding is not limited to loopback.
 A task turn's writable roots are its workspace plus, for each repository of a workspace
 made from cab's managed repository, that repository's `objects/` and `reftable/` and the
 worktree's admin directory `worktrees/<name>/` ([ADR-1026](../adr/1026-cab-owned-task-repositories.md)).

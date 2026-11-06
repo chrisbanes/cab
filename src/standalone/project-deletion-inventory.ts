@@ -643,6 +643,10 @@ export const projectDeletionInventory = {
     columns: ["workId", "projectId", "admittedAt"],
     ownership: "projectId=P",
   },
+  execution_intent_local_listening: {
+    columns: ["intentId", "enabled"],
+    ownership: "intentId in I",
+  },
   execution_intent_network_access: {
     columns: ["intentId", "enabled"],
     ownership: "intentId in I",
@@ -1003,6 +1007,10 @@ export const projectDeletionInventory = {
   },
   project_instruction_revisions: {
     columns: ["projectId", "revision", "instructions"],
+    ownership: "projectId=P",
+  },
+  project_local_listening: {
+    columns: ["projectId", "enabled"],
     ownership: "projectId=P",
   },
   project_repository_links: {

@@ -2355,6 +2355,7 @@ export class OperatorApi {
       commandNetworkAccess: this.service.commandNetworkAccessFor(
         request.workId,
       ),
+      localListening: this.service.localListeningFor(request.workId),
       failure:
         harness === "claude" && held
           ? this.service.terminalFailure(request.workId)
@@ -7051,6 +7052,7 @@ export class OperatorApi {
         instructionPresent: Boolean(p.instructions),
         diagnosticCapture: d.diagnosticCaptureMode(projectId),
         commandNetworkAccess: d.commandNetworkAccess(projectId),
+        localListening: d.localListening(projectId),
         stacking: d.stacking(projectId),
         placements: [
           this.service.githubSources(),
