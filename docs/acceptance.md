@@ -807,7 +807,7 @@ does not repeat.
 | Criteria | Evidence |
 | --- | --- |
 | A task worktree comes from a bare reftable repository per project and source with the source's objects as its alternate; a second task of the project reuses it and another project gets its own; a requested commit resolves in it; the source's worktree list and refs are unchanged | `workspaces.test.ts` |
-| A managed repository whose alternates or ref format changed is refused with a reason and no worktree; a worktree redirected to another admin directory is held; a legacy binding of the source checkout validates and cleans up as before | `workspaces.test.ts` |
+| A managed repository whose alternates or ref format changed is refused with a reason and no worktree; a worktree redirected to another admin directory is held; a legacy binding of the source checkout validates and cleans up as before; cab's status never runs the configuration of a submodule an agent staged | `workspaces.test.ts` |
 | Archive and deleted-project cleanup remove the worktree from the managed repository and keep the repository | `workspaces.test.ts`, `deleted-project-cleanup.test.ts` |
 | A task turn sends its three Git roots (with network access when enabled) and a draft turn sends none; Git confined to the workspace and those roots branches, commits, amends, rebases and deletes a branch, while the managed config and the source stay unwritten | `task-git-access.test.ts` |
 | Codex adds the roots to `writableRoots`; Claude adds them to the sandbox `allowWrite` while its file-editing hook still refuses them; both disclosures name the writable paths and their limits | `codex-runtime.test.ts`, `claude-runtime.test.ts`, `operator-execution-runtime.test.ts` |

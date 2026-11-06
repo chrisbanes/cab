@@ -11,8 +11,8 @@ const taskGitDisclosure =
   "In a task repository, Git commands can also write cab's per-project repository's objects/ and reftable/ and the worktree's own worktrees/<name>/ directory. Its root, config, info/ and hooks stay read-only, and the operator's checkout is never written.";
 
 const taskGitLimits = [
-  "Tasks of one project share their repository's objects and refs, so an agent can move another task's branches, though not its checked-out commit. Workspaces created before cab-owned repositories have no Git write access.",
-  "The repository reads the operator's objects through an alternate, so pruning objects a task's base needs breaks it. git fetch, pull, gc and worktree add fail, because they write the repository root, and Git LFS and submodule metadata are not writable.",
+  "Tasks of one project share their repository's objects and refs: an agent can move another task's branches and delete or corrupt its unpushed commits, and a changed alternates file stops new workspaces until the operator repairs it. Older workspaces have no Git write access.",
+  "The repository reads the operator's objects through an alternate, so pruning objects a task's base needs breaks it. git fetch, pull, gc and worktree add fail, because they write the repository root. Git LFS content is not available, and submodule metadata is not writable.",
   "cab keeps a project's repositories after the project is deleted; the operator can remove them.",
 ];
 

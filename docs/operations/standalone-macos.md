@@ -1081,11 +1081,14 @@ still uses it.
 The limits:
 
 - Tasks of one project share the repository's objects and refs: an agent can move another
-  task's branches, but not another worktree's checked-out commit.
+  task's branches and delete or corrupt its unpushed commits, though not move another
+  worktree's checked-out commit. An agent that changes the alternates file stops new
+  workspaces of the project until you repair it.
 - If the operator prunes objects a task's base needs (`git gc --prune` after deleting the
   branch), that task's repository loses them.
 - `git fetch`, `pull`, `gc` and `worktree add` fail in a task workspace, because they write
-  the repository root. Git LFS and submodule metadata are not writable.
+  the repository root. Git LFS content is not available in a task worktree, and submodule
+  metadata is not writable.
 - Workspaces created before managed repositories keep their worktree of the operator's
   checkout and have no Git write access. Drafting runs have none either.
 - cab keeps a project's managed repositories after the project is deleted. Once no task of

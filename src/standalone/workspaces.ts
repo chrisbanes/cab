@@ -138,23 +138,43 @@ export function repositoryBindingPaths(
  */
 export function taskGitWritableRoots(binding: TaskWorkspaceBinding): string[] {
   return binding.repositories.flatMap((repository) =>
-    repository.sourceGitCommonDir && repository.gitCommonDir
-      ? repository.gitDirectory
-        ? [
-            join(repository.gitCommonDir, "objects"),
-            join(repository.gitCommonDir, "reftable"),
-            repository.gitDirectory,
-          ]
-        : []
+    managedRepositoryOf(repository) && repository.gitDirectory
+      ? [
+          join(repository.gitCommonDir, "objects"),
+          join(repository.gitCommonDir, "reftable"),
+          repository.gitDirectory,
+        ]
       : [],
   );
 }
 
+/** A binding made from a managed repository, which is its `gitCommonDir`; legacy ones are not. */
+function managedRepositoryOf(
+  repository: TaskWorkspaceRepository,
+): repository is TaskWorkspaceRepository & { gitCommonDir: string } {
+  return !!repository.sourceGitCommonDir && !!repository.gitCommonDir;
+}
+
 /** The repository whose worktree list holds this binding's worktree. */
 function worktreeOwner(repository: TaskWorkspaceRepository): string {
-  return repository.sourceGitCommonDir && repository.gitCommonDir
+  return managedRepositoryOf(repository)
     ? repository.gitCommonDir
     : repository.sourcePath;
+}
+
+/** Runs `operation` after every earlier one under `key` has settled. */
+function serialized<T>(
+  chains: Map<string, Promise<unknown>>,
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const current = (chains.get(key) ?? Promise.resolve())
+    .catch(() => {})
+    .then(operation);
+  chains.set(key, current);
+  return current.finally(() => {
+    if (chains.get(key) === current) chains.delete(key);
+  });
 }
 
 export type TaskWorkspaceBinding = z.infer<typeof taskWorkspaceSchema>;
@@ -1146,23 +1166,23 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 
         if (!repository.gitCommonDir || !repository.commit) {
           const source = await this.gitRepositoryInfo(repository.sourcePath);
-          const managed =
-            this.repositoryRoot &&
-            (await this.managedRepository(binding.taskId, source.gitCommonDir));
+          const managed = this.repositoryRoot
+            ? await this.managedRepository(binding.taskId, source.gitCommonDir)
+            : undefined;
           // A requested commit must already be in the repository: it never falls back to `ref`.
           // A stacked dependent's requested commit is its blocker's, in the managed repository.
           const commit = repository.commit
             ? await this.resolveCommit(
-                managed || repository.sourcePath,
+                managed ?? repository.sourcePath,
                 repository.commit,
               )
             : await this.resolveCommit(repository.sourcePath, repository.ref);
           binding = this.store.bindRepository(
             binding.taskId,
             repository.repositoryId,
-            managed || source.gitCommonDir,
+            managed ?? source.gitCommonDir,
             commit,
-            managed ? source.gitCommonDir : undefined,
+            managed && source.gitCommonDir,
           );
           repository = binding.repositories.find(
             (candidate) =>
@@ -1332,81 +1352,73 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       .slice(0, 32);
     const path = join(root, key);
     const alternates = `${join(sourceGitCommonDir, "objects")}\n`;
-    const previous = this.repositoryLocks.get(path) ?? Promise.resolve();
-    const current = previous
-      .catch(() => {})
-      .then(async () => {
-        if (!(await lstatIfExists(path))) {
-          await mkdir(root, { recursive: true });
-          const temporary = join(root, `.${key}-${randomUUID()}`);
-          try {
-            const format = await this.git(
-              sourceGitCommonDir,
-              "repository-identity",
-              "rev-parse",
-              "--show-object-format",
-            );
-            await this.git(
-              root,
-              "repository-create",
-              "init",
-              "--quiet",
-              "--bare",
-              "--template=",
-              "--ref-format=reftable",
-              `--object-format=${format}`,
-              temporary,
-            );
-            await writeFile(
-              join(temporary, "objects", "info", "alternates"),
-              alternates,
-            );
-            for (const [name, value] of [
-              ["gc.auto", "0"],
-              ["maintenance.auto", "false"],
-              ["core.logAllRefUpdates", "true"],
-            ] as const)
-              await this.git(
-                temporary,
-                "repository-create",
-                "config",
-                name,
-                value,
-              );
-            await rename(temporary, path);
-          } catch (error) {
-            await rm(temporary, { recursive: true, force: true });
-            // Another process may have created it first; validation below decides.
-            if (!(await lstatIfExists(path))) throw error;
-          }
-        }
-        const info = await lstat(path);
-        if (
-          info.isSymbolicLink() ||
-          !info.isDirectory() ||
-          (await realpath(path)) !== path ||
-          (await this.git(
-            path,
+    return serialized(this.repositoryLocks, path, async () => {
+      if (!(await lstatIfExists(path))) {
+        await mkdir(root, { recursive: true });
+        const temporary = join(root, `.${key}-${randomUUID()}`);
+        try {
+          const format = await this.git(
+            sourceGitCommonDir,
             "repository-identity",
             "rev-parse",
-            "--absolute-git-dir",
-            "--is-bare-repository",
-            "--show-ref-format",
-          )) !== `${path}\ntrue\nreftable` ||
-          (await readFile(
-            join(path, "objects", "info", "alternates"),
-            "utf8",
-          ).catch(() => null)) !== alternates
-        )
-          throw new Error(
-            "Managed repository does not match its source; inspect it before recovery",
+            "--show-object-format",
           );
-        return path;
-      });
-    this.repositoryLocks.set(path, current);
-    return current.finally(() => {
-      if (this.repositoryLocks.get(path) === current)
-        this.repositoryLocks.delete(path);
+          await this.git(
+            root,
+            "repository-create",
+            "init",
+            "--quiet",
+            "--bare",
+            "--template=",
+            "--ref-format=reftable",
+            `--object-format=${format}`,
+            temporary,
+          );
+          await writeFile(
+            join(temporary, "objects", "info", "alternates"),
+            alternates,
+          );
+          for (const [name, value] of [
+            ["gc.auto", "0"],
+            ["maintenance.auto", "false"],
+            ["core.logAllRefUpdates", "true"],
+          ] as const)
+            await this.git(
+              temporary,
+              "repository-create",
+              "config",
+              name,
+              value,
+            );
+          await rename(temporary, path);
+        } catch (error) {
+          await rm(temporary, { recursive: true, force: true });
+          // Another process may have created it first; validation below decides.
+          if (!(await lstatIfExists(path))) throw error;
+        }
+      }
+      const info = await lstat(path);
+      if (
+        info.isSymbolicLink() ||
+        !info.isDirectory() ||
+        (await realpath(path)) !== path ||
+        (await this.git(
+          path,
+          "repository-identity",
+          "rev-parse",
+          "--absolute-git-dir",
+          "--is-bare-repository",
+          "--show-ref-format",
+        )) !== `${path}\ntrue\nreftable` ||
+        (await readFile(
+          join(path, "objects", "info", "alternates"),
+          "utf8",
+        ).catch(() => null)) !== alternates
+      )
+        throw new Error(
+          "Managed repository does not match its source; inspect it before recovery",
+        );
+      return path;
     });
   }
 
@@ -1415,7 +1427,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     taskId: string,
     repository: TaskWorkspaceRepository,
   ): Promise<void> {
-    if (!repository.sourceGitCommonDir || !repository.gitCommonDir) return;
+    if (!managedRepositoryOf(repository)) return;
     const gitDirectory = await this.git(
       repository.workspacePath,
       "checkout-validation",
@@ -1732,16 +1744,9 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     taskId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const previous = this.inFlight.get(taskId) ?? Promise.resolve();
-    const current = previous
-      .catch(() => {})
-      .then(() => {
-        this.assertNotCancelled();
-        return operation();
-      });
-    this.inFlight.set(taskId, current);
-    return current.finally(() => {
-      if (this.inFlight.get(taskId) === current) this.inFlight.delete(taskId);
+    return serialized(this.inFlight, taskId, () => {
+      this.assertNotCancelled();
+      return operation();
     });
   }
 }

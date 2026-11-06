@@ -1422,3 +1422,35 @@ test("a legacy binding made from the source checkout still validates and cleans 
     close();
   }
 });
+
+test("cab's Git never runs the configuration of a submodule an agent staged in its workspace", async () => {
+  const { f, close } = managedFixture();
+  try {
+    const source = repository(f.root, "source");
+    const binding = await f.manager.provision("project-a:task-1", [
+      { repositoryId: "repo", path: source },
+    ]);
+    const workspace = binding.repositories[0]!.workspacePath;
+    // The index is in the agent-writable admin directory, so an agent can stage a gitlink.
+    const sub = join(workspace, "sub");
+    execFileSync("git", ["init", "--quiet", sub]);
+    commitIn(sub, "f.txt", "sub");
+    const marker = join(f.root, "ran");
+    const monitor = join(f.root, "monitor.sh");
+    writeFileSync(monitor, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`, {
+      mode: 0o755,
+    });
+    git(sub, "config", "core.fsmonitor", monitor);
+    writeFileSync(join(sub, "f.txt"), "dirty\n");
+    git(workspace, "add", "sub");
+    const retained = await f.manager.archiveAndCleanup(
+      "project-a:task-1",
+      approvedCleanup,
+    );
+    assert.equal(retained.outcome, "retained");
+    assert.match(retained.reason, /Uncommitted or ignored work remains/);
+    assert.equal(exists(marker), false);
+  } finally {
+    close();
+  }
+});

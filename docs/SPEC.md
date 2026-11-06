@@ -891,10 +891,13 @@ rebase with normal Git, and cab's [task commit publication](#github-and-completi
 pushes the worktree's commits as before. The limits:
 
 - Tasks of one project share the repository's objects and refs: an agent can move
-  another task's branches, but not another worktree's checked-out commit.
+  another task's branches and delete or corrupt its unpushed commits, though not move
+  another worktree's checked-out commit. An agent that changes the alternates file stops
+  new workspaces of the project until the operator repairs it.
 - If the operator prunes objects a task's base needs, that task's repository loses them.
 - `git fetch`, `pull`, `gc` and `worktree add` fail in a task workspace, because they
-  write the repository root. Git LFS and submodule metadata are not writable.
+  write the repository root. Git LFS content is not available in a task worktree, and
+  submodule metadata is not writable.
 - Workspaces created before managed repositories keep their worktree of the operator's
   checkout, with no Git write access. Drafting runs keep a disposable worktree of the
   operator's checkout, also with no Git write access.
@@ -923,8 +926,9 @@ reconciliation evidence. Missing workspaces hold affected execution visibly.
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository
 verification) clears inherited `GIT_*` variables, never prompts on a terminal,
-lazily fetches objects or allows transport protocols, and uses bounded time and
-output. A repository that needs the network to supply objects therefore fails
+lazily fetches objects or allows transport protocols, never looks inside a submodule's
+working tree (`diff.ignoreSubmodules=dirty`, so an agent-made submodule's configuration
+never runs), and uses bounded time and output. A repository that needs the network to supply objects therefore fails
 closed. This governs cab's own Git; agent processes run their own Git with
 their runtime environment. The one exception is [task commit
 publication](#github-and-completion): a single bounded HTTPS push to the verified

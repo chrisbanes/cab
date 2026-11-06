@@ -32,8 +32,12 @@ sourceGitCommonDir)>`.
   directory.
 - The binding records `gitCommonDir` (the managed repository, the worktree's real common
   directory), `sourceGitCommonDir` (the operator's, the repository link's identity) and
-  `gitDirectory` (the admin directory). Every identity check compares the worktree's common and
-  admin directories with the binding before cab runs further Git in it. The base `ref` resolves
+  `gitDirectory` (the admin directory). The workspace manager compares the worktree's common and
+  admin directories with the binding before it runs status, add or remove, and runs
+  `worktree remove` in the managed repository, whose config agents cannot write. Every cab Git
+  child runs with `diff.ignoreSubmodules=dirty`: the index is agent-writable, so an agent could
+  stage a submodule whose own configuration would otherwise run in cab's status and diff. The
+  base `ref` resolves
   in the source; a stacked dependent's requested commit resolves in the managed repository.
   Comparisons read base branches from the source checkout.
 - A binding without `sourceGitCommonDir` is a legacy worktree of the source. It validates, runs
@@ -56,10 +60,12 @@ sourceGitCommonDir)>`.
 
 - Agents branch, commit, amend and rebase with normal Git; delivery pushes from the worktree,
   whose scratch repository follows the nested alternate to the source's objects.
-- Tasks of one project share objects and refs: an agent can move another task's branches, but
-  not another worktree's checked-out commit. cab's delivery binds exact commits.
+- Tasks of one project share objects and refs: an agent can move another task's branches and
+  delete or corrupt its unpushed commits, and a changed alternates file stops new workspaces
+  until the operator repairs it. cab's delivery binds exact commits.
 - If the operator prunes objects a task's base needs, that task's repository loses them.
 - `git fetch`, `pull`, `gc` and `worktree add` fail in a task workspace, because they write the
-  root. Git LFS and submodule metadata are not writable. Reftable needs Git 2.45 or later.
+  root. Git LFS content is not available in a task worktree, and submodule metadata is not
+  writable. Reftable needs Git 2.45 or later.
 - Existing workspaces are not migrated and have no Git write access.
 - Managed repositories are kept after their project is deleted; the operator can remove them.

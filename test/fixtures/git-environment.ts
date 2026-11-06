@@ -17,6 +17,9 @@ export const hardenedGitEnvironment = {
   GIT_NO_LAZY_FETCH: "1",
   GIT_OPTIONAL_LOCKS: "0",
   GIT_TERMINAL_PROMPT: "0",
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "diff.ignoreSubmodules",
+  GIT_CONFIG_VALUE_0: "dirty",
 } as const;
 
 export type GitInvocation = { args: string; env: Record<string, string> };
