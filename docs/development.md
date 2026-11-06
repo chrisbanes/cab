@@ -550,6 +550,8 @@ name, version and preview digest. The service rechecks every confirmation atomic
    `server/tool`; Agent subagent type), dropped whole when over its cap, with paths and
    Glob patterns never absolute, and redacted again on every read. No message text,
    deltas or reasoning is collected and tool observation is never claimed complete.
+   [ADR-1028](adr/1028-reasoning-summaries.md) accepts opt-in reasoning summaries, shown
+   in `logs` only with `--verbose`; they are not yet implemented.
 
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as

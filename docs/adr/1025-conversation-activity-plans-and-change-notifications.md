@@ -58,7 +58,8 @@ notices are implemented.
   jittered back-off from 1 to 30 seconds and polls every 15 seconds while the stream is
   not healthy, and every 60 seconds while it is, so an unattributed change still appears
   within a minute.
-- **Reasoning stays uncollected.** A separate ADR decides on it.
+- **Reasoning stays uncollected here.** [ADR-1028](1028-reasoning-summaries.md) decides on
+  opt-in reasoning summaries.
 
 ## Considered options
 
@@ -70,7 +71,7 @@ notices are implemented.
   authoritative path and brings back the browser merging ADR-1022 rejected.
 - Polling only. Kept as the fallback; it alone leaves the view up to 15 seconds stale.
 - Streaming text deltas and inline expandable output. Not pursued.
-- Collecting reasoning. Left to a separate ADR.
+- Collecting reasoning. Decided in [ADR-1028](1028-reasoning-summaries.md).
 - Copying code from panel libraries. Not pursued; only ideas inform the design.
 
 ## Consequences
