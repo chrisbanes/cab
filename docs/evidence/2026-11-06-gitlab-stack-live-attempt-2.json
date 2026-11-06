@@ -1,0 +1,178 @@
+{
+  "runId": "20261106071357-9117",
+  "project": {
+    "host": "gitlab.com",
+    "id": "88319115",
+    "path": "banes3/Banes-project"
+  },
+  "qualification": "passed",
+  "cleanup": "verified",
+  "mergeRequests": {
+    "a": 11,
+    "b": 12,
+    "c": 13
+  },
+  "steps": [
+    {
+      "step": "dependent create naming main refused with zero requests",
+      "result": "passed"
+    },
+    {
+      "step": "three pushes; A on main, B on A's branch, C on B's",
+      "result": "passed",
+      "detail": "!11 !12 !13"
+    },
+    {
+      "step": "B's merge before A refused with zero requests",
+      "result": "passed"
+    },
+    {
+      "step": "A merged with source-branch removal",
+      "result": "passed",
+      "detail": "{\"sha\":\"87a31ed59fe8133ee53dbbbb3e53e511690198e7\",\"squash\":false,\"auto_merge\":false,\"should_remove_source_branch\":true}"
+    },
+    {
+      "step": "A's branch removed, B retargeted to main and accepted; B's head unchanged",
+      "result": "passed"
+    },
+    {
+      "step": "Unstack of C: one target_branch edit, edge retired, one restack queued",
+      "result": "passed"
+    },
+    {
+      "step": "B merged without removal",
+      "result": "passed",
+      "detail": "{\"sha\":\"cee2f325e29d48c9b1eef3faa4bcf9642fea983d\",\"squash\":false,\"auto_merge\":false}"
+    },
+    {
+      "step": "main pipeline after the merges succeeded",
+      "result": "passed"
+    }
+  ],
+  "cleanupReads": [
+    {
+      "resource": "merge_request !11",
+      "result": "merged"
+    },
+    {
+      "resource": "merge_request !12",
+      "result": "merged"
+    },
+    {
+      "resource": "merge_request !13",
+      "result": "closed"
+    },
+    {
+      "resource": "branch cab/<task>",
+      "result": "deleted"
+    },
+    {
+      "resource": "branch cab/<task>",
+      "result": "deleted"
+    },
+    {
+      "resource": "branch cab/<task>",
+      "result": "deleted"
+    }
+  ],
+  "gitlab": {
+    "version": "19.6.0-pre",
+    "mergeMethod": "merge",
+    "squashOption": "default_off",
+    "mergeTrainsEnabled": false,
+    "removeSourceBranchAfterMerge": true
+  },
+  "account": {
+    "id": 43935395
+  },
+  "mainPipelineAfterMerge": "success",
+  "mergeBodies": [
+    {
+      "iid": 11,
+      "body": {
+        "sha": "87a31ed59fe8133ee53dbbbb3e53e511690198e7",
+        "squash": false,
+        "auto_merge": false,
+        "should_remove_source_branch": true
+      }
+    },
+    {
+      "iid": 12,
+      "body": {
+        "sha": "cee2f325e29d48c9b1eef3faa4bcf9642fea983d",
+        "squash": false,
+        "auto_merge": false
+      }
+    }
+  ],
+  "writes": {
+    "count": 11,
+    "merges": 2
+  },
+  "requests": [
+    {
+      "route": "git push",
+      "status": null
+    },
+    {
+      "route": "POST merge_requests",
+      "status": 201
+    },
+    {
+      "route": "git push",
+      "status": null
+    },
+    {
+      "route": "POST merge_requests",
+      "status": 201
+    },
+    {
+      "route": "git push",
+      "status": null
+    },
+    {
+      "route": "POST merge_requests",
+      "status": 201
+    },
+    {
+      "route": "PUT merge",
+      "status": 200
+    },
+    {
+      "route": "PUT retarget merge_request",
+      "status": 200
+    },
+    {
+      "route": "PUT merge",
+      "status": 200
+    },
+    {
+      "route": "PUT close merge_request",
+      "status": 200
+    },
+    {
+      "route": "DELETE branch",
+      "status": 204
+    }
+  ],
+  "requestCounts": {
+    "GET /api/v4/version": 1,
+    "GET /api/v4/projects/:n": 6,
+    "GET /api/v4/projects/:n/repository/branches/:branch": 25,
+    "GET /api/v4/user": 2,
+    "POST /api/v4/projects/:n/merge_requests": 3,
+    "GET /api/v4/projects/:n/merge_requests": 7,
+    "GET /api/v4/projects/:n/merge_requests/:n": 49,
+    "GET /api/v4/projects/:n/merge_requests/:n/discussions": 35,
+    "PUT /api/v4/projects/:n/merge_requests/:n/merge": 2,
+    "GET /api/v4/projects/:n/merge_requests/:n/pipelines": 7,
+    "PUT /api/v4/projects/:n/merge_requests/:n": 2,
+    "GET /api/v4/projects/:n/pipelines": 2,
+    "DELETE /api/v4/projects/:n/repository/branches/:branch": 1
+  },
+  "rateLimited": [],
+  "source": {
+    "revision": "9c6a74a050ad23cdecd94ace95c9b004770aef20",
+    "node": "v26.13.0"
+  }
+}
