@@ -802,8 +802,8 @@ export function TaskWorkspace({
   const reflow = useRef(false);
   const openPane = (opener: string) => {
     capture();
+    reflow.current = state.changesPane === null;
     state.changesPane = { opener };
-    reflow.current = true;
     changed();
     requestAnimationFrame(() =>
       document

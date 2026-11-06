@@ -154,7 +154,9 @@ test("below 1024px the result link and the pane buttons keep to the tab", async 
 test("Close restores the inspector and Open full width keeps the selection", async (_t, j) => {
   const { page } = await start(j);
   await openPane(page);
-  assert.equal(await focused(pane(page)), true);
+  await page.waitForFunction(() =>
+    document.activeElement?.matches("aside[aria-label='Changes']"),
+  );
   await closePane(page);
   await page.locator(".task-inspector").waitFor();
   await page.waitForFunction(
@@ -295,7 +297,10 @@ test("the split resizes from the keyboard within its minimums and keeps its widt
 test("a corrupt saved width opens the pane at the default", async (_t, j) => {
   const { page } = await start(j);
   await page.evaluate(() =>
-    localStorage.setItem("cab.changes-pane.v1", "null"),
+    localStorage.setItem(
+      "react-resizable-panels:cab.changes-pane.v1:split-conversation:split-changes",
+      "null",
+    ),
   );
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
