@@ -734,6 +734,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           "--porcelain=v1",
           "--untracked-files=all",
           "--ignored=matching",
+          "--ignore-submodules=dirty",
         ).catch((error: unknown) => {
           if (isUncertainGitError(error)) {
             const held = this.store.markGitUncertain(id, error.message);
@@ -1643,6 +1644,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       "status",
       "--porcelain=v1",
       "--untracked-files=no",
+      "--ignore-submodules=dirty",
     );
     if (head !== repository.commit || trackedChanges.length > 0)
       throw new Error(

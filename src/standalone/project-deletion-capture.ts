@@ -243,6 +243,7 @@ export async function captureDeletionCleanup(
               "--porcelain=v1",
               "--untracked-files=all",
               "--ignored=matching",
+              "--ignore-submodules=dirty",
             ],
             gitExecutable,
             signal,

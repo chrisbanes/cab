@@ -1443,6 +1443,11 @@ test("cab's Git never runs the configuration of a submodule an agent staged in i
     git(sub, "config", "core.fsmonitor", monitor);
     writeFileSync(join(sub, "f.txt"), "dirty\n");
     git(workspace, "add", "sub");
+    // Git reads an untracked .gitmodules too; its `ignore` must not override cab's.
+    writeFileSync(
+      join(workspace, ".gitmodules"),
+      '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n\tignore = none\n',
+    );
     const retained = await f.manager.archiveAndCleanup(
       "project-a:task-1",
       approvedCleanup,

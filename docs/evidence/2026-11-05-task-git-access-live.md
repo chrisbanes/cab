@@ -1,6 +1,6 @@
 # Task Git access live qualification
 
-Recorded 2026-11-06 for [#1532](https://github.com/chrisbanes/cab/issues/1532), at candidate `603a2277d192f6e128a4d8cb6630afdde78d0aa2`, a clean checkout; this record is the only later change. No credential, token or account data is recorded, and the data-directory path is replaced by `<managed>`.
+Recorded 2026-11-05 and repeated 2026-11-06 for [#1532](https://github.com/chrisbanes/cab/issues/1532). The runs below are at candidate `603a2277d192f6e128a4d8cb6630afdde78d0aa2`, a clean checkout; this record is the only later change. No credential, token or account data is recorded, and the data-directory path is replaced by `<managed>`.
 
 Commands: `npm run git-access:live -- --harness=codex` and `npm run git-access:live -- --harness=claude`, the second with `CLAUDE_CODE_OAUTH_TOKEN` set from the operator's environment. The harness reads only that variable, hands it to the service through an `env:` reference after the first service generation has stopped, and never reads operator data.
 

@@ -1213,6 +1213,7 @@ export async function compareRepository(
   if (request.target === "branch") {
     const output = await runWorkingTreeDiff([
       "diff",
+      "--ignore-submodules=dirty",
       "--raw",
       "-z",
       "--no-abbrev",
@@ -1251,6 +1252,7 @@ export async function compareRepository(
     if (changeSet !== "unstaged") {
       const stagedOutput = await run([
         "diff",
+        "--ignore-submodules=dirty",
         "--cached",
         "--raw",
         "-z",
@@ -1274,6 +1276,7 @@ export async function compareRepository(
     if (changeSet !== "staged") {
       const unstagedOutput = await runWorkingTreeDiff([
         "diff",
+        "--ignore-submodules=dirty",
         "--raw",
         "-z",
         "--no-abbrev",

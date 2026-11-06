@@ -926,9 +926,10 @@ reconciliation evidence. Missing workspaces hold affected execution visibly.
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository
 verification) clears inherited `GIT_*` variables, never prompts on a terminal,
-lazily fetches objects or allows transport protocols, never looks inside a submodule's
-working tree (`diff.ignoreSubmodules=dirty`, so an agent-made submodule's configuration
-never runs), and uses bounded time and output. A repository that needs the network to supply objects therefore fails
+lazily fetches objects or allows transport protocols, never looks inside a
+submodule's working tree (`--ignore-submodules=dirty` on its status and diff reads, and
+`diff.ignoreSubmodules=dirty` for every other command, so the configuration of a submodule
+an agent created never runs), and uses bounded time and output. A repository that needs the network to supply objects therefore fails
 closed. This governs cab's own Git; agent processes run their own Git with
 their runtime environment. The one exception is [task commit
 publication](#github-and-completion): a single bounded HTTPS push to the verified

@@ -34,12 +34,13 @@ sourceGitCommonDir)>`.
   directory), `sourceGitCommonDir` (the operator's, the repository link's identity) and
   `gitDirectory` (the admin directory). The workspace manager compares the worktree's common and
   admin directories with the binding before it runs status, add or remove, and runs
-  `worktree remove` in the managed repository, whose config agents cannot write. Every cab Git
-  child runs with `diff.ignoreSubmodules=dirty`: the index is agent-writable, so an agent could
-  stage a submodule whose own configuration would otherwise run in cab's status and diff. The
-  base `ref` resolves
-  in the source; a stacked dependent's requested commit resolves in the managed repository.
-  Comparisons read base branches from the source checkout.
+  `worktree remove` in the managed repository, whose config agents cannot write. The base `ref`
+  resolves in the source; a stacked dependent's requested commit resolves in the managed
+  repository. Comparisons read base branches from the source checkout.
+- The worktree's index is agent-writable, so an agent can stage a submodule whose own
+  configuration would run in cab's status and diff. cab passes `--ignore-submodules=dirty` to
+  its worktree status and diff reads, which a `.gitmodules` file cannot override, and sets
+  `diff.ignoreSubmodules=dirty` for every Git child.
 - A binding without `sourceGitCommonDir` is a legacy worktree of the source. It validates, runs
   without Git roots and cleans up as before. Drafting runs keep disposable worktrees of the
   source.
