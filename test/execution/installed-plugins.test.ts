@@ -7,13 +7,13 @@ import { profileSkillsSchema } from "../../src/core/execution-runtime.js";
 import {
   InstalledPluginError,
   resolveInstalledPlugin,
-} from "../../src/standalone/installed-plugins.js";
+} from "../fixtures/legacy-harness/installed-plugins.js";
 import {
   digestPlugin,
   listInstalledPlugins,
   loadProfilePlugins,
   skillFieldErrors,
-} from "../../src/standalone/skill-plugins.js";
+} from "../fixtures/legacy-harness/skill-plugins.js";
 import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import {
   writeNestedSkillPlugin,

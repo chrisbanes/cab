@@ -1,0 +1,120 @@
+{
+  "issue": 1569,
+  "observedOn": "2026-11-09",
+  "plan": "https://github.com/chrisbanes/cab/issues/1569#issuecomment-6720804732",
+  "base": "234e48455ffe13b7322e2d6fd1b79a86e0d1f488",
+  "runtimeVersions": {
+    "node": "26.13.0",
+    "npm": "12.2.1",
+    "codex": "0.166.0",
+    "claude": "2.1.318",
+    "claudeAgentSdk": "0.3.316"
+  },
+  "native": {
+    "codex": "passed",
+    "claude": "passed"
+  },
+  "lifecycle": {
+    "codex": {
+      "state": "passed",
+      "turnCount": 4,
+      "successfulEndedCallbacks": 2,
+      "checks": {
+        "stop": "passed",
+        "recovery": "recorded"
+      },
+      "allRecordedProcessesExited": true
+    },
+    "claudeAttempt1": {
+      "state": "failed",
+      "turnCount": 0,
+      "successfulEndedCallbacks": 0,
+      "checks": {},
+      "allRecordedProcessesExited": true
+    },
+    "claudeAttempt2": {
+      "state": "failed",
+      "turnCount": 2,
+      "successfulEndedCallbacks": 0,
+      "checks": {
+        "stop": "passed"
+      },
+      "allRecordedProcessesExited": true
+    },
+    "claudeAttempt3": {
+      "state": "passed",
+      "turnCount": 3,
+      "successfulEndedCallbacks": 2,
+      "checks": {
+        "stop": "reused verified attempt 2 evidence",
+        "recovery": "passed"
+      },
+      "allRecordedProcessesExited": true
+    }
+  },
+  "grant": {
+    "total": 14,
+    "consumed": 14,
+    "harnessLimits": {
+      "claude": 8,
+      "codex": 6
+    },
+    "consumedByHarness": {
+      "claude": 8,
+      "codex": 6
+    },
+    "lifecycleWindowEndsAt": "2026-11-09T08:52:14.278Z",
+    "claudeRecoveryWindowStartedAt": "2026-11-09T10:00:41.887000+00:00",
+    "claudeRecoveryDurationMs": 900000,
+    "allPriorAttemptsAndWindowsRetained": true
+  },
+  "evidenceDigests": {
+    "lifecycle/codex/evidence.json": "262f039f0df392cc229fe4ff73f311df84da46a3c2740b65ed2d7566ccf62973",
+    "lifecycle/claude/evidence.json": "92ea7ff4e72017459f6c47062ca47de6ba5f16ef8cd9b620b50eea73ac1086d6",
+    "lifecycle/claude-attempt2/evidence.json": "a96c210f760886042f96e1f8502f041a855da8a404da1c2af3bdd1d5b6ecdbd4",
+    "claude-native-attempt3.json": "6277c9f6860a3f928e2ed9b3261f069c037c2a0d5b242084fee96714e4f7135d",
+    "codex-native.json": "068110804e56bd29e8c83550cc9d3cd25304e638134e47fa2c80e7c736a0db85",
+    "codex-native-attempt2.json": "394163db12aac90241a2748397f6b07c5ecb810b03e869cb7779fec946ac4841",
+    "lifecycle/claude-attempt3/evidence.json": "08bee351aedc8c3c59265a6ce1a2dbfb0838a2fc97d546ad797e74d6c116ea81"
+  },
+  "currentSourceDigests": {
+    "src/standalone/service.ts": "a62b64314e1a517b26fbac92bfb94653a8d1f9c773f30c09439b790efd0ace1b",
+    "src/standalone/claude.ts": "dc873da64e1f521976f7281445e1d1ae2736d0233ffa0fed000c0dfc7d0bf42f",
+    "src/standalone/codex.ts": "f410f5821881463e5aa6f4158b9239fb0b01f4d4687f1d784a397ccb910d2f08",
+    "src/standalone/state.ts": "bcf1be2576aca842ece1c47c289e69c5e479d6a36ced5b257ef40cc56b0150c8",
+    "src/standalone/runtime-retention.ts": "06f240e2b278bef6f126fad283a754b72f871e6348d42f5314da148067091452",
+    "test/execution/user-setup-qualification/lifecycle.mjs": "72673dcc189c1bdfe9b1da7dbe7e94b5f9766dfc1963b04e21470ee3ca8154be",
+    "test/execution/user-setup-qualification/grant.mjs": "a9e42599188b66e82f74400be7e2eb9000885da4a77d9b09fe18bf386a9102bb"
+  },
+  "automatedValidation": {
+    "codeCommit": "cd4416399050875e526d8d2dc5d62b628f469bbd",
+    "fullCheck": {
+      "command": "npm run check",
+      "result": "passed",
+      "registered": 5796,
+      "passed": 5744,
+      "skipped": 52,
+      "failed": 0,
+      "dependencyVersions": "unchanged lockfile",
+      "npmMetadata": "fresh disposable cache"
+    },
+    "affectedRuntimeAndHarnessChecks": {
+      "passed": 74,
+      "failed": 0
+    },
+    "packageChecks": {
+      "passed": 9,
+      "failed": 0
+    },
+    "documentationInventoryChecks": {
+      "passed": 1,
+      "failed": 0
+    },
+    "independentCodeReview": "ship",
+    "remaining": ["final-head CI"],
+    "amendedQualificationDriverChecks": {
+      "passed": 11,
+      "failed": 0
+    }
+  }
+}

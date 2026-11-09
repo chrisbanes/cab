@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
@@ -107,7 +108,7 @@ for (const c of cases)
     });
     await service.start();
     const execute = (command: Record<string, unknown>) =>
-      service.domain().execute({
+      seedLegacyCommand(service.domain(), {
         actor: "operator",
         key: randomUUID(),
         ...command,

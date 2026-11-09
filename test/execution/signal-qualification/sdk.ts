@@ -143,6 +143,7 @@ export function signalSdk(
                 tool_name: "mcp__cab__cab_report_result",
                 tool_input: args,
                 tool_use_id: "successor-result",
+                mcp_server: { name: "cab", source: "sdk" },
               } as never,
               "successor-result",
               { signal: new AbortController().signal },
@@ -172,6 +173,14 @@ export function signalSdk(
           await exit;
         })(),
         {
+          mcpServerStatus: async () => [
+            { name: "cab", status: "connected", source: "sdk" },
+          ],
+          accountInfo: async () => ({
+            apiProvider: "firstParty",
+            subscriptionType: "max",
+            apiKeySource: "none",
+          }),
           supportedModels: async () => [
             {
               value: "opus",

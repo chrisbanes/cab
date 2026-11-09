@@ -18,7 +18,7 @@ that says what happened and what, if anything, to do next.
 ## Applies to
 
 Every write in the operator UI: configuration saves (projects, agents, routing,
-sources, sync preview and placement, discovery credential, Claude token, CLI
+sources, sync preview and placement, discovery credential, runtime settings, CLI
 credentials, capacity, recovery), project setup, the task composer, task Stop and
 Resume, question answers, approvals, replies, comment review, local review and
 sign-out. The wording rules also apply to read-only status, empty and error copy.

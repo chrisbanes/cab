@@ -376,7 +376,10 @@ export async function captureDeletionCleanup(
       .get(threadId) as
       | { harness: string; codexHome: string | null }
       | undefined;
-    if (qualification?.harness === "codex" && qualification.codexHome === "cab")
+    if (
+      qualification?.harness === "codex" &&
+      qualification.codexHome === "native"
+    )
       items.push({
         id: cleanupId("codex-thread", threadId),
         kind: "codex-thread",
@@ -386,7 +389,7 @@ export async function captureDeletionCleanup(
           kind: "codex-thread",
           threadId,
           harness: "codex",
-          codexHome: "cab",
+          codexHome: "native",
         },
       });
   }

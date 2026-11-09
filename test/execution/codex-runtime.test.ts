@@ -3083,6 +3083,9 @@ test("archived resume rejection retains its exact correlated request and process
   });
   try {
     await runtime.start();
+    runtimeFixtures
+      .get(runtime)!
+      .safetyPort.registerThreadTools("archived-thread", "0".repeat(64));
     await assert.rejects(
       runtime.resumeThread("archived-thread"),
       (error: unknown) => {
@@ -3157,6 +3160,9 @@ test("archived RPC text cannot qualify wrong methods, identities or malformed re
       });
       try {
         await runtime.start();
+        runtimeFixtures
+          .get(runtime)!
+          .safetyPort.registerThreadTools("archived-thread", "0".repeat(64));
         const call =
           mode === "wrong-method"
             ? runtime.startThread(root)

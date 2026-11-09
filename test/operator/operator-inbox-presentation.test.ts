@@ -335,7 +335,7 @@ test("every other admission reason still produces a hold notice", () => {
 
 test("a hold notice keeps a proper noun's capitals when the wait label sits inside the title", () => {
   for (const [code, label] of [
-    ["claude-token-unavailable", "Claude token unavailable"],
+    ["claude-token-unavailable", "Claude native login unavailable"],
     ["runtime-unavailable", "runtime unavailable"],
     ["capacity", "capacity full"],
   ] as const) {

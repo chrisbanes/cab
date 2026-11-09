@@ -938,11 +938,14 @@ export function jsonlRows(text) {
 }
 /**
  * Read-only proof that the Claude CLI saved this session's prompt: a "user" row in
- * <case>/data/claude/config/projects/<project>/<threadId>.jsonl. Resume needs this file.
+ * Only owned fixture directories are inspected; never search the service user's personal sessions.
  */
 export function savedPrompt(caseRoot, threadId) {
   if (!/^[A-Za-z0-9-]{1,128}$/.test(threadId)) return undefined;
-  const projects = join(caseRoot, "data", "claude", "config", "projects");
+  const native = join(caseRoot, "native-claude", "projects");
+  const projects = existsSync(native)
+    ? native
+    : join(caseRoot, "data", "claude", "config", "projects");
   if (!existsSync(projects)) return undefined;
   for (const project of readdirSync(projects)) {
     const file = join(projects, project, `${threadId}.jsonl`);

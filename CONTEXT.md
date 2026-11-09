@@ -197,7 +197,7 @@ planning and allocation exceptions. Delegating work does not transfer that accou
 _Avoid_: Task owner as a separate accountability role
 
 **Agent**:
-An operator-defined identity with reusable instructions and execution settings, selected for project leads and task assignments. One agent can serve multiple projects and assignments; each assignment keeps its own conversation history. Its execution settings are validated for the selected runtime. It may also list skill plugins, each a local plugin directory or a plugin installed in Claude Code or Codex, and the skills of each it enables; these are instructions to the agent, not cab policy. An assignment keeps the list of the revision it started with, while an installed plugin's content is whatever is installed when each turn starts.
+An operator-defined identity with reusable instructions and execution settings, selected for project leads and task assignments. One agent can serve multiple projects and assignments; each assignment keeps its own conversation history. Its execution settings are validated for the selected runtime. Authentication, personal instructions, skills, plugins, MCP servers and hooks use the service user's native harness setup. Those extensions are trusted and their effects are not confined by cab's action tools. Legacy selections remain historical data, not execution settings.
 _Avoid_: Profile alone, bot identity or assignment when referring to the agent
 
 **Assignment**:

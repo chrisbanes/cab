@@ -441,7 +441,7 @@ test("supported settings narrow runtime errors to listed values", () => {
   assert.deepEqual(runtimeErrors(claude("sonnet", ""), supported), {});
 });
 
-test("an unauthorized Claude failure names the token and Settings", () => {
+test("an unauthorized Claude failure points to native login and Settings", () => {
   const notice = failureNotice(
     assignment({
       state: "held",
@@ -451,7 +451,7 @@ test("an unauthorized Claude failure names the token and Settings", () => {
       }),
     }),
   );
-  assert.match(notice?.message ?? "", /Claude rejected the configured token/);
+  assert.match(notice?.message ?? "", /Claude rejected its native login/);
   assert.deepEqual(
     notice?.routes.map((r) => r.href),
     ["/settings#runtime", "/assignments/a1/recovery"],
@@ -527,7 +527,7 @@ test("unsupported Codex settings are judged against the runtime catalogue", () =
   );
 });
 
-test("both runtime policy disclosures explain explicit Global skills selection and retained adapters", () => {
+test("both runtime policy disclosures explain native configuration and trusted extension effects", () => {
   const claude = claudePolicyDisclosure(
     {
       writableRoots: ["/w"],
@@ -539,10 +539,7 @@ test("both runtime policy disclosures explain explicit Global skills selection a
     "/w",
   );
   for (const policy of [codexPolicyDisclosure(), claude]) {
-    assert.match(
-      policy.lines.join(" "),
-      /Global skills.*selected.*~\/.agents\/skills/,
-    );
-    assert.match(policy.limits.join(" "), /total.*disk.*not bounded/);
+    assert.match(policy.lines.join(" "), /native harness setup/);
+    assert.match(policy.limits.join(" "), /extensions.*outside cab/);
   }
 });

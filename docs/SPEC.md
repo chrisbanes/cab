@@ -29,8 +29,8 @@ cab is one standalone service coordinating multiple projects for a trusted
 single operator. It owns tasks, scheduling, assignments, execution supervision,
 workspaces, durable conversations and an operator interface. Keep TypeScript,
 Node.js and SQLite. The first deployment runs on Chris's Mac and serves a web
-operator interface, using Codex with the existing operator login, linked into cab's
-own Codex home. Codex App Server qualification remains a runtime gate. No BB
+operator interface, using the service user's native harness configuration and
+subscription login. Codex App Server qualification remains a runtime gate. No BB
 installation is required by the target product. Private remote access uses
 Tailscale plus a separate cab operator login. An explicitly configured IPv4 LAN
 listener also permits HTTP access on the loopback port; credentials on that listener
@@ -227,7 +227,7 @@ Deletion is archived-only, irreversible and addressed by project ID. It requires
 exact current display name and a version/digest-bound ownership and cleanup preview.
 Remove all owned records atomically while preserving shared agents, installation
 and authentication state, provider identity exceptions and private redaction values.
-Capture minimal worktree, Claude temporary-directory and qualified cab-home Codex
+Capture minimal worktree, Claude temporary-directory and qualified native-origin Codex
 thread cleanup identities before removing their source rows. Postcommit cleanup is
 retryable from tombstones; failure never restores the project. Completed cleanup
 drops captured path/binding payload. No code-host branch/PR or tracker item is removed.
@@ -667,32 +667,26 @@ visit. Navigation, sign-out or a full reload discards local assertions and reque
 details; it does not erase a recorded server receipt. Preserve the original command
 and key before leaving an uncertain outcome so its operation can be read back.
 
-**Codex home.** Codex App Server runs with a `CODEX_HOME` and an isolated `HOME` that
-cab owns under its data directory ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
-so Codex itself does not load ambient configuration or skills from the service user's
-`~/.codex` or `~/.agents`. cab separately supplies explicitly selected global skills. The home's
-`auth.json` is only a symlink to the service user's own file-backed Codex login
-(`$CODEX_HOME/auth.json` from the service environment, else `~/.codex/auth.json`):
-cab never copies, creates, reads or hashes the login, and a regular file or a link to
-another target makes Codex unavailable instead of being repaired. Codex starts with
-`cli_auth_credentials_store=file`, because a keyring-backed login cannot be linked;
-readiness reports a missing target or a replaced link without naming paths. Codex
-refreshes the login through the link and keeps it
-([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
-the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. Codex gets its agent's selected plugin and global skills as
-skill directories, including plugins installed in Claude Code or Codex. Codex starts
-with `tools.update_plan.enabled=true` whether or not cab owns its home, so the agent is
-offered its plan tool. A Codex conversation started under the previous home is not
-resumed: admission refuses the request, naming "Started under the previous Codex home; restart
-the task" in its revision refusal, before it holds a writer, capacity or recovery
-state, and the runtime refuses the resume before any App Server request.
-**Reset task** then replaces the conversation; **Start again** is refused the same way.
-Sessions are not linked or copied, and captured history stays readable. Finish or
-restart open Codex work before upgrading to the first release with this home.
+**Native harness setup.** Both harnesses preserve the service user's native homes,
+subscription login, instructions, skills, plugins, MCP connections and hooks
+([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)). cab does not copy
+credentials, create a login link or force credential storage. Native extensions
+are trusted and may act outside cab tools; shell controls are not universal effect
+containment. Codex keeps explicit approval policy `never`, workspace-write,
+`tools.update_plan.enabled=true` and disabled subagents. Its configuration follows
+the App Server lifecycle, so restart it after configuration changes. Claude loads
+native configuration per query and checks subscription identity plus the connected
+SDK provenance of the reserved `cab` MCP server before releasing a prompt.
+A collision refuses dispatch instead of replacing cab coordination. Tools requiring
+interactive approvals remain unavailable; no API/provider fallback occurs.
 
-**Conversation archival.** cab archives finished Codex conversations in its own
-Codex home after executions settle, at startup and on a one-minute sweep. A
+New cab conversations persist native configuration origin. Legacy/unknown origins
+refuse resume before assignment ownership is acquired: “Started under the previous
+harness setup; reset the task”. **Reset task** creates a new conversation only after
+normal recovery requirements; old history, holds and sessions remain intact.
+No personal conversations are imported or silently replaced.
+
+**Conversation archival.** cab archives only attributable native-origin Codex conversations after executions settle, at startup and on a one-minute sweep. A
 conversation is finished when its assignment has completed, its task is done or
 cancelled, its conversation revision has been replaced, or its direct or drafting
 run has ended. A successful turn alone does not finish an open assignment.
@@ -1146,7 +1140,7 @@ project and its chosen dependencies would have. Show the persisted state and the
 reasons for any wait after submission; creation does not imply running. Task
 detail, Inbox and the operator CLI list the same wait reasons in one fixed order,
 the first primary. Where the operator can clear a wait (paused project, missing or
-revoked project lead, unavailable runtime, unreadable Claude token, unconfigured
+revoked project lead, unavailable runtime, unavailable native Claude login, unconfigured
 agent runtime), the reason carries a Fix that performs that one action: Resume
 project confirms and sends only the project resume, and every other Fix opens the
 screen that clears it (the CLI prints the command or Settings path). Dependency,
@@ -1202,10 +1196,11 @@ When no agent exists, including revoked agents, setup offers an inline lead
 agent form with a prechecked option to add Implementer and Reviewer. The option
 names their resolved runtimes: Implementer uses the lead runtime; Reviewer uses the
 other runtime only when enabled, available and its executable and authentication
-checks pass (including a readable Claude token), otherwise the lead runtime. A
+checks pass (including native Claude subscription login), otherwise the lead runtime. A
 pending readiness read holds checked creation; an unreadable read uses the lead.
 The lead instructions remain blank; workers use ordinary editable/revocable agent
-revisions with default model and effort and no skills. Reviewer instructions to
+revisions with default model and effort; native harness skills and extensions
+apply without a cab selector. Reviewer instructions to
 avoid file changes are advisory, not an enforced restriction. cab prescribes no
 worker order. Unchecking preserves ordinary lead creation.
 The three agents and the original keyed receipt commit atomically. An unknown
@@ -1397,112 +1392,21 @@ back to another model, effort or runtime, and an agent without settings runs on 
 runtime's default exactly as before. An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
 falls back to another. The operator UI selects and shows each agent's runtime,
-the runtime of each assignment and each runtime's effective policy, and sets the
-Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
-without showing it.
+the runtime of each assignment and each runtime's effective policy. Native login
+guidance replaces cab-specific token configuration.
 
-An agent may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
-each with the names of its skills the agent enables (at most 16 plugins and 32 skills
-each), set in the agent settings or with `cab profile prepare --skills-file`. The same
-file can be used with `cab profile prepare-create`. An entry is
-an absolute plugin directory on the service host (`{"path":…}`) or a plugin the operator
-installed and enabled in Claude Code or Codex for the service user
-(`{"plugin":"claude:<plugin>@<marketplace>"}` or `codex:…`). The agent settings list
-each entry as a row, with its tool or directory and skill count. An installed plugin is
-added from a select of the plugins both tools have installed and enabled, grouped by tool,
-and its skills are chosen in a dialog with a filter. The select leaves out plugins already
-added and, on a Claude agent, plugins without a Claude manifest. A local directory is
-added in the same dialog by path and skill names. The listing
-(`GET /api/operator/installed-plugins`) names plugins, tools and skills, never paths.
+Extensions use native harness configuration. cab has no skill/plugin picker or
+`--skills-file` flag, discovery adapter or per-turn selected-skill refresh. Legacy
+profile selections, immutable revisions, token references and receipts remain
+readable; exact completed commands replay, while new selection/token writes fail
+with native setup guidance. They do not control new execution. No migration deletes
+user files, old cab homes, personal sessions or unresolved execution ownership.
 
-An agent may also explicitly select up to 32 global skills from the service user's
-`~/.agents/skills`. New skills are not enabled automatically. For example,
-`{"plugins":[],"global":["review"]}` selects one global skill; `{"plugins":[]}` clears
-all selections. The optional `global` field is omitted when empty. A selected plugin
-skill replaces a selected global skill with the same name; selecting a different skill
-from that plugin does not. Removing the plugin does not reselect the global skill.
-The CLI's prepared change shows the resulting selection.
-
-cab discovers direct child skill directories, including directory links to installations
-outside the root. Links inside a skill must resolve within that skill's resolved directory;
-invalid, ambiguous, missing or unreadable selected skills refuse a profile change or hold
-work, with path-free errors and readiness reasons. Held work is retried every 30 s. At each
-turn cab reads the current selected content, builds a bounded adapter for both harnesses and
-records its digest; an assignment retains its selected names, not a copy of their content.
-The service retains immutable, content-addressed adapters across Stop and restart. Each is
-bounded, but the cache has no total size limit or automatic collection. The
-[qualification record](evidence/global-skills-2026-11-06.md) covers both Claude
-and Codex, with separate Chromium coverage for profile settings.
-
-An installed plugin is resolved to its install directory at each turn start, and both
-harnesses load that directory, so an agent never sees two versions of a plugin; no hook,
-MCP server, app or setting is read from the operator's configuration. For Claude Code,
-`enabledPlugins` in `settings.json` must enable it and `plugins/installed_plugins.json`
-must hold exactly one user-scope install of it, under `$CLAUDE_CONFIG_DIR` from the
-service environment, else `~/.claude`; project and local installs are ignored. For Codex,
-`config.toml` must have `[plugins."<plugin>@<marketplace>"] enabled = true`, and
-`plugins/cache/<marketplace>/<plugin>/` must hold exactly one version directory
-(`plugin-install-*` and dot entries are ignored), under `$CODEX_HOME` from the service
-environment, else `~/.codex`. Neither format is documented, so cab validates both and
-fails closed. A plugin that is uninstalled, disabled, ambiguous or in an unrecognised record
-format makes the work wait, with a reason that names the plugin and its tool and no path.
-The `skill-plugins` readiness check reports the same reasons for every active agent.
-Plugin waits of either kind are re-checked every 30 s, so installing or enabling the plugin
-again lets the next attempt run. An assignment keeps its agent revision, but not the
-plugin content: each turn runs the current install, and the turn's digest shows an update.
-A turn whose install directory is removed while it runs, for example by an update, can fail.
-
-A directory needs a Claude (`.claude-plugin/plugin.json`) or Codex
-(`.codex-plugin/plugin.json`) manifest. cab finds skills as the runtimes do: the
-directories the Claude manifest's `skills` array lists (or, for a listed directory without
-a `SKILL.md`, its subdirectories), `SKILL.md` files up to six
-directories below the directory the Codex manifest's `skills` field names, and the
-one-level `skills/*/` scan. Each skill is named by its `SKILL.md` frontmatter `name`,
-else its directory, and each enabled name must be exactly one skill of its plugin; a
-Claude agent counts only the skills the Claude CLI loads, not those reached only through
-the Codex manifest. A
-plugin with only a Codex manifest can be enabled on Codex agents only: creating a
-Claude agent with one, or switching an agent that has one to Claude, is refused. A
-change that fails any of these is refused with the failing fields. A change is also
-refused when an installed plugin it names is unavailable now, or when two entries are the
-same plugin by manifest name, such as one plugin from both tools; a turn whose agent
-has such a pair waits. Each agent revision
-stores the list, and an assignment keeps the one it started with. The agent settings show the plugins and
-skills, and each runtime's effective policy states that skills are instructions to the
-agent, not cab policy. A plugin contributes skills, instructions and
-scripts only; the hooks and MCP servers it declares never run. At each Claude turn start
-cab digests every plugin's load scope, its manifests and its enabled skills' directories,
-since nothing else reaches the agent (SHA-256 over the sorted relative paths and contents of
-their regular files, read off the coordinating event loop), and records the digests with the
-turn, readable in the execution detail without paths; a change elsewhere in the plugin, such
-as under `node_modules`, does not change it. A symbolic link in the load scope that resolves
-inside the plugin directory is followed and hashed as its target; one that resolves outside
-it is refused. A plugin that is missing or unreadable, whose load scope holds an escaping
-link or a special file or exceeds 2000 files, 16 MiB or 12 levels of depth below a skill
-directory, or, for a Claude turn, that has no Claude manifest, makes the work wait visibly
-with a reason that names no path (the plugin's manifest name for a missing Claude
-manifest), and never runs without it. The same list serves a Codex agent: the digests are
-recorded the same way, Codex receives the parent directory of each enabled skill as a skills
-root, and each Codex thread runs with only its agent's enabled skills, matched by their
-discovered `SKILL.md` paths (other agents' plugins, the plugin's
-other skills, the bundled skills and repository skills are disabled for it; an agent that enables none sees no plugin skills). cab re-sends the scope before each later
-turn of a conversation, but a plugin directory that joins the process during a running
-turn can reach that turn; skills are instructions to the agent, not a boundary, and a
-disabled skill's file stays readable. Claude may start subagents with its `Agent` tool: their tool calls
-follow the same policy, sandbox and recovery boundary as the main agent and are recorded
-with the subagent that made them, and their prose is not shown as the lead's conversation.
-cab refuses isolation, model, effort and mode overrides in a subagent call; the settings of a
-named agent definition, including a plugin's, are untested. Plugin hooks are
-switched off with Claude Code managed settings, which an organisation's managed-settings
-tier can replace, so the guarantee is qualified for a personal login only. Background
-subagents are untested against Stop and resume, and a turn resumed after a crash during a
-subagent did not complete in two attempts (not diagnosed). Codex subagents stay
-disabled. The journeys are recorded in
-[Claude](evidence/skill-plugin-journeys-2026-10-30.md) and
-[Codex](evidence/codex-skill-journeys-2026-10-30.md), the installed-plugin journeys in
-[docs/evidence/installed-plugin-journeys-2026-11-05.md](evidence/installed-plugin-journeys-2026-11-05.md),
-and the Codex scoping proof in
-[docs/evidence/codex-skill-scope-probes-2026-10-30.md](evidence/codex-skill-scope-probes-2026-10-30.md).
+Claude retains its in-turn `Agent` tool with the same built-in execution/recovery
+boundary, and rejects isolation, model, effort and mode overrides. Background
+subagents and named-agent settings remain unqualified limits. Native loading grants
+no new background/delegation authority. Native MCP tools and hooks are trusted;
+cab cannot promise to confine their external effects through its shell policy.
 
 The operator enables or disables each execution runtime for the installation in
 Settings → Runtime or with `cab runtime enable|disable`
@@ -1533,7 +1437,7 @@ and is refused, with nothing saved, while its binary does not resolve on the ser
 runtime's checks are Not configured and raise no alert. The Claude runtime is
 qualified, with limits, by bounded live journeys
 ([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
-an available token reference waits visibly. It runs the `claude` that resolves on the
+native subscription authentication waits visibly. It runs the `claude` that resolves on the
 service's fixed `PATH`, looked up when the runtime starts; without one the Claude
 runtime is not enabled (Claude work waits as not enabled and never falls back),
 and Codex is unaffected. Readiness reports the version it finds and never
@@ -1549,22 +1453,18 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 - A sandbox self-test runs before each turn; if it fails, the work waits visibly.
 - Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`).
 - File-editing tools are confined by the hook, not by the OS sandbox.
-- Claude loads no user, project or plugin configuration; repository instructions
-  are supplied as text.
+- Claude loads trusted native user/project/plugin configuration alongside cab instructions.
 - Agents ask questions only through `cab_ask_question`.
 
 Each runtime's effective policy lists its disclosed limits. For Claude, the
-subprocess token scrub is qualified for sandboxed Bash only; hooks run in process and
-no stdio MCP servers are allowed. A Claude CLI process can outlive a crashed service,
+subprocess environment scrub is qualified for sandboxed Bash only; inherited hooks
+and MCP servers may perform external effects beyond cab tools. A Claude CLI process can outlive a crashed service,
 so the operator verifies its exit before recovering the turn through the supported
 CLI or operator recovery controls. Recovery continues
 from the assignment's latest completed turn, so a crash during its first turn
 continues in a fresh session. Surfaces the journeys did not test remain limits.
-The token comes from the operator's own subscription through `claude setup-token`.
-An unsafe token file (a symbolic link, not a regular file, not owned by the service
-user, group- or other-accessible, over 4096 bytes or missing) is never read, and an
-empty file or content other than one token is not used; Claude work waits with a
-reason that names neither the path nor the value.
+Native Claude subscription metadata is checked without a model prompt. A missing
+login waits with fixed, value-free guidance; cab exports no native credential.
 Anthropic's terms do not explicitly address a single-operator service driven by its
 owner; the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
 are rechecked when self-hosting by others is considered.

@@ -33,6 +33,13 @@ The lead stays accountable for the outcome. Planning, implementation and review
 come from the agents' instructions, so each project can have its own way of
 working.
 
+Both coding harnesses use the service user's native subscription login, instructions,
+skills, plugins, MCP connections and hooks. cab keeps explicit execution controls,
+coordination and conservative Stop/recovery; trusted native extensions can act
+outside cab tools. Legacy skill selections and token references are retained for
+history/redaction and do not configure new execution. Native compatibility has been
+proved; integrated delivery qualification remains pending.
+
 ## A team with a shared memory of the work
 
 cab's design centres on a few things that become important once several

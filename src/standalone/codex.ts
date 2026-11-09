@@ -8,7 +8,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { isAbsolute } from "node:path";
 import { normalizePlan, type NormalizedPlan } from "./agent-plan.js";
-import { pluginSkillScope, skillScopeConfig } from "./codex-skills.js";
 import { resolveOnPath } from "./executable-path.js";
 import {
   capTarget,
@@ -45,18 +44,13 @@ import {
   archivedResumeRejectionSchema,
 } from "./pre-turn-recovery.js";
 import {
-  cabCodexHome,
+  PreviousHarnessHomeError,
+  startedUnderPreviousHarnessHome,
   type RuntimeSafetyPort,
   type RuntimeTerminalEvidence,
   type RuntimeTerminalFailureEvidence,
   type RuntimeThreadQualification,
 } from "./runtime-retention.js";
-import {
-  type CodexHome,
-  PreviousCodexHomeError,
-  prepareCodexHome,
-  realHome,
-} from "./codex-home.js";
 
 const rpc = z.object({
   id: z.union([z.string(), z.number()]).optional(),
@@ -80,21 +74,6 @@ const thread = z.object({
   sandbox: z.object({ type: z.literal("workspaceWrite") }),
 });
 const turn = z.object({ turn: z.object({ id: z.string() }) });
-const unsubscribeResponseSchema = z
-  .object({ status: z.string() })
-  .passthrough();
-/** App Server `skills/list`: only where each skill's file is. */
-const skillListSchema = z.object({
-  data: z.array(
-    z
-      .object({
-        skills: z.array(
-          z.object({ name: z.string(), path: z.string() }).passthrough(),
-        ),
-      })
-      .passthrough(),
-  ),
-});
 /** App Server `model/list`: the runtime's own catalogue of models and their reasoning efforts. */
 const modelList = z.object({
   data: z.array(
@@ -654,10 +633,7 @@ export function unexpectedRequest(
 export interface RuntimeTurnSettings {
   model: string | null;
   reasoningEffort: string | null;
-  /**
-   * The skill plugins the bound profile revision enables, each resolved for this turn to the
-   * directory it loads from (an installed plugin's current install); absent when it enables none.
-   */
+  /** Historical callers may carry this field; native runtimes ignore it. */
   skills?: {
     plugins: Array<{ path: string; skills: readonly string[]; name?: string }>;
   };
@@ -851,10 +827,6 @@ export class CodexRuntime implements Runtime {
   readonly harness = "codex" as const;
   private child: ChildProcessWithoutNullStreams | undefined;
   private nativeGeneration: string | undefined;
-  /** Plugin `skills/` roots set on this App Server process; it holds the union for all threads. */
-  private skillRoots = new Set<string>();
-  /** Every skill file of the plugins whose roots were sent, so a linked one is still recognised. */
-  private skillFiles = new Set<string>();
   private scopeQueue: Promise<void> = Promise.resolve();
   private nativeExecutable:
     | { codexVersion: string; executableHash: string }
@@ -1736,11 +1708,6 @@ export class CodexRuntime implements Runtime {
     private readonly options: {
       safety: RuntimeSafetyPort;
       spawnEnvironment?: () => NodeJS.ProcessEnv;
-      /**
-       * cab's own Codex home. Codex then runs with `CODEX_HOME` and `HOME` under it and a
-       * linked login, and refuses to resume conversations started under the previous home.
-       */
-      codex?: CodexHome;
       /** Test-only executable identity for deterministic stdio fixtures. */
       qualifiedExecutableHash?: string;
       /** Test-only OS boundary for deterministic attached child identity. */
@@ -1916,14 +1883,9 @@ export class CodexRuntime implements Runtime {
       ? this.executable
       : ((await resolveOnPath(this.executable, environment)) ??
         this.executable);
-    const codex = this.options.codex;
-    // Awaited before the started guard so overlapping starts cannot both spawn.
-    if (codex) await prepareCodexHome(codex, environment);
     if (this.child) throw new Error("Runtime already started");
     this.failure = undefined;
     this.clearConversationCaptures();
-    this.skillRoots = new Set();
-    this.skillFiles = new Set();
     this.nativeGeneration = randomUUID();
     this.resetSupportedSettings();
     this.nativeEndpoints.clear();
@@ -1944,30 +1906,14 @@ export class CodexRuntime implements Runtime {
         // codex-cli 0.166.0 offers `update_plan`, the plan source, only behind this gate.
         "-c",
         "tools.update_plan.enabled=true",
-        ...(codex
-          ? [
-              // The keyring and auto modes key credentials by CODEX_HOME and would ignore the link.
-              "-c",
-              "cli_auth_credentials_store=file",
-              "-c",
-              "features.multi_agent=false",
-              "-c",
-              "features.plugins=false",
-              "-c",
-              "features.skill_mcp_dependency_install=false",
-              // Agent shell commands keep the real HOME; only Codex itself runs isolated.
-              "-c",
-              `shell_environment_policy.set.HOME=${JSON.stringify(realHome(environment))}`,
-            ]
-          : []),
+        "-c",
+        "features.multi_agent=false",
       ],
       {
         // Terminal signals must reach cab first; pipes and the child handle retain ownership.
         detached: true,
         stdio: "pipe",
-        env: codex
-          ? { ...environment, CODEX_HOME: codex.home, HOME: codex.userHome }
-          : environment,
+        env: environment,
       },
     );
     this.child = child;
@@ -2118,43 +2064,6 @@ export class CodexRuntime implements Runtime {
     return run;
   }
 
-  /**
-   * Thread config that scopes skills to the bound profile revision. App Server holds one
-   * set of extra roots per process, so the roots are the union of every profile's plugins
-   * and each thread disables what its own profile does not enable, on start and on resume.
-   */
-  private async skillConfig(
-    workspace: string,
-    settings: RuntimeTurnSettings | undefined,
-  ) {
-    const plugins = settings?.skills?.plugins ?? [];
-    const { roots: wanted, files } = await pluginSkillScope(plugins);
-    for (const file of files) this.skillFiles.add(file);
-    if (wanted.some((root) => !this.skillRoots.has(root))) {
-      const next = new Set([...this.skillRoots, ...wanted]);
-      emptyResponseSchema.parse(
-        await this.request("skills/extraRoots/set", {
-          extraRoots: [...next].sort(),
-        }),
-      );
-      // Recorded only once App Server has them, so a failed call is retried.
-      this.skillRoots = next;
-    }
-    if (plugins.length === 0 && this.skillRoots.size === 0) return undefined;
-    const listed = skillListSchema.parse(
-      await this.request("skills/list", {
-        cwds: [workspace],
-        forceReload: true,
-      }),
-    );
-    return skillScopeConfig({
-      listed: listed.data.flatMap((entry) => entry.skills),
-      knownRoots: this.skillRoots,
-      knownFiles: this.skillFiles,
-      plugins,
-    });
-  }
-
   startThread(
     workspace: string,
     tools: readonly RuntimeToolDefinition[] = [],
@@ -2171,12 +2080,10 @@ export class CodexRuntime implements Runtime {
     settings: RuntimeTurnSettings | undefined,
   ): Promise<string> {
     const definitions = registeredTools(tools);
-    const skills = await this.skillConfig(workspace, settings);
     const config = {
       ...(settings?.reasoningEffort
         ? { model_reasoning_effort: settings.reasoningEffort }
         : {}),
-      ...skills,
     };
     const response = thread.parse(
       await this.request(
@@ -2230,45 +2137,26 @@ export class CodexRuntime implements Runtime {
     return response.thread.id;
   }
 
-  /**
-   * Whether the thread may predate cab's Codex home. Fails closed: a thread without a durable
-   * cab-home marker, or whose marker cannot be read, counts as earlier.
-   */
+  /** A missing or unreadable native-origin marker refuses resume. */
   startedUnderPreviousHome(threadId: string): boolean {
-    if (!this.options.codex) return false;
-    try {
-      return (
-        this.options.safety.threadQualification(threadId)?.codexHome !==
-        cabCodexHome
-      );
-    } catch {
-      return true;
-    }
+    return startedUnderPreviousHarnessHome(this.options.safety, threadId);
   }
 
   resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
-    settings?: RuntimeTurnSettings,
-    workspace?: string,
+    _settings?: RuntimeTurnSettings,
+    _workspace?: string,
   ): Promise<void> {
-    return this.exclusive(() =>
-      this.resumeThreadScoped(threadId, tools, settings, workspace),
-    );
+    return this.exclusive(() => this.resumeThreadScoped(threadId, tools));
   }
 
   private async resumeThreadScoped(
     threadId: string,
     tools: readonly RuntimeToolDefinition[] | undefined,
-    settings: RuntimeTurnSettings | undefined,
-    workspace: string | undefined,
   ): Promise<void> {
     if (this.startedUnderPreviousHome(threadId))
-      throw new PreviousCodexHomeError();
-    // Config is not persisted with the thread, so every resume repeats the profile's scope.
-    const skills = workspace
-      ? await this.skillConfig(workspace, settings)
-      : undefined;
+      throw new PreviousHarnessHomeError();
     let snapshot = this.threadSnapshots.get(threadId);
     let restoredEmptyTools = false;
     if (!snapshot && tools === undefined) {
@@ -2283,19 +2171,12 @@ export class CodexRuntime implements Runtime {
       if (restoredEmptyTools) snapshot = { tools: [] };
     }
     const definitions = registeredTools(tools ?? snapshot?.tools ?? []);
-    // A loaded thread ignores new config on resume and also sees plugin roots that joined the
-    // process after it started, so an idle thread is unsubscribed first (probe S3b/S3c).
-    if (skills)
-      unsubscribeResponseSchema.parse(
-        await this.request("thread/unsubscribe", { threadId }),
-      );
     await this.request(
       "thread/resume",
       {
         threadId,
         approvalPolicy: "never",
         sandbox: "workspace-write",
-        ...(skills ? { config: skills } : {}),
         ...(definitions.length > 0 ? { dynamicTools: definitions } : {}),
       },
       (raw) => {

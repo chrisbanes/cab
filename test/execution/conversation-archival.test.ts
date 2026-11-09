@@ -60,6 +60,26 @@ test("archives finished Cab conversations once, restores only Cab archives, and 
   }
 });
 
+test("legacy archive receipts stay retained without restoring through the native runtime", async () => {
+  const f = fixture();
+  try {
+    await f.archival().sweep(f.runtime);
+    f.db.exec("UPDATE runtime_thread_qualification SET codexHome = 'cab'");
+    await assert.rejects(
+      f.archival().restore(f.runtime, "thread-child-a"),
+      /previous harness setup/,
+    );
+    assert.deepEqual(f.calls, [["thread-child-a", true]]);
+    assert.ok(
+      f.db
+        .prepare("SELECT 1 FROM conversation_archives WHERE threadId=?")
+        .get("thread-child-a"),
+    );
+  } finally {
+    f.close();
+  }
+});
+
 const protectedCases: [string, string][] = [
   [
     "running turn",
@@ -107,7 +127,11 @@ const protectedCases: [string, string][] = [
     "UPDATE runtime_thread_qualification SET harness = 'claude'",
   ],
   [
-    "previous Codex home",
+    "legacy cab home",
+    "UPDATE runtime_thread_qualification SET codexHome = 'cab'",
+  ],
+  [
+    "unknown configuration origin",
     "UPDATE runtime_thread_qualification SET codexHome = NULL",
   ],
 ];

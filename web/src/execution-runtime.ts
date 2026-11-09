@@ -160,7 +160,7 @@ const runtimeStatusRoute = {
   label: "Runtime status",
   href: "/settings/runtime",
 };
-// The Claude token reference is set in the Runtime and recovery section.
+// Native Claude login guidance is in Runtime and recovery.
 const settingsRoute = {
   label: "Settings",
   href: settingsSectionHref("runtime"),
@@ -207,7 +207,7 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
   if (reason.startsWith(`${label} runtime unavailable: `))
     return {
       message: `${reason}. This work waits and starts once the runtime is available; it never falls back to another runtime.`,
-      // The Claude token reference is set in Settings.
+      // Native Claude login guidance is in Settings.
       routes:
         harness === "claude"
           ? [runtimeStatusRoute, settingsRoute]
@@ -223,7 +223,7 @@ export function failureNotice(a: Assignment): ExecutionNoticeModel | null {
   if (g.failure.reasonCode === "unauthorized")
     return {
       message:
-        "Claude rejected the configured token. Replace the token value in the service environment, restart the service, then recover the held execution.",
+        "Claude rejected its native login. Sign in as the service user, restart Claude in Settings → Runtime, then recover the held execution.",
       routes: [settingsRoute, recoveryRoute(a)],
     };
   return {

@@ -261,6 +261,8 @@ export class ProjectDeletionCleanup {
             }),
         );
       case "codex-thread":
+        if (captured.codexHome !== "native")
+          return Promise.resolve({ outcome: "pending", reason: "unavailable" });
         return this.options.archival.archiveCaptured(
           this.options.runtime(),
           captured.threadId,

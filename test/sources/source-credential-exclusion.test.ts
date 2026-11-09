@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
@@ -100,9 +101,11 @@ async function fixture(t: TestContext) {
     assert.equal(turns, 0);
   });
   const execute = (command: object) =>
-    service
-      .domain()
-      .execute({ actor: "operator", key: randomUUID(), ...command } as never);
+    seedLegacyCommand(service.domain(), {
+      actor: "operator",
+      key: randomUUID(),
+      ...command,
+    } as never);
   await service.start();
   const projectId = randomUUID();
   execute({
@@ -637,7 +640,11 @@ test("credential failure invalidation is atomic, idempotent, scoped and keeps ob
   const sources = new GitHubSourceStore(db);
   sources.migrate();
   const execute = (command: object) =>
-    d.execute({ actor: "operator", key: randomUUID(), ...command } as never);
+    seedLegacyCommand(d, {
+      actor: "operator",
+      key: randomUUID(),
+      ...command,
+    } as never);
   const seed = (suffix: string, active = true) => {
     const projectId = randomUUID();
     execute({

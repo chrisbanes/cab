@@ -26,10 +26,7 @@ import {
 } from "../../src/operator/project-labels.js";
 import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
 import { GitLabCredentialsSection } from "./gitlab-credentials.js";
-import {
-  ClaudeTokenRow,
-  DiscoveryCredentialRow,
-} from "./discovery-credential.js";
+import { DiscoveryCredentialRow } from "./discovery-credential.js";
 import { runtimeSummary } from "./execution-runtime.js";
 import { NotificationsSection } from "./notifications.js";
 import { OperatorCredentialsSection } from "./operator-credentials.js";
@@ -369,7 +366,9 @@ export function SettingsWorkspace(
           </ActionLink>
         }
       >
-        <ClaudeTokenRow {...p} />
+        <p className="metadata muted">
+          Runtimes use the service user's native login and configuration.
+        </p>
       </Panel>
     ),
     profiles: (

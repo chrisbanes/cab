@@ -11,7 +11,7 @@ import {
   codexHomeFor,
   codexLoginLink,
   operatorAuthFile,
-} from "../../../src/standalone/codex-home.js";
+} from "../../fixtures/legacy-harness/codex-home.js";
 import {
   STANDALONE_MARKER_CONTENTS,
   STANDALONE_MARKER_NAME,

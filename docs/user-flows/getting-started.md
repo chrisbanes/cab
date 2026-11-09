@@ -24,7 +24,7 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
 | GitHub            | A discovery credential is configured and readable                                  | Set discovery credential, or Discovery settings when done                                                     |
 | Project           | An enabled project has a lead agent that is not revoked                          | Create project; **Choose a lead** for an enabled project without one; **Resume** when every project is paused |
 | First task        | A task has started a turn                                                          | Create task ([first task](first-task.md)); unavailable until a project exists                                 |
-| Claude (optional) | A Claude token reference is readable and `claude` is on the service `PATH`         | [Add Claude](claude-runtime.md); Open readiness check when `claude` is not runnable                           |
+| Claude (optional) | Native Claude subscription login is available and `claude` is on the service `PATH`         | [Add Claude](claude-runtime.md); Open readiness check when `claude` is not runnable                           |
 
 - Only the first incomplete required row is primary; the rest are secondary.
 - GitHub is optional for a repository-free project: the row says so and never blocks
@@ -49,7 +49,7 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
 
 ## Recovery
 
-- A row that regresses (login expired, token removed) returns to Needs attention
+- A row that regresses (native login expired) returns to Needs attention
   on Home even after dismissal, because it reflects current state.
 - Dismissal is per installation and can be undone from the account menu (Show
   getting started) or the checklist page.

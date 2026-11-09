@@ -45,12 +45,31 @@ export interface RuntimeThreadQualification {
   serviceTier: string | null;
   developerInstructionsDigest: string | null;
   harness: ExecutionHarness;
-  /** `cabCodexHome` for a Codex thread started under cab's own home; null for any other. */
+  /** Configuration origin; the legacy column name is retained for stored qualification evidence. */
   codexHome: string | null;
 }
 
-/** Marks a Codex thread started under cab's Codex home; older threads stay null. */
-export const cabCodexHome = "cab";
+/** Native-home conversations created and owned by this cab installation. */
+export const nativeHarnessHome = "native";
+export const previousHarnessHomeMessage =
+  "Started under the previous harness setup; reset the task";
+export class PreviousHarnessHomeError extends Error {
+  constructor() {
+    super(previousHarnessHomeMessage);
+  }
+}
+export function startedUnderPreviousHarnessHome(
+  safety: RuntimeSafetyPort,
+  threadId: string,
+): boolean {
+  try {
+    return (
+      safety.threadQualification(threadId)?.codexHome !== nativeHarnessHome
+    );
+  } catch {
+    return true;
+  }
+}
 
 export interface RuntimeThreadQualificationEvidence {
   threadId: string;
@@ -96,4 +115,11 @@ export interface RuntimeSafetyPort {
     threadId: string;
     processIdentity: RuntimeProcessIdentity;
   }): boolean;
+}
+
+/** Historical selected-plugin evidence remains readable after native configuration migration. */
+export interface TurnPlugin {
+  name: string;
+  skills: string[];
+  digest: string;
 }

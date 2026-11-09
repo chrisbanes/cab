@@ -48,9 +48,9 @@ import type {
   RuntimeThreadQualification,
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
-import { previousCodexHomeMessage } from "./codex-home.js";
-import type { TurnPlugin } from "./skill-plugins.js";
-import { cabCodexHome } from "./runtime-retention.js";
+import { previousHarnessHomeMessage } from "./runtime-retention.js";
+import type { TurnPlugin } from "./runtime-retention.js";
+import { nativeHarnessHome } from "./runtime-retention.js";
 
 export type TaskControlReceipt = Extract<
   CommandReceipt,
@@ -2366,13 +2366,13 @@ export class ExecutionState {
           (reason) =>
             refusedAssignmentRevisionReasons.has(reason) ||
             reason === "task-revision-changed" ||
-            reason === previousCodexHomeMessage,
+            reason === previousHarnessHomeMessage,
         ) &&
         reasons.every(
           (reason) =>
             safeRefusedAssignmentRevisionReasons.has(reason) ||
             reason === "task-revision-changed" ||
-            reason === previousCodexHomeMessage,
+            reason === previousHarnessHomeMessage,
         )
       );
     if (
@@ -2851,12 +2851,9 @@ export class ExecutionState {
       .prepare(
         "INSERT OR IGNORE INTO runtime_thread_qualification (threadId, toolDigest, harness, codexHome) VALUES (?, ?, ?, ?)",
       )
-      .run(
-        id,
-        digest,
-        executionHarness,
-        executionHarness === "codex" ? cabCodexHome : null,
-      ) as { changes: number };
+      .run(id, digest, executionHarness, nativeHarnessHome) as {
+      changes: number;
+    };
     if (inserted.changes === 0) {
       const existing = this.runtimeThreadQualification(id);
       if (

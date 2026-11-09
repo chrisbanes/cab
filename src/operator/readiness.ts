@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** The readiness checks, in the fixed order they are reported. */
+/** Stable readiness IDs; claude-token now checks native login and skill-plugins reports native ownership. */
 export const readinessCheckIds = [
   "runtime-enabled",
   "codex-executable",
@@ -60,7 +60,7 @@ export const readinessSchema = z
   .strict();
 export type ReadinessResult = z.infer<typeof readinessSchema>;
 
-/** The Add Claude panel's live Token readable row: the Claude token check alone. */
+/** Legacy read route returning the native Claude login check. */
 export const claudeTokenCheckSchema = z
   .object({
     data: readinessCheckSchema.refine((c) => c.id === "claude-token"),

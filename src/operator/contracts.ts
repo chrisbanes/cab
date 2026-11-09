@@ -4038,7 +4038,7 @@ export const profileConfigurationSchema = envelope(
       instructionRevision: revision,
       capabilities: safeText,
       runtime: profileRuntimeSchema,
-      /** Skill plugins and their enabled skills; an empty list enables none. */
+      /** Historical selections, retained for compatibility; native configuration controls execution. */
       skills: profileSkillsSchema,
     })
     .strict(),

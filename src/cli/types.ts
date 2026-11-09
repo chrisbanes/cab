@@ -83,7 +83,6 @@ export type Values = {
   summary?: string | undefined;
   "instructions-file"?: string | undefined;
   "capabilities-file"?: string | undefined;
-  "skills-file"?: string | undefined;
   "restore-revision"?: string | undefined;
   revoked?: string | undefined;
   model?: string | undefined;

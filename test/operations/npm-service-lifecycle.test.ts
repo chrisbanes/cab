@@ -246,7 +246,7 @@ async function sandbox(
   const codexDir = join(dir, "codex-bin");
   for (const path of [home, codexDir])
     mkdirSync(path, { recursive: true, mode: 0o700 });
-  // cab links the service user's login file into its own Codex home, so the target must exist.
+  // Native fixture state stays in this owned HOME, away from the user's setup.
   mkdirSync(join(home, ".codex"), { recursive: true, mode: 0o700 });
   writeFileSync(join(home, ".codex", "auth.json"), "{}", { mode: 0o600 });
   writeFileSync(join(codexDir, "fake-codex.mjs"), fakeCodex);
@@ -442,6 +442,17 @@ test("a service installed from a global npm package keeps running from its own c
   // Calibration: the first install serves the app from a process run from the staged copy.
   const installed = await s.install(root);
   assert.equal(installed.code, 0, installed.stderr);
+  // This lifecycle fixture supplies Codex only, even when the host has Claude installed.
+  const disabled = await s.cab([
+    "runtime",
+    "disable",
+    "claude",
+    "--yes",
+    "--local",
+    "--local-installation",
+    s.recordPath,
+  ]);
+  assert.equal(disabled.code, 0, disabled.stdout);
   assert.equal(JSON.parse(installed.stdout).version, "0.1.0");
   const stageA = join(s.stateDir, "versions", "0.1.0");
   const cliPath = join(stageA, "dist", "src", "standalone", "cli.js");
@@ -483,7 +494,10 @@ test("a service installed from a global npm package keeps running from its own c
         undefined,
         s.recordPath,
       ).readiness(AbortSignal.timeout(30_000));
-      assert.ok(checks.every((check) => check.status !== "fail"));
+      assert.ok(
+        checks.every((check) => check.status !== "fail"),
+        JSON.stringify(checks.filter((check) => check.status === "fail")),
+      );
       const doctor = await s.cab(["doctor", ...local]);
       assert.equal(doctor.code, 0);
       const browser = await signIn(s.origin, PASSWORD);

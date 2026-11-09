@@ -1,3 +1,7 @@
+import {
+  nativeHarnessHome,
+  PreviousHarnessHomeError,
+} from "./runtime-retention.js";
 import { isDeletedProjectThread } from "./project-cleanup-reservations.js";
 import type { CleanupOutcome } from "./project-cleanup-identities.js";
 import {
@@ -8,7 +12,7 @@ import type { Database } from "../core/store.js";
 import type { Runtime } from "./codex.js";
 import type { ExecutionState } from "./state.js";
 
-/** Archives only finished threads owned by cab's Codex home, retaining restore receipts. */
+/** Archives only finished native-home threads owned by cab, retaining restore receipts. */
 export class ConversationArchival {
   private readonly pending = new Map<string, Promise<void>>();
   private sweeping = false;
@@ -35,7 +39,7 @@ export class ConversationArchival {
         .prepare("SELECT workId FROM execution_intents WHERE threadId = ?")
         .all(threadId) as { workId: string }[]
     ).map(({ workId }) => this.state.byWorkId(workId)!);
-    // Candidates are already limited to threads in cab's Codex home.
+    // Candidates are already limited to native-home threads owned by cab.
     if (intents.length === 0) return false;
     for (const intent of intents) {
       if (
@@ -113,7 +117,7 @@ export class ConversationArchival {
       const threads = this.db
         .prepare(`SELECT q.threadId FROM runtime_thread_qualification q
         LEFT JOIN conversation_archives a ON a.threadId = q.threadId
-        WHERE q.harness = 'codex' AND q.codexHome = 'cab'
+        WHERE q.harness = 'codex' AND q.codexHome = 'native'
         AND (a.state IS NULL OR a.state = 'requested')
         AND EXISTS (SELECT 1 FROM execution_intents e WHERE e.threadId = q.threadId)`)
         .all() as { threadId: string }[];
@@ -266,6 +270,11 @@ export class ConversationArchival {
           .get(threadId)
       )
         return;
+      if (
+        this.state.runtimeThreadQualification(threadId)?.codexHome !==
+        nativeHarnessHome
+      )
+        throw new PreviousHarnessHomeError();
       if (!runtime.setThreadArchived)
         throw new Error("Conversation restoration unavailable");
       const restore = async () => {

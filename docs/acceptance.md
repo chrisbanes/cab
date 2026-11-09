@@ -586,6 +586,18 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   the launchd-installed service, other platforms and token expiry, remain limits.
   Evidence: [Claude journeys](evidence/issue-827-claude-journeys-2026-10-12.md).
 
+- **Native harness setup** — Native authentication, instruction/skill discovery,
+  inherited harmless MCP/hook fixtures, bound cab callbacks and start/resume passed
+  on both installed harnesses. Deterministic coverage must retain legacy history,
+  receipts, credential redaction and ownership while refusing legacy resume and
+  obsolete writes. Completion also requires integrated real-runtime Stop and
+  completed → interrupted → explicit recovery journeys, operator browser flows,
+  exact process/callback evidence and final-head checks/review. This does not qualify
+  arbitrary extension side effects or authorise switching the installed service.
+  [Native setup evidence](evidence/issue-1569-native-setup-2026-11-09.md) records
+  passing native start/resume, Stop and explicit recovery for both harnesses,
+  including retained failures and Claude's separately approved recovery attempt.
+
 ### Execution control, recovery and access
 
 These are required of the integrated service. The feasibility gate exercises the

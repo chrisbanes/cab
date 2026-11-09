@@ -1,3 +1,4 @@
+/** Retained only for historical qualification fixtures; production uses native harness configuration. */
 import { realpath } from "node:fs/promises";
 import { dirname, sep } from "node:path";
 import {

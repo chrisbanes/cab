@@ -1151,7 +1151,7 @@ test(
   },
 );
 test(
-  "offline Claude host receives its token only after the runtime snapshot and settles one keyed settings read",
+  "offline native Claude host excludes legacy tokens and settles one keyed settings read",
   darwin,
   async () => {
     const s = offlineSession();
@@ -1184,7 +1184,7 @@ test(
       assert.match(
         readFileSync(fixtureTrace, "utf8"),
         /"child-active"/,
-        "prompt released to the turn child: token available, not restart-required",
+        "native metadata and recorded identity release the prompt",
       );
       await backend.signal(host, "group-SIGINT");
       assert.equal(await backend.close(host), true);
@@ -1489,10 +1489,7 @@ test(
         await new Promise((r) => setTimeout(r, 50));
       // Restart1 is the consequence that matters: an unsaved session cannot be resumed.
       assert.equal(outcome()?.event, "result-saved", "successor resumed");
-      assert.match(
-        proof.detail.session.file,
-        /^data\/claude\/config\/projects\//,
-      );
+      assert.match(proof.detail.session.file, /^native-claude\/projects\//);
       const saved = fixtureRows().find(
         (r: { event: string }) => r.event === "session-saved",
       );

@@ -1,4 +1,3 @@
-import { inspectGlobalSkills } from "./global-skills.js";
 import { lstat } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import type { z } from "zod";
@@ -26,23 +25,12 @@ import {
   readinessCheckIds,
   readinessSchema,
 } from "../operator/readiness.js";
-import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
-import { codexHomeFor, codexLoginLink } from "./codex-home.js";
 import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
 import { printVersion, resolveOnPath } from "./executable-path.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
-import { loadProfilePlugins, SkillPluginError } from "./skill-plugins.js";
 
-export type CodexLoginResult =
-  | "verified"
-  | "policy"
-  | "failed"
-  | "unavailable"
-  /** The link to the operator's login in cab's Codex home has no usable target. */
-  | "link-missing"
-  /** A regular file, or a link to another target, stands where the link belongs. */
-  | "link-replaced";
+export type CodexLoginResult = "verified" | "policy" | "failed" | "unavailable";
 
 type Discovery = Pick<
   z.infer<typeof discoveryStatusSchema>["data"],
@@ -53,7 +41,7 @@ type Discovery = Pick<
 export type ReadinessProfile = {
   revoked: boolean;
   runtime: ProfileRuntime;
-  /** The current revision's skill plugins; none when absent. */
+  /** Historical selectors, ignored by native readiness. */
   skills?: ProfileSkills;
 };
 
@@ -76,14 +64,7 @@ export type ReadinessDeps = {
     /** A running runtime inherited a now-excluded GitLab credential; only a restart drops it. */
     restartRequired: boolean;
   }>;
-  claudeTokenReference: () => string | null;
-  claudeTokenStatus: () => {
-    state:
-      | "not-configured"
-      | "missing-value"
-      | "restart-required"
-      | "available";
-  };
+  claudeLogin?: () => Promise<boolean>;
   harnessStatuses: () => (Pick<
     HarnessStatus,
     "harness" | "state" | "enabled"
@@ -109,9 +90,9 @@ const labels: Record<ReadinessCheckId, string> = {
   git: "Git",
   "github-discovery": "GitHub discovery",
   "claude-executable": "Claude executable",
-  "claude-token": "Claude token",
+  "claude-token": "Claude native login",
   "runtime-harness": "Runtime harness",
-  "skill-plugins": "Skill plugins",
+  "skill-plugins": "Native extensions",
   "data-paths": "Data and auth paths",
   "gitlab-credentials": "GitLab credentials",
 };
@@ -141,10 +122,6 @@ const fixes = {
   codex:
     "Install Codex into the fixed PATH, then turn Codex off and on in Settings → Runtime",
   codexLogin: "Run `codex login` as the service user",
-  codexLinkMissing:
-    "Run `codex login` as the service user with file-backed credentials; cab links that file and cannot use a keyring login",
-  codexLinkReplaced:
-    "Remove auth.json from cab's Codex home in the data directory, then restart the service",
   git: "Install git",
   discovery: "Run `gh auth login`, or Settings → discovery credential",
   gitlab:
@@ -157,20 +134,13 @@ const fixes = {
     "Install Claude Code into the fixed PATH, then turn Claude off and on in Settings → Runtime",
   claudeVersion:
     "Run `claude --version` as the service user, or reinstall Claude Code, then restart the service",
-  claudeAdd: "Add a Claude token in Settings → Add Claude",
   restart: "Restart the service",
-  claudeVariable:
-    "Set the variable in the service environment and restart the service, or clear the reference in Add Claude",
-  claudeFile:
-    "Make the token file a private regular file you own (mode 600), or clear the reference in Add Claude",
   codexPolicy:
     "Set Codex's approval policy to never and its sandbox mode to workspace-write, then restart the service",
   harness: "Restart the service, or edit the agent's model or reasoning effort",
   harnessSettings:
     "Run a Claude task; supported models are read before its first turn, then run the check again",
   unknown: "Run the check again, or restart the service",
-  skillPlugins:
-    "Install or enable the named plugin in Claude Code or Codex as the service user, restore the selected global skill in ~/.agents/skills, or edit the agent's skills",
   runtimeEnabled: "Enable a runtime in Settings → Runtime",
   runtimeBinary:
     "Install Codex or Claude Code into the fixed PATH, then turn it off and on in Settings → Runtime",
@@ -217,7 +187,7 @@ export class Readiness {
     });
   }
 
-  /** The Claude token check alone, for the Add Claude panel. */
+  /** Legacy check route, now returning native login availability. */
   async claudeToken(): Promise<ClaudeTokenCheckResult> {
     return claudeTokenCheckSchema.parse({
       data: await this.run("claude-token"),
@@ -283,7 +253,12 @@ export class Readiness {
       case "runtime-harness":
         return this.runtimeHarness();
       case "skill-plugins":
-        return this.skillPlugins();
+        return outcome(
+          id,
+          "not-configured",
+          "Extensions are managed by the native harness",
+          "Use the service user's Claude Code or Codex settings",
+        );
       case "data-paths":
         return this.dataPaths();
       case "gitlab-credentials":
@@ -368,20 +343,6 @@ export class Readiness {
         "fail",
         "Codex's approval policy or sandbox mode is not the one cab requires",
         fixes.codexPolicy,
-      );
-    if (result === "link-replaced")
-      return outcome(
-        id,
-        "fail",
-        "The login link in cab's Codex home was replaced by another file",
-        fixes.codexLinkReplaced,
-      );
-    if (result === "link-missing")
-      return outcome(
-        id,
-        "fail",
-        "The service user's Codex login file is missing or not file-backed",
-        fixes.codexLinkMissing,
       );
     const reason = {
       failed: "Codex is not signed in on the running service",
@@ -512,42 +473,20 @@ export class Readiness {
       : { ...pass(id), label: `${labels[id]} (${version})` };
   }
 
-  private claudeTokenCheck(): ReadinessCheck {
+  private async claudeTokenCheck(): Promise<ReadinessCheck> {
     const id = "claude-token";
-    const reference = this.deps.claudeTokenReference();
-    if (reference === null)
-      return outcome(
-        id,
-        "not-configured",
-        "No Claude token reference is configured",
-        fixes.claudeAdd,
-      );
-    const { state } = this.deps.claudeTokenStatus();
-    if (state === "available") return pass(id);
-    const source = claudeTokenSource(reference);
-    if (state === "restart-required")
-      return outcome(
-        id,
-        "fail",
-        source.kind === "env"
-          ? "Restart the service to use this variable"
-          : "Restart the service to use this token",
-        fixes.restart,
-      );
-    if (source.kind === "env")
-      return outcome(
-        id,
-        "fail",
-        "Token variable is unavailable",
-        fixes.claudeVariable,
-      );
-    const read = readClaudeToken(source, this.deps.env, this.deps.uid);
-    return outcome(
-      id,
-      "fail",
-      "problem" in read ? `Token file ${read.problem}` : "Token is unavailable",
-      fixes.claudeFile,
+    const available = await bounded(
+      this.deps.claudeLogin?.() ?? Promise.resolve(false),
+      this.deps.timeoutMs ?? 10_000,
     );
+    return available
+      ? pass(id)
+      : outcome(
+          id,
+          "fail",
+          "Claude native subscription login is unavailable",
+          "Sign in to Claude Code as the service user, then restart the runtime in Settings → Runtime",
+        );
   }
 
   private runtimeHarness(): ReadinessCheck {
@@ -641,49 +580,6 @@ export class Readiness {
     );
   }
 
-  /**
-   * Whether every active agent's skill plugins load now, as its next turn would: an
-   * installed plugin that is uninstalled, disabled, ambiguous or in an unknown record
-   * format holds that agent's work. Reasons name the plugin, never a path.
-   */
-  private async skillPlugins(): Promise<ReadinessCheck> {
-    const id = "skill-plugins";
-    // Profiles with the same plugins on the same harness are loaded once.
-    const unique = new Map<
-      string,
-      { skills: ProfileSkills; harness: ExecutionHarness }
-    >();
-    for (const profile of this.deps.profiles())
-      if (
-        !profile.revoked &&
-        profile.skills &&
-        (profile.skills.plugins.length || profile.skills.global?.length)
-      )
-        unique.set(
-          `${profile.runtime.harness}:${JSON.stringify(profile.skills)}`,
-          { skills: profile.skills, harness: profile.runtime.harness },
-        );
-    const reasons = new Set<string>();
-    // Each load is bounded by the plugin inspection time limit; together they run in parallel.
-    await Promise.all(
-      [...unique.values()].map(({ skills, harness }) =>
-        Promise.all([
-          loadProfilePlugins(skills, harness, this.deps.env),
-          inspectGlobalSkills(skills, this.deps.env),
-        ]).catch((error: unknown) =>
-          reasons.add(
-            error instanceof SkillPluginError
-              ? error.message
-              : "Skill plugins could not be read",
-          ),
-        ),
-      ),
-    );
-    return reasons.size === 0
-      ? pass(id)
-      : outcome(id, "fail", [...reasons].join("; "), fixes.skillPlugins);
-  }
-
   private async dataPaths(): Promise<ReadinessCheck> {
     const id = "data-paths";
     const { uid, dataDir, authFile } = this.deps;
@@ -771,17 +667,7 @@ export function serviceReadiness(
     env: process.env,
     uid: process.getuid?.(),
     ...paths,
-    codexLogin: async () => {
-      const link = await codexLoginLink(
-        codexHomeFor(paths.dataDir),
-        process.env,
-      );
-      return link === "replaced"
-        ? "link-replaced"
-        : link === "missing-target"
-          ? "link-missing"
-          : service.verifyCodexLogin();
-    },
+    codexLogin: () => service.verifyCodexLogin(),
     discovery: async () => {
       // Only a `gh:` reference needs the `gh` probe; a stalled `gh` must not fail `env:`.
       const ref = service.domain().discoveryCredentialReference();
@@ -795,8 +681,7 @@ export function serviceReadiness(
       ...(await api.codeHostCredentialLocalState()),
       restartRequired: service.gitLabCredentialRestartRequired(),
     }),
-    claudeTokenReference: () => service.domain().claudeTokenReference(),
-    claudeTokenStatus: () => service.claudeTokenStatus(),
+    claudeLogin: () => service.verifyClaudeLogin(),
     harnessStatuses: () => service.harnessStatuses(),
     harnessSettings: (harness) => service.harnessSettings(harness),
     profiles: () =>
@@ -806,7 +691,6 @@ export function serviceReadiness(
         .map((row) => ({
           revoked: Number(row.revoked) !== 0,
           runtime: service.domain().profileRuntime(String(row.id)),
-          skills: service.domain().profileSkills(String(row.id)),
         })),
   });
 }

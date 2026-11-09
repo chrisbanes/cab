@@ -21,8 +21,8 @@ One task may therefore mix Codex and Claude assignments. cab keeps admission,
 ownership, coordination, policy and task completion for every harness.
 
 Claude agents expose model and reasoning effort, validated against the values the
-installed integration supports. Permission mode, tools, sandbox and configuration
-sources are cab policy, not agent settings.
+installed integration supports. Permission mode, built-in tools and sandbox controls are cab policy; native
+configuration sources belong to the service user.
 
 ## Integration
 
@@ -37,67 +37,21 @@ cab coordination tools are served through an in-process SDK MCP server.
 
 ## Authentication
 
-Use the operator's own Claude subscription through a `claude setup-token` token,
-mirroring the Codex operator login. API-key billing stays deferred.
-
-The token is configured as a reference and never stored or rendered back. Two
-forms are accepted:
-
-- `file:/absolute/path` names an owner-only file holding the token. This is the
-  form for the installed LaunchAgent service, whose plist and environment then
-  hold no Claude secret. The path is absolute with no empty, `.` or `..` segment.
-- `env:NAME` names a variable in the service environment, like cab's other
-  provider credentials; it suits foreground and development runs.
-
-`file:` is added alongside `env:NAME` rather than replacing it: it alone solves the
-installed service, and the environment form keeps its exclusion and restart rules.
-Configuration checks only the syntax, so the file can be created afterwards.
-
-The file is read without caching whenever a Claude preflight, turn start or status
-read needs the token, and whenever spawn environments and operator reads compute
-their exclusions. It is opened without following a final symbolic link, and the
-opened descriptor must be a regular file owned by the service user, with no group
-or other permission bits and at most 4096 bytes, before anything is read; otherwise
-it is not read. Its content, with trailing whitespace removed, must be one run of
-printable ASCII characters; otherwise it is not used. In either case Claude work
-waits with a reason such as `subscription token file permits group or other
-access`, which names neither the path nor the value, and the status read shows the
-token unavailable. Intermediate symbolic links in the path (such as macOS `/var`)
-are followed, the parent directories' ownership is not checked and access control
-lists are not inspected; the operator keeps the file in a private directory.
-Replacing the file atomically rotates the token from the next turn without a
-restart; a running turn keeps the value it started with.
-
-The Claude runtime ([#825](https://github.com/chrisbanes/cab/issues/825))
-sets the resolved token only as the Claude subprocess's token variable; it never
-logs it. Every other spawn environment, including Codex and helper children such
-as `git`, omits the token variable and any variable holding the same nonempty value.
-Operator reads and conversation history redact the reference, its variable name
-or file path, and the value. A token already inherited by the running runtimes
-(an `env:NAME` reference configured after start, or a file whose value is also in
-the service environment) holds activation until restart, as for delivery
-credentials. Delivery credentials are likewise excluded from the
-Claude spawn environment. Inside the Claude process, the runtime enables Claude
-Code's subprocess environment scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`) so
-Bash, hooks and stdio MCP children do not inherit the token; its effect is
-qualified before the harness is advertised, and any residual exposure is a
-disclosed limit. An invalid token fails the turn visibly. Operator setup,
-clearing and configured/available status belong to the harness UI
-([#826](https://github.com/chrisbanes/cab/issues/826)).
-
-Anthropic's terms bar third-party products from offering subscription login to
-others, and say advertised Pro/Max limits assume ordinary, individual use of
-Claude Code and the Agent SDK. A single-operator service driven by its owner is
-not addressed explicitly. Recheck the
-[current terms](https://code.claude.com/docs/en/legal-and-compliance) before
-advertising the harness and when self-hosting by others is considered.
+Use the service user's native Claude Code subscription login and preserve `HOME`
+and `CLAUDE_CONFIG_DIR`. Validate model-free account metadata before releasing a
+prompt: a first-party provider and subscription; reject an explicitly reported
+API-key source. The installed CLI may omit that optional source field. cab excludes
+API credential inputs and selects no alternate authentication path. No API billing
+or provider fallback is authorised. cab neither injects a setup token nor changes
+personal credentials. Legacy token references remain only for history, receipt
+replay and credential redaction; new token-reference writes are refused.
 
 ## Execution policy
 
 Match the Codex default policy and disclose where enforcement differs:
 
 - `permissionMode: "dontAsk"`, an explicit built-in tool allowlist, cab's MCP
-  tools, and every other tool disallowed. No interactive approvals.
+  tools and trusted inherited MCP/Skill tools. No interactive approvals.
 - A `PreToolUse` hook sees every tool call, records it, and denies calls outside
   policy, because allow rules bypass `canUseTool`.
 - Shell commands run in Claude Code's sandbox (Seatbelt on macOS): writes to the
@@ -119,21 +73,15 @@ Match the Codex default policy and disclose where enforcement differs:
   not OS confinement, and must be disclosed with the effective policy.
 - Reads keep full access subject to host permissions, as with Codex.
 
-Agents load no user, project or plugin Claude configuration: no setting sources,
-strict MCP configuration, `managedSettings.disableAllHooks` and a dedicated Claude
-configuration directory. cab supplies repository instructions (`CLAUDE.md`,
-`AGENTS.md`) as instruction text, so repository content cannot add permission rules,
-hooks or MCP servers. The one addition is the agent's skill plugins
-([ADR-1021](1021-profile-skill-plugins-and-subagents.md)): local plugin directories,
-plugins installed in Claude Code or Codex resolved at each turn start, and the adapter
-for explicitly selected global skills. These are passed through the SDK `plugins` option
-as local plugins, with the enabled names in `skills` and the
-`Skill` tool allowed only when an agent enables any. A plugin contributes skills,
-instructions and scripts; the hooks and MCP servers it declares never run, and its
-scripts run through the ordinary sandboxed shell. The `Agent` tool is allowed on every
-turn: a subagent's tool calls pass the same `PreToolUse` hook (which sees `agent_id`),
-allowlist and sandbox, are recorded as diagnostic items with their allow or deny
-decision and the subagent that made them, and share the main agent's recovery boundary.
+User, project and local configuration loads through Claude Code's native mechanisms
+([ADR-1021](1021-profile-skill-plugins-and-subagents.md)). This includes trusted
+hooks and MCP servers, whose effects are outside cab's command confinement.
+The SDK-supplied reserved `cab` server must be connected with SDK provenance before
+prompt release; a collision refuses dispatch. cab validates its own tool calls and
+keeps explicit built-in file-edit and unsandboxed-command checks.
+The `Agent` tool retains its in-turn policy and shared recovery boundary; cab rejects
+isolation, model, effort and mode overrides. Named-agent definitions and background
+subagents retain their disclosed limits.
 
 Native `AskUserQuestion` is disabled. Agents ask the operator through
 `cab_ask_question`, which is durable across restarts.

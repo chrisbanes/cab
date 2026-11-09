@@ -1376,6 +1376,21 @@ export class DomainStore {
     const outcome = transaction(this.db, () => {
       const prior = this.replayed(scope, command.key, hash, command.type);
       if (prior !== undefined) return { outcome: prior, recorded: false };
+      if (
+        command.type === "claude-token.configure" ||
+        ((command.type === "profile.create" ||
+          command.type === "profile.configure") &&
+          command.skills !== undefined)
+      )
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Harness authentication and extensions use the service user's native setup; cab selection and token writes are retired",
+          [
+            command.type === "claude-token.configure"
+              ? "credentialRef"
+              : "skills",
+          ],
+        );
       this.assertCommandProjectWritable(command);
       const result = parseFreshDomainCommandOutcome(
         command.type,

@@ -1,4 +1,3 @@
-import { prepareGlobalSkills } from "./global-skills.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
@@ -135,11 +134,7 @@ import {
   draftTaskDigest,
   draftTurnToolDecision,
 } from "./draft-turn.js";
-import {
-  claudeTokenExclusions,
-  claudeTokenSource,
-  readClaudeToken,
-} from "./claude-token.js";
+import { claudeTokenExclusions } from "./claude-token.js";
 import {
   CodexRuntime,
   parseFailureEvidence,
@@ -152,20 +147,10 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
-import { SkillScopeError } from "./codex-skills.js";
 import {
-  type CodexHome,
-  codexHomeFor,
-  PreviousCodexHomeError,
-  previousCodexHomeMessage,
-} from "./codex-home.js";
-import {
-  type LoadedPlugin,
-  loadProfilePlugins,
-  SkillPluginError,
-  skillPluginRetryMs,
-  turnPlugins,
-} from "./skill-plugins.js";
+  PreviousHarnessHomeError,
+  previousHarnessHomeMessage,
+} from "./runtime-retention.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
@@ -398,12 +383,12 @@ const immutableRevisionMismatches = new Set([
   "assignment-instructions-revision-stale",
   "assignment-profile-revision-stale",
   "task-revision-changed",
-  previousCodexHomeMessage,
+  previousHarnessHomeMessage,
 ]);
 
-/** The Claude turn's base environment and token, or why no turn may start. */
+/** Native Claude base environment, or an explicit runtime preflight refusal. */
 export type ClaudeTurnEnvironment =
-  | { env: NodeJS.ProcessEnv; token: string }
+  | { env: NodeJS.ProcessEnv }
   | {
       unavailable: string;
       /** Machine-readable cause for status reads; the reason text is unchanged. */
@@ -413,9 +398,7 @@ export type ClaudeTurnEnvironment =
 export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
   safety: RuntimeSafetyPort;
-  codex?: CodexHome;
   claude?: {
-    configDirectory: string;
     turnEnvironment: () => ClaudeTurnEnvironment;
   };
 }
@@ -621,8 +604,6 @@ export interface StandaloneServiceOptions {
     now?: () => number;
     fallbackBackoffMs?: number;
     maxFallbackBackoffMs?: number;
-    /** Test-only: how long work waiting on a skill plugin waits before it is re-checked. */
-    skillPluginMs?: number;
   };
   /** Execution diagnostic retention; `cli.ts` passes the environment limits. */
   diagnostics?: {
@@ -885,12 +866,6 @@ export class StandaloneService {
   private spawnRuntime: ((harness: ExecutionHarness) => Runtime) | undefined;
   /** Serialises enable/disable per harness; shutdown awaits them. */
   private readonly runtimeToggles = new Map<ExecutionHarness, Promise<void>>();
-  /** Keyed like conversation captures; finished ones stay to count late events. */
-  /** Plugins loaded at admission, recorded with the turn once it exists; dropped when the execution ends. */
-  private readonly turnPlugins = new Map<string, LoadedPlugin[]>();
-  private skillPluginRetry:
-    | { generation: ServiceGeneration; timer: NodeJS.Timeout }
-    | undefined;
   private readonly diagnosticCaptures = new Map<
     string,
     ExecutionDiagnosticsCapture
@@ -903,7 +878,7 @@ export class StandaloneService {
   private readonly lastCompletedWorkId = new Map<ExecutionHarness, string>();
   private canonicalDataDir: string | undefined;
   /** Exclusion-only: grows with distinct token-file rotations, never persisted or returned. */
-  private readonly claudeTokensHandedOut = new Set<string>();
+  private readonly legacyClaudeTokenValues = new Set<string>();
   /** Taken in `stop()`: `stopOwned()` clears the domain that the exclusions come from. */
   private stoppedExclusions: readonly string[] | undefined;
   private readonly active = new Set<Promise<ExecutionIntent>>();
@@ -1627,7 +1602,12 @@ export class StandaloneService {
         });
       const claudeTokenExcluded = () => {
         const ref = domain.claudeTokenReference();
-        return ref ? claudeTokenExclusions(ref) : { names: [], values: [] };
+        const excluded = ref
+          ? claudeTokenExclusions(ref)
+          : { names: [], values: [] };
+        for (const value of excluded.values)
+          this.legacyClaudeTokenValues.add(value);
+        return excluded;
       };
       // Resolve a gh login once so its token value is excluded from the spawn snapshot too;
       // a failure does not block start.
@@ -1675,93 +1655,32 @@ export class StandaloneService {
           ],
         };
       });
+      const runtimeEnvironment = (base: NodeJS.ProcessEnv) => {
+        const claude = claudeTokenExcluded(),
+          github = githubExcluded();
+        return managedAssignmentEnvironment(
+          credentialFreeEnvironment(
+            base,
+            [...deliveryCredentialNames(), ...claude.names, ...github.names],
+            process.env,
+            [
+              ...this.localAccessExclusions(),
+              ...claude.values,
+              ...github.values,
+            ],
+          ),
+        );
+      };
       const spawnEnvironment = {
         spawnEnvironment: () => {
-          const claude = claudeTokenExcluded(),
-            github = githubExcluded();
-          const snapshot = managedAssignmentEnvironment(
-            credentialFreeEnvironment(
-              process.env,
-              [...deliveryCredentialNames(), ...claude.names, ...github.names],
-              process.env,
-              [
-                ...this.localAccessExclusions(),
-                ...claude.values,
-                ...github.values,
-              ],
-            ),
-          );
-          runtimeSpawnSnapshot = snapshot;
-          return { ...snapshot };
+          runtimeSpawnSnapshot = runtimeEnvironment(process.env);
+          return { ...runtimeSpawnSnapshot };
         },
       };
-      const unavailable = (
-        reason: string,
-        code: "not-configured" | "empty" | "restart-required",
-      ) => ({
-        unavailable: `Claude runtime unavailable: ${reason}`,
-        code,
-      });
-      // Never wider than what the running runtimes inherited at start.
       const claude = {
-        configDirectory: join(this.dataDir, "claude", "config"),
-        turnEnvironment: (): ClaudeTurnEnvironment => {
-          const ref = domain.claudeTokenReference();
-          if (!ref)
-            return unavailable(
-              "subscription token is not configured",
-              "not-configured",
-            );
-          const snapshot = runtimeSpawnSnapshot ?? {};
-          const github = githubExcluded();
-          const source = claudeTokenSource(ref);
-          if (source.kind === "file") {
-            // Read on every call, never cached: a replaced file applies from the next turn.
-            const read = readClaudeToken(source);
-            if ("problem" in read)
-              return unavailable(
-                `subscription token file ${read.problem}`,
-                "empty",
-              );
-            if (Object.values(snapshot).includes(read.value))
-              return unavailable(
-                "Claude token is also in the service environment the running runtimes inherited; restart the service",
-                "restart-required",
-              );
-            // A rotated file must not drop a value a running runtime still holds.
-            this.claudeTokensHandedOut.add(read.value);
-            return {
-              env: credentialFreeEnvironment(
-                snapshot,
-                [...deliveryCredentialNames(), ...github.names],
-                process.env,
-                [read.value, ...github.values],
-              ),
-              token: read.value,
-            };
-          }
-          const name = source.name;
-          const token = process.env[name];
-          if (
-            snapshot[name] !== undefined ||
-            (token && Object.values(snapshot).includes(token))
-          )
-            return unavailable(
-              "Claude token reference was configured after the service started; restart the service",
-              "restart-required",
-            );
-          if (!token)
-            return unavailable("subscription token is unavailable", "empty");
-          return {
-            env: credentialFreeEnvironment(
-              snapshot,
-              [...deliveryCredentialNames(), name, ...github.names],
-              process.env,
-              github.values,
-            ),
-            token,
-          };
-        },
+        turnEnvironment: (): ClaudeTurnEnvironment => ({
+          env: runtimeEnvironment(runtimeSpawnSnapshot ?? {}),
+        }),
       };
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       spawnEnvironment.spawnEnvironment();
@@ -1775,7 +1694,6 @@ export class StandaloneService {
           {
             ...spawnEnvironment,
             safety: runtimeSafety(harness),
-            codex: codexHomeFor(this.dataDir),
             claude,
           },
           harness,
@@ -2738,7 +2656,7 @@ export class StandaloneService {
         ...secretEnvironmentValues(),
         ...providerCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
-        ...this.claudeTokensHandedOut,
+        ...this.legacyClaudeTokenValues,
         ...new UnstackStore(this.cache!)
           .records()
           .flatMap(unstackPrivateValues),
@@ -3255,20 +3173,11 @@ export class StandaloneService {
     return this.started().gitLabRestartRequired();
   }
 
-  /** Booleans and a closed state only; the token value never leaves this method. */
-  claudeTokenStatus() {
-    const { domain, claude } = this.started();
-    const configured = domain.claudeTokenReference() !== null;
-    const result = configured ? claude?.turnEnvironment() : undefined;
-    const state = !configured
-      ? "not-configured"
-      : !result ||
-          ("unavailable" in result && result.code !== "restart-required")
-        ? "missing-value"
-        : "unavailable" in result
-          ? "restart-required"
-          : "available";
-    return { configured, available: state === "available", state } as const;
+  async verifyClaudeLogin(): Promise<boolean> {
+    const runtime = this.runtimes.get("claude") as
+      | (Runtime & { verifyNativeLogin?: () => Promise<boolean> })
+      | undefined;
+    return (await runtime?.verifyNativeLogin?.()) ?? false;
   }
 
   terminalFailure(workId: string) {
@@ -8430,8 +8339,8 @@ export class StandaloneService {
     );
   }
 
-  /** Whether a resumed Codex conversation predates cab's Codex home; other runtimes never do. */
-  private startedUnderPreviousCodexHome(
+  /** Whether a resumed conversation predates native configuration ownership. */
+  private startedUnderPreviousHarnessHome(
     workId: string,
     threadId: string,
   ): boolean {
@@ -8565,12 +8474,12 @@ export class StandaloneService {
           // Refused here, before any writer or capacity is held, so Reset task can replace it.
           if (
             previous?.threadId &&
-            this.startedUnderPreviousCodexHome(
+            this.startedUnderPreviousHarnessHome(
               request.workId,
               previous.threadId,
             )
           )
-            reasons.push(previousCodexHomeMessage);
+            reasons.push(previousHarnessHomeMessage);
           if (
             this.repositoryAccessRevoked(binding.taskId, binding.repositories)
           )
@@ -8702,7 +8611,7 @@ export class StandaloneService {
         const reason = await this.untilFailure(
           runtime,
           (async () => {
-            const settings = this.turnSettings(request, true);
+            const settings = this.turnSettings(request);
             return preflight({
               workspace: workspaceKey,
               ...(settings ? { settings } : {}),
@@ -8722,19 +8631,6 @@ export class StandaloneService {
           store.wait(request.workId, reason);
           return;
         }
-      }
-      const pluginWait = await this.skillPluginWait(request, harness);
-      if (
-        this.runtimes.get(harness) !== runtime ||
-        this.generation !== generation ||
-        !generation.accepting
-      )
-        return;
-      if (pluginWait !== undefined) {
-        state.wait(intent.id, pluginWait);
-        store.wait(request.workId, pluginWait);
-        this.retrySkillPluginWait(generation);
-        return;
       }
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
@@ -8835,99 +8731,21 @@ export class StandaloneService {
       : undefined;
   }
 
-  /**
-   * Model settings of the bound profile revision. Claude always carries them; Codex only
-   * when a value is set, so a Codex profile without settings keeps today's call shapes.
-   * Skills are the plugins `skillPluginWait` resolved for this turn, never the profile's
-   * entries: a turn whose profile enables skills and has none resolved throws, except for
-   * `preflight`, which reads no skills.
-   */
-  private turnSettings(
-    request: TurnRequest,
-    preflight = false,
-  ): RuntimeTurnSettings | undefined {
+  /** Model and effort from the bound immutable profile revision. */
+  private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
     const bound = this.boundProfile(request);
     if (!bound) return undefined;
-    const domain = this.domain();
-    const runtime = domain.profileRuntime(bound.profileId, bound.revision);
+    const runtime = this.domain().profileRuntime(
+      bound.profileId,
+      bound.revision,
+    );
     const model = runtime.model ?? null,
       reasoningEffort = runtime.reasoningEffort ?? null;
-    const skills = domain.profileSkills(bound.profileId, bound.revision);
-    const enabled = skills.plugins.length > 0 || Boolean(skills.global?.length);
-    const loaded = this.turnPlugins.get(request.workId);
-    if (enabled && !loaded && !preflight)
-      throw new Error("Skill plugins were not loaded for this turn");
     return runtime.harness === "claude" ||
       model !== null ||
-      reasoningEffort !== null ||
-      enabled
-      ? {
-          model,
-          reasoningEffort,
-          ...(enabled && loaded
-            ? {
-                skills: {
-                  // Manifest names qualify each skill, so overlapping names across plugins stay distinct.
-                  plugins: loaded.map(({ path, skills, name }) => ({
-                    path,
-                    skills,
-                    name,
-                  })),
-                },
-              }
-            : {}),
-        }
+      reasoningEffort !== null
+      ? { model, reasoningEffort }
       : undefined;
-  }
-
-  /**
-   * Resolves current plugins and prepares selected global skills before admission.
-   * A missing, disabled or unreadable selection keeps work waiting, with no hold
-   * taken and no fallback to running without it. The reason never contains a path.
-   */
-  private async skillPluginWait(
-    request: TurnRequest,
-    harness: ExecutionHarness,
-  ): Promise<string | undefined> {
-    this.turnPlugins.delete(request.workId);
-    try {
-      const bound = this.boundProfile(request);
-      const skills = bound
-        ? this.domain().profileSkills(bound.profileId, bound.revision)
-        : undefined;
-      if (skills && (skills.plugins.length > 0 || skills.global?.length)) {
-        const loaded = await loadProfilePlugins(skills, harness);
-        const global = await prepareGlobalSkills(this.dataDir, skills);
-        this.turnPlugins.set(request.workId, [
-          ...loaded,
-          ...(global ? [global] : []),
-        ]);
-      }
-      return undefined;
-    } catch (error) {
-      return error instanceof SkillPluginError
-        ? error.message
-        : "Skill plugins could not be read";
-    }
-  }
-
-  /**
-   * Wakes the scheduler once `skillPluginRetryMs` after work waits on a skill plugin:
-   * restoring a skill source is not a cab event, so nothing else would re-check it.
-   * One timer per generation; other wakes still re-check the work at once.
-   */
-  private retrySkillPluginWait(generation: ServiceGeneration): void {
-    if (this.skillPluginRetry?.generation === generation) return;
-    if (this.skillPluginRetry) clearTimeout(this.skillPluginRetry.timer);
-    const timer = setTimeout(() => {
-      if (this.skillPluginRetry?.timer === timer)
-        this.skillPluginRetry = undefined;
-      void this.observeBackgroundFailure(generation, "skill-plugin-retry", () =>
-        this.wakeScheduler(0, generation),
-      );
-    }, this.options.retry?.skillPluginMs ?? skillPluginRetryMs);
-    timer.unref();
-    this.skillPluginRetry = { generation, timer };
   }
 
   /** Never awaited by admission: admissionResumed wakes the scheduler drain. */
@@ -9099,7 +8917,7 @@ export class StandaloneService {
               previous.threadId,
             ),
           );
-        // Settings or not, the runtime scopes the thread's skills to what its profile enables.
+        // Resume keeps the workspace and the bound model settings.
         await guard(
           runtime.resumeThread(
             previous.threadId,
@@ -9206,17 +9024,6 @@ export class StandaloneService {
       let turnBound = runtimeGeneration
         ? state.bindTurn(intent.id, turnId, runtimeGeneration)
         : state.bindTurn(intent.id, turnId);
-      try {
-        const loaded = this.turnPlugins.get(request.workId);
-        if (loaded)
-          state.recordTurnSkillPlugins(
-            request.workId,
-            turnId,
-            turnPlugins(loaded),
-          );
-      } catch {
-        // The record is evidence only; its storage failure cannot change the turn.
-      }
       if (turnBound) void this.current?.statusMappingWriter.run();
       let nativeRejected = false;
       if (!turnBound) {
@@ -9504,8 +9311,7 @@ export class StandaloneService {
       if (state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
-          error instanceof PreviousCodexHomeError ||
-            error instanceof SkillScopeError
+          error instanceof PreviousHarnessHomeError
             ? error.message
             : `Runtime submission or observation uncertain: ${String(error)}`,
         );
@@ -9556,7 +9362,6 @@ export class StandaloneService {
         }
       }
     } finally {
-      this.turnPlugins.delete(request.workId);
       if (draftingTimer) clearTimeout(draftingTimer);
       if (draftingRunId) this.draftingControls.delete(draftingRunId);
       if (conversationCapture) {

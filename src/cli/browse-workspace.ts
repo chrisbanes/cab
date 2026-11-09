@@ -296,7 +296,7 @@ const profileGet: BrowseCommand = {
         ["Version", String(d.profile.version)],
         ["Revoked", d.profile.revoked ? "yes" : "no"],
         ["Runtime", harnessLine(d.runtime)],
-        ["Skills", describeSkills(d.skills)],
+        ["Legacy skills (inactive)", describeSkills(d.skills)],
         ["Capabilities", unavailable(d.capabilities)],
         [
           "Instructions",

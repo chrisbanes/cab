@@ -79,7 +79,7 @@ export const capturedProjectCleanupSchema = z.discriminatedUnion("kind", [
       kind: z.literal("codex-thread"),
       threadId: identity,
       harness: z.literal("codex"),
-      codexHome: z.literal("cab"),
+      codexHome: z.enum(["cab", "native"]),
     })
     .strict(),
 ]);

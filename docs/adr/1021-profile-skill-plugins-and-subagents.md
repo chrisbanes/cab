@@ -2,260 +2,75 @@
 status: accepted
 ---
 
-# Load agent skill plugins and allow in-turn subagents
+# Use native harness configuration and retain in-turn subagents
 
-This amends [ADR-1008](1008-claude-code-execution-harness.md), whose agents load no
-plugin configuration and cannot start subagents. The operator's development workflow
-depends on skills, most of them distributed as plugins, and several of those skills
-delegate work to subagents. Delivery scope lives in
-[#1336](https://github.com/chrisbanes/cab/issues/1336).
-
-All of this is implemented: the Codex home, login link and previous-home refusal, agent
-skill plugins for both harnesses, and in-turn subagents for Claude. The Claude
-[journey record](../evidence/skill-plugin-journeys-2026-10-30.md) shows a skill running,
-a subagent under Stop, and a crash during a subagent; the
-[Codex skill proof](../evidence/codex-skill-scope-probes-2026-10-30.md) and
-[Codex journey record](../evidence/codex-skill-journeys-2026-10-30.md) show per-thread
-skills and a Codex turn running its agent's skill.
-
-The plugin layouts and load scope below are implemented
-([#1524](https://github.com/chrisbanes/cab/issues/1524)); the
-[layout journey record](../evidence/skill-plugin-layout-journeys-2026-11-05.md) shows a
-nested skill of `mattpocock-skills` running on each harness. Installed plugins are
-implemented too ([#1525](https://github.com/chrisbanes/cab/issues/1525)); the
-[installed-plugin journey record](../evidence/installed-plugin-journeys-2026-11-05.md)
-shows a plugin installed and then updated with each tool's own CLI, with the next turn
-running the update.
-
-Explicit per-profile global skills are implemented for both harnesses. The
-[qualification record](../evidence/global-skills-2026-11-06.md) shows current content
-and relative resources on Claude and Codex, with separate Chromium coverage for
-profile settings.
+cab runs the service user's existing coding environment. Authentication, personal
+instructions, skills, plugins, MCP servers and hooks belong to the native harness;
+cab owns assignments, workspaces, role instructions, model/effort settings,
+conversation bindings, capacity, durable questions, Stop/recovery and delivery.
+Delivery scope is [#1569](https://github.com/chrisbanes/cab/issues/1569).
 
 ## Decision
 
-- An agent lists skill plugins and which of their skills are enabled. A plugin
-  is either one the operator installed and enabled in Claude Code or Codex, named by
-  tool and plugin id (see Installed plugins below), or a local plugin directory on the
-  service host. Like other agent settings, an assignment keeps the agent revision
-  it started with; an installed plugin's content is whatever is installed when each
-  turn starts.
-- An agent can also select individual skills from the service user's `~/.agents/skills`.
-  Selection is explicit and new installs remain disabled. A selected plugin skill removes
-  a same-named global selection; removing that plugin does not restore it. The optional
-  `global` list holds at most 32 names and is omitted when empty.
-- Both harnesses receive the same skill set from the same directory. Claude receives the
-  plugins through the Agent SDK's local `plugins` option and the enabled names through
-  its `skills` option. Codex receives each plugin's skill directories as extra skills
-  roots of its App Server and scopes each thread to its agent's enabled skills (see
-  Codex skills below). A plugin with a Claude plugin manifest serves both runtimes; one
-  with only a Codex manifest serves Codex agents only (see Plugin layout below).
-- Plugins contribute skills, their instructions and their scripts only. Hooks and
-  MCP servers a plugin declares do not run, so repository and plugin content still
-  cannot change cab's tool policy. Claude keeps `strictMcpConfig` and adds
-  `managedSettings: { disableAllHooks: true }`; Codex receives skill directories, not
-  installed plugins. Skill scripts run through the harness's ordinary shell tool under
-  the existing sandbox and network policy. The
-  [probe record](../evidence/skill-plugin-probes-2026-10-29.md) shows that
-  `disableAllHooks` leaves cab's in-process `PreToolUse` callback running and denying
-  out-of-policy calls, that a plugin's own hook and MCP server do not run, and that the
-  skill's script ran under the sandbox with its outside write denied.
-- cab records a digest of each loaded plugin with the turn, alongside the existing
-  instruction digest, so a changed plugin is visible in the turn's execution detail.
-- Claude may start subagents through its `Agent` tool, which requires removing `Task`
-  from the disallowed tools too. Every subagent tool call goes through the same
-  `PreToolUse` hook (marked with `agent_id`), allowlist and sandbox as the main agent,
-  including a denied outside write and denied network, and subagents remain part of
-  the turn: an operator Stop leaves no process. Killing the service mid-subagent leaves
-  the CLI and its tool processes running until recovery terminates them by recorded
-  identity, exactly as for the main agent. That existing recovery boundary is accepted
-  for subagents and gets no new rules. `AskUserQuestion`, web tools and plan mode stay
-  disallowed. cab refuses isolation, model, effort and mode overrides in a subagent call (the settings of
-  a named agent definition, including a plugin's, are untested), and
-  does not show its prose as the lead's conversation. Plugin hooks are switched off
-  through Claude Code managed settings, which an organisation's managed-settings tier can
-  replace, so that guarantee is qualified for a personal login only. Background subagents
-  and a turn resumed after a crash during a subagent are not demonstrated (see the
-  journey record).
-- Codex subagents stay disabled (`features.multi_agent=false`). Enabling them needs a
-  later decision backed by a sandbox and Stop proof; the Codex skill proof only records
-  what was observed.
-- The agent settings show the plugins and enabled skills, and the effective policy
-  states that skills are instructions to the agent rather than cab policy.
+Preserve the service environment's `HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`.
+Use native subscription login, without copying credentials, forcing file storage,
+linking login files or writing personal configuration. API billing and provider
+fallback are unavailable. cab continues to exclude its delivery/service credentials
+from runtime and helper environments and to redact retained credential references.
 
-## Plugin layout
+Native extensions are trusted. Their MCP requests and hooks may have effects outside
+cab's tools; command sandbox controls do not contain every extension effect.
+External task content grants no new authority. cab enforces action policy in its own
+tools and integrations and provides no independent host sandbox.
 
-cab finds a plugin's skills the way the runtimes do, so a plugin loads in cab as it does
-in Claude Code and Codex:
+Codex retains explicit approval policy `never`, workspace-write, the plan tool and
+disabled subagents. Native tools that require approval are unavailable under that
+policy. Configuration refresh follows the App Server lifecycle; restart the runtime
+after changing its configuration.
 
-- **Discovery.** Skills are the directories listed in the Claude manifest's
-  (`.claude-plugin/plugin.json`) `skills` array, the directory named by the Codex
-  manifest's (`.codex-plugin/plugin.json`) `skills` field, and the flat `skills/*/` scan.
-  In a probe, the Claude CLI loaded the listed nested paths in addition to its one-level
-  scan, and Codex App Server listed skills up to six directories below a root.
-- **Names.** A skill is named by its `SKILL.md` frontmatter `name`, else its leaf
-  directory: both runtimes report that name without a category prefix. Two skills of one
-  plugin with the same name are refused.
-- **Scoping.** Codex threads are scoped by the discovered `SKILL.md` paths.
-- **Load scope.** The digest, the size, file and depth bounds and the link rules cover
-  the manifests and the enabled skills' directories only, because nothing else reaches
-  the agent. A symbolic link that resolves inside the plugin directory is allowed; one
-  that resolves outside it is refused.
-- **Codex-only plugins.** A plugin without a Claude manifest can be enabled only on a
-  Codex agent: the Claude CLI would name it after its directory, which for an
-  installed plugin is a version. An agent change to the Claude harness that keeps one
-  is refused, and a Claude conversation whose agent enables one is held with a reason
-  naming the plugin.
+Claude retains `dontAsk`, its explicit built-in tool policy, sandbox self-test,
+command network denial, no unsandboxed retry and file-edit checks. Native Skill and
+MCP tools are admitted alongside cab's SDK server. Before releasing a prompt, verify
+native subscription metadata and that the connected reserved `cab` MCP server has
+SDK provenance. A project/user server named `cab` that replaces it refuses the turn;
+cab tool hooks also require SDK provenance. Do not rebuild user configuration to
+resolve a collision. Native configuration is loaded anew by each Claude query.
 
-## Installed plugins
+Claude's `Agent` tool remains available in-turn under the existing execution and
+recovery boundary. cab rejects isolation, model, effort and permission-mode overrides.
+Named-agent settings and background subagent Stop/resume remain disclosed limits;
+native loading adds no new delegation authority.
 
-An agent can name a plugin the operator installed and enabled in Claude Code
-(`claude:<plugin>@<marketplace>`) or Codex (`codex:<plugin>@<marketplace>`). cab takes
-only that plugin's skill directories from the install; the isolation above is unchanged:
-cab's own Codex home, plugin hooks off, `strictMcpConfig` and `features.plugins=false`.
-No hook, MCP server, app or setting is read from the operator's configuration.
+## Transition and ownership
 
-- **Resolution.** Each turn start resolves the plugin to its install directory, and both
-  harnesses load from that directory, so an agent never sees two versions of a plugin.
-  Claude Code: the plugin is enabled in `~/.claude/settings.json` and resolved through
-  `installed_plugins.json`. Codex: the plugin is enabled in `config.toml` and has exactly
-  one version directory in its plugin cache. Neither format is a documented interface:
-  cab validates both at runtime and fails closed.
-- **Unavailable.** A plugin that cannot be resolved (uninstalled, disabled, an unknown
-  record format or two Codex versions) holds the turn with a reason that names the
-  plugin and no path, and readiness reports it. Installing or enabling it again
-  recovers: the held work is re-checked on a timer, because a change in either tool is
-  not a cab event. Only Claude Code's user-scope install counts; project and local
-  installs belong to a repository's own settings. An agent enables a plugin once by
-  manifest name, so the same plugin from both tools, or a local copy of it, is refused.
-- **Updates.** Updating a plugin in Claude Code or Codex updates it for cab's next turn,
-  and the turn's plugin digest shows the change. A turn whose install directory is
-  removed while it runs, for example by an update, can fail; whether either tool does so
-  during a session is unproven.
+New cab conversations persist `native` configuration origin in the existing
+qualification storage. A legacy or unknown origin is refused before resume and
+before assignment writer/capacity acquisition: “Started under the previous harness
+setup; reset the task”. Explicit **Reset task** can create a new conversation after
+normal recovery requirements. Existing holds, history and sessions remain intact;
+cab neither copies rollouts nor imports personal sessions.
 
-Local plugin directories remain for plugins that are not installed, such as one under
-development.
+Archival and project cleanup operate only on attributable native-origin Codex
+conversations with settled work and no unresolved ownership, pending effects or
+callbacks. Legacy archive requests and old harness homes remain retained and inactive.
+Unrelated personal conversations are never cleanup candidates.
 
-## Global skills
-
-cab discovers direct skill-directory children of the service user's `~/.agents/skills`,
-including directory links to installations outside that root. A link within a selected
-skill must resolve inside that skill's resolved directory. Missing, unreadable, invalid or
-ambiguous selections refuse a profile change or hold work; readiness reports the reason,
-and held work is retried. Listing, errors and turn evidence do not expose source or cache
-paths.
-
-Each turn reads the current selected content and prepares a bounded `cab-global-skills`
-adapter for both harnesses. The turn records its digest, while the profile revision retains
-names rather than content. The adapter's load scope has the existing 2,000-file, 16-MiB
-and depth-12 bounds. Completed content-addressed adapters are immutable and retained across
-Stop and restart for unresolved consumers and Codex roots. The cache has no total disk bound
-or automatic collection. A real plugin named `cab-global-skills` cannot be selected alongside
-global skills; 16 real plugin entries remain available alongside the adapter.
-
-## Codex home and login
-
-Codex App Server runs with a `CODEX_HOME` and an isolated `HOME` that cab owns under
-its data directory, so Codex does not load ambient skills, plugins or settings from the
-service user's `~/.codex` or `~/.agents`. cab supplies explicitly selected global skills
-through the adapter above. With only `CODEX_HOME` overridden, `~/.agents/skills` still
-loaded ([probe record](../evidence/skill-plugin-probes-2026-10-29.md)).
-
-- **Login.** cab's home holds `auth.json` only as a symlink to the service user's
-  Codex login (`$CODEX_HOME/auth.json` from the service environment, else
-  `~/.codex/auth.json`). cab never copies, migrates, creates, reads or hashes a login.
-  A regular file or a link to another target in its place makes Codex unavailable; it
-  is never repaired by copying, and readiness reports a missing target or a replaced
-  link without naming paths. Codex starts with `cli_auth_credentials_store=file`: the
-  keyring and auto modes key credentials by the `CODEX_HOME` path and would ignore the
-  link, so a keyring-backed login cannot be used.
-- **Refresh.** Codex writes a refreshed login in place through the link and keeps it,
-  as the [refresh probe](../evidence/codex-auth-link-refresh-2026-10-30.md) shows on
-  the installed Codex with a dummy target and then the operator's own login. If a Codex
-  release ever replaces the link with a regular file, the operator's login may need an
-  interactive `codex login`; cab does not fall back to a copy.
-- **Agent shells keep the real `HOME`.** Codex starts with
-  `shell_environment_policy.set.HOME=<service user's HOME>`, so commands behave as
-  before, such as git configuration. Only Codex itself runs isolated: shell commands
-  still see cab's `CODEX_HOME`, and the sandbox's host-permitted reads, including the
-  operator's `~/.codex`, are unchanged.
-- **Features.** Codex also starts with `features.plugins=false` and
-  `features.skill_mcp_dependency_install=false`.
-- **Conversations started earlier.** A Codex conversation started under the previous
-  home is not resumed. Admission refuses the request, naming "Started under the
-  previous Codex home; restart the task" in its revision refusal, before it holds a
-  writer, capacity or recovery state, so the operator can use Reset task (Start again
-  keeps the conversation and is refused the same way). A refused draft turn gives its
-  message back. The runtime also refuses the resume before any App Server request.
-  There is no sessions link and no copy of rollouts. The thread's qualification row
-  records the home it was started under: rows that exist at upgrade have none, and a
-  resumed thread with no row is treated the same way. Captured history stays readable.
-
-## Codex skills
-
-One Codex App Server process serves every Codex conversation, and its extra skills roots
-are process-wide, so the roots are the union of every agent's plugin skill
-directories and each thread is scoped by `skills.config` entries in its `thread/start`
-and `thread/resume` config. A thread whose agent enables skills disables every other
-listed skill (the plugins' other skills, the bundled skills and repository skills). A
-thread whose agent enables none disables the skills of cab's plugin roots only and
-keeps what it saw before; a process that never loaded plugins sends no skills config at all.
-The [proof](../evidence/codex-skill-scope-probes-2026-10-30.md) on Codex 0.164.0 shows:
-
-- Two threads on one App Server see different skills, and a restarted App Server resumes
-  a thread with the same scope.
-- A loaded thread ignores config sent on resume and also sees plugin roots that join the
-  process later, so before each resume that carries skills config cab sends
-  `thread/unsubscribe` for the (idle) thread and then resumes it with the current
-  config. A plugin directory that joins the process during a running turn can therefore
-  reach that turn until its conversation's next turn.
-- The scope is a model-facing list, not a security boundary: a thread given the path of
-  a disabled skill can still read its `SKILL.md`, and skills are instructions to the
-  agent, not cab policy. Scripts run through the shell tool under the existing sandbox.
-- A model-driven shell prints the real `HOME`, skill discovery loads nothing from it, and
-  the login link stays intact.
-
-Codex subagents stay disabled whatever the proof shows: with the feature on in a separate
-process, the recorded run showed the model delegating to a subagent whose outside write
-did not land, but two processes below the App Server were still running 3 s after
-`turn/interrupt`. That is a demonstrated gap in interrupt containment, and one more reason
-the feature stays off.
-
-## Considered options
-
-- Loading the operator's own Claude and Codex configuration. Rejected: it brings
-  every installed hook, MCP server, app and setting into agent turns, including
-  personal integrations such as mail, calendar and home automation, and makes a task's
-  behaviour depend on unrelated interactive setup. Installed plugins take only skill
-  directories from it.
-- Local plugin directories only. Rejected: the operator's plugins are installed in
-  Claude Code and Codex at versioned paths, so each update broke the agent or needed
-  a second checkout to maintain.
-- cab-managed marketplaces, fetched, pinned and updated by cab. Rejected: a second place
-  to install and update the same plugins, with its own fetching, credentials for private
-  repositories and storage, when both tools already install them.
-- Copying installed plugins into a cab store, on import or at assignment start.
-  Rejected: an import is another update step to manage, and a per-assignment copy adds
-  storage and collection to keep a version the operator has already replaced. Global skills
-  instead use the per-turn retained adapter described above.
-- Each harness loading its own tool's install of a plugin. Rejected: the two tools hold
-  different versions of the same plugin, so an agent's skills would differ by harness.
-- Skill directories only, without plugins. Rejected: most of the operator's skills
-  are distributed as plugins, and copying them out would drift from their updates.
-- Service-wide skills. Rejected: agents already carry instructions and execution
-  settings, and different agent roles need different skills.
-- Loading plugin hooks with disclosure. Rejected: plugin hooks run outside the
-  sandbox and could weaken cab's tool policy.
+Legacy profile skill JSON, immutable revisions, selected-plugin evidence, token
+references and completed command receipts remain readable and replayable. They do
+not control execution. New skill-selection and token-reference writes are rejected
+with native setup guidance. The CLI flag and operator editing forms are removed;
+existing setup links explain native login. Historical helpers remain only in test
+fixtures for retained qualification records.
 
 ## Consequences
 
-- Skills that rely on network access, `gh` or pull request publication still fail
-  in the sandbox or conflict with cab-owned publication
-  ([ADR-1016](1016-ensemble-owned-commit-publication.md)); the skills need a cab mode
-  or cab-aware instructions.
-- Plugins are read from the service host: installed plugins need Claude Code or Codex
-  installed there for the service user, with the plugins enabled.
-- An assignment no longer pins plugin content: each turn uses the current install, and
-  the turn digest records which content it ran.
-- Subagents increase token use and the number of concurrent tool calls within one
-  turn; capacity still counts the assignment, not its subagents.
+There is one configuration authority, maintained through each harness's own tools.
+A change in native extensions can change unattended execution, including external
+hook/MCP effects. Runtime process controls and conservative Stop/recovery still
+apply within their qualified limits; they do not establish universal descendant
+containment or external-effect rollback.
+
+The earlier selected-skill/home evidence remains historical under `docs/evidence/`.
+Native start/resume compatibility has passed; integrated lifecycle qualification and
+final-head automated/review gates are required before delivery is called ready.
+The installed Haze prototype is retained until a separately authorised cutover.

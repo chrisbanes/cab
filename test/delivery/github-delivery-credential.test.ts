@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -88,9 +89,11 @@ async function fixture(t: TestContext, credentialRef: string | null) {
     rmSync(root, { recursive: true, force: true });
   });
   const execute = (command: object) =>
-    service
-      .domain()
-      .execute({ actor: "operator", key: randomUUID(), ...command } as never);
+    seedLegacyCommand(service.domain(), {
+      actor: "operator",
+      key: randomUUID(),
+      ...command,
+    } as never);
   await service.start();
   const projectId = randomUUID();
   execute({

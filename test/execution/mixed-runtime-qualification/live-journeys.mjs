@@ -601,10 +601,10 @@ function restoreProbeEnvironment() {
 async function installedPlugin(current, ids, check, plugin) {
   try {
     const { digestPlugin, skillFieldErrors } = await import(
-      "../../../dist/src/standalone/skill-plugins.js"
+      "../../../dist/test/fixtures/legacy-harness/skill-plugins.js"
     );
     const { resolveInstalledPlugin } = await import(
-      "../../../dist/src/standalone/installed-plugins.js"
+      "../../../dist/test/fixtures/legacy-harness/installed-plugins.js"
     );
     const harness = installedTool;
     const skills = {
@@ -786,7 +786,7 @@ async function globalSkill(current, ids, check) {
       .results.some((r) => r.summary === "UNSELECTED_LEAK"),
   };
   const { digestPlugin } = await import(
-    "../../../dist/src/standalone/skill-plugins.js"
+    "../../../dist/test/fixtures/legacy-harness/skill-plugins.js"
   );
   const runtimeDigests = await Promise.all(
     current.observed.skillPlugins.map((plugins) =>
@@ -886,7 +886,7 @@ async function nestedSkill(current, ids, check, plugin) {
     true,
   );
   const { digestPlugin, skillFieldErrors } = await import(
-    "../../../dist/src/standalone/skill-plugins.js"
+    "../../../dist/test/fixtures/legacy-harness/skill-plugins.js"
   );
   const skills = { plugins: [{ path: plugin.dir, skills: [NESTED_SKILL] }] };
   const harness = facet === "codex-nested-skill" ? "codex" : "claude";
@@ -1273,7 +1273,7 @@ async function skill(current, ids, check, plugin) {
     followUpRan = true;
   }
   const { digestPlugin } = await import(
-    "../../../dist/src/standalone/skill-plugins.js"
+    "../../../dist/test/fixtures/legacy-harness/skill-plugins.js"
   );
   const { OperatorApi } = await import(
     "../../../dist/src/standalone/operator-api.js"

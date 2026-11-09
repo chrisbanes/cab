@@ -33,7 +33,7 @@ waits, led by the reason to clear first and a link that fixes it.
    | Project has no lead                 | Open project configuration to choose a lead              |
    | Project lead revoked                | Open project configuration to choose another lead        |
    | Runtime unavailable                 | Open [readiness check](readiness-check.md)               |
-   | Claude token unavailable            | Open [Add Claude](claude-runtime.md)                     |
+   | Native Claude login unavailable            | Open [Add Claude](claude-runtime.md)                     |
    | Lead agent runtime not configured | Open the agent                                         |
    | Held by power supervision           | No Fix; shows the power supervisor's hold reason         |
    | Repository access revoked           | Open the project's GitHub settings; grants nothing       |

@@ -60,8 +60,29 @@ export const fakeModels = [
 export function fakeSdk(
   scripts: Script[],
   log: string[],
-  options: { hangModels?: boolean } = {},
+  options: {
+    hangModels?: boolean;
+    mcpSources?: string[];
+    apiProvider?: string;
+    apiKeySource?: string | null;
+  } = {},
 ) {
+  const metadata = {
+    mcpServerStatus: async () =>
+      (options.mcpSources ?? ["sdk"]).map((source) => ({
+        name: "cab",
+        status: "connected",
+        source,
+      })),
+    accountInfo: async () => ({
+      apiProvider: options.apiProvider ?? "firstParty",
+      subscriptionType: "max",
+      apiKeySource:
+        options.apiKeySource === null
+          ? undefined
+          : (options.apiKeySource ?? "none"),
+    }),
+  };
   const supportedModels = () =>
     options.hangModels
       ? new Promise<never>(() => {})
@@ -84,7 +105,7 @@ export function fakeSdk(
                 : signal?.addEventListener("abort", done),
             );
           })(),
-          { supportedModels },
+          { supportedModels, ...metadata },
         );
       }
       queries.push("turn");
@@ -146,6 +167,9 @@ export function fakeSdk(
                 {
                   hook_event_name: "PreToolUse",
                   tool_name: toolName,
+                  ...(toolName.startsWith("mcp__cab__")
+                    ? { mcp_server: { name: "cab", source: "sdk" } }
+                    : {}),
                   tool_input: toolInput,
                   tool_use_id: toolUseId,
                   ...(agent
@@ -168,6 +192,9 @@ export function fakeSdk(
                 {
                   hook_event_name: event,
                   tool_name: toolName,
+                  ...(toolName.startsWith("mcp__cab__")
+                    ? { mcp_server: { name: "cab", source: "sdk" } }
+                    : {}),
                   tool_input: toolInput,
                   tool_use_id: toolUseId,
                   ...(agent
@@ -215,7 +242,7 @@ export function fakeSdk(
             await exit;
           }
         })(),
-        { supportedModels },
+        { supportedModels, ...metadata },
       );
     },
     createSdkMcpServer: ((options: { tools: FakeTool[] }) => ({

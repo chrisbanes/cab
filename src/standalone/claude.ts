@@ -6,15 +6,7 @@ import {
 } from "./project-cleanup-identities.js";
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  realpath,
-  rm,
-} from "node:fs/promises";
+import { lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type {
   CanUseTool,
@@ -63,14 +55,28 @@ import { normalizePlan } from "./agent-plan.js";
 import { resolveOnPath } from "./executable-path.js";
 import { isWithin } from "./workspace-inspection.js";
 import { maxToolPathChars } from "../operator/tool-limits.js";
+import {
+  PreviousHarnessHomeError,
+  startedUnderPreviousHarnessHome,
+} from "./runtime-retention.js";
 import { claudeToolTarget, workspaceRoots } from "./tool-activity.js";
 
 /** The SDK surface the runtime uses; tests inject a fake. */
+const nativeSubscriptionSchema = z.object({
+  apiProvider: z.literal("firstParty"),
+  subscriptionType: z.string().min(1),
+  apiKeySource: z.enum(["none", "oauth"]).optional(),
+});
+
 export interface ClaudeSdk {
   query(params: {
     prompt: AsyncIterable<SDKUserMessage>;
     options: Options;
-  }): AsyncIterable<unknown> & { supportedModels(): Promise<unknown> };
+  }): AsyncIterable<unknown> & {
+    supportedModels(): Promise<unknown>;
+    mcpServerStatus(): Promise<unknown>;
+    accountInfo(): Promise<unknown>;
+  };
   createSdkMcpServer: typeof createSdkMcpServer;
   tool: typeof tool;
 }
@@ -78,7 +84,6 @@ export interface ClaudeSdk {
 export interface ClaudeRuntimeOptions {
   safety: RuntimeSafetyPort;
   claude: {
-    configDirectory: string;
     turnEnvironment: () => ClaudeTurnEnvironment;
   };
   sdk?: ClaudeSdk;
@@ -122,7 +127,7 @@ const maxSandboxTemporaryBytes = 44;
 const mcpServerName = "cab";
 const mcpToolPrefix = `mcp__${mcpServerName}__`;
 const builtInTools = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"];
-/** Subagents run in the turn, under the same hook and sandbox; `Skill` only when skills are enabled. */
+/** Subagents keep the turn's built-in execution controls. */
 const agentTool = "Agent";
 const skillTool = "Skill";
 /** The agent's own in-turn task list; it feeds only the plan record (ADR-1025). */
@@ -188,6 +193,7 @@ const hookInputSchema = z.object({
   tool_name: z.string().min(1),
   tool_input: z.unknown(),
   tool_use_id: z.string().min(1),
+  mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
   ...subagentFields,
 });
 const postToolUseSchema = z.discriminatedUnion("hook_event_name", [
@@ -254,21 +260,18 @@ export function claudeResultFailure(
   return evidence("unknown", "unknown");
 }
 
-/** The Claude subprocess environment: one token variable, isolated config, scrubbed children. */
+/** Native homes and login; cab credentials and API billing inputs remain excluded. */
 export function claudeTurnEnvironment(
   base: NodeJS.ProcessEnv,
-  token: string,
-  configDirectory: string,
   temporaryBase: string,
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base))
     if (value !== undefined) env[key] = value;
-  // API-key billing is deferred; only the subscription token authenticates.
+  // Only native subscription authentication is authorised.
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
-  env.CLAUDE_CODE_OAUTH_TOKEN = token;
-  env.CLAUDE_CONFIG_DIR = configDirectory;
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
   env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
   // Claude Code 2.1.318 offers TodoWrite, the plan source, only with the task tools off.
   env.CLAUDE_CODE_ENABLE_TASKS = "0";
@@ -498,10 +501,10 @@ export const claudePolicyLimits: readonly string[] = [
   "The subprocess environment scrub is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
-  "Skill plugins come from the agent settings, from local plugin directories or plugins installed in Claude Code or Codex, and contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy.",
+  "Native instructions, skills, plugins, MCP servers and hooks are trusted. They can act outside cab tools; shell restrictions do not confine their effects.",
   "Subagents share the turn's tool policy and sandbox and the same recovery boundary.",
   "cab refuses isolation, model, effort and mode overrides in a subagent call; a named agent definition's own settings, including a plugin's agent definitions, are untested.",
-  "Plugin hooks are switched off through managed settings, which an organisation's managed-settings tier can replace; qualified for a personal login only.",
+  "The service user's HOME and CLAUDE_CONFIG_DIR are preserved. Configuration refresh follows Claude Code's native per-query lifecycle.",
   "Background subagents are untested against Stop and resume; a turn resumed after a crash during a subagent did not complete in two attempts (undiagnosed).",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
   "The sandboxed agent can write the per-task temporary directory; cab checks only its top-level entries before each turn.",
@@ -635,8 +638,7 @@ interface ClaudeTurn {
   roots: readonly string[];
   /** The workspace (lexical and real path), for relative tool paths; `roots[0]` is not it on a read-only turn. */
   workspace: readonly string[];
-  /** The `Skill` tool is allowed only when the bound profile revision enables skills. */
-  skills: boolean;
+  mcpVerified?: boolean;
   release: (released: boolean) => void;
   started: ReturnType<typeof deferred<void>>;
   settled: ReturnType<typeof deferred<TurnOutcome>>;
@@ -736,6 +738,23 @@ export class ClaudeRuntime implements Runtime {
     this.admissionChanged = listener;
   }
 
+  /** Native subscription metadata only; no model prompt or inherited extensions. */
+  async verifyNativeLogin(): Promise<boolean> {
+    if (!this.generation || !this.sdk) return false;
+    const environment = this.options.claude.turnEnvironment();
+    if ("unavailable" in environment) return false;
+    this.settingsStatus(
+      process.cwd(),
+      claudeTurnEnvironment(
+        environment.env,
+        claudeTemporaryBase(process.cwd()),
+      ),
+      true,
+    );
+    await this.settingsRun;
+    return this.supported !== undefined && this.settingsFailedAt === undefined;
+  }
+
   async preflightTurn(input: {
     workspace: string;
     settings?: RuntimeTurnSettings;
@@ -748,12 +767,7 @@ export class ClaudeRuntime implements Runtime {
     const base = claudeTemporaryBase(input.workspace);
     const temporary = await ensureTemporaryBase(base);
     if (temporary) return unavailable(temporary);
-    const env = claudeTurnEnvironment(
-      environment.env,
-      environment.token,
-      this.options.claude.configDirectory,
-      base,
-    );
+    const env = claudeTurnEnvironment(environment.env, base);
     // Probes run in the background so the serial scheduler never awaits them.
     const sandbox = this.sandboxStatus(input.workspace, env);
     if (sandbox) return unavailable(sandbox);
@@ -793,7 +807,8 @@ export class ClaudeRuntime implements Runtime {
           passed,
           at: Date.now(),
         });
-        this.notifyAdmission(passed ? 0 : this.retryMs);
+        this.notifyAdmission(0);
+        if (!passed) this.notifyAdmission(this.retryMs);
       });
     return "checking the sandbox";
   }
@@ -802,16 +817,19 @@ export class ClaudeRuntime implements Runtime {
   private settingsStatus(
     workspace: string,
     env: Record<string, string>,
+    fresh = false,
   ): string | undefined {
-    if (this.supported) return undefined;
+    if (this.supported && !fresh) return undefined;
     if (this.settingsReading) return "reading supported models";
     if (
+      !fresh &&
       this.settingsFailedAt !== undefined &&
       Date.now() - this.settingsFailedAt < this.retryMs
     )
       return "supported models could not be read";
     const generation = this.generation;
     this.settingsReading = true;
+    this.settingsFailedAt = undefined;
     this.settingsRun = this.readSettings(env, workspace).then(
       (supported) => {
         this.settingsReading = false;
@@ -823,6 +841,7 @@ export class ClaudeRuntime implements Runtime {
         this.settingsReading = false;
         if (this.generation !== generation) return;
         this.settingsFailedAt = Date.now();
+        this.notifyAdmission(0);
         this.notifyAdmission(this.retryMs);
       },
     );
@@ -873,6 +892,8 @@ export class ClaudeRuntime implements Runtime {
         pathToClaudeCodeExecutable: executable,
         settingSources: [],
         strictMcpConfig: true,
+        managedSettings: { disableAllHooks: true },
+        persistSession: false,
         permissionMode: "dontAsk",
         tools: [],
         abortController: abort,
@@ -895,7 +916,10 @@ export class ClaudeRuntime implements Runtime {
     try {
       let timer: NodeJS.Timeout | undefined;
       const models = await Promise.race([
-        query.supportedModels(),
+        (async () => {
+          nativeSubscriptionSchema.parse(await query.accountInfo());
+          return query.supportedModels();
+        })(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error("timed out")),
@@ -937,11 +961,6 @@ export class ClaudeRuntime implements Runtime {
       throw new RuntimeNotEnabledError(
         "Claude executable is not on the service PATH",
       );
-    await mkdir(this.options.claude.configDirectory, {
-      recursive: true,
-      mode: 0o700,
-    });
-    await chmod(this.options.claude.configDirectory, 0o700);
     this.sdk =
       this.options.sdk ??
       ((await import("@anthropic-ai/claude-agent-sdk")) as ClaudeSdk);
@@ -990,11 +1009,17 @@ export class ClaudeRuntime implements Runtime {
     return threadId;
   }
 
+  startedUnderPreviousHome(threadId: string): boolean {
+    return startedUnderPreviousHarnessHome(this.options.safety, threadId);
+  }
+
   async resumeThread(
     threadId: string,
     tools: readonly RuntimeToolDefinition[] = [],
   ): Promise<void> {
     if (!this.generation) throw new Error("Runtime stopped");
+    if (this.startedUnderPreviousHome(threadId))
+      throw new PreviousHarnessHomeError();
     this.threadTools.set(threadId, tools);
   }
 
@@ -1028,21 +1053,7 @@ export class ClaudeRuntime implements Runtime {
         : [...writable, ...(policy?.gitWritableRoots ?? [])];
     const temporary = await ensureTemporaryBase(base);
     if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
-    const plugins = settings?.skills?.plugins ?? [];
-    // Qualified by the plugin's manifest name when known, so two plugins' same-named skills differ.
-    const enabledSkills = [
-      ...new Set(
-        plugins.flatMap((p) =>
-          p.skills.map((skill) => (p.name ? `${p.name}:${skill}` : skill)),
-        ),
-      ),
-    ];
-    const turnTools = [
-      ...builtInTools,
-      agentTool,
-      todoTool,
-      ...(enabledSkills.length > 0 ? [skillTool] : []),
-    ];
+    const turnTools = [...builtInTools, agentTool, todoTool, skillTool];
     const fresh = this.freshThreads.delete(threadId);
     const tools = this.threadTools.get(threadId) ?? [];
     this.threadTools.delete(threadId);
@@ -1064,7 +1075,6 @@ export class ClaudeRuntime implements Runtime {
       pendingCount: 0,
       roots: writable,
       workspace: workspaceRoots(workspace),
-      skills: enabledSkills.length > 0,
       release: (released) => {
         turn.released = released;
         release(released);
@@ -1096,32 +1106,13 @@ export class ClaudeRuntime implements Runtime {
     const options: Options = {
       cwd: workspace,
       pathToClaudeCodeExecutable: executable,
-      env: claudeTurnEnvironment(
-        environment.env,
-        environment.token,
-        this.options.claude.configDirectory,
-        base,
-      ),
+      env: claudeTurnEnvironment(environment.env, base),
       ...(fresh ? { sessionId: threadId } : { resume: threadId }),
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
-      settingSources: [],
-      strictMcpConfig: true,
-      // Plugin hooks never run; cab's own in-process PreToolUse callback still does.
-      managedSettings: { disableAllHooks: true },
-      ...(plugins.length > 0
-        ? {
-            plugins: plugins.map((p) => ({
-              type: "local" as const,
-              path: p.path,
-              skipMcpDiscovery: true,
-            })),
-            skills: enabledSkills,
-          }
-        : {}),
       permissionMode: "dontAsk",
       tools: [...turnTools],
-      allowedTools: [...turnTools, `${mcpToolPrefix}*`],
+      allowedTools: [...turnTools, "mcp__cab__*"],
       disallowedTools: [...disallowedTools],
       sandbox: {
         enabled: true,
@@ -1167,7 +1158,7 @@ export class ClaudeRuntime implements Runtime {
       // Diagnostics may contain sensitive data; drain without retaining them.
       stderr: () => {},
     };
-    let stream: AsyncIterable<unknown>;
+    let stream: ReturnType<ClaudeSdk["query"]>;
     try {
       stream = sdk.query({ prompt: gatedPrompt(), options });
     } catch {
@@ -1175,13 +1166,65 @@ export class ClaudeRuntime implements Runtime {
       throw new Error("Claude turn could not start");
     }
     this.retain(turn);
+    let admissionRefused = false;
+    const refuseAdmission = () => {
+      admissionRefused = true;
+      turn.release(false);
+      turn.started.reject(
+        new Error(
+          "Native Claude authentication or cab coordination is unavailable",
+        ),
+      );
+      turn.abort.abort();
+    };
+    const admissionTimer = setTimeout(
+      refuseAdmission,
+      settingsReadTimeoutMs,
+    ).unref();
+    void (async () => {
+      try {
+        nativeSubscriptionSchema.parse(await stream.accountInfo());
+        const servers = z
+          .array(
+            z.object({
+              name: z.string(),
+              status: z.string(),
+              source: z.string().optional(),
+            }),
+          )
+          .parse(await stream.mcpServerStatus());
+        const cabServers = servers.filter(
+          (server) => server.name === mcpServerName,
+        );
+        if (
+          cabServers.length !== 1 ||
+          cabServers[0]?.source !== "sdk" ||
+          cabServers[0].status !== "connected"
+        ) {
+          refuseAdmission();
+          return;
+        }
+        if (turn.abort.signal.aborted) return;
+        turn.mcpVerified = true;
+        if (turn.identity) this.releaseRecordedProcess(turn);
+      } catch {
+        refuseAdmission();
+      } finally {
+        clearTimeout(admissionTimer);
+      }
+    })();
     void this.consume(turn, stream, generation);
     try {
       await turn.started.promise;
     } catch {
+      clearTimeout(admissionTimer);
       turn.abort.abort();
       await turn.settled.promise.catch(() => {});
-      throw new Error("Claude turn could not start");
+      throw new Error(
+        admissionRefused
+          ? "Claude turn could not start: native subscription login or the reserved cab MCP endpoint is unavailable"
+          : "Claude turn could not start",
+      );
     }
     return turn.turnId;
   }
@@ -1342,6 +1385,11 @@ export class ClaudeRuntime implements Runtime {
       return;
     }
     turn.identity = identity;
+    if (turn.mcpVerified) this.releaseRecordedProcess(turn);
+  }
+
+  private releaseRecordedProcess(turn: ClaudeTurn): void {
+    if (turn.released || turn.done || turn.abort.signal.aborted) return;
     turn.release(true);
     turn.started.resolve();
   }
@@ -1485,8 +1533,8 @@ export class ClaudeRuntime implements Runtime {
       !builtInTools.includes(name) &&
       name !== agentTool &&
       name !== todoTool &&
-      !(name === skillTool && turn.skills) &&
-      !name.startsWith(mcpToolPrefix)
+      name !== skillTool &&
+      !name.startsWith("mcp__")
     )
       return refuse(`${name} is outside cab's tool policy`);
     // A subagent runs in the turn's workspace, model and sandbox: no worktree or remote
@@ -1516,6 +1564,11 @@ export class ClaudeRuntime implements Runtime {
     )
       return refuse("Commands never run outside the sandbox");
     if (name.startsWith(mcpToolPrefix)) {
+      if (
+        input.data.mcp_server?.source !== "sdk" ||
+        input.data.mcp_server.name !== mcpServerName
+      )
+        return refuse("cab coordination endpoint provenance is unavailable");
       if (turn.pendingCount >= maxPendingToolUses)
         return deny("Too many pending cab tool calls");
       const key = inputDigest(name.slice(mcpToolPrefix.length), toolInput);
@@ -1523,6 +1576,14 @@ export class ClaudeRuntime implements Runtime {
       queue.push(input.data.tool_use_id);
       turn.pendingToolUses.set(key, queue);
       turn.pendingCount++;
+    } else if (name.startsWith("mcp__")) {
+      // Native deny/ask rules still apply after this hook's approval.
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse" as const,
+          permissionDecision: "allow" as const,
+        },
+      };
     }
     return {};
   }

@@ -85,7 +85,7 @@ export const waitLabels: Record<WaitCode, string> = {
   "project-lead-unconfigured": "Project has no lead",
   "project-lead-revoked": "Project lead revoked",
   "runtime-unavailable": "Runtime unavailable",
-  "claude-token-unavailable": "Claude token unavailable",
+  "claude-token-unavailable": "Claude native login unavailable",
   "profile-runtime-not-configured": "Lead agent runtime not configured",
   "power-held": "Held by power supervision",
   "repository-access-revoked": "Repository access revoked",

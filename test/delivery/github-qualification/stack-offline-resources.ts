@@ -17,7 +17,7 @@ import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { z } from "zod";
 import { materialDigest } from "../../../src/core/delivery.js";
-import { codexHomeFor } from "../../../src/standalone/codex-home.js";
+import { codexHomeFor } from "../../fixtures/legacy-harness/codex-home.js";
 import { coordinationTools } from "../../../src/standalone/coordination-tools.js";
 import { STANDALONE_MARKER_NAME } from "../../../src/standalone/data-directory.js";
 import {

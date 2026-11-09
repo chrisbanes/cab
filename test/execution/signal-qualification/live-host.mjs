@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../../../dist/test/fixtures/legacy-harness-configuration.js";
 // Owned service child for live-signals only. Importing this module never starts it.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -49,6 +50,9 @@ export async function host(config, offline = false) {
   const token = tokenName ? process.env[tokenName] : undefined;
   if (tokenName) delete process.env[tokenName];
   let tokenRestored = false;
+  // Offline session persistence uses an owned native config directory, never the user's home.
+  if (offline && harness === "claude")
+    process.env.CLAUDE_CONFIG_DIR = join(root, "native-claude");
   const restoreToken = (stage) => {
     if (tokenRestored || token === undefined) return;
     process.env[tokenName] = token;
@@ -164,9 +168,7 @@ export async function host(config, offline = false) {
       // when the reference (and so its exclusion) is already configured: "empty" means a
       // configured reference whose variable is absent; "not-configured" waits for start.
       if (harness === "claude" && token !== undefined) {
-        const probe = context.claude.turnEnvironment();
-        if ("unavailable" in probe && probe.code === "empty")
-          restoreToken("factory-reference-configured");
+        if (generation > 0) restoreToken("factory-reference-configured");
       }
       runtime =
         harness === "codex"
@@ -324,7 +326,11 @@ export async function host(config, offline = false) {
       })
     : null;
   const command = (body) =>
-    service.domain().execute({ key: randomUUID(), actor: "operator", ...body });
+    seedLegacyCommand(service.domain(), {
+      key: randomUUID(),
+      actor: "operator",
+      ...body,
+    });
   const prompt = SIGNAL_BRIEF;
   const idsFile = join(root, "ids.json");
   // Uncertain journeys continue an existing conversation: only a completed task lead can be

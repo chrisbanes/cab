@@ -20,7 +20,7 @@ import {
   createTestEvidenceDirectory,
   writeTestEvidence,
 } from "../dist/test/fixtures/browser-diagnostics.js";
-import { operatorAuthFile } from "../dist/src/standalone/codex-home.js";
+import { operatorAuthFile } from "../dist/test/fixtures/legacy-harness/codex-home.js";
 
 function diagnosticStream() {
   const result = { lines: [], omitted: 0, truncated: 0 };

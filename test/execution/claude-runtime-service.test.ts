@@ -1,13 +1,10 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
-  existsSync,
-  readFileSync,
-  mkdirSync,
   mkdtempSync,
   realpathSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -32,12 +29,6 @@ import {
   sessionOf,
 } from "../fixtures/claude-sdk.js";
 import { stopWithoutDrain } from "../fixtures/service-internals.js";
-import {
-  writeNestedSkillPlugin,
-  writeSkillPlugin,
-} from "../fixtures/skill-plugin.js";
-import { digestPlugin } from "../../src/standalone/skill-plugins.js";
-import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { failureNotice } from "../../web/src/execution-runtime.js";
@@ -105,7 +96,7 @@ function harnessFixture(t: { after: (fn: () => Promise<void>) => void }) {
     rmSync(join(dataDir, ".."), { recursive: true, force: true });
   });
   const configure = (credentialRef: string | null) =>
-    service.domain().execute({
+    seedLegacyCommand(service.domain(), {
       type: "claude-token.configure",
       actor: "operator",
       key: randomUUID(),
@@ -119,7 +110,7 @@ function harnessFixture(t: { after: (fn: () => Promise<void>) => void }) {
   return { service, dataDir, contexts, configure, claude };
 }
 
-test("the Claude token reaches only the Claude turn environment, never Codex or alias spawn environments", async (t) => {
+test("historical token references still scrub cab credentials while native startup preserves homes", async (t) => {
   withEnvironment(t, {
     [NAME]: TOKEN,
     [ALIAS]: TOKEN,
@@ -164,52 +155,11 @@ test("the Claude token reaches only the Claude turn environment, never Codex or 
   assert.equal(git[ALIAS], undefined);
   const turn = f.claude().turnEnvironment();
   assert.ok("env" in turn);
-  assert.equal(turn.token, TOKEN);
+  assert.equal("token" in turn, false);
   assert.equal(JSON.stringify(turn.env).includes(TOKEN), false);
   assert.equal(JSON.stringify(turn.env).includes(DELIVERY_VALUE), false);
   assert.equal(turn.env.CAB_MANAGED_ASSIGNMENT, "1");
-  assert.equal(f.claude().configDirectory, join(f.dataDir, "claude", "config"));
-});
-
-test("a Claude token reference inherited by the running runtime waits until restart", async (t) => {
-  withEnvironment(t, { [NAME]: TOKEN, [ALIAS]: undefined });
-  const f = harnessFixture(t);
-  await f.service.start();
-  f.configure(`env:${NAME}`);
-  const held = f.claude().turnEnvironment();
-  assert.ok("unavailable" in held);
-  assert.match(
-    held.unavailable,
-    /^Claude runtime unavailable: .*restart the service/,
-  );
-  assert.equal(held.unavailable.includes(TOKEN), false);
-  await f.service.stop();
-  await f.service.start();
-  const turn = f.claude().turnEnvironment();
-  assert.ok("token" in turn);
-  assert.equal(turn.token, TOKEN);
-});
-
-test("a missing or empty Claude token makes the turn environment unavailable without revealing it", async (t) => {
-  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
-  const f = harnessFixture(t);
-  await f.service.start();
-  const missing = f.claude().turnEnvironment();
-  assert.deepEqual(missing, {
-    unavailable:
-      "Claude runtime unavailable: subscription token is not configured",
-    code: "not-configured",
-  });
-  f.configure(`env:${NAME}`);
-  await f.service.stop();
-  await f.service.start();
-  const empty = f.claude().turnEnvironment();
-  assert.deepEqual(empty, {
-    unavailable:
-      "Claude runtime unavailable: subscription token is unavailable",
-    code: "empty",
-  });
-  assert.equal(JSON.stringify(empty).includes(NAME), false);
+  assert.ok(!("configDirectory" in f.claude()));
 });
 
 const FILE_TOKEN = "claude-file-token-canary-3381";
@@ -224,7 +174,7 @@ function tokenFile(t: { after: (fn: () => void) => void }, value = FILE_TOKEN) {
   return path;
 }
 
-test("a file-sourced Claude token reaches only the Claude turn, never Codex, helper or alias environments", async (t) => {
+test("historical file-token values remain excluded from every runtime and helper environment", async (t) => {
   withEnvironment(t, { [NAME]: undefined, [ALIAS]: FILE_TOKEN });
   const path = tokenFile(t);
   const f = harnessFixture(t);
@@ -241,7 +191,7 @@ test("a file-sourced Claude token reaches only the Claude turn, never Codex, hel
   assert.equal(git[ALIAS], undefined);
   const turn = f.claude().turnEnvironment();
   assert.ok("env" in turn);
-  assert.equal(turn.token, FILE_TOKEN);
+  assert.equal("token" in turn, false);
   assert.equal(JSON.stringify(turn.env).includes(FILE_TOKEN), false);
   assert.equal(turn.env.CAB_MANAGED_ASSIGNMENT, "1");
 });
@@ -260,64 +210,6 @@ test("a rotated token file keeps the previous value in the failure exclusions", 
   const exclusions = f.service.failureExclusions();
   assert.ok(exclusions?.includes("rotated-claude-token-1185"));
   assert.ok(exclusions?.includes(FILE_TOKEN));
-});
-
-test("a file token also inherited by the running runtimes waits until restart", async (t) => {
-  withEnvironment(t, { [NAME]: undefined, [ALIAS]: FILE_TOKEN });
-  const path = tokenFile(t);
-  const f = harnessFixture(t);
-  await f.service.start();
-  f.configure(`file:${path}`);
-  const held = f.claude().turnEnvironment();
-  assert.ok("unavailable" in held);
-  assert.equal(held.code, "restart-required");
-  assert.match(held.unavailable, /restart the service$/);
-  assert.equal(held.unavailable.includes(FILE_TOKEN), false);
-  await f.service.stop();
-  await f.service.start();
-  const turn = f.claude().turnEnvironment();
-  assert.ok("token" in turn);
-  assert.equal(turn.token, FILE_TOKEN);
-});
-
-test("an unsafe token file fails closed with a reason naming neither path nor value", async (t) => {
-  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
-  const path = tokenFile(t);
-  const f = harnessFixture(t);
-  await f.service.start();
-  f.configure(`file:${path}`);
-  chmodSync(path, 0o644);
-  const unsafe = f.claude().turnEnvironment();
-  assert.deepEqual(unsafe, {
-    unavailable:
-      "Claude runtime unavailable: subscription token file permits group or other access",
-    code: "empty",
-  });
-  assert.equal(f.service.claudeTokenStatus().state, "missing-value");
-  rmSync(path);
-  const missing = f.claude().turnEnvironment();
-  assert.ok("unavailable" in missing);
-  assert.equal(
-    missing.unavailable,
-    "Claude runtime unavailable: subscription token file is missing",
-  );
-});
-
-test("a replaced token file applies to the next turn without a restart", async (t) => {
-  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
-  const path = tokenFile(t);
-  const f = harnessFixture(t);
-  await f.service.start();
-  f.configure(`file:${path}`);
-  const first = f.claude().turnEnvironment();
-  assert.ok("token" in first);
-  assert.equal(first.token, FILE_TOKEN);
-  const next = `${path}.next`;
-  writeFileSync(next, "claude-file-token-rotated-5120\n", { mode: 0o600 });
-  renameSync(next, path);
-  const rotated = f.claude().turnEnvironment();
-  assert.ok("token" in rotated);
-  assert.equal(rotated.token, "claude-file-token-rotated-5120");
 });
 
 const processIdentity = {
@@ -405,9 +297,11 @@ test("a Claude preflight reason keeps work queued without admission, then the ne
     rmSync(root, { recursive: true, force: true });
   });
   const execute = (command: Record<string, unknown>) =>
-    service
-      .domain()
-      .execute({ key: randomUUID(), actor: "operator", ...command } as never);
+    seedLegacyCommand(service.domain(), {
+      key: randomUUID(),
+      actor: "operator",
+      ...command,
+    } as never);
   const db = () =>
     (service as unknown as { db: import("node:sqlite").DatabaseSync }).db;
   await service.start();
@@ -555,8 +449,6 @@ interface ClaudeHarnessControls {
   hangIdentity?: boolean;
   /** The `claude` the runtime finds; `null` is none on the PATH. Defaults to a fixture path. */
   executable?: string | null;
-  /** How long work waiting on a skill plugin waits before it is re-checked. */
-  skillPluginRetryMs?: number;
 }
 
 /** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
@@ -624,15 +516,14 @@ function claudeHarness(
       routingClient: null,
       terminationVerifier: verifier,
       supervisor: { observationMs: 3000 },
-      ...(controls.skillPluginRetryMs === undefined
-        ? {}
-        : { retry: { skillPluginMs: controls.skillPluginRetryMs } }),
     },
   );
   const execute = (command: Record<string, unknown>) =>
-    service
-      .domain()
-      .execute({ key: randomUUID(), actor: "operator", ...command } as never);
+    seedLegacyCommand(service.domain(), {
+      key: randomUUID(),
+      actor: "operator",
+      ...command,
+    } as never);
   const describe = () => ({
     intents: service.list().map((i) => [i.workId, i.state, i.reason]),
     requests: service.turnRequests().map((r) => [r.workId, r.state, r.reason]),
@@ -766,7 +657,7 @@ const releaseTemporaryBase = (workspace: string | undefined) => {
     rmSync(claudeTemporaryBase(workspace), { recursive: true, force: true });
 };
 
-test("a Claude assignment turn completes, its coordination call carries the hook ID, and only Claude sees the token", async (t) => {
+test("a native Claude assignment completes with its bound coordination callback", async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
@@ -796,268 +687,37 @@ test("a Claude assignment turn completes, its coordination call carries the hook
   assert.equal(receipts.length, 1);
   const env = run.sessions[0]?.options.env;
   assert.equal(env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
-  assert.equal(env?.CLAUDE_CODE_OAUTH_TOKEN, T6_TOKEN);
+  assert.equal(env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
   const codexEnvironment = run.codexContexts.at(-1)?.spawnEnvironment();
   assert.ok(codexEnvironment);
   assert.equal(JSON.stringify(codexEnvironment).includes(T6_TOKEN), false);
 });
 
-test("a Claude turn loads its profile's skill plugins and records their digests with the turn", async (t) => {
+test("native execution ignores unavailable historical plugin selections and records no new selected-plugin evidence", async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
       yield result(sessionOf(session));
     },
   ]);
-  // Nested skills listed in the manifest are named as the CLI names them: plugin and frontmatter name.
-  const plugin = writeNestedSkillPlugin(
-    join(run.root, "plugin"),
-    { engineering: ["review"], productivity: ["plan"] },
-    { name: "unit-plugin" },
-  );
   const { projectId, worker } = run.setup();
   run.execute({
     type: "profile.configure",
     profileId: worker,
     expectedVersion: 1,
-    skills: { plugins: [{ path: plugin, skills: ["review", "plan"] }] },
+    skills: { plugins: [{ path: "/missing/legacy-plugin", skills: ["old"] }] },
   });
   const { workId } = await run.claudeTask(projectId, worker);
   await waitUntil(
     () => run.intent(workId)?.state === "completed",
     run.describe,
   );
-  {
-    const base = run.intent(workId)?.workspace;
-    t.after(() => releaseTemporaryBase(base));
-  }
-  const options = run.sessions[0]?.options;
-  assert.deepEqual(options?.plugins, [
-    { type: "local", path: plugin, skipMcpDiscovery: true },
-  ]);
-  assert.deepEqual(options?.skills, ["unit-plugin:review", "unit-plugin:plan"]);
-  const digest = await digestPlugin(plugin, ["review", "plan"]);
-  assert.deepEqual(
-    (await new OperatorApi(run.service).readExecution(workId)).data
-      .skillPlugins,
-    [{ name: "unit-plugin", skills: ["review", "plan"], digest }],
-  );
-  // The record carries no path.
-  assert.equal(
-    JSON.stringify(run.service.turnSkillPlugins(workId)).includes(plugin),
-    false,
-  );
-});
-
-test("a missing skill plugin keeps the work waiting with a reason that names no path, then it runs", async (t) => {
-  const run = await claudeServiceRun(t, [
-    async function* (session) {
-      yield init(sessionOf(session));
-      yield result(sessionOf(session));
-    },
-  ]);
-  const plugin = join(run.root, "late-plugin");
-  const { projectId, worker } = run.setup();
-  run.execute({
-    type: "profile.configure",
-    profileId: worker,
-    expectedVersion: 1,
-    skills: { plugins: [{ path: plugin, skills: ["review"] }] },
+  assert.equal(run.sessions[0]?.options.plugins, undefined);
+  assert.equal(run.sessions[0]?.options.skills, undefined);
+  assert.deepEqual(run.service.turnSkillPlugins(workId), []);
+  assert.deepEqual(run.service.domain().profileSkills(worker), {
+    plugins: [{ path: "/missing/legacy-plugin", skills: ["old"] }],
   });
-  const { workId } = await run.claudeTask(projectId, worker);
-  const request = () =>
-    run.service.turnRequests().find((r) => r.workId === workId);
-  await waitUntil(
-    () => /Skill plugin 1 is missing/.test(request()?.reason ?? ""),
-    run.describe,
-  );
-  assert.equal(request()?.state, "queued");
-  assert.equal(`${request()?.reason}`.includes(plugin), false);
-  assert.notEqual(run.intent(workId)?.state, "held");
-  assert.equal(run.queries.includes("turn"), false);
-  writeSkillPlugin(plugin, ["review"]);
-  await run.wake();
-  await waitUntil(
-    () => run.intent(workId)?.state === "completed",
-    run.describe,
-  );
-  const base = run.intent(workId)?.workspace;
-  t.after(() => releaseTemporaryBase(base));
-});
-
-test("a Claude turn whose profile enables a Codex-only plugin waits with a reason naming the plugin, then runs once it has a Claude manifest", async (t) => {
-  const run = await claudeServiceRun(t, [
-    async function* (session) {
-      yield init(sessionOf(session));
-      yield result(sessionOf(session));
-    },
-  ]);
-  const plugin = writeNestedSkillPlugin(
-    join(run.root, "codex-plugin"),
-    { engineering: ["review"] },
-    { name: "codex-only", claude: false },
-  );
-  const { projectId, worker } = run.setup();
-  // Recorded directly: the operator API refuses this profile change.
-  run.execute({
-    type: "profile.configure",
-    profileId: worker,
-    expectedVersion: 1,
-    skills: { plugins: [{ path: plugin, skills: ["review"] }] },
-  });
-  const { workId } = await run.claudeTask(projectId, worker);
-  const request = () =>
-    run.service.turnRequests().find((r) => r.workId === workId);
-  await waitUntil(
-    () =>
-      /Skill plugin codex-only has no Claude plugin manifest/.test(
-        request()?.reason ?? "",
-      ),
-    run.describe,
-  );
-  assert.equal(`${request()?.reason}`.includes(run.root), false);
-  assert.equal(run.queries.includes("turn"), false);
-  writeNestedSkillPlugin(
-    plugin,
-    { engineering: ["review"] },
-    { name: "codex-only" },
-  );
-  await run.wake();
-  await waitUntil(
-    () => run.intent(workId)?.state === "completed",
-    run.describe,
-  );
-  const base = run.intent(workId)?.workspace;
-  t.after(() => releaseTemporaryBase(base));
-});
-
-/** A Claude-manifest plugin with one skill that also declares a hook and an MCP server. */
-function writeHookedPlugin(directory: string, name: string, body = "v1") {
-  writeSkillPlugin(directory, ["review"], name);
-  writeFileSync(
-    join(directory, "skills", "review", "SKILL.md"),
-    `---\nname: review\n---\n${body}\n`,
-  );
-  mkdirSync(join(directory, "hooks"), { recursive: true });
-  writeFileSync(
-    join(directory, "hooks", "hooks.json"),
-    JSON.stringify({
-      hooks: {
-        SessionStart: [
-          { hooks: [{ type: "command", command: "touch /tmp/never" }] },
-        ],
-      },
-    }),
-  );
-  writeFileSync(
-    join(directory, ".mcp.json"),
-    JSON.stringify({ mcpServers: { probe: { command: "/bin/false" } } }),
-  );
-}
-
-test("a Claude turn loads a plugin installed in Claude Code from its install, without its hooks or MCP servers, and a disabled one waits until it is enabled again", async (t) => {
-  const run = await claudeServiceRun(
-    t,
-    [1, 2, 3, 4].map(
-      () =>
-        async function* (session: Parameters<Script>[0]) {
-          yield init(sessionOf(session));
-          yield result(sessionOf(session));
-        },
-    ),
-    { selfTest: true, verified: true, skillPluginRetryMs: 50 },
-  );
-  const homes = installedPluginHomes(join(run.root, "operator"));
-  withEnvironment(t, { CLAUDE_CONFIG_DIR: homes.claudeHome });
-  const install = homes.installClaude("demo@m", {
-    write: (dir) => writeHookedPlugin(dir, "demo"),
-  });
-  const { projectId, worker } = run.setup();
-  run.execute({
-    type: "profile.configure",
-    profileId: worker,
-    expectedVersion: 1,
-    skills: { plugins: [{ plugin: "claude:demo@m", skills: ["review"] }] },
-  });
-  const first = await run.claudeTask(projectId, worker);
-  await waitUntil(
-    () => run.intent(first.workId)?.state === "completed",
-    run.describe,
-  );
-  {
-    const base = run.intent(first.workId)?.workspace;
-    t.after(() => releaseTemporaryBase(base));
-  }
-  const options = run.sessions[0]?.options;
-  assert.deepEqual(options?.plugins, [
-    { type: "local", path: install, skipMcpDiscovery: true },
-  ]);
-  assert.deepEqual(options?.skills, ["demo:review"]);
-  // The plugin's hook and MCP server are never handed to the CLI.
-  assert.deepEqual(options?.managedSettings, { disableAllHooks: true });
-  assert.equal(options?.strictMcpConfig, true);
-  assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["cab"]);
-  assert.deepEqual(options?.settingSources, []);
-  const firstDigest = await digestPlugin(install, ["review"]);
-  assert.deepEqual(run.service.turnSkillPlugins(first.workId), [
-    { name: "demo", skills: ["review"], digest: firstDigest },
-  ]);
-
-  // Every earlier turn (the first task's repair included) has settled, so no wake but the
-  // timed re-check is left to run the waiting work.
-  await waitUntil(
-    () =>
-      run.service.turnRequests().every((r) => r.state === "completed") &&
-      run.service.list().every((i) => i.state === "completed"),
-    run.describe,
-  );
-  // Disabled in Claude Code: the next turn waits, naming the plugin and no path.
-  homes.setClaudeEnabled("demo@m", false);
-  // An update while disabled: the next turn loads the new install.
-  const updated = homes.installClaude("demo@m", {
-    version: "1.1.0",
-    enabled: false,
-    write: (dir) => writeHookedPlugin(dir, "demo", "v2"),
-  });
-  const second = await run.claudeTask(projectId, worker);
-  const request = () =>
-    run.service.turnRequests().find((r) => r.workId === second.workId);
-  await waitUntil(
-    () =>
-      request()?.reason ===
-      "Skill plugin claude:demo@m is disabled in Claude Code",
-    run.describe,
-  );
-  assert.equal(request()?.state, "queued");
-  assert.notEqual(run.intent(second.workId)?.state, "held");
-  const sessionsBefore = run.sessions.length;
-  // Enabling it again is not a cab event: the timed re-check runs the work.
-  homes.setClaudeEnabled("demo@m", true);
-  await waitUntil(
-    () => run.intent(second.workId)?.state === "completed",
-    run.describe,
-  );
-  {
-    const base = run.intent(second.workId)?.workspace;
-    t.after(() => releaseTemporaryBase(base));
-  }
-  // The first task's repair turn may also have run since; one session loaded the update.
-  assert.ok(
-    run.sessions
-      .slice(sessionsBefore)
-      .some((session) => session.options.plugins?.[0]?.path === updated),
-  );
-  const secondDigest = await digestPlugin(updated, ["review"]);
-  assert.notEqual(secondDigest, firstDigest);
-  assert.deepEqual(run.service.turnSkillPlugins(second.workId), [
-    { name: "demo", skills: ["review"], digest: secondDigest },
-  ]);
-  assert.equal(
-    JSON.stringify(run.service.turnRequests().map((r) => r.reason)).includes(
-      run.root,
-    ),
-    false,
-  );
 });
 
 test("a Claude turn records its commands as runtime items with exit status and redacted output", async (t) => {
@@ -1124,7 +784,7 @@ test("a Claude turn records its commands as runtime items with exit status and r
   assert.equal(JSON.stringify(items).includes(T6_TOKEN), false);
 });
 
-test("an installed service runs a Claude turn from a token file with no token in its environment", async (t) => {
+test("native authentication ignores a retained historical token file", async (t) => {
   const path = tokenFile(t);
   const run = await claudeServiceRun(
     t,
@@ -1150,7 +810,7 @@ test("an installed service runs a Claude turn from a token file with no token in
     t.after(() => releaseTemporaryBase(base));
   }
   const env = run.sessions[0]?.options.env;
-  assert.equal(env?.CLAUDE_CODE_OAUTH_TOKEN, FILE_TOKEN);
+  assert.equal(env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
   assert.equal(env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
   assert.equal(
     Object.entries(env ?? {}).some(
@@ -1164,7 +824,7 @@ test("an installed service runs a Claude turn from a token file with no token in
   assert.equal(JSON.stringify(codexEnvironment).includes(FILE_TOKEN), false);
 });
 
-test("a missing token or failed sandbox self-test keeps Claude work waiting without holds while Codex proceeds", async (t) => {
+test("a failed sandbox self-test keeps Claude work waiting without holds while Codex proceeds", async (t) => {
   const controls = { selfTest: false, verified: true };
   const run = await claudeServiceRun(
     t,
@@ -1197,10 +857,9 @@ test("a missing token or failed sandbox self-test keeps Claude work waiting with
       [],
     );
   };
-  const missing =
-    "Claude runtime unavailable: subscription token is unavailable";
-  await waitUntil(() => request()?.reason === missing, run.describe);
-  assertWaiting(missing);
+  const sandbox = "Claude runtime unavailable: sandbox self-test failed";
+  await waitUntil(() => request()?.reason === sandbox, run.describe);
+  assertWaiting(sandbox);
   // Codex work in the same service is not blocked.
   const codexTask = randomUUID();
   run.execute({
@@ -1214,11 +873,6 @@ test("a missing token or failed sandbox self-test keeps Claude work waiting with
   await run.service.provisionTask(codexTask);
   await waitUntil(() => run.codex.startTurnArgs.length > 0, run.describe);
 
-  process.env[T6_NAME] = T6_TOKEN;
-  await run.wake();
-  const sandbox = "Claude runtime unavailable: sandbox self-test failed";
-  await waitUntil(() => request()?.reason === sandbox, run.describe);
-  assertWaiting(sandbox);
   assert.deepEqual(run.queries, []);
 
   controls.selfTest = true;
@@ -1278,7 +932,7 @@ test("an invalid Claude token fails the turn visibly as unauthorized and is not 
       reasonCode: "unauthorized",
     });
     const notice = failureNotice(a);
-    assert.match(notice?.message ?? "", /Claude rejected the configured token/);
+    assert.match(notice?.message ?? "", /Claude rejected its native login/);
     assert.deepEqual(
       notice?.routes.map((r) => r.href),
       ["/settings#runtime", `/assignments/${assignmentId}/recovery`],
@@ -1494,96 +1148,6 @@ test("a restart before the Claude process identity was recorded reports no proof
   );
 });
 
-test("operator token status reports each state without the reference name or value", async (t) => {
-  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
-  const f = harnessFixture(t);
-  await f.service.start();
-  let api = new OperatorApi(f.service, [f.dataDir]);
-  const state = async () => {
-    const read = api.readClaudeTokenStatus();
-    const text =
-      JSON.stringify(read) + JSON.stringify(await api.readWorkspace());
-    assert.equal(text.includes(NAME), false);
-    assert.equal(text.includes(TOKEN), false);
-    return read.data;
-  };
-  assert.deepEqual(await state(), {
-    configured: false,
-    available: false,
-    state: "not-configured",
-  });
-  const receipt = await api.execute({
-    type: "claude-token.configure",
-    key: randomUUID(),
-    credentialRef: `env:${NAME}`,
-  });
-  assert.equal(JSON.stringify(receipt).includes(NAME), false);
-  assert.deepEqual(await state(), {
-    configured: true,
-    available: false,
-    state: "missing-value",
-  });
-  // A value set after start is read live; it was never in the inherited snapshot.
-  process.env[NAME] = TOKEN;
-  assert.deepEqual(await state(), {
-    configured: true,
-    available: true,
-    state: "available",
-  });
-  const clear = () =>
-    api.execute({
-      type: "claude-token.configure",
-      key: randomUUID(),
-      credentialRef: null,
-    });
-  await clear();
-  assert.equal((await state()).state, "not-configured");
-  // Inherited by the running runtimes at start, then configured: restart first.
-  await f.service.stop();
-  await f.service.start();
-  api = new OperatorApi(f.service, [f.dataDir]);
-  await api.execute({
-    type: "claude-token.configure",
-    key: randomUUID(),
-    credentialRef: `env:${NAME}`,
-  });
-  assert.deepEqual(await state(), {
-    configured: true,
-    available: false,
-    state: "restart-required",
-  });
-  await f.service.stop();
-  await f.service.start();
-  api = new OperatorApi(f.service, [f.dataDir]);
-  assert.equal((await state()).state, "available");
-  await clear();
-  assert.equal((await state()).state, "not-configured");
-});
-
-test("operator token status for a file reference names neither its path nor its value", async (t) => {
-  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
-  const path = tokenFile(t);
-  const f = harnessFixture(t);
-  await f.service.start();
-  const api = new OperatorApi(f.service, [f.dataDir]);
-  const state = async () => {
-    const read = api.readClaudeTokenStatus();
-    const text =
-      JSON.stringify(read) + JSON.stringify(await api.readWorkspace());
-    assert.equal(text.includes(path), false);
-    assert.equal(text.includes(FILE_TOKEN), false);
-    return read.data.state;
-  };
-  await api.execute({
-    type: "claude-token.configure",
-    key: randomUUID(),
-    credentialRef: `file:${path}`,
-  });
-  assert.equal(await state(), "available");
-  chmodSync(path, 0o640);
-  assert.equal(await state(), "missing-value");
-});
-
 test("a service whose host has no claude starts with Claude not enabled, and its work waits without a query", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-claude-missing-"));
   const missing = claudeHarness(join(root, "missing"), [], {
@@ -1650,144 +1214,3 @@ test("a started Claude runtime's supported settings and effective policy parse i
   assert.ok(settings && settings.models.length > 0);
   assert.deepEqual(run.service.harnessStatuses()[1]?.settings, settings);
 });
-
-for (const mixed of [false, true])
-  test(`Claude global${mixed ? " and plugin" : "-only"} selections wait, retry and refresh current resources`, async (t) => {
-    const script: Script = async function* (session) {
-      yield init(sessionOf(session));
-      const args = { summary: "global fixture result" };
-      await session.hook("mcp__cab__cab_report_result", args, randomUUID());
-      const outcome = (await session.callTool("cab_report_result", args)) as {
-        isError: boolean;
-      };
-      assert.equal(outcome.isError, false);
-      yield result(sessionOf(session));
-    };
-    const run = await claudeServiceRun(t, [script, script, script], {
-      selfTest: true,
-      verified: true,
-      skillPluginRetryMs: 30,
-    });
-    const home = join(run.root, "service-home");
-    withEnvironment(t, { HOME: home });
-    const source = join(home, ".agents/skills/chosen");
-    const plugins = mixed
-      ? [
-          {
-            path: writeSkillPlugin(join(run.root, "normal"), ["normal"]),
-            skills: ["normal"],
-          },
-        ]
-      : [];
-    const { projectId, worker } = run.setup();
-    run.execute({
-      type: "profile.configure",
-      profileId: worker,
-      expectedVersion: 1,
-      skills: { plugins, global: ["chosen"] },
-    });
-    const first = await run.claudeTask(projectId, worker);
-    await waitUntil(
-      () =>
-        run.service
-          .turnRequests()
-          .some(
-            (r) =>
-              r.workId === first.workId &&
-              /Global skill chosen/.test(r.reason ?? ""),
-          ),
-      run.describe,
-    );
-    assert.equal(run.queries.includes("turn"), false);
-    mkdirSync(join(source, "resources"), { recursive: true });
-    writeFileSync(join(source, "SKILL.md"), "---\nname: chosen\n---\nChosen");
-    writeFileSync(join(source, "resources/answer"), "v1");
-    const other = join(home, ".agents/skills/other");
-    mkdirSync(other, { recursive: true });
-    writeFileSync(
-      join(other, "SKILL.md"),
-      "---\nname: other\n---\nOther profile only",
-    );
-    await waitUntil(
-      () => run.intent(first.workId)?.state === "completed",
-      run.describe,
-    );
-    const firstBase = run.intent(first.workId)?.workspace;
-    t.after(() => releaseTemporaryBase(firstBase));
-    const initial = run.sessions[0]!.options;
-    const firstAdapter = initial.plugins!.at(-1)!.path;
-    assert.equal(existsSync(join(firstAdapter, "skills/other")), false);
-    assert.deepEqual(initial.skills, [
-      ...(mixed ? ["unit-plugin:normal"] : []),
-      "cab-global-skills:chosen",
-    ]);
-    assert.equal(
-      readFileSync(
-        join(firstAdapter, "skills/chosen/resources/answer"),
-        "utf8",
-      ),
-      "v1",
-    );
-    assert.deepEqual(initial.managedSettings, { disableAllHooks: true });
-    assert.equal(initial.strictMcpConfig, true);
-    assert.deepEqual(Object.keys(initial.mcpServers ?? {}), ["cab"]);
-    const firstEvidence = run.service.turnSkillPlugins(first.workId);
-    assert.equal(firstEvidence.length, mixed ? 2 : 1);
-    writeFileSync(join(source, "resources/answer"), "v2");
-    const second = await run.claudeTask(projectId, worker);
-    await waitUntil(
-      () => run.intent(second.workId)?.state === "completed",
-      run.describe,
-    );
-    const secondBase = run.intent(second.workId)?.workspace;
-    t.after(() => releaseTemporaryBase(secondBase));
-    const secondAdapter = run.sessions.at(-1)!.options.plugins!.at(-1)!.path;
-    assert.notEqual(secondAdapter, firstAdapter);
-    assert.equal(
-      readFileSync(
-        join(secondAdapter, "skills/chosen/resources/answer"),
-        "utf8",
-      ),
-      "v2",
-    );
-    assert.notEqual(
-      run.service.turnSkillPlugins(second.workId).at(-1)?.digest,
-      firstEvidence.at(-1)?.digest,
-    );
-    assert.equal(JSON.stringify(firstEvidence).includes(run.root), false);
-    const independent = randomUUID();
-    run.execute({
-      type: "profile.create",
-      profileId: independent,
-      name: "Independent global worker",
-      instructions: "worker",
-      capabilities: "code",
-      runtime: { harness: "claude", model: "haiku", reasoningEffort: "low" },
-      skills: { plugins: [], global: ["other"] },
-    });
-    run.execute({
-      type: "routing.configure",
-      projectId,
-      expectedVersion: 2,
-      enabled: false,
-      guidance: "",
-      candidateProfileIds: [worker, independent],
-    });
-    const third = await run.claudeTask(projectId, independent);
-    await waitUntil(
-      () => run.intent(third.workId)?.state === "completed",
-      run.describe,
-    );
-    const thirdBase = run.intent(third.workId)?.workspace;
-    t.after(() => releaseTemporaryBase(thirdBase));
-    const independentOptions = run.sessions.at(-1)!.options;
-    assert.deepEqual(independentOptions.skills, ["cab-global-skills:other"]);
-    assert.equal(independentOptions.plugins!.length, 1);
-    assert.equal(
-      existsSync(join(independentOptions.plugins![0]!.path, "skills/chosen")),
-      false,
-    );
-    await run.service.stop();
-    assert.equal(existsSync(firstAdapter), true);
-    assert.equal(existsSync(secondAdapter), true);
-  });

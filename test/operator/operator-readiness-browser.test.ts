@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -51,7 +52,7 @@ for (const [name, viewport] of [
     const tokenPath = join(root, "claude-token");
     writeFileSync(tokenPath, `${CANARY}\n`);
     chmodSync(tokenPath, 0o644);
-    f.service.domain().execute({
+    seedLegacyCommand(f.service.domain(), {
       type: "claude-token.configure",
       actor: "operator",
       key: randomUUID(),
@@ -78,7 +79,7 @@ for (const [name, viewport] of [
     });
     await panel.getByRole("button", { name: "Run again" }).click();
     await panel
-      .getByRole("article", { name: "Claude token" })
+      .getByRole("article", { name: "Claude native login" })
       .getByText("Fail", { exact: true })
       .waitFor();
     assert.deepEqual(requests, ["GET /api/operator/readiness"]);
@@ -104,9 +105,9 @@ for (const [name, viewport] of [
       if (c.fix)
         assert.equal(await row.locator(".identifier").innerText(), c.fix);
     }
-    const claude = panel.getByRole("article", { name: "Claude token" });
+    const claude = panel.getByRole("article", { name: "Claude native login" });
     await claude
-      .getByText("Token file permits group or other access")
+      .getByText("Claude native subscription login is unavailable")
       .waitFor();
     await panel
       .getByRole("article", { name: "GitHub discovery" })
