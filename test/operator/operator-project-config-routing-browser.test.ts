@@ -109,6 +109,20 @@ test("Permitted agents edits the single delegation list outside Routing", async 
   );
   const d = f.service.domain();
   const mira = String(d.profiles().find((p) => p.name === "Mira")?.id);
+  const initialCandidates = d
+    .routingCandidates(ids.relay)
+    .map((r) => String(r.profileId));
+  const routing = d.routing(ids.relay);
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(routing.version),
+    enabled: false,
+    candidateProfileIds: initialCandidates,
+  });
+  await page.reload();
   await page
     .getByRole("heading", { name: "Permitted agents", exact: true })
     .waitFor();
@@ -117,6 +131,7 @@ test("Permitted agents edits the single delegation list outside Routing", async 
     .waitFor();
   const reviewer = page.getByRole("checkbox", { name: /^Mira ·/ });
   assert.equal(await reviewer.isChecked(), false);
+  const expectedAdded = [...initialCandidates, mira].sort();
   await reviewer.check();
   await changes(page).getByText("Agent added: Mira", { exact: true }).waitFor();
   const body = commandBody(page);
@@ -126,24 +141,51 @@ test("Permitted agents edits the single delegation list outside Routing", async 
   const sent = await body;
   assert.deepEqual(
     (sent.candidateProfileIds as string[]).slice().sort(),
-    [
-      ...d.routingCandidates(ids.relay).map((r) => String(r.profileId)),
-      mira,
-    ].sort(),
+    expectedAdded,
   );
   await savedOutcome(page, /^Saved\./);
-  assert.equal(d.routing(ids.relay).enabled, 1);
+  assert.equal(d.routing(ids.relay).enabled, 0);
   assert.equal(
     d.routingCandidates(ids.relay).some((r) => r.profileId === mira),
     true,
   );
+  assert.equal(await reviewer.isChecked(), true);
+
+  const expectedRemoved = [...initialCandidates].sort();
+  await reviewer.uncheck();
+  await changes(page)
+    .getByText("Agent removed: Mira", { exact: true })
+    .waitFor();
+  const removeBody = commandBody(page);
+  await page
+    .getByRole("button", { name: "Save permitted agents", exact: true })
+    .click();
+  const removed = await removeBody;
+  assert.deepEqual(
+    (removed.candidateProfileIds as string[]).slice().sort(),
+    expectedRemoved,
+  );
+  await savedOutcome(page, /^Saved\./);
+  assert.equal(
+    d.routingCandidates(ids.relay).some((r) => r.profileId === mira),
+    false,
+  );
+  await page.reload();
+  await page
+    .getByRole("heading", { name: "Permitted agents", exact: true })
+    .waitFor();
+  assert.equal(await reviewer.isChecked(), false);
+
   await page.goto(`/projects/${ids.relay}/settings?tab=routing`);
   await page.getByRole("switch", { name: "Enable routing" }).waitFor();
   assert.equal(await page.getByRole("checkbox").count(), 0);
-  await page
-    .getByRole("region", { name: "Saved routing" })
-    .getByText(/Mira/)
-    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("region", { name: "Saved routing" })
+      .getByText(/Mira/)
+      .count(),
+    0,
+  );
 });
 
 test("routing guidance reverted or edited keeps its state after leaving the tab", async (_t, journey) => {
