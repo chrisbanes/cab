@@ -23,11 +23,11 @@ const test = browserSuite("operator-delivery-config-browser");
 const path = "/projects/:atlas/settings?tab=delivery";
 const save = (page: Page) =>
   page.getByRole("button", { name: "Save delivery", exact: true });
-const read = async (page: Page) => {
+const read = async (page: Page, button = "Refresh") => {
   const response = page.waitForResponse(
     (r) => r.request().method() === "GET" && /configuration$/.test(r.url()),
   );
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: button, exact: true }).click();
   await response;
   await page.waitForFunction(
     () => !document.body.innerText.includes("Refreshing."),
@@ -177,7 +177,7 @@ test("project warning clears after fixing delivery needs and returns when the ho
     0,
   );
   hostAvailable = false;
-  await read(page);
+  await read(page, "Refresh tasks");
   await page
     .getByRole("link", { name: "Fix delivery setup", exact: true })
     .waitFor();
@@ -187,6 +187,7 @@ test("project warning clears after fixing delivery needs and returns when the ho
   await page
     .getByRole("link", { name: "Fix delivery setup", exact: true })
     .click();
+  await needs.getByText(/GitHub requirements are unavailable/).waitFor();
   hostAvailable = true;
   const refreshed = page.waitForResponse((r) => /configuration$/.test(r.url()));
   await needs
