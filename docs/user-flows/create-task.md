@@ -17,7 +17,9 @@ it in one submission.
 
 ## Steps
 
-1. The composer opens with the project selected when the entry point names one.
+1. The composer opens with the project selected when the entry point names one. If
+   there is exactly one visible project and no project was supplied, it is selected
+   automatically. Recovered input and explicit project choices are preserved.
 2. Project, title and desired outcome are the form; optional context, references,
    assignee and dependencies disclose beneath them.
 3. "If you create it now" states Starts now or Will wait with the reasons, and the

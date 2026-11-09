@@ -67,6 +67,7 @@ export function TaskComposer({
 }) {
   const labels = workspaceLabels(workspace);
   const [, render] = useState(0);
+  const projectDefaulted = useRef(false);
   const [state] = useState(() => {
     const s = new ComposerState(
       {
@@ -84,6 +85,13 @@ export function TaskComposer({
     state.activate(() => render((n) => n + 1));
     return () => state.dispose();
   }, [state]);
+  useEffect(() => {
+    if (projectDefaulted.current || !workspace || state.recovered) return;
+    const projects = visibleProjects(workspace.data.projects);
+    if (projects.length !== 1) return;
+    projectDefaulted.current = true;
+    if (!state.input.projectId) state.edit({ projectId: projects[0]!.id });
+  }, [workspace, state]);
   const [resumed, setResumed] = useState(
       !state.recovered || state.phase === "unknown",
     ),

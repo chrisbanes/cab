@@ -33,6 +33,38 @@ async function signIn(
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
 }
+test("composer preselects its sole visible project", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Only visible project",
+    leadProfileId: null,
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  await signIn(page, web.origin, web.password, "/tasks/new");
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+});
 test("List and Board preserve identical filtered task IDs and never submit commands", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),

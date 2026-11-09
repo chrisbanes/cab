@@ -250,6 +250,20 @@ export function taskReasonItems(task: TaskListSummary): TaskReason[] {
 }
 export const taskReasons = (task: TaskListSummary) =>
   taskReasonItems(task).map((r) => r.text);
+/** Identical readiness rules are shown once for the current result set. */
+export function sharedReadinessReasons(tasks: readonly TaskListSummary[]) {
+  const counts = new Map<string, number>();
+  for (const task of tasks)
+    for (const reason of taskReasonItems(task))
+      if (
+        reason.text.startsWith("Not Ready:") ||
+        reason.text === reasonLabels["task-unready"]
+      )
+        counts.set(reason.text, (counts.get(reason.text) ?? 0) + 1);
+  return [...counts].filter(([, count]) => count > 1);
+}
+export const taskVisibilityText = (visible: number, eligible: number) =>
+  `${visible} Ready of ${eligible} eligible tasks`;
 /**
  * Capacity is stated once for the visible work, not on every task it holds: a sentence when an open
  * task waits on the global limit, or else on a project's, otherwise null.

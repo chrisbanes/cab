@@ -275,6 +275,41 @@ const stored = (page: Page) =>
 const tasksLink = (page: Page) =>
   page.getByRole("link", { name: "Tasks", exact: true });
 
+test("default readiness discloses hidden drafts in List and Board and Show preserves other filters", async (_t, journey) => {
+  const { ids, page } = await startDefaults(
+    journey,
+    "/tasks?state=all&source=local&view=list",
+  );
+  await page.locator(`.task-list [data-task-id="${ids.ready}"]`).waitFor();
+  await page
+    .getByText(/Ready of .* eligible tasks · .* drafts hidden/)
+    .waitFor();
+  await page
+    .getByText("2 drafts share this readiness rule: Draft: not Ready.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await page
+      .locator(".task-list .task-reason")
+      .filter({ hasText: "Draft: not Ready" })
+      .count(),
+    0,
+  );
+  const show = page.getByRole("button", { name: /Show .* hidden drafts/ });
+  await show.click();
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("ready") === "any" &&
+      url.searchParams.get("state") === "all" &&
+      url.searchParams.get("source") === "local" &&
+      url.searchParams.get("view") === "list",
+  );
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.locator("#column-Draft").waitFor();
+  assert.equal(await page.locator("#column-Draft .task-card").count(), 2);
+});
+
 test("task filters are remembered across navigation and reload, and the URL wins", async (_t, journey) => {
   const { ids, web, page } = await startDefaults(journey, "/tasks");
   // Ready is the default readiness: a fresh visit lists no Draft task and stores nothing.
