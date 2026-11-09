@@ -653,6 +653,11 @@ export interface RuntimeTurnPolicy {
    * loopback-only control, so `CodexRuntime` ignores it; a read-only turn ignores it too.
    */
   localListening?: boolean;
+  /**
+   * Skip the harness sandbox, captured at admission; set only on a task turn of the setting's
+   * project. A draft turn never carries it. The runtime translates it per harness.
+   */
+  skipSandbox?: boolean;
 }
 
 /** Per-turn read-only policy of a draft turn; proven on a workspace-write thread. */

@@ -44,6 +44,16 @@ function admissionFixture() {
       localListening: enabled,
     });
   };
+  const setSkipSandbox = (enabled: boolean) => {
+    f.domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: crypto.randomUUID(),
+      projectId,
+      expectedVersion: Number(f.domain.project(projectId).version),
+      dangerouslySkipSandbox: enabled,
+    });
+  };
   let sequence = 0;
   /** A ready intent bound to a fresh assignment on a harness. */
   const ready = (taskId: string, harness: ExecutionHarness = "codex") => {
@@ -79,7 +89,7 @@ function admissionFixture() {
   };
   const admit = (intent: { id: string }) =>
     f.state.begin(intent.id, { projectId });
-  return { f, setNetwork, setListening, ready, admit };
+  return { f, setNetwork, setListening, setSkipSandbox, ready, admit };
 }
 
 test("a turn records the project's command network setting at its own admission", () => {
@@ -214,6 +224,73 @@ test("only Claude task turns can be admitted with local listening", () => {
     assert.equal(state.begin(draft.id, { projectId }), true);
     assert.equal(state.localListening(draft.id), false);
     assert.equal(state.commandNetworkAccess(draft.id), false);
+  } finally {
+    f.close();
+  }
+});
+
+test("a task turn of either harness records the project's skip-sandbox setting at its own admission", () => {
+  const { f, setSkipSandbox, ready, admit } = admissionFixture();
+  try {
+    const before = ready(taskA, "claude");
+    const earlier = ready(taskB, "codex");
+    assert.equal(f.state.dangerouslySkipSandbox(before.id), null);
+
+    assert.equal(admit(earlier), true);
+    setSkipSandbox(true);
+    assert.equal(admit(before), true);
+    assert.equal(f.state.dangerouslySkipSandbox(earlier.id), false);
+    assert.equal(f.state.dangerouslySkipSandbox(before.id), true);
+    assert.equal(f.state.localListening(before.id), false);
+    assert.equal(f.state.commandNetworkAccess(before.id), false);
+
+    // A running turn keeps its value; the next admission gets the new one.
+    setSkipSandbox(false);
+    const after = ready(taskA, "codex");
+    assert.equal(admit(after), true);
+    assert.equal(f.state.dangerouslySkipSandbox(after.id), false);
+    assert.equal(f.state.dangerouslySkipSandbox(before.id), true);
+    setSkipSandbox(true);
+    const codex = ready(taskB, "codex");
+    assert.equal(admit(codex), true);
+    assert.equal(f.state.dangerouslySkipSandbox(codex.id), true);
+    assert.equal(f.state.dangerouslySkipSandbox(after.id), false);
+  } finally {
+    f.close();
+  }
+});
+
+test("a drafting run, a draft turn and an unadmitted turn never record skip-sandbox", () => {
+  const { f, setSkipSandbox, ready, admit } = admissionFixture();
+  try {
+    setSkipSandbox(true);
+    const drafting = f.state.create(
+      "drafting:run-1",
+      "draft",
+      "/tmp/net-draft",
+    );
+    assert.equal(f.state.begin(drafting.id, { projectId }), true);
+    assert.equal(f.state.dangerouslySkipSandbox(drafting.id), false);
+    assert.equal(f.state.skipSandboxApplies(drafting.id, projectId), false);
+
+    const waiting = ready(taskB, "claude");
+    assert.equal(f.state.dangerouslySkipSandbox(waiting.id), null);
+    assert.equal(f.state.skipSandboxApplies(waiting.id, projectId), true);
+
+    new SchedulerStore(f.db);
+    const state = new ExecutionState(f.db);
+    const draft = ready(taskB, "claude");
+    f.db
+      .prepare(
+        "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
+      )
+      .run(randomUUID(), draft.workId);
+    assert.equal(state.skipSandboxApplies(draft.id, projectId), false);
+    assert.equal(state.begin(draft.id, { projectId }), true);
+    assert.equal(state.dangerouslySkipSandbox(draft.id), false);
+    setSkipSandbox(false);
+    assert.equal(f.state.skipSandboxApplies(waiting.id, projectId), false);
+    assert.equal(admit(waiting), true);
   } finally {
     f.close();
   }
@@ -463,4 +540,24 @@ test("each harness receives the expected sandbox policy for every combination of
         );
       }
   }
+});
+
+test("a task turn of either harness runs with skipSandbox only when the setting was on at admission", async (t) => {
+  const { service, project, configure, start, turnOf, finished } =
+    await recordingService(t);
+  for (const harness of ["codex", "claude"] as const) {
+    const projectId = project(harness);
+    for (const on of [false, true]) {
+      configure(projectId, { dangerouslySkipSandbox: on });
+      await start(projectId, `${harness} ${on}`);
+      const intent = await finished();
+      assert.deepEqual(
+        turnOf(intent)?.policy,
+        on ? { networkAccess: false, skipSandbox: true } : undefined,
+        `${harness} skip=${on}`,
+      );
+      assert.equal(service.dangerouslySkipSandboxFor(intent.workId), on);
+    }
+  }
+  assert.equal(service.dangerouslySkipSandboxFor("unknown-work"), null);
 });

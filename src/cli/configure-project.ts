@@ -56,7 +56,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--local-listening true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--local-listening true|false] [--dangerously-skip-sandbox true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
@@ -69,6 +69,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "diagnostic-capture",
         "command-network-access",
         "local-listening",
+        "dangerously-skip-sandbox",
         "stacking",
         "instructions",
         "instructions-file",
@@ -100,6 +101,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         const listening = boolFlag(
           ctx.values["local-listening"],
           "local-listening",
+        );
+        const skipSandbox = boolFlag(
+          ctx.values["dangerously-skip-sandbox"],
+          "dangerously-skip-sandbox",
         );
         const stacking = boolFlag(ctx.values.stacking, "stacking");
         // Read once before connecting: standard input cannot be read again on a retried read.
@@ -201,6 +206,24 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             to: String(listening),
           });
           notes.push(localListeningAppliesNote, localListeningLimit);
+        }
+        const currentSkipSandbox = config.data.dangerouslySkipSandbox;
+        if (skipSandbox !== undefined && skipSandbox !== currentSkipSandbox) {
+          if (currentSkipSandbox === undefined)
+            gaps.push("content-unavailable");
+          command.dangerouslySkipSandbox = skipSandbox;
+          changes.push({
+            field: "dangerouslySkipSandbox",
+            from:
+              currentSkipSandbox === undefined
+                ? null
+                : String(currentSkipSandbox),
+            to: String(skipSandbox),
+          });
+          // Plain note for now; the disclosure copy module replaces it.
+          notes.push(
+            "Applies to task turns admitted after the change; running turns keep their policy.",
+          );
         }
         const currentStacking = config.data.stacking;
         if (stacking !== undefined && stacking !== currentStacking) {

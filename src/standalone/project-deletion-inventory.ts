@@ -665,6 +665,10 @@ export const projectDeletionInventory = {
     columns: ["workId", "projectId", "admittedAt"],
     ownership: "projectId=P",
   },
+  execution_intent_dangerously_skip_sandbox: {
+    columns: ["intentId", "enabled"],
+    ownership: "intentId in I",
+  },
   execution_intent_local_listening: {
     columns: ["intentId", "enabled"],
     ownership: "intentId in I",
@@ -1020,6 +1024,10 @@ export const projectDeletionInventory = {
     ownership: "projectId=P",
   },
   project_command_network_access: {
+    columns: ["projectId", "enabled"],
+    ownership: "projectId=P",
+  },
+  project_dangerously_skip_sandbox: {
     columns: ["projectId", "enabled"],
     ownership: "projectId=P",
   },

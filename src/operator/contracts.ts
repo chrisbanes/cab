@@ -1298,6 +1298,8 @@ const generation = z
     commandNetworkAccess: z.boolean().nullable().optional(),
     /** Optional so older services still parse; null until the turn is admitted, true only for a Claude task turn. */
     localListening: z.boolean().nullable().optional(),
+    /** Optional so older services still parse; null until the turn is admitted. */
+    dangerouslySkipSandbox: z.boolean().nullable().optional(),
     /** The latest failed turn's bounded classification; null when none failed. */
     failure: z
       .object({
@@ -3016,6 +3018,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       commandNetworkAccess: z.boolean().optional(),
       localListening: z.boolean().optional(),
+      dangerouslySkipSandbox: z.boolean().optional(),
       stacking: z.boolean().optional(),
     })
     .strict(),
@@ -4083,6 +4086,7 @@ export const projectConfigurationSchema = envelope(
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       commandNetworkAccess: z.boolean().optional(),
       localListening: z.boolean().optional(),
+      dangerouslySkipSandbox: z.boolean().optional(),
       stacking: z.boolean().optional(),
       routing: z
         .object({
