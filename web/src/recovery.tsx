@@ -51,7 +51,11 @@ import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
-import { capacityChanges, type Values } from "./settings-changes.js";
+import {
+  capacityChanges,
+  capacityUsage,
+  type Values,
+} from "./settings-changes.js";
 import { useFragmentLanding } from "./settings-sections.js";
 import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
 import {
@@ -281,10 +285,17 @@ export function RuntimeSettings(p: SettingsProps) {
   const initial: Values | null = data
     ? {
         globalLimit: String(data.globalLimit),
+        minimumLeadSlots: String(data.minimumLeadSlots),
+        ...Object.fromEntries(
+          data.agents.flatMap((r) => [
+            [`agent-override-${r.agent.id}`, r.limit !== null],
+            [`agent-limit-${r.agent.id}`, String(r.limit ?? 1)],
+          ]),
+        ),
         ...Object.fromEntries(
           data.projects.flatMap((r) => [
             [`override-${r.project.id}`, r.override !== null],
-            [`limit-${r.project.id}`, String(r.override ?? r.limit)],
+            [`limit-${r.project.id}`, String(r.override ?? 1)],
           ]),
         ),
       }
@@ -313,10 +324,12 @@ export function RuntimeSettings(p: SettingsProps) {
       {data && (
         <>
           <p className="introduction muted">
-            {data.globalUsage} of {data.globalLimit} active turns in use;
-            projects default to {data.defaultProjectLimit}. Lowering a cap stops
-            new starts until usage fits; active turns keep running. Two saves at
-            the same time can overwrite each other.
+            {data.globalUsage} of {data.globalLimit} active turns in use;{" "}
+            {data.leadUsage} lead {data.leadUsage === 1 ? "turn" : "turns"}{" "}
+            running, with {data.minimumLeadSlots} of the global slots held for
+            lead turns. Lowering a cap stops new starts until usage fits; active
+            turns keep running. Two saves at the same time can overwrite each
+            other.
           </p>
           <div className="settings-split">
             <div className="settings-column">
@@ -376,6 +389,15 @@ export function RuntimeSettings(p: SettingsProps) {
                         type: "capacity.configure",
                         key: d.values.key,
                         globalLimit: Number(d.values.globalLimit),
+                        minimumLeadSlots: Number(d.values.minimumLeadSlots),
+                        agentOverrides: Object.fromEntries(
+                          data.agents.map((r) => [
+                            r.agent.id,
+                            d.values[`agent-override-${r.agent.id}`]
+                              ? Number(d.values[`agent-limit-${r.agent.id}`])
+                              : null,
+                          ]),
+                        ),
                         projectOverrides: Object.fromEntries(
                           writableProjects.map((r) => [
                             r.project.id,
@@ -395,6 +417,43 @@ export function RuntimeSettings(p: SettingsProps) {
                     label="Global active-turn cap"
                     type="number"
                   />
+                  <DraftField
+                    draft={d}
+                    field="minimumLeadSlots"
+                    label="Minimum lead slots"
+                    type="number"
+                  />
+                  <p className="metadata muted">
+                    Global slots only lead turns can use. Lead turns can also
+                    use any free slot.
+                  </p>
+                  {data.agents.map((r) => {
+                    const name = r.agent.name ?? "Agent name unavailable";
+                    return (
+                      <div className="settings-row" key={r.agent.id}>
+                        <div className="settings-row-heading">
+                          <h3 className="small-heading">{name}</h3>
+                          <span className="metadata muted">
+                            {capacityUsage(r.usage, r.limit, "agent")}
+                          </span>
+                        </div>
+                        <DraftCheck
+                          draft={d}
+                          field={`agent-override-${r.agent.id}`}
+                          label={`Set active-turn cap for ${name}`}
+                        />
+                        {d.values[`agent-override-${r.agent.id}`] && (
+                          <DraftField
+                            draft={d}
+                            field={`agent-limit-${r.agent.id}`}
+                            errorField={`agentOverrides.${r.agent.id}`}
+                            label={`Active-turn cap for ${name}`}
+                            type="number"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                   {data.projects.map((r) => {
                     const name = labelOf(r).text;
                     return (
@@ -404,7 +463,7 @@ export function RuntimeSettings(p: SettingsProps) {
                             <ProjectName label={labelOf(r)} id={r.project.id} />
                           </h3>
                           <span className="metadata muted">
-                            Usage {r.usage} / effective limit {r.limit} ·
+                            {capacityUsage(r.usage, r.limit, "project")} ·
                             Project {r.project.paused ? "paused" : "enabled"}
                           </span>
                         </div>

@@ -93,8 +93,9 @@ test("operator status follows a newer queued continuation over completed history
   });
   await service.configureCapacity({
     key: randomUUID(),
-    globalLimit: 1,
-    projectOverrides: { [projectId]: 1 },
+    minimumLeadSlots: 0,
+    globalLimit: 2,
+    projectOverrides: {},
   });
   await service.provisionTask(taskId);
   await service.provisionTask(capacityTaskId);
@@ -113,14 +114,15 @@ test("operator status follows a newer queued continuation over completed history
     expectedVersion: 1,
     ready: true,
   });
-  await until(() =>
-    service
-      .turnRequests()
-      .some(
-        (request) =>
-          request.taskId === capacityTaskId && request.state === "queued",
-      ),
-  );
+  await until(() => runtime.turns === 2);
+  // The other task keeps its slot, so the continuation below has to queue: resumed
+  // work goes first only once a slot is free.
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+    projectOverrides: {},
+  });
 
   const assignment = service.domain().assignments(taskId)[0];
   assert.ok(assignment);
@@ -737,6 +739,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
 
   await service.configureCapacity({
     key: randomUUID(),
+    minimumLeadSlots: 0,
     globalLimit: 1,
     projectOverrides: { [projectId]: 1 },
   });
@@ -846,33 +849,8 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   const answerReceipt = await api.execute(answer);
   const decisionReceipt = await api.execute(decision);
   runtime.complete(leadIntent.turnId);
-  await until(() =>
-    service
-      .list()
-      .some(
-        (intent) =>
-          intent.workId === workerRequest.workId && intent.state === "running",
-      ),
-  );
-  const workerIntent = service
-    .list()
-    .find((intent) => intent.workId === workerRequest.workId);
-  assert.ok(workerIntent?.threadId && workerIntent.turnId);
-
-  const report = await runtime.callTool({
-    threadId: workerIntent.threadId,
-    turnId: workerIntent.turnId,
-    callId: "operator-result",
-    tool: "cab_report_result",
-    arguments: { summary: "Reviewed parser output." },
-  });
-  assert.equal(report.success, true, report.text);
-  runtime.complete(workerIntent.turnId);
-  await until(
-    () =>
-      service.coordinationView().readTask(taskId).unresolvedResults.length ===
-      1,
-  );
+  // Resumed work goes first: the lead's continuation takes the task's writer before
+  // the worker that has not started.
   await until(() =>
     service
       .list()
@@ -913,6 +891,33 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   });
   assert.equal(leadReport.success, true, leadReport.text);
   runtime.complete(leadContinuation.turnId);
+  await until(() =>
+    service
+      .list()
+      .some(
+        (intent) =>
+          intent.workId === workerRequest.workId && intent.state === "running",
+      ),
+  );
+  const workerIntent = service
+    .list()
+    .find((intent) => intent.workId === workerRequest.workId);
+  assert.ok(workerIntent?.threadId && workerIntent.turnId);
+
+  const report = await runtime.callTool({
+    threadId: workerIntent.threadId,
+    turnId: workerIntent.turnId,
+    callId: "operator-result",
+    tool: "cab_report_result",
+    arguments: { summary: "Reviewed parser output." },
+  });
+  assert.equal(report.success, true, report.text);
+  runtime.complete(workerIntent.turnId);
+  await until(
+    () =>
+      service.coordinationView().readTask(taskId).unresolvedResults.length ===
+      1,
+  );
   await assert.rejects(
     api.execute({ ...answer, key: randomUUID() }),
     (error) => error instanceof OperatorApiError,

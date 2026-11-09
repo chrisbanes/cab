@@ -2824,13 +2824,12 @@ export class OperatorApi {
     });
   }
   private capacity(projectId: string) {
-    const c = this.domain().capacityLimits([projectId]);
+    const c = this.domain().capacityLimits();
     return {
       globalUsage: c.currentUsage.global,
       globalLimit: c.globalLimit,
       projectUsage: c.currentUsage.projects[projectId] ?? 0,
-      projectLimit:
-        c.effectiveProjectLimits[projectId] ?? c.defaultProjectLimit,
+      projectLimit: c.projectOverrides[projectId] ?? null,
     };
   }
   /**
@@ -2963,14 +2962,22 @@ export class OperatorApi {
         : [];
     });
   }
-  /** What is using capacity when the project or installation is at its limit. */
-  private capacityWait(projectId: string) {
+  /**
+   * What is using capacity when the project or installation is at its limit. A task
+   * already waiting can also be held by the lead slots: a lead turn never is, so only
+   * its delegated work waits there.
+   */
+  private capacityWait(projectId: string, waiting = false) {
     const c = this.capacity(projectId);
-    return c.projectUsage >= c.projectLimit
+    const { minimumLeadSlots, currentUsage } = this.domain().capacityLimits();
+    const held = Math.max(0, minimumLeadSlots - currentUsage.lead);
+    return c.projectLimit !== null && c.projectUsage >= c.projectLimit
       ? `${c.projectUsage} of ${c.projectLimit} project turns running`
       : c.globalUsage >= c.globalLimit
         ? `${c.globalUsage} of ${c.globalLimit} turns running`
-        : null;
+        : waiting && held > 0 && c.globalUsage >= c.globalLimit - held
+          ? `${c.globalUsage} of ${c.globalLimit} turns running, ${held} held for lead turns`
+          : null;
   }
   /** Set while the power supervisor holds admission; null when held by nothing or unsupervised. */
   private powerHold() {
@@ -3039,7 +3046,9 @@ export class OperatorApi {
           label: "Review material & decide",
         })),
       capacity:
-        admission.eligible && waiting ? this.capacityWait(projectId) : null,
+        admission.eligible && waiting
+          ? this.capacityWait(projectId, true)
+          : null,
       powerHold: this.powerHold(),
       repositoryAccessRevoked: this.service.repositoryAccessRevoked(taskId),
     });
@@ -7492,19 +7501,35 @@ export class OperatorApi {
       ),
       base = this.exclusionBase(),
       excluded = await this.exclusions(undefined, undefined, [], [], base),
-      limits = this.service.capacityLimits(projects.map((p) => String(p.id)));
+      limits = this.service.capacityLimits();
     const response = {
       data: {
         runtimes: this.service.runtimeSettings(),
         globalLimit: limits.globalLimit,
-        defaultProjectLimit: limits.defaultProjectLimit,
         globalUsage: limits.currentUsage.global,
+        minimumLeadSlots: limits.minimumLeadSlots,
+        leadUsage: limits.currentUsage.lead,
+        agents: d
+          .profiles()
+          .filter(
+            (a) =>
+              Number(a.revoked) === 0 ||
+              limits.agentOverrides[String(a.id)] !== undefined,
+          )
+          .map((a) => {
+            const agentId = String(a.id);
+            return {
+              agent: { id: agentId, name: this.safe(a.name, excluded) },
+              limit: limits.agentOverrides[agentId] ?? null,
+              usage: limits.currentUsage.agents[agentId] ?? 0,
+            };
+          }),
         projects: await Promise.all(
           projects.map(async (p) => {
             const id = String(p.id);
             return {
               project: this.project(p, excluded),
-              limit: limits.effectiveProjectLimits[id],
+              limit: limits.projectOverrides[id] ?? null,
               usage: limits.currentUsage.projects[id] ?? 0,
               override: limits.projectOverrides[id] ?? null,
               tasks: await Promise.all(
@@ -9867,10 +9892,19 @@ export class OperatorApi {
         if (raw === undefined) {
           for (const id of Object.keys(c.projectOverrides))
             this.requireProject(id);
+          const agents = new Set(
+            this.domain()
+              .profiles()
+              .map((p) => String(p.id)),
+          );
+          for (const id of Object.keys(c.agentOverrides))
+            if (!agents.has(id)) throw new OperatorApiError(404, "not-found");
           raw = await this.service.configureCapacity({
             key: c.key,
             globalLimit: c.globalLimit,
+            minimumLeadSlots: c.minimumLeadSlots,
             projectOverrides: c.projectOverrides,
+            agentOverrides: c.agentOverrides,
             ...(c.expectedCurrent
               ? { expectedCurrent: c.expectedCurrent }
               : {}),

@@ -527,14 +527,16 @@ test("complete configuration receipt predicates keep schema-valid mismatches unk
         type: "capacity.configure",
         key: randomUUID(),
         globalLimit: 4,
+        minimumLeadSlots: 0,
         projectOverrides: { [projectId]: null, [profileId]: 2 },
       },
       result: {
         commandType: "capacity.configure",
         resourceId: "system:capacity",
         globalLimit: 4,
-        defaultProjectLimit: 2,
+        minimumLeadSlots: 0,
         projectOverrides: { [profileId]: 2 },
+        agentOverrides: {},
       },
       changes: [
         { resourceId: "system:other" },
@@ -1109,6 +1111,7 @@ test("schema rejections name each field's fix and keep project override keys", a
   const capacity = await rejected({
     type: "capacity.configure",
     globalLimit: 0,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 2.5 },
   });
   assert.deepEqual(capacity.errors, {
@@ -2133,6 +2136,7 @@ test("read-only capacity recovery preserves the original system-scoped command a
     type: "capacity.configure" as const,
     key,
     globalLimit: 9,
+    minimumLeadSlots: 0,
     projectOverrides: { [owner]: 7 },
   };
   const requests: Array<{ method: string; url: string }> = [];
@@ -2153,8 +2157,9 @@ test("read-only capacity recovery preserves the original system-scoped command a
                 commandType: "capacity.configure",
                 resourceId: "system:capacity",
                 globalLimit: 9,
-                defaultProjectLimit: 2,
+                minimumLeadSlots: 0,
                 projectOverrides: { [owner]: 7 },
+                agentOverrides: {},
               },
             },
           }

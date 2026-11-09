@@ -2144,6 +2144,7 @@ test("a first turn waiting for capacity takes revisions changed by a profile edi
   try {
     await f.service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 4,
       projectOverrides: { [f.projectId]: 1 },
     });

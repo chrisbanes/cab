@@ -34,7 +34,7 @@ export type TurnRequest = z.infer<typeof requestSchema> & {
   nextEligibleAt: number | null;
 };
 
-/** Durable request identity and fair FIFO order, separate from execution ownership. */
+/** Durable request identity and admission order, separate from execution ownership. */
 export class SchedulerStore {
   constructor(private readonly db: Database) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS turn_requests (
@@ -245,12 +245,50 @@ export class SchedulerStore {
     });
   }
 
+  /**
+   * Eligible queued requests, resumed work first, oldest first within each group. A request
+   * is resumed when an earlier request on its assignment, or the request it continues, was
+   * admitted: answers, results, follow-ups, operator messages and retries.
+   */
   queued(now = Date.now()): TurnRequest[] {
+    const admitted = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_retry_generations'",
+      )
+      .get()
+      ? "OR EXISTS (SELECT 1 FROM execution_retry_generations g WHERE g.workId = p.workId)"
+      : "";
     return this.db
-      .prepare(`SELECT * FROM turn_requests WHERE state = 'queued'
-        AND (nextEligibleAt IS NULL OR nextEligibleAt <= ?) ORDER BY sequence`)
+      .prepare(`SELECT r.*, EXISTS (
+          SELECT 1 FROM turn_requests p
+          WHERE p.sequence < r.sequence
+            AND ((r.assignmentId IS NOT NULL AND p.assignmentId = r.assignmentId)
+              OR p.workId = r.previousWorkId)
+            AND (p.state IN ('active','completed') ${admitted})
+        ) AS resumed
+        FROM turn_requests r WHERE r.state = 'queued'
+        AND (r.nextEligibleAt IS NULL OR r.nextEligibleAt <= ?)
+        ORDER BY resumed DESC, r.sequence`)
       .all(now)
       .map((row) => this.parse(row as Record<string, unknown>));
+  }
+
+  /** Active turns holding capacity; 0 before execution state exists. */
+  reservedCapacity(): number {
+    const table = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_capacity_reservations'",
+      )
+      .get();
+    return table
+      ? (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM execution_capacity_reservations",
+            )
+            .get() as { count: number }
+        ).count
+      : 0;
   }
 
   nextEligibility(now = Date.now()): number | undefined {
@@ -499,7 +537,11 @@ export class TurnScheduler {
 
   constructor(
     private readonly store: SchedulerStore,
-    private readonly attempt: (request: TurnRequest) => Promise<void>,
+    /** `capacityFreed` is true once a slot was released after this attempt began. */
+    private readonly attempt: (
+      request: TurnRequest,
+      capacityFreed: () => boolean,
+    ) => Promise<void>,
     private readonly now: () => number = Date.now,
     private readonly onBackgroundFailure: (
       error: unknown,
@@ -566,9 +608,24 @@ export class TurnScheduler {
   private async drain(): Promise<void> {
     while (this.wakeAgain && !this.stopped) {
       this.wakeAgain = false;
+      let reserved = this.store.reservedCapacity();
       for (const request of this.store.queued(this.now())) {
         if (this.stopped) return;
-        await this.attempt(request);
+        // Freed capacity or a wake means admission may have changed: start again from
+        // the highest-priority request so a freed slot never goes to a later one. A
+        // turn releases its slot before its wake arrives, so watch the count too; an
+        // attempt that sees a slot freed mid-way gives way instead of taking it.
+        // shortcut: changes arriving faster than one attempt delay requests further down
+        // the queue; fine for a few active turns, track skipped requests if that changes.
+        if (this.store.reservedCapacity() < reserved) this.wakeAgain = true;
+        if (this.wakeAgain) break;
+        const before = reserved;
+        await this.attempt(
+          request,
+          () => this.store.reservedCapacity() < before,
+        );
+        reserved = this.store.reservedCapacity();
+        if (reserved < before) this.wakeAgain = true;
       }
     }
   }

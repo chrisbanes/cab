@@ -3643,6 +3643,7 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
     type: "capacity.configure",
     actor: "operator",
     key: randomUUID(),
+    minimumLeadSlots: 0,
     globalLimit: 4,
     projectOverrides: { [enabled.projectId]: 1 },
   });
@@ -3665,6 +3666,31 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
       (w) => w.code,
     ),
     ["capacity"],
+  );
+  // The held lead slot: a waiting task's delegated work waits; a new task (lead first) does not.
+  d.execute({
+    type: "capacity.configure",
+    actor: "operator",
+    key: randomUUID(),
+    minimumLeadSlots: 1,
+    globalLimit: 2,
+    projectOverrides: { [enabled.projectId]: null },
+  });
+  assert.deepEqual((await api.readTask(task(enabled.projectId))).data.waits, [
+    {
+      code: "capacity",
+      fix: null,
+      links: [
+        {
+          kind: "tasks-running",
+          label: "1 of 2 turns running, 1 held for lead turns",
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    (await api.readComposerOptions(enabled.projectId)).data.waits,
+    [],
   );
   // Without power supervision no read derives a power wait.
   assert.equal(f.service.powerStatus(), null);

@@ -488,9 +488,13 @@ test("a specialist keeps its lead-authored brief and is told nothing of text edi
   // Queued behind the lead's turn, then the issue is edited.
   await w.edit("Edited title", "Edited body");
   w.end("turn-1");
-  await w.until(() => w.prompts.length === 2, "specialist turn");
-  assert.match(w.prompts[1] ?? "", /^Specialist brief/);
-  assert.doesNotMatch(w.prompts[1] ?? "", /Edited title|Changes \(/);
+  // The lead's own continuation is resumed work, so it runs before the specialist.
+  await w.until(() => w.prompts.length === 2, "lead continuation");
+  assert.match(w.prompts[1] ?? "", /^Task: /);
+  w.end("turn-2");
+  await w.until(() => w.prompts.length === 3, "specialist turn");
+  assert.match(w.prompts[2] ?? "", /^Specialist brief/);
+  assert.doesNotMatch(w.prompts[2] ?? "", /Edited title|Changes \(/);
 });
 
 test("an Improve draft turn queued before a text edit is refused although the task version is unchanged", async (t) => {
@@ -932,9 +936,13 @@ test("a specialist's prompt never carries the issue brief", async (t) => {
   });
   await w.settle();
   w.end("turn-1");
-  await w.until(() => w.prompts.length === 2, "specialist turn");
-  assert.match(w.prompts[1] ?? "", /^Specialist brief/);
-  assert.doesNotMatch(w.prompts[1] ?? "", /Secret plan|Issue brief/);
+  // The lead's own continuation is resumed work, so it runs before the specialist.
+  await w.until(() => w.prompts.length === 2, "lead continuation");
+  assert.match(w.prompts[1] ?? "", /^Task: /);
+  w.end("turn-2");
+  await w.until(() => w.prompts.length === 3, "specialist turn");
+  assert.match(w.prompts[2] ?? "", /^Specialist brief/);
+  assert.doesNotMatch(w.prompts[2] ?? "", /Secret plan|Issue brief/);
 });
 
 /** An unready task with a configured lead, ready for draft turns. */

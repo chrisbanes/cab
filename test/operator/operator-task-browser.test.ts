@@ -1400,6 +1400,7 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
       projectOverrides: { [ids.projectId]: 1 },
     });
@@ -1423,6 +1424,7 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
       projectOverrides: { [ids.projectId]: 10 },
     });
@@ -1435,6 +1437,7 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
       projectOverrides: { [ids.projectId]: 1 },
     });
@@ -1447,6 +1450,7 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
       projectOverrides: { [ids.projectId]: 10 },
     });
@@ -1610,6 +1614,7 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
       projectOverrides: { [ids.projectId]: 1 },
     });

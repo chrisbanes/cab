@@ -153,6 +153,7 @@ test("capacity control replays the same keyed change", async (t) => {
     type: "capacity.configure" as const,
     key: randomUUID(),
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   };
   const receipt = await new OperatorApi(service).execute(input);
@@ -160,11 +161,8 @@ test("capacity control replays the same keyed change", async (t) => {
   service = new StandaloneService(join(directory, "data"), () => runtime);
   await service.start();
   assert.deepEqual(await new OperatorApi(service).execute(input), receipt);
-  assert.equal(service.capacityLimits([projectId]).globalLimit, 1);
-  assert.equal(
-    service.capacityLimits([projectId]).projectOverrides[projectId],
-    1,
-  );
+  assert.equal(service.capacityLimits().globalLimit, 1);
+  assert.equal(service.capacityLimits().projectOverrides[projectId], 1);
 });
 
 test("task execution keeps the writer hold visible after Resume", async (t) => {

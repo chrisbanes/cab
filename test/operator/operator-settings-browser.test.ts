@@ -1074,10 +1074,7 @@ test("Runtime Settings records lowered capacity separately from usage and retain
     })
     .waitFor();
   await savedOutcome(page);
-  assert.equal(
-    f.service.capacityLimits([ids.projectId]).currentUsage.global,
-    2,
-  );
+  assert.equal(f.service.capacityLimits().currentUsage.global, 2);
   assert.equal(f.service.list().filter((r) => r.state === "held").length, 1);
   await capture(page, "1366-capacity-below-usage");
   await page.getByRole("link", { name: /recovery evidence$/ }).click();

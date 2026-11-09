@@ -46,6 +46,7 @@ export async function seedCatalog(
     type: "capacity.configure",
     key: randomUUID(),
     actor: "operator",
+    minimumLeadSlots: 0,
     globalLimit: 10,
     projectOverrides: { [projectId]: 10 },
   });
@@ -112,16 +113,16 @@ export async function seedCatalog(
     uncertainStop = await active("Stop with uncertain ownership"),
     uncertain = await active("Uncertain execution"),
     running = await active("Work running normally");
-  const occupied = d.capacityLimits([projectId]).currentUsage.projects[
-    projectId
-  ];
+  // Lead turns hold capacity globally; a project cap would not count them.
+  const occupied = d.capacityLimits().currentUsage.global;
   assert.equal(occupied, 5);
   d.execute({
     type: "capacity.configure",
     actor: "operator",
     key: randomUUID(),
-    globalLimit: 10,
-    projectOverrides: { [projectId]: occupied },
+    minimumLeadSlots: 0,
+    globalLimit: occupied,
+    projectOverrides: {},
   });
   const ready = task("Ready selected", true);
   await f.service.provisionTask(ready);

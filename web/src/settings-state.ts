@@ -47,13 +47,20 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
     if (
       result.commandType !== "capacity.configure" ||
       result.resourceId !== "system:capacity" ||
-      result.globalLimit !== c.globalLimit
+      result.globalLimit !== c.globalLimit ||
+      result.minimumLeadSlots !== c.minimumLeadSlots
     )
       return false;
-    return Object.entries(c.projectOverrides).every(([id, limit]) =>
-      limit === null
-        ? !(id in result.projectOverrides)
-        : result.projectOverrides[id] === limit,
+    const applied = (
+      wanted: Record<string, number | null>,
+      stored: Record<string, number>,
+    ) =>
+      Object.entries(wanted).every(([id, limit]) =>
+        limit === null ? !(id in stored) : stored[id] === limit,
+      );
+    return (
+      applied(c.projectOverrides, result.projectOverrides) &&
+      applied(c.agentOverrides, result.agentOverrides ?? {})
     );
   }
   if (c.type === "discovery.configure")
@@ -141,8 +148,14 @@ const namedLengths = new Set([
 function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
   const [field] = issue.path,
     command = (input ?? {}) as Record<PropertyKey, unknown>;
-  if (field === "globalLimit" || field === "projectOverrides")
+  if (
+    field === "globalLimit" ||
+    field === "projectOverrides" ||
+    field === "agentOverrides"
+  )
     return "Enter a whole number of 1 or more.";
+  if (field === "minimumLeadSlots")
+    return "Enter a whole number of 0 or more, below the global active-turn cap.";
   if (issue.path.length !== 1 || typeof field !== "string")
     return "Check this field.";
   const noun = String(command.type).split(".")[0],
@@ -194,6 +207,8 @@ const inactive = (
   (field === "credentialRef" && values.referenceMode !== "set") ||
   // A project's cap counts only while its override is on.
   (field.startsWith("limit-") && !values[`override-${field.slice(6)}`]) ||
+  (field.startsWith("agent-limit-") &&
+    !values[`agent-override-${field.slice(12)}`]) ||
   // Matching applies to conditions; with none there is nothing to match.
   (field === "mode" && "conditions" in values && noRows(values.conditions));
 /**
@@ -222,7 +237,10 @@ function canonical(field: string, value: unknown): string {
       return `s:${value}`;
     }
   if (
-    (field === "globalLimit" || field.startsWith("limit-")) &&
+    (field === "globalLimit" ||
+      field === "minimumLeadSlots" ||
+      field.startsWith("limit-") ||
+      field.startsWith("agent-limit-")) &&
     /^\d+$/.test(value)
   )
     return `n:${Number(value)}`;

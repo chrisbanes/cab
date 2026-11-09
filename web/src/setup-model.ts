@@ -379,7 +379,8 @@ export function readyCheckItems(input: {
     blocked: checking || items.length > 0,
     capacityFull:
       capacity !== null &&
-      (capacity.projectUsage >= capacity.projectLimit ||
+      ((capacity.projectLimit !== null &&
+        capacity.projectUsage >= capacity.projectLimit) ||
         capacity.globalUsage >= capacity.globalLimit),
   };
 }

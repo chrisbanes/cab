@@ -115,7 +115,7 @@ routing and accountability.
 | ID | Required observable result |
 | --- | --- |
 | R01 | Codex App Server uses the existing operator login on macOS, including restart. Expired/unavailable login visibly holds affected work; no silent switch of agent execution to API credentials or billing. TypeSafe routing credentials are a separate opt-in integration. |
-| R02 | Defaults are four active turns globally and two per project; concurrent admission respects both. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
+| R02 | New installations default to six active turns globally with one slot held for lead turns, and no project or agent cap; concurrent admission respects the global cap, held lead slots, agent caps and project caps (non-lead turns only), trying resumed work before unstarted work. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
 | R03 | Sleep assertion exists only during active execution and releases when idle or supervision ends. Forced sleep/wake reconciles execution before more dispatch, without duplicates. |
 | R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. Explicit LAN HTTP access retains those checks and sends credentials without TLS. |
 | R05 | Conversation history and durable operator messages survive restart. Duplicate submission does not duplicate delivery; the next eligible turn receives the message without bypassing holds. No live steering is exposed. |

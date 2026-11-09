@@ -71,7 +71,11 @@ test("fresh operator message continues a refused canonical initial with exact cu
     };
     await service.start();
     unpause(f, service);
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     await waitUntil(
       () => service.domain().task(f.taskId).state === "done",
       "fresh initial continuation completion",
@@ -114,7 +118,11 @@ test("fresh operator message continues a refused canonical initial with exact cu
       (await service.coordinationView().postOperatorMessage(input)).eventId,
       receipt.eventId,
     );
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     assert.equal(
       f.runtime.turns,
       1,
@@ -262,6 +270,7 @@ test("canonical initial refusal proof rejects altered identity and every admissi
           await f.service.coordinationView().postOperatorMessage(message(f));
           await f.service.configureCapacity({
             key: randomUUID(),
+            minimumLeadSlots: 0,
             globalLimit: 1,
           });
         }
@@ -290,7 +299,11 @@ test("initial inbox batch remains bound and fresh messages cannot orphan or repl
     assert.equal(proof(f.service, f.workId), true);
     unpause(f);
     await f.service.coordinationView().postOperatorMessage(message(f));
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     assert.equal(f.runtime.turns, 0);
     assert.deepEqual(
       db(f.service)
@@ -360,6 +373,7 @@ test("fresh initial continuation still enforces Stop, stale profile, dependency 
         await f.service.coordinationView().postOperatorMessage(message(f));
         await f.service.configureCapacity({
           key: randomUUID(),
+          minimumLeadSlots: 0,
           globalLimit: 1,
         });
         assert.equal(f.runtime.turns, 0);

@@ -705,6 +705,17 @@ export function repositoryCommand(
   };
 }
 
+/** A capped row's usage, or that it has no limit of its own. */
+export function capacityUsage(
+  usage: number,
+  limit: number | null,
+  kind: "agent" | "project",
+) {
+  return limit === null
+    ? `Usage ${usage} · No ${kind} limit`
+    : `Usage ${usage} / limit ${limit}`;
+}
+
 export function capacityChanges(
   data: RuntimeSettingsData,
   v: Values,
@@ -717,17 +728,39 @@ export function capacityChanges(
     lines.push(
       `Global active-turn cap: ${data.globalLimit} → ${v.globalLimit}`,
     );
-  for (const r of data.projects) {
-    const name = labelOf(r);
-    const set = Boolean(v[`override-${r.project.id}`]),
-      limit = Number(v[`limit-${r.project.id}`]);
-    if (set && r.override === null)
+  if (
+    v.minimumLeadSlots !== undefined &&
+    Number(v.minimumLeadSlots) !== data.minimumLeadSlots
+  )
+    lines.push(
+      `Minimum lead slots: ${data.minimumLeadSlots} → ${v.minimumLeadSlots}`,
+    );
+  const override = (
+    name: string,
+    current: number | null,
+    set: boolean,
+    limit: number,
+  ) => {
+    if (set && current === null)
       lines.push(`${name}: override set to ${limit}`);
-    else if (!set && r.override !== null)
-      lines.push(`${name}: override cleared`);
-    else if (set && r.override !== limit)
-      lines.push(`${name} override: ${r.override} → ${limit}`);
-  }
+    else if (!set && current !== null) lines.push(`${name}: override cleared`);
+    else if (set && current !== limit)
+      lines.push(`${name} override: ${current} → ${limit}`);
+  };
+  for (const r of data.agents)
+    override(
+      r.agent.name ?? "Agent",
+      r.limit,
+      Boolean(v[`agent-override-${r.agent.id}`]),
+      Number(v[`agent-limit-${r.agent.id}`]),
+    );
+  for (const r of data.projects)
+    override(
+      labelOf(r),
+      r.override,
+      Boolean(v[`override-${r.project.id}`]),
+      Number(v[`limit-${r.project.id}`]),
+    );
   return lines;
 }
 
