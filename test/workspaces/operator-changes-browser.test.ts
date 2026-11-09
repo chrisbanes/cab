@@ -19,6 +19,16 @@ import {
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { until } from "../fixtures/until.js";
+import {
+  changedFile,
+  changedFilePaths,
+  diffKeys,
+  diffLineNumber,
+  diffLineText,
+  fileDiff,
+  selectedDiffLines,
+  waitForDiff,
+} from "../fixtures/diff-view.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 
 setFixtureGitIdentity();
@@ -307,8 +317,7 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   await page
     .getByLabel("Repository", { exact: true })
     .selectOption("repo-alpha");
-  const list = changes.getByLabel("Workspace comparison files");
-  await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
+  await changedFile(changes, "default-ref.md").waitFor();
   const branchRead = new URL(
     comparisonRequests.find((url) => {
       const params = new URL(url).searchParams;
@@ -344,7 +353,7 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   // Last turn and Uncommitted stay selectable, and Branch still works after them.
   for (const target of ["uncommitted", "last-turn", "branch"])
     await comparisonTargetControl.selectOption(target);
-  await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
+  await changedFile(changes, "default-ref.md").waitFor();
 
   // A refresh that finds nothing new shows no "since you last looked" notice.
   const refreshed = page.waitForResponse((response) => {
@@ -377,7 +386,7 @@ test("Changes opens on the Branch comparison against the configured ref", async 
           button.textContent === "Refresh comparison" && button.disabled,
       ),
   );
-  await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
+  await changedFile(changes, "default-ref.md").waitFor();
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
 });
 
@@ -401,11 +410,8 @@ test("Changes labels repositories by verified name, selects by ID and falls back
   );
   // The select keeps the ID as its value and the request keeps it as its parameter.
   await select.selectOption("repo-alpha");
-  const entry = changes
-    .getByLabel("Workspace comparison files")
-    .getByRole("button", { name: /named\.md/ });
+  const entry = changedFile(changes, "named.md");
   await entry.waitFor();
-  assert.equal(await entry.getAttribute("title"), "acme/alpha/named.md");
   assert.ok(
     comparisonRequests.some(
       (url) => new URL(url).searchParams.get("repositoryId") === "repo-alpha",
@@ -756,9 +762,7 @@ test("production Changes preserves exact repository baselines and last-good refr
   );
   const requestCountBeforeCachedRestore = comparisonRequests.length;
   await baseBranchControl.selectOption("base-alpha");
-  await changes
-    .getByRole("button", { name: "modified guide.md, text", exact: true })
-    .waitFor();
+  await changedFile(changes, "guide.md").waitFor();
   assert.equal(await baseBranchControl.inputValue(), "base-alpha");
   assert.match(
     (await changes.locator(".changes-observation").textContent()) ?? "",
@@ -773,77 +777,66 @@ test("production Changes preserves exact repository baselines and last-good refr
     requestCountBeforeCachedRestore,
     "restoring a cached local base displays its exact prior response without rereading",
   );
-  const guide = changes.getByRole("button", {
-    name: "modified guide.md, text",
-    exact: true,
-  });
-  await guide.click();
-  const beforeLine = changes.getByRole("button", {
-    name: /^Before line 1, guide\.md;/,
-  });
-  await beforeLine.waitFor();
-  assert.match((await beforeLine.textContent()) ?? "", /-- alpha heading/);
-  await beforeLine.focus();
-  await page.keyboard.press("ArrowRight");
+  await changedFile(changes, "guide.md").click();
+  await waitForDiff(changes);
   assert.match(
-    (await page.evaluate(() =>
-      document.activeElement?.getAttribute("aria-label"),
-    )) ?? "",
-    /^After line 1, guide\.md;/,
+    await diffLineText(changes, "Before", 1).innerText(),
+    /-- alpha heading/,
   );
-  const afterBranchLine = changes.getByRole("button", {
-    name: /^After line 1, guide\.md;/,
-  });
   assert.match(
-    (await afterBranchLine.textContent()) ?? "",
+    await diffLineText(changes, "After", 1).innerText(),
     /\+\+ alpha heading/,
   );
-  await page.keyboard.press("Enter");
+  // A line-number click selects; arrows move the selection and Left/Right switch side.
+  await diffLineNumber(changes, "Before", 1).click();
+  await changes.getByText(/Selected Before lines 1–1 · guide\.md/).waitFor();
+  await page.keyboard.press("ArrowRight");
   await changes.getByText(/Selected After lines 1–1 · guide\.md/).waitFor();
-  const afterContextLine = changes.getByRole("button", {
-    name: /^After line 3, guide\.md;/,
-  });
-  await afterContextLine.click();
+  await diffLineNumber(changes, "After", 3).click();
   await changes.getByText(/Selected After lines 3–3 · guide\.md/).waitFor();
   await page.keyboard.press("Shift+ArrowUp");
   await changes.getByText(/Selected After lines 2–3 · guide\.md/).waitFor();
-  const beforeContextLine = changes.getByRole("button", {
-    name: /^Before line 3, guide\.md;/,
-  });
-  await beforeContextLine.click();
+  assert.deepEqual(await selectedDiffLines(changes, "After"), [2, 3]);
+  await diffLineNumber(changes, "Before", 3).click();
   await changes.getByText(/Selected Before lines 3–3 · guide\.md/).waitFor();
   await page.keyboard.press("Shift+ArrowUp");
   await changes.getByText(/Selected Before lines 2–3 · guide\.md/).waitFor();
-  await afterBranchLine.click();
+  await diffLineNumber(changes, "After", 1).click();
   await page.keyboard.press("Shift+ArrowDown");
   await changes.getByText(/Selected After lines 1–2 · guide\.md/).waitFor();
   await captureBrowserEvidence(page, "1366-branch-diff-anchor");
 
-  // Roving tabindex: one tab stop per diff side; arrows move within it.
-  const panels = await changes
-    .locator(".changes-diff-side")
-    .evaluateAll((elements) =>
-      elements.map((element) => ({
-        stops: element.querySelectorAll(
-          'button.changes-selectable-line[tabindex="0"]',
-        ).length,
-        lines: element.querySelectorAll("button.changes-selectable-line")
-          .length,
-      })),
-    );
-  assert.equal(panels.length, 2);
-  for (const panel of panels) {
-    assert.equal(panel.stops, 1);
-    assert.ok(panel.lines > 1);
-  }
-  await afterBranchLine.focus();
-  await page.keyboard.press("Tab");
+  // The diff is one tab stop; its lines are not tab stops.
+  const keys = diffKeys(changes);
+  assert.equal(await keys.getAttribute("tabindex"), "0");
   assert.equal(
-    await page.evaluate(() => document.activeElement?.textContent),
-    "Set start",
-    "Tab leaves the After panel for the range controls",
+    await fileDiff(changes).evaluate(
+      (host) =>
+        host.shadowRoot?.querySelectorAll(
+          "pre [tabindex]:not([tabindex='-1']), pre button, pre a[href]",
+        ).length ?? -1,
+    ),
+    0,
   );
-  // The composer's focus return targets the current line of this comparison.
+  await keys.focus();
+  const tabOrder: string[] = [];
+  for (let step = 0; step < 4; step++) {
+    await page.keyboard.press("Tab");
+    tabOrder.push(
+      await page.evaluate(
+        () =>
+          document.activeElement?.getAttribute("aria-label") ??
+          document.activeElement?.textContent?.trim() ??
+          "",
+      ),
+    );
+  }
+  assert.deepEqual(
+    tabOrder,
+    ["Hide changed files", "Split", "Unified", "Set start"],
+    "Tab passes the diff header controls, then leaves for the range controls",
+  );
+  // The composer's focus return targets this comparison's diff.
   const returnTargets = await changes
     .locator("[data-review-return]")
     .evaluateAll((elements) =>
@@ -855,35 +848,28 @@ test("production Changes preserves exact repository baselines and last-good refr
   assert.deepEqual(returnTargets, [
     {
       origin: `changes:${alphaBody.data.comparisonId}`,
-      label: "After line 2, guide.md; hunk lines 1–3",
+      label:
+        "Diff of guide.md. Up and Down select a line, Shift extends, Left and Right switch side, Escape clears.",
     },
   ]);
 
-  // Phone: unified rows keep old and new numbers apart; labelled 44px Start/End
-  // controls build a range on either side without Shift.
+  // Phone: the unified diff numbers each row on its own side; labelled 44px
+  // Start/End controls build a range on either side without Shift.
   await page.setViewportSize({ width: 390, height: 844 });
-  const phoneDiff = changes.locator(".changes-diff-unified");
-  await phoneDiff.waitFor();
-  const numbers = (name: RegExp) =>
-    changes.getByRole("button", { name }).evaluate((element) => ({
-      old: element.querySelector(".changes-line-old")?.textContent,
-      next: element.querySelector(".changes-line-new")?.textContent,
-    }));
-  assert.deepEqual(await numbers(/^Before line 1, guide\.md;/), {
-    old: "1",
-    next: "",
-  });
-  assert.deepEqual(await numbers(/^After line 1, guide\.md;/), {
-    old: "",
-    next: "1",
-  });
-  assert.deepEqual(await numbers(/^After line 3, guide\.md;/), {
-    old: "3",
-    next: "3",
-  });
+  await fileDiff(changes).locator("code[data-unified]").waitFor();
   assert.equal(
-    await phoneDiff
-      .getByRole("button", { name: /^After line 3, guide\.md;/ })
+    await diffLineNumber(changes, "Before", 1).getAttribute("data-line-type"),
+    "change-deletion",
+  );
+  assert.equal(
+    await diffLineNumber(changes, "After", 1).getAttribute("data-line-type"),
+    "change-addition",
+  );
+  assert.equal(
+    await fileDiff(changes)
+      .locator(
+        'code[data-unified] [data-gutter] [data-line-type="context"][data-column-number="3"]',
+      )
       .count(),
     1,
     "an unchanged row appears once in the unified diff",
@@ -899,14 +885,10 @@ test("production Changes preserves exact repository baselines and last-good refr
         (element) => element.getBoundingClientRect().height,
       )) >= 44,
     );
-  await changes
-    .getByRole("button", { name: /^Before line 1, guide\.md;/ })
-    .click();
+  await diffLineNumber(changes, "Before", 1).click();
   await setStart.click();
   await changes.getByText("Edge fixed at line 1.", { exact: false }).waitFor();
-  await changes
-    .getByRole("button", { name: /^Before line 2, guide\.md;/ })
-    .click();
+  await diffLineNumber(changes, "Before", 2).click();
   await setEnd.click();
   await changes.getByText(/Selected Before lines 1–2 · guide\.md/).waitFor();
   await captureBrowserEvidence(page, "390-phone-before-range-controls", {
@@ -914,18 +896,14 @@ test("production Changes preserves exact repository baselines and last-good refr
   });
   // Switching side starts a new selection instead of transforming the range.
   await setStart.click();
-  await changes
-    .getByRole("button", { name: /^After line 1, guide\.md;/ })
-    .click();
+  await diffLineNumber(changes, "After", 1).click();
   await changes.getByText(/Selected After lines 1–1 · guide\.md/).waitFor();
   await setStart.click();
-  await changes
-    .getByRole("button", { name: /^After line 3, guide\.md;/ })
-    .click();
+  await diffLineNumber(changes, "After", 3).click();
   await setEnd.click();
   await changes.getByText(/Selected After lines 1–3 · guide\.md/).waitFor();
   await page.setViewportSize({ width: 1366, height: 900 });
-  await afterBranchLine.click();
+  await diffLineNumber(changes, "After", 1).click();
   await page.keyboard.press("Shift+ArrowDown");
   await changes.getByText(/Selected After lines 1–2 · guide\.md/).waitFor();
 
@@ -958,14 +936,18 @@ test("production Changes preserves exact repository baselines and last-good refr
   });
   const inspectReadingAnchor = () =>
     changes.locator(".changes-reading-area").evaluate((pane) => {
-      const line = pane.querySelector<HTMLButtonElement>(
-        "button.changes-selectable-line[aria-pressed='true']",
-      );
+      const line = pane
+        .querySelector(".changes-file-diff")
+        ?.shadowRoot?.querySelector(
+          "code[data-additions] [data-gutter] [data-selected-line]",
+        );
       const paneBounds = pane.getBoundingClientRect();
       const lineBounds = line?.getBoundingClientRect();
       return {
         scrollTop: pane.scrollTop,
-        label: line?.getAttribute("aria-label") ?? null,
+        label: line
+          ? `After line ${line.getAttribute("data-column-number")}`
+          : null,
         paneRelativeTop: lineBounds
           ? Math.round(lineBounds.top - paneBounds.top)
           : null,
@@ -988,10 +970,7 @@ test("production Changes preserves exact repository baselines and last-good refr
     beforeFailure.selection,
     new RegExp(alphaBody.data.comparisonId),
   );
-  assert.equal(
-    beforeFailure.anchor.label,
-    "After line 1, guide.md; hunk lines 1–3",
-  );
+  assert.equal(beforeFailure.anchor.label, "After line 1");
   consoleState.expected503Window = true;
   expected503WindowStartedAt = Date.now();
   const failedRefreshResponse = page.waitForResponse((response) => {
@@ -1066,7 +1045,7 @@ test("production Changes preserves exact repository baselines and last-good refr
         beforeFailure.anchor.paneRelativeTop,
     ) <= 1,
   );
-  assert.equal(await guide.count(), 1);
+  assert.equal(await changedFile(changes, "guide.md").count(), 1);
   assert.ok(controlledFailureUrl);
   assert.ok(expected503ConsoleErrors.length <= 1);
   for (const consoleError of expected503ConsoleErrors) {
@@ -1131,12 +1110,8 @@ test("production Changes preserves exact repository baselines and last-good refr
   );
   assert.equal(betaGuide?.left?.sha256?.length, 64);
   assert.equal(betaGuide?.right?.sha256?.length, 64);
-  await changes
-    .getByRole("button", { name: "modified guide.md, text", exact: true })
-    .waitFor();
-  const betaList = await changes
-    .locator('[aria-label="Workspace comparison files"]')
-    .innerText();
+  await changedFile(changes, "guide.md").waitFor();
+  const betaList = (await changedFilePaths(changes)).join("\n");
   assert.match(betaList, /beta-only\.md/);
   assert.doesNotMatch(betaList, /alpha-only\.md/);
   const alphaRequestCount = comparisonRequests.filter((request) => {
@@ -1149,9 +1124,7 @@ test("production Changes preserves exact repository baselines and last-good refr
   await page
     .getByLabel("Repository", { exact: true })
     .selectOption("repo-alpha");
-  await changes
-    .getByRole("button", { name: "modified guide.md, text", exact: true })
-    .waitFor();
+  await changedFile(changes, "guide.md").waitFor();
   assert.equal(
     await page.getByLabel("Local base branch").inputValue(),
     "base-alpha",
@@ -1171,9 +1144,7 @@ test("production Changes preserves exact repository baselines and last-good refr
     alphaRequestCount,
     "a cached return uses repo-alpha's exact response without rereading repo-beta bytes",
   );
-  const alphaList = await changes
-    .locator('[aria-label="Workspace comparison files"]')
-    .innerText();
+  const alphaList = (await changedFilePaths(changes)).join("\n");
   assert.match(alphaList, /alpha-only\.md/);
   assert.doesNotMatch(alphaList, /beta-only\.md/);
 
@@ -1346,9 +1317,10 @@ test("production Changes separates staged and unstaged snapshots and retains exp
     new RegExp(partialComparisonId),
   );
   await page.unroute(failRefreshRoute);
-  const list = changes.locator('[aria-label="Workspace comparison files"]');
-  assert.match(await list.innerText(), /staged\.txt/);
-  assert.match(await list.innerText(), /unstaged\.txt/);
+  await changedFile(changes, "unstaged.txt").waitFor();
+  const listed = (await changedFilePaths(changes)).join("\n");
+  assert.match(listed, /^staged\.txt$/m);
+  assert.match(listed, /^unstaged\.txt$/m);
 
   const stagedRead = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -1469,10 +1441,8 @@ test("production Changes separates staged and unstaged snapshots and retains exp
     "returning to cached All changes does not read newer workspace bytes",
   );
   const beforeRefresh = allBody;
-  await list.getByRole("button", { name: /modified unstaged\.txt/ }).click();
-  const afterLine = changes.getByRole("button", {
-    name: /^After line 1, unstaged\.txt;/,
-  });
+  await changedFile(changes, "unstaged.txt").click();
+  const afterLine = diffLineNumber(changes, "After", 1);
   await afterLine.waitFor();
   await afterLine.click();
   writeFileSync(
@@ -1485,14 +1455,8 @@ test("production Changes separates staged and unstaged snapshots and retains exp
       "\n",
     )}\n`,
   );
-  assert.equal(
-    await list.getByRole("button", { name: /later\.txt/ }).count(),
-    0,
-  );
-  assert.equal(
-    await list.getByRole("button", { name: /long\.txt/ }).count(),
-    0,
-  );
+  assert.equal(await changedFile(changes, "later.txt").count(), 0);
+  assert.equal(await changedFile(changes, "long.txt").count(), 0);
   const refreshedRead = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (
@@ -1524,16 +1488,14 @@ test("production Changes separates staged and unstaged snapshots and retains exp
       (entry) => entry.path === "long.txt",
     ),
   );
-  await list.getByRole("button", { name: /added later\.txt/ }).waitFor();
+  await changedFile(changes, "later.txt").waitFor();
   assert.equal(
     await changes.locator(".changes-refresh-notice").innerText(),
     "Refresh found a different comparison since you last looked: 2 added, 0 removed, 0 changed file entries.",
   );
   await changes.getByText(/Selected After lines 1–1 · unstaged\.txt/).waitFor();
-  await list.getByRole("button", { name: /added long\.txt/ }).click();
-  const longLastLine = changes.getByRole("button", {
-    name: /^After line 120, long\.txt;/,
-  });
+  await changedFile(changes, "long.txt").click();
+  const longLastLine = diffLineNumber(changes, "After", 120);
   await longLastLine.waitFor();
   const readingArea = changes.locator(".changes-reading-area");
   await readingArea.evaluate((element) => {
@@ -1542,7 +1504,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
   const longScrollBefore = await readingArea.evaluate(
     (element) => element.scrollTop,
   );
-  await longLastLine.focus();
+  await longLastLine.click();
   await page.keyboard.press("Shift+ArrowUp");
   await changes.getByText(/Selected After lines 119–120 · long\.txt/).waitFor();
   assert.ok(longScrollBefore > 0);
@@ -1557,9 +1519,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
   await comparisonTargetControl.focus();
   // Native select arrow keys differ by platform; this checks the focused control.
   await comparisonTargetControl.selectOption("uncommitted");
-  const mobileRow = list.getByRole("button", {
-    name: /modified unstaged\.txt/,
-  });
+  const mobileRow = changedFile(changes, "unstaged.txt");
   assert.equal(
     await mobileRow.evaluate(
       (element) => element.getBoundingClientRect().height,
@@ -1583,9 +1543,9 @@ test("production Changes separates staged and unstaged snapshots and retains exp
     "none",
   );
   assert.notEqual(
-    await changes
-      .locator(".changes-diff-unified")
-      .evaluate((element) => getComputedStyle(element).display),
+    await fileDiff(changes).evaluate(
+      (element) => getComputedStyle(element).display,
+    ),
     "none",
   );
   assert.ok(
