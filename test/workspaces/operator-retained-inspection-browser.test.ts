@@ -14,6 +14,15 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import {
+  changedLineTexts,
+  diffKeys,
+  diffLineNumber,
+  diffLineNumbers,
+  diffLineText,
+  fileDiff,
+  waitForDiff,
+} from "../fixtures/diff-view.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   nameLinkedRepository,
@@ -425,32 +434,21 @@ test("production retained diff evidence renders its original Before and After re
 
   // Original Before and After, not the raw workspace-diff JSON.
   assert.equal(await retained.getByText(/"version"/).count(), 0);
-  const panels = diff.locator(".changes-diff-side");
-  assert.deepEqual(await panels.locator("h6").allTextContents(), [
-    "Before",
-    "After",
+  await waitForDiff(diff);
+  assert.deepEqual(await changedLineTexts(diff, "Before"), ["line two"]);
+  assert.deepEqual(await changedLineTexts(diff, "After"), [
+    "line 2 changed",
+    "line four",
   ]);
-  assert.deepEqual(
-    await panels.nth(0).locator(".changes-line-deleted code").allTextContents(),
-    ["line two"],
-  );
-  assert.deepEqual(
-    await panels.nth(1).locator(".changes-line-added code").allTextContents(),
-    ["line 2 changed", "line four"],
-  );
-  assert.deepEqual(
-    await panels.nth(0).locator(".changes-line-number").allTextContents(),
-    ["1", "2", "3"],
-  );
+  assert.deepEqual(await diffLineNumbers(diff, "Before"), ["1", "2", "3"]);
   assert.equal(
-    await panels.nth(0).locator(".changes-line-empty").count(),
+    await fileDiff(diff)
+      .locator("code[data-deletions] [data-gutter-buffer]")
+      .count(),
     1,
     "the added line has no Before counterpart",
   );
-  assert.deepEqual(
-    await panels.nth(1).locator(".changes-line-number").allTextContents(),
-    ["1", "2", "3", "4"],
-  );
+  assert.deepEqual(await diffLineNumbers(diff, "After"), ["1", "2", "3", "4"]);
   const text = await retained.innerText();
   assert.match(text, /notes\.txt · Before 3 lines · After 4 lines/);
   // The original's repository reads by its verified name, never its ID.
@@ -466,7 +464,11 @@ test("production retained diff evidence renders its original Before and After re
   await diff
     .getByText(/Review comments cannot be added to a retained diff/)
     .waitFor();
-  assert.equal(await diff.locator("button.changes-selectable-line").count(), 0);
+  assert.equal(await diffKeys(diff).count(), 0);
+  assert.equal(
+    await fileDiff(diff).locator("pre[data-interactive-line-numbers]").count(),
+    0,
+  );
   assert.equal(
     await retained
       .getByRole("button", { name: "Add review comment", exact: true })
@@ -476,19 +478,18 @@ test("production retained diff evidence renders its original Before and After re
   await captureBrowserEvidence(page, "1366-retained-diff-split");
 
   await diff.getByRole("button", { name: "Unified", exact: true }).click();
-  const added = diff
-    .locator(".changes-diff-unified .changes-line-added")
-    .first();
-  assert.deepEqual(
-    await added.evaluate((element) => ({
-      old: element.querySelector(".changes-line-old")?.textContent,
-      next: element.querySelector(".changes-line-new")?.textContent,
-    })),
-    { old: "", next: "2" },
+  await fileDiff(diff).locator("code[data-unified]").waitFor();
+  assert.equal(
+    await diffLineText(diff, "After", 2).innerText(),
+    "line 2 changed",
+  );
+  assert.equal(
+    await diffLineNumber(diff, "After", 2).getAttribute("data-line-type"),
+    "change-addition",
   );
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await diff.locator(".changes-diff-unified").waitFor();
+  await fileDiff(diff).locator("code[data-unified]").waitFor();
   assert.ok(
     (await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth,

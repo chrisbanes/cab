@@ -12,6 +12,7 @@ import {
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { changedFile } from "../fixtures/diff-view.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 import {
   nameLinkedRepository,
@@ -1564,10 +1565,7 @@ test("Files markers follow the Changes tab's repository, base branch and refresh
   // Reading alpha in Changes marks it in Files, without a Files reload.
   await openTaskTab(page, "Changes");
   await page.getByLabel("Repository", { exact: true }).selectOption("alpha");
-  await changes
-    .getByLabel("Workspace comparison files")
-    .getByRole("button", { name: /added\.md/ })
-    .waitFor();
+  await changedFile(changes, "added.md").waitFor();
   await openTaskTab(page, "Files");
   await s
     .entry(/^added\.md/)
