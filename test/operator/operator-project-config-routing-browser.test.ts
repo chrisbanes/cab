@@ -201,7 +201,10 @@ test("Permitted agents status tracks its own saved list version", async (_t, jou
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await savedOutcome(page, /^Saved\./);
 
-  await page.goto(`/projects/${ids.relay}/settings?tab=permitted-agents`);
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Permitted agents" })
+    .click();
   await page
     .getByRole("heading", { name: "Permitted agents", exact: true })
     .waitFor();
@@ -243,6 +246,16 @@ test("routing guidance reverted or edited keeps its state after leaving the tab"
     exact: true,
   });
   const save = page.getByRole("button", { name: "Save routing", exact: true });
+  const reference = page.getByLabel("Credential reference change", {
+    exact: true,
+  });
+  await reference.selectOption({ label: "Set new environment reference" });
+  await page
+    .getByLabel("New environment reference", { exact: true })
+    .fill("env:HIDDEN_REFERENCE");
+  await reference.selectOption({ label: "Preserve current reference" });
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
   await revealButton(page, "routing guidance").click();
   await field.fill("CHANGED");
   await field.fill("PRIVATE ROUTING GUIDANCE");
@@ -368,15 +381,22 @@ test("Routing conflict keeps a revealed guidance edit until the newer version is
   });
   await guidance.fill("EDITED BEFORE A CONFLICT");
   const d = f.service.domain();
-  d.execute({
-    type: "routing.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: ids.relay,
-    expectedVersion: Number(d.routing(ids.relay).version),
-    enabled: true,
-    candidateProfileIds: [ids.profiles.Eli as string],
-  });
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Permitted agents" })
+    .click();
+  const mira = page.getByRole("checkbox", { name: /^Mira ·/ });
+  assert.equal(await mira.isChecked(), false);
+  await mira.check();
+  await page
+    .getByRole("button", { name: "Save permitted agents", exact: true })
+    .click();
+  await savedOutcome(page, /^Saved\./);
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Routing" })
+    .click();
+  await page.getByRole("heading", { name: "Routing", exact: true }).waitFor();
   await page.getByRole("button", { name: "Save routing", exact: true }).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
   assert.equal(await outcomeMessages(page).count(), 1);
@@ -393,6 +413,11 @@ test("Routing conflict keeps a revealed guidance edit until the newer version is
   const body = await sent;
   assert.equal(body.expectedVersion, newer);
   assert.equal(body.guidance, "EDITED BEFORE A CONFLICT");
+  assert.ok(
+    (body.candidateProfileIds as string[]).includes(
+      ids.profiles.Mira as string,
+    ),
+  );
   await savedOutcome(page, /^Saved\./);
   assert.equal(d.routing(ids.relay).guidance, "EDITED BEFORE A CONFLICT");
 });
@@ -403,32 +428,50 @@ test("Permitted agents conflict keeps checked profiles until the newer version i
     "/projects/:relay/settings?tab=permitted-agents",
   );
   const d = f.service.domain();
-  await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
-  d.execute({
-    type: "routing.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: ids.relay,
-    expectedVersion: Number(d.routing(ids.relay).version),
-    enabled: true,
-    candidateProfileIds: [ids.profiles.Eli as string],
+  const nora = page.getByRole("checkbox", { name: /^Nora ·/ });
+  const savePermitted = page.getByRole("button", {
+    name: "Save permitted agents",
+    exact: true,
   });
+  await nora.check();
+  await leaveAndReturn(page, "Permitted agents", "Routing");
+  assert.equal(await nora.isChecked(), true);
+  await changes(page).getByText("Agent added: Nora", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  assert.equal(await nora.isChecked(), false);
+  await noChanges(page);
+  assert.equal(await savePermitted.isDisabled(), true);
+
+  await nora.check();
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Routing" })
+    .click();
+  await revealButton(page, "routing guidance").click();
+  const guidance = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  await guidance.fill("EDITED IN ROUTING");
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  await savedOutcome(page, /^Saved\./);
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Permitted agents" })
+    .click();
+  await page
+    .getByRole("heading", { name: "Permitted agents", exact: true })
+    .waitFor();
   await page
     .getByRole("button", { name: "Save permitted agents", exact: true })
     .click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
-  assert.equal(
-    await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
-    true,
-  );
+  assert.equal(await nora.isChecked(), true);
   await refresh(page);
   await outcomeMessages(page)
     .getByRole("button", { name: "Review changes" })
     .click();
-  assert.equal(
-    await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
-    true,
-  );
+  assert.equal(await nora.isChecked(), true);
   const newer = Number(d.routing(ids.relay).version);
   const sent = commandBody(page);
   await page
@@ -480,7 +523,7 @@ test("a re-read of another writer's permitted agents retires the saved line", as
   );
 });
 
-test("another writer committing between a routing save and its re-read is not described as saved", async (_t, journey) => {
+test("another writer committing between a Permitted agents save and its re-read is not described as saved", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/projects/:relay/settings?tab=permitted-agents",
@@ -512,8 +555,22 @@ test("another writer committing between a routing save and its re-read is not de
     enabled: true,
     candidateProfileIds: [ids.profiles.Eli as string],
   });
+  const readback = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response
+        .url()
+        .endsWith(`/api/operator/projects/${ids.relay}/configuration`),
+  );
   release();
-  await page.getByRole("checkbox", { name: /^Eli ·/ }).waitFor();
+  await readback;
+  const nora = page.getByRole("checkbox", { name: /^Nora ·/ });
+  await page.waitForFunction(
+    (id) =>
+      document.getElementById(`permitted-${id}`) instanceof HTMLInputElement &&
+      !(document.getElementById(`permitted-${id}`) as HTMLInputElement).checked,
+    ids.profiles.Nora as string,
+  );
   // The form shows the other writer's version, so nothing claims it was this save.
   assert.equal(await outcomeMessages(page).count(), 0);
   assert.doesNotMatch(
@@ -523,8 +580,5 @@ test("another writer committing between a routing save and its re-read is not de
   await page
     .getByRole("button", { name: "Save permitted agents", exact: true })
     .waitFor();
-  assert.equal(
-    await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
-    false,
-  );
+  assert.equal(await nora.isChecked(), false);
 });
