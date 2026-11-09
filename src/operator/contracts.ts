@@ -222,7 +222,7 @@ const envelope = <T extends z.ZodType>(schema: T) =>
 /** What a harness enforces and its disclosed limits; null until disclosable. */
 export const policyDisclosureSchema = z
   .object({
-    lines: z.array(z.string().max(300)).max(10),
+    lines: z.array(z.string().max(300)).max(12),
     limits: z.array(z.string().max(300)).max(21),
   })
   .strict();

@@ -416,6 +416,17 @@ test("both harnesses' disclosures state the skip-sandbox grant and risks within 
     },
     "/w",
   );
+  const shared = claudePolicyDisclosure(
+    {
+      writableRoots: ["/w", "/tmp/ens-0123"],
+      sharedWriteRoots: ["/tmp/shared"],
+      network: "denied",
+      fileToolConfinement: "hook",
+      limits: [...claudePolicyLimits],
+    },
+    "/w",
+  );
+  assert.deepEqual(policyDisclosureSchema.parse(shared), shared);
   const codex = codexPolicyDisclosure();
   assert.match(
     codexSkipSandboxLine,
@@ -445,7 +456,7 @@ test("both harnesses' disclosures state local listening within the disclosure ca
   const claude = claudePolicyDisclosure(
     {
       writableRoots: ["/w", "/tmp/ens-0123"],
-      sharedWriteRoots: [],
+      sharedWriteRoots: ["/tmp/shared"],
       network: "denied",
       fileToolConfinement: "hook",
       limits: [...claudePolicyLimits],
