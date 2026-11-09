@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
+import {
+  comparisonEntryLimitSentence,
+  comparisonObservationTimes,
+  comparisonReasonSentence,
+  isWorkspaceComparisonStale,
+} from "../../web/src/inspection-changes-presentation.js";
+
+type ComparisonData = WorkspaceComparisonRead["data"];
+type Entry = Extract<
+  ComparisonData,
+  { state: "available" }
+>["comparison"]["entries"][number];
+
+const entry = (overrides: Partial<Entry>): Entry => ({
+  path: "large.txt",
+  repositoryId: "repo-alpha",
+  change: "modified",
+  state: "gap",
+  hunks: [],
+  ...overrides,
+});
+
+test("comparison reasons say what happened and offer a useful next step", () => {
+  assert.match(
+    comparisonReasonSentence("workspace-unavailable"),
+    /Not read yet: workspace was unavailable/,
+  );
+  assert.match(comparisonReasonSentence("workspace-unavailable"), /Refresh/);
+  assert.match(
+    comparisonReasonSentence("time-limit"),
+    /5-second observation budget/,
+  );
+  const output = comparisonReasonSentence("output-limit");
+  assert.match(output, /2,048-lines-per-side/);
+  assert.match(output, /1 MiB rendered-diff/);
+  assert.match(output, /does not identify/);
+  assert.equal(comparisonReasonSentence(undefined), "");
+});
+
+test("a file names exceeded limits only when its observation proves them", () => {
+  const lineLimited = comparisonEntryLimitSentence(
+    entry({
+      reason: "output-limit",
+      left: { size: 30_000, lineCount: 2_049 },
+      right: { size: 20_000, lineCount: 2_048 },
+    }),
+  );
+  assert.match(lineLimited ?? "", /large\.txt/);
+  assert.match(lineLimited ?? "", /2,048 lines on the Before side/);
+  assert.match(lineLimited ?? "", /Inspect it locally/);
+
+  const byteLimited = comparisonEntryLimitSentence(
+    entry({ reason: "too-large", left: { size: 1_048_577, lineCount: null } }),
+  );
+  assert.match(byteLimited ?? "", /1 MiB file limit on the Before side/);
+
+  const ambiguous = comparisonEntryLimitSentence(
+    entry({
+      reason: "output-limit",
+      left: { size: 300_000, lineCount: 1_000 },
+      right: { size: 300_000, lineCount: 1_000 },
+    }),
+  );
+  assert.match(ambiguous ?? "", /cannot distinguish/);
+  assert.match(ambiguous ?? "", /Inspect it locally/);
+
+  const aggregateContentLimit = comparisonEntryLimitSentence(
+    entry({ reason: "too-large", left: { size: 500_000, lineCount: null } }),
+  );
+  assert.doesNotMatch(aggregateContentLimit ?? "", /1 MiB/);
+});
+
+test("pending and finished turn observations contribute to staleness only when newer", () => {
+  const pending = {
+    state: "unsettled",
+    pending: { observedAt: 12, beforeObservedAt: 13, afterObservedAt: 15 },
+    latestFinished: { observedAt: 11 },
+  } as unknown as ComparisonData;
+  const observations = comparisonObservationTimes(pending);
+  assert.deepEqual(observations, [12, 13, 15, 11]);
+  assert.equal(isWorkspaceComparisonStale(10, observations), true);
+  assert.equal(isWorkspaceComparisonStale(15, observations), false);
+});

@@ -945,7 +945,11 @@ export function TaskFiles({
     if (!directoryResource.state.data) return;
     state.directory = directoryResource.state.data.data;
     state.directoryKey = directoryKey;
-  }, [directoryResource.state.data, directoryKey, state]);
+    if (state.directoryObservedAt !== directoryResource.state.data.observedAt) {
+      state.directoryObservedAt = directoryResource.state.data.observedAt;
+      changed();
+    }
+  }, [directoryResource.state.data, directoryKey, state, changed]);
   const directory =
     directoryResource.state.data?.data ??
     (state.directoryKey === directoryKey ? state.directory : null);

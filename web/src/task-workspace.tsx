@@ -3595,6 +3595,12 @@ function Changes({
         taskId={taskId}
         assignments={data.assignments}
         state={state.changes}
+        knownWorkspaceObservationAt={
+          Math.max(
+            state.files.directoryObservedAt ?? 0,
+            ...state.files.tabs.map((tab) => tab.observedAt ?? 0),
+          ) || null
+        }
         changed={changed}
       />
       {changes && (

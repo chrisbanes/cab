@@ -222,31 +222,6 @@ test("Close restores the inspector and Open full width keeps the selection", asy
   assert.equal(await focused(changesTab(page)), true);
 });
 
-test("a newer known workspace observation marks the fixed comparison stale", async (_t, j) => {
-  const { page } = await start(j);
-  await openPane(page);
-  await page.getByText(/^As of /).waitFor();
-  assert.equal(
-    await pane(page)
-      .getByText(/newer workspace observation or turn capture/)
-      .count(),
-    0,
-  );
-  await page.waitForTimeout(10);
-  await pane(page)
-    .getByRole("button", { name: "Refresh repositories" })
-    .click();
-  await pane(page)
-    .getByText(/newer workspace observation or turn capture/)
-    .waitFor();
-  assert.equal(
-    await pane(page)
-      .getByText(/^As of /)
-      .count(),
-    1,
-  );
-});
-
 test("the reply draft survives opening and closing the pane", async (_t, j) => {
   const { page } = await start(j);
   const draft = page.locator("section.reply-card textarea").first();

@@ -29,6 +29,7 @@ import {
   selectedDiffLines,
   waitForDiff,
 } from "../fixtures/diff-view.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 
 setFixtureGitIdentity();
@@ -337,6 +338,7 @@ test("Changes opens on the Branch comparison against the configured ref", async 
     await changes.locator(".changes-baseline").innerText(),
     `main @ ${mergeBase.slice(0, 8)}`,
   );
+  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
   const strip = await changes.locator(".changes-observation").innerText();
   assert.doesNotMatch(strip, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
   assert.doesNotMatch(strip, /[0-9a-f]{40}/);
@@ -388,6 +390,116 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   );
   await changedFile(changes, "default-ref.md").waitFor();
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
+});
+
+test("workspace-unavailable hides a stored empty snapshot and refreshes only when asked", async (_t, j) => {
+  const { page, changes, comparisonTargetControl } =
+    await startChangesJourney(j);
+  const unavailableRoute = "**/api/operator/tasks/*/comparisons*";
+  let comparisonId: string | null = null;
+  let interceptedReads = 0;
+  await page.route(unavailableRoute, async (route) => {
+    const url = new URL(route.request().url());
+    const exactRead =
+      comparisonId !== null &&
+      url.searchParams.get("comparisonId") === comparisonId;
+    const selectedRead =
+      url.searchParams.get("target") === "uncommitted" &&
+      url.searchParams.get("repositoryId") === "repo-alpha" &&
+      !url.searchParams.has("comparisonId");
+    if (!selectedRead && !exactRead) {
+      await route.continue();
+      return;
+    }
+    interceptedReads++;
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      data: {
+        state: string;
+        comparisonId?: string;
+        reason?: string;
+        comparison?: { comparisonId: string; state: string; reason?: string };
+      };
+    };
+    assert.ok(body.data.comparison);
+    if (!url.searchParams.has("comparisonId"))
+      comparisonId =
+        body.data.comparisonId ?? body.data.comparison.comparisonId;
+    body.data.state = "unavailable";
+    body.data.reason = "workspace-unavailable";
+    body.data.comparison.state = "unavailable";
+    body.data.comparison.reason = "workspace-unavailable";
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption("repo-alpha");
+  await comparisonTargetControl.selectOption("uncommitted");
+  await changes
+    .getByText(
+      "Not read yet: workspace was unavailable. Refresh to read it again.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(await changes.locator(".changes-rail").count(), 0);
+  assert.equal(await changes.getByText(/Changes · 0/).count(), 0);
+  assert.equal(await changes.getByText(/No changed files/).count(), 0);
+  assert.equal(await changes.getByText(/No current comparison/).count(), 0);
+  assert.equal(interceptedReads, 2, "read and exact-ID projection only");
+  assert.equal(
+    await changes.getByRole("button", { name: "Refresh comparison" }).count(),
+    1,
+  );
+
+  const refreshed = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.get("target") === "uncommitted" &&
+      url.searchParams.get("refresh") === "true"
+    );
+  });
+  await changes.getByRole("button", { name: "Refresh comparison" }).click();
+  assert.equal((await refreshed).status(), 200);
+  await changes
+    .getByText(
+      "Not read yet: workspace was unavailable. Refresh to read it again.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(
+    interceptedReads,
+    4,
+    "one explicit read and its exact-ID projection",
+  );
+});
+
+test("a newer Files observation marks the cached Branch snapshot stale without rereading it", async (_t, j) => {
+  const { page, changes, comparisonRequests } = await startChangesJourney(j);
+  await changes.getByText(/^As of /).waitFor();
+  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  const readsBeforeFilesObservation = comparisonRequests.length;
+  await page.route("**/api/operator/tasks/*/files*", async (route) => {
+    if (new URL(route.request().url()).pathname.match(/\/files\/[^/]+/)) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = (await response.json()) as { observedAt: number };
+    body.observedAt = Math.max(body.observedAt + 1, Date.now() + 60_000);
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await openTaskTab(page, "Files");
+  await page.getByRole("button", { name: /guide\.md/ }).click();
+  await page.getByText(/Listing observed/).waitFor();
+  await openTaskTab(page, "Changes");
+  await changes.getByText(/^Stale\./).waitFor();
+  assert.equal(comparisonRequests.length, readsBeforeFilesObservation);
 });
 
 test("Changes labels repositories by verified name, selects by ID and falls back to the ID", async (_t, j) => {
@@ -1594,6 +1706,8 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
     task,
     page,
     changes,
+    comparisonTargetControl,
+    comparisonRequests,
     consoleErrors,
     historyRace503s,
     race503Responses,
@@ -1601,6 +1715,17 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
     consoleState,
   } = await startChangesJourney(j, { recordResult: false });
   consoleState.historyRaceAllowed = true;
+  await changes.getByText(/^As of /).waitFor();
+  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  const initialBranchId = comparisonRequests
+    .map((request) => new URL(request))
+    .find(
+      (url) =>
+        url.searchParams.get("target") === "branch" &&
+        url.searchParams.has("comparisonId"),
+    )
+    ?.searchParams.get("comparisonId");
+  assert.ok(initialBranchId, "the fresh Branch comparison has an exact ID");
   const domain = fixture.service.domain();
   domain.execute({
     type: "project.configure",
@@ -1759,6 +1884,35 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   assert.equal(fixture.service.taskHold(task.taskId), undefined);
   await captureBrowserEvidence(page, "1366-pending-latest-finished");
 
+  const requestsBeforeCachedBranch = comparisonRequests.length;
+  await comparisonTargetControl.selectOption("branch");
+  await changes.getByText(/^Stale\./).waitFor();
+  assert.equal(comparisonRequests.length, requestsBeforeCachedBranch);
+  assert.equal(
+    await changes.getByText(initialBranchId, { exact: true }).count(),
+    1,
+  );
+
+  const uncommittedRead = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.get("target") === "uncommitted" &&
+      !url.searchParams.has("comparisonId")
+    );
+  });
+  await comparisonTargetControl.selectOption("uncommitted");
+  const uncommittedBody = (await (await uncommittedRead).json()) as {
+    data: { comparisonId: string; comparison: { observedAt: number } };
+  };
+  assert.ok(uncommittedBody.data.comparisonId);
+  await changes.getByText(/^As of /).waitFor();
+  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  await comparisonTargetControl.selectOption("last-turn");
+  await changes
+    .getByRole("heading", { name: "Current actual turn", exact: true })
+    .waitFor();
+
   fixture.runtime.complete(2);
   await secondAction;
   await until(
@@ -1817,6 +1971,31 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   // The finished capture adds no file entries over the previous one, so there is no change to announce.
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
   await captureBrowserEvidence(page, "1366-finished-last-turn-identity");
+
+  const requestsBeforeStaleCachedTargets = comparisonRequests.length;
+  for (const targetName of ["branch", "uncommitted"]) {
+    await comparisonTargetControl.selectOption(targetName);
+    await changes.getByText(/^Stale\./).waitFor();
+    assert.equal(comparisonRequests.length, requestsBeforeStaleCachedTargets);
+  }
+  assert.equal(
+    await changes.getByText(initialBranchId, { exact: true }).count(),
+    1,
+  );
+  const uncommittedId = comparisonRequests
+    .map((request) => new URL(request))
+    .find(
+      (url) =>
+        url.searchParams.get("target") === "uncommitted" &&
+        url.searchParams.has("comparisonId"),
+    )
+    ?.searchParams.get("comparisonId");
+  assert.ok(uncommittedId);
+  assert.equal(
+    await changes.getByText(uncommittedId, { exact: true }).count(),
+    1,
+  );
+  await comparisonTargetControl.selectOption("last-turn");
 
   // An incomplete finished capture discloses its gap instead of looking complete.
   const gapRoute = "**/api/operator/tasks/*/comparisons*";
