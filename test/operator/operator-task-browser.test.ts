@@ -1289,11 +1289,11 @@ for (const viewport of [
         .count(),
       1,
     );
-    // The occupied project limit is stated once for the whole view, on no card or row.
+    // The occupied global limit is stated once for the whole view, on no card or row.
     assert.match(
       await work.locator(".work-capacity").innerText(),
-      /^Capacity is full for .+; it rechecks as turns finish\.$/,
-      "occupied project limit preserves eligible Ready work in its real capacity queue",
+      /^Capacity is full; it rechecks as turns finish\.$/,
+      "occupied global limit preserves eligible Ready work in its real capacity queue",
     );
     assert.equal(await page.getByText(/Capacity is full/).count(), 1);
     await screenshot(page, `${viewport.width}-overview-attention-work`);
@@ -1401,8 +1401,9 @@ for (const viewport of [
       key: randomUUID(),
       actor: "operator",
       minimumLeadSlots: 0,
-      globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 1 },
+      // The five running lead turns fill a global cap of five.
+      globalLimit: 5,
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1426,7 +1427,7 @@ for (const viewport of [
       actor: "operator",
       minimumLeadSlots: 0,
       globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 10 },
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1438,8 +1439,9 @@ for (const viewport of [
       key: randomUUID(),
       actor: "operator",
       minimumLeadSlots: 0,
-      globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 1 },
+      // The five running lead turns fill a global cap of five.
+      globalLimit: 5,
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1452,7 +1454,7 @@ for (const viewport of [
       actor: "operator",
       minimumLeadSlots: 0,
       globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 10 },
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })

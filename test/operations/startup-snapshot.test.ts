@@ -763,6 +763,8 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Capacity reservations record lead and agent; lead slots and agent caps.
+  18: "3bb5f450441df390a887a1a456422d556c45cb6c7f54f97bea9153a6998f31aa",
   17: "8ba6991a76347b881e3a144d747ae5bcf16daa9a55d54560d9977640bfb5232f",
   16: "1beeceba2ba659c1f1d49fb2ec194f0b7eed75d8a70c14255a03ec497c1ecd32",
   15: "8c62eb6e45b35bd0b6de4961ebdf351f23d9e9723eaa6b9d66fcebc8c740057a",

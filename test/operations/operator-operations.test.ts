@@ -237,7 +237,8 @@ test("bearer capacity commands honour expectedCurrent; session commands without 
       minimumLeadSlots: 0,
       projectOverrides: { [s.projectId]: 1 },
       expectedCurrent: {
-        globalLimit: 4,
+        globalLimit: 6,
+        minimumLeadSlots: 1,
         projectOverrides: { [s.projectId]: null },
       },
     },
@@ -246,12 +247,12 @@ test("bearer capacity commands honour expectedCurrent; session commands without 
   const session = await s.sessionPost("/api/operator/commands", {
     type: "capacity.configure",
     key: randomUUID(),
-    globalLimit: 6,
+    globalLimit: 5,
     minimumLeadSlots: 0,
     projectOverrides: {},
   });
   assert.equal(session.status, 200);
-  assert.equal(s.f.service.domain().capacityLimits().globalLimit, 6);
+  assert.equal(s.f.service.domain().capacityLimits().globalLimit, 5);
 });
 
 test("source configure and preview receipts read back exactly, without private text", async (t) => {
