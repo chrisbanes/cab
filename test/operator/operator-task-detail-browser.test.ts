@@ -1317,7 +1317,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   assert.equal(d.project(projectId).paused, 0);
 
   // Claude token unavailable opens Add Claude.
-  await page.goto(`${web.origin}/tasks/${claudeTask}`);
+  await page.goto(`${web.origin}/tasks/${claudeTask}?section=execution`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.equal(
     await waits
@@ -1352,7 +1352,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
 
   // A revoked delegate profile is listed by its label and name, and its Fix opens that profile.
   await page.setViewportSize({ width: 1366, height: 900 });
-  await page.goto(`${web.origin}/tasks/${delegateTask}`);
+  await page.goto(`${web.origin}/tasks/${delegateTask}?section=execution`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
     "Assignment agent revoked",
