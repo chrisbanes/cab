@@ -782,7 +782,7 @@ process.exit(r.status ?? 1);
         nvmrc: await pin(join(sourceRoot, ".nvmrc")),
         packageJson: await pin(join(sourceRoot, "package.json")),
         lockfile: await pin(join(sourceRoot, "package-lock.json")),
-        packageManager: "npm@12.2.1",
+        packageManager: "npm@12.2.2",
       },
       dataDirectory: data,
       scratchParent: scratch,
