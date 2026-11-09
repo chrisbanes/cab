@@ -174,6 +174,13 @@ automated service/UI integration and bounded real-runtime validation before hand
 
 ## Assignment routing and accountability
 
+Each project has one **Permitted agents** list, editable beside the lead in
+project Settings and during project setup. It governs which agents the lead may
+delegate to whether routing is enabled or disabled. Routing chooses only from
+this same list; it has no separate candidate editor. The operator CLI prepares
+changes with `project prepare-permitted-agents --permitted-agents ID,ID|none`;
+`project prepare-routing --candidates ID,ID|none` remains a compatible alias.
+
 Routing is optional per project and part of the first standalone release. It
 requires explicit project opt-in and configured TypeSafe credentials. The service
 calls TypeSafe directly, with no PA agent turn. Supply the assignment brief,

@@ -113,6 +113,29 @@ test("nested assignments stay on the requester's task", () => {
         ready: true,
       });
     run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: "20000000-0000-4000-8000-000000000002",
+      name: "Unpermitted",
+      instructions: "Work",
+      capabilities: "code",
+    });
+    assert.throws(
+      () =>
+        run(f.domain, {
+          type: "assignment.create",
+          actor: "agent",
+          projectId: p,
+          taskId: a,
+          assignmentId: allocated,
+          profileId: "20000000-0000-4000-8000-000000000002",
+          brief: "Try to delegate",
+          resultDestination: "requester:A",
+          requesterAssignmentId: assignment,
+        }),
+      /Permitted agents in project Settings/,
+    );
+    run(f.domain, {
       type: "assignment.create",
       actor: "agent",
       projectId: p,

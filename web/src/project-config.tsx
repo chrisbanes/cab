@@ -25,6 +25,7 @@ import {
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
+import { PermittedAgentsTab } from "./permitted-agents-config.js";
 import {
   privateField,
   projectChanges,
@@ -194,6 +195,13 @@ export function ProjectConfiguration(
           </nav>
           {tab === "routing" ? (
             <RoutingTab
+              {...tabProps}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
+          ) : tab === "permitted-agents" ? (
+            <PermittedAgentsTab
               {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}

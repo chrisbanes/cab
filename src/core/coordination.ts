@@ -1288,7 +1288,9 @@ export class CoordinationStore {
         project.leadProfileId !== call.arguments.profileId &&
         !permittedProfiles.includes(call.arguments.profileId)
       )
-        throw new Error("Delegated profile is not permitted for this project");
+        throw new Error(
+          "Delegated profile is not permitted for this project. Add it in Permitted agents in project Settings.",
+        );
       const assignmentId = randomUUID();
       this.db
         .prepare(`INSERT INTO domain_assignments

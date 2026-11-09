@@ -40,6 +40,56 @@ async function setup(t: After) {
   return { s, seed, h, cli, out, d: s.f.service.domain() };
 }
 
+test("Permitted agents have a dedicated reviewed CLI command", async (t) => {
+  const { seed, cli, out, d } = await setup(t);
+  const other = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: other,
+    name: "Permitted worker",
+    instructions: "work",
+    capabilities: "build",
+  });
+  const before = d.routing(seed.projectA);
+  const file = out();
+  const prepared = await cli("ro", [
+    "project",
+    "prepare-permitted-agents",
+    seed.projectA,
+    "--permitted-agents",
+    other,
+    "--out",
+    file,
+  ]);
+  assert.equal(prepared.code, 0, prepared.err + prepared.out);
+  const document = prepared.json().data.document;
+  assert.deepEqual(
+    document.preview.changes.map((c: Json) => c.field),
+    ["candidateProfileIds"],
+  );
+  const applied = await cli("rw", ["project", "apply", "--file", file]);
+  assert.equal(applied.code, 0, applied.err + applied.out);
+  const receipt = applied.json().data.receipt;
+  assert.equal(Boolean(receipt.result.enabled), Boolean(before.enabled));
+  const journal = await cli("ro", [
+    "operation",
+    "get",
+    receipt.key,
+    "--scope",
+    `project:${seed.projectA}`,
+    "--type",
+    "routing.configure",
+  ]);
+  assert.deepEqual(journal.json().data, { state: "recorded", receipt });
+  assert.deepEqual(
+    d.routingCandidates(seed.projectA).map((r) => String(r.profileId)),
+    [other],
+  );
+  assert.equal(d.routing(seed.projectA).guidance, before.guidance);
+});
+
 test("routing changes through reviewed documents", async (t) => {
   const { s, seed, h, cli, out, d } = await setup(t);
   const other = randomUUID();

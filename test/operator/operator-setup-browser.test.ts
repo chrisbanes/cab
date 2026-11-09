@@ -71,6 +71,8 @@ test("Setup creates a paused project from discovered repositories and Projects",
   await page
     .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Mira" });
+  const permitted = page.getByRole("checkbox", { name: /^Nora ·/ });
+  await permitted.check();
   await page
     .getByLabel("Instructions", { exact: true })
     .fill("PRIVATE SETUP SENTINEL");
@@ -125,8 +127,14 @@ test("Setup creates a paused project from discovered repositories and Projects",
     projectId: string;
     repositories: unknown;
     githubProject: unknown;
+    candidateProfileIds?: string[];
   };
   assert.equal(body.type, "project.create");
+  const nora = f.service
+    .domain()
+    .profiles()
+    .find((p) => p.name === "Nora");
+  assert.ok((body.candidateProfileIds as string[]).includes(String(nora?.id)));
   assert.deepEqual(body.repositories, [
     {
       repositoryId: "R_atlas",
@@ -1696,7 +1704,7 @@ test("Setup does not open Add a repository while the project is being created or
   await page.unroute("**/api/operator/commands");
 });
 
-test("Setup freezes starter identity through an unknown committed create and grants candidates only to its inline lead", async (_t, journey) => {
+test("Setup freezes starter identity through an unknown committed create and keeps starter agents in Permitted agents", async (_t, journey) => {
   const { f, page } = await setupJourney(journey, {
     profiles: false,
     claude: true,
@@ -1738,21 +1746,41 @@ test("Setup freezes starter identity through an unknown committed create and gra
   await page.getByRole("button", { name: "Create paused project" }).click();
   await page.getByRole("region", { name: "Ready check" }).waitFor();
   const project = sent.find((c) => c.type === "project.create");
-  assert.equal(Object.hasOwn(project!, "candidateProfileIds"), false);
+  assert.equal((project!.candidateProfileIds as string[]).length, 2);
   assert.equal(
     f.service
       .domain()
       .routingCandidates(String(f.service.domain().projects()[0]?.id)).length,
-    0,
+    2,
   );
 });
 
-test("Setup omits the starter offer when profiles already exist", async (_t, journey) => {
-  const { page } = await setupJourney(journey);
+test("Setup exposes Permitted agents when profiles already exist", async (_t, journey) => {
+  const { page, f } = await setupJourney(journey);
   assert.equal(
     await page.getByRole("checkbox", { name: /Adds Implementer/ }).count(),
     0,
   );
+  const permitted = page.getByRole("checkbox", { name: /^Mira ·/ });
+  assert.equal(await permitted.count(), 1);
+  await permitted.check();
+  await page
+    .getByLabel("Project name", { exact: true })
+    .fill("Permitted setup");
+  await page
+    .getByLabel("Lead agent", { exact: true })
+    .selectOption({ label: "Jonas" });
+  const sent = sentCommands(page);
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const command = sent.find((c) => c.type === "project.create")!;
+  const mira = f.service
+    .domain()
+    .profiles()
+    .find((p) => p.name === "Mira");
+  assert.deepEqual(command.candidateProfileIds, [mira?.id]);
 });
 
 test("Setup holds checked creation for readiness, resolves both runtime labels, and refreshes a rejected alternate without losing the draft", async (_t, journey) => {

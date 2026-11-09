@@ -36,6 +36,7 @@ export interface SettingsHeader {
 }
 export const projectTabs = [
   { id: "general", label: "General" },
+  { id: "permitted-agents", label: "Permitted agents" },
   { id: "routing", label: "Routing" },
   { id: "repositories", label: "Repositories" },
   { id: "github", label: "GitHub source" },
