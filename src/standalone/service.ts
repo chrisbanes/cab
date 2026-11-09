@@ -1426,7 +1426,9 @@ export class StandaloneService {
                   reasons.push("closure-target-not-task-issue");
               }
               if (reasons.length)
-                throw new DeliveryHoldError(
+                // Mostly the request's own reviewed results or target, which the agent can correct.
+                throw new DomainPolicyError(
+                  "forbidden",
                   `Completion action held: ${reasons.join(", ")}`,
                 );
             }

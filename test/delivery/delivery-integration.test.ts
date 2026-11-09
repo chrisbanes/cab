@@ -2110,7 +2110,7 @@ test("delivery tool failures name the invalid field, the refusal category and ca
     );
     assert.match(register, /^Invalid arguments: prNumber: /);
 
-    // An untyped failure inside cab is fixed text, whatever its message.
+    // A stale head the agent sent is a refusal it can correct.
     const changed = await failed(
       await f.call("cab_register_pr", {
         repositoryId: "R1",
@@ -2119,7 +2119,23 @@ test("delivery tool failures name the invalid field, the refusal category and ca
         expectedHeadSha: "f".repeat(40),
       }),
     );
-    assert.equal(changed, deliveryInternalFailureText);
+    assert.equal(
+      changed,
+      "Refused by policy: PR registration material changed",
+    );
+    // A provider failure is fixed text that discloses nothing the provider said.
+    f.scripted.state.outage = true;
+    const outage = await failed(
+      await f.call("cab_register_pr", {
+        repositoryId: "R1",
+        prNumber: 7,
+        expectedPrNodeId: "P7",
+        expectedHeadSha: f.scripted.state.head,
+      }),
+    );
+    assert.doesNotMatch(outage, /scripted provider/);
+    assert.equal(outage, deliveryInternalFailureText);
+    f.scripted.state.outage = false;
 
     const refused = await failed(await f.threadAction(reply()));
     assert.match(refused, /denied \(delivery-authority-denied\)/);
@@ -2143,7 +2159,7 @@ test("delivery tool failures name the invalid field, the refusal category and ca
     const held = await failed(await f.threadAction(resolve("C1")));
     assert.match(
       held,
-      /Held: Task (admission is held|has unresolved external action)\. The operator must resolve the hold/,
+      /Held: Task (admission is held|has unresolved external action)\. Retry once it clears/,
     );
     assert.doesNotMatch(held, /Refused by policy/);
 
@@ -2174,6 +2190,15 @@ test("delivery failure text caps validation and never echoes values or untyped m
   );
   assert.ok(text.length <= 500);
   assert.equal(text.split("; ").length, 3);
+  const long = z
+    .object({})
+    .strict()
+    .safeParse({ ["k".repeat(2000)]: 1 });
+  assert.equal(long.success, false);
+  assert.equal(
+    deliveryToolFailureText(new DeliveryArgumentsError(long.error)).length,
+    500,
+  );
   assert.doesNotMatch(text, /ghp_secret|\/private\/path/);
   assert.equal(
     deliveryToolFailureText(new Error("token ghp_secret at /private/path")),

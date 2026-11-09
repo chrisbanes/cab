@@ -217,7 +217,7 @@ export function deliveryToolFailureText(error: unknown): string {
   if (error instanceof DeliveryApprovalRequiredError)
     return `Approval required: ${error.message}. Request approval with cab_request_approval, then retry with its approval.`;
   if (error instanceof DeliveryHoldError)
-    return `Held: ${error.message}. The operator must resolve the hold; do not retry until it clears.`;
+    return `Held: ${error.message}. Retry once it clears; the operator resolves a task hold.`;
   if (
     error instanceof DomainPolicyError ||
     error instanceof DomainConflictError
@@ -1140,7 +1140,7 @@ export class DeliveryCoordinator {
             (this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion) ||
           observation.headSha !== identity.expectedHeadSha
         )
-          throw new Error("PR registration material changed");
+          throw new DomainConflictError("PR registration material changed");
         const lead =
           this.options.leadAssignmentId?.(caller.taskId) ?? caller.assignmentId;
         if (lead !== caller.assignmentId)
