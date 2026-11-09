@@ -33,17 +33,32 @@ export function gatedInput(message) {
 export function readGrant(path) {
   const grant = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(grant.plan, PLAN);
-  assert.ok([12, 13].includes(grant.limit));
-  if (grant.limit === 13) {
+  assert.ok([12, 13, 14].includes(grant.limit));
+  if (grant.limit >= 13) {
     assert.equal(grant.allowanceRevision, "consolidated-2026-11-09");
-    assert.deepEqual(grant.harnessLimits, { claude: 7, codex: 6 });
+    assert.deepEqual(grant.harnessLimits, {
+      claude: grant.limit === 14 ? 8 : 7,
+      codex: 6,
+    });
     assert.deepEqual(grant.nativeAttemptLimits, { claude: 3, codex: 2 });
     assert.deepEqual(grant.nativeTurnLimits, { claude: 3, codex: 2 });
     assert.equal(grant.phaseWindows?.native?.durationMs, 15 * 60_000);
     assert.equal(grant.phaseWindows?.lifecycle?.durationMs, 30 * 60_000);
   }
+  if (grant.limit === 14) {
+    assert.equal(grant.claudeRecovery?.durationMs, 15 * 60_000);
+    assert.equal(grant.claudeRecovery?.turnLimit, 3);
+    assert.match(
+      grant.claudeRecovery?.stopEvidenceDigest ?? "",
+      /^[a-f0-9]{64}$/,
+    );
+    assert.deepEqual(grant.lifecycleAttemptLimits, { claude: 3, codex: 1 });
+  } else assert.equal(grant.claudeRecovery, undefined);
   if (grant.lifecycleAttemptLimits !== undefined) {
-    assert.deepEqual(grant.lifecycleAttemptLimits, { claude: 2, codex: 1 });
+    assert.deepEqual(grant.lifecycleAttemptLimits, {
+      claude: grant.limit === 14 ? 3 : 2,
+      codex: 1,
+    });
   }
   assert.equal(grant.perHarness, 6);
   assert.ok(Array.isArray(grant.turns));
@@ -59,8 +74,14 @@ export function saveGrant(path, grant) {
   renameSync(`${path}.tmp`, path);
 }
 
-function assertWindow(grant, facet, now, requireStarted = false) {
-  const phase = grant.phaseWindows?.[facet];
+export function phaseWindow(grant, harness, facet) {
+  return harness === "claude" && facet === "lifecycle" && grant.claudeRecovery
+    ? grant.claudeRecovery
+    : grant.phaseWindows?.[facet];
+}
+
+function assertWindow(grant, harness, facet, now, requireStarted = false) {
+  const phase = phaseWindow(grant, harness, facet);
   const started = phase
     ? phase.startedAt
     : (grant.liveWindowStartedAt ?? grant.startedAt);
@@ -83,7 +104,7 @@ export function assertAttemptAvailable(
 ) {
   assert.ok(["codex", "claude"].includes(harness));
   assert.ok(["native", "lifecycle"].includes(facet));
-  assertWindow(grant, facet, now);
+  assertWindow(grant, harness, facet, now);
   const limit =
     facet === "native"
       ? (grant.nativeAttemptLimits?.[harness] ??
@@ -101,14 +122,21 @@ export function beginAttempt(path, harness, facet, now = Date.now()) {
   const grant = readGrant(path);
   assertAttemptAvailable(grant, harness, facet, now);
   grant.startedAt ??= now;
-  if (grant.phaseWindows?.[facet]) grant.phaseWindows[facet].startedAt ??= now;
-  grant.attempts.push({ harness, facet, startedAt: now, state: "active" });
+  const phase = phaseWindow(grant, harness, facet);
+  if (phase) phase.startedAt ??= now;
+  grant.attempts.push({
+    harness,
+    facet,
+    startedAt: now,
+    state: "active",
+    firstTurnIndex: grant.turns.length,
+  });
   saveGrant(path, grant);
 }
 
 export function reserveTurn(path, harness, facet, now = Date.now()) {
   const grant = readGrant(path);
-  assertWindow(grant, facet, now, true);
+  assertWindow(grant, harness, facet, now, true);
   assert.ok(
     grant.attempts.some(
       (a) => a.harness === harness && a.facet === facet && a.state === "active",
@@ -121,8 +149,28 @@ export function reserveTurn(path, harness, facet, now = Date.now()) {
       (grant.harnessLimits?.[harness] ?? grant.perHarness),
     "Harness turn cap exhausted",
   );
+  const recovery =
+    harness === "claude" && facet === "lifecycle" && grant.claudeRecovery;
+  if (recovery) {
+    const attempt = grant.attempts.findLast(
+      (a) => a.harness === harness && a.facet === facet && a.state === "active",
+    );
+    assert.ok(
+      Number.isSafeInteger(attempt.firstTurnIndex) &&
+        attempt.firstTurnIndex >= 0 &&
+        attempt.firstTurnIndex <= grant.turns.length,
+    );
+    assert.ok(
+      grant.turns.length - attempt.firstTurnIndex < recovery.turnLimit,
+      "Recovery attempt turn cap exhausted",
+    );
+  }
   const facetLimit =
-    facet === "native" ? (grant.nativeTurnLimits?.[harness] ?? 2) : 4;
+    facet === "native"
+      ? (grant.nativeTurnLimits?.[harness] ?? 2)
+      : recovery
+        ? 5
+        : 4;
   assert.ok(
     grant.turns.filter((t) => t.harness === harness && t.facet === facet)
       .length < facetLimit,

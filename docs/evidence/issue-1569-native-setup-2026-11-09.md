@@ -1,9 +1,10 @@
 # Native harness setup, 9 November 2026
 
 The native configuration prerequisites for [#1569](https://github.com/chrisbanes/cab/issues/1569)
-passed on both installed harnesses. Integrated Codex Stop and recovery passed.
-Claude Stop passed, but its coordinated recovery journey remains unqualified after
-two failed attempts. This is partial evidence, not delivery or deployment approval.
+passed on both installed harnesses. Integrated Stop and explicit recovery are now
+qualified for both: Claude's third lifecycle attempt passed three fresh recovery
+turns, reusing the verified Stop proof from attempt 2. Both earlier failures remain
+recorded. This is bounded qualification, not deployment approval.
 
 The [approved plan](https://github.com/chrisbanes/cab/issues/1569#issuecomment-6720804732)
 uses the service user's native authentication, instructions and extensions while
@@ -24,6 +25,7 @@ private; they are not part of this evidence export.
 | Codex integrated recovery | Passed | Completed seed, interrupted follow-up, retained crash ownership and explicit recovery on the same conversation. Both result callbacks ended successfully. |
 | Claude lifecycle attempt 1 | Failed before model dispatch | Cab required an optional account metadata field omitted by the installed CLI. No model slot was used. The field is now optional; positive first-party subscription metadata is still required. The real production preflight passed after repair without a model prompt. |
 | Claude lifecycle attempt 2 | Partial: Stop passed, seed failed | Stop retained all holds and no resubmission. The seed's native terminal completed, but cab held the work after an unexpected permission request for `mcp__cab__cab_report_result`; no cab result callback ran. The failed seed does not qualify a completed coordinated turn. |
+| Claude lifecycle attempt 3 | Passed | Completed coordinated seed, interrupted follow-up and explicit recovery on the same native conversation; two ended successful cab callbacks. Reused the exact verified Stop evidence from attempt 2, without refunding either earlier slot. |
 | Owned-process cleanup | Passed for recorded identities | Every recorded process in the lifecycle evidence was verified exited. Personal configuration, unrelated sessions and old cab homes were retained. |
 
 Installed versions were Node `26.13.0`, npm `12.2.1`, Codex `0.166.0`, Claude Code
@@ -31,7 +33,7 @@ Installed versions were Node `26.13.0`, npm `12.2.1`, Codex `0.166.0`, Claude Co
 service environment. They do not qualify launchd, other platforms or arbitrary
 inherited extension effects.
 
-## Corrections and remaining proof
+## Corrections and completed proof
 
 The second Claude failure exposed an invalid `mcp__*` allow rule. Claude's
 [permission contract](https://code.claude.com/docs/en/agent-sdk/permissions)
@@ -43,21 +45,22 @@ before a prompt. This closes an accepted-payload ambiguity found during review;
 normal startup producing duplicate entries was not observed. Trusted non-cab MCP tools receive a
 [PreToolUse approval](https://code.claude.com/docs/en/agent-sdk/hooks).
 Native deny/ask rules and the unexpected-permission rejection remain effective.
-The repair passes deterministic runtime/service checks; it has not passed a new
-live coordinated Claude turn.
+The repair passed deterministic checks and the production Claude recovery journey.
+The successful seed and explicit continuation both ended their bound cab result
+callbacks. The interrupted follow-up retained writer, capacity and uncertainty
+holds across restart; recovery alone submitted no model turn, and the explicit
+continuation resumed the same conversation. All four recorded owned process
+identities were verified exited.
 
-The retained ledger counts 11 of 13 slots, including the earlier quota-rejected
-request and failed seed. Codex used its six slots; Claude used five of seven.
-Both approved Claude lifecycle attempts are consumed. The lifecycle window ended
-at 08:52:14 Europe/London on 9 November. No extra attempt or renewed window was
-inferred.
-
-Reusing the valid Stop observation leaves three new Claude turns to prove:
-completed coordinated seed, interrupted follow-up and explicit recovery. Only
-two slots remain. Continuing therefore needs a separate approval for one more
-slot, a third Claude lifecycle attempt of at most three turns and a new bounded
-window. All prior attempts, reservations and deadlines must remain recorded.
-The four-minute turn cap and prohibition on provider/model/billing fallback remain.
+The user approved one third Claude lifecycle attempt with three fresh turns in a
+new 15-minute window from dispatch. The window began at 10:00:41 Europe/London
+and the attempt finished within it; the four-minute turn cap was unchanged.
+The retained ledger counts 14 of 14 slots: Claude eight, Codex six, including the
+earlier quota-rejected request and failed seed. The original expired windows and
+every failed attempt remain recorded. Stop was reused only after its exact
+retained evidence digest, observed terminal, ownership holds, no resubmission
+and verified cleanup passed validation. No further live attempt is authorised,
+and no provider, model or API billing fallback was used.
 
 ## Automated coverage and delivery gates
 
@@ -81,8 +84,9 @@ with fresh metadata: 5,796 tests registered, 5,744 passed, 52 skipped and zero
 failures. This includes static checks, the service build and Chromium coverage;
 WebKit was not run on macOS. Independent code review accepted the repaired
 candidate after checking the runner import and unambiguous MCP admission. The
-remaining delivery gates are Claude's live coordinated recovery proof and
-final-head CI after publication.
+production implementation is unchanged by the final qualification-driver amendment;
+its 11 contract checks also pass, including the exact recovery cap and retained
+Stop evidence checks. Final-head CI remains required after publication.
 
 The [operations guide](../operations/standalone-macos.md) retains backup and
 rollback steps for a separately approved service switch. No installed service,

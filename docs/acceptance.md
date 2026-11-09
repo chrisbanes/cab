@@ -595,7 +595,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   exact process/callback evidence and final-head checks/review. This does not qualify
   arbitrary extension side effects or authorise switching the installed service.
   [Native setup evidence](evidence/issue-1569-native-setup-2026-11-09.md) records
-  the passing Codex lifecycle, Claude Stop and remaining Claude recovery proof.
+  passing native start/resume, Stop and explicit recovery for both harnesses,
+  including retained failures and Claude's separately approved recovery attempt.
 
 ### Execution control, recovery and access
 

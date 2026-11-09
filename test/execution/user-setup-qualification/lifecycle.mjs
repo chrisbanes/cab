@@ -7,6 +7,7 @@ import {
   assertAttemptAvailable,
   beginAttempt,
   readGrant,
+  phaseWindow,
   reserveTurn,
   saveGrant,
   TURN_MS,
@@ -26,7 +27,40 @@ const complete =
 const sleep =
   "This is a disposable native harness qualification. Use the ordinary sandboxed shell tool to run /bin/sleep 120 synchronously. Do not use background execution, subagents, external integrations or other commands. The operator will interrupt it. Do not call cab_report_result before the command ends.";
 
-/** One fixed four-turn lifecycle, using production service/runtime and the retained grant. */
+/** Reuse only the approved, unchanged Stop proof; never count a failed seed as completed. */
+export function retainedClaudeStop(grant) {
+  const path = join(
+    grant.root,
+    "lifecycle",
+    "claude-attempt2",
+    "evidence.json",
+  );
+  const bytes = readFileSync(path);
+  assert.equal(
+    createHash("sha256").update(bytes).digest("hex"),
+    grant.claudeRecovery.stopEvidenceDigest,
+  );
+  const prior = JSON.parse(bytes);
+  assert.equal(prior.harness, "claude");
+  assert.equal(prior.checks.stop.outcome.terminal, "observed");
+  assert.equal(prior.checks.stop.noResubmission, true);
+  assert.ok(prior.checks.stop.held.length > 0);
+  assert.ok(
+    prior.checks.stop.held.every(
+      (h) => h.writer && h.capacity && h.uncertainty && h.stop,
+    ),
+  );
+  assert.ok(
+    prior.cleanup.length > 0 && prior.cleanup.every((c) => c.exited === true),
+  );
+  return {
+    ...prior.checks.stop,
+    reusedFrom: "lifecycle/claude-attempt2/evidence.json",
+    evidenceSha256: grant.claudeRecovery.stopEvidenceDigest,
+  };
+}
+
+/** Bounded lifecycle using production service/runtime and the retained grant. */
 export async function lifecycle(path, harnesses = ["claude", "codex"]) {
   const { StandaloneService } = await import(
     "../../../dist/src/standalone/service.js"
@@ -110,6 +144,11 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
       "Both native proofs are required",
     );
     assertAttemptAvailable(grant, harness, "lifecycle");
+    const reusedStop =
+      harness === "claude" && grant.claudeRecovery
+        ? retainedClaudeStop(grant)
+        : undefined;
+    const stopTurns = reusedStop ? 0 : 1;
     const previous = grant.attempts.filter(
       (a) => a.harness === harness && a.facet === "lifecycle",
     );
@@ -305,7 +344,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
       });
     }
     beginAttempt(path, harness, "lifecycle");
-    const phase = readGrant(path).phaseWindows.lifecycle;
+    const phase = phaseWindow(readGrant(path), harness, "lifecycle");
     const phaseDeadline = phase.startedAt + phase.durationMs;
     let phaseExpired = false;
     const phaseTimer = setTimeout(
@@ -349,50 +388,57 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         expectedVersion: 1,
         paused: false,
       });
-      const stopTask = await newTask(projectId, "Native Stop", sleep);
-      const stopRecord = await running(stopTask);
-      retainIdentity(stopRecord.processIdentity);
-      const stopChildren = await descendants(stopRecord.processIdentity);
-      stopChildren.forEach(retainIdentity);
-      const beforeStop = evidence.turns.length;
-      const stopped = await service.stopTask(stopTask);
-      const outcome = stopped.outcomes.find(
-        (o) => o.workId === stopRecord.workId,
-      );
-      assert.ok(
-        outcome?.terminal === "observed" ||
-          records(stopTask).some(
-            (r) => r.intent.state === "held" && r.holds.writer,
-          ),
-        "Stop must observe terminal or retain ownership",
-      );
-      await until(
-        () => pendingCallbacks === 0,
-        Date.now() + 5000,
-        "ended Stop callbacks",
-      );
-      // Runtime-owned tool processes must end; retained identities never authorise signalling a reused PID.
-      for (const identity of stopChildren) {
-        if (await gone(identity)) continue;
-        const command = execFileSync(
-          "/bin/ps",
-          ["-p", identity.processId, "-o", "comm="],
-          { encoding: "utf8" },
-        ).trim();
-        if (command.endsWith("/sleep") || command === "sleep")
-          await end(identity);
+      if (reusedStop) evidence.checks.stop = reusedStop;
+      else {
+        const stopTask = await newTask(projectId, "Native Stop", sleep);
+        const stopRecord = await running(stopTask);
+        retainIdentity(stopRecord.processIdentity);
+        const stopChildren = await descendants(stopRecord.processIdentity);
+        stopChildren.forEach(retainIdentity);
+        const beforeStop = evidence.turns.length;
+        const stopped = await service.stopTask(stopTask);
+        const outcome = stopped.outcomes.find(
+          (o) => o.workId === stopRecord.workId,
+        );
+        assert.ok(
+          outcome?.terminal === "observed" ||
+            records(stopTask).some(
+              (r) => r.intent.state === "held" && r.holds.writer,
+            ),
+          "Stop must observe terminal or retain ownership",
+        );
+        await until(
+          () => pendingCallbacks === 0,
+          Date.now() + 5000,
+          "ended Stop callbacks",
+        );
+        // Runtime-owned tool processes must end; retained identities never authorise signalling a reused PID.
+        for (const identity of stopChildren) {
+          if (await gone(identity)) continue;
+          const command = execFileSync(
+            "/bin/ps",
+            ["-p", identity.processId, "-o", "comm="],
+            { encoding: "utf8" },
+          ).trim();
+          if (command.endsWith("/sleep") || command === "sleep")
+            await end(identity);
+        }
+        await delay(1000);
+        assert.equal(
+          evidence.turns.length,
+          beforeStop,
+          "Stop must not resubmit",
+        );
+        evidence.checks.stop = {
+          outcome,
+          held: records(stopTask).map((r) => r.holds),
+          noResubmission: true,
+        };
       }
-      await delay(1000);
-      assert.equal(evidence.turns.length, beforeStop, "Stop must not resubmit");
-      evidence.checks.stop = {
-        outcome,
-        held: records(stopTask).map((r) => r.holds),
-        noResubmission: true,
-      };
       const taskId = await newTask(projectId, "Native recovery", complete);
       const seed = await completed(taskId);
       retainIdentity(seed.processIdentity);
-      assert.equal(evidence.turns.length, 2);
+      assert.equal(evidence.turns.length, stopTurns + 1);
       assert.ok(
         evidence.callbacks.some(
           (c) =>
@@ -434,7 +480,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
       await delay(1000);
       assert.equal(
         evidence.turns.length,
-        3,
+        stopTurns + 2,
         "Restart must not resubmit held work",
       );
       await until(
@@ -460,7 +506,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
       });
       assert.equal(
         evidence.turns.length,
-        3,
+        stopTurns + 2,
         "Recovery alone must not submit a model turn",
       );
       await followUp(taskId, held, complete);
@@ -480,7 +526,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         seed.intent.threadId,
         "Recover the last completed native conversation",
       );
-      assert.equal(evidence.turns.length, 4);
+      assert.equal(evidence.turns.length, stopTurns + 3);
       assert.equal(pendingCallbacks, 0);
       assert.ok(
         evidence.callbacks.some(

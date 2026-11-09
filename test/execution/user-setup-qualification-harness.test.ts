@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdtempSync,
   readFileSync,
@@ -13,6 +14,133 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "../fixtures/temp.js";
+
+test("the approved Claude recovery adds only three turns and a separate finite window, preserving all history", async (t) => {
+  const {
+    PLAN,
+    saveGrant,
+    readGrant,
+    assertAttemptAvailable,
+    beginAttempt,
+    reserveTurn,
+  } = await import(
+    pathToFileURL(resolve("test/execution/user-setup-qualification/grant.mjs"))
+      .href
+  );
+  const root = mkdtempSync(join(tmpdir(), "cab-user-setup-recovery-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "grant.json");
+  const turns = [
+    ...Array.from({ length: 3 }, () => ({
+      harness: "claude",
+      facet: "native",
+    })),
+    ...Array.from({ length: 6 }, () => ({
+      harness: "codex",
+      facet: "lifecycle",
+    })),
+    ...Array.from({ length: 2 }, () => ({
+      harness: "claude",
+      facet: "lifecycle",
+    })),
+  ];
+  const grant = {
+    plan: PLAN,
+    root,
+    limit: 14,
+    perHarness: 6,
+    allowanceRevision: "consolidated-2026-11-09",
+    harnessLimits: { claude: 8, codex: 6 },
+    nativeAttemptLimits: { claude: 3, codex: 2 },
+    nativeTurnLimits: { claude: 3, codex: 2 },
+    lifecycleAttemptLimits: { claude: 3, codex: 1 },
+    phaseWindows: {
+      native: { startedAt: 1, durationMs: 15 * 60_000 },
+      lifecycle: { startedAt: 1, durationMs: 30 * 60_000 },
+    },
+    claudeRecovery: {
+      durationMs: 15 * 60_000,
+      turnLimit: 3,
+      stopEvidenceDigest: "a".repeat(64),
+    },
+    attempts: [
+      { harness: "claude", facet: "lifecycle", state: "failed" },
+      { harness: "claude", facet: "lifecycle", state: "failed" },
+    ],
+    turns,
+  };
+  saveGrant(path, grant);
+  const now = 10_000_000;
+  assert.throws(() => reserveTurn(path, "claude", "lifecycle", now), /expired/);
+  assert.throws(
+    () => assertAttemptAvailable(readGrant(path), "codex", "lifecycle", now),
+    /expired/,
+  );
+  beginAttempt(path, "claude", "lifecycle", now);
+  assert.equal(readGrant(path).claudeRecovery.startedAt, now);
+  assert.equal(readGrant(path).phaseWindows.lifecycle.startedAt, 1);
+  assert.throws(
+    () => beginAttempt(path, "claude", "lifecycle", now + 1),
+    /consumed/,
+  );
+  assert.throws(
+    () => reserveTurn(path, "claude", "lifecycle", now + 15 * 60_000),
+    /expired/,
+  );
+  for (let i = 1; i <= 3; i++)
+    reserveTurn(path, "claude", "lifecycle", now + i);
+  assert.equal(readGrant(path).turns.length, 14);
+  assert.deepEqual(readGrant(path).turns.slice(0, 11), turns);
+  assert.deepEqual(readGrant(path).attempts.slice(0, 2), grant.attempts);
+  assert.throws(
+    () => reserveTurn(path, "claude", "lifecycle", now + 4),
+    /cap exhausted/,
+  );
+});
+
+test("reusing Claude Stop requires the exact retained observed proof and verified cleanup", async (t) => {
+  const { retainedClaudeStop } = await import(
+    pathToFileURL(
+      resolve("test/execution/user-setup-qualification/lifecycle.mjs"),
+    ).href
+  );
+  const root = mkdtempSync(join(tmpdir(), "cab-user-setup-retained-stop-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "lifecycle", "claude-attempt2", "evidence.json");
+  mkdirSync(join(root, "lifecycle", "claude-attempt2"), { recursive: true });
+  const proof = {
+    harness: "claude",
+    checks: {
+      stop: {
+        outcome: { terminal: "observed" },
+        noResubmission: true,
+        held: [{ writer: true, capacity: true, uncertainty: true, stop: true }],
+      },
+    },
+    cleanup: [{ exited: true }],
+  };
+  const bytes = JSON.stringify(proof);
+  const grant = {
+    root,
+    claudeRecovery: {
+      stopEvidenceDigest: createHash("sha256").update(bytes).digest("hex"),
+    },
+  };
+  writeFileSync(path, bytes);
+  assert.equal(
+    retainedClaudeStop(grant).evidenceSha256,
+    grant.claudeRecovery.stopEvidenceDigest,
+  );
+  writeFileSync(path, `${bytes} `);
+  assert.throws(() => retainedClaudeStop(grant));
+  proof.cleanup[0]!.exited = false;
+  const invalid = JSON.stringify(proof);
+  writeFileSync(path, invalid);
+  grant.claudeRecovery.stopEvidenceDigest = createHash("sha256")
+    .update(invalid)
+    .digest("hex");
+  assert.throws(() => retainedClaudeStop(grant));
+});
 
 test("native-setup qualification persists caps and refuses repeated attempts after reopen", async (t) => {
   const { beginAttempt, PLAN, readGrant, reserveTurn, saveGrant } =
