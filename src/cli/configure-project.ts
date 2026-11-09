@@ -189,7 +189,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             "Reasoning summaries require enhanced diagnostic capture.",
           );
         const currentReasoning = config.data.reasoningSummaries;
-        const nextReasoning = capture === "baseline" ? false : reasoning;
+        const nextReasoning =
+          capture === "baseline" && currentReasoning !== undefined
+            ? false
+            : reasoning;
         if (nextReasoning !== undefined && nextReasoning !== currentReasoning) {
           if (currentReasoning === undefined) gaps.push("content-unavailable");
           command.reasoningSummaries = nextReasoning;

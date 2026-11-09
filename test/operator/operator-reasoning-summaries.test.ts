@@ -197,3 +197,91 @@ test("project CLI parses reasoning summaries, reports it and previews baseline r
   assert.equal(r.code, 0, r.out + r.err);
   assert.equal(s.f.service.domain().reasoningSummaries(s.projectId), false);
 });
+
+test("baseline CLI changes omit implicit reasoning on a legacy service but preserve explicit options", async (t) => {
+  const s = await startCliService(t);
+  const token = await s.issue("read-write", "legacy-reasoning-cli");
+  const commands: Record<string, unknown>[] = [];
+  const h = harness(t, {
+    fetch: async (input, init) => {
+      if (
+        String(input).endsWith("/api/operator/commands") &&
+        init?.method === "POST"
+      ) {
+        const command = JSON.parse(String(init.body)) as Record<
+          string,
+          unknown
+        >;
+        commands.push(command);
+        if ("reasoningSummaries" in command)
+          return Response.json(
+            {
+              error: {
+                code: "invalid-input",
+                message: "Unknown reasoningSummaries field",
+              },
+            },
+            { status: 400 },
+          );
+      }
+      const response = await fetch(input, init);
+      if (String(input).endsWith(`/projects/${s.projectId}/configuration`)) {
+        const body = (await response.json()) as {
+          data: { reasoningSummaries?: boolean };
+        };
+        delete body.data.reasoningSummaries;
+        return Response.json(body, { status: response.status });
+      }
+      return response;
+    },
+  });
+  const cli = (...args: string[]) => h.run([...args, "--connection", "legacy"]);
+  const login = await cli(
+    "auth",
+    "login",
+    "--url",
+    s.origin,
+    "--token-file",
+    h.tokenFile(token.token),
+  );
+  assert.equal(login.code, 0, login.err);
+  const out = join(h.dir, "legacy-baseline.json");
+  const prepared = await cli(
+    "project",
+    "prepare",
+    s.projectId,
+    "--diagnostic-capture",
+    "baseline",
+    "--out",
+    out,
+  );
+  assert.equal(prepared.code, 0, prepared.err);
+  const doc = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal("reasoningSummaries" in doc.command, false);
+  assert.deepEqual(doc.preview.changes, [
+    { field: "diagnosticCapture", from: "enhanced", to: "baseline" },
+  ]);
+  const applied = await cli("project", "apply", "--file", out);
+  assert.equal(applied.code, 0, applied.err);
+  assert.equal(commands.length, 1);
+  assert.equal("reasoningSummaries" in commands[0]!, false);
+  assert.equal(
+    s.f.service.domain().diagnosticCaptureMode(s.projectId),
+    "baseline",
+  );
+  const explicit = join(h.dir, "explicit-reasoning.json");
+  const opted = await cli(
+    "project",
+    "prepare",
+    s.projectId,
+    "--reasoning-summaries",
+    "false",
+    "--out",
+    explicit,
+  );
+  assert.equal(opted.code, 0, opted.err);
+  assert.equal(
+    JSON.parse(readFileSync(explicit, "utf8")).command.reasoningSummaries,
+    false,
+  );
+});
