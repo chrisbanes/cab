@@ -1068,8 +1068,21 @@ test("Runtime Settings records lowered capacity separately from usage and retain
   );
   await override.uncheck();
   await page.getByLabel("Global active-turn cap", { exact: true }).fill("1");
+  // An empty lead-slot field is refused, not saved as zero.
+  const leadSlots = page.getByLabel("Minimum lead slots", { exact: true });
+  await leadSlots.fill("");
+  await page
+    .getByRole("button", { name: "Save capacity", exact: true })
+    .click();
+  await page
+    .getByText(
+      "Enter a whole number of 0 or more, below the global active-turn cap.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(f.service.capacityLimits().globalLimit, 6);
   // Held lead slots must stay below the global cap.
-  await page.getByLabel("Minimum lead slots", { exact: true }).fill("0");
+  await leadSlots.fill("0");
   await page
     .getByRole("button", { name: "Save capacity", exact: true })
     .click();

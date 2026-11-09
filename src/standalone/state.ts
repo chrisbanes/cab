@@ -5314,13 +5314,12 @@ export class ExecutionState {
       lead: number;
       agentId: string | null;
     };
-    const config = this.db
+    // The singleton row is seeded with the store and never deleted.
+    const { globalLimit, minimumLeadSlots } = this.db
       .prepare(
         "SELECT globalLimit, minimumLeadSlots FROM scheduler_capacity_limits WHERE singleton = 1",
       )
-      .get() as { globalLimit: number; minimumLeadSlots: number } | undefined;
-    const globalLimit = config?.globalLimit ?? 6;
-    const minimumLeadSlots = config?.minimumLeadSlots ?? 0;
+      .get() as { globalLimit: number; minimumLeadSlots: number };
     const usage = this.db
       .prepare(
         `SELECT COUNT(*) AS total, COALESCE(SUM(lead), 0) AS lead,

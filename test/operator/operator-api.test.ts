@@ -3692,6 +3692,25 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
     (await api.readComposerOptions(enabled.projectId)).data.waits,
     [],
   );
+  // A waiting turn's recorded reason names its limit exactly, over the usage estimate.
+  const agentHeld = task(enabled.projectId);
+  await until(() =>
+    f.service.turnRequestsForTask(agentHeld).some((r) => r.state === "queued"),
+  );
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE turn_requests SET reason = 'Capacity waiting: agent active-turn limit (1)' WHERE taskId = ? AND state = 'queued'",
+      )
+      .run(agentHeld),
+  );
+  assert.deepEqual((await api.readTask(agentHeld)).data.waits, [
+    {
+      code: "capacity",
+      fix: null,
+      links: [{ kind: "tasks-running", label: "Agent active-turn limit (1)" }],
+    },
+  ]);
   // Without power supervision no read derives a power wait.
   assert.equal(f.service.powerStatus(), null);
 });
