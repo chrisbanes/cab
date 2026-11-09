@@ -264,7 +264,7 @@ export function executionFacts(
     delivery: !delivery
       ? "Delivery not recorded"
       : binding
-        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}`
+        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}${delivery.unregisteredPr ? ` · ${delivery.unregisteredPr}` : ""}`
         : (delivery.unregisteredPr ??
           `${deliveryModes[delivery.mode]} · no PR yet`),
   };

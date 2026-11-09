@@ -630,29 +630,31 @@ export class DeliveryCoordinator {
             }),
           ];
           for (const candidate of candidates) {
-            const observed = await this.provider(
-              caller.projectId,
-              target,
-              policy,
-            ).inspectPr(
-              {
-                repositoryId: target,
-                prNumber: candidate.number,
-                expectedPrNodeId: candidate.nodeId,
-                expectedHeadSha: action.target.expectedHeadSha,
-                ...(bound ? { recordedBaseRef: bound.acceptedBaseRef } : {}),
-              },
-              policy,
+            const observed = await this.bounded(
+              caller,
+              this.provider(caller.projectId, target, policy).inspectPr(
+                {
+                  repositoryId: target,
+                  prNumber: candidate.number,
+                  expectedPrNodeId: candidate.nodeId,
+                  expectedHeadSha: action.target.expectedHeadSha,
+                  ...(bound ? { recordedBaseRef: bound.acceptedBaseRef } : {}),
+                },
+                policy,
+              ),
             );
             if (
               observed.repositoryId !== target ||
               observed.nodeId !== candidate.nodeId ||
-              observed.number !== candidate.number ||
+              observed.number !== candidate.number
+            )
+              throw new Error("Existing PR identity changed");
+            if (observed.state !== "OPEN") continue;
+            if (
               observed.headRef !== action.target.headRef ||
               observed.headSha !== action.target.expectedHeadSha
             )
               throw new Error("Existing PR identity changed");
-            if (observed.state !== "OPEN") continue;
             if (observed.baseRef !== action.target.baseRef)
               throw new Error("Existing PR base changed");
             reused = observed;
@@ -1300,7 +1302,7 @@ export class DeliveryCoordinator {
           repositoryId: action.target.repositoryId,
           prNumber: receipt.number,
           expectedPrNodeId: receipt.nodeId,
-          expectedHeadSha: action.target.expectedHeadSha,
+          expectedHeadSha: receipt.headSha ?? action.target.expectedHeadSha,
         },
         record.binding,
       );

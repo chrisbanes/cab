@@ -138,6 +138,40 @@ test("delivery get retains the exact created PR and registration step without a 
   ]);
   assert.match(human.out, /Pull request: +Created PR #7/);
   assert.match(human.out, /register PR #7 with cab_register_pr/);
+
+  await w.f.register();
+  assert.equal((await w.task()).delivery.unregisteredPr, null);
+  const original = store.action(operationId),
+    otherId = randomUUID();
+  store.prepareAction(
+    { ...original.request, operationId: otherId },
+    original.binding,
+    false,
+  );
+  store.beginAttempt(otherId, {});
+  store.recordObservation(otherId, {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "P8", number: 8, headSha: "b".repeat(40) },
+  });
+  const withBound = await w.ok("ro", ["delivery", "get", w.f.taskId]);
+  assert.equal(withBound.data.delivery.binding.number, 7);
+  assert.match(
+    withBound.data.delivery.unregisteredPr,
+    /Created PR #8.*node P8, head b{40}.*register PR #8/,
+  );
+  const both = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(both.out, /Pull request: +org\/repo#7 OPEN/);
+  assert.match(
+    both.out,
+    /Unregistered pull request: +Created PR #8.*register PR #8/,
+  );
 });
 
 test("delivery get prints the status-mapping authority line, naming the Project by ID", async (t) => {

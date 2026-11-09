@@ -3194,19 +3194,24 @@ export class DeliveryStore {
       : binding;
   }
   unregisteredPr(taskId: string): string | null {
-    if (this.delivery(taskId)) return null;
+    const bound = this.delivery(taskId)?.observation;
     const created = this.actions(taskId)
       .reverse()
       .find(
         (a) =>
           a.state === "confirmed-success" &&
           a.request.action.kind === "pr.create" &&
-          a.observation?.receipt?.number,
+          a.observation?.receipt?.number &&
+          !(
+            a.request.action.target.repositoryId === bound?.repositoryId &&
+            a.observation.receipt.number === bound.number &&
+            a.observation.receipt.nodeId === bound.nodeId
+          ),
       );
     if (!created) return null;
     const receipt = created.observation!.receipt!;
     const target = created.request.action.target;
-    return `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${"expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""}); register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
+    return `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${receipt.headSha ? `, head ${receipt.headSha}` : "expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""}); register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
   }
   publicTask(taskId: string) {
     const task = this.db

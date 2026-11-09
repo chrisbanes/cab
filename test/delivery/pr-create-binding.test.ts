@@ -147,6 +147,7 @@ function fixture(host: "github" | "gitlab" = "github") {
   return {
     db,
     store,
+    provider,
     coordinator,
     caller,
     lead,
@@ -341,5 +342,70 @@ test("reuse refuses a moved head or base and rechecks authority after inspection
     assert.equal(f.writes(), 1);
   } finally {
     await f.close();
+  }
+});
+
+test("a closed PR at an earlier head does not prevent a new create on the advanced branch", async () => {
+  const f = fixture();
+  try {
+    await f.coordinator.submit(f.request(), f.caller);
+    const closed = {
+      ...f.store.delivery(f.taskId)!.observation,
+      state: "CLOSED" as const,
+    };
+    f.provider.inspectPr = async () => closed;
+    f.setPr({ number: 8, nodeId: "P8", headSha: "c".repeat(40) });
+    f.db
+      .prepare(
+        "UPDATE delivery_task_branches SET lastPushedSha=? WHERE taskId=?",
+      )
+      .run("c".repeat(40), f.taskId);
+    const result = await f.coordinator.submit(f.request(), f.caller);
+    assert.equal(result.state, "confirmed-success");
+    assert.equal(result.observation?.receipt?.number, 8);
+    assert.equal(f.writes(), 2);
+    assert.match(
+      f.store.unregisteredPr(f.taskId)!,
+      /Created PR #8.*node P8.*register PR #8/,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("automatic binding and recovery summaries use the confirmed receipt head", async () => {
+  const f = fixture();
+  try {
+    const request = f.request();
+    f.setPr({ headSha: "c".repeat(40) });
+    f.setReadFailure(true);
+    assert.equal(
+      (await f.coordinator.submit(request, f.caller)).state,
+      "confirmed-success",
+    );
+    assert.match(f.store.unregisteredPr(f.taskId)!, /head c{40}/);
+    f.setReadFailure(false);
+    // A second fixture proves the automatic path rather than the manual fallback.
+  } finally {
+    await f.close();
+  }
+  const bound = fixture();
+  try {
+    const request = bound.request();
+    bound.setPr({ headSha: "c".repeat(40) });
+    assert.equal(
+      (await bound.coordinator.submit(request, bound.caller)).state,
+      "confirmed-success",
+    );
+    assert.equal(
+      bound.store.delivery(bound.taskId)?.observation.headSha,
+      "c".repeat(40),
+    );
+    assert.equal(
+      bound.store.taskBranch(bound.taskId, "R1")?.outsideHeadSha,
+      "c".repeat(40),
+    );
+  } finally {
+    await bound.close();
   }
 });
