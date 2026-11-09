@@ -89,7 +89,8 @@ Preserve unrelated query parameters. A rewrite must not add a Back-button loop.
 
 | Current section or entry | Canonical destination | Compatibility / entry-point change |
 | --- | --- | --- |
-| `/settings` (no recognised fragment) | `/settings/readiness` before first turn; `/settings/projects` otherwise | Workspace-based resolver above; account menu, shell and lifecycle links can keep `/settings` |
+| `/settings` (no recognised fragment) | `/settings/readiness` before first turn; `/settings/projects` otherwise | Workspace-based resolver above; generic Settings entries in the account menu and shell can keep `/settings` |
+| Deleted project's **Projects** return (`DeletedProject` in `project-lifecycle.tsx`) | `/settings/projects` | Change the current `/settings` literal to the concrete Projects route, including before the first turn |
 | Projects; `/settings#projects` | `/settings/projects` | `settingsSectionHref("projects")`; project setup return; project detail and create crumbs |
 | Runtime summary; `/settings#runtime` | `/settings/runtime` | `settingsSectionHref("runtime")`; remove summary step |
 | Agents; `/settings#profiles` | `/settings/agents` | `settingsSectionHref("profiles")` keeps internal id; profile-config return and agent crumbs |
@@ -157,7 +158,9 @@ to a subsequent implementation task; merging this proposal does not perform that
    Settings account-menu current matching. Pure tests cover mappings, malformed
    fragments, first-turn true/false/unknown and header wording. Browser tests cover
    initial legacy entry, hashchange, Back/Forward, direct loads and reloads
-   (including unauthenticated sign-in return).
+   (including unauthenticated sign-in return). Create, archive and delete a project
+   before any turn starts, then follow its Projects return: assert Projects opens
+   rather than the generic Readiness landing.
 2. **Page composition and navigation (medium):** mount only one section, reuse
    panels and existing Runtime page, isolate page loaders, add the phone disclosure.
    Preserve configuration concurrency, retry, archived visibility, drafts, writes
