@@ -1,0 +1,47 @@
+{
+  "candidate": "4b85e35148dc2d3f52738128d08b11fd091866b5",
+  "node": "v26.13.0",
+  "codex": {
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.167.0-alpha.3.2",
+    "sandboxed": {
+      "exit": 0,
+      "steps": {
+        "chromium": "browserType.launch: EPERM: operation not permitted, mkdtemp '/tmp/playwright-artifacts-ME1LAP'",
+        "emulator": "emulator exited:  exit=SIGILL Command failed: ~/Library/Android/sdk/platform-tools/adb -s emulator-5580 shell getprop sys.boot_completed * daemon not running; starting now at tcp:5037 11-09 15:15:12.978 41743 542787304 F adb : main.cpp:54 cannot open /tmp/adb.501.log: Operation not permitted ADB server didn't ACK Full server startup log: /tmp/adb.501.log Server had pid: 41743 * failed to start daemon ad"
+      }
+    }
+  },
+  "claude": {
+    "sdk": "0.3.319",
+    "sdkDeclaredClaudeCode": "2.1.319",
+    "installed": "2.1.318 (Claude Code)",
+    "sandboxed": {
+      "bashCalls": 1,
+      "resultSubtype": "success",
+      "steps": {
+        "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-br",
+        "emulator": "emulator exited:  exit=SIGILL Command failed: ~/Library/Android/sdk/platform-tools/adb -s emulator-5580 shell getprop sys.boot_completed * daemon not running; starting now at tcp:5037 ADB server didn't ACK Full server startup log: /tmp/claude-501/adb.501.log Server had pid: 42128 --- adb starting (pid 42128) --- 11-09 15:15:18.935 42128 542788100 I adb : main.cpp:65 Android Debug Bridge version 1.0.41 1"
+      }
+    },
+    "sandboxDisabled": {
+      "bashCalls": 1,
+      "resultSubtype": "success",
+      "steps": {
+        "chromium": "ok",
+        "emulator": "ok"
+      }
+    }
+  },
+  "cleanup": {
+    "fixtureRemoved": true
+  },
+  "failure": null,
+  "verdict": {
+    "codexSandboxedBlocked": true,
+    "claudeSandboxedBlocked": true,
+    "claudeSandboxDisabledWorks": true,
+    "fixtureRemoved": true
+  },
+  "pass": true
+}
