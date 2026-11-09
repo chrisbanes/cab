@@ -85,6 +85,14 @@ test("composer preselects its sole visible project", async (_t, journey) => {
   await page
     .getByRole("button", { name: "Resume unfinished input", exact: true })
     .click();
+  assert.equal(
+    await page.getByLabel("Task title", { exact: true }).inputValue(),
+    "Recovered then discarded",
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .waitFor();
   await page
     .getByRole("button", { name: "Discard unfinished input", exact: true })
     .click();
