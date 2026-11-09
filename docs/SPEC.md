@@ -1010,8 +1010,8 @@ turn has the service user's full filesystem, process, network and credential acc
 untrusted text such as issue and pull request bodies can drive it through prompt injection.
 Processes the agent starts, such as emulators and browsers, can outlive the turn and cab
 does not clean them up. The Claude subprocess environment scrub, confinement to the per-task
-temporary directory and the Claude sandbox self-test no longer hold for it, which
-does not gate such a turn. Only macOS is qualified. Turning it on in Settings needs a
+temporary directory, whose qualification depended on the sandbox, no longer hold for an
+unsandboxed turn. The Claude sandbox self-test does not gate such a turn. Only macOS is qualified. Turning it on in Settings needs a
 confirmation that states the risk; turning it off applies at once. Every place the
 effective policy is shown states the grant and these risks in that harness.
 cab enforces only what it sends the runtime; none of the three settings is an allow-list,
