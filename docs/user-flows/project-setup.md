@@ -27,11 +27,11 @@ note, **Cancel** and then **Create paused project** at every width.
    two separate submissions. With zero agents (including revoked ones), a prechecked
    option names the resolved Implementer and Reviewer runtimes. Implementer uses the
    lead runtime; Reviewer uses the other enabled, available and authenticated runtime,
-   including a readable Claude token, or falls back to the lead. Checked creation waits
+   including native Claude subscription login, or falls back to the lead. Checked creation waits
    for readiness to settle; a failed read falls back to the lead. The three ordinary
    agents and receipt commit together, with blank lead instructions, default models
-   and effort and no skills; skills are added later in the agent's settings, from
-   plugins installed in Claude Code or Codex or a local plugin directory. The workers'
+   and effort. Instructions, skills and extensions come from the service user's
+   native harness setup; cab has no skill selector. The workers'
    copied instructions are editable; the Reviewer
    file-change restriction is advisory. There is no prescribed execution order.
    Unchecking preserves lead-only creation. The subsequent project receives the workers
@@ -76,8 +76,8 @@ note, **Cancel** and then **Create paused project** at every width.
      readiness reads: no lead agent, the lead's runtime unavailable or not enabled,
      a model or reasoning effort the lead's runtime does not accept (Fix opens the
      lead agent), Codex executable or sign-in unavailable for a Codex lead, Claude
-     executable not on the service `PATH` or Claude token unavailable for a Claude
-     lead (the token's Fix opens [Add Claude](claude-runtime.md)).
+     executable not on the service `PATH` or native Claude login unavailable for a
+     Claude lead (the login's Fix opens [Add Claude](claude-runtime.md)).
      An unreadable readiness check counts as a wait item, so the check fails closed.
      Fix links open in a new tab so the check stays; **Check again** re-reads
      readiness, the workspace and capacity once the item is fixed.

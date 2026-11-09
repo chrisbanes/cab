@@ -181,19 +181,21 @@ into its `main`) and cleans up what it created; its offline contract is
 
 The production service runs the Claude runtime
 ([ADR-1008](adr/1008-claude-code-execution-harness.md)) beside Codex; agents
-select it explicitly. Its token is the operator's own subscription token from `claude setup-token`,
-configured in Settings as a `file:/absolute/path` or `env:NAME` reference. The
-installed LaunchAgent service uses an owner-only token file
-([operations](operations/standalone-macos.md#claude-subscription-token)); a
-replaced file applies from the next turn. An `env:NAME` variable must be in the
-service process environment when the service starts, and a reference configured
-while the service runs takes effect after a restart.
-`npm run mixed-runtime:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
-bounded journey against disposable data and prints redacted evidence. It refuses
-any other arguments, a missing `CLAUDE_CODE_OAUTH_TOKEN` (read from the
-environment, then `~/.env`) or a missing ChatGPT.app Codex launcher before creating
-anything, and enforces per-attempt and session turn caps through a ledger in the
-temporary directory. It needs an explicit grant to run.
+select it explicitly. Both use the service user's native subscription login and
+configuration. Preserve `HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`; sign in with
+the harness's own tools. cab accepts no new token-reference or skill-selection
+writes. See [native setup](operations/standalone-macos.md#native-coding-harness-setup)
+for environment, migration and rollback details.
+
+`node test/execution/user-setup-qualification/run.mjs --live
+--facet=lifecycle --grant-file APPROVED_LEDGER_PATH` runs the bounded
+production-service lifecycle proof; use `--facet=native` for native compatibility.
+It requires an explicit retained grant, records failed starts and
+turn reservations, enforces attempt/turn/time limits and verifies exact owned
+process cleanup. Do not renew an expired window or infer extra attempts. Earlier
+qualification drivers, including `mixed-runtime:live`, retain their historical
+fixture inputs and grants; they do not replace the native-setup proof or authorise
+new token use.
 
 The command surface is `npm run service -- <serve|operator|run|list> ABSOLUTE_DATA_DIR`.
 `run` also takes `workId`, `prompt`, an existing absolute workspace directory,

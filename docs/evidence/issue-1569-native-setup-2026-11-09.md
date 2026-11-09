@@ -76,9 +76,13 @@ the package suites then exposed a Codex-only fixture accidentally depending on
 the host's Claude login. That fixture now explicitly disables Claude through the
 supported CLI. All nine package checks and 74 affected runtime, admission,
 source-copy and qualification-driver checks pass. No assertion or dependency
-version was removed to conceal a failure. The full check is renewing with fresh
-metadata. Independent review identified the runner import and ambiguous MCP
-status admission; focused review of their repairs and final-head CI remain pending.
+version was removed to conceal a failure. The final full `npm run check` passed
+with fresh metadata: 5,796 tests registered, 5,744 passed, 52 skipped and zero
+failures. This includes static checks, the service build and Chromium coverage;
+WebKit was not run on macOS. Independent code review accepted the repaired
+candidate after checking the runner import and unambiguous MCP admission. The
+remaining delivery gates are Claude's live coordinated recovery proof and
+final-head CI after publication.
 
 The [operations guide](../operations/standalone-macos.md) retains backup and
 rollback steps for a separately approved service switch. No installed service,

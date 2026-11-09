@@ -70,5 +70,32 @@
     "src/standalone/state.ts": "bcf1be2576aca842ece1c47c289e69c5e479d6a36ced5b257ef40cc56b0150c8",
     "src/standalone/runtime-retention.ts": "06f240e2b278bef6f126fad283a754b72f871e6348d42f5314da148067091452",
     "test/execution/user-setup-qualification/lifecycle.mjs": "48dbe6d1aab90f57a7be2d198ea7c9049583681a26592b15cf34cbb656016655"
+  },
+  "automatedValidation": {
+    "codeCommit": "cd4416399050875e526d8d2dc5d62b628f469bbd",
+    "fullCheck": {
+      "command": "npm run check",
+      "result": "passed",
+      "registered": 5796,
+      "passed": 5744,
+      "skipped": 52,
+      "failed": 0,
+      "dependencyVersions": "unchanged lockfile",
+      "npmMetadata": "fresh disposable cache"
+    },
+    "affectedRuntimeAndHarnessChecks": {
+      "passed": 74,
+      "failed": 0
+    },
+    "packageChecks": {
+      "passed": 9,
+      "failed": 0
+    },
+    "documentationInventoryChecks": {
+      "passed": 1,
+      "failed": 0
+    },
+    "independentCodeReview": "ship",
+    "remaining": ["Claude coordinated recovery live proof", "final-head CI"]
   }
 }

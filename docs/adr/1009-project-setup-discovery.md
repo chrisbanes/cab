@@ -44,7 +44,7 @@ implicitly.
 
 Discovery and project source credentials are removed, by name and value, from the Codex runtime
 spawn environment, from each Claude turn and from helper child processes, as
-delivery credentials and the Claude token are:
+delivery credentials and retained legacy Claude token references are:
 
 - an `env:` reference by its variable and value;
 - a `gh:` reference by `GH_TOKEN`, `GITHUB_TOKEN` and every token value the

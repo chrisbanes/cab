@@ -1196,10 +1196,11 @@ When no agent exists, including revoked agents, setup offers an inline lead
 agent form with a prechecked option to add Implementer and Reviewer. The option
 names their resolved runtimes: Implementer uses the lead runtime; Reviewer uses the
 other runtime only when enabled, available and its executable and authentication
-checks pass (including a readable Claude token), otherwise the lead runtime. A
+checks pass (including native Claude subscription login), otherwise the lead runtime. A
 pending readiness read holds checked creation; an unreadable read uses the lead.
 The lead instructions remain blank; workers use ordinary editable/revocable agent
-revisions with default model and effort and no skills. Reviewer instructions to
+revisions with default model and effort; native harness skills and extensions
+apply without a cab selector. Reviewer instructions to
 avoid file changes are advisory, not an enforced restriction. cab prescribes no
 worker order. Unchecking preserves ordinary lead creation.
 The three agents and the original keyed receipt commit atomically. An unknown
