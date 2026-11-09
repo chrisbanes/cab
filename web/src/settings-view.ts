@@ -1,5 +1,6 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
 import {
+  missingProjectSelectionWarning,
   selectionCountsText,
   zeroMatchWarning,
 } from "../../src/operator/readiness-text.js";
@@ -333,6 +334,18 @@ export function projectStateSummary(
   const observed = observations?.projects.find(
     (p) => p.projectId === c.project.id,
   );
+  const missingProjectFieldSelection =
+    observed?.readiness.kind === "rule" &&
+    observed.readiness.conditions.some(
+      (condition) =>
+        condition.kind === "project-field" &&
+        !c.source.selections.some(
+          (selection) =>
+            selection.kind === "project" &&
+            selection.active &&
+            selection.descriptor === condition.projectNodeId,
+        ),
+    );
   const state = [
     `Lead: ${lead} · repository access: ${access}`,
     ...(c.source.selections.length
@@ -356,7 +369,14 @@ export function projectStateSummary(
         : observed?.selections.some((o) =>
               zeroMatchWarning(o.counts, observed.readiness),
             )
-          ? readinessNextStep
+          ? missingProjectFieldSelection
+            ? missingProjectSelectionWarning(
+                observed?.readiness.kind === "rule" &&
+                  observed.readiness.mode === "any"
+                  ? "any"
+                  : "all",
+              )
+            : readinessNextStep
           : "Nothing needs attention here.";
   return { state, next };
 }
