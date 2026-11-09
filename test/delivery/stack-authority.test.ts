@@ -78,7 +78,7 @@ async function fixture(
         nvmrc: pin,
         packageJson: pin,
         lockfile: pin,
-        packageManager: "npm@12.2.1",
+        packageManager: "npm@12.2.2",
       },
       dataDirectory: data,
       scratchParent: scratch,

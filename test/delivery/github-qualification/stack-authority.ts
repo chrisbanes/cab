@@ -100,7 +100,7 @@ export const stackAuthoritySchema = z
             nvmrc: pin,
             packageJson: pin,
             lockfile: pin,
-            packageManager: z.literal("npm@12.2.1"),
+            packageManager: z.literal("npm@12.2.2"),
           })
           .strict(),
         dataDirectory: path,
