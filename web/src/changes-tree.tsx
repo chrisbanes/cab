@@ -2,7 +2,6 @@ import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { useEffect, useRef, type CSSProperties } from "react";
 import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
-import { treePaths } from "./diff-model.js";
 import { entryLineCounts, type FileChange } from "./file-change-markers.js";
 
 type Snapshot = Extract<
@@ -18,25 +17,26 @@ const gitStatus: Record<FileChange, GitStatus> = {
   renamed: "renamed",
   "type-changed": "modified",
 };
-/** The changed files of one comparison. Remount it per comparison: its options are read once. */
+/** The changed files of one comparison. Its options are read once: remount it when they change. */
 export default function ChangesTree({
   entries,
+  paths,
   selectedIndex,
   listView,
   phone,
-  repositoryName,
   onSelect,
 }: {
   entries: readonly Entry[];
+  /** One unique tree path per entry (`treePaths`); a change needs a remount. */
+  paths: readonly string[];
   selectedIndex: number;
   /** Phone list view: the open entry is not shown as selected, so tapping it reopens it. */
   listView: boolean;
   /** Phones get 44px rows; read once, so remount when it changes. */
   phone: boolean;
-  repositoryName: (id: string) => string;
   onSelect: (entry: Entry, index: number) => void;
 }) {
-  const paths = treePaths(entries, repositoryName);
+  const counts = entries.map(entryLineCounts);
   const index = new Map(paths.map((path, at) => [path, at]));
   const select = useRef(onSelect);
   select.current = onSelect;
@@ -62,9 +62,8 @@ export default function ChangesTree({
     },
     renderRowDecoration: ({ item }) => {
       const at = item.kind === "file" ? index.get(item.path) : undefined;
-      const entry = at === undefined ? undefined : entries[at];
-      if (entry?.state !== "text") return null;
-      const { added, removed } = entryLineCounts(entry);
+      if (at === undefined || entries[at]?.state !== "text") return null;
+      const { added, removed } = counts[at]!;
       return {
         text: `+${added} −${removed}`,
         title: `${added} added, ${removed} removed lines`,

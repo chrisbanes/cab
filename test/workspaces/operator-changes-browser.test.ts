@@ -836,6 +836,15 @@ test("production Changes preserves exact repository baselines and last-good refr
     ["Hide changed files", "Split", "Unified", "Set start"],
     "Tab passes the diff header controls, then leaves for the range controls",
   );
+  // Keys on the header controls stay with them and leave the selection alone.
+  const selectionText = await changes.locator(".changes-selection").innerText();
+  await changes.getByRole("button", { name: "Split", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  assert.equal(
+    await changes.locator(".changes-selection").innerText(),
+    selectionText,
+  );
   // The composer's focus return targets this comparison's diff.
   const returnTargets = await changes
     .locator("[data-review-return]")
@@ -1556,6 +1565,14 @@ test("production Changes separates staged and unstaged snapshots and retains exp
   await captureBrowserEvidence(page, "390-phone-list-to-diff", {
     fullPage: false,
   });
+  // Back, then the same file again, reopens it.
+  await changes
+    .getByRole("button", { name: "Back to changed files", exact: true })
+    .click();
+  await mobileRow.click();
+  await changes
+    .getByRole("button", { name: "Back to changed files", exact: true })
+    .waitFor();
 
   assert.equal(git(alpha.workspacePath, "rev-parse", "HEAD"), alphaHead);
   const finalStatus = git(alpha.workspacePath, "status", "--porcelain").split(

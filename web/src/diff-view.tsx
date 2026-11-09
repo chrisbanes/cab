@@ -21,7 +21,7 @@ import { Button } from "./components.js";
 import type { TaskChangeSelection } from "./task-workspace-state.js";
 import { useTheme } from "./theme.js";
 
-export type { Anchor, DiffHunkData, Hunk } from "./diff-model.js";
+export type { Anchor, DiffHunkData } from "./diff-model.js";
 
 // Loaded on first use so the highlighter stays out of the initial bundle.
 const PatchDiff = lazy(() =>
@@ -60,7 +60,7 @@ export function useNarrowViewport() {
   return narrow;
 }
 
-export function DiffLayoutControls({
+function DiffLayoutControls({
   layout,
   onChange,
 }: {
@@ -211,7 +211,8 @@ export function FileDiffView({
     });
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!select) return;
+    // Keys on the header controls inside the diff are theirs, not the selection's.
+    if (!select || event.target !== event.currentTarget) return;
     if (event.key === "Escape" && active) {
       event.preventDefault();
       select.onClear();

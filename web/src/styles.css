@@ -1671,10 +1671,6 @@ nav {
     min-height: 44px;
     margin-bottom: 8px;
   }
-  /* Phone shows only the unified diff, so there is no layout to choose. */
-  .changes-layout-controls {
-    display: none;
-  }
   .artifact-comparisons {
     grid-template-columns: 1fr;
   }

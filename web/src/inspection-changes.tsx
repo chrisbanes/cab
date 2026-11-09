@@ -26,6 +26,7 @@ import { failureCause } from "./outcome-copy.js";
 import { codeSentence, shortId } from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
 import { ChangesWorkbench, FilesPanelToggle } from "./changes-pane.js";
+import { treePaths } from "./diff-model.js";
 import { FileDiffView, useNarrowViewport, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
@@ -507,6 +508,8 @@ export function TaskWorkspaceChanges({
       : -1;
   const selected =
     selectedIndex >= 0 ? snapshot?.entries[selectedIndex] : undefined;
+  // Repository labels can change while the tree is open; new paths remount it.
+  const paths = snapshot ? treePaths(snapshot.entries, repositoryName) : [];
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the snapshot or the request changes.
   useEffect(() => {
     const path = state.pendingPath;
@@ -847,12 +850,12 @@ export function TaskWorkspaceChanges({
               </h5>
               <Suspense fallback={<p role="status">Loading files…</p>}>
                 <ChangesTree
-                  key={`${snapshot.comparisonId}:${phone}`}
+                  key={`${snapshot.comparisonId}:${phone}:${paths.join("\u0000")}`}
                   entries={snapshot.entries}
+                  paths={paths}
                   phone={phone}
                   selectedIndex={selectedIndex}
                   listView={state.mobileView === "list"}
-                  repositoryName={repositoryName}
                   onSelect={selectEntry}
                 />
               </Suspense>
