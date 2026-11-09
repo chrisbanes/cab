@@ -130,7 +130,7 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
     "stacked-blocker-unpublished": "waiting for the blocker's change request",
     "stacked-blocker-unknown": "blocker's change request unconfirmed",
     "imported-blockers-blocked": "blocked by a source dependency",
-    "imported-blockers-unknown": "Source dependencies unconfirmed",
+    "imported-blockers-unknown": "source dependencies unconfirmed",
     "source-held": "held by the source",
     approval: "approval needs a decision",
     "admission-blocked": "waiting to start",

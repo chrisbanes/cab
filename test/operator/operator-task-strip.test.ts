@@ -124,20 +124,48 @@ test("taskNextActor reads the List's next actor from the same attention codes", 
   }
 });
 
-test("taskIdentity reads repository#number or Local task, never a UUID", () => {
+test("taskIdentity reads GitHub numbers, Jira keys and unavailable keys, or Local task", () => {
   const url = "https://github.com/acme/app/issues/42";
+  const identity = {
+    provider: "github.com",
+    repositoryId: "R_app",
+    nodeId: "I_42",
+  };
   assert.deepEqual(
     taskIdentity(
-      data({ source: { repositoryName: "acme/app", number: 42, url } }),
+      data({
+        source: { identity, repositoryName: "acme/app", number: 42, url },
+      }),
     ),
     { label: "acme/app#42", url },
   );
   assert.deepEqual(
     taskIdentity(
-      data({ source: { repositoryName: null, number: null, url: null } }),
+      data({
+        source: { identity, repositoryName: null, number: null, url: null },
+      }),
     ),
     { label: "repository unavailable#?", url: null },
   );
+  const jira = {
+    identity: {
+      provider: "example.atlassian.net",
+      tracker: "jira" as const,
+      repositoryId: "10000",
+      nodeId: "10042",
+    },
+    repositoryName: "ABC",
+    number: 42,
+    url: "https://example.atlassian.net/browse/ABC-42",
+  };
+  assert.deepEqual(taskIdentity({ source: { ...jira, key: "ABC-42" } }), {
+    label: "ABC-42",
+    url: jira.url,
+  });
+  assert.deepEqual(taskIdentity({ source: jira }), {
+    label: "Jira issue · key unavailable",
+    url: jira.url,
+  });
   assert.deepEqual(taskIdentity(data()), { label: "Local task", url: null });
 });
 
