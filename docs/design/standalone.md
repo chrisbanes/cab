@@ -330,8 +330,8 @@ the recorded, sandboxed policy and `failIfUnavailable` still fails it closed. Wh
 supersedes command network access and local listening, whose stored values are kept. An
 unsandboxed turn has the service user's full filesystem, process, network and credential access,
 and started processes can outlive the turn; cab does not clean them up. The Claude subprocess
-environment scrub, per-task temporary directory confinement and self-test no longer hold, and
-only macOS is qualified.
+environment scrub and per-task temporary directory confinement no longer hold, the Claude
+sandbox self-test does not gate an unsandboxed turn, and only macOS is qualified.
 The three values are recorded at admission (`execution_intent_network_access`,
 `execution_intent_local_listening` and `execution_intent_dangerously_skip_sandbox`), so a later change reaches only later admissions and a
 running turn keeps its policy. Claude Code turns, drafting runs and requests without a task
