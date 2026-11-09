@@ -126,10 +126,7 @@ test("GitHub source shows search queries plainly and edits them in place", async
 });
 
 test("GitHub source explains a Project field rule without its matching selection", async (_t, journey) => {
-  const { f, ids, page } = await startSettings(
-    journey,
-    "/projects/:atlas/settings?tab=github",
-  );
+  const { f, ids, page } = await startDiscovery(journey, {});
   const d = f.service.domain();
   await new OperatorApi(f.service, [f.directory]).execute({
     type: "github.configure",
@@ -176,8 +173,14 @@ test("GitHub source explains a Project field rule without its matching selection
     true,
     "the advisory does not block saving",
   );
+  const firstSave = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/operator/commands"),
+  );
   await save.click();
-  await page.getByText(/Saved \d\d:\d\d/).waitFor();
+  assert.equal((await firstSave).ok(), true);
+  await savedOutcome(page);
   const saved = d.githubConfiguration(ids.atlas);
   assert.equal(saved.readiness?.mode, "any");
   assert.equal(saved.readiness?.conditions[0]?.kind, "project-field");
@@ -196,8 +199,14 @@ test("GitHub source explains a Project field rule without its matching selection
     0,
     "the exact matching Project in the draft clears the advisory before activation",
   );
+  const secondSave = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/operator/commands"),
+  );
   await save.click();
-  await page.getByText(/Saved \d\d:\d\d/).waitFor();
+  assert.equal((await secondSave).ok(), true);
+  await savedOutcome(page);
   const project = d
     .githubConfiguration(ids.atlas)
     .selections.find((selection) => selection.kind === "project");
