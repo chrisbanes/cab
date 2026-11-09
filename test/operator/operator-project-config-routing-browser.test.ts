@@ -188,6 +188,50 @@ test("Permitted agents edits the single delegation list outside Routing", async 
   );
 });
 
+test("Permitted agents status tracks its own saved list version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:relay/settings",
+  );
+  const d = f.service.domain();
+  const initialCandidates = d
+    .routingCandidates(ids.relay)
+    .map((r) => String(r.profileId));
+  await page.getByLabel("Project name", { exact: true }).fill("Relay renamed");
+  await page.getByRole("button", { name: "Save project", exact: true }).click();
+  await savedOutcome(page, /^Saved\./);
+
+  await page.goto(`/projects/${ids.relay}/settings?tab=permitted-agents`);
+  await page
+    .getByRole("heading", { name: "Permitted agents", exact: true })
+    .waitFor();
+  const status = page.locator(".settings-status");
+  assert.doesNotMatch(await status.innerText(), /Saved \d\d:\d\d/);
+
+  const permittedMira = page.getByRole("checkbox", { name: /^Mira ·/ });
+  assert.equal(await permittedMira.isChecked(), false);
+  await permittedMira.check();
+  await page
+    .getByRole("button", { name: "Save permitted agents", exact: true })
+    .click();
+  await savedOutcome(page, /^Saved\./);
+  await status.getByText(/Saved \d\d:\d\d/).waitFor();
+
+  const routing = d.routing(ids.relay);
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(routing.version),
+    enabled: Boolean(routing.enabled),
+    candidateProfileIds: initialCandidates,
+  });
+  await refresh(page);
+  assert.doesNotMatch(await status.innerText(), /Saved \d\d:\d\d/);
+  assert.equal(await permittedMira.isChecked(), false);
+});
+
 test("routing guidance reverted or edited keeps its state after leaving the tab", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

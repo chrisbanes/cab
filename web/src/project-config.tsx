@@ -306,6 +306,11 @@ function statusLine(
         : admission,
       saved("routing.configure", data.routing.version),
     );
+  if (tab === "permitted-agents")
+    return withSaved(
+      admission,
+      saved("permitted-agents", data.routing.version),
+    );
   if (tab === "repositories")
     return withSaved(
       "Repository links are the checkouts workspaces and delivery use.",
