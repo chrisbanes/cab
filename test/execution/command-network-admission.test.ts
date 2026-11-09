@@ -334,6 +334,7 @@ class RecordingRuntime implements Runtime {
     arity: number;
     policy: RuntimeTurnPolicy | undefined;
   }[] = [];
+  preflights: { workspace: string; skipSandbox?: boolean }[] = [];
   gate: Promise<void> | undefined;
   entered: (() => void) | undefined;
   private ids = 0;
@@ -345,6 +346,10 @@ class RecordingRuntime implements Runtime {
     return `thread-${++this.ids}`;
   }
   async resumeThread() {}
+  async preflightTurn(input: { workspace: string; skipSandbox?: boolean }) {
+    this.preflights.push(input);
+    return undefined;
+  }
   async startTurn(...call: unknown[]) {
     this.turns.push({
       workspace: call[1],
@@ -560,4 +565,57 @@ test("a task turn of either harness runs with skipSandbox only when the setting 
     }
   }
   assert.equal(service.dangerouslySkipSandboxFor("unknown-work"), null);
+});
+
+test("the service hints skipSandbox to preflight only for a task turn of a project with the setting on", async (t) => {
+  const { service, runtime, project, configure, start, finished } =
+    await recordingService(t);
+  const projectId = project("claude");
+  const hinted = (intent: { workspace: string }) =>
+    runtime.preflights.filter((input) => input.workspace === intent.workspace);
+  for (const on of [false, true]) {
+    configure(projectId, { dangerouslySkipSandbox: on });
+    await start(projectId, `task ${on}`);
+    const intent = await finished();
+    const inputs = hinted(intent);
+    assert.ok(inputs.length > 0);
+    for (const input of inputs)
+      assert.deepEqual(
+        "skipSandbox" in input ? input.skipSandbox : "absent",
+        on ? true : "absent",
+      );
+  }
+
+  // A draft turn in the same project, setting still on, gets no hint.
+  const taskId = randomUUID();
+  const d = service.domain();
+  d.execute({
+    key: randomUUID(),
+    actor: "operator",
+    type: "task.create",
+    projectId,
+    taskId,
+    title: "draft",
+    outcome: "Probe",
+    ready: false,
+  } as never);
+  await service.startDraftTurn({
+    key: randomUUID(),
+    taskId,
+    expectedVersion: Number(d.task(taskId).version),
+    message: "Refine this",
+  });
+  const draftPreflights = () => {
+    const draft = service.list().find((i) => i.workId.includes(":draft:"));
+    return runtime.preflights.filter(
+      (input) => draft && input.workspace === draft.workspace,
+    );
+  };
+  const deadline = Date.now() + 15_000;
+  while (draftPreflights().length === 0) {
+    assert.ok(Date.now() < deadline, "the draft turn was preflighted");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  for (const input of draftPreflights())
+    assert.equal("skipSandbox" in input, false);
 });
