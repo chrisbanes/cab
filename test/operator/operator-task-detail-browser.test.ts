@@ -797,12 +797,18 @@ for (const [label, viewport] of [
     const fixture = await openFixture(j);
     const a = await seed(fixture.f);
     const { web, page } = await fixture.launch(viewport);
-    let uncertain = false;
+    let uncertain = false,
+      unreadyAndRejected = false;
     await page.route(
       (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
       async (route) => {
         const response = await route.fetch();
         const json = await response.json();
+        json.data.task.ready = !unreadyAndRejected;
+        json.data.admission = unreadyAndRejected
+          ? { eligible: false, reasons: ["task-unready"] }
+          : { eligible: true, reasons: [] };
+        if (json.data.project) json.data.project.paused = false;
         json.data.execution.state = uncertain ? "uncertain" : "running";
         json.data.execution.holds.writer = !uncertain;
         json.data.execution.holds.capacity = !uncertain;
@@ -810,8 +816,25 @@ for (const [label, viewport] of [
         json.data.waits = uncertain
           ? []
           : [{ code: "capacity", fix: null, links: [] }];
-        json.data.attention.codes = uncertain ? ["execution-uncertain"] : [];
+        json.data.attention.codes = uncertain
+          ? [
+              "execution-uncertain",
+              ...(unreadyAndRejected ? ["completion-rejected"] : []),
+            ]
+          : [];
         json.data.attention.count = json.data.attention.codes.length;
+        json.data.executionRecovery = {
+          holds: {
+            stop: false,
+            writer: !uncertain,
+            capacity: !uncertain,
+            uncertainty: uncertain,
+            task: false,
+          },
+          evidenceAvailable: true,
+          omittedCount: 0,
+          records: [],
+        };
         await route.fulfill({ response, json });
       },
     );
@@ -834,7 +857,7 @@ for (const [label, viewport] of [
     const decisions = page.locator("#decisions[data-pinned]");
     await decisions.waitFor();
     const inspectorFold = page.locator(".task-inspector .inspector-fold");
-    if (!(await inspectorFold.getAttribute("open")))
+    if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();
     await page.getByText("Holds · 1", { exact: true }).waitFor();
     await page
@@ -843,6 +866,27 @@ for (const [label, viewport] of [
       .waitFor();
     await decisions.getByText("Uncertainty", { exact: true }).waitFor();
     await captureBrowserEvidence(page, `task-attention-${label}`);
+
+    unreadyAndRejected = true;
+    await page.reload();
+    await page.locator("#decisions[data-pinned]").waitFor();
+    if ((await inspectorFold.getAttribute("open")) === null)
+      await inspectorFold.locator(":scope > summary").click();
+    await page
+      .locator('aside[aria-label="Task context"]')
+      .getByText("Holds · 3", { exact: true })
+      .waitFor();
+    const inspector = page.locator('aside[aria-label="Task context"]');
+    await inspector
+      .getByText("Execution held (task not ready)", { exact: true })
+      .waitFor();
+    await inspector
+      .getByText("Completion requires review", { exact: true })
+      .waitFor();
+    await decisions
+      .getByText("Execution held (task not ready)", { exact: true })
+      .waitFor();
+    await decisions.getByRole("link", { name: "Message the lead" }).waitFor();
   });
 
 for (const [label, viewport] of [
@@ -858,10 +902,25 @@ for (const [label, viewport] of [
       async (route) => {
         const response = await route.fetch();
         const json = await response.json();
+        json.data.task.ready = true;
+        json.data.admission = { eligible: true, reasons: [] };
+        if (json.data.project) json.data.project.paused = false;
         json.data.execution.state = "running";
         json.data.execution.holds.writer = true;
         json.data.execution.holds.capacity = true;
         json.data.waits = [{ code: "capacity", fix: null, links: [] }];
+        json.data.executionRecovery = {
+          holds: {
+            stop: false,
+            writer: true,
+            capacity: true,
+            uncertainty: false,
+            task: false,
+          },
+          evidenceAvailable: true,
+          omittedCount: 0,
+          records: [],
+        };
         await route.fulfill({ response, json });
       },
     );
@@ -874,7 +933,7 @@ for (const [label, viewport] of [
     );
     const inspector = page.locator('aside[aria-label="Task context"]');
     const inspectorFold = inspector.locator(".inspector-fold");
-    if (!(await inspectorFold.getAttribute("open")))
+    if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();
     await inspector.getByText("Holds · 1", { exact: true }).waitFor();
     await inspector.getByText("Question pending", { exact: false }).waitFor();
@@ -2471,7 +2530,7 @@ async function serveApprovals(page: Page, taskId: string, ids: string[]) {
 
 const approvalHold = "Execution held (approval needs a decision)";
 
-test("The decision card and inspector list only the other open approvals as holds", async (_t, j) => {
+test("The decision card and inspector do not repeat open approvals as merged holds", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedOwnApproval(fixture.f);
   const { web, page } = await fixture.launch();
@@ -2485,32 +2544,30 @@ test("The decision card and inspector list only the other open approvals as hold
   );
   const holds = page.locator("section#decisions .question-holds"),
     aside = page.getByRole("complementary", { name: "Task context" }),
-    card = page.locator("section#decisions"),
-    // The merged approval wait, which the card's rows and hold line already cover.
-    waitLabel = /Approval needs a decision/;
-  // Two open approvals, one in view: the other is the hold, once on each surface.
-  await holds.getByText(approvalHold, { exact: true }).waitFor();
-  assert.equal(await holds.getByText(approvalHold).count(), 1);
-  // Two request rows, the paused project and the other approval.
-  await aside.getByText("Holds · 4", { exact: true }).waitFor();
-  assert.equal(await aside.getByText(approvalHold).count(), 1);
-  assert.equal(await card.getByText(approvalHold).count(), 1);
-  assert.equal(await card.getByText(waitLabel).count(), 0);
+    card = page.locator("section#decisions");
+  await holds.getByText("Project paused", { exact: true }).waitFor();
+  assert.equal(
+    await card.getByText("Project paused", { exact: true }).count(),
+    1,
+  );
+  assert.equal(await holds.getByText(approvalHold).count(), 0);
+  // Both approval rows and the pause each appear once in the inspector projection.
+  await aside.getByText("Holds · 3", { exact: true }).waitFor();
+  assert.equal(await aside.getByText("Approval pending").count(), 2);
+  assert.equal(await card.getByText(approvalHold).count(), 0);
 
   // Only the approval in view: it is not a hold on itself.
   await serveApprovals(page, a.taskId, [a.interactionId]);
   await page.reload();
   await aside.getByText("Holds · 2", { exact: true }).waitFor();
-  assert.equal(await page.getByText(approvalHold).count(), 0);
-  assert.equal(await card.getByText(waitLabel).count(), 0);
+  assert.equal(await card.getByText(approvalHold).count(), 0);
 
-  // Nothing selected: both approvals are rows already, so neither surface repeats them as a hold.
+  // Nothing selected: both approvals remain their own rows.
   await serveApprovals(page, a.taskId, [a.interactionId, other]);
   await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await aside.getByText("Holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
-  assert.equal(await page.getByText(approvalHold).count(), 0);
-  assert.equal(await card.getByText(waitLabel).count(), 0);
+  assert.equal(await card.getByText(approvalHold).count(), 0);
 });
 
 const refreshTask = async (page: Page, taskId: string) => {

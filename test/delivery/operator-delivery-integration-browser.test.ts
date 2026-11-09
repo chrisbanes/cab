@@ -42,10 +42,11 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
       const data = (
         await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
       ).data;
-      assert.equal(
-        await page.locator("main [data-task-reason]").textContent(),
-        taskStripReason(data),
-      );
+      assert.equal(await page.locator("main .task-state").count(), 1);
+      const reason = taskStripReason(data),
+        stripReason = page.locator("main [data-task-reason]");
+      if (reason === null) assert.equal(await stripReason.count(), 0);
+      else assert.equal(await stripReason.textContent(), reason);
     };
     await page.goto(web.origin + taskPath);
     await page.getByLabel("Password").fill(web.password);

@@ -1712,9 +1712,11 @@ during a running turn stay on Execution. The task strip pairs its state badge wi
 most one distinct reason and omits duplicate readiness or next-actor wording. Beneath
 the card the lead's
 conversation runs oldest to newest, and the reply composer is docked at the bottom.
-The outcome, current situation and next actor stay in the task header, and the brief,
-evidence, delivery observations, artifacts, dependencies and assignments stay in the
-inspector. Understanding current work must not require reading raw runtime output.
+The outcome and current situation stay in the task header, while its strip shows a
+state badge and at most one distinct reason without repeating readiness or next-actor
+wording. The brief, evidence, delivery observations, artifacts, dependencies and
+assignments stay in the inspector. Understanding current work must not require reading
+raw runtime output.
 
 The conversation interleaves captured assistant text (sanitized Markdown with a
 raw-text view), operator messages and follow-ups, questions and answers, approvals,

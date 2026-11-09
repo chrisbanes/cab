@@ -266,7 +266,20 @@ export function taskAttentionProjection(
       (wait) => !(normalRunning && wait.code === "capacity"),
     ),
     noticeTask = { ...task, waits },
-    notices = holdNoticesBesideRequests(noticeTask, action, deciding),
+    notices = [
+      ...new Map(
+        holdNoticesBesideRequests(noticeTask, action, deciding)
+          .filter(
+            (notice) =>
+              notice.id !== "approval" ||
+              !requests.some((request) => request.kind === "approval"),
+          )
+          .map((notice) => [notice.id, notice] as const),
+      ).values(),
+    ],
+    cardNotices = notices.filter(
+      (notice) => !(notice.id === "source-held" && task.source?.hold?.active),
+    ),
     executionHolds = holdLines(
       task.execution.holds,
       task.taskHold ?? (task.execution.holds.task ? { reason: null } : null),
@@ -281,7 +294,12 @@ export function taskAttentionProjection(
       (code) =>
         attentionNext[code].operator &&
         code !== "question" &&
-        code !== "approval",
+        code !== "approval" &&
+        !(code === "unresolved-result" && task.unresolvedResults.length > 0),
+    ),
+    unresolvedResults = task.unresolvedResults,
+    completionPending = task.completionRequests.filter(
+      (request) => request.status === "pending",
     ),
     actions: TaskAttentionRow[] = [];
 
@@ -325,9 +343,15 @@ export function taskAttentionProjection(
         title: attentionNext[code].reason,
         kind: "action",
       });
-  if (task.completionRequests.some((request) => request.status === "pending"))
+  for (const item of unresolvedResults)
     actions.push({
-      id: "completion-pending",
+      id: `unresolved-result:${item.resultId}`,
+      title: attentionNext["unresolved-result"].reason,
+      kind: "action",
+    });
+  for (const request of completionPending)
+    actions.push({
+      id: `completion-pending:${request.requestId}`,
       title: "Completion requested",
       kind: "action",
     });
@@ -365,7 +389,18 @@ export function taskAttentionProjection(
         ),
       ]
     : [];
-  return { pinned, requests, waits, notices, executionHolds, actions, rows };
+  return {
+    pinned,
+    requests,
+    waits,
+    notices,
+    cardNotices,
+    executionHolds,
+    actions,
+    unresolvedResults,
+    completionPending,
+    rows,
+  };
 }
 
 /**

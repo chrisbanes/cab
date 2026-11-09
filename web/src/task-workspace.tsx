@@ -162,7 +162,6 @@ import {
   trackerName,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
-import { WaitReasons } from "./wait-reasons.js";
 import { ApplyInstructions, TaskExecution } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
 
@@ -2266,13 +2265,13 @@ export function TaskWorkspace({
         id="decisions"
         className="workspace-attention decision-card"
         hidden={!attentionPinned}
-        data-attention={openRequests.length > 0 || undefined}
+        data-attention={attention.requests.length > 0 || undefined}
         data-pinned={attentionPinned || undefined}
         data-collapsed={attentionCollapsed || undefined}
         aria-label="Pending requests and holds"
       >
         <h3 className="sr-only">Decisions and holds</h3>
-        {(openRequests.length > 0 || nextActor.operator) && (
+        {(attention.requests.length > 0 || attention.actions.length > 0) && (
           <button
             type="button"
             className="attention-banner"
@@ -2282,8 +2281,8 @@ export function TaskWorkspace({
               changed();
             }}
           >
-            {openRequests.length > 0
-              ? `${count(openRequests.length, "decision")} waiting on you`
+            {attention.requests.length > 0
+              ? `${count(attention.requests.length, "decision")} waiting on you`
               : "Waiting on you"}
           </button>
         )}
@@ -2312,7 +2311,7 @@ export function TaskWorkspace({
             />
           )
         )}
-        {openRequests
+        {attention.requests
           .filter((q) => q.interactionId !== requestId)
           .map((q) => (
             <div
@@ -2368,34 +2367,32 @@ export function TaskWorkspace({
             </div>
           ))}
         {state.inlineAnswer &&
-          !openRequests.some((q) => q.interactionId === state.inlineAnswer) && (
-            <p role="status">No longer waiting; see the conversation.</p>
-          )}
-        {data.completionRequests
-          .filter((r) => r.status === "pending")
-          .map((r) => (
-            <div
-              key={r.requestId}
-              className="decision"
-              data-record-id={r.requestId}
-            >
-              <p>
-                The lead requested completion (revision {r.revision}). It
-                finishes once the holds below clear.
-              </p>
-              {data.delivery?.blockers.includes(
-                "reviewable-pr-awaiting-current-settlement",
-              ) && (
-                <ActionLink
-                  variant="secondary"
-                  href={`/tasks/${taskId}?section=changes`}
-                >
-                  Settle handback
-                </ActionLink>
-              )}
-            </div>
-          ))}
-        {data.unresolvedResults.map((item) => (
+          !attention.requests.some(
+            (q) => q.interactionId === state.inlineAnswer,
+          ) && <p role="status">No longer waiting; see the conversation.</p>}
+        {attention.completionPending.map((r) => (
+          <div
+            key={r.requestId}
+            className="decision"
+            data-record-id={r.requestId}
+          >
+            <p>
+              The lead requested completion (revision {r.revision}). It finishes
+              once the holds below clear.
+            </p>
+            {data.delivery?.blockers.includes(
+              "reviewable-pr-awaiting-current-settlement",
+            ) && (
+              <ActionLink
+                variant="secondary"
+                href={`/tasks/${taskId}?section=changes`}
+              >
+                Settle handback
+              </ActionLink>
+            )}
+          </div>
+        ))}
+        {attention.unresolvedResults.map((item) => (
           <ResultDestination
             readOnly={projectReadOnly}
             key={item.resultId}
@@ -2407,13 +2404,41 @@ export function TaskWorkspace({
           />
         ))}
         {attention.actions
+          .filter((item) => item.id === "unresolved-result")
+          .map((item) => (
+            <p key={item.id} className="metadata">
+              {item.title} ·{" "}
+              <ActionLink
+                variant="secondary"
+                href={`/tasks/${taskId}?section=execution`}
+              >
+                Inspect execution
+              </ActionLink>
+            </p>
+          ))}
+        {attention.actions
           .filter((item) => item.id === "execution-stop")
           .map((item) => (
             <p key={item.id} className="metadata">
               {item.title}
             </p>
           ))}
-        {nextActor.code === "completion-rejected" && (
+        {attention.actions
+          .filter((item) => item.id === "execution-uncertain")
+          .map((item) => (
+            <p key={item.id} className="metadata">
+              {item.title} ·{" "}
+              <ActionLink
+                variant="secondary"
+                href={`/tasks/${taskId}?section=execution`}
+              >
+                Inspect execution
+              </ActionLink>
+            </p>
+          ))}
+        {attention.actions.some(
+          (item) => item.id === "completion-rejected",
+        ) && (
           <div className="decision">
             <p>
               The lead's completion request was rejected at this task version.
@@ -2428,7 +2453,7 @@ export function TaskWorkspace({
           </div>
         )}
         {/* Kept once sent, so a confirmation or a check outlives the code it cleared. */}
-        {(data.attention.codes.includes("not-started") ||
+        {(attention.actions.some((item) => item.id === "not-started") ||
           startedAgain === taskId) && (
           <StartAgainAction
             readOnly={projectReadOnly}
@@ -2453,18 +2478,10 @@ export function TaskWorkspace({
             onChanged={refreshAll}
           />
         )}
-        {nextActor.code === "execution-uncertain" &&
-          !data.execution.holds.uncertainty && (
-            <ActionLink
-              variant="secondary"
-              href={`/tasks/${taskId}?section=execution`}
-            >
-              Inspect uncertain execution
-            </ActionLink>
-          )}
-        {/* The holds the open requests, the selected one included, do not clear: once, in
-          the Inbox's wording. */}
-        {openRequests.length > 0 && <QuestionHolds holds={attention.notices} />}
+        {/* The projection removes requests already represented by their own rows. */}
+        {attention.cardNotices.length > 0 && (
+          <QuestionHolds holds={attention.cardNotices} />
+        )}
         {!nextActor.operator &&
           !data.source?.hold?.active &&
           !data.completionRequests.some((r) => r.status === "pending") &&
@@ -2472,21 +2489,21 @@ export function TaskWorkspace({
           !Object.values(data.execution.holds).some(Boolean) && (
             <p className="muted">No operator decision needed.</p>
           )}
-        {/* The merged approval wait is left out: the open approvals are rows above, and the
-          hold line names the others when one is selected. */}
-        <WaitReasons
-          waits={attention.waits.filter((wait) => wait.code !== "approval")}
-          taskId={taskId}
-          projectId={data.task.projectId}
-          client={client}
-          session={session}
-          drafts={drafts}
-          workspace={workspace ?? null}
-          onChanged={refreshAll}
-          holds={attention.executionHolds}
-          executionHref={`/tasks/${taskId}?section=execution`}
-          assignments={data.assignments}
-        />
+        {attention.executionHolds.length > 0 && (
+          <ul className="execution-list" aria-label="Execution holds">
+            {attention.executionHolds.map((hold) => (
+              <li key={hold.kind}>
+                <strong>{hold.label}</strong> · {hold.clears} ·{" "}
+                <ActionLink
+                  variant="secondary"
+                  href={`/tasks/${taskId}?section=execution`}
+                >
+                  Inspect execution
+                </ActionLink>
+              </li>
+            ))}
+          </ul>
+        )}
         <TaskUnstack
           client={client}
           session={session}
@@ -3171,6 +3188,8 @@ export function TaskWorkspace({
             project={data.project}
             client={client}
             session={session}
+            drafts={drafts}
+            workspace={workspace ?? null}
             onChanged={refreshAll}
           />
         </TabPanel>

@@ -223,6 +223,7 @@ const task = (
     ),
     localDependencies: [],
     source: null,
+    unresolvedResults: [],
     ...extra,
   }) as unknown as TaskRead["data"];
 
@@ -369,6 +370,38 @@ test("task attention projection counts combined uncertainty state, hold and code
   ]);
 });
 
+test("uncertainty keeps an unready explanation and rejected completion action beside it", () => {
+  const result = taskAttentionProjection(
+    attentionTask({
+      task: { state: "open", ready: false } as never,
+      admission: { eligible: false, reasons: ["task-unready"] } as never,
+      execution: {
+        state: "uncertain",
+        holds: {
+          stop: false,
+          writer: false,
+          capacity: false,
+          uncertainty: true,
+          task: false,
+        },
+        reasonCodes: [],
+      } as never,
+      attention: {
+        codes: ["execution-uncertain", "completion-rejected"],
+        count: 2,
+      } as never,
+    }),
+    "approve",
+    null,
+  );
+  assert.equal(result.rows.length, 3);
+  assert.deepEqual(
+    result.rows.map((row) => row.id),
+    ["hold:task-unready", "execution:uncertainty", "completion-rejected"],
+  );
+  assert.equal(result.cardNotices.length, 1);
+});
+
 test("task attention projection deduplicates stop state and flag and source notice while retaining intervention", () => {
   const stopped = taskAttentionProjection(
     attentionTask({
@@ -438,6 +471,45 @@ test("selected and unselected open approvals each produce one inspector request 
       { id: "request:approval-1", title: "Approval pending", kind: "request" },
     ]);
   }
+});
+
+test("open approvals suppress their merged wait while project pause stays a single projected hold", () => {
+  const ids = ["approval-1", "approval-2"],
+    requests = ids.map(
+      (interactionId) =>
+        ({ interactionId, kind: "approval", status: "open" }) as never,
+    ),
+    result = taskAttentionProjection(
+      attentionTask({
+        approvals: requests,
+        waits: [
+          {
+            code: "approval",
+            fix: null,
+            links: ids.map((id) => ({
+              kind: "request",
+              id,
+            })),
+          } as never,
+          { code: "project-paused", fix: null, links: [] } as never,
+        ],
+      }),
+      "approve",
+      "approval-1",
+    );
+  assert.equal(result.rows.length, 3);
+  assert.deepEqual(
+    result.rows.map((row) => row.id),
+    ["request:approval-1", "request:approval-2", "hold:paused"],
+  );
+  assert.equal(
+    result.notices.filter((notice) => notice.id === "approval").length,
+    0,
+  );
+  assert.equal(
+    result.cardNotices.filter((notice) => notice.id === "paused").length,
+    1,
+  );
 });
 
 test("operator recovery hold pins the card even when the wait is its only signal", () => {

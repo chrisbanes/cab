@@ -13,6 +13,8 @@ import type { OperatorClient } from "./api.js";
 import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
+import { WaitReasons } from "./wait-reasons.js";
+import type { ConfigurationDrafts } from "./settings-state.js";
 import {
   admissionLine,
   evidenceNotice,
@@ -227,12 +229,16 @@ export function TaskExecution({
   project,
   client,
   session,
+  drafts,
+  workspace,
   onChanged,
 }: {
   data: Data;
   project: Workspace["data"]["projects"][number] | undefined;
   client: OperatorClient;
   session: Session;
+  drafts: ConfigurationDrafts;
+  workspace: Workspace | null;
   onChanged: () => void;
 }) {
   const taskId = data.task.id,
@@ -286,6 +292,22 @@ export function TaskExecution({
           )}
         </dd>
       </dl>
+      <WaitReasons
+        waits={data.waits.filter(
+          (wait) =>
+            wait.code !== "approval" &&
+            !(data.execution.state === "running" && wait.code === "capacity"),
+        )}
+        taskId={taskId}
+        projectId={data.task.projectId}
+        client={client}
+        session={session}
+        drafts={drafts}
+        workspace={workspace}
+        onChanged={onChanged}
+        executionHref={`/tasks/${taskId}?section=execution`}
+        assignments={data.assignments}
+      />
       <section aria-labelledby="execution-holds">
         <h4 id="execution-holds">Execution ownership and recovery</h4>
         {holds.length ? (
