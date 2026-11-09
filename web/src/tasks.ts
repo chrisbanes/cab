@@ -1,5 +1,5 @@
 import { attentionNext } from "../../src/operator/attention.js";
-import { unmetReason } from "../../src/operator/readiness-text.js";
+import { ruleText, unmetReason } from "../../src/operator/readiness-text.js";
 import {
   taskListPageSchema,
   uuid,
@@ -276,17 +276,39 @@ export const taskLeadLabel = (task: TaskListSummary) =>
 /** Identical readiness rules are shown once for the current result set. */
 export function sharedTaskReasons(tasks: readonly TaskListSummary[]) {
   const counts = new Map<string, number>();
+  const readinessRules = new Map<string, number>();
+  const unmetReasons = new Map<string, number>();
   const sharedReason = (reason: string) =>
-    reason.startsWith("Not Ready:") ||
     reason === reasonLabels["task-unready"] ||
     reason === reasonLabels["local-dependency"] ||
     reason === reasonLabels["stacked-blocker-unpublished"] ||
     reason === reasonLabels["stacked-blocker-unknown"] ||
     reason === reasonLabels["imported-blockers-unknown"];
-  for (const task of tasks)
-    for (const reason of taskReasonItems(task))
-      if (sharedReason(reason.text))
+  for (const task of tasks) {
+    const rule = task.source?.readiness.rule;
+    if (
+      !task.ready &&
+      task.state !== "done" &&
+      task.state !== "cancelled" &&
+      rule?.kind === "rule"
+    ) {
+      const text = `Readiness rule: ${ruleText(rule)}`;
+      readinessRules.set(text, (readinessRules.get(text) ?? 0) + 1);
+    }
+    for (const reason of taskReasonItems(task)) {
+      if (reason.text.startsWith("Not Ready:"))
+        unmetReasons.set(reason.text, (unmetReasons.get(reason.text) ?? 0) + 1);
+      else if (sharedReason(reason.text))
         counts.set(reason.text, (counts.get(reason.text) ?? 0) + 1);
+    }
+  }
+  // Different unmet conditions are exceptions; keep them beside their own task.
+  for (const reasons of [readinessRules, unmetReasons]) {
+    if (reasons.size === 1) {
+      const shared = reasons.entries().next().value;
+      if (shared) counts.set(...shared);
+    }
+  }
   return [...counts].filter(([, count]) => count > 1);
 }
 export const taskVisibilityText = (visible: number, eligible: number) =>

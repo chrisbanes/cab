@@ -281,9 +281,10 @@ test("default readiness discloses hidden drafts in List and Board and Show prese
     "/tasks?source=local&view=list",
   );
   await page.locator(`.task-list [data-task-id="${ids.ready}"]`).waitFor();
-  await page
-    .getByText(/Ready of .* eligible tasks · .* drafts hidden/)
-    .waitFor();
+  assert.equal(
+    await page.locator(".work-count").innerText(),
+    "7 Ready of 9 eligible tasks · 2 drafts hidden",
+  );
   await page
     .getByRole("button", { name: "Show 2 hidden tasks", exact: true })
     .click();
@@ -1057,16 +1058,36 @@ test("task rows show state, next actor and lead from recorded facts without raw 
   const { ids, web, page } = await start(journey, "/tasks?state=all");
   const row = (id: string) => page.locator(`.task-list [data-task-id="${id}"]`);
   await row(ids.importedId).waitFor();
+  const leadFacts = async (id: string) =>
+    page.evaluate(async (taskId) => {
+      const response = await fetch("/api/operator/task-list");
+      const body = await response.json();
+      return body.data.tasks.find((task: { id: string }) => task.id === taskId);
+    }, id);
+  const importedFacts = await leadFacts(ids.importedId);
+  assert.ok(importedFacts);
+  assert.notEqual(
+    importedFacts.lead?.profileId,
+    importedFacts.project.leadProfileId,
+    "the imported task fixture has a differing or missing task lead",
+  );
+  const importedLead = row(ids.importedId).locator(".task-lead");
+  if (
+    importedFacts.lead?.profileId &&
+    importedFacts.project.leadProfileId === importedFacts.lead.profileId
+  )
+    assert.equal(await importedLead.count(), 0);
+  else
+    assert.equal(
+      await importedLead.innerText(),
+      importedFacts.lead?.name ?? "No lead configured",
+    );
   const imported = await row(ids.importedId)
     .locator(".task-project-metadata")
     .innerText();
   assert.match(imported, /Service integration/);
   assert.match(imported, /fixture\/source#42/);
   assert.doesNotMatch(imported, /GitHub fixture/);
-  assert.equal(
-    await row(ids.importedId).locator(".task-lead").innerText(),
-    "Accountable lead · lead",
-  );
   assert.equal(
     await row(ids.importedId).locator(".task-source-state").count(),
     0,
@@ -1079,6 +1100,19 @@ test("task rows show state, next actor and lead from recorded facts without raw 
   await question
     .getByText("Next: you · answer question", { exact: true })
     .waitFor();
+  const questionFacts = await leadFacts(ids.question.id);
+  assert.ok(questionFacts);
+  const questionLead = question.locator(".task-lead");
+  if (
+    questionFacts.lead?.profileId &&
+    questionFacts.project.leadProfileId === questionFacts.lead.profileId
+  )
+    assert.equal(await questionLead.count(), 0);
+  else
+    assert.equal(
+      await questionLead.innerText(),
+      questionFacts.lead?.name ?? "No lead configured",
+    );
   // Nobody must act on these: no Next line at all, not a "none" fallback.
   for (const id of [ids.running.id, ids.done, ids.cancelled]) {
     assert.equal(await row(id).locator(".task-next").count(), 0, id);
@@ -2107,6 +2141,15 @@ const style = (page: Page, selector: string, property: string) =>
 test("board cards follow the frame's anatomy", async (_t, journey) => {
   const { ids, page, commands } = await start(journey, "/tasks?view=board");
   const card = (id: string) => `[data-task-id="${id}"]`;
+  const questionFacts = await page.evaluate(async (taskId) => {
+    const response = await fetch("/api/operator/task-list");
+    const body = await response.json();
+    return body.data.tasks.find((task: { id: string }) => task.id === taskId);
+  }, ids.question.id);
+  assert.ok(questionFacts);
+  const sameProjectLead =
+    Boolean(questionFacts.lead?.profileId) &&
+    questionFacts.lead.profileId === questionFacts.project.leadProfileId;
   await page.locator(card(ids.question.id)).waitFor();
   await page
     .locator(card(ids.question.id))
@@ -2121,7 +2164,9 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     "Service integration · Local task",
     "Question needs an answer",
     "Next: you · answer question",
-    "Accountable lead · accountable lead",
+    ...(sameProjectLead
+      ? []
+      : [questionFacts.lead?.name ?? "No lead configured"]),
     "Answer question →",
   ]);
   // Capacity is stated once for the board; a card nobody must act on has no Next line.
@@ -2137,11 +2182,14 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     ),
   );
   // The lead leads the footer; a narrow card wraps the response below it.
-  assert.ok(
-    lead &&
-      response &&
-      (lead.x + lead.width <= response.x || lead.y + lead.height <= response.y),
-  );
+  assert.ok(response);
+  if (sameProjectLead) assert.equal(lead, null);
+  else
+    assert.ok(
+      lead &&
+        (lead.x + lead.width <= response.x ||
+          lead.y + lead.height <= response.y),
+    );
   assert.match(
     (await page
       .locator(`${card(ids.question.id)} .task-request`)

@@ -49,12 +49,51 @@ test("task visibility and shared readiness copy stay concise", () => {
     ]),
     [["GitHub dependencies unavailable", 2]],
   );
+  const readinessRule = {
+    kind: "rule",
+    mode: "all",
+    conditions: [
+      { kind: "label", operator: "has", name: "ready" },
+      { kind: "label", operator: "has", name: "reviewed" },
+    ],
+  };
+  const unmet = (condition: string) =>
+    summary({
+      ready: false,
+      reasons: ["task-unready"],
+      closure: null,
+      readiness: {
+        rule: readinessRule,
+        outcome: "unmet",
+        unmet: [{ kind: "label", operator: "has", name: condition }],
+      },
+    });
+  const mixed = [
+    unmet("ready"),
+    unmet("ready"),
+    unmet("reviewed"),
+    unmet("reviewed"),
+  ];
+  assert.deepEqual(sharedTaskReasons(mixed), [
+    ["Readiness rule: label `ready` and label `reviewed`", 4],
+  ]);
+  assert.deepEqual(
+    taskReasonItems(mixed[0]!).map((reason) => reason.text),
+    ["Not Ready: needs label `ready`"],
+  );
+  assert.deepEqual(
+    taskReasonItems(mixed[2]!).map((reason) => reason.text),
+    ["Not Ready: needs label `reviewed`"],
+  );
   const sameLead = summary({ lead: "Mira" });
   sameLead.project.leadProfileId = sameLead.lead!.profileId;
   assert.equal(taskLeadLabel(sameLead), null);
   assert.equal(taskLeadLabel(summary()), "No lead configured");
-  assert.equal(
-    taskLeadLabel(summary({ lead: "Different lead" })),
-    "Different lead",
-  );
+  const missingLeadWithDefault = summary();
+  missingLeadWithDefault.project.leadProfileId =
+    "00000000-0000-4000-8000-000000000001";
+  assert.equal(taskLeadLabel(missingLeadWithDefault), "No lead configured");
+  const differingLead = summary({ lead: "Mira" });
+  differingLead.project.leadProfileId = "00000000-0000-4000-8000-000000000001";
+  assert.equal(taskLeadLabel(differingLead), "Mira");
 });

@@ -46,7 +46,9 @@ list or reloading, and always sees which filters are hiding work.
    match these filters" when filters hide everything. Overview and project pages share
    the same count and visibility explanation. The page header count uses the same URL
    or remembered filters as the list.
-7. The first keystroke in Filter tasks adds a history entry and later ones replace
+7. Identical source readiness rules are explained once for the visible result set.
+   Each row keeps its own unmet condition when tasks fail different parts of that rule.
+8. The first keystroke in Filter tasks adds a history entry and later ones replace
    it, so one Back returns to the list without the text. Every other filter change adds
    an entry. Back and Forward show the filters each entry had: an entry that a filter change
    or Reset left bare, with the filters at their defaults, stays the defaults instead of
