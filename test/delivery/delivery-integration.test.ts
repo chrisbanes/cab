@@ -19,7 +19,14 @@ import {
   canonicalMaterial,
   DeliveryStore,
 } from "../../src/core/delivery.js";
-import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
+import {
+  DeliveryArgumentsError,
+  DeliveryCoordinator,
+  deliveryInternalFailureText,
+  deliveryToolFailureText,
+} from "../../src/standalone/delivery.js";
+import { coordinationTools } from "../../src/standalone/coordination-tools.js";
+import { z } from "zod";
 import {
   gitlabWorld,
   opened,
@@ -2053,4 +2060,134 @@ test("a pull request that moved off the merge target never confirms it, but its 
       await waiting.f.close();
     }
   }
+});
+
+test("delivery tool failures name the invalid field, the refusal category and cab's reason", async () => {
+  const { f, reply, resolve } = await threadWorld(null);
+  const responses: string[] = [];
+  const failed = async (result: { success: boolean; text: string }) => {
+    assert.equal(result.success, false, result.text);
+    responses.push(result.text);
+    return result.text;
+  };
+  try {
+    const actionCount = () =>
+      f.readDb(
+        (db) =>
+          (
+            db.prepare("SELECT COUNT(*) AS n FROM delivery_actions").get() as {
+              n: number;
+            }
+          ).n,
+      );
+    const before = actionCount();
+    const slug = await failed(
+      await f.call("cab_external_action", {
+        operationId: "publish-cb-permitted-agents-6d1dc6c2",
+        action: { kind: "branch.push", target: { repositoryId: "R1" } },
+      }),
+    );
+    assert.match(slug, /^Invalid arguments: operationId: Invalid UUID/);
+    assert.equal(actionCount(), before);
+    const branch = await failed(
+      await f.call("cab_external_action", {
+        operationId: randomUUID(),
+        action: {
+          kind: "branch.push",
+          target: { repositoryId: "R1", branch: "cb/mine" },
+        },
+      }),
+    );
+    assert.match(branch, /^Invalid arguments: action\.target: .*"branch"/);
+    assert.equal(actionCount(), before);
+    const register = await failed(
+      await f.call("cab_register_pr", {
+        repositoryId: "R1",
+        prNumber: 0,
+        expectedPrNodeId: "P7",
+        expectedHeadSha: f.scripted.state.head,
+      }),
+    );
+    assert.match(register, /^Invalid arguments: prNumber: /);
+
+    // An untyped failure inside cab is fixed text, whatever its message.
+    const changed = await failed(
+      await f.call("cab_register_pr", {
+        repositoryId: "R1",
+        prNumber: 7,
+        expectedPrNodeId: "P7",
+        expectedHeadSha: "f".repeat(40),
+      }),
+    );
+    assert.equal(changed, deliveryInternalFailureText);
+
+    const refused = await failed(await f.threadAction(reply()));
+    assert.match(refused, /denied \(delivery-authority-denied\)/);
+    assert.match(
+      refused,
+      /Refused by policy: External action denied by project policy$/,
+    );
+
+    f.grant(
+      { action: "pr.thread.reply", mode: "approval" },
+      { action: "pr.thread.resolve", mode: "allow" },
+    );
+    const approval = await failed(await f.threadAction(reply()));
+    assert.match(
+      approval,
+      /Approval required: Exact material approval required\. Request approval with cab_request_approval/,
+    );
+
+    f.scripted.state.lostThreadResolve = true;
+    await failed(await f.threadAction(resolve("C1")));
+    const held = await failed(await f.threadAction(resolve("C1")));
+    assert.match(
+      held,
+      /Held: Task (admission is held|has unresolved external action)\. The operator must resolve the hold/,
+    );
+    assert.doesNotMatch(held, /Refused by policy/);
+
+    for (const text of responses) {
+      assert.doesNotMatch(text, /rejected or held/);
+      assert.ok(!text.includes(f.directory), text);
+      assert.doesNotMatch(text, /SYNTHETIC_SOURCE/);
+      assert.ok(text.length <= 1000, text);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("delivery failure text caps validation and never echoes values or untyped messages", () => {
+  const parsed = z
+    .object({ a: z.string(), b: z.string(), c: z.string(), d: z.string() })
+    .strict()
+    .safeParse({ a: "ghp_secret", b: 1, c: 2, d: 3, extra: "/private/path" });
+  assert.equal(parsed.success, false);
+  // A provider payload's ZodError is not the agent's input to fix.
+  assert.equal(
+    deliveryToolFailureText(parsed.error),
+    deliveryInternalFailureText,
+  );
+  const text = deliveryToolFailureText(
+    new DeliveryArgumentsError(parsed.error),
+  );
+  assert.ok(text.length <= 500);
+  assert.equal(text.split("; ").length, 3);
+  assert.doesNotMatch(text, /ghp_secret|\/private\/path/);
+  assert.equal(
+    deliveryToolFailureText(new Error("token ghp_secret at /private/path")),
+    deliveryInternalFailureText,
+  );
+});
+
+test("cab_external_action describes the operationId and branch.push contract", () => {
+  const description = coordinationTools.find(
+    (t) => t.name === "cab_external_action",
+  )?.description;
+  assert.match(description ?? "", /operationId: a fresh UUID v4/);
+  assert.match(
+    description ?? "",
+    /branch\.push takes only target\.repositoryId/,
+  );
 });
