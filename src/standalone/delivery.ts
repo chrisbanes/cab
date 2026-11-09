@@ -932,7 +932,7 @@ export class DeliveryCoordinator {
               receipt: null,
             },
       );
-      if (!baseMoved) onRefused?.(error);
+      onRefused?.(error);
       return refused;
     }
     let observation: ProviderActionObservation;

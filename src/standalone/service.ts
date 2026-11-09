@@ -175,6 +175,7 @@ import {
 } from "./data-directory.js";
 import {
   DeliveryCoordinator,
+  deliveryInternalFailureText,
   deliveryToolFailureText,
   assertDeliveryArguments,
   unresolvedThreadSummary,
@@ -6120,7 +6121,9 @@ export class StandaloneService {
             call.arguments,
             caller,
             (error) => {
-              refusal = deliveryToolFailureText(error);
+              // An untyped refusal is a race a retry may clear; the recorded reason says enough.
+              const text = deliveryToolFailureText(error);
+              if (text !== deliveryInternalFailureText) refusal = text;
             },
           );
           const response = coordination.recordAsyncReceipt(
