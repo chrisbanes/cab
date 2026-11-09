@@ -1437,6 +1437,11 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "project_dangerously_skip_sandbox",
+      values: { projectId: i.projectId, enabled: 1 },
+    },
+    {
+      shared: false,
       table: "project_active_selections",
       values: {
         projectId: i.projectId,
@@ -1667,6 +1672,11 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     {
       shared: false,
       table: "execution_intent_reasoning_summaries",
+      values: { intentId: i.intentId, enabled: 1 },
+    },
+    {
+      shared: false,
+      table: "execution_intent_dangerously_skip_sandbox",
       values: { intentId: i.intentId, enabled: 1 },
     },
     {

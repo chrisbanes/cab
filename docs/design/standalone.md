@@ -311,20 +311,36 @@ before harness selection read as Codex through the `harness` column default of
 
 Select supported App Server `workspaceWrite` controls with task working directory
 and explicit task writable roots, `networkAccess: false`, and `approvalPolicy: never`.
-Two operator-owned project settings, both off by default, expand it. A Codex task turn
+Three operator-owned project settings, all off by default, expand it. A Codex task turn
 admitted while `commandNetworkAccess` is on sends `networkAccess: true` in
 `turn/start.sandboxPolicy`. A Claude Code task turn admitted while `localListening` is on
 adds `allowLocalBinding: true` to its sandbox `network` options, so its commands can bind
 local ports while outbound network stays denied ([ADR-1027](../adr/1027-local-listening-for-test-fixtures.md)).
-Both values are recorded at admission (`execution_intent_network_access` and
-`execution_intent_local_listening`), so a later change reaches only later admissions and a
+A third, `dangerouslySkipSandbox` ([ADR-1029](../adr/1029-skip-sandbox-for-host-tools.md)),
+removes the sandbox for a project's task turns so they can run host tools such as browsers and
+Android emulators. A Codex task turn admitted while it is on sends
+`sandboxPolicy: { type: "dangerFullAccess" }` and keeps approval policy `never`; a read-only
+turn never gets it. A Claude Code task turn admitted while it is on runs its query with
+`sandbox: { enabled: false }`; the permission mode, tool allowlist, disallowed tools and cab
+tool checks are unchanged, and the PreToolUse hook still confines Write and Edit to the task's
+writable roots and refuses a Bash call that sets `dangerouslyDisableSandbox`, which guards
+against accidental edits and is not a boundary. The Claude sandbox self-test does not gate a turn
+admitted with it on; if the setting changes between that check and admission, the turn runs with
+the recorded, sandboxed policy and `failIfUnavailable` still fails it closed. While it is on it
+supersedes command network access and local listening, whose stored values are kept. An
+unsandboxed turn has the service user's full filesystem, process, network and credential access,
+and started processes can outlive the turn; cab does not clean them up. The Claude subprocess
+environment scrub and per-task temporary directory confinement no longer hold, the Claude
+sandbox self-test does not gate an unsandboxed turn, and only macOS is qualified.
+The three values are recorded at admission (`execution_intent_network_access`,
+`execution_intent_local_listening` and `execution_intent_dangerously_skip_sandbox`), so a later change reaches only later admissions and a
 running turn keeps its policy. Claude Code turns, drafting runs and requests without a task
 binding always run with command network access denied. Codex has no loopback-only per-turn
 control, so a Codex command listens only with command network access, on any interface, and
 a Codex turn's admission always records local listening off. Draft turns and drafting runs never
-listen. Neither setting is an allow-list, proxy or host filter: network access enables
-whatever the runtime then permits, including the credentials and logins the host exposes,
-and Claude Code's local binding is not limited to loopback.
+listen or skip the sandbox. None of the settings is an allow-list, proxy or host filter:
+network access enables whatever the runtime then permits, including the credentials and
+logins the host exposes, and Claude Code's local binding is not limited to loopback.
 A task turn's writable roots are its workspace plus, for each repository of a workspace
 made from cab's managed repository, that repository's `objects/` and `reftable/` and the
 worktree's admin directory `worktrees/<name>/` ([ADR-1026](../adr/1026-cab-owned-task-repositories.md)).

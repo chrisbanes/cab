@@ -612,6 +612,13 @@ export class ExecutionState {
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
+    CREATE TABLE IF NOT EXISTS project_dangerously_skip_sandbox (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_dangerously_skip_sandbox (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       cabRetriesUsed INTEGER NOT NULL CHECK(cabRetriesUsed >= 0),
@@ -1892,6 +1899,43 @@ export class ExecutionState {
       )
       .get(intentId) as { enabled: number } | undefined;
     return row ? row.enabled === 1 : null;
+  }
+
+  /** Skip-sandbox the turn was admitted with; null when no admission recorded it. */
+  dangerouslySkipSandbox(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_dangerously_skip_sandbox WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
+  }
+
+  /**
+   * Whether admitting this intent now would record skip-sandbox on: the project setting is on,
+   * the work has a task binding and it is not a draft turn. Admission uses the same condition.
+   */
+  skipSandboxApplies(intentId: string, projectId: string): boolean {
+    const work = this.db
+      .prepare("SELECT workId FROM execution_intents WHERE id = ?")
+      .get(intentId) as { workId: string } | undefined;
+    if (!work) return false;
+    return (
+      (
+        this.db
+          .prepare(`SELECT EXISTS (
+            SELECT 1 FROM project_dangerously_skip_sandbox p
+            JOIN task_execution_bindings b ON b.workId = ?
+            WHERE p.projectId = ? AND p.enabled = 1
+            ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}
+          ) AS applies`)
+          .get(
+            work.workId,
+            projectId,
+            ...(this.hasTurnRequests ? [work.workId] : []),
+          ) as { applies: number }
+      ).applies === 1
+    );
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
@@ -5397,10 +5441,11 @@ export class ExecutionState {
             .prepare("SELECT workId FROM execution_intents WHERE id = ?")
             .get(id) as { workId: string }
         ).workId;
-        // Only a Codex task turn can run with command network access, and only a
-        // Claude task turn with local listening: drafting runs have no binding and
-        // stay off, as does the other harness. Writes execution_intent_network_access
-        // and execution_intent_local_listening.
+        // Only a Codex task turn can run with command network access, only a Claude
+        // task turn with local listening, and a task turn of either harness with
+        // skip-sandbox: drafting runs have no binding and stay off, as does the other
+        // harness. Writes execution_intent_network_access,
+        // execution_intent_local_listening and execution_intent_dangerously_skip_sandbox.
         for (const [intentTable, projectTable, harness] of [
           [
             "execution_intent_network_access",
@@ -5412,15 +5457,20 @@ export class ExecutionState {
             "project_local_listening",
             "claude",
           ],
+          [
+            "execution_intent_dangerously_skip_sandbox",
+            "project_dangerously_skip_sandbox",
+            "any",
+          ],
         ] as const)
           this.db
             .prepare(`INSERT OR REPLACE INTO ${intentTable} (intentId, enabled)
           SELECT ?, EXISTS (
             SELECT 1 FROM ${projectTable} p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = '${harness}')
+            WHERE p.projectId = ? AND p.enabled = 1 ${harness === "any" ? "" : `AND b.harness = '${harness}'`})
             ${
-              // A draft turn never gets either expansion.
+              // A draft turn never gets any of the expansions.
               this.hasTurnRequests
                 ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)"
                 : ""

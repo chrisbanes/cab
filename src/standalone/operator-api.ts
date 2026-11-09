@@ -2369,6 +2369,9 @@ export class OperatorApi {
         request.workId,
       ),
       localListening: this.service.localListeningFor(request.workId),
+      dangerouslySkipSandbox: this.service.dangerouslySkipSandboxFor(
+        request.workId,
+      ),
       failure:
         harness === "claude" && held
           ? this.service.terminalFailure(request.workId)
@@ -7132,6 +7135,7 @@ export class OperatorApi {
         reasoningSummaries: d.reasoningSummaries(projectId),
         commandNetworkAccess: d.commandNetworkAccess(projectId),
         localListening: d.localListening(projectId),
+        dangerouslySkipSandbox: d.dangerouslySkipSandbox(projectId),
         stacking: d.stacking(projectId),
         placements: [
           this.service.githubSources(),

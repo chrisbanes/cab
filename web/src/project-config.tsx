@@ -2,7 +2,7 @@ import { projectSchema } from "../../src/operator/contracts.js";
 import { ProjectLifecyclePanel, DeletedProject } from "./project-lifecycle.js";
 import { sourceCredentialSummary } from "./settings-view.js";
 import { Circle, CircleCheck, CirclePause } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   projectConfigurationSchema,
   projectPrivateValuesSchema,
@@ -22,6 +22,13 @@ import {
   localListeningLimit,
   projectLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
+import {
+  skipSandboxAppliesNote,
+  skipSandboxGrantLines,
+  skipSandboxRisk,
+  skipSandboxSupersededLine,
+  projectSkipSandboxLine,
+} from "../../src/operator/skip-sandbox-copy.js";
 import {
   ActionLink,
   Button,
@@ -66,6 +73,7 @@ import {
   PrivateTextField,
   reloadDraft,
   revealedText,
+  sendDraft,
   submitDraft,
   useDraft,
   useHeaderRefresh,
@@ -393,6 +401,9 @@ function GeneralTab(p: TabProps) {
     ...(data.localListening === undefined
       ? {}
       : { localListening: data.localListening }),
+    ...(data.dangerouslySkipSandbox === undefined
+      ? {}
+      : { dangerouslySkipSandbox: data.dangerouslySkipSandbox }),
     ...(data.diagnosticCapture === undefined
       ? {}
       : { diagnosticCapture: data.diagnosticCapture }),
@@ -447,6 +458,10 @@ function GeneralTab(p: TabProps) {
     Boolean(v.localListening) !== data.localListening
       ? { localListening: Boolean(v.localListening) }
       : {}),
+    ...(data.dangerouslySkipSandbox !== undefined &&
+    Boolean(v.dangerouslySkipSandbox) !== data.dangerouslySkipSandbox
+      ? { dangerouslySkipSandbox: Boolean(v.dangerouslySkipSandbox) }
+      : {}),
     ...(data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== data.diagnosticCapture
       ? { diagnosticCapture: v.diagnosticCapture }
@@ -458,12 +473,24 @@ function GeneralTab(p: TabProps) {
       : {}),
     ...privateField("instructions", v.instructions, revealed),
   });
+  const [confirmSkip, setConfirmSkip] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const skipping = data.dangerouslySkipSandbox === true;
+  const turnsOnSkip =
+    data.dangerouslySkipSandbox === false && Boolean(v.dangerouslySkipSandbox);
   return (
     <div className="settings-split">
       <div className="settings-column">
         <Panel title="General" description="Each section saves on its own.">
           <form
-            onSubmit={(e) =>
+            ref={form}
+            onSubmit={(e) => {
+              // Turning the sandbox off for the project needs an explicit confirmation first.
+              if (turnsOnSkip && !holdSave && !d.readOnly) {
+                e.preventDefault();
+                setConfirmSkip(true);
+                return;
+              }
               void submitDraft(
                 e,
                 d,
@@ -473,8 +500,8 @@ function GeneralTab(p: TabProps) {
                 p.refreshConfiguration,
                 {},
                 holdSave,
-              )
-            }
+              );
+            }}
           >
             <div className="settings-fields">
               <DraftField draft={d} field="name" label="Project name" />
@@ -509,6 +536,7 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectCommandNetworkLine(data.commandNetworkAccess)}{" "}
                   {commandNetworkAppliesNote} {commandNetworkDisclosure}
+                  {skipping && ` ${skipSandboxSupersededLine}`}
                 </p>
               </>
             )}
@@ -523,6 +551,22 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectLocalListeningLine(data.localListening)}{" "}
                   {localListeningAppliesNote} {localListeningLimit}
+                  {skipping && ` ${skipSandboxSupersededLine}`}
+                </p>
+              </>
+            )}
+            {data.dangerouslySkipSandbox !== undefined && (
+              <>
+                <DraftCheck
+                  draft={d}
+                  field="dangerouslySkipSandbox"
+                  label="Skip sandbox (dangerous)"
+                  toggle
+                />
+                <p className="metadata muted">
+                  {projectSkipSandboxLine(data.dangerouslySkipSandbox)}{" "}
+                  {skipSandboxAppliesNote} {skipSandboxGrantLines.join(" ")}{" "}
+                  {skipSandboxRisk}
                 </p>
               </>
             )}
@@ -599,6 +643,39 @@ function GeneralTab(p: TabProps) {
             />
           </form>
           {data.reasoningSummaries !== undefined && <DeleteReasoning {...p} />}
+          <Dialog open={confirmSkip} onOpenChange={setConfirmSkip}>
+            <DialogContent role="alertdialog" className="stop-dialog">
+              <DialogTitle>Skip the sandbox for this project?</DialogTitle>
+              <DialogDescription className="body">
+                {skipSandboxRisk} {skipSandboxAppliesNote}
+              </DialogDescription>
+              <div className="stop-dialog-actions">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    setConfirmSkip(false);
+                    if (form.current)
+                      void sendDraft(
+                        form.current,
+                        d,
+                        p.client,
+                        p.session,
+                        command(),
+                        p.refreshConfiguration,
+                      );
+                  }}
+                >
+                  Skip sandbox
+                </Button>
+                <DialogClose asChild>
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
+                </DialogClose>
+              </div>
+            </DialogContent>
+          </Dialog>
         </Panel>
         <CredentialReferences projectId={projectId} data={data} />
       </div>

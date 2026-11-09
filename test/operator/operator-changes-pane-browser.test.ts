@@ -12,6 +12,11 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { seedChangedTask } from "../fixtures/changed-task.js";
+import {
+  changedFile,
+  diffLineNumber,
+  diffTitle,
+} from "../fixtures/diff-view.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
@@ -162,12 +167,9 @@ for (const colorScheme of ["light", "dark"] as const) {
         await computed(page.locator("#task-changes-split"), "overflow"),
         "visible",
       );
-      await pane(page)
-        .locator(".changes-entry")
-        .filter({ hasText: /guide\.md/ })
-        .click();
-      await page.getByLabel("Diff hunk 1").first().waitFor();
-      // The rail stacks above the diff, which keeps a readable width beside the conversation.
+      await changedFile(pane(page), "guide.md").click();
+      await diffTitle(pane(page)).waitFor();
+      // The files stack above the diff, which keeps a readable width beside the conversation.
       assert.ok((await width(page.locator(".changes-reading-area"))) >= 280);
       if (w === 1366)
         await j.capture(page, `changes-pane-${colorScheme}`, false);
@@ -204,10 +206,7 @@ test("Close restores the inspector and Open full width keeps the selection", asy
   );
   assert.equal(await pane(page).count(), 0);
   await openPane(page);
-  await pane(page)
-    .locator(".changes-entry")
-    .filter({ hasText: /guide\.md/ })
-    .click();
+  await changedFile(pane(page), "guide.md").click();
   await pane(page)
     .getByRole("button", { name: "Open full width", exact: true })
     .click();
@@ -215,10 +214,9 @@ test("Close restores the inspector and Open full width keeps the selection", asy
   assert.equal(await pane(page).count(), 0);
   assert.equal(await page.locator("section#changes").count(), 1);
   assert.equal(
-    await page
-      .locator(".changes-entry")
-      .filter({ hasText: /guide\.md/ })
-      .getAttribute("aria-current"),
+    await changedFile(page.locator("body"), "guide.md").getAttribute(
+      "aria-selected",
+    ),
     "true",
   );
   assert.equal(await focused(changesTab(page)), true);
@@ -238,14 +236,8 @@ test("the reply draft survives opening and closing the pane", async (_t, j) => {
 test("Escape dismisses what is open inside the pane before the pane", async (_t, j) => {
   const { page } = await start(j);
   await openPane(page);
-  await pane(page)
-    .locator(".changes-entry")
-    .filter({ hasText: /guide\.md/ })
-    .click();
-  await pane(page)
-    .getByRole("button", { name: /^(Before |After )?line \d+, guide\.md;/i })
-    .first()
-    .click();
+  await changedFile(pane(page), "guide.md").click();
+  await diffLineNumber(pane(page), "After", 1).click();
   await pane(page)
     .getByRole("button", { name: "Add review comment" })
     .first()
@@ -443,16 +435,20 @@ for (const colorScheme of ["light", "dark"] as const)
         "missing.md is not in this comparison. Refresh to compare again.",
       )
       .waitFor();
-    assert.equal(await pane(page).locator("[aria-current='true']").count(), 0);
+    assert.equal(
+      await pane(page)
+        .locator('[role="treeitem"][aria-selected="true"]')
+        .count(),
+      0,
+    );
     await closePane(page);
     await filePath(page, "guide.md").click();
     await pane(page).waitFor();
     assert.equal(page.url(), url);
-    await pane(page)
-      .locator(".changes-entry[aria-current='true']")
-      .filter({ hasText: /guide\.md/ })
+    await changedFile(pane(page), "guide.md")
+      .and(pane(page).locator('[aria-selected="true"]'))
       .waitFor();
-    await pane(page).getByLabel("Diff hunk 1").first().waitFor();
+    await diffTitle(pane(page)).waitFor();
     // Close returns focus to the path that opened the pane.
     await closePane(page);
     await page.waitForFunction(
@@ -465,9 +461,8 @@ test("a changed file in the conversation opens in the Changes tab at 800px", asy
   await filePath(page, "guide.md").click();
   assert.equal(await changesTab(page).getAttribute("aria-selected"), "true");
   assert.equal(await pane(page).count(), 0);
-  await page
-    .locator(".changes-entry[aria-current='true']")
-    .filter({ hasText: /guide\.md/ })
+  await changedFile(page.locator("body"), "guide.md")
+    .and(page.locator('[aria-selected="true"]'))
     .waitFor();
 });
 

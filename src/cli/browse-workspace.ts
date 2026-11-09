@@ -13,6 +13,11 @@ import {
   workspaceSchema,
 } from "../operator/contracts.js";
 import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
+import {
+  skipSandboxGrantLines,
+  skipSandboxRisk,
+  skipSandboxSupersededLine,
+} from "../operator/skip-sandbox-copy.js";
 import { taskColumn } from "../operator/task-presentation.js";
 import {
   anyNull,
@@ -34,6 +39,7 @@ import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
 
 const API = "/api/operator";
+const skipped = " (superseded by skip sandbox)";
 const query = (params: Record<string, string | number | undefined>) =>
   new URLSearchParams(
     Object.entries(params).flatMap(([k, v]) =>
@@ -219,17 +225,25 @@ const projectGet: BrowseCommand = {
           ],
           [
             "Command network access",
-            d.commandNetworkAccess === undefined
+            (d.commandNetworkAccess === undefined
               ? "not reported"
               : d.commandNetworkAccess
                 ? "enabled"
-                : "disabled",
+                : "disabled") + (d.dangerouslySkipSandbox ? skipped : ""),
           ],
           [
             "Local listening",
-            d.localListening === undefined
+            (d.localListening === undefined
               ? "not reported"
               : d.localListening
+                ? "enabled"
+                : "disabled") + (d.dangerouslySkipSandbox ? skipped : ""),
+          ],
+          [
+            "Skip sandbox",
+            d.dangerouslySkipSandbox === undefined
+              ? "not reported"
+              : d.dangerouslySkipSandbox
                 ? "enabled"
                 : "disabled",
           ],
@@ -267,6 +281,13 @@ const projectGet: BrowseCommand = {
             ]
           : []),
         commandNetworkDisclosure,
+        ...(d.dangerouslySkipSandbox
+          ? [
+              ...skipSandboxGrantLines,
+              skipSandboxSupersededLine,
+              skipSandboxRisk,
+            ]
+          : []),
         "",
         d.profiles.length
           ? table(
