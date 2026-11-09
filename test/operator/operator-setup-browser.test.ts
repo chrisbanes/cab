@@ -71,7 +71,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
   await page
     .getByLabel("Lead agent", { exact: true })
     .selectOption({ label: "Mira" });
-  const permitted = page.getByRole("checkbox", { name: /^Nora ·/ });
+  const permitted = page.getByRole("checkbox", { name: /^Nora(?: ·|$)/ });
   await permitted.check();
   await page
     .getByLabel("Instructions", { exact: true })
@@ -1761,7 +1761,7 @@ test("Setup exposes Permitted agents when profiles already exist", async (_t, jo
     await page.getByRole("checkbox", { name: /Adds Implementer/ }).count(),
     0,
   );
-  const permitted = page.getByRole("checkbox", { name: /^Mira ·/ });
+  const permitted = page.getByRole("checkbox", { name: /^Mira(?: ·|$)/ });
   assert.equal(await permitted.count(), 1);
   await permitted.check();
   await page

@@ -52,6 +52,7 @@ const documentedWrites = [
   "profile apply",
   "project prepare",
   "project prepare-create",
+  "project prepare-permitted-agents",
   "project prepare-routing",
   "project prepare-repositories",
   "project apply",

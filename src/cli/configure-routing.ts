@@ -17,7 +17,7 @@ const sameSet = (a: string[], b: string[]) =>
 
 const prepareRouting: WriteCommand = {
   usage:
-    "project prepare-routing PROJECT_ID [--out FILE] [--expected-version N] [--enabled true|false] [--candidates ID,ID|none] [--guidance-file PATH] [--credential-ref env:NAME|none] (Permitted agents: project prepare-permitted-agents --permitted-agents)",
+    "project prepare-routing PROJECT_ID [--out FILE] [--expected-version N] [--enabled true|false] [--candidates ID,ID|none] [--guidance-file PATH] [--credential-ref env:NAME|none] (Permitted agents: project prepare-permitted-agents)",
   positionals: 1,
   expects:
     "--expected-version: the routing configuration's version (routing.version in 'cab project get PROJECT_ID --output json'); omitted, the version this command reads.",

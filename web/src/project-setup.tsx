@@ -696,7 +696,7 @@ export function ProjectSetup(
               <legend className="small-heading">Permitted agents</legend>
               <p className="metadata muted">
                 The lead may delegate to these agents whether routing is on or
-                off. Routing chooses from this same list.
+                off.
               </p>
               {profiles.map((r) => {
                 const candidates = values.candidateProfileIds ?? [];

@@ -103,7 +103,7 @@ test("Routing reads Permitted agents and edits revealed guidance in place", asyn
 });
 
 test("Permitted agents edits the single delegation list outside Routing", async (_t, journey) => {
-  const { f, ids, page } = await startSettings(
+  const { f, ids, page, web } = await startSettings(
     journey,
     "/projects/:relay/settings?tab=permitted-agents",
   );
@@ -176,7 +176,7 @@ test("Permitted agents edits the single delegation list outside Routing", async 
     .waitFor();
   assert.equal(await reviewer.isChecked(), false);
 
-  await page.goto(`/projects/${ids.relay}/settings?tab=routing`);
+  await page.goto(`${web.origin}/projects/${ids.relay}/settings?tab=routing`);
   await page.getByRole("switch", { name: "Enable routing" }).waitFor();
   assert.equal(await page.getByRole("checkbox").count(), 0);
   assert.equal(

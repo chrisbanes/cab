@@ -395,6 +395,20 @@
       "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
+      "id": "project prepare-permitted-agents",
+      "kind": "command",
+      "area": "project",
+      "scenarios": ["CLI01", "CLI03"],
+      "evidence": ["test/coordination/operator-cli-routing-capacity.test.ts"],
+      "effect": "Writes a routing change document for the single Permitted agents list (candidateProfileIds), preserving routing enabled state and guidance; sends no write.",
+      "denial": "n/a: prepare sends no write; naming a revoked or unknown profile exits 2; revoked saved agents are dropped and listed.",
+      "revision": "A Permitted agents edit in the session between prepare and apply exits 4 with no change.",
+      "retry": "n/a: prepare is local; apply replay is covered by project apply.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "The command is exercised through the in-process CLI against a loopback service with fixture runtimes, not through an installed binary or a second machine/private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
       "id": "project prepare-routing",
       "kind": "command",
       "area": "project",
