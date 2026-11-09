@@ -1,6 +1,7 @@
 import {
   claudeSkipSandboxLine,
   codexSkipSandboxLine,
+  skipSandboxSupersededLine,
 } from "../../src/operator/skip-sandbox-copy.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -676,6 +677,38 @@ test("assignment get states skip sandbox for both harnesses", async (t) => {
       human,
     );
   }
+  // An admitted-on turn states its own harness's grant, and only that one.
+  const a = (await ok(["assignment", "get", codexId])).data;
+  const workId = randomUUID();
+  s.f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        assignmentVersion, instructionsRevision, profileRevision, prompt, state)
+        VALUES (?, ?, 'assignment', ?, ?, ?, ?, ?, ?, 'p', 'completed')`,
+    ).run(
+      randomUUID(),
+      workId,
+      a.taskId,
+      a.projectId,
+      codexId,
+      a.version,
+      a.instructionsRevision,
+      a.profileRevision,
+    );
+    const intentId = randomUUID();
+    db.prepare(
+      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed','chatgpt','workspaceWrite','never')",
+    ).run(intentId, workId);
+    db.prepare(
+      "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
+    ).run(intentId);
+  });
+  const on = (await h.run(["assignment", "get", codexId])).out;
+  assert.ok(on.includes("Admitted with the sandbox skipped."), on);
+  assert.ok(on.includes(codexSkipSandboxLine), on);
+  assert.ok(!on.includes(claudeSkipSandboxLine), on);
+  assert.ok(on.includes(skipSandboxSupersededLine), on);
 });
 
 test("project get shows skip sandbox and marks network access and local listening superseded when on", async (t) => {

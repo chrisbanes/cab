@@ -7,6 +7,8 @@ import {
   turnLocalListeningLine,
 } from "../operator/local-listening-copy.js";
 import {
+  claudeSkipSandboxLine,
+  codexSkipSandboxLine,
   skipSandboxRisk,
   skipSandboxSupersededLine,
   turnSkipSandboxLine,
@@ -192,7 +194,13 @@ const assignmentGet: BrowseCommand = {
           ? [
               turnSkipSandboxLine(g?.dangerouslySkipSandbox ?? null),
               ...(g?.dangerouslySkipSandbox
-                ? [skipSandboxSupersededLine, skipSandboxRisk]
+                ? [
+                    (g.harness ?? a.runtime.harness) === "codex"
+                      ? codexSkipSandboxLine
+                      : claudeSkipSandboxLine,
+                    skipSandboxSupersededLine,
+                    skipSandboxRisk,
+                  ]
                 : []),
             ]
           : []),

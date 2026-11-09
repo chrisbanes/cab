@@ -15,7 +15,7 @@ export const claudeSkipSandboxLine =
 /** The threat model, in two lines so each fits the disclosure cap. */
 export const skipSandboxRiskLines = [
   "An unsandboxed turn has the service user's full filesystem, process, network and credential access, and untrusted text, including issue and pull request bodies, can drive it. Claude Code's edit-tool confinement still applies but is not a boundary.",
-  "Processes it starts, such as emulators and browsers, can outlive the turn; cab does not clean them up. The Claude subprocess environment scrub, per-task temporary directory confinement and Seatbelt self-test no longer hold. Only macOS is qualified.",
+  "Processes it starts, such as emulators and browsers, can outlive the turn; cab does not clean them up. The Claude subprocess environment scrub and per-task temporary directory confinement no longer hold, and the Seatbelt self-test does not gate an unsandboxed turn. Only macOS is qualified.",
 ];
 
 /** Both harnesses' grants, for surfaces that show the setting rather than one harness. */
