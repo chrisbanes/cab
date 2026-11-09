@@ -6121,7 +6121,7 @@ export class StandaloneService {
             call.arguments,
             caller,
             (error) => {
-              // An untyped refusal is a race a retry may clear; the recorded reason says enough.
+              // Untyped refusals (mostly send-time races) keep just their recorded reason.
               const text = deliveryToolFailureText(error);
               if (text !== deliveryInternalFailureText) refusal = text;
             },
