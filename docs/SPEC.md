@@ -1371,7 +1371,10 @@ separate sections. Repository links are project configuration, not part of any
 source: each link records its code host and host name (GitHub on `github.com`, or
 GitLab on a configured host with the project's full path and numeric ID), and links
 change through one versioned, receipted `repositories.configure` command that
-verifies every checkout before anything is recorded. Settings, `project prepare-repositories`
+verifies every checkout before anything is recorded. Web and CLI repository-link
+configuration accept `~` and `~/…` checkout paths, which the service resolves
+against its home directory before verification and storage; omitting a saved
+link's path keeps the saved path. Settings, `project prepare-repositories`
 and the API each add GitHub and GitLab links, change a link's ref (and, in Settings, its
 local path) and remove links through that command; a saved link's code host, host, project
 path and project ID are its identity, so changing one means removing the link and adding

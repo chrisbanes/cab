@@ -10091,7 +10091,16 @@ export class OperatorApi {
                   path: resolveHomePath(r.path, this.home()),
                 })),
               }
-            : c;
+            : c.type === "repositories.configure"
+              ? {
+                  ...c,
+                  repositories: c.repositories.map((r) =>
+                    r.path === undefined
+                      ? r
+                      : { ...r, path: resolveHomePath(r.path, this.home()) },
+                  ),
+                }
+              : c;
         const raw = await this.executeDomain({ ...command, actor: "operator" });
         return commandReceipt(
           parseDomainCommandOutcome(c.type, raw),
