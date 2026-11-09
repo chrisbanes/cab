@@ -98,7 +98,8 @@ Project identity uses a small square dot per project, coloured from `--accent-te
 `--fg-2` and `--fg-3`; it is never a state colour.
 
 Code and evidence views take their colours from the tokens in both themes. Diffs
-render with `@pierre/diffs` in Geist Mono 12/20: syntax colouring, word-level
+render with `@pierre/diffs` in Geist Mono 12/20: syntax colouring for the common
+languages in `web/src/shiki-langs.ts` (others render as plain text), word-level
 emphasis inside changed lines, wrapped long lines and the library's light or dark
 palette chosen by the active theme. Diff colour always pairs with `+`/`−` markers;
 split view puts Before on the left and After on the right, and the file header names

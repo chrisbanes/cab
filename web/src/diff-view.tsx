@@ -24,11 +24,7 @@ import { useTheme } from "./theme.js";
 export type { Anchor, DiffHunkData } from "./diff-model.js";
 
 // Loaded on first use so the highlighter stays out of the initial bundle.
-const PatchDiff = lazy(() =>
-  import("@pierre/diffs/react").then((module) => ({
-    default: module.PatchDiff,
-  })),
-);
+const PierreDiff = lazy(() => import("./pierre-diff.js"));
 
 type Layout = "split" | "unified";
 
@@ -250,8 +246,9 @@ export function FileDiffView({
 
   const diff = (
     <Suspense fallback={<p role="status">Loading diff…</p>}>
-      <PatchDiff
+      <PierreDiff
         patch={patch}
+        path={path}
         className={`changes-file-diff${active ? ` selects-${active.side}` : ""}`}
         selectedLines={selectedLines}
         options={{
