@@ -1,3 +1,7 @@
+import {
+  claudeSkipSandboxLine,
+  codexSkipSandboxLine,
+} from "../../src/operator/skip-sandbox-copy.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -695,6 +699,8 @@ test("project get shows skip sandbox and marks network access and local listenin
   assert.match(row(out, "Command network access"), /superseded/);
   assert.match(row(out, "Local listening"), /superseded/);
   assert.match(out, /full filesystem, process, network and credential access/);
+  assert.ok(out.includes(codexSkipSandboxLine));
+  assert.ok(out.includes(claudeSkipSandboxLine));
 });
 
 test("task get names the lead assignment, execution and who acts next", async (t) => {

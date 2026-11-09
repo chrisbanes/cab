@@ -1,3 +1,7 @@
+import {
+  skipSandboxGrantLines,
+  skipSandboxSupersededLine,
+} from "../../src/operator/skip-sandbox-copy.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -332,6 +336,16 @@ test("skip sandbox is off by default, operator-only and versioned through the AP
   r = await cli("rw", ["project", "apply", "--file", off.out]);
   assert.equal(r.code, 0, r.err + r.out);
   assert.equal(d.dangerouslySkipSandbox(s.projectId), false);
+
+  // Turning it on states both grants and that network access and listening are superseded.
+  const on = prepare("true");
+  r = await on.run();
+  assert.equal(r.code, 0, r.err + r.out);
+  const notes = JSON.stringify(
+    (JSON.parse(readFileSync(on.out, "utf8")) as Json).preview.notes,
+  );
+  for (const line of [...skipSandboxGrantLines, skipSandboxSupersededLine])
+    assert.ok(notes.includes(line), line);
 
   const bad = prepare("maybe");
   r = await bad.run();

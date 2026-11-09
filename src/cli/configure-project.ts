@@ -13,7 +13,9 @@ import {
 } from "../operator/local-listening-copy.js";
 import {
   skipSandboxAppliesNote,
+  skipSandboxGrantLines,
   skipSandboxRisk,
+  skipSandboxSupersededLine,
 } from "../operator/skip-sandbox-copy.js";
 import {
   stackingAppliesNote,
@@ -224,7 +226,9 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
                 : String(currentSkipSandbox),
             to: String(skipSandbox),
           });
-          notes.push(skipSandboxAppliesNote, skipSandboxRisk);
+          notes.push(skipSandboxAppliesNote, ...skipSandboxGrantLines);
+          if (skipSandbox) notes.push(skipSandboxSupersededLine);
+          notes.push(skipSandboxRisk);
         }
         const currentStacking = config.data.stacking;
         if (stacking !== undefined && stacking !== currentStacking) {
