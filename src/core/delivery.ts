@@ -3193,6 +3193,21 @@ export class DeliveryStore {
         }
       : binding;
   }
+  unregisteredPr(taskId: string): string | null {
+    if (this.delivery(taskId)) return null;
+    const created = this.actions(taskId)
+      .reverse()
+      .find(
+        (a) =>
+          a.state === "confirmed-success" &&
+          a.request.action.kind === "pr.create" &&
+          a.observation?.receipt?.number,
+      );
+    if (!created) return null;
+    const receipt = created.observation!.receipt!;
+    const target = created.request.action.target;
+    return `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${"expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""}); register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
+  }
   publicTask(taskId: string) {
     const task = this.db
       .prepare("SELECT projectId,version FROM domain_tasks WHERE id=?")
@@ -3251,6 +3266,7 @@ export class DeliveryStore {
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.withBaseHold(this.delivery(taskId)),
+      unregisteredPr: this.unregisteredPr(taskId),
       branches: this.taskBranches(taskId),
       blockers: this.completionBlockers(taskId, task.version),
       actions: this.actions(taskId).map((a) => ({

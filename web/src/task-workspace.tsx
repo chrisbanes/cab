@@ -3620,6 +3620,7 @@ function Changes({
           ))}
         </>
       )}
+      {d?.unregisteredPr && <p>{d.unregisteredPr}</p>}
       {d?.branches.map((b) => (
         <p key={`${b.repositoryName}:${b.branch}`}>
           {b.repositoryName} · branch {b.branch ?? "withheld"} ·{" "}

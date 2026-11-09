@@ -61,6 +61,85 @@ test("delivery get shows the PR, actions and comment policy without provider acc
   assert.equal(w.scripted.requests.length, requests);
 });
 
+test("delivery get retains the exact created PR and registration step without a binding", async (t) => {
+  const w = await deliveryWorld(t);
+  const store = w.f.service.delivery();
+  const policy = store.configuration(w.f.projectId);
+  w.f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.f.projectId,
+    expectedVersion: policy.version,
+    mode: policy.mode,
+    credentialRef: null,
+    grants: [
+      ...policy.grants,
+      { action: "pr.create", repositoryId: "R1", mode: "allow" },
+    ],
+    requiredChecks: [],
+  });
+  const branch = store.assignTaskBranchWithinTransaction(w.f.taskId, "R1");
+  const head = "a".repeat(40);
+  w.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE delivery_task_branches SET lastPushedSha=? WHERE taskId=?",
+      )
+      .run(head, w.f.taskId),
+  );
+  const operationId = randomUUID();
+  store.prepareAction(
+    {
+      operationId,
+      action: {
+        kind: "pr.create",
+        target: {
+          repositoryId: "R1",
+          headRef: branch.branch,
+          baseRef: "main",
+          expectedHeadSha: head,
+        },
+        title: "T",
+        body: "",
+        draft: false,
+      },
+    },
+    {
+      projectId: w.f.projectId,
+      taskId: w.f.taskId,
+      assignmentId: randomUUID(),
+      taskVersion: 1,
+      assignmentVersion: 1,
+      workId: "fixture-work",
+      workRevision: 1,
+      conversationRevision: 1,
+    },
+    false,
+  );
+  store.beginAttempt(operationId, {});
+  store.recordObservation(operationId, {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "P7", number: 7, headSha: head },
+  });
+  const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
+  assert.equal(json.data.delivery.binding, null);
+  assert.match(
+    json.data.delivery.unregisteredPr,
+    /repository R1 \(node P7, head a{40}\); register PR #7/,
+  );
+  const human = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /Pull request: +Created PR #7/);
+  assert.match(human.out, /register PR #7 with cab_register_pr/);
+});
+
 test("delivery get prints the status-mapping authority line, naming the Project by ID", async (t) => {
   const w = await deliveryWorld(t);
   await w.f.register();
