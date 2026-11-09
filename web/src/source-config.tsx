@@ -2,6 +2,7 @@ import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
 import {
   missingProjectSelectionWarning,
   noRuleText,
+  projectFieldSelectionGap,
 } from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { CircleCheck } from "lucide-react";
@@ -215,19 +216,21 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const projectSources = data.source.selections.filter(
     (s) => s.kind === "project" && s.descriptor,
   );
-  const activeProjectIds = new Set(
-    selections
-      .filter((r) => r.kind === "project" && r.active && !r.removed)
-      .map((r) =>
-        String(r.keep ? (r.descriptor ?? "") : (r.projectNodeId ?? "")),
-      )
-      .filter(Boolean),
-  );
-  const missingProjectFieldSelections = conditions.filter(
-    (r) =>
-      r.kind === "project-field" &&
-      r.projectNodeId &&
-      !activeProjectIds.has(String(r.projectNodeId)),
+  const missingProjectFieldSelection = projectFieldSelectionGap(
+    conditions.map((condition) => ({
+      kind: String(condition.kind),
+      projectNodeId: condition.projectNodeId,
+    })),
+    selections.map((r) => ({
+      kind: String(r.kind),
+      descriptor: r.keep
+        ? String(r.descriptor ?? "")
+        : String(r.projectNodeId ?? ""),
+      removed: Boolean(r.removed),
+      unknown: Boolean(
+        r.kind === "project" && (r.unavailable || (r.keep && !r.descriptor)),
+      ),
+    })),
   );
   /** The Remove and Undo names carry the S-n id, so two rows with one name stay distinct. */
   const rowName = (n: SourceNaming, id: unknown) =>
@@ -568,6 +571,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                   projectId={projectId}
                   rule={observed.readiness}
                   counts={s.counts}
+                  projectSelections={data.source.selections}
                   sameTab
                 />
               );
@@ -601,7 +605,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 "source-conditions-error",
                 "Check readiness mode and complete conditions.",
               )}
-              {missingProjectFieldSelections.length > 0 && (
+              {missingProjectFieldSelection && (
                 <Alert variant="warning" role="status">
                   {missingProjectSelectionWarning(
                     v.mode === "any" ? "any" : "all",

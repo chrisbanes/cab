@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   missingProjectSelectionWarning,
+  projectFieldSelectionGap,
+  projectFieldSelectionSummaryCause,
   selectionCountsText,
   unmetReason,
   zeroMatchWarning,
@@ -110,11 +112,109 @@ test("the zero-match warning needs a complete read, open items, no match and a k
 test("missing Project selections describe all and any conditions accurately", () => {
   assert.equal(
     missingProjectSelectionWarning("all"),
-    "This readiness rule can never match because its Project field condition has no active GitHub Project selection. Add that Project as a selection or remove the condition.",
+    "This readiness rule can never match because its Project field condition has no corresponding GitHub Project selection in this draft. Add that Project as a selection or remove the condition.",
   );
   assert.equal(
     missingProjectSelectionWarning("any"),
-    "This Project field condition never applies because its GitHub Project has no active selection. Add that Project as a selection or remove the condition.",
+    "This Project field condition never applies because its GitHub Project has no corresponding selection in this draft. Add that Project as a selection or remove the condition.",
+  );
+});
+
+test("zero-match context names missing or inactive Project selections without guessing", () => {
+  const missing = projectFieldSelectionGap(
+    rule("all", field).conditions,
+    [
+      { kind: "repository", descriptor: "R_1", active: true },
+      { kind: "search", descriptor: null, active: true },
+      { kind: "project", descriptor: "P_2", active: true },
+    ],
+    true,
+  );
+  assert.deepEqual(missing, { projectNodeId: "P_1", inactive: false });
+  assert.equal(
+    projectFieldSelectionSummaryCause("all", missing!),
+    "The readiness rule can never match: Project field condition references GitHub Project P_1 with no active selection. Add that Project as a selection.",
+  );
+  const inactive = projectFieldSelectionGap(
+    rule("any", field).conditions,
+    [{ kind: "project", descriptor: "P_1", active: false }],
+    true,
+  );
+  assert.deepEqual(inactive, { projectNodeId: "P_1", inactive: true });
+  assert.equal(
+    projectFieldSelectionSummaryCause("any", inactive!),
+    "A Project field condition never applies: Project field condition references inactive GitHub Project P_1. Activate that selection to supply fields.",
+  );
+  assert.equal(
+    projectFieldSelectionGap(
+      rule("all", field).conditions,
+      [
+        { kind: "project", descriptor: "P_1", active: false },
+        { kind: "project", descriptor: "P_1", active: true },
+      ],
+      true,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    projectFieldSelectionGap(rule("all", field).conditions, [
+      { kind: "project", descriptor: "P_2", active: true, removed: true },
+    ]),
+    { projectNodeId: "P_1", inactive: false },
+  );
+  assert.equal(
+    projectFieldSelectionGap(
+      rule("all", field).conditions,
+      [{ kind: "project", descriptor: null, active: false, unknown: true }],
+      true,
+    ),
+    null,
+    "an opaque saved Project identity is not proof of absence",
+  );
+  assert.equal(
+    projectFieldSelectionGap(
+      rule("all", field).conditions,
+      [
+        { kind: "project", descriptor: "P_1", active: false },
+        { kind: "project", descriptor: null, active: true, unknown: true },
+      ],
+      true,
+    ),
+    null,
+    "an opaque Project identity might be the active matching selection",
+  );
+  assert.equal(
+    projectFieldSelectionGap(rule("all", field).conditions, [
+      { kind: "project", descriptor: "P_1", active: false },
+    ]),
+    null,
+    "a matching Project in the draft counts before activation",
+  );
+  assert.match(
+    zeroMatchWarning(counts(), rule("all", field), [
+      { kind: "repository", descriptor: "R_1", active: true },
+    ]) ?? "",
+    /Project field condition references GitHub Project P_1 with no active selection/,
+  );
+  assert.match(
+    zeroMatchWarning(counts(), rule("any", field), [
+      { kind: "project", descriptor: "P_1", active: false },
+    ]) ?? "",
+    /Project field condition references inactive GitHub Project P_1/,
+  );
+  assert.equal(
+    zeroMatchWarning(counts({ complete: false }), rule("all", field), []),
+    null,
+  );
+  assert.equal(zeroMatchWarning(null, rule("all", field), []), null);
+  assert.equal(
+    projectFieldSelectionGap(
+      rule("all", label("ready")).conditions,
+      [{ kind: "jql", descriptor: "query", active: true }],
+      true,
+    ),
+    null,
+    "Jira sources do not supply GitHub Project fields",
   );
 });
 

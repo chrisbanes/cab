@@ -221,7 +221,7 @@ const sourcesCommand: BrowseCommand = {
             )
           : "No selections.",
         ...observations.flatMap((o) => {
-          const warning = zeroMatchWarning(o.counts, rule);
+          const warning = zeroMatchWarning(o.counts, rule, source.selections);
           return warning
             ? [
                 `${unavailable(o.selectionId)}: ${warning} Change readiness with 'cab project prepare-source'.`,

@@ -47,11 +47,64 @@ export const projectFieldText = (f: {
 export const noRuleText =
   "No readiness rule: open issues in active selections are not filtered by label or Project field.";
 
-/** Explain a Project field condition whose exact GitHub Project is not selected actively. */
+export type ProjectSelection = {
+  kind: string;
+  descriptor?: string | null;
+  active?: boolean;
+  removed?: boolean;
+  unknown?: boolean;
+};
+
+/** A known project-field reference that is absent or inactive in the supplied selections. */
+export function projectFieldSelectionGap(
+  conditions: readonly { kind: string; projectNodeId?: unknown }[],
+  selections: readonly ProjectSelection[],
+  activeOnly = false,
+) {
+  const projects = selections.filter(
+    (selection) => selection.kind === "project" && !selection.removed,
+  );
+  for (const condition of conditions) {
+    if (
+      condition.kind !== "project-field" ||
+      typeof condition.projectNodeId !== "string" ||
+      !condition.projectNodeId
+    )
+      continue;
+    const matching = projects.filter(
+      (selection) => selection.descriptor === condition.projectNodeId,
+    );
+    if (matching.some((selection) => !activeOnly || selection.active)) continue;
+    if (
+      projects.some(
+        (selection) => selection.unknown ?? selection.descriptor == null,
+      )
+    )
+      return null;
+    if (matching.length)
+      return { projectNodeId: condition.projectNodeId, inactive: true };
+    return { projectNodeId: condition.projectNodeId, inactive: false };
+  }
+  return null;
+}
+
+/** Explain a Project field condition whose corresponding Project is not in this draft. */
 export function missingProjectSelectionWarning(mode: "all" | "any") {
   return mode === "all"
-    ? "This readiness rule can never match because its Project field condition has no active GitHub Project selection. Add that Project as a selection or remove the condition."
-    : "This Project field condition never applies because its GitHub Project has no active selection. Add that Project as a selection or remove the condition.";
+    ? "This readiness rule can never match because its Project field condition has no corresponding GitHub Project selection in this draft. Add that Project as a selection or remove the condition."
+    : "This Project field condition never applies because its GitHub Project has no corresponding selection in this draft. Add that Project as a selection or remove the condition.";
+}
+
+export function projectFieldSelectionSummaryCause(
+  mode: "all" | "any",
+  gap: { projectNodeId: string; inactive: boolean },
+) {
+  const cause = gap.inactive
+    ? `Project field condition references inactive GitHub Project ${gap.projectNodeId}. Activate that selection to supply fields.`
+    : `Project field condition references GitHub Project ${gap.projectNodeId} with no active selection. Add that Project as a selection.`;
+  return mode === "all"
+    ? `The readiness rule can never match: ${cause}`
+    : `A Project field condition never applies: ${cause}`;
 }
 
 export function ruleText(rule: RuleView) {
@@ -86,13 +139,26 @@ export function selectionCountsText(counts: Counts, rule: RuleView) {
 }
 
 /** Only a complete read with open items and none matching a known rule warns. */
-export function zeroMatchWarning(counts: Counts | null, rule: RuleView) {
-  return counts?.complete &&
-    counts.open > 0 &&
-    counts.matching === 0 &&
-    rule.kind === "rule"
-    ? `No open item matches the readiness rule (${ruleText(rule)}); imported tasks stay Draft until one does.`
+export function zeroMatchWarning(
+  counts: Counts | null,
+  rule: RuleView,
+  projectSelections?: readonly ProjectSelection[],
+) {
+  if (
+    !(
+      counts?.complete &&
+      counts.open > 0 &&
+      counts.matching === 0 &&
+      rule.kind === "rule"
+    )
+  )
+    return null;
+  const gap = projectSelections
+    ? projectFieldSelectionGap(rule.conditions, projectSelections, true)
     : null;
+  return gap
+    ? `No open item matches the readiness rule (${ruleText(rule)}); ${projectFieldSelectionSummaryCause(rule.mode, gap)} Imported tasks stay Draft until one does.`
+    : `No open item matches the readiness rule (${ruleText(rule)}); imported tasks stay Draft until one does.`;
 }
 
 /** "needs label `ready`" or "needs any of …"; null unless the rule is known and unmet. */

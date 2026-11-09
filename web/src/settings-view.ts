@@ -1,6 +1,7 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
 import {
-  missingProjectSelectionWarning,
+  projectFieldSelectionGap,
+  projectFieldSelectionSummaryCause,
   selectionCountsText,
   zeroMatchWarning,
 } from "../../src/operator/readiness-text.js";
@@ -335,17 +336,18 @@ export function projectStateSummary(
     (p) => p.projectId === c.project.id,
   );
   const missingProjectFieldSelection =
-    observed?.readiness.kind === "rule" &&
-    observed.readiness.conditions.some(
-      (condition) =>
-        condition.kind === "project-field" &&
-        !c.source.selections.some(
-          (selection) =>
-            selection.kind === "project" &&
-            selection.active &&
-            selection.descriptor === condition.projectNodeId,
-        ),
-    );
+    observed?.readiness.kind === "rule"
+      ? projectFieldSelectionGap(
+          observed.readiness.conditions,
+          c.source.selections.map((selection) => ({
+            kind: selection.kind,
+            descriptor: selection.descriptor,
+            active: selection.active,
+            unknown: selection.kind === "project" && !selection.descriptor,
+          })),
+          true,
+        )
+      : null;
   const state = [
     `Lead: ${lead} · repository access: ${access}`,
     ...(c.source.selections.length
@@ -367,14 +369,19 @@ export function projectStateSummary(
       : c.source.selections.length && c.source.credential?.usable === false
         ? "Set or change the credential in GitHub source settings, then preview this source version."
         : observed?.selections.some((o) =>
-              zeroMatchWarning(o.counts, observed.readiness),
+              zeroMatchWarning(
+                o.counts,
+                observed.readiness,
+                c.source.selections,
+              ),
             )
           ? missingProjectFieldSelection
-            ? missingProjectSelectionWarning(
+            ? projectFieldSelectionSummaryCause(
                 observed?.readiness.kind === "rule" &&
                   observed.readiness.mode === "any"
                   ? "any"
                   : "all",
+                missingProjectFieldSelection,
               )
             : readinessNextStep
           : "Nothing needs attention here.";
