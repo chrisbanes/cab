@@ -856,7 +856,7 @@ Code disables its sandbox, with Claude's tool policy and edit-hook confinement u
 ([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)). The service, both runtimes and the
 operator surfaces are covered by deterministic suites; the sandbox behaviour is proved by the
 [probe](evidence/skip-sandbox-probe-2026-11-09.md) and by one live service turn per harness
-and setting, recorded by `npm run skip-sandbox:live`, which CI does not repeat.
+and setting, recorded by `npm run skip-sandbox:live` in the [live record](evidence/2026-11-09-skip-sandbox-live.md), which CI does not repeat.
 
 | Criteria | Evidence |
 | --- | --- |
@@ -869,7 +869,7 @@ and setting, recorded by `npm run skip-sandbox:live`, which CI does not repeat.
 | Settings asks for confirmation when the setting is turned on and saves off without one; the change list and each turn's admission read from shared copy | `operator-project-config-general-browser.test.ts`, `operator-settings-presentation.test.ts`, `operator-harness-assignment-browser.test.ts` |
 | `project get` and `assignment get` show the setting and the turn's admission, and mark network access and local listening superseded when it is on | `operator-cli-browse.test.ts` |
 | The startup migration adds both tables empty, so every project stays off; project deletion removes them | `startup-snapshot.test.ts`, `project-deletion.test.ts` |
-| A live task turn in each harness with the setting on launches Chromium and boots the emulator, and with it off does neither | `npm run skip-sandbox:live` writes the dated live record in `docs/evidence/` |
+| A live task turn in each harness with the setting on launches Chromium and boots the emulator, and with it off does neither | [live evidence](evidence/2026-11-09-skip-sandbox-live.md) |
 
 ## Draft turns
 
