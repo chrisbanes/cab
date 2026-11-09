@@ -1193,13 +1193,13 @@ export class ClaudeRuntime implements Runtime {
             }),
           )
           .parse(await stream.mcpServerStatus());
+        const cabServers = servers.filter(
+          (server) => server.name === mcpServerName,
+        );
         if (
-          !servers.some(
-            (server) =>
-              server.name === mcpServerName &&
-              server.source === "sdk" &&
-              server.status === "connected",
-          )
+          cabServers.length !== 1 ||
+          cabServers[0]?.source !== "sdk" ||
+          cabServers[0].status !== "connected"
         ) {
           refuseAdmission();
           return;

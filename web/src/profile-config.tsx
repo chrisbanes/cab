@@ -531,7 +531,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                 items={[
                   "Authentication, instructions, skills, plugins, MCP servers and hooks use the service user's native harness setup.",
                   "Configured extensions are trusted and may act outside cab's tools. Command restrictions do not confine every extension effect.",
-                  "Restart Codex after changing its configuration. Claude loads native settings for each query.",
+                  `Restart ${executionHarnessLabels.codex} after changing its configuration. ${executionHarnessLabels.claude} loads native settings for each query.`,
                 ]}
               />
               <PolicyAside draft={d} workspace={p.workspace} />

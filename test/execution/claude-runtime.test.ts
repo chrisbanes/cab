@@ -74,7 +74,7 @@ function fixture(
     verified?: boolean;
     selfTest?: () => boolean;
     hangModels?: boolean;
-    mcpSource?: string;
+    mcpSources?: string[];
     apiProvider?: string;
     apiKeySource?: string | null;
     resolveExecutable?: () => Promise<string | null>;
@@ -93,7 +93,7 @@ function fixture(
     log,
     {
       hangModels: options.hangModels ?? false,
-      ...(options.mcpSource ? { mcpSource: options.mcpSource } : {}),
+      ...(options.mcpSources ? { mcpSources: options.mcpSources } : {}),
       ...(options.apiProvider ? { apiProvider: options.apiProvider } : {}),
       ...(options.apiKeySource !== undefined
         ? { apiKeySource: options.apiKeySource }
@@ -1890,25 +1890,26 @@ test("settings probe cleanup awaits its existing SIGKILL fallback", {
   }
 });
 
-test("an inherited cab MCP collision refuses the turn before releasing its prompt", async () => {
-  const f = fixture({
-    mcpSource: "project",
-    scripts: [
-      async function* (session) {
-        yield init(sessionOf(session));
-        yield result(sessionOf(session));
-      },
-    ],
+for (const sources of [[], ["project"], ["sdk", "project"], ["sdk", "sdk"]])
+  test(`ambiguous or missing cab MCP provenance refuses the prompt: ${sources.join(",")}`, async () => {
+    const f = fixture({
+      mcpSources: sources,
+      scripts: [
+        async function* (session) {
+          yield init(sessionOf(session));
+          yield result(sessionOf(session));
+        },
+      ],
+    });
+    try {
+      await f.runtime.start();
+      const id = await f.runtime.startThread(f.workspace, []);
+      await assert.rejects(f.turn(id), /Claude turn could not start/);
+      assert.ok(!f.log.includes("prompt"));
+    } finally {
+      await f.cleanup();
+    }
   });
-  try {
-    await f.runtime.start();
-    const id = await f.runtime.startThread(f.workspace, []);
-    await assert.rejects(f.turn(id), /Claude turn could not start/);
-    assert.ok(!f.log.includes("prompt"));
-  } finally {
-    await f.cleanup();
-  }
-});
 
 test("Claude refuses legacy and unknown configuration origins before a resume query", async () => {
   const f = fixture();

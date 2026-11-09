@@ -62,15 +62,18 @@ export function fakeSdk(
   log: string[],
   options: {
     hangModels?: boolean;
-    mcpSource?: string;
+    mcpSources?: string[];
     apiProvider?: string;
     apiKeySource?: string | null;
   } = {},
 ) {
   const metadata = {
-    mcpServerStatus: async () => [
-      { name: "cab", status: "connected", source: options.mcpSource ?? "sdk" },
-    ],
+    mcpServerStatus: async () =>
+      (options.mcpSources ?? ["sdk"]).map((source) => ({
+        name: "cab",
+        status: "connected",
+        source,
+      })),
     accountInfo: async () => ({
       apiProvider: options.apiProvider ?? "firstParty",
       subscriptionType: "max",

@@ -37,7 +37,10 @@ The second Claude failure exposed an invalid `mcp__*` allow rule. Claude's
 [permission contract](https://code.claude.com/docs/en/agent-sdk/permissions)
 requires a literal server prefix before a tool wildcard. Production now explicitly
 allows `mcp__cab__*`; every cab call still requires SDK server provenance and the
-bound coordination validation. Trusted non-cab MCP tools receive a
+bound coordination validation. Prompt admission also requires exactly one
+connected SDK `cab` status: empty, duplicate or conflicting status arrays refuse
+before a prompt. This closes an accepted-payload ambiguity found during review;
+normal startup producing duplicate entries was not observed. Trusted non-cab MCP tools receive a
 [PreToolUse approval](https://code.claude.com/docs/en/agent-sdk/hooks).
 Native deny/ask rules and the unexpected-permission rejection remain effective.
 The repair passes deterministic runtime/service checks; it has not passed a new
@@ -66,13 +69,16 @@ Archival/deletion checks limit native runtime calls to attributable native cab
 conversations. Chromium checks cover native setup guidance, profile edits,
 drafts, focus and navigation.
 
-The integrated full `npm run check` registered 5,786 tests: 5,730 passed, 52 were
-skipped and four failed. One failure was a stale HTTP expectation for the retired
-Claude token endpoint; it is corrected to expect `410`. The other three package
-installation fixtures failed with registry `ETARGET` for the unchanged pinned
-`lucide-react@1.68.0`. Dependency versions and those assertions were not changed
-to conceal the failure. Affected checks are renewed after repairs; the complete
-gate remains pending, as do independent review and final-head CI.
+Initial full checks exposed a stale retired-endpoint expectation and a test-runner
+import masked by old build output. Both are repaired, and a clean rebuild passes.
+Fresh registry metadata resolved `ETARGET` for the unchanged pinned dependency;
+the package suites then exposed a Codex-only fixture accidentally depending on
+the host's Claude login. That fixture now explicitly disables Claude through the
+supported CLI. All nine package checks and 74 affected runtime, admission,
+source-copy and qualification-driver checks pass. No assertion or dependency
+version was removed to conceal a failure. The full check is renewing with fresh
+metadata. Independent review identified the runner import and ambiguous MCP
+status admission; focused review of their repairs and final-head CI remain pending.
 
 The [operations guide](../operations/standalone-macos.md) retains backup and
 rollback steps for a separately approved service switch. No installed service,

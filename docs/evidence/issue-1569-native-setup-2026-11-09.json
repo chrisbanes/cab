@@ -65,7 +65,7 @@
   },
   "currentSourceDigests": {
     "src/standalone/service.ts": "a62b64314e1a517b26fbac92bfb94653a8d1f9c773f30c09439b790efd0ace1b",
-    "src/standalone/claude.ts": "2335674ccd802ebac6caf8d1a3658ab7757e7257dafbfe1ad804fa75190d83ae",
+    "src/standalone/claude.ts": "dc873da64e1f521976f7281445e1d1ae2736d0233ffa0fed000c0dfc7d0bf42f",
     "src/standalone/codex.ts": "f410f5821881463e5aa6f4158b9239fb0b01f4d4687f1d784a397ccb910d2f08",
     "src/standalone/state.ts": "bcf1be2576aca842ece1c47c289e69c5e479d6a36ced5b257ef40cc56b0150c8",
     "src/standalone/runtime-retention.ts": "06f240e2b278bef6f126fad283a754b72f871e6348d42f5314da148067091452",
