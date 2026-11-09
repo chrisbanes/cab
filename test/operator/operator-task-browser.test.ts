@@ -64,6 +64,12 @@ test("composer preselects its sole visible project", async (_t, journey) => {
     await page.getByLabel("Project", { exact: true }).inputValue(),
     projectId,
   );
+  await page.goto(`${web.origin}/tasks/new?project=${projectId}`);
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
 });
 test("List and Board preserve identical filtered task IDs and never submit commands", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>

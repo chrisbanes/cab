@@ -6,6 +6,7 @@ import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import {
   activeFilterCount,
+  changedFilterCount,
   columns,
   taskVisibilityText,
   type TaskFilters,
@@ -22,6 +23,7 @@ export function TaskToolbar({
   total,
   eligible,
   hiddenDrafts,
+  hiddenOther,
   loaded,
   reset,
   refresh,
@@ -37,6 +39,7 @@ export function TaskToolbar({
   count: number;
   eligible: number;
   hiddenDrafts: number;
+  hiddenOther: number;
   /** Tasks in scope before any filter, so "no tasks" and "no matches" read differently. */
   total: number;
   /** The task list has been read, so a zero total is real. */
@@ -55,8 +58,9 @@ export function TaskToolbar({
     project: "",
     state: "",
   });
-  const hasMore = hiddenActive > 0;
-  const [open, setOpen] = useState(hasMore);
+  const hasMoreChanges =
+    changedFilterCount({ ...filters, project: "", state: "" }, projectId) > 0;
+  const [open, setOpen] = useState(hasMoreChanges);
   const switchView = (
     <div className="work-switch" role="toolbar" aria-label="Task presentation">
       {(["list", "board"] as const).map((view) => (
@@ -114,26 +118,28 @@ export function TaskToolbar({
             ? taskVisibilityText(count, eligible)
             : `${count} task${count === 1 ? "" : "s"}`}
       {hiddenDrafts > 0 && ` · ${hiddenDrafts} drafts hidden`}
+      {hiddenOther > 0 && ` · ${hiddenOther} other not-Ready tasks hidden`}
     </p>
   );
   const showDrafts =
-    hiddenDrafts > 0 ? (
+    hiddenDrafts + hiddenOther > 0 ? (
       <Button
         variant="secondary"
         className="work-reset"
         onClick={() => update({ ready: "any" })}
       >
-        Show {hiddenDrafts} hidden drafts
+        Show {hiddenDrafts + hiddenOther} hidden tasks
       </Button>
     ) : null;
   const resetButton =
-    activeFilterCount(filters, projectId) > 0 ? (
+    changedFilterCount(filters, projectId) > 0 ? (
       <Button variant="secondary" className="work-reset" onClick={reset}>
         Reset filters
       </Button>
     ) : (
       // The default view hides drafts and finished work; an empty one would otherwise dead-end.
       loaded &&
+      hiddenDrafts + hiddenOther === 0 &&
       count === 0 &&
       total > 0 && (
         <Button
@@ -160,8 +166,8 @@ export function TaskToolbar({
   );
   // A filter set from the URL opens the disclosure; the component never closes it.
   useEffect(() => {
-    if (hasMore) setOpen(true);
-  }, [hasMore]);
+    if (hasMoreChanges) setOpen(true);
+  }, [hasMoreChanges]);
   return (
     <div className="work-toolbar-block">
       <div

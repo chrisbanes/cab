@@ -298,6 +298,7 @@ test("normal Stop observation stays Work while Stop with actual uncertainty need
 import { OperatorClient } from "../../web/src/api.js";
 import {
   activeFilterCount,
+  changedFilterCount,
   defaultTaskFilters,
   loadTaskList,
   filterTasks,
@@ -382,14 +383,20 @@ test("a complete task aggregate rejects changing membership and repeated page cu
     readiness("yes").length + readiness("no").length,
   );
   const shown = { ...defaultTaskFilters, source: "github", q: "x" } as const;
-  assert.equal(activeFilterCount(shown), 2);
+  assert.equal(activeFilterCount(shown), 3);
+  assert.equal(activeFilterCount({ ...defaultTaskFilters, ready: "no" }), 1);
+  assert.equal(activeFilterCount({ ...defaultTaskFilters, ready: "any" }), 0);
+  assert.equal(activeFilterCount(defaultTaskFilters), 1);
+  assert.equal(changedFilterCount(defaultTaskFilters), 0);
+  assert.equal(changedFilterCount({ ...defaultTaskFilters, ready: "no" }), 1);
+  assert.equal(changedFilterCount({ ...defaultTaskFilters, ready: "any" }), 1);
   assert.equal(
     activeFilterCount({ ...defaultTaskFilters, project: randomUUID() }),
-    1,
+    2,
   );
   assert.equal(
     activeFilterCount({ ...defaultTaskFilters, project: randomUUID() }, "p"),
-    0,
+    1,
   );
   assert.equal(parseTaskFilters("?state=all").state, "all");
 });

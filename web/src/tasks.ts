@@ -35,6 +35,15 @@ export function columnCounts(tasks: readonly TaskListSummary[]) {
   for (const task of tasks) counts[taskColumn(task)]++;
   return counts;
 }
+export function readinessHiddenCounts(tasks: readonly TaskListSummary[]) {
+  const counts = columnCounts(tasks.filter((task) => !task.ready));
+  return {
+    drafts: counts.Draft,
+    other: Object.entries(counts)
+      .filter(([column]) => column !== "Draft")
+      .reduce((total, [, count]) => total + count, 0),
+  };
+}
 export interface TaskAggregate {
   tasks: TaskListSummary[];
   firstObservedAt: number;
@@ -108,6 +117,14 @@ export const defaultTaskFilters: TaskFilters = {
 export const activeFilterCount = (filters: TaskFilters, projectId?: string) =>
   (["project", "state", "source", "ready", "q"] as const).filter(
     (key) =>
+      (key === "ready"
+        ? filters.ready !== "any"
+        : filters[key] !== defaultTaskFilters[key]) &&
+      !(key === "project" && projectId),
+  ).length;
+export const changedFilterCount = (filters: TaskFilters, projectId?: string) =>
+  (["project", "state", "source", "ready", "q"] as const).filter(
+    (key) =>
       filters[key] !== defaultTaskFilters[key] &&
       !(key === "project" && projectId),
   ).length;
@@ -125,6 +142,13 @@ export function parseTaskFilters(search: string): TaskFilters {
     q: (p.get("q") ?? "").slice(0, 512),
     view: p.get("view") === "board" ? "board" : "list",
   };
+}
+/** Resolve the task filters the address represents, including a bare remembered visit. */
+export function taskFiltersForPath(path: string, bareDefaults = false) {
+  const query = path.includes("?") ? path.slice(path.indexOf("?")) : "";
+  return query || bareDefaults
+    ? parseTaskFilters(query)
+    : parseTaskFilters(rememberedTaskQuery());
 }
 export function taskFiltersUrl(path: string, filters: TaskFilters) {
   const params = new URLSearchParams();
@@ -250,20 +274,33 @@ export function taskReasonItems(task: TaskListSummary): TaskReason[] {
 }
 export const taskReasons = (task: TaskListSummary) =>
   taskReasonItems(task).map((r) => r.text);
+export const taskLeadLabel = (task: TaskListSummary) =>
+  task.lead !== null &&
+  task.project.leadProfileId !== null &&
+  task.lead.profileId === task.project.leadProfileId
+    ? null
+    : (task.lead?.name ??
+      (task.lead ? "Name unavailable" : "No lead configured"));
 /** Identical readiness rules are shown once for the current result set. */
-export function sharedReadinessReasons(tasks: readonly TaskListSummary[]) {
+export function sharedTaskReasons(tasks: readonly TaskListSummary[]) {
   const counts = new Map<string, number>();
+  const sharedReason = (reason: string) =>
+    reason.startsWith("Not Ready:") ||
+    reason === reasonLabels["task-unready"] ||
+    reason === reasonLabels["local-dependency"] ||
+    reason === reasonLabels["stacked-blocker-unpublished"] ||
+    reason === reasonLabels["stacked-blocker-unknown"] ||
+    reason === reasonLabels["imported-blockers-unknown"];
   for (const task of tasks)
     for (const reason of taskReasonItems(task))
-      if (
-        reason.text.startsWith("Not Ready:") ||
-        reason.text === reasonLabels["task-unready"]
-      )
+      if (sharedReason(reason.text))
         counts.set(reason.text, (counts.get(reason.text) ?? 0) + 1);
   return [...counts].filter(([, count]) => count > 1);
 }
 export const taskVisibilityText = (visible: number, eligible: number) =>
   `${visible} Ready of ${eligible} eligible tasks`;
+export const sharedTaskReasonText = (count: number, reason: string) =>
+  `${count} tasks share this readiness/dependency reason: ${reason}.`;
 /**
  * Capacity is stated once for the visible work, not on every task it holds: a sentence when an open
  * task waits on the global limit, or else on a project's, otherwise null.
@@ -308,12 +345,7 @@ export function taskRouteSubtitle(
   if (kind === "overview")
     return "Decisions first. Work and completed results stay separate.";
   if (!tasks) return undefined;
-  const scoped = tasks.filter(
-    (t) =>
-      (kind === "tasks" || t.projectId === projectId) &&
-      isActiveColumn(taskColumn(t)),
-  );
-  const count = plural(scoped.length, "active task");
+  const count = `${plural(tasks.length, "task")} shown`;
   if (kind === "tasks")
     return `${count} · ${plural(workspace?.projects.length ?? new Set(tasks.map((t) => t.projectId)).size, "project")}`;
   const leadId = workspace?.projects.find(

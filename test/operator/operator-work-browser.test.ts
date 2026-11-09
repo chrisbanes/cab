@@ -276,18 +276,31 @@ const tasksLink = (page: Page) =>
   page.getByRole("link", { name: "Tasks", exact: true });
 
 test("default readiness discloses hidden drafts in List and Board and Show preserves other filters", async (_t, journey) => {
-  const { ids, page } = await startDefaults(
+  const { ids, web, page } = await startDefaults(
     journey,
-    "/tasks?state=all&source=local&view=list",
+    "/tasks?source=local&view=list",
   );
   await page.locator(`.task-list [data-task-id="${ids.ready}"]`).waitFor();
   await page
     .getByText(/Ready of .* eligible tasks · .* drafts hidden/)
     .waitFor();
   await page
-    .getByText("2 drafts share this readiness rule: Draft: not Ready.", {
-      exact: true,
-    })
+    .getByRole("button", { name: "Show 2 hidden tasks", exact: true })
+    .click();
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("ready") === "any" &&
+      url.searchParams.get("state") === null &&
+      url.searchParams.get("source") === "local" &&
+      url.searchParams.get("view") === "list",
+  );
+  await page
+    .getByText(
+      "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+      {
+        exact: true,
+      },
+    )
     .waitFor();
   assert.equal(
     await page
@@ -296,18 +309,48 @@ test("default readiness discloses hidden drafts in List and Board and Show prese
       .count(),
     0,
   );
-  const show = page.getByRole("button", { name: /Show .* hidden drafts/ });
-  await show.click();
+  await openMoreFilters(page);
+  await page.getByLabel("Readiness", { exact: true }).selectOption("yes");
   await page.waitForURL(
     (url) =>
-      url.searchParams.get("ready") === "any" &&
-      url.searchParams.get("state") === "all" &&
-      url.searchParams.get("source") === "local" &&
+      url.searchParams.get("ready") === null &&
       url.searchParams.get("view") === "list",
   );
   await page.getByRole("button", { name: "Board", exact: true }).click();
   await page.locator("#column-Draft").waitFor();
+  await page
+    .getByRole("button", { name: /^Draft · 0 \(2 hidden\)$/ })
+    .waitFor();
+  await page.getByText("2 hidden by Ready filter", { exact: true }).waitFor();
+  await page
+    .getByRole("button", { name: "Show 2 hidden tasks", exact: true })
+    .click();
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("ready") === "any" &&
+      url.searchParams.get("state") === null &&
+      url.searchParams.get("source") === "local" &&
+      url.searchParams.get("view") === "board",
+  );
   assert.equal(await page.locator("#column-Draft .task-card").count(), 2);
+  await page
+    .getByText(
+      "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+      { exact: true },
+    )
+    .waitFor();
+  for (const route of [
+    `/?state=all&source=local&ready=any&view=board`,
+    `/projects/${ids.projectId}?state=all&source=local&ready=any&view=board`,
+  ]) {
+    await page.goto(`${web.origin}${route}`);
+    await page
+      .getByText(
+        "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+        { exact: true },
+      )
+      .waitFor();
+  }
 });
 
 test("task filters are remembered across navigation and reload, and the URL wins", async (_t, journey) => {
@@ -372,18 +415,18 @@ test("active filters are counted, reset in one step and undone by Back", async (
   const summary = page.locator(".work-more > summary"),
     reset = page.getByRole("button", { name: "Reset filters" });
   await page.locator(".task-list [data-task-id]").first().waitFor();
-  assert.equal(await summary.innerText(), "More filters");
+  assert.match(await summary.innerText(), /More filters · 1 active$/);
   assert.equal(await reset.count(), 0);
   await page.goto(`${web.origin}/tasks?source=github`);
   await page.locator(".work-more").waitFor();
   // A URL filter opens the disclosure; the indicator is for when it is collapsed.
   await summary.click();
   assert.equal(await page.locator(".work-more").getAttribute("open"), null);
-  assert.match(await summary.innerText(), /More filters · 1 active$/);
+  assert.match(await summary.innerText(), /More filters · 2 active$/);
   assert.equal(await reset.count(), 1);
   await page.goto(`${web.origin}/tasks?source=github&ready=any`);
   await page.locator(".work-more").waitFor();
-  assert.match(await summary.innerText(), /More filters · 2 active$/);
+  assert.match(await summary.innerText(), /More filters · 1 active$/);
 
   // Reset pushes the defaults and forgets the set; Back returns to the filtered URL.
   await page.goto(`${web.origin}/tasks?state=all&view=board`);
@@ -510,15 +553,22 @@ test("headers carry the new subtitles, one New task action and the page-owned re
   );
   await page.goto(`${web.origin}/tasks`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
-  assert.match(
-    await page.locator(".page-header-title p").innerText(),
-    /^\d+ active tasks? · \d+ projects?$/,
+  let header = await page.locator(".page-header-title p").innerText();
+  assert.match(header, /^\d+ tasks? shown · \d+ projects?$/);
+  assert.equal(
+    Number(header.match(/^\d+/)?.[0]),
+    await page.locator(".task-list [data-task-id]").count(),
   );
   await page.goto(`${web.origin}/projects/${ids.projectId}`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
+  header = await page.locator(".page-header-title p").innerText();
   assert.match(
-    await page.locator(".page-header-title p").innerText(),
-    /^\d+ active tasks? · accountable lead Accountable lead$/,
+    header,
+    /^\d+ tasks? shown · accountable lead Accountable lead$/,
+  );
+  assert.equal(
+    Number(header.match(/^\d+/)?.[0]),
+    await page.locator(".task-list [data-task-id]").count(),
   );
   await page
     .getByRole("link", { name: "Project settings", exact: true })

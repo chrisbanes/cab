@@ -60,8 +60,11 @@ import {
   operatorNext,
   readyButBlocked,
   nextActor,
+  readinessHiddenCounts,
   taskReasonItems,
-  sharedReadinessReasons,
+  taskLeadLabel,
+  sharedTaskReasons,
+  sharedTaskReasonText,
   visibleColumns,
   type TaskAggregate,
   type TaskColumn,
@@ -104,11 +107,6 @@ const identity = (task: TaskListSummary) =>
   task.source
     ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
     : "Local task";
-const leadName = (task: TaskListSummary) =>
-  task.lead?.profileId === task.project.leadProfileId
-    ? null
-    : (task.lead?.name ??
-      (task.lead ? "Name unavailable" : "No lead configured"));
 function TaskFacts({
   task,
   shared = [],
@@ -167,8 +165,8 @@ export function TaskRow({
           </p>
         )}
       </div>
-      {leadName(task) && (
-        <p className="metadata muted task-lead">{leadName(task)}</p>
+      {taskLeadLabel(task) && (
+        <p className="metadata muted task-lead">{taskLeadLabel(task)}</p>
       )}
       <ChevronRight aria-hidden="true" className="task-chevron" />
     </article>
@@ -184,7 +182,7 @@ export function TaskCard({
   shared?: readonly string[];
 }) {
   const url = task.source?.url,
-    lead = leadName(task),
+    lead = taskLeadLabel(task),
     column = taskColumn(task);
   return (
     <article data-task-id={task.id}>
@@ -247,7 +245,7 @@ export function TaskCard({
 }
 export function TaskBoard({
   tasks,
-  hiddenDrafts = 0,
+  hiddenByReadiness = [],
   sharedReasons = [],
   columns,
   initial,
@@ -255,7 +253,7 @@ export function TaskBoard({
   columnsTarget,
 }: {
   tasks: TaskListSummary[];
-  hiddenDrafts?: number;
+  hiddenByReadiness?: TaskListSummary[];
   sharedReasons?: readonly [string, number][];
   columns: readonly TaskColumn[];
   /** The column a State filter names, shown first unless the operator already chose one. */
@@ -273,6 +271,7 @@ export function TaskBoard({
     selected = Math.min(stored, columns.length - 1);
   const board = useRef<HTMLDivElement>(null);
   const counts = columnCounts(tasks);
+  const hiddenCounts = columnCounts(hiddenByReadiness);
   const firstRequest = new Map<string, InboxItem>();
   for (const item of requests.data?.items ?? [])
     if (item.kind !== "runtime" && !firstRequest.has(item.taskId))
@@ -394,8 +393,8 @@ export function TaskBoard({
           >
             {risky && <CircleQuestionMark aria-hidden="true" />}
             {column} · {counts[column]}
-            {column === "Draft" && hiddenDrafts
-              ? ` (${hiddenDrafts} hidden)`
+            {hiddenCounts[column] > 0
+              ? ` (${hiddenCounts[column]} hidden)`
               : ""}
           </Button>
         );
@@ -417,9 +416,9 @@ export function TaskBoard({
             <h2 className="board-column-heading">
               <ColumnMark column={column} className="board-column-name" />
               <span className="board-column-count">{counts[column]}</span>
-              {column === "Draft" && hiddenDrafts > 0 && (
+              {hiddenCounts[column] > 0 && (
                 <span className="metadata muted">
-                  {hiddenDrafts} hidden by Ready filter
+                  {hiddenCounts[column]} hidden by Ready filter
                 </span>
               )}
             </h2>
@@ -554,8 +553,12 @@ export function TaskViews({
       : all.length,
     tasks = filterTasks(all, filters, projectId),
     eligible = filterTasks(all, { ...filters, ready: "any" }, projectId),
-    hiddenDrafts = filters.ready === "yes" ? eligible.length - tasks.length : 0,
-    sharedReasons = sharedReadinessReasons(tasks),
+    hiddenByReadiness =
+      filters.ready === "yes" ? eligible.filter((task) => !task.ready) : [],
+    hiddenCounts = readinessHiddenCounts(hiddenByReadiness),
+    hiddenDrafts = hiddenCounts.drafts,
+    hiddenOther = hiddenCounts.other,
+    sharedReasons = sharedTaskReasons(tasks),
     notice = capacityNotice(tasks);
   const project = workspace?.data.projects.find((p) => p.id === projectId),
     scope = projectId || filters.project;
@@ -576,6 +579,7 @@ export function TaskViews({
         total={inScope}
         eligible={eligible.length}
         hiddenDrafts={hiddenDrafts}
+        hiddenOther={hiddenOther}
         loaded={Boolean(state.data)}
         reset={reset}
         refresh={refresh}
@@ -586,7 +590,7 @@ export function TaskViews({
       {notice && <p className="metadata muted work-capacity">{notice}</p>}
       {sharedReasons.map(([reason, count]) => (
         <p key={reason} className="metadata muted">
-          {count} drafts share this readiness rule: {reason}.
+          {sharedTaskReasonText(count, reason)}
         </p>
       ))}
       {/* Home with no project shows the getting-started checklist instead. */}
@@ -613,7 +617,7 @@ export function TaskViews({
           // A new State filter picks its column again; other filters keep the operator's tab.
           key={filters.state}
           tasks={tasks}
-          hiddenDrafts={hiddenDrafts}
+          hiddenByReadiness={hiddenByReadiness}
           sharedReasons={sharedReasons}
           columns={visibleColumns(filters.state)}
           initial={allColumns.find((c) => c === filters.state)}

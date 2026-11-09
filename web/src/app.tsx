@@ -56,9 +56,11 @@ import { notificationOpenPath } from "./notifications-model.js";
 import { migrateLegacyPush } from "./notifications.js";
 import { Alert } from "./ui/alert.js";
 import {
+  filterTasks,
   isActiveColumn,
   loadTaskList,
   taskColumn,
+  taskFiltersForPath,
   taskRouteSubtitle,
 } from "./tasks.js";
 import { useDraftReleases } from "./composer-drafting.js";
@@ -941,12 +943,21 @@ export function App() {
   const taskRoute =
     pathname === "/" || pathname === "/tasks" || Boolean(projectId);
   const newTaskHref = `/tasks/new${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
+  const taskHeaderFilters = taskFiltersForPath(
+    path,
+    Boolean(
+      history.state?.taskDefaults && history.state.entryUrl === location.href,
+    ),
+  );
+  const headerTasks = tasks.state.data
+    ? filterTasks(tasks.state.data.tasks, taskHeaderFilters, projectId)
+    : undefined;
   const headerSubtitle = unknownRoute
     ? notFoundSubtitle
     : taskRoute
       ? taskRouteSubtitle(
           projectId ? "project" : pathname === "/" ? "overview" : "tasks",
-          tasks.state.data?.tasks,
+          headerTasks,
           workspace.state.data?.data ?? null,
           projectId,
         )

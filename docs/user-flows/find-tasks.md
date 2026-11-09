@@ -31,18 +31,21 @@ list or reloading, and always sees which filters are hiding work.
    Project.
 4. Readiness defaults to Ready, so a Draft task (not Ready) is hidden until Readiness
    is Not Ready or Any readiness (`ready=any`). The count states how many Ready tasks
-   are visible out of the eligible total, names hidden drafts and offers Show hidden
-   drafts. Show changes only readiness and keeps the other filters and view. Board
-   columns also disclose drafts hidden by readiness. Ready is omitted from URLs like
+   are visible out of the eligible total, names hidden drafts and other not-Ready
+   states separately, and offers Show hidden tasks. Show changes only readiness and
+   keeps the other filters and view. Board columns disclose each state hidden by
+   readiness. Ready is omitted from URLs like
    `view=list`; a missing, empty or unknown `ready` means Ready.
-5. With More filters closed, its summary counts the hidden filters that differ from
-   the defaults ("More filters · 2 active"). Reset filters, at the end of that line,
-   appears when any filter differs and keeps List or Board. It is a normal navigation, so Back returns to
+5. With More filters closed, its summary counts active hidden filters (Ready and Not
+   Ready are active; Any readiness is neutral), even when Ready is the default
+   ("More filters · 1 active"). Reset filters appears only when a value differs from
+   its default and keeps List or Board. It is a normal navigation, so Back returns to
    the filtered list, which becomes the remembered set again.
 6. The count line reads "N Ready of M eligible tasks" when readiness is Ready, otherwise
    "N tasks"; it reads "No tasks" when nothing is in scope, or "No tasks
    match these filters" when filters hide everything. Overview and project pages share
-   the same count and visibility explanation.
+   the same count and visibility explanation. The page header count uses the same URL
+   or remembered filters as the list.
 7. The first keystroke in Filter tasks adds a history entry and later ones replace
    it, so one Back returns to the list without the text. Every other filter change adds
    an entry. Back and Forward show the filters each entry had: an entry that a filter change

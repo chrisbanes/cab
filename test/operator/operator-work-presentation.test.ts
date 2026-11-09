@@ -12,6 +12,7 @@ import {
   capacityNotice,
   columnCounts,
   columns,
+  defaultTaskFilters,
   filterTasks,
   nextActor,
   operatorNext,
@@ -315,7 +316,7 @@ test("source summaries only accept https links", () => {
     assert.equal(source(bad), false);
 });
 
-test("route subtitles count active tasks and name the accountable lead", () => {
+test("route subtitles count filtered tasks and name the accountable lead", () => {
   const a = randomUUID(),
     b = randomUUID(),
     lead = randomUUID();
@@ -332,24 +333,35 @@ test("route subtitles count active tasks and name the accountable lead", () => {
     summary({ projectId: b }),
     summary({ projectId: b, state: "done" }),
   ];
+  const visible = filterTasks(tasks, defaultTaskFilters);
   assert.equal(
-    taskRouteSubtitle("tasks", tasks, workspace),
-    "3 active tasks · 2 projects",
+    taskRouteSubtitle("tasks", visible, workspace),
+    "3 tasks shown · 2 projects",
   );
   assert.equal(
     taskRouteSubtitle("tasks", [tasks[0] as TaskListSummary], {
       ...workspace,
       projects: [workspace.projects[0] as never],
     }),
-    "1 active task · 1 project",
+    "1 task shown · 1 project",
   );
   assert.equal(
-    taskRouteSubtitle("project", tasks, workspace, a),
-    "2 active tasks · accountable lead Mira Chen",
+    taskRouteSubtitle(
+      "project",
+      filterTasks(tasks, defaultTaskFilters, a),
+      workspace,
+      a,
+    ),
+    "2 tasks shown · accountable lead Mira Chen",
   );
   assert.equal(
-    taskRouteSubtitle("project", tasks, workspace, b),
-    "1 active task · no accountable lead",
+    taskRouteSubtitle(
+      "project",
+      filterTasks(tasks, defaultTaskFilters, b),
+      workspace,
+      b,
+    ),
+    "1 task shown · no accountable lead",
   );
   assert.equal(taskRouteSubtitle("tasks", undefined, workspace), undefined);
   assert.equal(
