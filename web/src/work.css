@@ -59,6 +59,13 @@
   order: 3;
 }
 
+@media (min-width: 760px) {
+  .work-toolbar[data-surface="overview"] .work-count {
+    order: 4;
+    flex-basis: 100%;
+  }
+}
+
 /* Reset filters sits on the More filters line, so it never crowds the toolbar row. */
 .work-more-row {
   display: flex;

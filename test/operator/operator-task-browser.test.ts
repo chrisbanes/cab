@@ -96,6 +96,12 @@ test("composer preselects its sole visible project", async (_t, journey) => {
   await page
     .getByRole("button", { name: "Discard unfinished input", exact: true })
     .click();
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('[aria-label="Project"]')
+        ?.value === id,
+    projectId,
+  );
   assert.equal(
     await page.getByLabel("Project", { exact: true }).inputValue(),
     projectId,
