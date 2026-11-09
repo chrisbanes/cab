@@ -1040,7 +1040,10 @@ Old `/app` and `/app/*` addresses permanently redirect (308) to the same path at
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions
-for its next turn. These use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
+for its next turn. Active and unsettled recovery records appear first; known terminal,
+effect-free records with no recorded holds are collapsed under a settled count. The
+evidence caveat stays visible, and every record remains available in the disclosure. These
+use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
 per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
@@ -2048,7 +2051,9 @@ they are not semantic secret scanning or host-wide read isolation.
 
 The Files section renders Markdown inertly with a Source view, fits/zooms/pans
 rasters, and renders PDFs through a pinned `pdfjs-dist` worker onto an app-owned
-canvas. There is no download, export or execute action. Opening current contents
+canvas. Directory rows come first, then other entries, alphabetically within each
+group; file sizes use readable units and retain exact bytes in row details. There
+is no download, export or execute action. Opening current contents
 from retained evidence is a separate explicit action. Read-only inspection
 rechecks may reuse a successful Git worktree identity read for up to 1 second
 while the worktree root and its `.git` entry keep the same filesystem identity.

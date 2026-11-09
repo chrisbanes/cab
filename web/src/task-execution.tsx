@@ -20,6 +20,7 @@ import {
   executionHoldLines,
   executionStatus,
   holdsUnreadable,
+  partitionRecoveryRecords,
   recordLine,
   resumeWarning,
   staleRevisions,
@@ -243,6 +244,26 @@ export function TaskExecution({
   const name = (assignmentId: string) =>
     data.assignments.find((a) => a.assignmentId === assignmentId)?.name ??
     "Assignment";
+  const records = recovery?.records ?? [];
+  const { active: activeRecords, settled: settledRecords } =
+    partitionRecoveryRecords(records);
+  const recordRow = (
+    r: NonNullable<Data["executionRecovery"]>["records"][number],
+  ) => (
+    <li key={r.workId ?? r.generation.requestSequence}>
+      <ShortId value={r.workId ?? "withheld"} />{" "}
+      {r.binding ? (
+        <a href={`/assignments/${r.binding.assignmentId}/recovery`}>
+          {name(r.binding.assignmentId)}
+        </a>
+      ) : (
+        "Assignment identity not recorded"
+      )}{" "}
+      <span className="metadata muted">
+        request {r.generation.requestSequence} · {recordLine(r)}
+      </span>
+    </li>
+  );
   return (
     <section id="execution" className="task-execution">
       <h3 className="section-heading">Execution</h3>
@@ -306,24 +327,16 @@ export function TaskExecution({
       <section aria-labelledby="execution-evidence">
         <h4 id="execution-evidence">Recorded recovery evidence</h4>
         {notice && <p>{notice}</p>}
-        {recovery && recovery.records.length > 0 && (
-          <ol className="execution-list">
-            {recovery.records.map((r) => (
-              <li key={r.workId ?? r.generation.requestSequence}>
-                <ShortId value={r.workId ?? "withheld"} />{" "}
-                {r.binding ? (
-                  <a href={`/assignments/${r.binding.assignmentId}/recovery`}>
-                    {name(r.binding.assignmentId)}
-                  </a>
-                ) : (
-                  "Assignment identity not recorded"
-                )}{" "}
-                <span className="metadata muted">
-                  request {r.generation.requestSequence} · {recordLine(r)}
-                </span>
-              </li>
-            ))}
-          </ol>
+        {activeRecords.length > 0 && (
+          <ol className="execution-list">{activeRecords.map(recordRow)}</ol>
+        )}
+        {settledRecords.length > 0 && (
+          <details className="execution-settled">
+            <summary className="metadata">
+              {settledRecords.length} settled
+            </summary>
+            <ol className="execution-list">{settledRecords.map(recordRow)}</ol>
+          </details>
         )}
         <p className="muted">{evidenceWarning}</p>
         {data.assignments.length > 0 && (

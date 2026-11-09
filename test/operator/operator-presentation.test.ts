@@ -23,10 +23,12 @@ import {
 import {
   clockLabel,
   codeSentence,
+  fileSizeLabel,
   midSentence,
   outcomeLine,
   repositoryLabel,
   shortId,
+  sortFileEntries,
   updatedLabel,
 } from "../../web/src/presentation.js";
 
@@ -56,6 +58,51 @@ test("short identifier keeps the first eight characters unless told otherwise", 
   assert.equal(shortId("9bd4c1e2f00d4a7b"), "9bd4c1e2");
   assert.equal(shortId("A-9bd4"), "A-9bd4");
   assert.equal(shortId("9bd4c1e2f00d4a7b", 4), "9bd4");
+});
+
+test("compound assignment work ids retain both identifying parts", () => {
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v1:inbox:87654321-bbbb"),
+    "assignment:12345678…inbox:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v1:draft:87654321-bbbb"),
+    "assignment:12345678…draft:87654321",
+  );
+});
+
+test("file entries group directories first and sort names within each group", () => {
+  const entries = [
+    { kind: "file", name: "zeta.txt" },
+    { kind: "directory", name: "zoo" },
+    { kind: "repository", repositoryId: "beta" },
+    { kind: "directory", name: "Alpha" },
+    { kind: "file", name: "beta.txt" },
+  ] as const;
+  assert.deepEqual(
+    sortFileEntries(entries).map((entry) =>
+      entry.kind === "repository" ? entry.repositoryId : entry.name,
+    ),
+    ["Alpha", "zoo", "beta", "beta.txt", "zeta.txt"],
+  );
+  assert.deepEqual(
+    sortFileEntries(
+      [
+        { kind: "repository", repositoryId: "R2" },
+        { kind: "repository", repositoryId: "R1" },
+      ],
+      (id) => ({ R1: "zulu/repo", R2: "alpha/repo" })[id] ?? id,
+    ).map((entry) => entry.repositoryId),
+    ["R2", "R1"],
+  );
+});
+
+test("file sizes use readable binary units", () => {
+  assert.equal(fileSizeLabel(12), "12 bytes");
+  assert.equal(fileSizeLabel(1024), "1 KB");
+  assert.equal(fileSizeLabel(1536), "1.5 KB");
+  assert.equal(fileSizeLabel(1_572_864), "1.5 MB");
+  assert.equal(fileSizeLabel(1_073_741_824), "1 GB");
 });
 
 test("a reason code reads as its sentence and an unmapped code never leaks", () => {
