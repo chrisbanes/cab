@@ -98,9 +98,9 @@ const surfaces: Surface[] = [
     save: "Save routing",
     command: "routing.configure",
     edit: (page) =>
-      page.getByRole("switch", { name: "Enable routing" }).check(),
-    editAgain: (page) =>
       page.getByRole("switch", { name: "Enable routing" }).uncheck(),
+    editAgain: (page) =>
+      page.getByRole("switch", { name: "Enable routing" }).check(),
     invalid: async (page) => {
       await page
         .getByLabel("Credential reference change", { exact: true })
