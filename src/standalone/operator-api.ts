@@ -1,4 +1,3 @@
-import { listGlobalSkills } from "./global-skills.js";
 import {
   unstackReadSchema,
   unstackReceiptSchema,
@@ -92,12 +91,9 @@ import {
   questionFormSchema,
 } from "../core/question-forms.js";
 import {
-  defaultProfileRuntime,
   executionHarnessLabels,
   executionIntentStateSchema,
-  noProfileSkills,
 } from "../core/execution-runtime.js";
-import { listInstalledPlugins, skillFieldErrors } from "./skill-plugins.js";
 import {
   runtimeInboxHeadline,
   runtimeInboxReason,
@@ -120,7 +116,7 @@ import {
   assignmentRecoverySchema,
   checkoutVerificationSchema,
   checkoutVerifyRequestSchema,
-  claudeTokenStatusSchema,
+  type claudeTokenStatusSchema,
   commandReceiptSchema,
   composerOptionsSchema,
   draftingRunReadSchema,
@@ -153,7 +149,7 @@ import {
   operationTypeSchema,
   operatorCommandSchema,
   type savedConfigurationRowSchema,
-  installedPluginsSchema,
+  type installedPluginsSchema,
   profileConfigurationSchema,
   profilePrivateValuesSchema,
   profileInstructionsSchema,
@@ -2860,7 +2856,8 @@ export class OperatorApi {
           unsupportedRuntimeField(runtime, status.settings) !== null),
       claudeTokenUnavailable:
         runtime.harness === "claude" &&
-        this.service.claudeTokenStatus().state !== "available",
+        this.service.harnessStatuses().find((s) => s.harness === "claude")
+          ?.state !== "available",
     };
   }
   /**
@@ -6992,16 +6989,14 @@ export class OperatorApi {
     return operationReadSchema.parse({ data, observedAt: Date.now() });
   }
   /** Installed plugin choices and service-user global skill availability; no paths. */
-  async readInstalledPlugins() {
-    const [installed, global] = await Promise.all([
-      listInstalledPlugins(),
-      listGlobalSkills(),
+  async readInstalledPlugins(): Promise<
+    z.infer<typeof installedPluginsSchema>
+  > {
+    throw new OperatorApiError(410, "invalid-input", [
+      "Use the service user's native harness setup",
     ]);
-    return installedPluginsSchema.parse({
-      data: { ...installed, global },
-      observedAt: Date.now(),
-    });
   }
+
   async readProfileConfiguration(profileId: string) {
     uuid.parse(profileId);
     const row = this.domain()
@@ -7979,11 +7974,14 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  readClaudeTokenStatus() {
-    return claudeTokenStatusSchema.parse({
-      data: this.service.claudeTokenStatus(),
-      observedAt: Date.now(),
-    });
+  readClaudeTokenStatus(): z.infer<typeof claudeTokenStatusSchema> {
+    throw new OperatorApiError(
+      410,
+      "invalid-input",
+      undefined,
+      undefined,
+      "Use the service user's native Claude Code login; cab token references are retired.",
+    );
   }
   private gh(): GhOptions {
     return {
@@ -9880,6 +9878,19 @@ export class OperatorApi {
           "system:capacity",
         );
       }
+      if (
+        (c.type === "claude-token.configure" ||
+          ((c.type === "profile.create" || c.type === "profile.configure") &&
+            c.skills !== undefined)) &&
+        this.domain().recordedCommand({ ...c, actor: "operator" }) === undefined
+      )
+        throw new OperatorApiError(
+          400,
+          "invalid-input",
+          [c.type === "claude-token.configure" ? "credentialRef" : "skills"],
+          undefined,
+          "Use the service user's native harness authentication and extensions; cab token and skill selection writes are retired.",
+        );
       if (c.type === "claude-token.configure") {
         const outcome = await this.executeDomain({ ...c, actor: "operator" });
         return commandReceipt(
@@ -10049,29 +10060,6 @@ export class OperatorApi {
                 "starter.reviewerHarness",
               ]);
           }
-        }
-        // Skill plugins must exist and be loadable by the profile's harness, including when
-        // a change switches an existing profile to Claude.
-        if (
-          (c.type === "profile.create" || c.type === "profile.configure") &&
-          (c.skills || c.runtime?.harness === "claude") &&
-          this.domain().recordedCommand({ ...c, actor: "operator" }) ===
-            undefined
-        ) {
-          const d = this.domain();
-          const harness =
-            c.runtime?.harness ??
-            (c.type === "profile.configure"
-              ? d.profileRuntime(c.profileId).harness
-              : defaultProfileRuntime(d.enabledRuntimes()).harness);
-          const skills =
-            c.skills ??
-            (c.type === "profile.configure"
-              ? d.profileSkills(c.profileId)
-              : noProfileSkills);
-          const fields = await skillFieldErrors(skills, harness);
-          if (fields.length > 0)
-            throw new OperatorApiError(400, "invalid-input", fields);
         }
         // Supported values are authoritative once the runtime has read them.
         if (

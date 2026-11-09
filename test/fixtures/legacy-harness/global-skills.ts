@@ -1,3 +1,4 @@
+/** Retained only for historical qualification fixtures; production uses native harness configuration. */
 import { createHash } from "node:crypto";
 import { basename, dirname, join, relative, sep } from "node:path";
 import {
@@ -16,7 +17,7 @@ import {
   type ProfileSkills,
   profileSkillsSchema,
   skillNameSchema,
-} from "../core/execution-runtime.js";
+} from "../../../src/core/execution-runtime.js";
 import { resolveInstalledPlugin } from "./installed-plugins.js";
 import { realHome } from "./codex-home.js";
 import {

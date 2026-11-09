@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import { waitUntil } from "../fixtures/refused-turn.js";
 import { DomainStore } from "../../src/core/domain.js";
 import {
@@ -152,9 +153,10 @@ test("the discovery credential reference is set, shown only as configured and cl
     await assert.rejects(reopened.execute(configure(bad)));
   assert.throws(
     () =>
-      f.service
-        .domain()
-        .execute({ ...configure(null), actor: "agent" } as never),
+      seedLegacyCommand(f.service.domain(), {
+        ...configure(null),
+        actor: "agent",
+      } as never),
     (e) => e instanceof DomainPolicyError && e.code === "forbidden",
   );
 });
@@ -877,7 +879,7 @@ test("a discovery result read with a credential that changed meanwhile is read a
   await api.execute(configure("env:FIRST_DISCOVERY"));
   // The reference switches while the first read is in flight: its result is discarded.
   configureDuringRead = () =>
-    f.service.domain().execute({
+    seedLegacyCommand(f.service.domain(), {
       ...configure("env:SECOND_DISCOVERY"),
       actor: "operator",
     } as never);
@@ -890,7 +892,7 @@ test("a discovery result read with a credential that changed meanwhile is read a
   // Cleared in flight: nothing read with the old credential is returned.
   used.length = 0;
   configureDuringRead = () =>
-    f.service.domain().execute({
+    seedLegacyCommand(f.service.domain(), {
       ...configure(null),
       actor: "operator",
     } as never);
@@ -1263,6 +1265,12 @@ test("the setup home read records and logs nothing and the home stays out of eve
   const write = await s.issue("read-write", "home-leak-rw");
   // A reference under the home is configured, as Add Claude would save it.
   const reference = `file:${s.home}/.cab/claude/claude-token`;
+  seedLegacyCommand(s.f.service.domain(), {
+    type: "claude-token.configure",
+    actor: "operator",
+    key: randomUUID(),
+    credentialRef: reference,
+  });
   assert.equal(
     (
       await s.sessionPost("/api/operator/commands", {
@@ -1271,7 +1279,7 @@ test("the setup home read records and logs nothing and the home stays out of eve
         credentialRef: reference,
       })
     ).status,
-    200,
+    400,
   );
   const chunks: string[] = [];
   const stderr = process.stderr.write.bind(process.stderr);
@@ -1320,7 +1328,7 @@ test("the setup home read records and logs nothing and the home stays out of eve
     }
   for (const body of bodies)
     assert.ok(!body.includes(s.home), body.slice(0, 80));
-  assert.ok(bodies.some((b) => b.startsWith("/api/operator/claude-token 200")));
+  assert.ok(bodies.some((b) => b.startsWith("/api/operator/claude-token 410")));
 });
 
 test("the setup home read refuses without a current session even when routed past the route table", async (t) => {
@@ -1626,12 +1634,12 @@ test("starter commit survives notification failure with its original receipt and
       starter: { ...original.starter, reviewerHarness: "codex" as const },
     };
     assert.throws(
-      () => d.execute(command),
+      () => seedLegacyCommand(d, command),
       /Command committed but change notification failed/,
     );
     const recorded = d.recordedCommand(command);
     assert.ok(recorded);
-    assert.deepEqual(d.execute(command), recorded);
+    assert.deepEqual(seedLegacyCommand(d, command), recorded);
     assert.equal(d.profiles().length, 3);
     assert.equal(
       db.prepare("SELECT COUNT(*) AS n FROM command_receipts").get()?.n,

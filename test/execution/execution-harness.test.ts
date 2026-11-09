@@ -42,7 +42,6 @@ test("runtime factory constructs the requested harness and rejects unknown ones"
     {
       ...context,
       claude: {
-        configDirectory: "/nonexistent/claude/config",
         turnEnvironment: () => ({ unavailable: "unused" }),
       },
     },
@@ -254,7 +253,7 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
     );
     assert.equal(
       f.state.runtimeThreadQualification("fresh-thread")?.codexHome,
-      "cab",
+      "native",
     );
     f.state.registerRuntimeThreadTools(
       "claude-thread",
@@ -263,7 +262,7 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
     );
     assert.equal(
       f.state.runtimeThreadQualification("claude-thread")?.codexHome,
-      null,
+      "native",
     );
   } finally {
     f.close();

@@ -116,7 +116,7 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
     "project-lead-unconfigured": "project has no lead",
     "project-lead-revoked": "project lead revoked",
     "runtime-unavailable": "runtime unavailable",
-    "claude-token-unavailable": "Claude token unavailable",
+    "claude-token-unavailable": "Claude native login unavailable",
     "profile-runtime-not-configured": "lead agent runtime not configured",
     "power-held": "held by power supervision",
     "repository-access-revoked": "repository access revoked",

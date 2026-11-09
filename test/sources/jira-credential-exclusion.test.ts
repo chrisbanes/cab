@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -74,7 +75,7 @@ test("the Jira site, email and token reach no runtime, Claude turn, helper child
   });
   await service.start();
   const execute = (command: Record<string, unknown>) =>
-    service.domain().execute({
+    seedLegacyCommand(service.domain(), {
       actor: "operator",
       key: randomUUID(),
       ...command,

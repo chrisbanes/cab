@@ -274,7 +274,7 @@ for (const [device, viewport] of [
     });
   }
 
-test("Profile edit, capacity, Claude token and discovery saves each leave one message", async (_t, journey) => {
+test("Profile edit, capacity and discovery saves each leave one message", async (_t, journey) => {
   const { page, ids, web } = await startSettings(
     journey,
     "/profiles/:reviewer/settings",
@@ -296,18 +296,10 @@ test("Profile edit, capacity, Claude token and discovery saves each leave one me
 
   // Each credential row keeps the confirmation of its own save.
   await go("/settings");
-  const claude = page.getByRole("region", {
-    name: "Claude subscription token",
-  });
-  await claude.getByRole("button", { name: "Set", exact: true }).click();
-  await claude
-    .getByLabel("Claude token reference")
-    .fill("env:FIXTURE_FEEDBACK_TOKEN");
-  await claude.getByRole("button", { name: "Save reference" }).click();
-  await savedOutcome(claude);
-  await claude.getByRole("button", { name: "Change", exact: true }).click();
-  await claude.getByRole("button", { name: "Clear reference" }).click();
-  await savedOutcome(claude);
+  assert.equal(
+    await page.getByLabel("Claude token reference", { exact: true }).count(),
+    0,
+  );
 
   const discovery = page.getByRole("region", {
     name: "GitHub discovery credential",
@@ -319,7 +311,7 @@ test("Profile edit, capacity, Claude token and discovery saves each leave one me
     .fill("FIXTURE_FEEDBACK_DISCOVERY");
   await discovery.getByRole("button", { name: "Save reference" }).click();
   await savedOutcome(discovery);
-  assert.equal(await outcomeMessages(page).count(), 2);
+  assert.equal(await outcomeMessages(page).count(), 1);
 });
 
 /** The first command reaches the service and commits, but the browser never sees the answer. */

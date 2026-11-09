@@ -31,7 +31,6 @@ import {
   assertCanonicalDirectoryPath,
   assertExistingCanonicalDirectoryPath,
 } from "../../src/standalone/data-directory.js";
-import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const TOKEN = "canary-readiness-token-4417";
@@ -76,8 +75,7 @@ function deps(f: Fixture, over: Partial<ReadinessDeps> = {}): ReadinessDeps {
       overridden: false,
       restartRequired: false,
     }),
-    claudeTokenReference: () => null,
-    claudeTokenStatus: () => ({ state: "not-configured" }),
+    claudeLogin: async () => true,
     harnessStatuses: () => [
       { harness: "codex", enabled: true, state: "available" },
       { harness: "claude", enabled: true, state: "available" },
@@ -200,7 +198,7 @@ test("a missing claude is not configured whether or not Claude is used (ADR-1012
   for (const over of [
     {},
     profiles(codexProfile()),
-    { claudeTokenReference: () => "file:/x" },
+    { claudeLogin: async () => false },
     profiles({ revoked: false, runtime: claude(null) }),
   ]) {
     const missing = await claudeExecutable(f, over);
@@ -447,21 +445,6 @@ test("codex login passes when verified and fails otherwise with the login fix", 
   }
 });
 
-test("a missing or replaced Codex login link fails without naming paths", async (t) => {
-  const f = fixture(t);
-  for (const [result, reason] of [
-    ["link-missing", /login file is missing/],
-    ["link-replaced", /replaced by another file/],
-  ] as const) {
-    const login = await check(f, "codex-login", {
-      codexLogin: async () => result,
-    });
-    assert.equal(login.status, "fail", result);
-    assert.match(login.reason ?? "", reason, result);
-    assert.doesNotMatch(`${login.reason} ${login.fix}`, /\/(Users|tmp|var)\//);
-  }
-});
-
 test("a Codex policy mismatch is not reported as a missing login", async (t) => {
   const f = fixture(t);
   const result = await check(f, "codex-login", {
@@ -664,75 +647,24 @@ test("service discovery probes gh only for a gh reference", async (t) => {
   assert.equal(probes, 1);
 });
 
-test("the Claude token check reports each reference state without path or value", async (t) => {
+test("Claude readiness uses a model-free native login check and exposes no credentials", async (t) => {
   const f = fixture(t);
-  const tokenPath = join(f.root, "claude-token");
-  const withFile = (mode: number, over: Partial<ReadinessDeps> = {}) => {
-    writeFileSync(tokenPath, `${TOKEN}\n`, { mode });
-    chmodSync(tokenPath, mode);
-    return {
-      claudeTokenReference: () => `file:${tokenPath}`,
-      claudeTokenStatus: () => ({ state: "missing-value" as const }),
-      ...over,
-    };
-  };
-
-  const none = await check(f, "claude-token");
-  assert.equal(none.status, "not-configured");
-
-  const readable = await check(
-    f,
-    "claude-token",
-    withFile(0o600, { claudeTokenStatus: () => ({ state: "available" }) }),
+  assert.equal(
+    (await check(f, "claude-token", { claudeLogin: async () => true })).status,
+    "pass",
   );
-  assert.equal(readable.status, "pass");
-
-  const open = await check(f, "claude-token", withFile(0o644));
-  assert.equal(open.status, "fail");
-  assert.equal(open.reason, "Token file permits group or other access");
-  assert.ok(open.fix?.includes("Add Claude"));
-
-  rmSync(tokenPath);
-  const missing = await check(f, "claude-token", {
-    claudeTokenReference: () => `file:${tokenPath}`,
-    claudeTokenStatus: () => ({ state: "missing-value" }),
+  const failed = await check(f, "claude-token", {
+    claudeLogin: async () => false,
   });
-  assert.equal(missing.reason, "Token file is missing");
-
-  const target = join(f.root, "real-token");
-  writeFileSync(target, TOKEN, { mode: 0o600 });
-  symlinkSync(target, tokenPath);
-  const link = await check(f, "claude-token", {
-    claudeTokenReference: () => `file:${tokenPath}`,
-    claudeTokenStatus: () => ({ state: "missing-value" }),
+  assert.equal(failed.status, "fail");
+  assert.match(failed.fix ?? "", /service user/);
+  const thrown = await check(f, "claude-token", {
+    claudeLogin: async () => {
+      throw new Error(TOKEN);
+    },
   });
-  assert.equal(link.reason, "Token file is a symbolic link");
-
-  const env = {
-    claudeTokenReference: () => `env:${ENV_NAME}`,
-  };
-  const unset = await check(f, "claude-token", {
-    ...env,
-    claudeTokenStatus: () => ({ state: "missing-value" }),
-  });
-  assert.equal(unset.reason, "Token variable is unavailable");
-  const restart = await check(f, "claude-token", {
-    ...env,
-    claudeTokenStatus: () => ({ state: "restart-required" }),
-  });
-  assert.equal(restart.reason, "Restart the service to use this variable");
-  assert.equal(restart.fix, "Restart the service");
-  const fileRestart = await check(f, "claude-token", {
-    claudeTokenReference: () => `file:${tokenPath}`,
-    claudeTokenStatus: () => ({ state: "restart-required" }),
-  });
-  assert.equal(fileRestart.reason, "Restart the service to use this token");
-
-  for (const result of [open, missing, link, unset, restart, fileRestart]) {
-    const text = JSON.stringify(result);
-    for (const secret of [TOKEN, ENV_NAME, tokenPath, f.root])
-      assert.ok(!text.includes(secret), secret);
-  }
+  assert.equal(thrown.status, "fail");
+  assert.ok(!JSON.stringify(thrown).includes(TOKEN));
 });
 
 test("the runtime harness check follows the profiles in use", async (t) => {
@@ -1104,7 +1036,7 @@ test("a throwing dependency fails that check only, without its message", async (
   const harness = data.checks.find((c) => c.id === "runtime-harness");
   assert.equal(harness?.status, "fail");
   assert.ok(!JSON.stringify(data).includes(TOKEN));
-  assert.equal(data.checks.filter((c) => c.status === "pass").length, 5);
+  assert.equal(data.checks.filter((c) => c.status === "pass").length, 6);
 });
 
 test("the shared schema rejects a pass with a fix and a failure without one", () => {
@@ -1153,8 +1085,7 @@ test("running the checks changes nothing on disk and leaks no canary", async (t)
   const failing = deps(f, {
     env: { PATH: join(f.root, "none") },
     codexLogin: async () => "failed",
-    claudeTokenReference: () => `file:${tokenPath}`,
-    claudeTokenStatus: () => ({ state: "missing-value" }),
+    claudeLogin: async () => false,
     ...profiles(codexProfile()),
   });
   const readiness = new Readiness(failing);
@@ -1218,56 +1149,17 @@ test("the data path check keeps the canonical-path semantics without blocking th
   assert.doesNotMatch(source, /[A-Za-z]Sync\(|assertCanonicalDirectoryPath/);
 });
 
-test("skill plugins fail while an active agent's installed plugin is unavailable, naming it and no path, and pass once it is enabled", async (t) => {
+test("legacy selections do not gate readiness or create adapters", async (t) => {
   const f = fixture(t);
-  const homes = installedPluginHomes(join(f.root, "operator"));
-  homes.installCodex("demo@m", { enabled: false });
-  const env = { PATH: f.bin, ...homes.environment };
-  const skills = {
-    plugins: [{ plugin: "codex:demo@m" as const, skills: ["probe-skill"] }],
-  };
-  const over = {
-    env,
-    ...profiles(
-      { ...codexProfile(), skills },
-      // A revoked agent's plugins hold no work.
-      {
-        revoked: true,
-        runtime: { harness: "codex" },
-        skills: {
-          plugins: [{ plugin: "codex:gone@m" as const, skills: ["x"] }],
-        },
-      },
-      codexProfile(),
-    ),
-  };
-  const failed = await check(f, "skill-plugins", over);
-  assert.equal(failed.status, "fail");
-  assert.equal(failed.reason, "Skill plugin codex:demo@m is disabled in Codex");
-  assert.match(failed.fix ?? "", /Install or enable the named plugin/);
-  assert.ok(!JSON.stringify(failed).includes(f.root));
-  homes.setCodexEnabled("demo@m", true);
-  assert.equal((await check(f, "skill-plugins", over)).status, "pass");
-  // No profile enables a plugin: nothing can be held.
-  assert.equal((await check(f, "skill-plugins")).status, "pass");
-});
-
-test("globals-only readiness refuses missing sources, recovers after restoration, and never writes adapters", async (t) => {
-  const f = fixture(t);
-  const home = join(f.root, "global-home");
-  const skills = { plugins: [], global: ["chosen"] };
-  const over = {
-    env: { PATH: f.bin, HOME: home },
-    ...profiles({ ...codexProfile(), skills }),
-    timeoutMs: 2000,
-  };
-  const failed = await check(f, "skill-plugins", over);
-  assert.equal(failed.status, "fail");
-  assert.match(failed.reason ?? "", /Global skill chosen/);
-  assert.equal(JSON.stringify(failed).includes(f.root), false);
-  const source = join(home, ".agents/skills/chosen");
-  mkdirSync(source, { recursive: true });
-  writeFileSync(join(source, "SKILL.md"), "---\nname: chosen\n---\nChosen");
-  assert.equal((await check(f, "skill-plugins", over)).status, "pass");
+  const result = await check(
+    f,
+    "skill-plugins",
+    profiles({
+      ...codexProfile(),
+      skills: { plugins: [{ path: "/missing/plugin", skills: ["old"] }] },
+    }),
+  );
+  assert.equal(result.status, "not-configured");
+  assert.match(result.reason ?? "", /native harness/);
   assert.equal(existsSync(join(f.data, "global-skill-cache")), false);
 });

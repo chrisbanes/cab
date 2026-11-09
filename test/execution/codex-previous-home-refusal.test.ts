@@ -10,7 +10,7 @@ import {
   waitUntil,
 } from "../fixtures/refused-turn.js";
 
-const previousHome = "Started under the previous Codex home; restart the task";
+const previousHome = "Started under the previous harness setup; reset the task";
 
 test("a follow-up to a conversation from the previous Codex home is refused before it holds anything, and Reset task replaces it", async () => {
   const f = await refusedInitial();

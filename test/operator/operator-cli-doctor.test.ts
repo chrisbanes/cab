@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
@@ -48,7 +49,7 @@ test("doctor reports the service's readiness checks, equal to the API read and w
   const tokenPath = join(root, "claude-token");
   writeFileSync(tokenPath, `${CANARY}\n`);
   chmodSync(tokenPath, 0o644);
-  s.f.service.domain().execute({
+  seedLegacyCommand(s.f.service.domain(), {
     type: "claude-token.configure",
     key: randomUUID(),
     actor: "operator",
@@ -69,7 +70,10 @@ test("doctor reports the service's readiness checks, equal to the API read and w
     (c: { id: string }) => c.id === "claude-token",
   );
   assert.equal(claude.status, "fail");
-  assert.equal(claude.reason, "Token file permits group or other access");
+  assert.equal(
+    claude.reason,
+    "Claude native subscription login is unavailable",
+  );
 
   const human = await h.run(["doctor"]);
   assert.equal(human.code, 0, "a failing check does not fail the command");
@@ -77,11 +81,11 @@ test("doctor reports the service's readiness checks, equal to the API read and w
     assert.ok(human.out.includes(check.label));
   assert.match(
     human.out,
-    /Claude token\s+Fail\s+Token file permits group or other access/,
+    /Claude native login\s+Fail\s+Claude native subscription login is unavailable/,
   );
   assert.match(
     human.out,
-    /Fix Claude token: Make the token file a private regular file/,
+    /Fix Claude native login: Sign in to Claude Code as the service user/,
   );
   assert.match(human.out, /GitHub discovery\s+Not configured/);
   assert.match(human.out, /GitLab credentials\s+Not configured/);

@@ -15,11 +15,8 @@ import {
   privateField,
   profileChanges,
   runtimeChanged,
-  skillsChanged,
   type Values,
 } from "./settings-changes.js";
-import { parseSkillsDraft, skillsDraft } from "./skill-plugins.js";
-import { SkillFields } from "./skill-picker.js";
 import {
   harnessNote,
   runtimeCommand,
@@ -320,7 +317,6 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         replaceCapabilities: false,
         revoked: data.profile.revoked,
         ...runtimeValues(data.runtime),
-        skills: skillsDraft(data.skills),
         expectedVersion: String(data.profile.version),
       }
     : null;
@@ -376,9 +372,6 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         : {}),
       ...(runtimeChanged(data.runtime, v)
         ? { runtime: runtimeCommand(v) }
-        : {}),
-      ...(skillsChanged(data.skills, v) && parseSkillsDraft(String(v.skills))
-        ? { skills: parseSkillsDraft(String(v.skills)) }
         : {}),
     };
   };
@@ -441,13 +434,6 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                               harnessSettings(p.workspace, d.values),
                             )
                           : {}),
-                        ...(parseSkillsDraft(String(d.values.skills ?? "")) ===
-                        null
-                          ? {
-                              skills:
-                                "The skill plugins in this draft are not valid",
-                            }
-                          : {}),
                       },
                       holdSave,
                     )
@@ -505,14 +491,11 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     />
                   )}
                   <RuntimeFields draft={d} workspace={p.workspace} />
-                  <SkillFields
-                    draft={d}
-                    harness={
-                      d.values.runtimeHarness === "claude" ? "claude" : "codex"
-                    }
-                    client={p.client}
-                    session={p.session}
-                  />
+                  <p className="metadata muted">
+                    Authentication, instructions, skills, plugins, MCP servers
+                    and hooks come from the service user's native harness setup.
+                    Changes take effect according to the harness lifecycle.
+                  </p>
                   <ChangeList lines={lines} />
                   <DraftOutcome
                     draft={d}
@@ -544,11 +527,11 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
               />
               <Aside title="Runtime change" items={[runtimeChangeNote]} />
               <Aside
-                title="About skill plugins"
+                title="Native harness setup"
                 items={[
-                  "Skills are instructions to the agent, not cab policy. A plugin contributes skills, instructions and scripts only; its hooks, MCP servers and apps never run, including for an installed plugin.",
-                  "Global skills are explicitly selected from the service user's ~/.agents/skills. An installed plugin or global skill is used as installed when each turn starts: an update applies to the next turn, and a selected skill that is unavailable makes the work wait.",
-                  "Skill scripts run through the shell tool under the same sandbox and network policy. A skills change affects new conversations only.",
+                  "Authentication, instructions, skills, plugins, MCP servers and hooks use the service user's native harness setup.",
+                  "Configured extensions are trusted and may act outside cab's tools. Command restrictions do not confine every extension effect.",
+                  "Restart Codex after changing its configuration. Claude loads native settings for each query.",
                 ]}
               />
               <PolicyAside draft={d} workspace={p.workspace} />

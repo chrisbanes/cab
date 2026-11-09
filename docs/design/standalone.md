@@ -36,6 +36,17 @@ transmits credentials without TLS, and
 browser notifications are unavailable in that insecure context. The local OS-account
 capability remains limited to the loopback socket.
 
+Both runtimes inherit the service user's native authentication and configuration,
+including trusted instructions, skills, plugins, MCP servers and hooks. Preserve
+native homes rather than creating cab-owned configuration or login links. cab owns
+explicit execution settings, coordination and conversation origin; it neither
+imports personal conversations nor claims to confine every native extension effect.
+Legacy selections and token references remain historical/redaction data. New writes
+are refused after exact completed-receipt replay. Native-origin qualification marks
+new cab sessions; legacy/unknown sessions require explicit Reset after recovery.
+Claude releases prompts only after native subscription metadata and reserved SDK
+cab-server provenance pass. See [ADR-1021](../adr/1021-profile-skill-plugins-and-subagents.md).
+
 ## Confirmed review decisions
 
 - Use Codex first, with the existing operator login, and qualify Codex App Server

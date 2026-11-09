@@ -6,7 +6,7 @@ import { configure, until } from "../fixtures/completed-lead.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
-const previousHome = "Started under the previous Codex home; restart the task";
+const previousHome = "Started under the previous harness setup; reset the task";
 
 test("a draft turn from the previous Codex home gives its message back, and Reset task replaces the conversation once Ready", async (t) => {
   const f = await createOperatorFixture();

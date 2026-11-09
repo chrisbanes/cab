@@ -17,7 +17,7 @@ import {
   readPlugin,
   skillFieldErrors,
   SkillPluginError,
-} from "../../src/standalone/skill-plugins.js";
+} from "../fixtures/legacy-harness/skill-plugins.js";
 import {
   writeNestedSkillPlugin,
   writeSkillPlugin,

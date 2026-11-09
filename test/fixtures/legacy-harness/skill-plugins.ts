@@ -1,3 +1,4 @@
+/** Retained only for historical qualification fixtures; production uses native harness configuration. */
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
@@ -9,7 +10,7 @@ import {
   type ProfilePlugin,
   type ProfileSkills,
   skillNameSchema,
-} from "../core/execution-runtime.js";
+} from "../../../src/core/execution-runtime.js";
 import {
   enabledInstalledPlugins,
   InstalledPluginError,

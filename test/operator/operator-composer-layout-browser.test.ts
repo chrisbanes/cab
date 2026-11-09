@@ -531,7 +531,7 @@ test("Composer predicts start or wait before submission from the same waits", as
   // An explicit assignee runs the turn, so its runtime waits replace the lead's.
   await page.getByLabel("Assignee").selectOption(claude);
   await verdict("Will wait");
-  assert.equal((await labels())[0], "Claude token unavailable");
+  assert.equal((await labels())[0], "Claude native login unavailable");
   await page.getByLabel("Assignee").selectOption("");
   await verdict("Starts now");
 

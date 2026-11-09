@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
@@ -120,7 +121,10 @@ class HistoryRuntime implements Runtime {
 }
 
 function command(service: StandaloneService, body: Record<string, unknown>) {
-  return service.domain().execute({ key: randomUUID(), ...body } as never);
+  return seedLegacyCommand(service.domain(), {
+    key: randomUUID(),
+    ...body,
+  } as never);
 }
 
 function query<T extends Record<string, unknown>>(

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Runtime } from "../../src/standalone/codex.js";
 import { isDeletedProjectThread } from "../../src/standalone/project-cleanup-reservations.js";
+import { projectCleanupSchema } from "../../src/standalone/project-deletion.js";
 import { databaseOf, startedOf } from "../fixtures/service-internals.js";
 import { deletedCleanupFixture } from "../fixtures/deleted-project-cleanup.js";
 
@@ -42,6 +43,44 @@ async function fakeArchive(root: string) {
     file: (id: string) => join(archive, `${id}.jsonl`),
   };
 }
+
+test("legacy captured cleanup remains pending without calling the native runtime", async (t) => {
+  const f = await deletedCleanupFixture(t, { thread: true }),
+    fake = await fakeArchive(f.fixture.directory);
+  await f.commit();
+  const db = databaseOf(f.service);
+  const cleanup = projectCleanupSchema.parse(
+    JSON.parse(
+      String(
+        db
+          .prepare(
+            "SELECT cleanupJson FROM project_tombstones WHERE projectId=?",
+          )
+          .get(f.projectId)!.cleanupJson,
+      ),
+    ),
+  );
+  for (const item of cleanup.items)
+    if (item.state === "pending" && item.captured.kind === "codex-thread")
+      item.captured.codexHome = "cab";
+  db.prepare(
+    "UPDATE project_tombstones SET cleanupJson=? WHERE projectId=?",
+  ).run(JSON.stringify(cleanup), f.projectId);
+  await f.runner(() => fake.runtime).sweep();
+  assert.deepEqual(fake.calls, []);
+  assert.ok(
+    f
+      .store()
+      .status(f.projectId)!
+      .cleanup.some(
+        (item) =>
+          item.kind === "codex-thread" &&
+          item.state === "pending" &&
+          item.reason === "unavailable",
+      ),
+  );
+  assert.ok(f.store().pendingCleanup().length);
+});
 
 test("captured thread cleanup survives deletion of every intent/qualification and preserves fake archive files", async (t) => {
   const f = await deletedCleanupFixture(t, { thread: true }),

@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -391,9 +392,11 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
     service: StandaloneService,
     command: Record<string, unknown>,
   ) =>
-    service
-      .domain()
-      .execute({ key: randomUUID(), actor: "operator", ...command } as never);
+    seedLegacyCommand(service.domain(), {
+      key: randomUUID(),
+      actor: "operator",
+      ...command,
+    } as never);
 
   /** A project whose lead runs on `harness`, linked to the one source repository. */
   const project = async (

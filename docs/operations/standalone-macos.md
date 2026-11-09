@@ -294,11 +294,11 @@ tar -xzf cab-0.2.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/
 "$STATE/versions/0.2.0/bin/cab" service upgrade "$STATE/versions/0.2.0"
 ```
 
-The first release that gives Codex its own home refuses to resume Codex
-conversations started before it: the request is refused, naming "Started under
-the previous Codex home; restart the task", and Reset task starts a new conversation.
-Finish or restart open Codex work before upgrading; conversation history stays
-readable.
+The native-setup transition refuses to resume conversations from the previous
+cab-owned configuration, naming "Started under the previous harness setup; reset
+the task". Reset task starts a new conversation after normal ownership and recovery
+checks. Finish open work before upgrading; historical results, holds and old homes
+stay retained.
 
 Before it changes anything, upgrade reads the install record, checks the target
 release as install does, checks that the running job is the one the record
@@ -579,11 +579,11 @@ The JSON results include `"mode"` on install and uninstall; daemon install adds
 false, `"steps"`.
 
 **Credentials on a daemon host.** A daemon starts before anyone logs in, so it
-cannot read the login keychain. The Codex login must be file-based
-(`~/.codex/auth.json`) so cab can link it; a keychain-backed Codex login cannot be
-used. A Claude token configured as a
-[`file:` reference](#claude-subscription-token) stays readable; a Claude or Codex
-login that lives only in the keychain does not. For GitHub, use a file-based
+cannot read the login keychain. Native harness login must be available to that service user without an interactive
+keychain unlock. cab preserves native credential storage and does not create login
+links or inject a Claude token. Verify native subscription readiness under the actual
+service environment before choosing daemon mode; a login available only in the
+interactive user's locked keychain is unavailable to the daemon. For GitHub, use a file-based
 `gh` login: run `gh auth login --insecure-storage` on the Mac. That keeps the token
 in plaintext in `~/.config/gh/hosts.yml` (mode `0600`) instead of the keychain, and
 it serves discovery, source reads and agents' `git push` through the existing
@@ -753,19 +753,16 @@ not patch launchctl's shared environment or add arbitrary plist variables locall
 
 After the service starts, run `cab doctor` or open Settings → Readiness. Both
 show what the running service sees: Codex executable and login, git, GitHub
-discovery, GitLab credentials, the Claude executable and token, runtime harness and data and auth paths, each as Pass,
+discovery, GitLab credentials, the Claude executable and native login, runtime harness and data and auth paths, each as Pass,
 Fail or Not configured with one fix line and no token value or path. The checks
 change nothing and request no model turn; re-run them after any fix.
 
-The service runs Codex in its own Codex home under the data directory
-(`DATA/codex/home`) with an isolated `HOME`; `auth.json` there is a symlink to the
-logged-in user's file-backed Codex login (`$CODEX_HOME/auth.json` from the service
-environment, else `~/.codex/auth.json`). It does not copy, read or hash Codex
-credentials, and Codex refreshes the login through the link. If readiness reports the
-link replaced, remove `auth.json` from `DATA/codex/home` and restart the service; if
-it reports the login file missing, run `codex login` as the service user. The separate
-cab auth file is not that login. The launchd proof starts App Server and verifies authentication/config
-initialization without requesting a model turn.
+The service preserves `HOME` and `CODEX_HOME` and uses Codex's native credential
+storage. Sign in with `codex login` as the service user, then restart the runtime
+if readiness cannot verify that login. cab creates no login link and retains old
+`DATA/codex/home` contents without using them. The separate cab operator auth file
+is not the harness login. Previous launchd evidence used the old home arrangement;
+it does not qualify native authentication from an installed job.
 
 ### GitLab credentials
 
@@ -947,43 +944,31 @@ fail at startup or enforce the sandbox, tool and permission controls differently
 That is a disclosed limit, not a fail-closed boundary
 ([ADR-1011](../adr/1011-packaging-and-distribution.md)).
 
-### Claude subscription token
+### Native coding harness setup
 
-Claude agents need the operator's own subscription token from
-`claude setup-token`. The installed service reads it from an owner-only file, so
-the plist and its environment need no Claude variable. Settings → Runtime → Add
-Claude shows these commands and a suggested path. Create a private real directory
-(not a symbolic link) and an empty mode `0600` file:
+Sign in to Codex and Claude Code as the user running the service. Preserve the same
+`HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` in its environment and use each
+harness's normal configuration tools. cab uses native subscription authentication;
+API billing and provider fallback are unavailable. Readiness checks native login
+without sending a model prompt. A missing login is a fixed, value-free failure.
 
-```sh
-mkdir -m 700 -p "$HOME/.cab/claude"
-install -m 600 /dev/null "$HOME/.cab/claude/claude-token"
-```
+Restart Codex after changing its configuration; Claude loads native settings per
+query. Keep cab's reserved `cab` MCP name available: if inherited configuration
+replaces the SDK endpoint, Claude refuses the turn. Native hooks/MCP servers are
+trusted and can act outside cab tools. Command restrictions do not undo those effects.
 
-Then copy the token printed by `claude setup-token` and write it from the clipboard
-without shell history or argv. Type these two lines; do not copy them with the
-commands above, because `pbpaste` reads the clipboard and a copied command replaces
-the token:
+Legacy token references and skill revisions are retained for redaction/history and
+receipt replay. They no longer configure execution and cannot be edited. Retain old
+cab harness homes and sessions. Existing legacy/unknown-origin conversations require
+explicit Reset task after their Stop/recovery requirements are settled.
 
-```sh
-pbpaste > "$HOME/.cab/claude/claude-token"
-stat -f '%Su %Lp' "$HOME/.cab/claude/claude-token"
-```
-
-`stat` must show the service user and `600`. In Add Claude, click Set: the field
-starts with the reference for this path, for example
-`file:/Users/you/.cab/claude/claude-token`, so you can save it as it stands. In
-the Claude token row in Settings, or when the field opens empty, enter `file:`
-followed by the absolute path; `~` and `$HOME` are not expanded and are refused. The
-Token readable row then shows Pass, or the unsafe-file reason without the path or value.
-The file is checked
-whenever a Claude turn needs it: a symbolic link, a file owned by another user, any
-group or other permission bit, more than 4096 bytes, a missing or empty file, or
-content other than one token makes Claude work wait with a visible reason, and
-the row shows the token unavailable. To rotate, write the new token to a new mode
-`0600` file in the same directory and `mv` it over the old one; the next turn uses
-it without a restart. A launchd-installed Claude turn with a real token is
-untested; the bounded live journeys ran the service outside launchd.
+Before a separately authorised installed-service switch, stop and drain using the
+normal controls, preserve unresolved holds, and take the documented offline snapshot
+of the database plus the current executable/build configuration. Keep the installed
+Haze prototype and user harness configuration unchanged. Roll back by stopping the
+candidate, restoring the matching snapshot/build and restarting the prior service;
+never run both writers against one database. Do not copy sessions between homes or
+resume uncertain work implicitly. This procedure grants no deployment authority.
 
 ### Browser notifications
 

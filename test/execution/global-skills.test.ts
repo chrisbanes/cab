@@ -20,12 +20,12 @@ import { join } from "node:path";
 import test from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
 import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
-import { digestPlugin } from "../../src/standalone/skill-plugins.js";
+import { digestPlugin } from "../fixtures/legacy-harness/skill-plugins.js";
 import {
   listGlobalSkills,
   inspectGlobalSkills,
   prepareGlobalSkills,
-} from "../../src/standalone/global-skills.js";
+} from "../fixtures/legacy-harness/global-skills.js";
 
 function fixture(t: test.TestContext) {
   const root = mkdtempSync(join(tmpdir(), "cab-global-skills-"));

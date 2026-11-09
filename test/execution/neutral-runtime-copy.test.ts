@@ -9,21 +9,11 @@ const runtimeNaming = /\bCodex\b|App Server/;
 /** Where Codex naming is truthful runtime identity or disclosure. */
 const allowed: Record<string, { reason: string; lines?: string[] }> = {
   [join("src", "standalone", "codex.ts")]: { reason: "the Codex runtime" },
-  [join("src", "standalone", "codex-home.ts")]: { reason: "the Codex home" },
-  [join("src", "standalone", "codex-skills.ts")]: {
-    reason: "the Codex skill scope",
-  },
   [join("src", "standalone", "readiness.ts")]: {
     reason: "the Codex readiness checks",
   },
   [join("src", "standalone", "execution-policy.ts")]: {
     reason: "Codex-specific execution policy disclosure",
-  },
-  [join("src", "standalone", "claude.ts")]: {
-    reason: "Claude disclosure naming where installed skill plugins come from",
-    lines: [
-      `"Skill plugins come from the agent settings, from local plugin directories or plugins installed in Claude Code or Codex, and contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy.",`,
-    ],
   },
   [join("src", "operator", "command-network-copy.ts")]: {
     reason: "the setting applies only to Codex turns",

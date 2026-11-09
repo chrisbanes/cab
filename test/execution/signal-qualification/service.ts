@@ -63,10 +63,8 @@ await runServiceEntry(["serve", data], () => {
           : new ClaudeRuntime({
               safety,
               claude: {
-                configDirectory: join(root, "claude"),
                 turnEnvironment: () => ({
                   env: { PATH: process.env.PATH, SIGNAL_TRACE: trace },
-                  token: "offline-fixture",
                 }),
               },
               sdk: signalSdk(trace, executable, mode === "restart"),

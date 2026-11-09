@@ -248,10 +248,11 @@ export function checklistRows(input: {
               ? "Checking readiness…"
               : "Readiness couldn't be checked."
             : claude.status === "pass"
-              ? "The Claude token reference is readable."
+              ? "Claude native subscription login is available."
               : claude.status === "not-configured"
                 ? "Not configured."
-                : (claude.reason ?? "The Claude token isn't readable."),
+                : (claude.reason ??
+                  "Claude native subscription login is unavailable."),
           {
             kind: "link",
             label: "Add Claude",

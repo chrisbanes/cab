@@ -51,14 +51,7 @@ export const profileRuntimeSchema = z.discriminatedUnion("harness", [
 ]);
 export type ProfileRuntime = z.infer<typeof profileRuntimeSchema>;
 
-/**
- * Skill plugins a profile enables, each with the names of its skills the profile enables:
- * an absolute local directory on the service host (`path`), or a plugin the operator
- * installed and enabled in Claude Code or Codex (`plugin`, `claude:<plugin>@<marketplace>`
- * or `codex:<plugin>@<marketplace>`). Shared by both harnesses, so it is not part of the
- * runtime JSON. Optional global names select skills from the service user's `.agents/skills`.
- * A plugin contributes skills, instructions and scripts only.
- */
+/** Legacy selection data retained for immutable revisions and receipt replay; never execution authority. */
 export const skillNameSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);

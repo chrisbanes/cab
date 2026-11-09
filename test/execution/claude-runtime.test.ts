@@ -74,6 +74,9 @@ function fixture(
     verified?: boolean;
     selfTest?: () => boolean;
     hangModels?: boolean;
+    mcpSource?: string;
+    apiProvider?: string;
+    apiKeySource?: string | null;
     resolveExecutable?: () => Promise<string | null>;
     diagnostic?: "collect" | "throw" | "none";
   } = {},
@@ -82,6 +85,7 @@ function fixture(
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   const safetyFixture = runtimeSafetyFixture();
+  let origin: string | undefined;
   const log: string[] = [];
   const recorded: unknown[] = [];
   const { sdk, sessions, queries, optionsSeen } = fakeSdk(
@@ -89,11 +93,20 @@ function fixture(
     log,
     {
       hangModels: options.hangModels ?? false,
+      ...(options.mcpSource ? { mcpSource: options.mcpSource } : {}),
+      ...(options.apiProvider ? { apiProvider: options.apiProvider } : {}),
+      ...(options.apiKeySource !== undefined
+        ? { apiKeySource: options.apiKeySource }
+        : {}),
     },
   );
   const runtime = new ClaudeRuntime({
     safety: {
       ...safetyFixture.safety,
+      threadQualification: (id) => {
+        const q = safetyFixture.safety.threadQualification(id);
+        return q && origin !== undefined ? { ...q, codexHome: origin } : q;
+      },
       recordTurnProcess: (input) => {
         recorded.push(input);
         log.push("record");
@@ -101,12 +114,16 @@ function fixture(
       },
     },
     claude: {
-      configDirectory: join(root, "data", "claude", "config"),
       turnEnvironment:
         options.environment ??
         (() => ({
-          env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: "api-key-canary" },
-          token: TOKEN,
+          env: {
+            PATH: process.env.PATH,
+            HOME: "/native/home",
+            CLAUDE_CONFIG_DIR: "/native/config",
+            ANTHROPIC_API_KEY: "api-key-canary",
+            CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
+          },
         })),
     },
     sdk,
@@ -191,6 +208,9 @@ function fixture(
     return turnId;
   };
   return {
+    setOrigin: (value: string) => {
+      origin = value;
+    },
     root,
     workspace,
     runtime,
@@ -255,7 +275,7 @@ test("every coordination tool converts to a real SDK MCP tool without defaults",
   }
 });
 
-test("a Claude turn runs one isolated query, releases its prompt only after the process is recorded, then resumes the session", async () => {
+test("a Claude turn runs one native query, releases its prompt only after the process is recorded, then resumes the session", async () => {
   const scripts: Script[] = [
     async function* (session) {
       yield init(sessionOf(session));
@@ -295,20 +315,18 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
     assert.equal(options.sessionId, threadId);
     assert.equal(options.resume, undefined);
     assert.equal(options.cwd, f.workspace);
-    assert.deepEqual(options.settingSources, []);
-    assert.equal(options.strictMcpConfig, true);
+    assert.equal(options.settingSources, undefined);
+    assert.equal(options.strictMcpConfig, undefined);
     assert.equal(options.permissionMode, "dontAsk");
     assert.equal(options.model, "haiku");
     assert.equal(options.effort, "low");
-    assert.equal(options.env?.CLAUDE_CODE_OAUTH_TOKEN, TOKEN);
+    assert.equal(options.env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+    assert.equal(options.env?.HOME, "/native/home");
     assert.equal(options.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
     // Claude Code offers TodoWrite only behind these gates.
     assert.equal(options.env?.CLAUDE_CODE_ENABLE_TASKS, "0");
     assert.equal(options.env?.CLAUDE_CODE_ENABLE_TODO_TOOLS, "1");
-    assert.equal(
-      options.env?.CLAUDE_CONFIG_DIR,
-      join(f.root, "data", "claude", "config"),
-    );
+    assert.equal(options.env?.CLAUDE_CONFIG_DIR, "/native/config");
     assert.equal(options.env?.ANTHROPIC_API_KEY, undefined);
     const base = claudeTemporaryBase(f.workspace);
     assert.equal(options.env?.CLAUDE_CODE_TMPDIR, base);
@@ -322,6 +340,7 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Bash",
       "Agent",
       "TodoWrite",
+      "Skill",
     ]);
     assert.deepEqual(options.allowedTools, [
       "Read",
@@ -332,6 +351,7 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Bash",
       "Agent",
       "TodoWrite",
+      "Skill",
       "mcp__cab__*",
     ]);
     assert.deepEqual(options.disallowedTools, [
@@ -341,8 +361,8 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "EnterPlanMode",
       "ExitPlanMode",
     ]);
-    // No profile skills: no plugin, no Skill tool; plugin hooks are off in every turn.
-    assert.deepEqual(options.managedSettings, { disableAllHooks: true });
+    // Native configuration supplies extensions.
+    assert.equal(options.managedSettings, undefined);
     assert.equal(options.plugins, undefined);
     assert.equal(options.skills, undefined);
     assert.deepEqual(options.sandbox, {
@@ -862,7 +882,8 @@ test("the PreToolUse hook allows calls inside policy and denies the rest", async
       ).hookSpecificOutput;
     assert.deepEqual(decisions[0], {});
     assert.deepEqual(decisions[7], {});
-    for (const index of [1, 2, 3, 4, 5, 6, 8]) {
+    assert.equal(denied(8)?.permissionDecision, "allow");
+    for (const index of [1, 2, 3, 4, 5, 6]) {
       assert.equal(denied(index)?.permissionDecision, "deny");
       assert.ok(denied(index)?.permissionDecisionReason);
     }
@@ -998,7 +1019,7 @@ test("a read-only turn can write only the temporary base, in the sandbox and the
 
 test("preflight waits for a failed sandbox self-test, unsupported settings or a missing token before any query", async () => {
   let selfTest = false;
-  let environment: ClaudeTurnEnvironment = { env: {}, token: TOKEN };
+  let environment: ClaudeTurnEnvironment = { env: {} };
   const f = fixture({
     selfTest: () => selfTest,
     environment: () => environment,
@@ -1073,7 +1094,6 @@ test("the effective policy discloses hook confinement, the redirected temporary 
   const runtime = new ClaudeRuntime({
     safety: runtimeSafetyFixture().safety,
     claude: {
-      configDirectory: "/unused",
       turnEnvironment: () => ({ unavailable: "unused" }),
     },
   });
@@ -1414,10 +1434,7 @@ test("file changes and allowlisted tools record a relative path or target, never
           ["toolCall", "started", "Glob", "**/*.ts", undefined],
           ["toolCall", "started", "Agent", "explore", undefined],
           ["toolCall", "started", "mcp__kb__search", "kb/search", undefined],
-          // A tool the profile does not allow is recorded as declined, with its name only.
-          ["toolCall", "completed", "mcp__kb__search", "kb/search", undefined],
           ["toolCall", "started", "Skill", undefined, undefined],
-          ["toolCall", "completed", "Skill", undefined, undefined],
         ],
       );
     const text = JSON.stringify(run.diagnostics);
@@ -1516,7 +1533,7 @@ async function pluginFixture(root: string) {
   return writePluginFixture(root, { nonce: "unit" });
 }
 
-test("a profile's skill plugins load as local plugins with only their enabled skills, never their hooks or MCP servers", async () => {
+test("native extensions keep built-in tool controls for lead and subagents", async () => {
   const decisions: unknown[] = [];
   let outside = "";
   const f = fixture({
@@ -1557,27 +1574,12 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
     });
     assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
     const options = f.sessions[0]?.options;
-    assert.deepEqual(options?.plugins, [
-      { type: "local", path: plugin.dir, skipMcpDiscovery: true },
-    ]);
-    assert.deepEqual(options?.skills, ["probe-skill"]);
-    assert.deepEqual(options?.tools, [
-      "Read",
-      "Glob",
-      "Grep",
-      "Write",
-      "Edit",
-      "Bash",
-      "Agent",
-      "TodoWrite",
-      "Skill",
-    ]);
-    assert.ok(!options?.disallowedTools?.includes("Agent"));
-    assert.ok(!options?.disallowedTools?.includes("Task"));
-    // Hooks and MCP servers the plugin declares are not passed to the harness and are off.
-    assert.deepEqual(options?.managedSettings, { disableAllHooks: true });
-    assert.equal(options?.strictMcpConfig, true);
-    assert.deepEqual(options?.settingSources, []);
+    assert.equal(options?.plugins, undefined);
+    assert.equal(options?.skills, undefined);
+    assert.ok(Array.isArray(options?.tools) && options.tools.includes("Skill"));
+    assert.equal(options?.managedSettings, undefined);
+    assert.equal(options?.strictMcpConfig, undefined);
+    assert.equal(options?.settingSources, undefined);
     assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["cab"]);
     assert.deepEqual(Object.keys(options?.hooks ?? {}).sort(), [
       "PostToolUse",
@@ -1611,7 +1613,7 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
   }
 });
 
-test("enabled skills are qualified by their plugin's manifest name, so overlapping names stay distinct", async () => {
+test("legacy profile selections do not override native skill discovery", async () => {
   const f = fixture({
     scripts: [
       async function* (session) {
@@ -1630,16 +1632,13 @@ test("enabled skills are qualified by their plugin's manifest name, so overlappi
       ],
     });
     assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
-    assert.deepEqual(f.sessions[0]?.options.skills, [
-      "plugin-a:review",
-      "plugin-b:test",
-    ]);
+    assert.equal(f.sessions[0]?.options.skills, undefined);
   } finally {
     await f.cleanup();
   }
 });
 
-test("the Skill tool is outside policy for a turn whose profile enables no skills", async () => {
+test("native skills are admitted without a cab selection", async () => {
   const decisions: unknown[] = [];
   const f = fixture({
     scripts: [
@@ -1661,7 +1660,7 @@ test("the Skill tool is outside policy for a turn whose profile enables no skill
           hookSpecificOutput?: { permissionDecision: string };
         }
       ).hookSpecificOutput?.permissionDecision,
-      "deny",
+      undefined,
     );
     assert.deepEqual(f.sessions[0]?.options.tools, [
       "Read",
@@ -1672,6 +1671,7 @@ test("the Skill tool is outside policy for a turn whose profile enables no skill
       "Bash",
       "Agent",
       "TodoWrite",
+      "Skill",
     ]);
   } finally {
     await f.cleanup();
@@ -1723,8 +1723,6 @@ test("a subagent's tool calls are recorded with their attribution, and a denied 
 test("the TodoWrite gates override the service environment", () => {
   const env = claudeTurnEnvironment(
     { CLAUDE_CODE_ENABLE_TASKS: "1", CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" },
-    TOKEN,
-    "/config",
     "/tmp/base",
   );
   assert.equal(env.CLAUDE_CODE_ENABLE_TASKS, "0");
@@ -1854,14 +1852,23 @@ test("settings probe cleanup awaits its existing SIGKILL fallback", {
           ),
         );
       })(),
-      { supportedModels: () => new Promise<never>(() => {}) },
+      {
+        supportedModels: () => new Promise<never>(() => {}),
+        mcpServerStatus: async () => [
+          { name: "cab", status: "connected", source: "sdk" },
+        ],
+        accountInfo: async () => ({
+          apiProvider: "firstParty",
+          subscriptionType: "max",
+          apiKeySource: "none",
+        }),
+      },
     );
   const runtime = new ClaudeRuntime({
     safety: safety.safety,
     sdk,
     claude: {
-      configDirectory: join(root, "config"),
-      turnEnvironment: () => ({ env: {}, token: "offline-probe-fixture" }),
+      turnEnvironment: () => ({ env: {} }),
     },
     resolveExecutable: async () => process.execPath,
     sandboxSelfTest: async () => true,
@@ -1880,5 +1887,75 @@ test("settings probe cleanup awaits its existing SIGKILL fallback", {
   } finally {
     await runtime.stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an inherited cab MCP collision refuses the turn before releasing its prompt", async () => {
+  const f = fixture({
+    mcpSource: "project",
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const id = await f.runtime.startThread(f.workspace, []);
+    await assert.rejects(f.turn(id), /Claude turn could not start/);
+    assert.ok(!f.log.includes("prompt"));
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Claude refuses legacy and unknown configuration origins before a resume query", async () => {
+  const f = fixture();
+  try {
+    await f.runtime.start();
+    await assert.rejects(
+      f.runtime.resumeThread("personal-session", []),
+      /previous harness setup/,
+    );
+    const id = await f.runtime.startThread(f.workspace, []);
+    f.setOrigin("cab");
+    await assert.rejects(
+      f.runtime.resumeThread(id, []),
+      /previous harness setup/,
+    );
+    assert.equal(f.sessions.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("API-backed Claude metadata cannot release a model prompt", async () => {
+  const f = fixture({ apiProvider: "bedrock" });
+  try {
+    await f.runtime.start();
+    assert.equal(await f.runtime.verifyNativeLogin(), false);
+    assert.deepEqual(f.queries, ["settings"]);
+    assert.equal(f.sessions.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("native subscription metadata may omit the optional API-key source and refuses known API billing sources", async () => {
+  for (const [apiKeySource, expected] of [
+    [null, true],
+    ["oauth", true],
+    ["ANTHROPIC_API_KEY", false],
+    ["apiKeyHelper", false],
+  ] as const) {
+    const f = fixture({ apiKeySource });
+    try {
+      await f.runtime.start();
+      assert.equal(await f.runtime.verifyNativeLogin(), expected);
+      assert.equal(f.sessions.length, 0);
+    } finally {
+      await f.cleanup();
+    }
   }
 });

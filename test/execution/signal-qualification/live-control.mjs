@@ -432,6 +432,9 @@ export function fenceAdapters(journal, bindingBase) {
                       throw classify(error, "settings");
                     },
                   );
+              if (property === "accountInfo" || property === "mcpServerStatus")
+                return () =>
+                  bounded(() => target[property](), deadline, "metadata", now);
               if (property === "then") return undefined;
               const value = Reflect.get(target, property, target);
               if (typeof value !== "function") return value;

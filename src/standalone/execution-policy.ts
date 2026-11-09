@@ -21,10 +21,10 @@ const taskGitLimits = [
   "The source checkout's own Git config, including a repository-local user identity, does not apply in task worktrees. cab keeps a project's repositories after the project is deleted; the operator can remove them.",
 ];
 
-const globalSkillsDisclosure =
-  "Global skills load only when selected in the agent, from the service user's ~/.agents/skills; they are instructions, not cab policy.";
-const globalCacheLimit =
-  "Prepared global-skill adapters are retained across stops and restarts; total disk use is not bounded.";
+const nativeSetupDisclosure =
+  "Authentication, personal instructions, skills, plugins, MCP servers and hooks use the service user's native harness setup.";
+const nativeExtensionLimit =
+  "Inherited extensions are trusted and may act outside cab's tools. Command restrictions do not confine every extension effect; cab provides no independent sandbox.";
 
 /** The retained Codex disclosure; `executionPolicy` in codex.ts is what it describes. */
 export function codexPolicyDisclosure(): PolicyDisclosure {
@@ -36,16 +36,16 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
       localListeningLimit,
       taskGitDisclosure,
 
-      globalSkillsDisclosure,
+      nativeSetupDisclosure,
     ],
     limits: [
       ...taskGitLimits,
       "Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.",
-      "Codex runs in cab's own Codex home with the operator's login linked; it loads no user Codex settings, only the skills enabled in the agent settings, and has subagents disabled. cab does not provide an independent execution sandbox.",
-      "Codex gets plugin skills only from its agent settings, from local plugin directories or plugins installed in Claude Code or Codex, as skill directories: a plugin's hooks, MCP servers and apps are not loaded, and skills are instructions to the agent, not cab policy.",
+      "Codex preserves HOME and CODEX_HOME, native credential storage and configured extensions. Codex subagents remain disabled; native tools requiring an interactive approval are unavailable under approval policy never.",
+      "Codex configuration refresh follows the App Server lifecycle; restart the runtime after changing its configuration.",
       "Plan capture relies on Codex's tools.update_plan.enabled setting, as qualified on codex-cli 0.166.0. The agent decides whether to plan, so a Codex turn may show no plan.",
       commandNetworkDisclosure,
-      globalCacheLimit,
+      nativeExtensionLimit,
     ],
   };
 }
@@ -86,10 +86,10 @@ export function claudePolicyDisclosure(
       claudeLocalListeningLine,
       localListeningLimit,
 
-      globalSkillsDisclosure,
+      nativeSetupDisclosure,
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
       taskGitDisclosure,
     ],
-    limits: [...policy.limits, ...taskGitLimits, globalCacheLimit],
+    limits: [...policy.limits, ...taskGitLimits, nativeExtensionLimit],
   };
 }

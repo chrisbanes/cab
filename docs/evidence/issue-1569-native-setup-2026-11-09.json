@@ -1,0 +1,74 @@
+{
+  "issue": 1569,
+  "observedOn": "2026-11-09",
+  "plan": "https://github.com/chrisbanes/cab/issues/1569#issuecomment-6720804732",
+  "base": "234e48455ffe13b7322e2d6fd1b79a86e0d1f488",
+  "runtimeVersions": {
+    "node": "26.13.0",
+    "npm": "12.2.1",
+    "codex": "0.166.0",
+    "claude": "2.1.318",
+    "claudeAgentSdk": "0.3.316"
+  },
+  "native": {
+    "codex": "passed",
+    "claude": "passed"
+  },
+  "lifecycle": {
+    "codex": {
+      "state": "passed",
+      "turnCount": 4,
+      "successfulEndedCallbacks": 2,
+      "checks": {
+        "stop": "passed",
+        "recovery": "recorded"
+      },
+      "allRecordedProcessesExited": true
+    },
+    "claudeAttempt1": {
+      "state": "failed",
+      "turnCount": 0,
+      "successfulEndedCallbacks": 0,
+      "checks": {},
+      "allRecordedProcessesExited": true
+    },
+    "claudeAttempt2": {
+      "state": "failed",
+      "turnCount": 2,
+      "successfulEndedCallbacks": 0,
+      "checks": {
+        "stop": "passed"
+      },
+      "allRecordedProcessesExited": true
+    }
+  },
+  "grant": {
+    "total": 13,
+    "consumed": 11,
+    "harnessLimits": {
+      "claude": 7,
+      "codex": 6
+    },
+    "consumedByHarness": {
+      "claude": 5,
+      "codex": 6
+    },
+    "lifecycleWindowEndsAt": "2026-11-09T08:52:14.278Z"
+  },
+  "evidenceDigests": {
+    "lifecycle/codex/evidence.json": "262f039f0df392cc229fe4ff73f311df84da46a3c2740b65ed2d7566ccf62973",
+    "lifecycle/claude/evidence.json": "92ea7ff4e72017459f6c47062ca47de6ba5f16ef8cd9b620b50eea73ac1086d6",
+    "lifecycle/claude-attempt2/evidence.json": "a96c210f760886042f96e1f8502f041a855da8a404da1c2af3bdd1d5b6ecdbd4",
+    "claude-native-attempt3.json": "6277c9f6860a3f928e2ed9b3261f069c037c2a0d5b242084fee96714e4f7135d",
+    "codex-native.json": "068110804e56bd29e8c83550cc9d3cd25304e638134e47fa2c80e7c736a0db85",
+    "codex-native-attempt2.json": "394163db12aac90241a2748397f6b07c5ecb810b03e869cb7779fec946ac4841"
+  },
+  "currentSourceDigests": {
+    "src/standalone/service.ts": "a62b64314e1a517b26fbac92bfb94653a8d1f9c773f30c09439b790efd0ace1b",
+    "src/standalone/claude.ts": "2335674ccd802ebac6caf8d1a3658ab7757e7257dafbfe1ad804fa75190d83ae",
+    "src/standalone/codex.ts": "f410f5821881463e5aa6f4158b9239fb0b01f4d4687f1d784a397ccb910d2f08",
+    "src/standalone/state.ts": "bcf1be2576aca842ece1c47c289e69c5e479d6a36ced5b257ef40cc56b0150c8",
+    "src/standalone/runtime-retention.ts": "06f240e2b278bef6f126fad283a754b72f871e6348d42f5314da148067091452",
+    "test/execution/user-setup-qualification/lifecycle.mjs": "48dbe6d1aab90f57a7be2d198ea7c9049583681a26592b15cf34cbb656016655"
+  }
+}

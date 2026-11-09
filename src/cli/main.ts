@@ -360,7 +360,6 @@ export const OPTIONS = {
   instructions: { type: "string" },
   "instructions-file": { type: "string" },
   "capabilities-file": { type: "string" },
-  "skills-file": { type: "string" },
   "restore-revision": { type: "string" },
   revoked: { type: "string" },
   model: { type: "string" },

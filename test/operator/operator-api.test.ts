@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,12 +9,10 @@ import {
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -57,11 +56,6 @@ import {
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
-import {
-  writeNestedSkillPlugin,
-  writeSkillPlugin,
-} from "../fixtures/skill-plugin.js";
-import { installedPluginHomes } from "../fixtures/installed-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 import {
   createNativeWork,
@@ -387,7 +381,7 @@ test("assignment and dependency commands preflight their target before key confl
     resultDestination: "lead",
     requesterAssignmentId: null,
   };
-  await domain.execute({ ...assignment, actor: "operator" });
+  await seedLegacyCommand(domain, { ...assignment, actor: "operator" });
   const assignmentRow = domain.assignment(assignmentId);
   const targetVersion = Number(domain.task(target.taskId).version);
 
@@ -1780,7 +1774,7 @@ test("source.review resumes a source hold through the command flow and refuses d
   );
   await assert.rejects(api.execute(legacyFresh), refused);
   assert.throws(
-    () => d.execute({ ...legacyFresh, actor: "operator" }),
+    () => seedLegacyCommand(d, { ...legacyFresh, actor: "operator" }),
     /revision/i,
   );
   for (const revision of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
@@ -3039,196 +3033,7 @@ test("profile configuration reads and writes a validated execution runtime", asy
     runtime,
   );
 });
-test("profile skills reject missing plugins and unknown skills, and follow the profile across runtimes", async (t) => {
-  const f = await createOperatorFixture();
-  t.after(() => f.close());
-  const ids = await seed(f);
-  const api = new OperatorApi(f.service, [f.directory]);
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-skill-api-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const plugin = writeSkillPlugin(join(root, "plugin"), ["probe-skill"]);
-  const fieldsOf = async (command: object) => {
-    const error = await api.execute(command as never).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-    assert.ok(error instanceof OperatorApiError && error.status === 400);
-    return error.fieldPaths;
-  };
-  const configure = (extra: object, expectedVersion = 1) => ({
-    type: "profile.configure",
-    key: randomUUID(),
-    profileId: ids.profileId,
-    expectedVersion,
-    ...extra,
-  });
-  const claude = {
-    harness: "claude" as const,
-    model: null,
-    reasoningEffort: null,
-  };
-  // A plugin that is not there, and a skill the plugin does not have.
-  assert.deepEqual(
-    await fieldsOf(
-      configure({
-        runtime: claude,
-        skills: { plugins: [{ path: join(root, "absent"), skills: ["x"] }] },
-      }),
-    ),
-    ["skills.plugins.0.path"],
-  );
-  assert.deepEqual(
-    await fieldsOf(
-      configure({
-        runtime: claude,
-        skills: {
-          plugins: [{ path: plugin, skills: ["probe-skill", "other-skill"] }],
-        },
-      }),
-    ),
-    ["skills.plugins.0.skills.1"],
-  );
-  // A tree that could never be digested is refused when saved, not when its work waits.
-  const linked = writeSkillPlugin(join(root, "linked"), ["probe-skill"]);
-  symlinkSync(root, join(linked, "skills", "probe-skill", "loop"));
-  assert.deepEqual(
-    await fieldsOf(
-      configure({
-        runtime: claude,
-        skills: { plugins: [{ path: linked, skills: ["probe-skill"] }] },
-      }),
-    ),
-    ["skills.plugins.0.path"],
-  );
-  assert.equal(f.service.domain().profile(ids.profileId).version, 1);
-  // Both harnesses load profile skills: the Codex profile saves them, and they follow it across runtimes.
-  const skills = { plugins: [{ path: plugin, skills: ["probe-skill"] }] };
-  await api.execute(configure({ skills }) as never);
-  assert.deepEqual(f.service.domain().profileRuntime(ids.profileId), {
-    harness: "codex",
-  });
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    skills,
-  );
-  await api.execute(configure({ runtime: claude }, 2) as never);
-  await api.execute(configure({ runtime: { harness: "codex" } }, 3) as never);
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    skills,
-  );
-  // A Codex-only plugin is saved on a Codex profile, and refused once the profile is or becomes Claude.
-  const codexOnly = writeNestedSkillPlugin(
-    join(root, "codex-only"),
-    { engineering: ["probe-skill"] },
-    { claude: false },
-  );
-  const codexSkills = {
-    plugins: [{ path: codexOnly, skills: ["probe-skill"] }],
-  };
-  assert.deepEqual(
-    await fieldsOf(configure({ runtime: claude, skills: codexSkills }, 4)),
-    ["skills.plugins.0.path"],
-  );
-  await api.execute(configure({ skills: codexSkills }, 4) as never);
-  assert.deepEqual(await fieldsOf(configure({ runtime: claude }, 5)), [
-    "skills.plugins.0.path",
-  ]);
-  assert.equal(f.service.domain().profile(ids.profileId).version, 5);
-});
-test("installed plugins are listed by tool with their skills and no path, saved as profile entries, and refused while unavailable", async (t) => {
-  const f = await createOperatorFixture();
-  t.after(() => f.close());
-  const ids = await seed(f);
-  const api = new OperatorApi(f.service, [f.directory]);
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-installed-api-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const homes = installedPluginHomes(root);
-  for (const [key, value] of Object.entries(homes.environment)) {
-    const previous = process.env[key];
-    t.after(() => {
-      if (previous === undefined) delete process.env[key];
-      else process.env[key] = previous;
-    });
-    process.env[key] = value;
-  }
-  homes.installClaude("demo@m", { skills: ["probe-skill"] });
-  homes.installCodex("tools@n", {
-    write: (dir) =>
-      writeNestedSkillPlugin(
-        dir,
-        { engineering: ["deep"] },
-        { name: "tools", claude: false },
-      ),
-  });
-  const listing = await api.readInstalledPlugins();
-  assert.deepEqual(listing.data, {
-    plugins: [
-      {
-        plugin: "claude:demo@m",
-        tool: "claude",
-        name: "demo",
-        claude: true,
-        skills: [{ name: "probe-skill", claude: true }],
-      },
-      {
-        plugin: "codex:tools@n",
-        tool: "codex",
-        name: "tools",
-        claude: false,
-        skills: [{ name: "deep", claude: false }],
-      },
-    ],
-    status: { claude: "available", codex: "available" },
-    global: { status: "missing", skills: [] },
-  });
-  assert.equal(JSON.stringify(listing).includes(root), false);
-  const globalRoot = join(homes.environment.HOME!, ".agents", "skills");
-  mkdirSync(globalRoot, { recursive: true });
-  for (let i = 0; i < 2001; i++) writeFileSync(join(globalRoot, String(i)), "");
-  const oversized = await api.readInstalledPlugins();
-  assert.deepEqual(oversized.data.plugins, listing.data.plugins);
-  assert.deepEqual(oversized.data.status, listing.data.status);
-  assert.deepEqual(oversized.data.global, { status: "unreadable", skills: [] });
-  assert.equal(JSON.stringify(oversized).includes(root), false);
-  rmSync(globalRoot, { recursive: true });
-  assert.deepEqual((await api.readInstalledPlugins()).data.global, {
-    status: "missing",
-    skills: [],
-  });
-  const configure = (skills: object, expectedVersion: number) =>
-    ({
-      type: "profile.configure",
-      key: randomUUID(),
-      profileId: ids.profileId,
-      expectedVersion,
-      skills,
-    }) as never;
-  const skills = {
-    plugins: [
-      { plugin: "claude:demo@m", skills: ["probe-skill"] },
-      { plugin: "codex:tools@n", skills: ["deep"] },
-    ],
-  };
-  await api.execute(configure(skills, 1));
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    skills,
-  );
-  homes.setClaudeEnabled("demo@m", false);
-  const error = await api.execute(configure(skills, 2)).then(
-    () => undefined,
-    (e: unknown) => e,
-  );
-  assert.ok(error instanceof OperatorApiError && error.status === 400);
-  assert.deepEqual(error.fieldPaths, ["skills.plugins.0.plugin"]);
-  assert.equal(f.service.domain().profile(ids.profileId).version, 2);
-  // The effective policy names where plugin skills come from.
-  assert.match(
-    codexPolicyDisclosure().limits.join(" "),
-    /local plugin directories or plugins installed in Claude Code or Codex/,
-  );
-});
+
 test("task reads report the persisted binding harness of each execution generation", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -3653,7 +3458,7 @@ test("task reads redact a file-sourced Claude token value and path", async (t) =
   t.after(() => f.close());
   const ids = await seed(f);
   const d = f.service.domain();
-  d.execute({
+  seedLegacyCommand(d, {
     type: "claude-token.configure",
     actor: "operator",
     key: randomUUID(),
@@ -3688,7 +3493,7 @@ test("task reads redact the Claude token reference and its value", async (t) => 
   t.after(() => f.close());
   const ids = await seed(f);
   const d = f.service.domain();
-  d.execute({
+  seedLegacyCommand(d, {
     type: "claude-token.configure",
     actor: "operator",
     key: randomUUID(),
@@ -4955,117 +4760,33 @@ test("a Jira project's status mapping is read with its observed status names, sa
   );
 });
 
-test("global listing and profile validation are path-free, read-only and canonical", async (t) => {
+test("retired extension discovery and selection writes fail while profile edits keep legacy history", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const ids = await seed(f);
   const api = new OperatorApi(f.service, [f.directory]);
-  const home = join(f.directory, "global-home");
-  const previous = process.env.HOME;
-  process.env.HOME = home;
-  t.after(() => {
-    if (previous === undefined) delete process.env.HOME;
-    else process.env.HOME = previous;
-  });
-  for (const name of ["chosen", "unselected"]) {
-    const dir = join(home, ".agents/skills", name);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, "SKILL.md"),
-      `---\nname: ${name}\n---\nInstructions`,
+  assert.throws(
+    () => api.readClaudeTokenStatus(),
+    (error) =>
+      error instanceof OperatorApiError &&
+      error.status === 410 &&
+      Boolean(error.publicMessage?.includes("native Claude Code login")),
+  );
+  await assert.rejects(
+    api.readInstalledPlugins(),
+    (error) => error instanceof OperatorApiError && error.status === 410,
+  );
+  for (const command of [
+    {
+      type: "profile.configure",
+      profileId: ids.profileId,
+      expectedVersion: 1,
+      skills: { plugins: [] },
+    },
+    { type: "claude-token.configure", credentialRef: "env:RETIRED_TOKEN" },
+  ])
+    await assert.rejects(
+      api.execute({ ...command, key: randomUUID() }),
+      (error) => error instanceof OperatorApiError && error.status === 400,
     );
-  }
-  const listing = await api.readInstalledPlugins();
-  assert.deepEqual(listing.data.global, {
-    status: "available",
-    skills: [
-      { name: "chosen", available: true },
-      { name: "unselected", available: true },
-    ],
-  });
-  assert.equal(JSON.stringify(listing).includes(home), false);
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    { plugins: [] },
-  );
-  const configure = (skills: object, version = 1) => ({
-    type: "profile.configure",
-    key: randomUUID(),
-    profileId: ids.profileId,
-    expectedVersion: version,
-    skills,
-  });
-  const fields = async (skills: object) => {
-    const error = await api.execute(configure(skills)).then(
-      () => undefined,
-      (error) => error,
-    );
-    assert.ok(error instanceof OperatorApiError);
-    assert.equal(error.status, 400);
-    assert.deepEqual(error.fieldPaths, ["skills.global"]);
-    assert.equal(error.message.includes(home), false);
-  };
-  await fields({ plugins: [], global: ["unknown"] });
-  const reserved = writeSkillPlugin(
-    join(f.directory, "reserved"),
-    ["p"],
-    "cab-global-skills",
-  );
-  await fields({
-    plugins: [{ path: reserved, skills: ["p"] }],
-    global: ["chosen"],
-  });
-  if (process.getuid?.() !== 0) {
-    chmodSync(join(home, ".agents/skills"), 0);
-    try {
-      await fields({ plugins: [], global: ["chosen"] });
-    } finally {
-      chmodSync(join(home, ".agents/skills"), 0o700);
-    }
-  }
-  const malformed = operatorCommandSchema.safeParse(
-    configure({ plugins: [], global: ["../bad"] }),
-  );
-  assert.equal(malformed.success, false);
-  if (!malformed.success)
-    assert.ok(
-      malformed.error.issues.some((i) =>
-        i.path.join(".").startsWith("skills.global"),
-      ),
-    );
-  await api.execute(configure({ plugins: [], global: ["chosen"] }));
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    { plugins: [], global: ["chosen"] },
-  );
-  const plugin = writeSkillPlugin(join(f.directory, "mixed"), [
-    "chosen",
-    "other",
-  ]);
-  await api.execute(
-    configure(
-      { plugins: [{ path: plugin, skills: ["other"] }], global: ["chosen"] },
-      2,
-    ),
-  );
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills.global,
-    ["chosen"],
-  );
-  await api.execute(
-    configure(
-      { plugins: [{ path: plugin, skills: ["chosen"] }], global: ["chosen"] },
-      3,
-    ),
-  );
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    { plugins: [{ path: plugin, skills: ["chosen"] }] },
-  );
-  await api.execute(configure({ plugins: [] }, 4));
-  assert.deepEqual(
-    (await api.readProfileConfiguration(ids.profileId)).data.skills,
-    { plugins: [] },
-  );
-  assert.equal(existsSync(join(f.directory, "data/global-skill-cache")), false);
 });

@@ -1,3 +1,4 @@
+/** Retained only for historical qualification fixtures; production uses native harness configuration. */
 import { lstat, mkdir, readlink, stat, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";

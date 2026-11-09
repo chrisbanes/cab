@@ -1,3 +1,4 @@
+/** Retained only for historical qualification fixtures; production uses native harness configuration. */
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
@@ -7,7 +8,7 @@ import {
   type InstalledPluginRef,
   pluginToolLabels,
   installedPluginRefSchema,
-} from "../core/execution-runtime.js";
+} from "../../../src/core/execution-runtime.js";
 import { realHome } from "./codex-home.js";
 
 /**

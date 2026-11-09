@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -83,7 +84,7 @@ test("the readiness read reports a Claude token the service cannot use without i
   const tokenPath = join(root, "claude-token");
   writeFileSync(tokenPath, "ready-http-canary-token-9031\n");
   chmodSync(tokenPath, 0o644);
-  s.f.service.domain().execute({
+  seedLegacyCommand(s.f.service.domain(), {
     type: "claude-token.configure",
     key: crypto.randomUUID(),
     actor: "operator",
@@ -94,7 +95,7 @@ test("the readiness read reports a Claude token the service cannot use without i
   const text = await response.text();
   const check = claudeTokenCheckSchema.parse(JSON.parse(text)).data;
   assert.equal(check.status, "fail");
-  assert.equal(check.reason, "Token file permits group or other access");
+  assert.equal(check.reason, "Claude native subscription login is unavailable");
   assert.ok(!text.includes(tokenPath));
   assert.ok(!text.includes("ready-http-canary-token-9031"));
 });
@@ -181,7 +182,7 @@ test("a rejected agent's name never reaches readiness output", async (t) => {
         : new OperatorFixtureRuntime()) as unknown as () => Runtime,
   });
   const d = s.f.service.domain();
-  d.execute({
+  seedLegacyCommand(d, {
     type: "claude-token.configure",
     key: crypto.randomUUID(),
     actor: "operator",

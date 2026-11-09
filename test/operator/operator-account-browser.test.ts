@@ -1,3 +1,4 @@
+import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
@@ -772,7 +773,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   assert.equal(await checklist.count(), 0);
 
   // A token reference that can't be read brings Claude back as Needs attention.
-  d.execute({
+  seedLegacyCommand(d, {
     type: "claude-token.configure",
     actor: "operator",
     key: randomUUID(),
