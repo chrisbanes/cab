@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  activeFilterCount,
+  defaultTaskFilters,
   sharedTaskReasons,
   sharedTaskReasonText,
   readinessHiddenCounts,
@@ -12,6 +14,9 @@ import { summary } from "../fixtures/task-summary.js";
 
 test("task visibility and shared readiness copy stay concise", () => {
   assert.equal(taskVisibilityText(5, 34), "5 Ready of 34 eligible tasks");
+  assert.equal(activeFilterCount(defaultTaskFilters), 0);
+  assert.equal(activeFilterCount({ ...defaultTaskFilters, ready: "no" }), 1);
+  assert.equal(activeFilterCount({ ...defaultTaskFilters, ready: "any" }), 1);
   assert.deepEqual(
     readinessHiddenCounts([
       summary({ ready: false }),

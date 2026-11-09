@@ -36,10 +36,10 @@ list or reloading, and always sees which filters are hiding work.
    keeps the other filters and view. Board columns disclose each state hidden by
    readiness. Ready is omitted from URLs like
    `view=list`; a missing, empty or unknown `ready` means Ready.
-5. With More filters closed, its summary counts active hidden filters (Ready and Not
-   Ready are active; Any readiness is neutral), even when Ready is the default
-   ("More filters · 1 active"). Reset filters appears only when a value differs from
-   its default and keeps List or Board. It is a normal navigation, so Back returns to
+5. With More filters closed, its summary counts only hidden filter choices that differ
+   from their defaults. Ready is the default, so it is not counted; Not Ready and Any
+   readiness each count as one. Reset filters follows the same count and keeps List or
+   Board. It is a normal navigation, so Back returns to
    the filtered list, which becomes the remembered set again.
 6. The count line reads "N Ready of M eligible tasks" when readiness is Ready, otherwise
    "N tasks"; it reads "No tasks" when nothing is in scope, or "No tasks

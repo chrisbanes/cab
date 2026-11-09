@@ -415,18 +415,18 @@ test("active filters are counted, reset in one step and undone by Back", async (
   const summary = page.locator(".work-more > summary"),
     reset = page.getByRole("button", { name: "Reset filters" });
   await page.locator(".task-list [data-task-id]").first().waitFor();
-  assert.match(await summary.innerText(), /More filters · 1 active$/);
+  assert.equal(await summary.innerText(), "More filters");
   assert.equal(await reset.count(), 0);
   await page.goto(`${web.origin}/tasks?source=github`);
   await page.locator(".work-more").waitFor();
   // A URL filter opens the disclosure; the indicator is for when it is collapsed.
   await summary.click();
   assert.equal(await page.locator(".work-more").getAttribute("open"), null);
-  assert.match(await summary.innerText(), /More filters · 2 active$/);
+  assert.match(await summary.innerText(), /More filters · 1 active$/);
   assert.equal(await reset.count(), 1);
   await page.goto(`${web.origin}/tasks?source=github&ready=any`);
   await page.locator(".work-more").waitFor();
-  assert.match(await summary.innerText(), /More filters · 1 active$/);
+  assert.match(await summary.innerText(), /More filters · 2 active$/);
 
   // Reset pushes the defaults and forgets the set; Back returns to the filtered URL.
   await page.goto(`${web.origin}/tasks?state=all&view=board`);

@@ -6,7 +6,6 @@ import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import {
   activeFilterCount,
-  changedFilterCount,
   columns,
   taskVisibilityText,
   type TaskFilters,
@@ -58,9 +57,8 @@ export function TaskToolbar({
     project: "",
     state: "",
   });
-  const hasMoreChanges =
-    changedFilterCount({ ...filters, project: "", state: "" }, projectId) > 0;
-  const [open, setOpen] = useState(hasMoreChanges);
+  const hasMore = hiddenActive > 0;
+  const [open, setOpen] = useState(hasMore);
   const switchView = (
     <div className="work-switch" role="toolbar" aria-label="Task presentation">
       {(["list", "board"] as const).map((view) => (
@@ -132,7 +130,7 @@ export function TaskToolbar({
       </Button>
     ) : null;
   const resetButton =
-    changedFilterCount(filters, projectId) > 0 ? (
+    activeFilterCount(filters, projectId) > 0 ? (
       <Button variant="secondary" className="work-reset" onClick={reset}>
         Reset filters
       </Button>
@@ -166,8 +164,8 @@ export function TaskToolbar({
   );
   // A filter set from the URL opens the disclosure; the component never closes it.
   useEffect(() => {
-    if (hasMoreChanges) setOpen(true);
-  }, [hasMoreChanges]);
+    if (hasMore) setOpen(true);
+  }, [hasMore]);
   return (
     <div className="work-toolbar-block">
       <div

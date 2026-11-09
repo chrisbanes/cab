@@ -117,14 +117,6 @@ export const defaultTaskFilters: TaskFilters = {
 export const activeFilterCount = (filters: TaskFilters, projectId?: string) =>
   (["project", "state", "source", "ready", "q"] as const).filter(
     (key) =>
-      (key === "ready"
-        ? filters.ready !== "any"
-        : filters[key] !== defaultTaskFilters[key]) &&
-      !(key === "project" && projectId),
-  ).length;
-export const changedFilterCount = (filters: TaskFilters, projectId?: string) =>
-  (["project", "state", "source", "ready", "q"] as const).filter(
-    (key) =>
       filters[key] !== defaultTaskFilters[key] &&
       !(key === "project" && projectId),
   ).length;
