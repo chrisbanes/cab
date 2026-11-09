@@ -605,7 +605,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   const longEntry = page.getByRole("button", { name: new RegExp(longName) });
   assert.equal(
     await longEntry.getAttribute("title"),
-    `Repository alpha/${longName}`,
+    `Repository alpha/${longName} · 22 bytes`,
   );
   const longNameStyle = await longEntry
     .locator(".file-entry-name")
