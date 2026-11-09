@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -16,6 +16,7 @@ import {
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { DomainStore } from "../../src/core/domain.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
 import {
@@ -763,6 +764,7 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  17: "adff272f6d38d80943a1705b89cbcd3374b3853b49d8b4e446afbe78614e1720",
   16: "1beeceba2ba659c1f1d49fb2ec194f0b7eed75d8a70c14255a03ec497c1ecd32",
   15: "8c62eb6e45b35bd0b6de4961ebdf351f23d9e9723eaa6b9d66fcebc8c740057a",
   14: "f0cc50cf3e479a85922ecfe951a4337fafbfd8af243328b38f2838e2ac328117",
@@ -827,6 +829,122 @@ test("the service entry reports a refused startup in its log with nothing listen
     // The log carries only the stable name and code before the database is open.
     assert.equal(records[0].error.name, "StartupRefusedError");
     assert.equal(records[0].error.code, "startup-schema-newer");
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("reasoning migration protects the level 16 schema before adding either table and refuses older builds", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 16);
+    const database = join(dirs.data, "standalone.sqlite");
+    const projectId = randomUUID(),
+      intentId = randomUUID();
+    const before = new DatabaseSync(database);
+    try {
+      new DomainStore(before).execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        name: "Retained project",
+        leadProfileId: null,
+        instructions: "Retained instructions",
+      });
+      before
+        .prepare(`INSERT INTO execution_intents
+        (id, workId, prompt, workspace, state, threadId, turnId, accountType, sandbox, approval)
+        VALUES (?, 'retained-work', 'Retained prompt', '/retained/workspace', 'completed',
+          'retained-thread', 'retained-turn', 'chatgpt', 'workspaceWrite', 'never')`)
+        .run(intentId);
+      before.exec(
+        "DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries",
+      );
+    } finally {
+      before.close();
+    }
+    // Pin the whole prior schema, rather than merely labelling a current store level 16.
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[16]);
+    const read = (file: string) => {
+      const db = new DatabaseSync(file, { readOnly: true });
+      try {
+        return {
+          project: new DomainStore(db).project(projectId),
+          turn: db
+            .prepare("SELECT * FROM execution_intents WHERE id = ?")
+            .get(intentId),
+          tables: db
+            .prepare(
+              "SELECT name FROM sqlite_schema WHERE name IN ('project_reasoning_summaries', 'execution_intent_reasoning_summaries') ORDER BY name",
+            )
+            .all(),
+        };
+      } finally {
+        db.close();
+      }
+    };
+    const retained = read(database);
+    assert.deepEqual(retained.tables, []);
+    await assert.rejects(
+      run(dirs.data, MIGRATION_LEVEL, (point) => {
+        if (point === "after-startup-snapshot-record") {
+          assert.deepEqual(read(database), retained);
+          assert.equal(recordedLevel(dirs.data), 16);
+          throw new Error(
+            "Stopped after verified reasoning migration snapshot",
+          );
+        }
+      }),
+      /Stopped after verified reasoning migration snapshot/,
+    );
+    const state = readStartupState(dirs.data);
+    assert.equal(state?.snapshot?.from, 16);
+    assert.equal(state?.snapshot?.to, 17);
+    const snapshot = state?.snapshot?.path;
+    assert.ok(snapshot);
+    await verifySnapshot(snapshot);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[16]);
+    assert.deepEqual(read(join(snapshot, "standalone.sqlite")), retained);
+    assert.deepEqual(read(database), retained);
+    await run(dirs.data);
+    const migrated = read(database);
+    assert.deepEqual(migrated.project, retained.project);
+    assert.deepEqual(migrated.turn, retained.turn);
+    assert.deepEqual(
+      migrated.tables.map((row) => row.name),
+      ["execution_intent_reasoning_summaries", "project_reasoning_summaries"],
+    );
+    const current = new DatabaseSync(database, { readOnly: true });
+    try {
+      for (const table of [
+        "project_reasoning_summaries",
+        "execution_intent_reasoning_summaries",
+      ])
+        assert.equal(
+          current.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n,
+          0,
+        );
+      assert.equal(
+        new DomainStore(current).reasoningSummaries(projectId),
+        false,
+      );
+      assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      current.close();
+    }
+    assert.equal(recordedLevel(dirs.data), 17);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    await run(dirs.data);
+    assert.deepEqual(read(database), migrated);
+    assert.deepEqual(startupSnapshots(dirs.snapshots), snapshots);
+    assert.deepEqual(readStartupState(dirs.data), state);
+    const bytes = readFileSync(database);
+    await assert.rejects(run(dirs.data, 16), refusal("startup-schema-newer"));
+    assert.deepEqual(readFileSync(database), bytes);
+    assert.deepEqual(readStartupState(dirs.data), state);
+    assert.deepEqual(startupSnapshots(dirs.snapshots), snapshots);
   } finally {
     dirs.cleanup();
   }
