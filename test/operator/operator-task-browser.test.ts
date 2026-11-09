@@ -1219,6 +1219,15 @@ for (const viewport of [
     await screenshot(page, `${viewport.width}-no-projects`);
     await page.unroute("**/api/operator/readiness");
     const ids = await seedCatalog(f);
+    // The view states a full global limit; the five running lead turns fill a cap of five.
+    f.service.domain().execute({
+      type: "capacity.configure",
+      key: randomUUID(),
+      actor: "operator",
+      minimumLeadSlots: 0,
+      globalLimit: 5,
+      projectOverrides: {},
+    });
     const emptyProject = randomUUID();
     f.service.domain().execute({
       type: "project.create",
