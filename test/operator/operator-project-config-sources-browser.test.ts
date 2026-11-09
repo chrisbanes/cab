@@ -125,6 +125,59 @@ test("GitHub source shows search queries plainly and edits them in place", async
   assert.equal(await save.isDisabled(), true);
 });
 
+test("GitHub source explains a Project field rule without its matching selection", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+    ],
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "PVT_atlas",
+          fieldNodeId: "FIELD_status",
+          operator: "in",
+          optionNodeIds: ["OPTION_ready"],
+        },
+      ],
+    },
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await page.reload();
+  await page
+    .getByText(
+      /This readiness rule can never match.*Add that Project as a selection or remove the condition\./,
+    )
+    .waitFor();
+  await page
+    .getByLabel("Readiness matching", { exact: true })
+    .selectOption("any");
+  await page
+    .getByText(
+      /This Project field condition never applies.*Add that Project as a selection or remove the condition\./,
+    )
+    .waitFor();
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await page
+    .getByLabel("Closed GitHub issues", { exact: true })
+    .selectOption({ label: "Treat closure as Done" });
+  assert.equal(
+    await save.isEnabled(),
+    true,
+    "the advisory does not block saving",
+  );
+});
+
 test("repositories show local paths plainly and edit them in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,

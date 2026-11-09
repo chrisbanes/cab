@@ -1,5 +1,8 @@
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
-import { noRuleText } from "../../src/operator/readiness-text.js";
+import {
+  missingProjectSelectionWarning,
+  noRuleText,
+} from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { CircleCheck } from "lucide-react";
 import { Button, StatusBadge } from "./components.js";
@@ -211,6 +214,20 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     observed?.selections.find((o) => o.selectionId === id);
   const projectSources = data.source.selections.filter(
     (s) => s.kind === "project" && s.descriptor,
+  );
+  const activeProjectIds = new Set(
+    selections
+      .filter((r) => r.kind === "project" && r.active && !r.removed)
+      .map((r) =>
+        String(r.keep ? (r.descriptor ?? "") : (r.projectNodeId ?? "")),
+      )
+      .filter(Boolean),
+  );
+  const missingProjectFieldSelections = conditions.filter(
+    (r) =>
+      r.kind === "project-field" &&
+      r.projectNodeId &&
+      !activeProjectIds.has(String(r.projectNodeId)),
   );
   /** The Remove and Undo names carry the S-n id, so two rows with one name stay distinct. */
   const rowName = (n: SourceNaming, id: unknown) =>
@@ -583,6 +600,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 "readiness",
                 "source-conditions-error",
                 "Check readiness mode and complete conditions.",
+              )}
+              {missingProjectFieldSelections.length > 0 && (
+                <Alert variant="warning" role="status">
+                  {missingProjectSelectionWarning(
+                    v.mode === "any" ? "any" : "all",
+                  )}
+                </Alert>
               )}
               {data.source.readiness.kind === "unavailable" ? (
                 <p className="metadata muted">

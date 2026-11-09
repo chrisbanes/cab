@@ -47,6 +47,13 @@ export const projectFieldText = (f: {
 export const noRuleText =
   "No readiness rule: open issues in active selections are not filtered by label or Project field.";
 
+/** Explain a Project field condition whose exact GitHub Project is not selected actively. */
+export function missingProjectSelectionWarning(mode: "all" | "any") {
+  return mode === "all"
+    ? "This readiness rule can never match because its Project field condition has no active GitHub Project selection. Add that Project as a selection or remove the condition."
+    : "This Project field condition never applies because its GitHub Project has no active selection. Add that Project as a selection or remove the condition.";
+}
+
 export function ruleText(rule: RuleView) {
   if (rule.kind === "none") return "no readiness rule";
   if (rule.kind === "unavailable") return "rule unavailable";

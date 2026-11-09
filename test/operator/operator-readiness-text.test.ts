@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  missingProjectSelectionWarning,
   selectionCountsText,
   unmetReason,
   zeroMatchWarning,
@@ -104,6 +105,17 @@ test("the zero-match warning needs a complete read, open items, no match and a k
     null,
   );
   assert.equal(zeroMatchWarning(null, ready), null);
+});
+
+test("missing Project selections describe all and any conditions accurately", () => {
+  assert.equal(
+    missingProjectSelectionWarning("all"),
+    "This readiness rule can never match because its Project field condition has no active GitHub Project selection. Add that Project as a selection or remove the condition.",
+  );
+  assert.equal(
+    missingProjectSelectionWarning("any"),
+    "This Project field condition never applies because its GitHub Project has no active selection. Add that Project as a selection or remove the condition.",
+  );
 });
 
 test("unmet reasons name the missing conditions and stay silent otherwise", () => {
