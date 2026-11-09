@@ -39,6 +39,91 @@ import {
 
 const test = browserSuite("operator-project-config-general-browser");
 
+test("reasoning setting sits beside capture, baseline disables it and deletion works by keyboard", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:atlas/settings?tab=general",
+  );
+  const d = f.service.domain();
+  const capture = page.getByRole("combobox", {
+    name: "Diagnostic capture",
+    exact: true,
+  });
+  const reasoning = page.getByRole("switch", {
+    name: "Reasoning summaries",
+    exact: true,
+  });
+  await reasoning.waitFor();
+  assert.equal(await reasoning.isChecked(), false);
+  assert.equal(await reasoning.isDisabled(), false);
+  assert.equal(
+    await capture.evaluate((select) => {
+      const label = select.closest("label");
+      return label?.nextElementSibling?.nextElementSibling?.textContent?.trim();
+    }),
+    "Reasoning summaries",
+  );
+  await reasoning.focus();
+  await page.keyboard.press("Space");
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  const sent = commandBody(page);
+  await save.click();
+  assert.equal((await sent).reasoningSummaries, true);
+  await savedOutcome(page);
+  assert.equal(d.reasoningSummaries(ids.atlas), true);
+  await capture.selectOption("baseline");
+  assert.equal(await reasoning.isDisabled(), true);
+  assert.equal(await reasoning.isChecked(), false);
+  await page.getByText(/Requires enhanced diagnostic capture/).waitFor();
+  await changes(page)
+    .getByText("Reasoning summaries disabled", { exact: true })
+    .waitFor();
+  await save.click();
+  await savedOutcome(page);
+  assert.equal(d.reasoningSummaries(ids.atlas), false);
+  await capture.selectOption("enhanced");
+  assert.equal(await reasoning.isDisabled(), false);
+  assert.equal(await reasoning.isChecked(), false);
+  await save.click();
+  await savedOutcome(page);
+  const trigger = page.getByRole("button", {
+    name: "Delete collected reasoning…",
+    exact: true,
+  });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", {
+    name: "Delete collected reasoning?",
+  });
+  await dialog.waitFor();
+  await dialog.getByText(/This cannot be undone/).waitFor();
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(
+    await trigger.evaluate((e) => e === document.activeElement),
+    true,
+  );
+  await page.keyboard.press("Enter");
+  const confirm = dialog.getByRole("button", {
+    name: "Delete collected reasoning",
+    exact: true,
+  });
+  const version = Number(d.project(ids.atlas).version);
+  await confirm.focus();
+  const deletion = commandBody(page);
+  await page.keyboard.press("Enter");
+  const command = await deletion;
+  assert.equal(command.type, "project.reasoning.delete");
+  assert.equal(command.confirmed, true);
+  assert.equal(command.expectedVersion, version);
+  await savedOutcome(dialog, /^Collected reasoning cleared\./);
+  assert.equal(Number(d.project(ids.atlas).version), version + 1);
+  assert.equal(d.reasoningSummaries(ids.atlas), false);
+  await dialog.getByRole("button", { name: "Close", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await dialog.waitFor({ state: "hidden" });
+});
+
 test("General tab edits in place with Kept · Reveal instructions, a change list, a saved line and tabs that keep drafts", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,

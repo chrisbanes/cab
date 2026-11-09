@@ -3014,6 +3014,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       leadProfileId: uuid.nullable().optional(),
       instructions: text.optional(),
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      reasoningSummaries: z.boolean().optional(),
       commandNetworkAccess: z.boolean().optional(),
       localListening: z.boolean().optional(),
       stacking: z.boolean().optional(),
@@ -3599,6 +3600,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...domainBase,
+      type: z.literal("project.reasoning.delete"),
+      expectedVersion: revision,
+      confirmed: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
       type: z.literal("project.delete"),
       expectedVersion: revision,
       confirmationName: z.string().min(1).max(512),
@@ -3630,7 +3639,11 @@ export const configurationReceiptSchema = z
         .strict(),
       z
         .object({
-          commandType: z.enum(["project.create", "project.configure"]),
+          commandType: z.enum([
+            "project.create",
+            "project.configure",
+            "project.reasoning.delete",
+          ]),
           resourceId: uuid,
           version: revision,
           paused: z.boolean(),
@@ -4081,6 +4094,7 @@ export const projectConfigurationSchema = envelope(
       instructionPresent: z.boolean(),
       /** Optional so older services still parse; absent means not reported. */
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      reasoningSummaries: z.boolean().optional(),
       commandNetworkAccess: z.boolean().optional(),
       localListening: z.boolean().optional(),
       stacking: z.boolean().optional(),
@@ -5237,6 +5251,7 @@ export const operationTypeSchema = z.enum([
   "profile.configure",
   "project.create",
   "project.configure",
+  "project.reasoning.delete",
   "project.archive",
   "project.restore",
   "project.delete",

@@ -210,6 +210,14 @@ const projectGet: BrowseCommand = {
           ],
           ["Diagnostic capture", d.diagnosticCapture ?? "not reported"],
           [
+            "Reasoning summaries",
+            d.reasoningSummaries === undefined
+              ? "not reported"
+              : d.reasoningSummaries
+                ? "enabled"
+                : "disabled",
+          ],
+          [
             "Command network access",
             d.commandNetworkAccess === undefined
               ? "not reported"

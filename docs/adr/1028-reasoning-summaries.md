@@ -10,8 +10,9 @@ reasoning summaries from neither runtime. Operators reviewing or debugging an ag
 cannot see why it chose an approach. Both runtimes can be asked for provider-produced
 summaries of their reasoning. This decision lets a project opt in to collecting and showing
 them. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable summaries
-from Claude Code but not from Codex. This decision is not yet implemented: cab still collects
-no reasoning.
+from Claude Code but not from Codex. The project setting, admission snapshot and confirmed
+delete command are implemented. Requesting, storing and displaying summaries remain
+unimplemented: cab still collects no reasoning, so deletion currently has nothing to erase.
 
 ## Decision
 

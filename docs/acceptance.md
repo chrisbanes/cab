@@ -306,7 +306,15 @@ captures the 2026-10-12 qualification): those the host live journey ran are pass
 Stop; adoption followed by a follow-up on a completed lead is covered by a
 deterministic test ([#935](https://github.com/chrisbanes/cab/issues/935)); the rest are
 bounded to deterministic fixtures, including the `project prepare` write for
-`diagnosticCapture`.
+`diagnosticCapture` and `reasoningSummaries`.
+
+Reasoning summaries remain uncollected. Deterministic tests cover the operator-only
+setting's default, enhanced-capture validation, atomic baseline reset and confirmed,
+repeatable no-op deletion (`operator-reasoning-summaries.test.ts`), admission snapshots
+and additive migration (`command-network-admission.test.ts`), CLI parsing and output,
+and the Settings toggle and keyboard-accessible deletion confirmation
+(`operator-project-config-general-browser.test.ts`). These checks do not qualify
+runtime requesting, reasoning storage or display.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |

@@ -605,6 +605,13 @@ export class ExecutionState {
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
+    CREATE TABLE IF NOT EXISTS project_reasoning_summaries (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_reasoning_summaries (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       cabRetriesUsed INTEGER NOT NULL CHECK(cabRetriesUsed >= 0),
@@ -1872,6 +1879,16 @@ export class ExecutionState {
     const row = this.db
       .prepare(
         "SELECT enabled FROM execution_intent_local_listening WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
+  }
+
+  /** The turn's admitted opt-in; null for historical or not yet admitted turns. */
+  reasoningSummaries(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_reasoning_summaries WHERE intentId = ?",
       )
       .get(intentId) as { enabled: number } | undefined;
     return row ? row.enabled === 1 : null;
@@ -5414,6 +5431,19 @@ export class ExecutionState {
               options.projectId,
               ...(this.hasTurnRequests ? [workId] : []),
             );
+        this.db
+          .prepare(`INSERT OR REPLACE INTO execution_intent_reasoning_summaries (intentId, enabled)
+          SELECT ?, EXISTS (
+            SELECT 1 FROM project_reasoning_summaries p
+            JOIN task_execution_bindings b ON b.workId = ?
+            WHERE p.projectId = ? AND p.enabled = 1)
+          ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}`)
+          .run(
+            id,
+            workId,
+            options.projectId,
+            ...(this.hasTurnRequests ? [workId] : []),
+          );
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations
           WHERE workId = ?`)

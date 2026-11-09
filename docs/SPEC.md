@@ -147,8 +147,16 @@ unless a project reduces capture to the baseline. General conversation history r
 instruction redaction; historical gaps remain explicit. The diagnostic payload
 retention policy does not delete durable safety records or change existing
 result/review evidence contracts. [ADR-1028](adr/1028-reasoning-summaries.md) accepts
-opt-in provider reasoning summaries for enhanced-capture projects; it is not yet
-implemented. The design defines capture limits, credential lifecycle, command
+opt-in provider reasoning summaries for enhanced-capture projects. The versioned,
+operator-only `reasoningSummaries` setting is off by default and applies to later
+admitted turns. Enabling it requires enhanced diagnostic capture; switching capture
+to baseline resets it to off atomically. Settings and `project get` expose it;
+`cab project prepare --reasoning-summaries true|false` prepares its configuration.
+Settings also offers **Delete collected reasoning** (`project.reasoning.delete`), with revision checking and
+explicit, irreversible confirmation. Deletion is safe to repeat and leaves the
+setting unchanged. Runtime requesting, storage and display are not implemented:
+cab still collects no reasoning, so deletion currently has nothing to erase.
+The design defines capture limits, credential lifecycle, command
 semantics and required acceptance evidence.
 
 ## First local-task journey

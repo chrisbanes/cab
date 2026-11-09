@@ -97,6 +97,7 @@ const cases = {
   },
   "project.create": project,
   "project.configure": project,
+  "project.reasoning.delete": { ...project, archived: 0 },
   "project.archive": { ...project, archived: 1, paused: 1 },
   "project.restore": { ...project, archived: 0, paused: 1 },
   "project.delete": {

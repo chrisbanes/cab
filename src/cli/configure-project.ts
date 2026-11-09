@@ -56,7 +56,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--local-listening true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--reasoning-summaries true|false] [--command-network-access true|false] [--local-listening true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
@@ -67,6 +67,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "paused",
         "lead-profile",
         "diagnostic-capture",
+        "reasoning-summaries",
         "command-network-access",
         "local-listening",
         "stacking",
@@ -84,6 +85,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         const paused = boolFlag(ctx.values.paused, "paused");
         const lead = uuidOrNone(ctx.values["lead-profile"], "lead-profile");
         const capture = ctx.values["diagnostic-capture"];
+        const reasoning = boolFlag(
+          ctx.values["reasoning-summaries"],
+          "reasoning-summaries",
+        );
         if (
           capture !== undefined &&
           capture !== "enhanced" &&
@@ -167,6 +172,26 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           });
         }
         const currentCapture = config.data.diagnosticCapture;
+        if (reasoning === true && (capture ?? currentCapture) !== "enhanced")
+          throw new CliError(
+            "invalid-input",
+            "Reasoning summaries require enhanced diagnostic capture.",
+          );
+        const currentReasoning = config.data.reasoningSummaries;
+        const nextReasoning = capture === "baseline" ? false : reasoning;
+        if (nextReasoning !== undefined && nextReasoning !== currentReasoning) {
+          if (currentReasoning === undefined) gaps.push("content-unavailable");
+          command.reasoningSummaries = nextReasoning;
+          changes.push({
+            field: "reasoningSummaries",
+            from:
+              currentReasoning === undefined ? null : String(currentReasoning),
+            to: String(nextReasoning),
+          });
+          notes.push(
+            "The setting applies to later admitted turns. Runtime reasoning capture is not implemented; no reasoning is collected.",
+          );
+        }
         if (capture !== undefined && capture !== currentCapture) {
           if (currentCapture === undefined) gaps.push("content-unavailable");
           command.diagnosticCapture = capture;

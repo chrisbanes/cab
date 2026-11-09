@@ -90,6 +90,7 @@ export type Values = {
   paused?: string | undefined;
   "lead-profile"?: string | undefined;
   "diagnostic-capture"?: string | undefined;
+  "reasoning-summaries"?: string | undefined;
   "command-network-access"?: string | undefined;
   "local-listening"?: string | undefined;
   stacking?: string | undefined;

@@ -7129,6 +7129,7 @@ export class OperatorApi {
         instructionsRevision: Number(p.instructionsRevision),
         instructionPresent: Boolean(p.instructions),
         diagnosticCapture: d.diagnosticCaptureMode(projectId),
+        reasoningSummaries: d.reasoningSummaries(projectId),
         commandNetworkAccess: d.commandNetworkAccess(projectId),
         localListening: d.localListening(projectId),
         stacking: d.stacking(projectId),
@@ -10017,6 +10018,7 @@ export class OperatorApi {
       if (
         c.type === "project.create" ||
         c.type === "project.configure" ||
+        c.type === "project.reasoning.delete" ||
         c.type === "profile.create" ||
         c.type === "profile.configure" ||
         c.type === "routing.configure" ||

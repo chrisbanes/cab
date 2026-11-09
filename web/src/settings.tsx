@@ -444,12 +444,16 @@ export function DraftCheck({
   field,
   label,
   toggle = false,
+  disabled = false,
+  checked,
 }: {
   draft: ConfigurationDraft;
   field: string;
   label: string;
   /** Draw the checkbox as a switch (frames draw switches for on/off settings). */
   toggle?: boolean;
+  disabled?: boolean;
+  checked?: boolean;
 }) {
   const id = useId();
   return (
@@ -460,8 +464,8 @@ export function DraftCheck({
         type="checkbox"
         role={toggle ? "switch" : undefined}
         className={`native-check size-5 shrink-0 p-0 accent-foreground${toggle ? " settings-switch" : ""}`}
-        checked={Boolean(draft.values[field])}
-        disabled={locked(draft)}
+        checked={checked ?? Boolean(draft.values[field])}
+        disabled={disabled || locked(draft)}
         onChange={(e) => draft.set(field, e.target.checked)}
       />
       {label}
