@@ -1,6 +1,6 @@
-import { seedLegacyCommand } from "../fixtures/legacy-harness-configuration.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readinessSchema } from "../../src/operator/readiness.js";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -620,19 +620,8 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
     if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
       commands.push(String(r.postDataJSON()?.type));
   });
-  // Codex and claude are not on every test host's PATH; the rows read the checks as given.
-  await page.route("**/api/operator/readiness", async (route) => {
-    const response = await route.fetch(),
-      body = await response.json();
-    for (const check of body.data.checks)
-      if (
-        check.id === "codex-executable" ||
-        check.id === "codex-login" ||
-        check.id === "claude-executable"
-      )
-        Object.assign(check, { status: "pass", reason: null, fix: null });
-    await route.fulfill({ response, json: body });
-  });
+  const claudeLogin = { unavailable: false };
+  await routeReadiness(page, { pass: true }, claudeLogin);
   await page.goto(`${web.origin}/`);
   await submitPassword(page, web.password);
   const checklist = page.getByRole("region", { name: "Get cab running" });
@@ -772,13 +761,8 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   await page.getByRole("link", { name: "First task" }).first().waitFor();
   assert.equal(await checklist.count(), 0);
 
-  // A token reference that can't be read brings Claude back as Needs attention.
-  seedLegacyCommand(d, {
-    type: "claude-token.configure",
-    actor: "operator",
-    key: randomUUID(),
-    credentialRef: "env:CAB_GETTING_STARTED_MISSING_TOKEN",
-  });
+  // A failed native login brings Claude back as Needs attention.
+  claudeLogin.unavailable = true;
   await page.reload();
   const claude = checklist.getByRole("listitem", {
     name: "Claude (optional)",
@@ -794,12 +778,16 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
 });
 
 /** Codex and claude are not on every test host's PATH; the rows read the checks as given. */
-async function routeReadiness(page: Page, codexLogin: { pass: boolean }) {
+async function routeReadiness(
+  page: Page,
+  codexLogin: { pass: boolean },
+  claudeLogin = { unavailable: false },
+) {
   await page.route("**/api/operator/readiness", async (route) => {
     const response = await route.fetch(),
       body = await response.json();
     for (const check of body.data.checks)
-      if (check.id === "codex-executable" || check.id === "claude-executable")
+      if (check.id === "codex-executable")
         Object.assign(check, { status: "pass", reason: null, fix: null });
       else if (check.id === "codex-login")
         Object.assign(
@@ -812,7 +800,25 @@ async function routeReadiness(page: Page, codexLogin: { pass: boolean }) {
                 fix: "Sign in.",
               },
         );
-    await route.fulfill({ response, json: body });
+      else if (check.id === "claude-executable")
+        Object.assign(check, {
+          status: claudeLogin.unavailable ? "pass" : "not-configured",
+          reason: claudeLogin.unavailable ? null : "Disabled in Settings",
+          fix: claudeLogin.unavailable
+            ? null
+            : "Enable Claude in Settings → Runtime",
+        });
+      else if (check.id === "claude-token")
+        Object.assign(check, {
+          status: claudeLogin.unavailable ? "fail" : "not-configured",
+          reason: claudeLogin.unavailable
+            ? "Claude native subscription login is unavailable"
+            : "Disabled in Settings",
+          fix: claudeLogin.unavailable
+            ? "Sign in to Claude Code as the service user"
+            : "Enable Claude in Settings → Runtime",
+        });
+    await route.fulfill({ response, json: readinessSchema.parse(body) });
   });
 }
 /** The page content below the heading: only the getting-started card on a first-run Home. */
