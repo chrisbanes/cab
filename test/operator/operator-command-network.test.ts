@@ -337,3 +337,10 @@ test("skip sandbox is off by default, operator-only and versioned through the AP
   r = await bad.run();
   assert.equal(r.code, 2, r.err + r.out);
 });
+
+test("no coordination tool can read or change a project's skip-sandbox setting", () => {
+  assert.doesNotMatch(
+    JSON.stringify(coordinationTools),
+    /skipSandbox|dangerously|sandbox/i,
+  );
+});
