@@ -1099,7 +1099,9 @@ test("an intervention shows its recorded reason and links to the execution", asy
   // It lands on the task's Overview with the decision card, and its hold lines, in view.
   await inspect.click();
   const card = page.locator("section#decisions");
-  await card.getByRole("list", { name: "Also held", exact: true }).waitFor();
+  await card
+    .getByRole("list", { name: "Execution holds", exact: true })
+    .waitFor();
   assert.equal(
     await page
       .locator('[role="tablist"] [aria-selected="true"]')

@@ -305,26 +305,22 @@ export function TaskExecution({
         drafts={drafts}
         workspace={workspace}
         onChanged={onChanged}
+        holds={holds}
+        holdsHeading="Execution ownership and recovery"
         executionHref={`/tasks/${taskId}?section=execution`}
         assignments={data.assignments}
       />
-      <section aria-labelledby="execution-holds">
-        <h4 id="execution-holds">Execution ownership and recovery</h4>
-        {holds.length ? (
-          <ul className="execution-list">
-            {holds.map((h) => (
-              <li key={h.kind}>
-                <strong>{h.label}</strong> · {h.clears}
-              </li>
-            ))}
-          </ul>
-        ) : recovery ? (
-          <p>No unresolved execution hold is reported.</p>
-        ) : (
-          <p>{holdsUnreadable}</p>
-        )}
-        <p className="muted">{resumeWarning}</p>
-      </section>
+      {holds.length === 0 && (
+        <section aria-labelledby="execution-holds">
+          <h4 id="execution-holds">Execution ownership and recovery</h4>
+          {recovery ? (
+            <p>No unresolved execution hold is reported.</p>
+          ) : (
+            <p>{holdsUnreadable}</p>
+          )}
+        </section>
+      )}
+      <p className="muted">{resumeWarning}</p>
       <section aria-labelledby="execution-evidence">
         <h4 id="execution-evidence">Recorded recovery evidence</h4>
         {notice && <p>{notice}</p>}

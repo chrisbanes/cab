@@ -164,6 +164,7 @@ import {
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { ApplyInstructions, TaskExecution } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
+import { HoldRecoveryLinks } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
 const sectionIds = [
@@ -2432,7 +2433,7 @@ export function TaskWorkspace({
                 variant="secondary"
                 href={`/tasks/${taskId}?section=execution`}
               >
-                Inspect execution
+                Inspect uncertain execution
               </ActionLink>
             </p>
           ))}
@@ -2494,12 +2495,10 @@ export function TaskWorkspace({
             {attention.executionHolds.map((hold) => (
               <li key={hold.kind}>
                 <strong>{hold.label}</strong> · {hold.clears} ·{" "}
-                <ActionLink
-                  variant="secondary"
+                <HoldRecoveryLinks
                   href={`/tasks/${taskId}?section=execution`}
-                >
-                  Inspect execution
-                </ActionLink>
+                  assignments={data.assignments}
+                />
               </li>
             ))}
           </ul>

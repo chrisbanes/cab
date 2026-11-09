@@ -1236,6 +1236,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
       commands.push(request.postDataJSON());
   });
   await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
+  await openTaskTab(page, "Execution");
   const waits = page.locator(".wait-reasons");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   const list = waits.locator(".wait-list li");
@@ -1419,7 +1420,12 @@ test("Holds stay listed beneath Fix: Resume project with what clears them and Ex
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/tasks/${taskId}?section=execution`,
+  );
   const waits = page.locator(".wait-reasons");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   const primary = waits.locator(".wait-primary");
@@ -1614,7 +1620,12 @@ test("Task detail explains a held assignment, revoked repository access and unre
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/tasks/${taskId}?section=execution`,
+  );
   const waits = page.locator(".wait-reasons");
   const list = waits.locator(".wait-list li");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
@@ -4186,11 +4197,13 @@ for (const engine of ["chromium", "webkit"] as const)
 
       // Holds are lines inside the decision card, above the result.
       await page.goto(`${web.origin}/tasks/${held}`);
-      await page.locator("section#decisions .wait-reasons").waitFor();
+      const heldLines = page.getByRole("list", {
+        name: "Execution holds",
+        exact: true,
+      });
+      await heldLines.waitFor();
       assert.ok(
-        (
-          await page.locator("section#decisions .wait-reasons").innerText()
-        ).includes("Archival is awaiting review"),
+        (await heldLines.innerText()).includes("Archival is awaiting review"),
       );
       await expectOverviewOrder(page, await present(overviewOrder));
       assert.equal(

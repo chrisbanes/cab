@@ -195,7 +195,10 @@ test("hold lines name each assignment's recovery page when the task has several"
     await route.fulfill({ response, json: body });
   });
   await s.page.reload();
-  const holds = s.page.getByRole("list", { name: "Also held", exact: true });
+  const holds = s.page.getByRole("list", {
+    name: "Execution holds",
+    exact: true,
+  });
   await holds.waitFor();
   const [a, b] = served;
   assert.equal(served.length, 2);

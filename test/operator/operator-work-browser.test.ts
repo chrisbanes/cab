@@ -2670,7 +2670,9 @@ test("attention summary names the uncertain or stopping task and links to the In
   // Like the Inbox, it lands on the task's decision card with the hold lines in view.
   await action.click();
   const card = page.locator("section#decisions");
-  await card.getByRole("list", { name: "Also held", exact: true }).waitFor();
+  await card
+    .getByRole("list", { name: "Execution holds", exact: true })
+    .waitFor();
   const box = await card.boundingBox();
   assert.ok(box && box.y >= 0 && box.y < (page.viewportSize()?.height ?? 0));
   await page.goBack();
