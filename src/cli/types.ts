@@ -92,6 +92,7 @@ export type Values = {
   "diagnostic-capture"?: string | undefined;
   "command-network-access"?: string | undefined;
   "local-listening"?: string | undefined;
+  "dangerously-skip-sandbox"?: string | undefined;
   stacking?: string | undefined;
   id?: string | undefined;
   enabled?: string | undefined;

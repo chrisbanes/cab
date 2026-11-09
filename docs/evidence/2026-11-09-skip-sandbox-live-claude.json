@@ -1,0 +1,112 @@
+{
+  "candidate": "6a21d5e43692f964ca8273fecfb7e48a99782237",
+  "harness": "claude",
+  "node": "v26.13.0",
+  "runtime": {
+    "version": "2.1.318 (Claude Code)",
+    "sdk": "0.3.319"
+  },
+  "cells": [
+    {
+      "skipSandbox": false,
+      "startTurnCalls": [
+        {
+          "policy": null
+        }
+      ],
+      "wire": [
+        {
+          "sandbox": {
+            "enabled": true,
+            "failIfUnavailable": true,
+            "allowUnsandboxedCommands": false,
+            "autoAllowBashIfSandboxed": true,
+            "network": {
+              "allowedDomains": []
+            },
+            "filesystem": {
+              "allowWrite": [
+                "<redacted>/data/workspaces/a16dfca6-8683-40ca-a74d-6867ca240966",
+                "/tmp/ens-dc6411a3a4b0af58"
+              ]
+            }
+          }
+        }
+      ],
+      "refusedTurns": 1,
+      "task": {
+        "state": "completed",
+        "reason": null,
+        "steps": {
+          "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-br",
+          "emulator": "emulator exited:  exit=SIGILL Command failed: ~/Library/Android/sdk/platform-tools/adb -s emulator-5580 shell getprop sys.boot_completed * daemon not running; starting now at tcp:5037 ADB server didn't ACK Full server startup log: /tmp/ens-dc6411a3a4b0af58/claude-501/adb.501.log Server had pid: 70043 --- adb starting (pid 70043) --- 11-09 16:03:01.733 70043 545633926 I adb : main.cpp:65 Android Debug Br"
+        }
+      },
+      "checks": {
+        "turnCompleted": true,
+        "oneTurn": true,
+        "admitted": true,
+        "runtimePolicy": true,
+        "wirePolicy": true,
+        "chromium": true,
+        "emulator": true
+      },
+      "cleanup": {
+        "serviceStopped": true,
+        "emulatorKilled": false,
+        "fixtureRemoved": true
+      },
+      "failure": null,
+      "pass": true
+    },
+    {
+      "skipSandbox": true,
+      "startTurnCalls": [
+        {
+          "policy": {
+            "networkAccess": false,
+            "skipSandbox": true
+          }
+        }
+      ],
+      "wire": [
+        {
+          "sandbox": {
+            "enabled": false
+          }
+        }
+      ],
+      "refusedTurns": 0,
+      "task": {
+        "state": "completed",
+        "reason": null,
+        "steps": {
+          "chromium": "ok",
+          "emulator": "ok"
+        }
+      },
+      "checks": {
+        "turnCompleted": true,
+        "oneTurn": true,
+        "admitted": true,
+        "runtimePolicy": true,
+        "wirePolicy": true,
+        "chromium": true,
+        "emulator": true
+      },
+      "cleanup": {
+        "serviceStopped": true,
+        "emulatorKilled": false,
+        "fixtureRemoved": true
+      },
+      "failure": null,
+      "pass": true
+    }
+  ],
+  "verdict": {
+    "offBlocked": true,
+    "onWorks": true
+  },
+  "pass": true,
+  "failure": null
+}

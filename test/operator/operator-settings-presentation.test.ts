@@ -15,6 +15,12 @@ import {
   turnLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  projectSkipSandboxLine,
+  skipSandboxAppliesNote,
+  skipSandboxSupersededLine,
+  turnSkipSandboxLine,
+} from "../../src/operator/skip-sandbox-copy.js";
+import {
   diagnosticCaptureAppliesNote,
   diagnosticCaptureLine,
   sourceCredentialCopy,
@@ -186,6 +192,18 @@ test("project and profile change lists name each change without private values",
   assert.deepEqual(listening(true, false), ["Local listening disabled"]);
   assert.deepEqual(listening(true, true), []);
   assert.deepEqual(listening(undefined, true), []);
+  const skip = (saved: boolean | undefined, next: boolean) =>
+    projectChanges(
+      {
+        ...c,
+        ...(saved === undefined ? {} : { dangerouslySkipSandbox: saved }),
+      },
+      { name: "Atlas", leadProfileId: mira, dangerouslySkipSandbox: next },
+    );
+  assert.deepEqual(skip(false, true), ["Skip sandbox enabled"]);
+  assert.deepEqual(skip(true, false), ["Skip sandbox disabled"]);
+  assert.deepEqual(skip(true, true), []);
+  assert.deepEqual(skip(undefined, true), []);
   // Diagnostic capture lists the change in both directions, and nothing for a mode the service did not report.
   const capture = (saved: "enhanced" | "baseline" | undefined, next: string) =>
     projectChanges(
@@ -1572,6 +1590,25 @@ test("local listening reads the saved setting, what applies and each turn's admi
     turnLocalListeningLine(null),
     "No local listening admission recorded; the project's setting at admission applies.",
   );
+});
+
+test("skip sandbox reads the saved setting, what applies and each turn's admission", () => {
+  assert.equal(
+    projectSkipSandboxLine(false),
+    "Skip sandbox is disabled for this project.",
+  );
+  assert.match(projectSkipSandboxLine(true), /enabled.*both harnesses/);
+  assert.match(skipSandboxAppliesNote, /admitted after the change/);
+  assert.match(
+    skipSandboxSupersededLine,
+    /^Superseded while skipping the sandbox/,
+  );
+  assert.equal(turnSkipSandboxLine(true), "Admitted with the sandbox skipped.");
+  assert.equal(
+    turnSkipSandboxLine(false),
+    "Admitted with the sandbox in force.",
+  );
+  assert.match(turnSkipSandboxLine(null), /No skip-sandbox admission recorded/);
 });
 
 test("diagnostic capture reads the saved mode, when a change applies and that stored diagnostics stay", () => {

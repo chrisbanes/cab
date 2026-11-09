@@ -7,6 +7,13 @@ import {
   turnLocalListeningLine,
 } from "../operator/local-listening-copy.js";
 import {
+  claudeSkipSandboxLine,
+  codexSkipSandboxLine,
+  skipSandboxRisk,
+  skipSandboxSupersededLine,
+  turnSkipSandboxLine,
+} from "../operator/skip-sandbox-copy.js";
+import {
   assignmentDetailSchema,
   assignmentHistorySchema,
   assignmentInstructionsSchema,
@@ -181,6 +188,20 @@ const assignmentGet: BrowseCommand = {
           ? [
               turnLocalListeningLine(g?.localListening ?? null),
               localListeningLimit,
+            ]
+          : []),
+        ...(!g || g.dangerouslySkipSandbox !== undefined
+          ? [
+              turnSkipSandboxLine(g?.dangerouslySkipSandbox ?? null),
+              ...(g?.dangerouslySkipSandbox
+                ? [
+                    (g.harness ?? a.runtime.harness) === "codex"
+                      ? codexSkipSandboxLine
+                      : claudeSkipSandboxLine,
+                    skipSandboxSupersededLine,
+                    skipSandboxRisk,
+                  ]
+                : []),
             ]
           : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),

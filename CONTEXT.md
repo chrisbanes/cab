@@ -258,6 +258,15 @@ The association between an assignment and its runtime-specific session or proces
 identity and validated execution settings.
 _Avoid_: Assignment identity when referring only to an execution session
 
+**Skip sandbox**:
+A per-project setting, `dangerouslySkipSandbox`, that the operator turns on so a project's task turns
+run without the harness sandbox and can launch host tools such as browsers and Android emulators.
+It is recorded when a turn is admitted and never applies to draft turns, drafting runs or turns
+without a task binding. Agents then act with the service user's full filesystem, process, network
+and credential access, and command network access and local listening are superseded while it is on.
+It is a short-term measure until the verification tool replaces it.
+_Avoid_: Sandbox bypass, unsandboxed mode, when referring to the setting
+
 **Task workspace**:
 The working files allocated to a task, retained independently of its conversations.
 A local task's holds the project's repository links; an imported task's holds its source

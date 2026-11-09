@@ -1110,6 +1110,43 @@ To check what a turn was admitted with, open the assignment's **Effective execut
 on the task page, or run `cab assignment get ASSIGNMENT_ID`: a Claude Code turn states
 whether it was admitted with local listening enabled.
 
+## Skipping the sandbox for host tools
+
+A project's verification can need host tools that a harness sandbox blocks: Chromium fails
+before opening a page and an Android emulator cannot reach the hypervisor, the adb sockets or
+the GPU. Turn on **Skip sandbox (dangerous)** in the project's Settings, General tab, and
+confirm the dialog, or run `cab project prepare PROJECT_ID --dangerously-skip-sandbox true` and
+apply the prepared file. Turn it off in Settings, which applies at once, or with
+`--dangerously-skip-sandbox false`. It is off by default and applies to task turns admitted
+after the change; a running turn keeps its policy.
+[ADR-1029](../adr/1029-skip-sandbox-for-host-tools.md) records the decision. It is a short-term
+measure until cab's own verification tool exists.
+
+- **Codex.** A task turn runs with sandbox policy `dangerFullAccess`; the approval policy stays
+  `never`.
+- **Claude Code.** A task turn runs with Claude Code's sandbox disabled. The tool policy is
+  unchanged and cab's edit hook still confines Write and Edit to the task's writable roots, but
+  that guards against accidental edits and does not confine commands.
+- Draft turns, drafting runs, read-only turns and turns without a task binding never skip the
+  sandbox.
+- While it is on, command network access and local listening are superseded: an unsandboxed
+  command can use the network and listen on ports. Their stored values return when it is off.
+
+An unsandboxed turn has the service user's full filesystem, process, network and credential
+access, and untrusted text such as issue and pull request bodies can drive it. Turn it on only
+for a project whose task sources and repositories you trust with that access. Only macOS is
+qualified, and cab provides no independent sandbox to compensate.
+
+cab does not clean up what a turn starts. An emulator or browser can keep running after the
+turn ends and accumulate across turns. To find them, run `adb devices` and
+`pgrep -fl 'qemu-system|emulator'` for emulators, and `pgrep -fl 'chrome-headless-shell|Chromium'`
+for browsers. Stop one by running `adb -s emulator-NNNN emu kill` for an emulator, or by
+checking that its PID is the leftover and stopping it with `kill PID`.
+
+To check what a turn was admitted with, open the assignment's **Effective execution policy** on
+the task page, or run `cab assignment get ASSIGNMENT_ID`: it states whether the turn was admitted
+with the sandbox skipped. `cab project get PROJECT_ID` shows the project's current setting.
+
 ## Startup snapshot
 
 Whenever the service starts against an existing database with migrations pending, it

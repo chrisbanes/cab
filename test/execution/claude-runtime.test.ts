@@ -182,6 +182,7 @@ function fixture(
     skills?: RuntimeTurnSettings["skills"],
     gitWritableRoots?: string[],
     localListening?: boolean,
+    skipSandbox?: boolean,
   ) => {
     const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
@@ -193,12 +194,13 @@ function fixture(
       workspace,
       "Do the work",
       turnSettings,
-      access || gitWritableRoots || localListening
+      access || gitWritableRoots || localListening || skipSandbox
         ? {
             networkAccess: false,
             ...(access ? { access } : {}),
             ...(gitWritableRoots ? { gitWritableRoots } : {}),
             ...(localListening ? { localListening } : {}),
+            ...(skipSandbox ? { skipSandbox } : {}),
           }
         : undefined,
     );
@@ -968,6 +970,129 @@ test("a task turn with local listening can bind loopback ports and keeps network
     assert.deepEqual(network(1), { allowedDomains: [] });
     // A read-only (draft) turn never listens, whatever the policy carries.
     assert.deepEqual(network(2), { allowedDomains: [] });
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a skip-sandbox task turn disables only the sandbox and keeps the tool policy and hook roots", async () => {
+  let outside = "";
+  const decisions: unknown[] = [];
+  const turnScript = async function* (
+    session: Parameters<typeof sessionOf>[0],
+  ) {
+    yield init(sessionOf(session));
+    decisions.push(
+      await session.hook(
+        "Write",
+        { file_path: join(outside, "x.txt"), content: "x" },
+        "toolu_out",
+      ),
+    );
+    yield result(sessionOf(session));
+  };
+  const f = fixture({ scripts: [turnScript, turnScript, turnScript] });
+  try {
+    outside = join(f.root, "outside");
+    mkdirSync(outside);
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    for (const [access, skip] of [
+      [undefined, undefined],
+      [undefined, true],
+      ["read-only", true],
+    ] as const) {
+      const turnId = await f.turn(
+        threadId,
+        access,
+        undefined,
+        undefined,
+        undefined,
+        skip,
+      );
+      assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    }
+    const [normal, skipped, draft] = f.sessions.map((s) => s.options);
+    assert.ok(normal && skipped && draft);
+    assert.deepEqual(skipped.sandbox, { enabled: false });
+    for (const key of [
+      "permissionMode",
+      "tools",
+      "allowedTools",
+      "disallowedTools",
+      "cwd",
+    ] as const)
+      assert.deepEqual(skipped[key], normal[key]);
+    assert.deepEqual(
+      Object.keys(skipped.hooks ?? {}),
+      Object.keys(normal.hooks ?? {}),
+    );
+    assert.deepEqual(Object.keys(skipped.mcpServers ?? {}), ["cab"]);
+    assert.equal(normal.sandbox?.enabled, true);
+    assert.equal(normal.sandbox?.failIfUnavailable, true);
+    // A read-only (draft) turn stays sandboxed whatever the policy carries.
+    assert.deepEqual(draft.sandbox, {
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      autoAllowBashIfSandboxed: true,
+      network: { allowedDomains: [] },
+      filesystem: { allowWrite: [claudeTemporaryBase(f.workspace)] },
+    });
+    // The hook still confines Write outside the roots in every turn.
+    assert.equal(decisions.length, 3);
+    for (const decision of decisions)
+      assert.equal(
+        (
+          decision as {
+            hookSpecificOutput?: { permissionDecision: string };
+          }
+        ).hookSpecificOutput?.permissionDecision,
+        "deny",
+      );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("preflight with the skip-sandbox hint ignores the self-test and leaves a passed probe unconsumed", async () => {
+  let runs = 0;
+  let passing = false;
+  const f = fixture({
+    selfTest: () => {
+      runs++;
+      return passing;
+    },
+  });
+  try {
+    await f.runtime.start();
+    const hinted = () =>
+      settledPreflight(f.runtime, {
+        workspace: f.workspace,
+        skipSandbox: true,
+      });
+    // The failing self-test is never consulted.
+    assert.equal(await hinted(), undefined);
+    assert.equal(runs, 0);
+    passing = true;
+    // Without the hint it still waits, then a passed probe is left for the next turn.
+    assert.match(
+      String(await f.runtime.preflightTurn({ workspace: f.workspace })),
+      /checking the sandbox/,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(runs, 1);
+    assert.equal(await hinted(), undefined);
+    assert.equal(
+      await settledPreflight(f.runtime, { workspace: f.workspace }),
+      undefined,
+    );
+    assert.equal(runs, 1);
+    // That unhinted admission consumed it: the next one probes again.
+    assert.match(
+      String(await f.runtime.preflightTurn({ workspace: f.workspace })),
+      /checking the sandbox/,
+    );
   } finally {
     await f.cleanup();
   }

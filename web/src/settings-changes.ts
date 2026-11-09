@@ -99,6 +99,14 @@ export function projectChanges(
     Boolean(v.localListening) !== data.localListening
   )
     lines.push(`Local listening ${v.localListening ? "enabled" : "disabled"}`);
+  if (
+    v.dangerouslySkipSandbox !== undefined &&
+    data.dangerouslySkipSandbox !== undefined &&
+    Boolean(v.dangerouslySkipSandbox) !== data.dangerouslySkipSandbox
+  )
+    lines.push(
+      `Skip sandbox ${v.dangerouslySkipSandbox ? "enabled" : "disabled"}`,
+    );
   const mode = diagnosticCaptureLabels;
   if (
     data.diagnosticCapture !== undefined &&

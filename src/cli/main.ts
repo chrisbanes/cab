@@ -369,6 +369,7 @@ export const OPTIONS = {
   "diagnostic-capture": { type: "string" },
   "command-network-access": { type: "string" },
   "local-listening": { type: "string" },
+  "dangerously-skip-sandbox": { type: "string" },
   stacking: { type: "string" },
   id: { type: "string" },
   enabled: { type: "string" },
