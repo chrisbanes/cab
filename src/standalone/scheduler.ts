@@ -248,25 +248,30 @@ export class SchedulerStore {
   /**
    * Eligible queued requests, resumed work first, oldest first within each group. Work is
    * resumed when its task already had a turn admitted (answers, results, follow-ups,
-   * operator messages, retries and newly delegated work on a task underway), or when it
-   * continues admitted direct work. A drafting run never counts as resumed.
+   * operator messages, retries and newly delegated work on a task underway), when it
+   * continues admitted direct work, or when it is a retry or shutdown requeue, which is
+   * queued with its retry lineage before admission. A drafting run never counts as resumed.
    */
   queued(now = Date.now()): TurnRequest[] {
-    const admitted = this.db
+    const lineage = this.db
       .prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_retry_generations'",
       )
-      .get()
+      .get();
+    const admitted = lineage
       ? "OR EXISTS (SELECT 1 FROM execution_retry_generations g WHERE g.workId = p.workId)"
       : "";
+    const retried = lineage
+      ? "OR EXISTS (SELECT 1 FROM execution_retry_generations g WHERE g.workId = r.workId)"
+      : "";
     return this.db
-      .prepare(`SELECT r.*, r.kind != 'drafting' AND EXISTS (
+      .prepare(`SELECT r.*, r.kind != 'drafting' AND (EXISTS (
           SELECT 1 FROM turn_requests p
           WHERE p.sequence < r.sequence AND p.kind != 'drafting'
             AND ((r.taskId IS NOT NULL AND p.taskId = r.taskId)
               OR p.workId = r.previousWorkId)
             AND (p.state IN ('active','completed') ${admitted})
-        ) AS resumed
+        ) ${retried}) AS resumed
         FROM turn_requests r WHERE r.state = 'queued'
         AND (r.nextEligibleAt IS NULL OR r.nextEligibleAt <= ?)
         ORDER BY resumed DESC, r.sequence`)

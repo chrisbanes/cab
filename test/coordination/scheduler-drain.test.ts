@@ -320,3 +320,20 @@ test("timer-triggered failure reaches the background observer once", async () =>
     assert.deepEqual(observed, [failure]);
   });
 });
+
+test("a queued retry of direct work is resumed work, ahead of older unstarted requests", async () => {
+  await withStore(async (db, store) => {
+    // A retry is queued with its retry lineage and no task or predecessor link.
+    db.exec(`CREATE TABLE execution_retry_generations (
+      workId TEXT PRIMARY KEY, chainId TEXT NOT NULL, retryIndex INTEGER NOT NULL)`);
+    for (const workId of ["unstarted-one", "unstarted-two", "retry"])
+      store.ensure(request(workId));
+    db.prepare(
+      "INSERT INTO execution_retry_generations (workId, chainId, retryIndex) VALUES ('retry', 'failed', 1)",
+    ).run();
+    assert.deepEqual(
+      store.queued().map((r) => r.workId),
+      ["retry", "unstarted-one", "unstarted-two"],
+    );
+  });
+});
