@@ -57,10 +57,15 @@ test("the updated label shows one time unless the reads show different clock lab
 test("short identifier keeps the first eight characters unless told otherwise", () => {
   assert.equal(shortId("9bd4c1e2f00d4a7b"), "9bd4c1e2");
   assert.equal(shortId("A-9bd4"), "A-9bd4");
+  assert.equal(shortId("550e8400-e29b-41d4-a716-446655440000"), "550e8400");
   assert.equal(shortId("9bd4c1e2f00d4a7b", 4), "9bd4");
 });
 
-test("compound assignment work ids retain both identifying parts", () => {
+test("compound assignment work ids retain identifying parts across generated forms", () => {
+  assert.equal(
+    shortId("assignment:12345678-aaaa:initial"),
+    "assignment:12345678…initial",
+  );
   assert.equal(
     shortId("assignment:12345678-aaaa:v1:inbox:87654321-bbbb"),
     "assignment:12345678…inbox:87654321",
@@ -68,6 +73,18 @@ test("compound assignment work ids retain both identifying parts", () => {
   assert.equal(
     shortId("assignment:12345678-aaaa:v1:draft:87654321-bbbb"),
     "assignment:12345678…draft:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v2:restart:87654321-bbbb"),
+    "assignment:12345678…restart:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v3:reset:87654321-bbbb"),
+    "assignment:12345678…reset:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v4:repair:12"),
+    "assignment:12345678…repair:12",
   );
 });
 

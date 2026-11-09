@@ -33,10 +33,15 @@ export const repositoryLabel = (
 
 /** A short identifier for mono metadata; the caller carries the full value on hover or in Details. */
 export const shortId = (value: string, length = 8) => {
-  const work = /^assignment:([^:]+):v\d+:(inbox|draft):([^:]+)$/.exec(value);
-  return work
-    ? `assignment:${work[1]?.slice(0, length)}…${work[2]}:${work[3]?.slice(0, length)}`
-    : value.slice(0, length);
+  const work = /^assignment:([^:]+):(?:v\d+:([^:]+)(?::(.+))?|([^:]+))$/.exec(
+    value,
+  );
+  if (!work) return value.slice(0, length);
+  const assignment = work[1]?.slice(0, length);
+  const kind = work[2] ?? work[4];
+  return work[3]
+    ? `assignment:${assignment}…${kind}:${work[3].split(":").at(-1)?.slice(0, length)}`
+    : `assignment:${assignment}…${kind}`;
 };
 
 type FileEntry = {

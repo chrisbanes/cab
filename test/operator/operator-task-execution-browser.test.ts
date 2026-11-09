@@ -620,13 +620,16 @@ test(
     await execution.getByText(/request 3 · Intent running/).waitFor();
     const settled = execution.locator("details.execution-settled");
     await settled.getByText("1 settled", { exact: true }).waitFor();
-    assert.equal(
-      await settled.getByText(/request 1 · Intent completed/).count(),
-      0,
-    );
+    const settledRecord = settled.getByText(/request 1 · Intent completed/);
+    assert.equal(await settled.getAttribute("open"), null);
+    assert.equal(await settledRecord.isVisible(), false);
     await settled.locator("summary").focus();
     await page.keyboard.press("Enter");
-    await settled.getByText(/request 1 · Intent completed/).waitFor();
+    await settledRecord.waitFor({ state: "visible" });
+    assert.notEqual(await settled.getAttribute("open"), null);
+    await page.keyboard.press("Enter");
+    await settledRecord.waitFor({ state: "hidden" });
+    assert.equal(await settled.getAttribute("open"), null);
     await execution
       .getByText(
         /identities, observations, receipts and dispositions are evidence only/,
