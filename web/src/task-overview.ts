@@ -139,7 +139,7 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
                 : blocker
                   ? `Ready · waiting on ${blocker.label}`
                   : reason
-                    ? `Ready · ${midSentence(waitLabels[reason])}`
+                    ? `Ready · ${reason === "capacity" ? "waiting for capacity" : midSentence(waitLabels[reason])}`
                     : execution.state === "idle"
                       ? "Ready"
                       : `Ready · ${execution.state}`;
@@ -149,6 +149,50 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
 export const taskNextActor = (
   data: Pick<Data, "task" | "execution" | "admission" | "source" | "attention">,
 ) => nextActor(data.attention.codes, taskColumnOf(data));
+
+/** The one task-level reason worth pinning above the conversation. */
+export function taskAttentionPinned(
+  data: Pick<
+    Data,
+    | "task"
+    | "execution"
+    | "admission"
+    | "attention"
+    | "questions"
+    | "approvals"
+    | "source"
+  >,
+) {
+  return (
+    data.questions.some((q) => q.status === "open") ||
+    data.approvals.some((q) => q.status === "open") ||
+    taskNextActor(data).operator ||
+    data.execution.state === "stopping" ||
+    data.execution.state === "uncertain" ||
+    data.execution.holds.stop ||
+    data.execution.holds.uncertainty ||
+    data.source?.hold?.active === true
+  );
+}
+
+/** Strip repeats the state badge and shows at most one distinct reason. */
+export function taskStripReason(data: Omit<StatusData, "lead">) {
+  const readiness = taskReadiness(data),
+    column = taskColumnOf(data),
+    prefix = `${data.task.ready ? "Ready" : "Draft"} · `;
+  const reason = readiness.startsWith(`${column} · `)
+    ? readiness.slice(column.length + 3)
+    : readiness.startsWith(prefix)
+      ? readiness.slice(prefix.length)
+      : readiness;
+  if (reason === data.execution.state) return null;
+  if (readiness === column || readiness === "Ready" || readiness === "Draft")
+    return null;
+  if (readiness === "Stopping; effects may continue")
+    return "effects may continue";
+  if (readiness === "Execution uncertain") return "ownership uncertain";
+  return reason;
+}
 
 /** The ID slot: `repository#number` for an imported task, otherwise "Local task". */
 export function taskIdentity(data: Pick<Data, "source">) {

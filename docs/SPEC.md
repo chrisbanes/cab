@@ -1705,8 +1705,12 @@ remote-write reconciliation and permission rules.
 ### Task detail
 
 The task Overview is the task's conversation
-([ADR-1022](adr/1022-task-conversation-view.md)). An attention card pinned at the top
-lists the unresolved decisions waiting on the operator; beneath it the lead's
+([ADR-1022](adr/1022-task-conversation-view.md)). The pinned Decisions and holds
+card lists open questions and approvals, execution uncertainty or Stop, active source
+holds, interventions and operator-action recovery. Normal writer and capacity waits
+during a running turn stay on Execution. The task strip pairs its state badge with at
+most one distinct reason and omits duplicate readiness or next-actor wording. Beneath
+the card the lead's
 conversation runs oldest to newest, and the reply composer is docked at the bottom.
 The outcome, current situation and next actor stay in the task header, and the brief,
 evidence, delivery observations, artifacts, dependencies and assignments stay in the

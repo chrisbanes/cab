@@ -16,8 +16,10 @@ import {
   projectFieldRows,
   sourceFacts,
   sourceHoldReasonText,
+  taskAttentionPinned,
   taskColumnOf,
   taskIdentity,
+  taskNextActor,
   trackerName,
 } from "./task-overview.js";
 
@@ -63,10 +65,26 @@ export function TaskInspector({
   const source = data.source,
     comment = commentAvailability(data.commentPolicy),
     facts = executionFacts(data),
+    pinned = taskAttentionPinned(data),
     requests = [...data.approvals, ...data.questions].filter(
       (q) => q.status === "open",
     ),
-    holds = holdNoticesBesideRequests(data, "approve", deciding);
+    holds = holdNoticesBesideRequests(data, "approve", deciding),
+    holdCount =
+      requests.length +
+      holds.length +
+      Number(data.execution.holds.stop || data.execution.holds.uncertainty) +
+      Number(
+        data.source?.hold?.active &&
+          !holds.some((hold) => hold.id === "source-held"),
+      ) +
+      Number(
+        taskNextActor(data).operator &&
+          !requests.length &&
+          !data.execution.holds.stop &&
+          !data.execution.holds.uncertainty &&
+          !data.source?.hold?.active,
+      );
   const show = (resultId: string) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (!isPlainClick(event)) return;
     event.preventDefault();
@@ -180,8 +198,8 @@ export function TaskInspector({
             <p className="inspector-divider">cab execution</p>
           </>
         )}
-        <Group label={`Holds · ${requests.length + holds.length}`}>
-          {requests.length + holds.length ? (
+        <Group label={`Holds · ${pinned ? holdCount : 0}`}>
+          {pinned && holdCount ? (
             <ul className="inspector-rows">
               {requests.map((q) => (
                 <li key={q.interactionId}>

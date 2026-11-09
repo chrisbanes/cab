@@ -160,6 +160,7 @@ import {
   criterionRows,
   deliveryApplies,
   taskNextActor,
+  taskAttentionPinned,
   trackerName,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
@@ -1578,6 +1579,7 @@ export function TaskWorkspace({
       (q) => q.status === "open",
     ),
     nextActor = taskNextActor(data),
+    attentionPinned = taskAttentionPinned(data),
     attentionCollapsed =
       (openRequests.length > 0 || nextActor.operator) &&
       state.attentionCollapsed &&
@@ -2245,8 +2247,9 @@ export function TaskWorkspace({
       <section
         id="decisions"
         className="workspace-attention decision-card"
+        hidden={!attentionPinned}
         data-attention={openRequests.length > 0 || undefined}
-        data-pinned
+        data-pinned={attentionPinned || undefined}
         data-collapsed={attentionCollapsed || undefined}
         aria-label="Pending requests and holds"
       >
@@ -2598,7 +2601,7 @@ export function TaskWorkspace({
             </a>
           </p>
         )}
-        <TaskStrip data={data} onNext={() => reveal("decisions")}>
+        <TaskStrip data={data}>
           <div className="task-actions task-tools">
             {data.source && (
               <>

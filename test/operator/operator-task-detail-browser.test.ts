@@ -172,8 +172,8 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     /Accountable lead · Task lead/,
   );
   assert.ok(
-    ((await strip.locator("[data-task-readiness]").textContent()) ?? "")
-      .length > 0,
+    ((await strip.locator("[data-task-reason]").textContent()) ?? "").length >
+      0,
   );
   // Exactly four header actions (Execution, Edit task, Reset task, Stop), and the direct-load Back names the project.
   assert.deepEqual(
@@ -735,10 +735,7 @@ test("A rejected completion is a decision the strip and decision card both name"
     web.password,
     `/tasks/${a.taskId}?section=files`,
   );
-  const next = page
-    .locator("[data-task-strip]")
-    .getByRole("button", { name: "Next: you · review rejected completion" });
-  await next.click();
+  assert.equal(await page.locator("[data-task-strip] .task-next").count(), 0);
   const card = page.locator("section#decisions");
   await card.getByText(/completion request was rejected/).waitFor();
   assert.equal(
@@ -771,9 +768,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
   );
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
-  await strip
-    .getByRole("button", { name: "Next: you · inspect execution" })
-    .click();
+  assert.equal(await strip.locator(".task-next").count(), 0);
   const card = page.locator("section#decisions");
   assert.equal(
     await card
@@ -784,15 +779,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
   // cab records a routing fallback itself: plain text, never an operator button.
   codes = ["lead-review"];
   await page.reload();
-  await strip
-    .getByText("Next: cab · recording routing fallback", { exact: true })
-    .waitFor();
-  assert.equal(
-    await strip
-      .getByRole("button", { name: /recording routing fallback/ })
-      .count(),
-    0,
-  );
+  await strip.getByText("Ready", { exact: true }).waitFor();
   // The decision card offers the operator nothing to do for it.
   assert.equal(
     await card
@@ -801,6 +788,46 @@ test("The strip and decision card follow the server's attention codes, not a cli
     0,
   );
 });
+
+for (const [label, viewport] of [
+  ["desktop", { width: 1366, height: 900 }],
+  ["phone", { width: 390, height: 844 }],
+] as const)
+  test(`normal live writer/capacity stays on Execution while uncertainty pins Decisions and holds (${label})`, async (_t, j) => {
+    const fixture = await openFixture(j);
+    const a = await seed(fixture.f);
+    const { web, page } = await fixture.launch(viewport);
+    let uncertain = false;
+    await page.route(
+      (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+      async (route) => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.data.execution.state = uncertain ? "uncertain" : "running";
+        json.data.execution.holds.writer = !uncertain;
+        json.data.execution.holds.capacity = !uncertain;
+        json.data.execution.holds.uncertainty = uncertain;
+        json.data.attention.codes = uncertain ? ["execution-uncertain"] : [];
+        json.data.attention.count = json.data.attention.codes.length;
+        await route.fulfill({ response, json });
+      },
+    );
+    await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+    assert.equal(await page.locator("#decisions[data-pinned]").count(), 0);
+    assert.equal(await page.locator("#decisions").isHidden(), true);
+    assert.equal(await page.getByText("Holds · 0", { exact: true }).count(), 1);
+    await taskTab(page, "Execution").click();
+    await page
+      .getByText(/Writer|Capacity/)
+      .first()
+      .waitFor();
+    uncertain = true;
+    await page.reload();
+    const decisions = page.locator("#decisions[data-pinned]");
+    await decisions.waitFor();
+    await page.getByText("Holds · 1", { exact: true }).waitFor();
+    await captureBrowserEvidence(page, `task-attention-${label}`);
+  });
 
 for (const engine of [
   { name: "chromium", type: chromium },
@@ -914,8 +941,8 @@ for (const engine of [
         () => document.activeElement?.textContent === "Resume…",
       );
       assert.match(
-        (await page.locator("[data-task-readiness]").textContent()) ?? "",
-        /^Stopping; effects may continue/,
+        (await page.locator("[data-task-reason]").textContent()) ?? "",
+        /^effects may continue/,
       );
 
       // Resume confirms on its safe choice, clears only the Stop and offers Stop… again.
@@ -1971,7 +1998,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   assert.deepEqual(commands, []);
 });
 
-test("An open approval leads Overview and stays reachable from every tab through the strip", async (_t, j) => {
+test("An open approval leads Overview and stays reachable from every tab in Decisions and holds", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedOwnApproval(fixture.f);
   const { web, page, commands } = await fixture.launch();
@@ -2008,22 +2035,15 @@ test("An open approval leads Overview and stays reachable from every tab through
   );
   await page.clock.runFor(15000);
   await polled;
-  const next = strip.getByRole("button", {
-    name: "Next: you · review material & decide",
-  });
-  await next.waitFor();
-  assert.equal(await next.getAttribute("data-operator"), "true");
+  await page.locator("#decisions").waitFor();
   // The arriving request moves neither the tab nor the focus.
   assert.equal(await selectedTab(page), "Files");
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
     "Files",
   );
-  // The strip's button opens Overview at the decision card.
-  await next.click();
-  await page.waitForFunction(
-    () => document.activeElement?.closest("#decisions") !== null,
-  );
+  // The compact strip has no second next-actor control; Overview holds the request.
+  await openTaskTab(page, "Overview");
   assert.equal(await selectedTab(page), "Overview");
 
   // The decision card leads with the approval and decides nothing itself.
@@ -2245,7 +2265,7 @@ test("An imported task separates read-only GitHub source from cab execution", as
     "cab execution",
   );
   assert.match(
-    await strip.locator("[data-task-readiness]").innerText(),
+    await strip.locator("[data-task-reason]").innerText(),
     /waiting on outside\/repo#7/,
   );
   await captureBrowserEvidence(page, "1366-task-detail-imported", {
@@ -4416,10 +4436,7 @@ for (const engine of ["chromium", "webkit"] as const)
       polled = taskRead();
       await page.clock.runFor(15000);
       await polled;
-      await page
-        .locator("[data-task-strip]")
-        .getByRole("button", { name: "Next: you · review material & decide" })
-        .waitFor();
+      await page.locator("#decisions").waitFor();
       await unchanged("arriving approval");
 
       // Leave for another view and press Back: same cards, same reading position. The

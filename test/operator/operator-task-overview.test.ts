@@ -18,7 +18,9 @@ import {
   sourceHoldResumeCaveat,
   stopConsequences,
   taskIdentity,
+  taskAttentionPinned,
   taskReadiness,
+  taskStripReason,
 } from "../../web/src/task-overview.js";
 
 type Data = TaskRead["data"];
@@ -303,6 +305,49 @@ test("taskReadiness states recorded state and wait", () => {
     }),
     "Execution uncertain",
   );
+});
+
+test("task strip shows one distinct reason and the pinned card excludes ordinary live waits", () => {
+  const base = {
+    task: { state: "open", ready: true },
+    execution: { state: "idle", holds },
+    admission: { eligible: true, reasons: [] },
+    waits: [],
+    source: null,
+    attention: { codes: [], count: 0 },
+    questions: [],
+    approvals: [],
+  };
+  assert.equal(taskStripReason(base as unknown as Data), null);
+  assert.equal(
+    taskStripReason({
+      ...base,
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    "waiting for capacity",
+  );
+  assert.equal(
+    taskAttentionPinned({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, writer: true, capacity: true },
+      },
+    } as unknown as Data),
+    false,
+  );
+  for (const patch of [
+    { execution: { state: "uncertain", holds } },
+    { execution: { state: "stopping", holds } },
+    { attention: { codes: ["unresolved-result"], count: 1 } },
+    { source: { hold: { active: true } } },
+    { questions: [{ status: "open" }] },
+    { approvals: [{ status: "open" }] },
+  ])
+    assert.equal(
+      taskAttentionPinned({ ...base, ...patch } as unknown as Data),
+      true,
+    );
 });
 
 test("stopConsequences counts unfinished delegated assignments", () => {

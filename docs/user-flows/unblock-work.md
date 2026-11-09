@@ -18,7 +18,8 @@ place.
 
 ## Entry points
 
-- Task detail decision card and status strip.
+- Task detail Decisions and holds card and compact status strip. Ordinary writer
+  and capacity waits during a running turn stay on Execution.
 - Composer "If you create it now" and the created-task receipt.
 - Project page paused banner.
 - Getting-started checklist Project row.
