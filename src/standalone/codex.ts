@@ -711,6 +711,7 @@ export interface Runtime {
   preflightTurn?(input: {
     workspace: string;
     settings?: RuntimeTurnSettings;
+    skipSandbox?: boolean;
   }): Promise<string | undefined>;
   /** Called when a preflight reason may have cleared, so waiting work is retried. */
   onAdmissionChange?(listener: () => void): void;
@@ -2234,11 +2235,13 @@ export class CodexRuntime implements Runtime {
         sandboxPolicy:
           policy?.access === "read-only"
             ? readOnlyPolicy()
-            : executionPolicy(
-                workspace,
-                policy?.networkAccess === true,
-                policy?.gitWritableRoots,
-              ),
+            : policy?.skipSandbox
+              ? { type: "dangerFullAccess" as const }
+              : executionPolicy(
+                  workspace,
+                  policy?.networkAccess === true,
+                  policy?.gitWritableRoots,
+                ),
         // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
         ...(settings?.model ? { model: settings.model } : {}),
         ...(settings?.reasoningEffort

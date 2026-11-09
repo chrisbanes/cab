@@ -8620,9 +8620,15 @@ export class StandaloneService {
           runtime,
           (async () => {
             const settings = this.turnSettings(request);
+            // A stale hint fails closed: admission records the setting itself, and a
+            // sandboxed turn keeps `failIfUnavailable: true`.
+            const skipSandbox =
+              request.projectId !== null &&
+              state.skipSandboxApplies(intent.id, request.projectId);
             return preflight({
               workspace: workspaceKey,
               ...(settings ? { settings } : {}),
+              ...(skipSandbox ? { skipSandbox: true } : {}),
             });
           })(),
           () => failed,

@@ -758,6 +758,7 @@ export class ClaudeRuntime implements Runtime {
   async preflightTurn(input: {
     workspace: string;
     settings?: RuntimeTurnSettings;
+    skipSandbox?: boolean;
   }): Promise<string | undefined> {
     const unavailable = (reason: string) =>
       `Claude runtime unavailable: ${reason}`;
@@ -769,14 +770,16 @@ export class ClaudeRuntime implements Runtime {
     if (temporary) return unavailable(temporary);
     const env = claudeTurnEnvironment(environment.env, base);
     // Probes run in the background so the serial scheduler never awaits them.
-    const sandbox = this.sandboxStatus(input.workspace, env);
+    const sandbox = input.skipSandbox
+      ? undefined
+      : this.sandboxStatus(input.workspace, env);
     if (sandbox) return unavailable(sandbox);
     const settings = this.settingsStatus(input.workspace, env);
     if (settings) return unavailable(settings);
     const problem = this.settingsProblem(input.settings);
     if (problem) return unavailable(problem);
-    // A passed self-test admits exactly one turn.
-    this.sandboxProbes.delete(input.workspace);
+    // A passed self-test admits exactly one turn; a skip-sandbox turn leaves it for the next.
+    if (!input.skipSandbox) this.sandboxProbes.delete(input.workspace);
     return undefined;
   }
 
@@ -1114,20 +1117,23 @@ export class ClaudeRuntime implements Runtime {
       tools: [...turnTools],
       allowedTools: [...turnTools, "mcp__cab__*"],
       disallowedTools: [...disallowedTools],
-      sandbox: {
-        enabled: true,
-        failIfUnavailable: true,
-        allowUnsandboxedCommands: false,
-        autoAllowBashIfSandboxed: true,
-        network: {
-          allowedDomains: [],
-          // macOS only: lets sandboxed commands bind local ports; outbound stays denied.
-          ...(policy?.localListening && policy.access !== "read-only"
-            ? { allowLocalBinding: true }
-            : {}),
-        },
-        filesystem: { allowWrite: sandboxWritable },
-      },
+      sandbox:
+        policy?.skipSandbox && policy.access !== "read-only"
+          ? { enabled: false }
+          : {
+              enabled: true,
+              failIfUnavailable: true,
+              allowUnsandboxedCommands: false,
+              autoAllowBashIfSandboxed: true,
+              network: {
+                allowedDomains: [],
+                // macOS only: lets sandboxed commands bind local ports; outbound stays denied.
+                ...(policy?.localListening && policy.access !== "read-only"
+                  ? { allowLocalBinding: true }
+                  : {}),
+              },
+              filesystem: { allowWrite: sandboxWritable },
+            },
       mcpServers: {
         [mcpServerName]: sdk.createSdkMcpServer({
           name: mcpServerName,
