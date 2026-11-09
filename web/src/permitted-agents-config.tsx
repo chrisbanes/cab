@@ -1,4 +1,9 @@
-import { type Values, savedCandidates } from "./settings-changes.js";
+import {
+  type Values,
+  permittedAgentsChanges,
+  savedCandidates,
+  selectableCandidates,
+} from "./settings-changes.js";
 import { Input } from "./ui/input.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -23,21 +28,7 @@ export function PermittedAgentsTab(p: TabProps) {
   const permitted = Array.isArray(d.values.candidateProfileIds)
       ? d.values.candidateProfileIds
       : [],
-    current = savedCandidates(data),
-    lines = [
-      ...permitted
-        .filter((id) => !current.includes(id))
-        .map(
-          (id) =>
-            `Agent added: ${data.profiles.find((r) => r.id === id)?.name ?? "Name unavailable"}`,
-        ),
-      ...current
-        .filter((id) => !permitted.includes(id))
-        .map(
-          (id) =>
-            `Agent removed: ${data.profiles.find((r) => r.id === id)?.name ?? "Name unavailable"}`,
-        ),
-    ];
+    lines = permittedAgentsChanges(data, permitted);
   return (
     <Panel
       title="Permitted agents"
@@ -56,9 +47,7 @@ export function PermittedAgentsTab(p: TabProps) {
               projectId,
               expectedVersion: Number(d.values.expectedVersion),
               enabled: data.routing.enabled,
-              candidateProfileIds: permitted.filter(
-                (id) => !data.profiles.find((r) => r.id === id)?.revoked,
-              ),
+              candidateProfileIds: selectableCandidates(data, permitted),
             },
             p.refreshConfiguration,
           )

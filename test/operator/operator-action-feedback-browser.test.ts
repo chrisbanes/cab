@@ -97,9 +97,10 @@ const surfaces: Surface[] = [
     path: "/projects/:relay/settings?tab=routing",
     save: "Save routing",
     command: "routing.configure",
-    edit: (page) => page.getByRole("checkbox", { name: /^Nora ·/ }).check(),
+    edit: (page) =>
+      page.getByRole("switch", { name: "Enable routing" }).check(),
     editAgain: (page) =>
-      page.getByRole("checkbox", { name: /^Mira ·/ }).check(),
+      page.getByRole("switch", { name: "Enable routing" }).uncheck(),
     invalid: async (page) => {
       await page
         .getByLabel("Credential reference change", { exact: true })

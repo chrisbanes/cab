@@ -123,7 +123,8 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
     "assignment-profile-revoked": "assignment agent revoked",
     "assignment-profile-stale": "assignment agent changed",
     "assignment-instructions-stale": "assignment instructions changed",
-    "assignment-profile-not-permitted": "assignment agent not permitted",
+    "assignment-profile-not-permitted":
+      "assignment agent not permitted · edit Permitted agents in project Settings",
     "assignment-held": "assignment held",
     "assignment-recovery-unresolved": "assignment recovery unresolved",
     "local-dependency": "blocked by a task dependency",

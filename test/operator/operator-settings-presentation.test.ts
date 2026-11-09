@@ -36,8 +36,10 @@ import {
   repositoryChanges,
   repositoryCommand,
   repositoryRowsFrom,
+  permittedAgentsChanges,
   routingChanges,
   routingCommand,
+  selectableCandidates,
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
@@ -373,6 +375,14 @@ test("routing lines and command keep guidance out unless edited", () => {
     "PRIVATE",
   );
   assert.equal((edited as Record<string, unknown>).guidance, "NEW");
+});
+
+test("permitted-agent preview matches save when a drafted profile is revoked", () => {
+  const c = config();
+  c.routing.candidateProfileIds = [worker];
+  const draft = [worker, reviewer];
+  assert.deepEqual(permittedAgentsChanges(c, draft), []);
+  assert.deepEqual(selectableCandidates(c, draft), [worker]);
 });
 
 test("source rows, change lines and command use keep markers and never put a value in a line", () => {
