@@ -309,18 +309,31 @@ export function repositoryDeliveryNeeds(
       (g) =>
         "action" in g && g.repositoryId === repositoryId && g.action === action,
     );
-  const needs: { met: boolean; text: string }[] = [
+  const needs: {
+    met: boolean;
+    text: string;
+    fix:
+      | "credential"
+      | "settings"
+      | "refresh"
+      | "grants"
+      | "mode"
+      | "method"
+      | "checks";
+  }[] = [
     {
       met: credential === "usable",
+      fix: host === "gitlab" ? "settings" : "credential",
       text:
         credential === "usable"
           ? "Delivery credential is usable; write permissions are checked when acting."
           : credential === "unusable"
-            ? `Delivery credential is missing or unusable. ${host === "gitlab" ? "Configure the installation's GitLab credential in Settings." : "Set a usable credential in Delivery credentials."}`
+            ? `Delivery credential is missing or unusable. ${host === "gitlab" ? "Configure the installation's GitLab credential in Settings." : "Set a usable credential in Delivery."}`
             : "Delivery credential usability is unconfirmed. Save credential changes and Refresh to check it.",
     },
     {
       met: read?.codeHost.status === "live",
+      fix: "refresh",
       text:
         read?.codeHost.status === "live"
           ? `${codeHostName(host)} requirements were read. Branch rules and permissions are checked again when acting.`
@@ -333,6 +346,7 @@ export function repositoryDeliveryNeeds(
   ] as const)
     needs.push({
       met: has(action),
+      fix: policy.grants.some((g) => "savedRow" in g) ? "refresh" : "grants",
       text: has(action)
         ? `Grant to ${label} is present.`
         : policy.grants.some((g) => "savedRow" in g)
@@ -342,6 +356,7 @@ export function repositoryDeliveryNeeds(
   if (has("pr.merge")) {
     needs.push({
       met: policy.mode === "through-merge",
+      fix: "mode",
       text:
         policy.mode === "through-merge"
           ? "Completion mode permits merging."
@@ -357,6 +372,10 @@ export function repositoryDeliveryNeeds(
           read?.codeHost.status === "live" &&
           read.codeHost.allowedMethods.includes(method),
       ),
+      fix:
+        !row || (method && read?.codeHost.status !== "live")
+          ? "refresh"
+          : "method",
       text: !method
         ? row
           ? "Choose a merge method below before cab can merge."
@@ -376,6 +395,7 @@ export function repositoryDeliveryNeeds(
       Boolean(read?.codeHost.status === "live" && read.codeHost.checks.length);
     needs.push({
       met: checksMet,
+      fix: row ? "checks" : "refresh",
       text: checksMet
         ? "Required checks are configured; each merge must pass its actual gate."
         : read?.codeHost.status === "live"
@@ -386,6 +406,7 @@ export function repositoryDeliveryNeeds(
   if (policy.grants.some((g) => "savedRow" in g))
     needs.push({
       met: false,
+      fix: "refresh",
       text: "Some grants are unavailable. Refresh with access to their details before relying on this summary.",
     });
   return needs;
@@ -450,14 +471,22 @@ export function repositoryAuthorityGroups(
       }
       if (seen.has(identity)) return [];
       seen.add(identity);
-      const line =
-        g.action === "branch.adopt"
-          ? grantSentence({ ...g, mode: "approval" })
-          : (sentences?.[i] ?? grantSentence(g));
+      const alwaysApproval =
+        g.action === "branch.adopt" || g.action === "pr.edit";
+      const configuredLine = sentences?.[i] ?? grantSentence(g);
+      const line = alwaysApproval
+        ? configuredLine.replace(/^Allow:/, "Require approval:")
+        : configuredLine;
       return [
         g.action === "project.item.add"
           ? `${line} (operator publication only).`
-          : `${prefix}${line}${g.action === "branch.adopt" ? " (always requires approval)" : ""}`,
+          : `${prefix}${line}${
+              alwaysApproval
+                ? " (always requires approval)"
+                : g.action === "branch.force-push"
+                  ? " (recovery from an outside change always requires approval)"
+                  : ""
+            }`,
       ];
     });
     return {

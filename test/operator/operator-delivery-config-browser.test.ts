@@ -93,6 +93,14 @@ test("project warning clears after fixing delivery needs and returns when the ho
     name: "Delivery needs for acme/atlas",
   });
   await needs.getByText(/Cannot push branches/).waitFor();
+  await needs
+    .getByRole("button", { name: "Choose delivery level" })
+    .first()
+    .click();
+  assert.equal(
+    await levelControl(page).evaluate((el) => el === document.activeElement),
+    true,
+  );
   await levelControl(page).selectOption("merge-with-approval");
   await needs.getByText(/Choose a merge method below/).waitFor();
   await needs.getByText(/No required checks/).waitFor();
@@ -108,11 +116,41 @@ test("project warning clears after fixing delivery needs and returns when the ho
   assert.equal(await levelControl(page).inputValue(), "");
   await authority.getByText(/Require approval: push branches/).waitFor();
   await levelControl(page).selectOption("merge-with-approval");
+  await page.getByLabel("Completion mode").selectOption("reviewable-pr");
+  await needs.getByRole("button", { name: "Change completion mode" }).click();
+  assert.equal(
+    await page
+      .getByLabel("Completion mode")
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.getByLabel("Completion mode").selectOption("through-merge");
+  await needs.getByRole("button", { name: "Choose merge method" }).click();
+  assert.equal(
+    await page
+      .getByLabel("Merge method for acme/atlas", { exact: true })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
   await page
     .getByLabel("Merge method for acme/atlas", { exact: true })
     .selectOption("squash");
+  await needs
+    .getByRole("button", { name: "Configure required checks" })
+    .click();
+  assert.equal(
+    await addCheck(page).evaluate((el) => el === document.activeElement),
+    true,
+  );
   await addCheck(page).click();
   await check(page).getByLabel("Check name").fill("build");
+  await needs.getByRole("button", { name: "Set credential" }).click();
+  assert.equal(
+    await page
+      .getByLabel("Credential reference change")
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
   await page.getByLabel("Credential reference change").selectOption("gh");
   await authority
     .getByText(/Credential unconfirmed.*Require approval: merge/)
@@ -146,11 +184,21 @@ test("project warning clears after fixing delivery needs and returns when the ho
   await page
     .getByText(/GitHub requirements are unavailable.*Check the credential/)
     .waitFor();
-  hostAvailable = true;
-  await read(page);
   await page
     .getByRole("link", { name: "Fix delivery setup", exact: true })
-    .waitFor({ state: "detached" });
+    .click();
+  hostAvailable = true;
+  const refreshed = page.waitForResponse((r) => /configuration$/.test(r.url()));
+  await needs
+    .getByRole("button", { name: "Refresh host access" })
+    .first()
+    .click();
+  await refreshed;
+  await needs.getByText(/GitHub requirements were read/).waitFor();
+  assert.equal(
+    await needs.getByRole("button", { name: "Refresh host access" }).count(),
+    0,
+  );
 });
 
 test("Delivery edits exact scopes and checks with keyboard focus, discard, credential intents and readback", async (_t, journey) => {
@@ -1296,6 +1344,12 @@ test("bulk targets the complete saved link snapshot and cancels without editing"
     await route.fulfill({ response, json });
   });
   await read(page);
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Open GitLab Settings", exact: true })
+      .getAttribute("href"),
+    "/settings#gitlab-credentials",
+  );
   await page
     .getByRole("region", { name: "Repository 42", exact: true })
     .getByText("Not set up", { exact: true })

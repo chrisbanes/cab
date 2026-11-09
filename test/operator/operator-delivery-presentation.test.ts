@@ -199,6 +199,83 @@ test("custom authority retains Project scopes, first matching action and credent
   );
 });
 
+test("custom allow grants show mandatory PR-edit and recovery approval without losing names", () => {
+  const grants = [
+    { action: "pr.edit", repositoryId: "R", mode: "allow" },
+    { action: "branch.adopt", repositoryId: "R", mode: "allow" },
+    { action: "branch.force-push", repositoryId: "R", mode: "allow" },
+  ] satisfies DeliveryPolicyValues["grants"];
+  const sentences = grants.map((g) =>
+    grantSentence(g, { repository: "acme/atlas" }),
+  );
+  for (const credential of ["usable", "unknown", "unusable"] as const) {
+    const groups = repositoryAuthorityGroups(
+      grants,
+      "R",
+      credential,
+      sentences,
+    );
+    assert.match(
+      groups[1]!.lines[0]!,
+      /Require approval: edit pull requests in acme\/atlas \(always requires approval\)/,
+    );
+    assert.match(
+      groups[0]!.lines[0]!,
+      /Require approval: adopt existing branches to acme\/atlas \(always requires approval\)/,
+    );
+    assert.match(
+      groups[0]!.lines[1]!,
+      /Allow: force-push branches to acme\/atlas \(recovery from an outside change always requires approval\)/,
+    );
+    for (const line of [...groups[0]!.lines, ...groups[1]!.lines]) {
+      if (credential === "unknown")
+        assert.match(line, /^Credential unconfirmed/);
+      if (credential === "unusable")
+        assert.match(line, /^Unavailable until credential is fixed/);
+    }
+  }
+});
+
+test("unmet delivery needs point to existing repair controls", () => {
+  const policy = levelPolicy("merge-when-ready");
+  policy.mode = "reviewable-pr";
+  policy.grants = policy.grants.filter(
+    (g) => !("action" in g) || g.action !== "branch.push",
+  );
+  policy.repositories = [{ ...deliveryRead, mergeMethod: null }];
+  const read = {
+    ...deliveryRead,
+    codeHost: {
+      status: "live" as const,
+      allowedMethods: ["squash" as const],
+      checks: [],
+    },
+  };
+  assert.deepEqual(
+    repositoryDeliveryNeeds(policy, "R", "github", "unusable", read)
+      .filter((n) => !n.met)
+      .map((n) => n.fix),
+    ["credential", "grants", "mode", "method", "checks"],
+  );
+  const unavailable = {
+    ...deliveryRead,
+    codeHost: {
+      status: "unavailable" as const,
+      reason: "credential-missing" as const,
+    },
+  };
+  assert.deepEqual(
+    repositoryDeliveryNeeds(policy, "R", "gitlab", "unusable", unavailable)
+      .slice(0, 2)
+      .map((n) => n.fix),
+    ["settings", "refresh"],
+  );
+  assert.doesNotMatch(
+    repositoryDeliveryNeeds(policy, "R", "github", "unusable", read)[0]!.text,
+    /Delivery credentials/,
+  );
+});
+
 test("later overlapping Project options and supplemental branch scopes cannot overstate effective authority", () => {
   const grants: DeliveryPolicyValues["grants"] = [
     {

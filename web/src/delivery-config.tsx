@@ -665,7 +665,61 @@ function DeliveryPolicyForm(p: TabProps) {
                     >
                       {needs.map((need) => (
                         <li key={need.text}>
-                          {need.met ? "Met" : "Needs attention"}: {need.text}
+                          {need.met ? "Met" : "Needs attention"}: {need.text}{" "}
+                          {!need.met &&
+                            (need.fix === "settings" ? (
+                              <a href="/settings#gitlab-credentials">
+                                Open GitLab Settings
+                              </a>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => {
+                                  if (need.fix === "refresh") {
+                                    void p.refreshConfiguration();
+                                    return;
+                                  }
+                                  if (
+                                    need.fix === "credential" ||
+                                    need.fix === "mode"
+                                  ) {
+                                    const name =
+                                      need.fix === "credential"
+                                        ? "Credential reference change"
+                                        : "Completion mode";
+                                    form.current
+                                      ?.querySelector<HTMLElement>(
+                                        `[aria-label="${name}"]`,
+                                      )
+                                      ?.focus();
+                                    return;
+                                  }
+                                  const r = repositoryRows.findIndex(
+                                    (row) =>
+                                      row.repositoryId === link.repositoryId,
+                                  );
+                                  focus(
+                                    need.fix === "grants"
+                                      ? `shepherd-level-${i}`
+                                      : need.fix === "method"
+                                        ? `merge-method-${r}`
+                                        : `add-check-${r}`,
+                                  );
+                                }}
+                              >
+                                {
+                                  {
+                                    credential: "Set credential",
+                                    refresh: "Refresh host access",
+                                    grants: "Choose delivery level",
+                                    mode: "Change completion mode",
+                                    method: "Choose merge method",
+                                    checks: "Configure required checks",
+                                  }[need.fix]
+                                }
+                              </Button>
+                            ))}
                         </li>
                       ))}
                     </ul>
