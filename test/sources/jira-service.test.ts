@@ -756,9 +756,232 @@ test("a Jira readiness loss gives the lead one source-hold notice, and a repeat 
   await f.api.refreshSources();
   assert.equal(stores.hold("10001")?.active, 0);
   assert.equal(releaseEvents(), 1);
+  const releasePayload = JSON.parse(
+    String(
+      (
+        db
+          .prepare(
+            "SELECT payload FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold-released'",
+          )
+          .get(leadId) as { payload: string }
+      ).payload,
+    ),
+  ) as { message: string };
+  assert.match(releasePayload.message, /check the task's current admission/i);
+  assert.doesNotMatch(releasePayload.message, /work may continue/i);
   await f.api.refreshSources();
   assert.equal(releaseEvents(), 1);
   assert.equal(notices(), 1);
+});
+
+test("a withdrawn Jira hold explains self-release and sends one lead event when relisted Ready", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  const jql = "project = ABC";
+  await f.configureJira([{ id: "S-1", kind: "jql", jql }], 1, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  f.state.issues[jql] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(f.service.domain().ensureLeadAssignment(taskId)?.id);
+  const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  t.after(() => db.close());
+  const count = (eventType: string) =>
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = ?",
+          )
+          .get(leadId, eventType) as { count: number }
+      ).count,
+    );
+  f.state.issues[jql] = [];
+  await f.api.refreshSources();
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.reason, "withdrawn");
+  assert.equal(count("source-hold"), 1);
+  const payload = JSON.parse(
+    String(
+      (
+        db
+          .prepare(
+            "SELECT payload FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+          )
+          .get(leadId) as { payload: string }
+      ).payload,
+    ),
+  ) as { guidance: string };
+  assert.match(payload.guidance, /Stop new work and wait/);
+  assert.match(payload.guidance, /do not ask the operator/);
+  f.state.issues[jql] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.active, 0);
+  assert.equal(count("source-hold-released"), 1);
+  await f.api.refreshSources();
+  assert.equal(count("source-hold-released"), 1);
+});
+
+test("a non-self-releasing Jira hold keeps its original notice contract", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  const jql = "project = ABC";
+  await f.configureJira([{ id: "S-1", kind: "jql", jql }], 1, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  f.state.issues[jql] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(f.service.domain().ensureLeadAssignment(taskId)?.id);
+  const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  t.after(() => db.close());
+  db.prepare(`INSERT INTO source_holds
+    (provider, instance, externalId, active, reason, generation)
+    VALUES ('jira', ?, '10001', 1, 'closure-read-unavailable', 1)`).run(site);
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.active, 1);
+  assert.equal(stores.hold("10001")?.reason, "closure-read-unavailable");
+  assert.equal(
+    (
+      db
+        .prepare(
+          "SELECT payload FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+        )
+        .get(leadId) as { payload: string }
+    ).payload,
+    JSON.stringify({
+      reason: "closure-read-unavailable",
+      disposition: "safe-stop-new-work",
+    }),
+  );
+  assert.equal(
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold-released'",
+          )
+          .get(leadId) as { count: number }
+      ).count,
+    ),
+    0,
+  );
+});
+
+test("legacy Jira source-hold notices replay unchanged after refresh and startup", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  const jql = "project = ABC";
+  await f.configureJira([{ id: "S-1", kind: "jql", jql }], 1, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  f.state.issues[jql] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(f.service.domain().ensureLeadAssignment(taskId)?.id);
+  f.state.issues[jql] = [
+    jiraIssue(1, { status: { id: "3", name: "In Progress" } }),
+  ];
+  await f.api.refreshSources();
+  const legacyPayload = JSON.stringify({
+    reason: "readiness-lost",
+    disposition: "safe-stop-new-work",
+  });
+  let db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  db.prepare(`UPDATE coordination_inbox_events SET payload = ?
+    WHERE recipientAssignmentId = ? AND eventType = 'source-hold'`).run(
+    legacyPayload,
+    leadId,
+  );
+  db.close();
+  await f.api.refreshSources();
+  await f.service.stop();
+  await f.service.start();
+  db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  t.after(() => db.close());
+  assert.equal(
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+          )
+          .get(leadId) as { count: number }
+      ).count,
+    ),
+    1,
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          "SELECT payload FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+        )
+        .get(leadId) as { payload: string }
+    ).payload,
+    legacyPayload,
+  );
+});
+
+test("a pending source-hold release is not written for an archived task", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  const jql = "project = ABC";
+  await f.configureJira([{ id: "S-1", kind: "jql", jql }], 1, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  f.state.issues[jql] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(f.service.domain().ensureLeadAssignment(taskId)?.id);
+  f.state.issues[jql] = [
+    jiraIssue(1, { status: { id: "3", name: "In Progress" } }),
+  ];
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.reason, "readiness-lost");
+  const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  t.after(() => db.close());
+  db.prepare("UPDATE domain_tasks SET ready = 1 WHERE id = ?").run(taskId);
+  db.prepare(
+    "UPDATE source_holds SET active = 0 WHERE externalId = '10001'",
+  ).run();
+  db.prepare(`INSERT INTO source_hold_release_records
+    (provider, instance, externalId, generation, reason, taskId)
+    SELECT provider, instance, externalId, generation, reason, ?
+    FROM source_holds WHERE externalId = '10001'`).run(taskId);
+  db.prepare("UPDATE domain_projects SET archived = 1 WHERE id = ?").run(
+    f.projectId,
+  );
+  await f.api.refreshSources();
+  assert.equal(
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold-released'",
+          )
+          .get(leadId) as { count: number }
+      ).count,
+    ),
+    0,
+  );
 });
 
 test("a hold created and cleared within one complete Jira refresh emits neither event", async (t) => {

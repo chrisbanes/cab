@@ -493,7 +493,8 @@ that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving a
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
 releases nothing, and every other source hold, including closure, still needs
 the operator to resume it. A withdrawn or readiness-lost hold notice tells the
-recipient to stop new work and wait; when a previously announced hold clears,
+recipient to stop new work and wait for the qualifying complete read, without
+asking the operator to clear it. When a previously announced hold clears,
 one durable Inbox release event goes to the task lead and says the complete read
 listed the issue again while it was Ready. A hold created and cleared in one
 refresh emits neither event. External closure

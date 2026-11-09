@@ -4745,7 +4745,10 @@ export class StandaloneService {
         coordination.ensureSourceHoldEvent({ ...hold, recipientAssignmentId });
     }
     for (const release of coordination.sourceHoldReleases())
-      if (leadByTask.get(release.taskId) === release.recipientAssignmentId)
+      if (
+        this.writableTask(release.taskId) &&
+        leadByTask.get(release.taskId) === release.recipientAssignmentId
+      )
         coordination.ensureSourceHoldReleasedEvent(release);
   }
 

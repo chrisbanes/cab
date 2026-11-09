@@ -3445,7 +3445,7 @@ export class CoordinationStore {
       ...(input.reason === "withdrawn" || input.reason === "readiness-lost"
         ? {
             guidance:
-              "Stop new work and wait. This hold clears automatically after a complete source read lists the issue again while the task is Ready.",
+              "Stop new work and wait; do not ask the operator to clear this hold. It clears automatically after a complete source read lists the issue again while the task is Ready.",
           }
         : {}),
     });
@@ -3460,10 +3460,25 @@ export class CoordinationStore {
         recipient,
       );
       if (existing) {
+        let legacyPayload = false;
+        if (input.reason === "withdrawn" || input.reason === "readiness-lost") {
+          try {
+            const prior = JSON.parse(String(existing.payload)) as Record<
+              string,
+              unknown
+            >;
+            legacyPayload =
+              Object.keys(prior).sort().join(",") === "disposition,reason" &&
+              prior.disposition === "safe-stop-new-work" &&
+              prior.reason === input.reason;
+          } catch {
+            // A malformed persisted notice is a conflict, not a replay.
+          }
+        }
         if (
           existing.taskId !== taskId ||
           existing.eventType !== "source-hold" ||
-          existing.payload !== payload
+          (existing.payload !== payload && !legacyPayload)
         )
           throw new Error("Source hold notice conflict");
         return this.parseEvent(existing);
@@ -3526,7 +3541,7 @@ export class CoordinationStore {
     const taskId = uuid.parse(input.taskId);
     const payload = JSON.stringify({
       reason: input.reason,
-      message: `The ${input.reason} source hold cleared after a complete read listed the issue again while it was Ready. Work may continue.`,
+      message: `The ${input.reason} source hold cleared after a complete read listed the issue again while it was Ready. Check the task's current admission and any other holds before continuing.`,
     });
     return transaction(this.db, () => {
       const existing = this.one(
