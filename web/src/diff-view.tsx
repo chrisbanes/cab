@@ -1,101 +1,49 @@
+import type { SelectedLineRange } from "@pierre/diffs";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
-import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
+import {
+  filePatch,
+  selectableLines,
+  type Anchor,
+  type DiffHunkData,
+  type Selectable,
+  type Side,
+} from "./diff-model.js";
 import { Button } from "./components.js";
 import type { TaskChangeSelection } from "./task-workspace-state.js";
+import { useTheme } from "./theme.js";
 
-type Snapshot = Extract<
-  WorkspaceComparisonRead["data"],
-  { state: "available" }
->["comparison"];
-export type Hunk = Snapshot["entries"][number]["hunks"][number];
-export type Anchor = NonNullable<Hunk["leftAnchor"]>;
-/** A hunk without anchors renders as read-only Before/After. */
-export type DiffHunkData = Pick<
-  Hunk,
-  "oldStart" | "oldLines" | "newStart" | "newLines" | "patch"
-> &
-  Partial<Pick<Hunk, "leftAnchor" | "rightAnchor">>;
+export type { Anchor, DiffHunkData } from "./diff-model.js";
 
-type Side = "left" | "right";
+// Loaded on first use so the highlighter stays out of the initial bundle.
+const PierreDiff = lazy(() => import("./pierre-diff.js"));
+
 type Layout = "split" | "unified";
-type PatchLine = {
-  kind: "context" | "deleted" | "added" | "note";
-  oldLine?: number;
-  newLine?: number;
-  text: string;
-};
-type PairedLine = { oldLine?: PatchLine; newLine?: PatchLine };
-type Slot = {
-  panel: Side | "unified";
-  row: number;
-  side: Side;
-  line: PatchLine | undefined;
-};
 
-/** Lines in patch order, each carrying its own old and new line number. */
-function patchLines(hunk: DiffHunkData): PatchLine[] {
-  const result: PatchLine[] = [];
-  let oldLine = hunk.oldStart;
-  let newLine = hunk.newStart;
-  for (const source of hunk.patch.split("\n")) {
-    if (source.startsWith("@@") || source.startsWith("\\ No newline")) continue;
-    const marker = source[0];
-    const text = source.slice(1);
-    if (marker === " ") {
-      result.push({ kind: "context", oldLine, newLine, text });
-      oldLine++;
-      newLine++;
-    } else if (marker === "-") {
-      result.push({ kind: "deleted", oldLine, text });
-      oldLine++;
-    } else if (marker === "+") {
-      result.push({ kind: "added", newLine, text });
-      newLine++;
-    } else if (source) result.push({ kind: "note", text: source });
-  }
-  return result;
-}
+/** A review range belongs to one side; split view otherwise highlights the paired rows of both. */
+const selectionSideCSS = `
+:host(.selects-right) code[data-deletions] [data-selected-line],
+:host(.selects-left) code[data-additions] [data-selected-line] {
+  --diffs-computed-selected-line-bg: var(--diffs-computed-diff-line-bg);
+  --diffs-selection-number-fg: var(--diffs-fg-number);
+}`;
 
-/** Aligns each run of deletions with the additions that replace it. */
-function pairLines(lines: PatchLine[]): PairedLine[] {
-  const result: PairedLine[] = [];
-  let removed: PatchLine[] = [];
-  let added: PatchLine[] = [];
-  const flush = () => {
-    for (let index = 0; index < Math.max(removed.length, added.length); index++)
-      result.push({
-        ...(removed[index] ? { oldLine: removed[index] } : {}),
-        ...(added[index] ? { newLine: added[index] } : {}),
-      });
-    removed = [];
-    added = [];
-  };
-  for (const line of lines) {
-    if (line.kind === "deleted") removed.push(line);
-    else if (line.kind === "added") added.push(line);
-    else {
-      flush();
-      result.push(
-        line.kind === "context"
-          ? { oldLine: line, newLine: line }
-          : { oldLine: line },
-      );
-    }
-  }
-  flush();
-  return result;
-}
+const toPierre = (side: Side) => (side === "left" ? "deletions" : "additions");
+const fromPierre = (side: SelectedLineRange["side"]): Side =>
+  side === "deletions" ? "left" : "right";
 
 const narrowQuery = "(max-width: 700px)";
 
 /** Phones show the unified diff only; mirrors the stylesheet breakpoint. */
-function useNarrowViewport() {
+export function useNarrowViewport() {
   const [narrow, setNarrow] = useState(
     () => window.matchMedia(narrowQuery).matches,
   );
@@ -108,7 +56,7 @@ function useNarrowViewport() {
   return narrow;
 }
 
-export function DiffLayoutControls({
+function DiffLayoutControls({
   layout,
   onChange,
 }: {
@@ -117,7 +65,7 @@ export function DiffLayoutControls({
 }) {
   return (
     <div
-      className="task-actions changes-layout-controls"
+      className="changes-layout-controls"
       role="toolbar"
       aria-label="Diff layout"
     >
@@ -147,248 +95,202 @@ export type DiffSelect = {
     maxLine: number,
     extend: boolean,
   ) => void;
+  onClear: () => void;
 };
 
-export function DiffHunk({
-  hunk,
-  hunkIndex,
+/** A file's diff. Review selection works by pointer on line numbers and by arrow keys. */
+export function FileDiffView({
+  path,
+  previousPath,
+  hunks,
   layout,
+  onLayout,
+  headerPrefix,
+  headerMetadata,
   select,
 }: {
-  hunk: DiffHunkData;
-  hunkIndex: number;
+  path: string;
+  previousPath?: string | undefined;
+  hunks: DiffHunkData[];
   layout: Layout;
+  onLayout: (layout: Layout) => void;
+  headerPrefix?: ReactNode;
+  headerMetadata?: ReactNode;
   /** Omitted when the diff is read-only. */
   select?: DiffSelect;
 }) {
-  const lines = useMemo(() => patchLines(hunk), [hunk]);
-  const effective: Layout = useNarrowViewport() ? "unified" : layout;
-  const root = useRef<HTMLElement>(null);
-  const [focused, setFocused] = useState<Record<string, string>>({});
-  const slots: Slot[] =
-    effective === "split"
-      ? pairLines(lines).flatMap((pair, row) => [
-          { panel: "left", row, side: "left", line: pair.oldLine },
-          { panel: "right", row, side: "right", line: pair.newLine },
-        ])
-      : lines.map((line, row) => ({
-          panel: "unified",
-          row,
-          side: line.kind === "deleted" ? "left" : "right",
-          line,
-        }));
+  const theme = useTheme();
+  const narrow = useNarrowViewport();
+  const effective: Layout = narrow ? "unified" : layout;
+  const patch = useMemo(
+    () => filePatch(path, previousPath, hunks),
+    [path, previousPath, hunks],
+  );
+  const lines = useMemo(() => selectableLines(hunks), [hunks]);
 
-  const describe = (slot: Slot) => {
-    const { line, side } = slot;
-    const anchor = side === "left" ? hunk.leftAnchor : hunk.rightAnchor;
-    const number = line && (side === "left" ? line.oldLine : line.newLine);
+  const bounds = (hunk: DiffHunkData, side: Side) => {
     const minLine = side === "left" ? hunk.oldStart : hunk.newStart;
-    const maxLine =
-      minLine + (side === "left" ? hunk.oldLines : hunk.newLines) - 1;
-    const active =
-      select?.selection &&
-      select.selection.comparisonId === select.comparisonId &&
-      select.selection.side === side &&
-      select.selection.path === anchor?.path &&
-      select.selection.contentSha256 === anchor?.contentSha256
-        ? select.selection
-        : null;
-    return {
-      anchor,
-      number,
-      minLine,
-      maxLine,
-      selectable:
-        Boolean(select && anchor) &&
-        number !== undefined &&
-        (line?.kind === "context" ||
-          (side === "left" && line?.kind === "deleted") ||
-          (side === "right" && line?.kind === "added")),
-      selected:
-        active !== null &&
-        number !== undefined &&
-        active.startLine <= number &&
-        number <= active.endLine,
-      current: active !== null && active.currentLine === number,
-    };
+    const count = side === "left" ? hunk.oldLines : hunk.newLines;
+    return { minLine, maxLine: minLine + count - 1 };
+  };
+  const anchorOf = (hunk: DiffHunkData, side: Side) =>
+    side === "left" ? hunk.leftAnchor : hunk.rightAnchor;
+
+  const active =
+    select?.selection &&
+    select.selection.comparisonId === select.comparisonId &&
+    hunks.some((hunk) => {
+      const anchor = anchorOf(hunk, select.selection!.side);
+      return (
+        anchor?.path === select.selection!.path &&
+        anchor.contentSha256 === select.selection!.contentSha256
+      );
+    })
+      ? select.selection
+      : null;
+  const selectedLines: SelectedLineRange | null = active
+    ? {
+        start: active.startLine,
+        end: active.endLine,
+        side: toPierre(active.side),
+      }
+    : null;
+
+  /** Selects `to`; `from` keeps the range anchor when extending within its hunk. */
+  const choose = (to: Selectable, extend: boolean) => {
+    if (!select) return;
+    const hunk = hunks[to.hunk];
+    const anchor = hunk && anchorOf(hunk, to.side);
+    if (!hunk || !anchor) return;
+    const { minLine, maxLine } = bounds(hunk, to.side);
+    select.onSelect(anchor, to.line, minLine, maxLine, extend);
   };
 
-  // One tab stop per panel: the focused line, else the current selection, else the first line.
-  const panelCells = (panel: Slot["panel"]) =>
-    slots
-      .filter((slot) => slot.panel === panel)
-      .map((slot) => ({ slot, cell: describe(slot) }))
-      .filter(({ cell }) => cell.selectable);
-  const cellKey = (slot: Slot, number: number | undefined) =>
-    `${slot.side}:${number}`;
-  const stops = new Map<string, string>();
-  for (const panel of ["left", "right", "unified"] as const) {
-    const cells = panelCells(panel);
-    const stop =
-      cells.find(
-        ({ slot, cell }) => cellKey(slot, cell.number) === focused[panel],
-      ) ??
-      cells.find(({ cell }) => cell.current) ??
-      cells[0];
-    if (stop) stops.set(panel, cellKey(stop.slot, stop.cell.number));
-  }
+  const onLineSelected = (range: SelectedLineRange | null) => {
+    if (!select) return;
+    if (!range) return select.onClear();
+    const side = fromPierre(range.side);
+    const start = lines[side].find((item) => item.line === range.start);
+    if (!start) return;
+    // A review range stays on one side of one hunk; clamp a drag that leaves it.
+    const sameSide = fromPierre(range.endSide ?? range.side) === side;
+    const end =
+      (sameSide &&
+        lines[side].find(
+          (item) => item.line === range.end && item.hunk === start.hunk,
+        )) ||
+      start;
+    choose(start, false);
+    if (end !== start) choose(end, true);
+  };
 
-  const handleKeyDown = (
-    event: KeyboardEvent<HTMLButtonElement>,
-    slot: Slot,
-    cell: ReturnType<typeof describe>,
-  ) => {
-    if (!select || !cell.anchor || cell.number === undefined) return;
-    const focusCell = (target: Slot) =>
-      root.current
-        ?.querySelector<HTMLButtonElement>(
-          `button[data-panel="${target.panel}"][data-row="${target.row}"][data-side="${target.side}"]`,
+  const keys = useRef<HTMLDivElement>(null);
+  /** Keeps a keyboard-chosen line on screen once the diff has redrawn its selection. */
+  const reveal = (target: Selectable) =>
+    requestAnimationFrame(() => {
+      const root =
+        keys.current?.querySelector(".changes-file-diff")?.shadowRoot;
+      const column =
+        target.side === "left"
+          ? "code[data-deletions]"
+          : "code[data-additions]";
+      const type =
+        target.side === "left"
+          ? '[data-line-type="change-deletion"]'
+          : '[data-line-type="change-addition"], [data-line-type="context"]';
+      const number = `[data-gutter] [data-column-number="${target.line}"]`;
+      root
+        ?.querySelector(
+          `${column} ${number}, code[data-unified] ${number}:is(${type})`,
         )
-        ?.focus();
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      const target = slots.find(
-        (item) =>
-          item.row === slot.row &&
-          item.panel !== slot.panel &&
-          item.side === (event.key === "ArrowLeft" ? "left" : "right"),
-      );
-      if (target && describe(target).selectable) {
-        event.preventDefault();
-        focusCell(target);
-      }
+        ?.scrollIntoView({ block: "nearest" });
+    });
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Keys on the header controls inside the diff are theirs, not the selection's.
+    if (!select || event.target !== event.currentTarget) return;
+    if (event.key === "Escape" && active) {
+      event.preventDefault();
+      select.onClear();
       return;
     }
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-    const peers = panelCells(slot.panel);
-    const next =
-      peers[
-        peers.findIndex((item) => item.slot === slot) +
-          (event.key === "ArrowDown" ? 1 : -1)
-      ];
-    if (!next?.cell.anchor || next.cell.number === undefined) return;
+    const side: Side = active?.side ?? (lines.right.length ? "right" : "left");
+    const peers = lines[side];
+    const index = active
+      ? peers.findIndex((item) => item.line === active.currentLine)
+      : -1;
+    let target: Selectable | undefined;
+    if (event.key === "ArrowDown")
+      target = index < 0 ? peers[0] : peers[index + 1];
+    else if (event.key === "ArrowUp")
+      target = index < 0 ? peers[0] : peers[index - 1];
+    else if (
+      (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+      effective === "split"
+    ) {
+      const other: Side = event.key === "ArrowLeft" ? "left" : "right";
+      const from = peers[index];
+      if (other === side || !from) return;
+      // Nearest line on the other side of the same hunk.
+      target = lines[other]
+        .filter((item) => item.hunk === from.hunk)
+        .sort(
+          (a, b) => Math.abs(a.row - from.row) - Math.abs(b.row - from.row),
+        )[0];
+    } else return;
     event.preventDefault();
-    focusCell(next.slot);
-    // Shift extends from the focused line even when it was not yet selected.
-    if (event.shiftKey)
-      select.onSelect(
-        cell.anchor,
-        cell.number,
-        cell.minLine,
-        cell.maxLine,
-        true,
-      );
-    select.onSelect(
-      next.cell.anchor,
-      next.cell.number,
-      next.cell.minLine,
-      next.cell.maxLine,
-      event.shiftKey,
-    );
+    if (!target) return;
+    choose(target, event.shiftKey && target.side === side);
+    reveal(target);
   };
 
-  const renderSlot = (slot: Slot) => {
-    const { line } = slot;
-    const key = `${slot.panel}:${slot.row}`;
-    if (!line)
-      return (
-        <div key={key} className="changes-line changes-line-empty">
-          <span aria-hidden="true"> </span>
-        </div>
-      );
-    const cell = describe(slot);
-    const unified = slot.panel === "unified";
-    const marker =
-      line.kind === "deleted" ? "-" : line.kind === "added" ? "+" : " ";
-    const numbers = unified ? (
-      <>
-        <span className="changes-line-number changes-line-old">
-          {line.oldLine ?? ""}
-        </span>
-        <span className="changes-line-number changes-line-new">
-          {line.newLine ?? ""}
-        </span>
-        <span className="changes-line-marker" aria-hidden="true">
-          {marker}
-        </span>
-      </>
-    ) : (
-      <span className="changes-line-number">{cell.number ?? ""}</span>
-    );
-    const className = `changes-line${unified ? " changes-line-unified" : ""}`;
-    if (select && cell.selectable && cell.anchor && cell.number !== undefined) {
-      const { anchor, number } = cell;
-      const label = slot.side === "left" ? "Before" : "After";
-      return (
-        <button
-          type="button"
-          key={key}
-          className={`${className} changes-line-${line.kind} changes-selectable-line ${cell.selected ? "is-selected" : ""}`}
-          aria-pressed={cell.selected}
-          aria-current={cell.current ? "true" : undefined}
-          aria-label={`${label} line ${number}, ${anchor.path}; hunk lines ${cell.minLine}–${cell.maxLine}`}
-          tabIndex={stops.get(slot.panel) === cellKey(slot, number) ? 0 : -1}
-          data-review-return={cell.current ? select.originKey : undefined}
-          data-row={slot.row}
-          data-side={slot.side}
-          data-panel={slot.panel}
-          data-line={number}
-          onFocus={() =>
-            setFocused((previous) => ({
-              ...previous,
-              [slot.panel]: cellKey(slot, number),
-            }))
-          }
-          onKeyDown={(event) => handleKeyDown(event, slot, cell)}
-          onClick={(event) =>
-            select.onSelect(
-              anchor,
-              number,
-              cell.minLine,
-              cell.maxLine,
-              event.shiftKey,
-            )
-          }
-        >
-          {numbers}
-          <code>{line.text}</code>
-        </button>
-      );
-    }
-    return (
-      <div key={key} className={`${className} changes-line-${line.kind}`}>
-        {numbers}
-        <code>{line.text || " "}</code>
-      </div>
-    );
-  };
-
+  const diff = (
+    <Suspense fallback={<p role="status">Loading diff…</p>}>
+      <PierreDiff
+        patch={patch}
+        path={path}
+        className={`changes-file-diff${active ? ` selects-${active.side}` : ""}`}
+        selectedLines={selectedLines}
+        options={{
+          diffStyle: effective,
+          themeType: theme,
+          overflow: "wrap",
+          lineDiffType: "word",
+          // `+`/`−` markers, so colour is never the only cue for an added or removed line.
+          diffIndicators: "classic",
+          unsafeCSS: selectionSideCSS,
+          hunkSeparators: "line-info",
+          stickyHeader: true,
+          enableLineSelection: Boolean(select),
+          controlledSelection: true,
+          onLineSelected,
+        }}
+        {...(headerPrefix ? { renderHeaderPrefix: () => headerPrefix } : {})}
+        renderHeaderMetadata={() => (
+          <>
+            {headerMetadata}
+            {!narrow && (
+              <DiffLayoutControls layout={layout} onChange={onLayout} />
+            )}
+          </>
+        )}
+      />
+    </Suspense>
+  );
+  if (!select) return diff;
   return (
-    <section
-      ref={root}
-      className="changes-hunk"
-      aria-label={`Diff hunk ${hunkIndex + 1}`}
+    <div
+      ref={keys}
+      className="changes-diff-keys"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: one keyboard stop whose arrow keys move the line selection.
+      tabIndex={0}
+      role="application"
+      aria-roledescription="diff"
+      aria-label={`Diff of ${path}. Up and Down select a line, Shift extends, Left and Right switch side, Escape clears.`}
+      data-review-return={select.originKey}
+      onKeyDown={onKeyDown}
     >
-      <h6 className="changes-hunk-heading">
-        @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
-      </h6>
-      {effective === "split" ? (
-        <div className="changes-diff-split is-active">
-          {(["left", "right"] as const).map((side) => (
-            <div className="changes-diff-side" key={side}>
-              <h6>{side === "left" ? "Before" : "After"}</h6>
-              {slots.filter((slot) => slot.panel === side).map(renderSlot)}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="changes-diff-unified is-active">
-          <p className="changes-unified-head" aria-hidden="true">
-            <span>Old</span>
-            <span>New</span>
-          </p>
-          {slots.map(renderSlot)}
-        </div>
-      )}
-    </section>
+      {diff}
+    </div>
   );
 }

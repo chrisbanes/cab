@@ -59,10 +59,3 @@
   width: 2px;
   background: var(--focus);
 }
-
-/* Beside a conversation the pane is too narrow for the rail and the diff side by side. */
-@container (max-width: 760px) {
-  .changes-workbench {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}

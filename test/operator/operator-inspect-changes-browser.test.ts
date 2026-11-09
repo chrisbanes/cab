@@ -16,6 +16,7 @@ import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { seedChangedTask } from "../fixtures/changed-task.js";
+import { changedFile, diffTitle, fileDiff } from "../fixtures/diff-view.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 
 setFixtureGitIdentity();
@@ -92,25 +93,24 @@ async function assertFirstScreen(page: Page, targets: Locator[]) {
   await noPageOverflow(page);
 }
 
-const entry = (page: Page, name: RegExp) =>
-  page.locator(".changes-entry").filter({ hasText: name });
+const entry = (page: Page, path: string) =>
+  changedFile(page.locator("body"), path);
 
-/** The diff is open on guide.md and the reply control sits below its first hunk, in the same reading area. */
+/** The diff is open on guide.md and the reply control sits below it, in the same reading area. */
 async function assertDiffWithReply(page: Page) {
   const area = page.locator(".changes-reading-area");
-  const heading = area.locator(".changes-file-heading h5");
+  const heading = diffTitle(area);
   await heading.waitFor();
   assert.equal((await heading.innerText()).trim(), "guide.md");
-  const hunk = page.getByLabel("Diff hunk 1").first();
-  await hunk.waitFor();
+  const diff = fileDiff(area);
   const reply = area
     .getByRole("button", { name: "Add review comment" })
     .first();
   await reply.waitFor();
-  const hunkBox = await hunk.boundingBox();
+  const diffBox = await diff.boundingBox();
   const replyBox = await reply.boundingBox();
-  assert.ok(hunkBox && replyBox);
-  assert.ok(replyBox.y > hunkBox.y, "the reply control follows the hunk");
+  assert.ok(diffBox && replyBox);
+  assert.ok(replyBox.y > diffBox.y, "the reply control follows the diff");
   // The brief and retained evidence live in the hidden Overview panel.
   assert.equal(await page.locator("#brief").isVisible(), false);
   assert.equal(await page.locator("#result-evidence").isVisible(), false);
@@ -134,7 +134,7 @@ for (const [label, viewport] of [
     let interactions = 0;
     await tab.click();
     interactions++;
-    const guide = entry(s.page, /guide\.md/);
+    const guide = entry(s.page, "guide.md");
     await guide.waitFor();
     await settle(s.page);
     const heading = s.page.locator(".changes-rail h5");
@@ -193,7 +193,7 @@ for (const [label, viewport] of [
       await s.page.waitForURL(/section=changes&result=[0-9a-f-]{36}$/);
       assert.equal(await tab.getAttribute("aria-selected"), "true");
     }
-    const guide = entry(s.page, /guide\.md/);
+    const guide = entry(s.page, "guide.md");
     await guide.waitFor();
     await guide.click();
     interactions++;
