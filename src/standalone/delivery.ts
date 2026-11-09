@@ -215,9 +215,9 @@ export function deliveryToolFailureText(error: unknown): string {
       .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
       .join("; ")}`.slice(0, 500);
   if (error instanceof DeliveryApprovalRequiredError)
-    return `Approval required: ${error.message}. Request approval with cab_request_approval, then retry with its approval.`;
+    return `Approval required: ${error.message}. Request approval with cab_request_approval, then send the action again with its approval and a new operationId.`;
   if (error instanceof DeliveryHoldError)
-    return `Held: ${error.message}. Retry once it clears; the operator resolves a task hold.`;
+    return `Held: ${error.message}. Once it clears, send the action again with a new operationId; the operator resolves a task hold.`;
   if (
     error instanceof DomainPolicyError ||
     error instanceof DomainConflictError

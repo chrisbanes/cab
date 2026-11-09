@@ -2151,7 +2151,7 @@ test("delivery tool failures name the invalid field, the refusal category and ca
     const approval = await failed(await f.threadAction(reply()));
     assert.match(
       approval,
-      /Approval required: Exact material approval required\. Request approval with cab_request_approval/,
+      /Approval required: Exact material approval required\. Request approval with cab_request_approval, then send the action again with its approval and a new operationId/,
     );
 
     f.scripted.state.lostThreadResolve = true;
@@ -2159,7 +2159,7 @@ test("delivery tool failures name the invalid field, the refusal category and ca
     const held = await failed(await f.threadAction(resolve("C1")));
     assert.match(
       held,
-      /Held: Task (admission is held|has unresolved external action)\. Retry once it clears/,
+      /Held: Task (admission is held|has unresolved external action)\. Once it clears, send the action again with a new operationId/,
     );
     assert.doesNotMatch(held, /Refused by policy/);
 
@@ -2210,7 +2210,10 @@ test("cab_external_action describes the operationId and branch.push contract", (
   const description = coordinationTools.find(
     (t) => t.name === "cab_external_action",
   )?.description;
-  assert.match(description ?? "", /operationId: a fresh UUID v4/);
+  assert.match(
+    description ?? "",
+    /operationId: a fresh UUID v4 for every request, even after a refusal/,
+  );
   assert.match(
     description ?? "",
     /branch\.push takes only target\.repositoryId/,
