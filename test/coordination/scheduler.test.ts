@@ -1486,6 +1486,18 @@ test("resumed work is admitted before unstarted work, oldest first within each g
       "Resumed assignment",
       started.workId,
     );
+    // A worker newly delegated on a task underway is resumed work too.
+    execute(service, {
+      type: "assignment.create",
+      actor: "agent",
+      projectId,
+      taskId: started.taskId,
+      assignmentId: randomUUID(),
+      profileId,
+      brief: "Delegated assignment",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
     pending.push(
       service.submit(
         "direct-resume",
@@ -1496,18 +1508,23 @@ test("resumed work is admitted before unstarted work, oldest first within each g
     );
     await waitForState(service, "direct-resume", "capacity-waiting");
 
-    for (let turn = 3; turn <= 7; turn++) await finishLatest(turn);
-    await finishLatest(8);
+    for (let turn = 3; turn <= 8; turn++) await finishLatest(turn);
+    await finishLatest(9);
     const order = [
       "Resumed assignment",
+      "Delegated assignment",
       "Resumed direct",
       "Unstarted assignment",
       "New direct one",
       "New direct two",
     ].map((marker) =>
-      runtime.prompts.findIndex((prompt) => prompt.includes(marker)),
+      runtime.prompts.findIndex((prompt) => prompt.startsWith(marker)),
     );
-    assert.deepEqual(order, [3, 4, 5, 6, 7], JSON.stringify(runtime.prompts));
+    assert.deepEqual(
+      order,
+      [3, 4, 5, 6, 7, 8],
+      JSON.stringify(runtime.prompts),
+    );
   } finally {
     for (const release of gates) release();
     await Promise.allSettled(pending);

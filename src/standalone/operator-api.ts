@@ -2979,6 +2979,15 @@ export class OperatorApi {
           ? `${c.globalUsage} of ${c.globalLimit} turns running, ${held} held for lead turns`
           : null;
   }
+  /** The limit admission recorded for the task's waiting turn, which names the limit exactly. */
+  private recordedCapacityWait(taskId: string) {
+    const prefix = "Capacity waiting: ";
+    const reason = this.service
+      .turnRequestsForTask(taskId)
+      .find((r) => r.state === "queued" && r.reason?.startsWith(prefix))
+      ?.reason?.slice(prefix.length);
+    return reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : null;
+  }
   /** Set while the power supervisor holds admission; null when held by nothing or unsupervised. */
   private powerHold() {
     const status = this.service.powerStatus();
@@ -3047,7 +3056,8 @@ export class OperatorApi {
         })),
       capacity:
         admission.eligible && waiting
-          ? this.capacityWait(projectId, true)
+          ? (this.recordedCapacityWait(taskId) ??
+            this.capacityWait(projectId, true))
           : null,
       powerHold: this.powerHold(),
       repositoryAccessRevoked: this.service.repositoryAccessRevoked(taskId),

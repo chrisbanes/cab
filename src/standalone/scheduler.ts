@@ -246,9 +246,10 @@ export class SchedulerStore {
   }
 
   /**
-   * Eligible queued requests, resumed work first, oldest first within each group. A request
-   * is resumed when an earlier request on its assignment, or the request it continues, was
-   * admitted: answers, results, follow-ups, operator messages and retries.
+   * Eligible queued requests, resumed work first, oldest first within each group. Work is
+   * resumed when its task already had a turn admitted (answers, results, follow-ups,
+   * operator messages, retries and newly delegated work on a task underway), or when it
+   * continues admitted direct work. A drafting run never counts as resumed.
    */
   queued(now = Date.now()): TurnRequest[] {
     const admitted = this.db
@@ -259,10 +260,10 @@ export class SchedulerStore {
       ? "OR EXISTS (SELECT 1 FROM execution_retry_generations g WHERE g.workId = p.workId)"
       : "";
     return this.db
-      .prepare(`SELECT r.*, EXISTS (
+      .prepare(`SELECT r.*, r.kind != 'drafting' AND EXISTS (
           SELECT 1 FROM turn_requests p
-          WHERE p.sequence < r.sequence
-            AND ((r.assignmentId IS NOT NULL AND p.assignmentId = r.assignmentId)
+          WHERE p.sequence < r.sequence AND p.kind != 'drafting'
+            AND ((r.taskId IS NOT NULL AND p.taskId = r.taskId)
               OR p.workId = r.previousWorkId)
             AND (p.state IN ('active','completed') ${admitted})
         ) AS resumed
@@ -611,21 +612,23 @@ export class TurnScheduler {
       let reserved = this.store.reservedCapacity();
       for (const request of this.store.queued(this.now())) {
         if (this.stopped) return;
-        // Freed capacity or a wake means admission may have changed: start again from
-        // the highest-priority request so a freed slot never goes to a later one. A
-        // turn releases its slot before its wake arrives, so watch the count too; an
-        // attempt that sees a slot freed mid-way gives way instead of taking it.
-        // shortcut: changes arriving faster than one attempt delay requests further down
-        // the queue; fine for a few active turns, track skipped requests if that changes.
-        if (this.store.reservedCapacity() < reserved) this.wakeAgain = true;
-        if (this.wakeAgain) break;
+        // A freed slot starts the pass again from the highest-priority request, so it
+        // never goes to a later one; an attempt that sees a slot freed while it awaited
+        // gives way instead of taking it. Other wakes let the pass finish, then rerun it.
+        if (this.store.reservedCapacity() < reserved) {
+          this.wakeAgain = true;
+          break;
+        }
         const before = reserved;
         await this.attempt(
           request,
           () => this.store.reservedCapacity() < before,
         );
         reserved = this.store.reservedCapacity();
-        if (reserved < before) this.wakeAgain = true;
+        if (reserved < before) {
+          this.wakeAgain = true;
+          break;
+        }
       }
     }
   }

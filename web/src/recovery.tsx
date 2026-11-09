@@ -389,7 +389,10 @@ export function RuntimeSettings(p: SettingsProps) {
                         type: "capacity.configure",
                         key: d.values.key,
                         globalLimit: Number(d.values.globalLimit),
-                        minimumLeadSlots: Number(d.values.minimumLeadSlots),
+                        // An empty field is refused, not saved as zero.
+                        minimumLeadSlots: Number(
+                          d.values.minimumLeadSlots || Number.NaN,
+                        ),
                         agentOverrides: Object.fromEntries(
                           data.agents.map((r) => [
                             r.agent.id,

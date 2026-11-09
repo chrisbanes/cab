@@ -5281,16 +5281,18 @@ export class ExecutionState {
         .prepare("PRAGMA table_info(execution_capacity_reservations)")
         .all() as Array<{ name: string }>
     ).map(({ name }) => name);
-    if (!columns.includes("lead")) {
-      this.db.exec(`ALTER TABLE execution_capacity_reservations
-        ADD COLUMN lead INTEGER NOT NULL DEFAULT 0 CHECK(lead IN (0,1))`);
-      this.db.exec(
-        "ALTER TABLE execution_capacity_reservations ADD COLUMN agentId TEXT",
-      );
-      this.db.exec(`UPDATE execution_capacity_reservations
-        SET lead = ${this.capacityLeadSql("execution_capacity_reservations.workId")},
-          agentId = ${this.capacityAgentSql("execution_capacity_reservations.workId")}`);
-    }
+    // One transaction, so an interrupted upgrade never leaves one column or unclassified rows.
+    if (!columns.includes("lead"))
+      transaction(this.db, () => {
+        this.db.exec(`ALTER TABLE execution_capacity_reservations
+          ADD COLUMN lead INTEGER NOT NULL DEFAULT 0 CHECK(lead IN (0,1))`);
+        this.db.exec(
+          "ALTER TABLE execution_capacity_reservations ADD COLUMN agentId TEXT",
+        );
+        this.db.exec(`UPDATE execution_capacity_reservations
+          SET lead = ${this.capacityLeadSql("execution_capacity_reservations.workId")},
+            agentId = ${this.capacityAgentSql("execution_capacity_reservations.workId")}`);
+      });
     migrateCapacityLimits(this.db);
   }
 

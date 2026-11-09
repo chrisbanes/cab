@@ -557,6 +557,7 @@ const capacityGet: BrowseCommand = {
       projectId: p.project.id,
       name: p.project.name,
       limit: p.limit,
+      override: p.override,
       usage: p.usage,
     }));
     const agents = r.agents.map((a) => ({

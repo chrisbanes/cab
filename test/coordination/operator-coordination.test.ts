@@ -849,8 +849,33 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   const answerReceipt = await api.execute(answer);
   const decisionReceipt = await api.execute(decision);
   runtime.complete(leadIntent.turnId);
-  // Resumed work goes first: the lead's continuation takes the task's writer before
-  // the worker that has not started.
+  await until(() =>
+    service
+      .list()
+      .some(
+        (intent) =>
+          intent.workId === workerRequest.workId && intent.state === "running",
+      ),
+  );
+  const workerIntent = service
+    .list()
+    .find((intent) => intent.workId === workerRequest.workId);
+  assert.ok(workerIntent?.threadId && workerIntent.turnId);
+
+  const report = await runtime.callTool({
+    threadId: workerIntent.threadId,
+    turnId: workerIntent.turnId,
+    callId: "operator-result",
+    tool: "cab_report_result",
+    arguments: { summary: "Reviewed parser output." },
+  });
+  assert.equal(report.success, true, report.text);
+  runtime.complete(workerIntent.turnId);
+  await until(
+    () =>
+      service.coordinationView().readTask(taskId).unresolvedResults.length ===
+      1,
+  );
   await until(() =>
     service
       .list()
@@ -891,33 +916,6 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   });
   assert.equal(leadReport.success, true, leadReport.text);
   runtime.complete(leadContinuation.turnId);
-  await until(() =>
-    service
-      .list()
-      .some(
-        (intent) =>
-          intent.workId === workerRequest.workId && intent.state === "running",
-      ),
-  );
-  const workerIntent = service
-    .list()
-    .find((intent) => intent.workId === workerRequest.workId);
-  assert.ok(workerIntent?.threadId && workerIntent.turnId);
-
-  const report = await runtime.callTool({
-    threadId: workerIntent.threadId,
-    turnId: workerIntent.turnId,
-    callId: "operator-result",
-    tool: "cab_report_result",
-    arguments: { summary: "Reviewed parser output." },
-  });
-  assert.equal(report.success, true, report.text);
-  runtime.complete(workerIntent.turnId);
-  await until(
-    () =>
-      service.coordinationView().readTask(taskId).unresolvedResults.length ===
-      1,
-  );
   await assert.rejects(
     api.execute({ ...answer, key: randomUUID() }),
     (error) => error instanceof OperatorApiError,
