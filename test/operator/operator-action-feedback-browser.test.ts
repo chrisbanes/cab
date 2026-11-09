@@ -20,6 +20,7 @@ import {
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { refreshed } from "../fixtures/browser-waits.js";
+import { refresh } from "../fixtures/project-config-browser.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-action-feedback-browser");
@@ -228,6 +229,10 @@ for (const [device, viewport] of [
         1,
       );
       if (surface.name === "Routing") {
+        await refresh(page);
+        const newer = Number(
+          fixture.f.service.domain().routing(fixture.ids.relay).version,
+        );
         await warning.getByRole("button", { name: "Review changes" }).click();
         assert.equal(await routing.isChecked(), false);
         assert.equal(
@@ -236,10 +241,13 @@ for (const [device, viewport] of [
         );
         const reviewed = commandBody(page);
         await page.getByRole("button", { name: surface.save }).click();
-        assert.equal(
-          ((await reviewed) as { key: string; enabled: boolean }).enabled,
-          false,
-        );
+        const retried = (await reviewed) as {
+          key: string;
+          enabled: boolean;
+          expectedVersion: number;
+        };
+        assert.equal(retried.enabled, false);
+        assert.equal(retried.expectedVersion, newer);
         await savedOutcome(page, /^Saved\./);
       }
       if (device === "phone") await noPageOverflow(page);
