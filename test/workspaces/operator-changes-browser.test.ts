@@ -462,16 +462,23 @@ test("workspace-unavailable hides a stored empty snapshot and refreshes only whe
       url.searchParams.get("refresh") === "true"
     );
   });
+  const refreshedExactRead = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.get("target") === "uncommitted" &&
+      url.searchParams.has("comparisonId")
+    );
+  });
   await changes.getByRole("button", { name: "Refresh comparison" }).click();
   assert.equal((await refreshed).status(), 200);
-  await changes
-    .getByText(
-      "Not read yet: workspace was unavailable. Refresh to read it again.",
-      {
-        exact: true,
-      },
-    )
-    .waitFor();
+  assert.equal((await refreshedExactRead).status(), 200);
+  await page.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Refresh comparison",
+    );
+    return button !== undefined && !button.disabled;
+  });
   assert.equal(
     interceptedReads,
     4,
@@ -1972,16 +1979,6 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
   await captureBrowserEvidence(page, "1366-finished-last-turn-identity");
 
-  const requestsBeforeStaleCachedTargets = comparisonRequests.length;
-  for (const targetName of ["branch", "uncommitted"]) {
-    await comparisonTargetControl.selectOption(targetName);
-    await changes.getByText(/^Stale\./).waitFor();
-    assert.equal(comparisonRequests.length, requestsBeforeStaleCachedTargets);
-  }
-  assert.equal(
-    await changes.getByText(initialBranchId, { exact: true }).count(),
-    1,
-  );
   const uncommittedId = comparisonRequests
     .map((request) => new URL(request))
     .find(
@@ -1991,10 +1988,20 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
     )
     ?.searchParams.get("comparisonId");
   assert.ok(uncommittedId);
-  assert.equal(
-    await changes.getByText(uncommittedId, { exact: true }).count(),
-    1,
-  );
+  const requestsBeforeStaleCachedTargets = comparisonRequests.length;
+  for (const targetName of ["branch", "uncommitted"]) {
+    await comparisonTargetControl.selectOption(targetName);
+    await changes.getByText(/^Stale\./).waitFor();
+    assert.equal(comparisonRequests.length, requestsBeforeStaleCachedTargets);
+    assert.equal(
+      await changes
+        .getByText(targetName === "branch" ? initialBranchId : uncommittedId, {
+          exact: true,
+        })
+        .count(),
+      1,
+    );
+  }
   await comparisonTargetControl.selectOption("last-turn");
 
   // An incomplete finished capture discloses its gap instead of looking complete.
