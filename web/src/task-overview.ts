@@ -150,31 +150,6 @@ export const taskNextActor = (
   data: Pick<Data, "task" | "execution" | "admission" | "source" | "attention">,
 ) => nextActor(data.attention.codes, taskColumnOf(data));
 
-/** The one task-level reason worth pinning above the conversation. */
-export function taskAttentionPinned(
-  data: Pick<
-    Data,
-    | "task"
-    | "execution"
-    | "admission"
-    | "attention"
-    | "questions"
-    | "approvals"
-    | "source"
-  >,
-) {
-  return (
-    data.questions.some((q) => q.status === "open") ||
-    data.approvals.some((q) => q.status === "open") ||
-    taskNextActor(data).operator ||
-    data.execution.state === "stopping" ||
-    data.execution.state === "uncertain" ||
-    data.execution.holds.stop ||
-    data.execution.holds.uncertainty ||
-    data.source?.hold?.active === true
-  );
-}
-
 /** Strip repeats the state badge and shows at most one distinct reason. */
 export function taskStripReason(data: Omit<StatusData, "lead">) {
   const readiness = taskReadiness(data),

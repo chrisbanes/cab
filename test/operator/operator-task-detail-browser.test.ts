@@ -807,6 +807,9 @@ for (const [label, viewport] of [
         json.data.execution.holds.writer = !uncertain;
         json.data.execution.holds.capacity = !uncertain;
         json.data.execution.holds.uncertainty = uncertain;
+        json.data.waits = uncertain
+          ? []
+          : [{ code: "capacity", fix: null, links: [] }];
         json.data.attention.codes = uncertain ? ["execution-uncertain"] : [];
         json.data.attention.count = json.data.attention.codes.length;
         await route.fulfill({ response, json });
@@ -818,15 +821,64 @@ for (const [label, viewport] of [
     assert.equal(await page.getByText("Holds · 0", { exact: true }).count(), 1);
     await taskTab(page, "Execution").click();
     await page
-      .getByText(/Writer|Capacity/)
-      .first()
+      .locator("#execution")
+      .getByText("Writer ownership", { exact: true })
+      .waitFor();
+    await page
+      .locator("#execution")
+      .getByText("Capacity", { exact: true })
       .waitFor();
     uncertain = true;
     await page.reload();
+    await openTaskTab(page, "Overview");
     const decisions = page.locator("#decisions[data-pinned]");
     await decisions.waitFor();
+    const inspectorFold = page.locator(".task-inspector .inspector-fold");
+    if (!(await inspectorFold.getAttribute("open")))
+      await inspectorFold.locator(":scope > summary").click();
     await page.getByText("Holds · 1", { exact: true }).waitFor();
+    await page
+      .locator('aside[aria-label="Task context"]')
+      .getByText("Uncertainty", { exact: true })
+      .waitFor();
+    await decisions.getByText("Uncertainty", { exact: true }).waitFor();
     await captureBrowserEvidence(page, `task-attention-${label}`);
+  });
+
+for (const [label, viewport] of [
+  ["desktop", { width: 1366, height: 900 }],
+  ["phone", { width: 390, height: 844 }],
+] as const)
+  test(`an open question pins the card without repeating normal live capacity/writer holds (${label})`, async (_t, j) => {
+    const fixture = await openFixture(j);
+    const a = await seedOwnQuestion(fixture.f);
+    const { web, page } = await fixture.launch(viewport);
+    await page.route(
+      (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+      async (route) => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.data.execution.state = "running";
+        json.data.execution.holds.writer = true;
+        json.data.execution.holds.capacity = true;
+        json.data.waits = [{ code: "capacity", fix: null, links: [] }];
+        await route.fulfill({ response, json });
+      },
+    );
+    await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+    const decisions = page.locator("#decisions[data-pinned]");
+    await decisions.waitFor();
+    assert.equal(
+      await decisions.getByText(/Writer ownership|Capacity/).count(),
+      0,
+    );
+    const inspector = page.locator('aside[aria-label="Task context"]');
+    const inspectorFold = inspector.locator(".inspector-fold");
+    if (!(await inspectorFold.getAttribute("open")))
+      await inspectorFold.locator(":scope > summary").click();
+    await inspector.getByText("Holds · 1", { exact: true }).waitFor();
+    await inspector.getByText("Question pending", { exact: false }).waitFor();
+    await captureBrowserEvidence(page, `task-question-running-${label}`);
   });
 
 for (const engine of [

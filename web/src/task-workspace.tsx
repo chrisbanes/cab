@@ -55,7 +55,6 @@ import {
   taskSchema,
   type Workspace,
 } from "../../src/operator/contracts.js";
-import { holdLines } from "../../src/operator/wait-reasons.js";
 import type { CommandState, OperatorClient } from "./api.js";
 import {
   ActionLink,
@@ -138,7 +137,7 @@ import {
   type TimelineEntry,
   type TimelineWindow,
 } from "./task-conversation-model.js";
-import { holdNoticesBesideRequests } from "./inbox-presentation.js";
+import { taskAttentionProjection } from "./inbox-presentation.js";
 import {
   type TaskHeaderReport,
   TaskStrip,
@@ -160,7 +159,6 @@ import {
   criterionRows,
   deliveryApplies,
   taskNextActor,
-  taskAttentionPinned,
   trackerName,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
@@ -1579,7 +1577,6 @@ export function TaskWorkspace({
       (q) => q.status === "open",
     ),
     nextActor = taskNextActor(data),
-    attentionPinned = taskAttentionPinned(data),
     attentionCollapsed =
       (openRequests.length > 0 || nextActor.operator) &&
       state.attentionCollapsed &&
@@ -1590,6 +1587,27 @@ export function TaskWorkspace({
     deciding = inView?.kind === "approval" ? inView.interactionId : null,
     // Any status: a decided approval stays in view, read only, until the operator leaves it.
     reviewing = data.approvals.find((a) => a.interactionId === requestId);
+  const attention = taskAttentionProjection(
+      data,
+      (inView?.kind ??
+        (openRequests.some((q) => q.kind === "approval")
+          ? "approval"
+          : "question")) === "approval"
+        ? "approve"
+        : "answer",
+      deciding,
+    ),
+    retainedAttention = Boolean(
+      (requestId &&
+        [...data.questions, ...data.approvals].some(
+          (request) => request.interactionId === requestId,
+        )) ||
+        (state.inlineAnswer &&
+          !openRequests.some((q) => q.interactionId === state.inlineAnswer)) ||
+        startedAgain === taskId ||
+        resumedSource?.taskId === taskId,
+    ),
+    attentionPinned = attention.pinned || retainedAttention;
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -2388,6 +2406,13 @@ export function TaskWorkspace({
             onConflict={refreshAll}
           />
         ))}
+        {attention.actions
+          .filter((item) => item.id === "execution-stop")
+          .map((item) => (
+            <p key={item.id} className="metadata">
+              {item.title}
+            </p>
+          ))}
         {nextActor.code === "completion-rejected" && (
           <div className="decision">
             <p>
@@ -2439,21 +2464,7 @@ export function TaskWorkspace({
           )}
         {/* The holds the open requests, the selected one included, do not clear: once, in
           the Inbox's wording. */}
-        {openRequests.length > 0 && (
-          <QuestionHolds
-            holds={holdNoticesBesideRequests(
-              data,
-              // The selected request's action names the wording; otherwise any approval.
-              (inView?.kind ??
-                (openRequests.some((q) => q.kind === "approval")
-                  ? "approval"
-                  : "question")) === "approval"
-                ? "approve"
-                : "answer",
-              deciding,
-            )}
-          />
-        )}
+        {openRequests.length > 0 && <QuestionHolds holds={attention.notices} />}
         {!nextActor.operator &&
           !data.source?.hold?.active &&
           !data.completionRequests.some((r) => r.status === "pending") &&
@@ -2464,7 +2475,7 @@ export function TaskWorkspace({
         {/* The merged approval wait is left out: the open approvals are rows above, and the
           hold line names the others when one is selected. */}
         <WaitReasons
-          waits={data.waits.filter((wait) => wait.code !== "approval")}
+          waits={attention.waits.filter((wait) => wait.code !== "approval")}
           taskId={taskId}
           projectId={data.task.projectId}
           client={client}
@@ -2472,7 +2483,7 @@ export function TaskWorkspace({
           drafts={drafts}
           workspace={workspace ?? null}
           onChanged={refreshAll}
-          holds={holdLines(data.execution.holds, data.taskHold)}
+          holds={attention.executionHolds}
           executionHref={`/tasks/${taskId}?section=execution`}
           assignments={data.assignments}
         />

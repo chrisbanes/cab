@@ -10,6 +10,7 @@ import {
   kindLabels,
   nextAttention,
 } from "../../src/operator/attention.js";
+import { holdLines } from "../../src/operator/wait-reasons.js";
 import {
   retriesExhausted,
   runtimeSettingsAction,
@@ -240,6 +241,126 @@ export function holdNoticesBesideRequests(
   return holdNotices(task, action, deciding).filter(
     (notice) => notice.id !== "approval" || deciding !== null,
   );
+}
+
+type TaskAttentionRow = {
+  id: string;
+  title: string;
+  kind: "request" | "hold" | "execution" | "action";
+};
+
+/** One projection feeds the pinned card, inspector count and inspector rows. */
+export function taskAttentionProjection(
+  task: TaskRead["data"],
+  action: "approve" | "answer",
+  deciding: string | null,
+) {
+  const requests = [...task.approvals, ...task.questions].filter(
+      (request) => request.status === "open",
+    ),
+    normalRunning =
+      task.execution.state === "running" &&
+      !task.execution.holds.stop &&
+      !task.execution.holds.uncertainty,
+    waits = task.waits.filter(
+      (wait) => !(normalRunning && wait.code === "capacity"),
+    ),
+    noticeTask = { ...task, waits },
+    notices = holdNoticesBesideRequests(noticeTask, action, deciding),
+    executionHolds = holdLines(
+      task.execution.holds,
+      task.taskHold ?? (task.execution.holds.task ? { reason: null } : null),
+    )
+      .filter(
+        (hold) =>
+          !normalRunning ||
+          (hold.kind !== "writer" && hold.kind !== "capacity"),
+      )
+      .filter((hold) => !notices.some((notice) => notice.id === hold.kind)),
+    attentionCodes = task.attention.codes.filter(
+      (code) =>
+        attentionNext[code].operator &&
+        code !== "question" &&
+        code !== "approval",
+    ),
+    actions: TaskAttentionRow[] = [];
+
+  if (
+    (task.execution.state === "stopping" || task.execution.holds.stop) &&
+    !executionHolds.some((hold) => hold.kind === "stop")
+  )
+    actions.push({
+      id: "execution-stop",
+      title: "Stop requested; effects may continue",
+      kind: "action",
+    });
+  if (
+    (task.execution.state === "uncertain" ||
+      task.execution.holds.uncertainty ||
+      attentionCodes.includes("execution-uncertain")) &&
+    !executionHolds.some((hold) => hold.kind === "uncertainty")
+  )
+    actions.push({
+      id: "execution-uncertain",
+      title: attentionNext["execution-uncertain"].reason,
+      kind: "action",
+    });
+  if (
+    task.source?.hold?.active &&
+    !notices.some((notice) => notice.id === "source-held")
+  )
+    actions.push({
+      id: "source-held",
+      title: "Source hold is active",
+      kind: "action",
+    });
+  for (const code of attentionCodes)
+    if (
+      code !== "execution-uncertain" ||
+      !actions.some((item) => item.id === "execution-uncertain")
+    )
+      actions.push({
+        id: code,
+        title: attentionNext[code].reason,
+        kind: "action",
+      });
+  if (task.completionRequests.some((request) => request.status === "pending"))
+    actions.push({
+      id: "completion-pending",
+      title: "Completion requested",
+      kind: "action",
+    });
+
+  const pinned = Boolean(
+    requests.length ||
+      actions.length ||
+      executionHolds.length ||
+      notices.some((notice) => notice.id === "source-held"),
+  );
+  const rows: TaskAttentionRow[] = pinned
+    ? [
+        ...requests.map((request) => ({
+          id: `request:${request.interactionId}`,
+          title: `${request.kind === "approval" ? "Approval" : "Question"} pending`,
+          kind: "request" as const,
+        })),
+        ...notices.map((notice) => ({
+          id: `hold:${notice.id}`,
+          title: notice.title,
+          kind: "hold" as const,
+        })),
+        ...executionHolds.map((hold) => ({
+          id: `execution:${hold.kind}`,
+          title: hold.label,
+          kind: "execution" as const,
+        })),
+        ...actions.filter(
+          (actionItem) =>
+            !notices.some((notice) => notice.id === actionItem.id),
+        ),
+      ]
+    : [];
+  return { pinned, requests, waits, notices, executionHolds, actions, rows };
 }
 
 /**
