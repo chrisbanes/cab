@@ -16,6 +16,11 @@ import {
   localListeningLimit,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  claudeSkipSandboxLine,
+  codexSkipSandboxLine,
+  skipSandboxRiskLines,
+} from "../../src/operator/skip-sandbox-copy.js";
+import {
   executionSummary,
   failureNotice,
   harnessNote,
@@ -400,11 +405,47 @@ test("both harnesses' disclosures name the writable Git paths and their limits",
   }
 });
 
+test("both harnesses' disclosures state the skip-sandbox grant and risks within the disclosure caps", () => {
+  const claude = claudePolicyDisclosure(
+    {
+      writableRoots: ["/w", "/tmp/ens-0123"],
+      sharedWriteRoots: [],
+      network: "denied",
+      fileToolConfinement: "hook",
+      limits: [...claudePolicyLimits],
+    },
+    "/w",
+  );
+  const codex = codexPolicyDisclosure();
+  assert.match(
+    codexSkipSandboxLine,
+    /dangerFullAccess.*approval policy stays never/,
+  );
+  assert.match(claudeSkipSandboxLine, /sandbox disabled/);
+  assert.ok(claude.lines.includes(claudeSkipSandboxLine));
+  assert.ok(codex.lines.includes(codexSkipSandboxLine));
+  for (const disclosure of [claude, codex]) {
+    for (const risk of skipSandboxRiskLines)
+      assert.ok(disclosure.lines.includes(risk));
+    assert.deepEqual(policyDisclosureSchema.parse(disclosure), disclosure);
+  }
+  const risks = skipSandboxRiskLines.join(" ");
+  for (const word of [
+    /full filesystem, process, network and credential access/,
+    /issue and pull request bodies/,
+    /edit-tool confinement.*not a boundary/,
+    /outlive the turn.*cab does not clean them up/,
+    /environment scrub.*temporary directory confinement.*Seatbelt self-test/,
+    /Only macOS is qualified/,
+  ])
+    assert.match(risks, word);
+});
+
 test("both harnesses' disclosures state local listening within the disclosure caps", () => {
   const claude = claudePolicyDisclosure(
     {
       writableRoots: ["/w", "/tmp/ens-0123"],
-      sharedWriteRoots: ["/tmp/shared"],
+      sharedWriteRoots: [],
       network: "denied",
       fileToolConfinement: "hook",
       limits: [...claudePolicyLimits],

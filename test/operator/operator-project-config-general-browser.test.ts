@@ -2159,6 +2159,56 @@ test("local listening is a switch with its disclosure that saves as a versioned 
   assert.equal(d.localListening(ids.atlas), false);
 });
 
+test("skip sandbox asks for confirmation when turned on and saves off without one", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const skip = page.getByRole("switch", { name: "Skip sandbox (dangerous)" });
+  await skip.waitFor();
+  assert.equal(await skip.isChecked(), false);
+  await page.getByText("Skip sandbox is disabled for this project.").waitFor();
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  const dialog = page.getByRole("alertdialog");
+
+  // Cancel keeps the draft and sends nothing.
+  await skip.click();
+  await changes(page).getByText("Skip sandbox enabled").waitFor();
+  await save.click();
+  await dialog
+    .getByText(/full filesystem, process, network and credential access/)
+    .waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(d.dangerouslySkipSandbox(ids.atlas), false);
+  assert.equal(await skip.isChecked(), true);
+
+  // Confirm saves it on.
+  await save.click();
+  const sent = commandBody(page);
+  await dialog.getByRole("button", { name: "Skip sandbox" }).click();
+  const body = await sent;
+  assert.equal(body.type, "project.configure");
+  assert.equal(body.dangerouslySkipSandbox, true);
+  await savedOutcome(page);
+  assert.equal(d.dangerouslySkipSandbox(ids.atlas), true);
+  await page.getByText("Skip sandbox is enabled for this project").waitFor();
+  await page
+    .getByText(/Superseded while skipping the sandbox/)
+    .first()
+    .waitFor();
+
+  // Turning it off saves at once.
+  await skip.click();
+  const back = commandBody(page);
+  await save.click();
+  assert.equal((await back).dangerouslySkipSandbox, false);
+  assert.equal(await dialog.count(), 0);
+  await savedOutcome(page);
+  assert.equal(d.dangerouslySkipSandbox(ids.atlas), false);
+});
+
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
