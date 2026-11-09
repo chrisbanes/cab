@@ -271,6 +271,7 @@ async function setup() {
   await service.configureCapacity({
     key: randomUUID(),
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   });
   progress("task-workspace-provisioning");

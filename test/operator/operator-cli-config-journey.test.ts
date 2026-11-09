@@ -470,6 +470,7 @@ test("configuration journey through the CLI and the shared service", async (t) =
     type: "capacity.configure",
     key: randomUUID(),
     globalLimit: 3,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   assert.equal(capacity.status, 200);

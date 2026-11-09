@@ -24,13 +24,15 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
     .waitFor();
   assert.equal(await trail(page), "Settings / Runtime");
   await page
-    .getByText(/\d+ of \d+ active turns in use; projects default to 2\./)
+    .getByText(
+      /\d+ of \d+ active turns in use; \d+ lead turns? running, with \d+ of the global slots held for lead turns\./,
+    )
     .waitFor();
   const save = page.getByRole("button", { name: "Save capacity", exact: true });
   assert.equal(await save.isDisabled(), true);
   await page.getByLabel("Set capacity override for Relay").waitFor();
   await page
-    .getByText("Usage 1 / effective limit 2 · Project paused", { exact: false })
+    .getByText("Usage 1 · No project limit · Project paused", { exact: false })
     .waitFor();
   // Wait for the runtime rows too, so the guard does not run before their badges exist.
   await page.getByText("Available", { exact: true }).first().waitFor();
@@ -46,10 +48,13 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
   const global = page.getByLabel("Global active-turn cap", { exact: true });
   const before = await global.inputValue();
   await global.fill("1");
-  await page
-    .getByRole("region", { name: "Changes to save" })
-    .getByText(`Global active-turn cap: ${before} → 1`)
-    .waitFor();
+  // Held lead slots must stay below the global cap.
+  const lead = page.getByLabel("Minimum lead slots", { exact: true });
+  const leadBefore = await lead.inputValue();
+  await lead.fill("0");
+  const changes = page.getByRole("region", { name: "Changes to save" });
+  await changes.getByText(`Global active-turn cap: ${before} → 1`).waitFor();
+  await changes.getByText(`Minimum lead slots: ${leadBefore} → 0`).waitFor();
   await save.click();
   await savedOutcome(page);
   await page.waitForFunction(() =>
