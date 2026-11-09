@@ -337,3 +337,42 @@ test("a queued retry of direct work is resumed work, ahead of older unstarted re
     );
   });
 });
+
+test("raising a limit while a later request awaits restarts the pass at the resumed request", async () => {
+  await withStore(async (db, store) => {
+    db.exec(`CREATE TABLE execution_retry_generations (
+        workId TEXT PRIMARY KEY, chainId TEXT NOT NULL, retryIndex INTEGER NOT NULL);
+      CREATE TABLE scheduler_capacity_limits (singleton INTEGER PRIMARY KEY, globalLimit INTEGER);
+      INSERT INTO scheduler_capacity_limits VALUES (1, 1);`);
+    store.ensure(request("unstarted"));
+    store.ensure(request("resumed"));
+    db.prepare(
+      "INSERT INTO execution_retry_generations VALUES ('resumed', 'failed', 1)",
+    ).run();
+    const attempts: string[] = [];
+    let raised = false;
+    const scheduler = new TurnScheduler(store, async ({ workId }, freed) => {
+      if (workId === "unstarted" && !raised) {
+        // The operator raises the cap while this later attempt awaits preflight.
+        raised = true;
+        await Promise.resolve();
+        db.exec("UPDATE scheduler_capacity_limits SET globalLimit = 2");
+        attempts.push(`${workId}:${freed() ? "gave way" : "admitted"}`);
+        return;
+      }
+      attempts.push(workId);
+      if (workId === "resumed" && raised) store.hold(workId, "Admitted");
+      if (workId === "unstarted" && raised) store.hold(workId, "Admitted");
+    });
+    scheduler.start();
+    await scheduler.wake();
+    await scheduler.settle();
+    assert.deepEqual(attempts, [
+      "resumed",
+      "unstarted:gave way",
+      "resumed",
+      "unstarted",
+    ]);
+    scheduler.stop();
+  });
+});

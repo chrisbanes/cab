@@ -279,14 +279,18 @@ export class SchedulerStore {
       .map((row) => this.parse(row as Record<string, unknown>));
   }
 
-  /** Active turns holding capacity; 0 before execution state exists. */
-  reservedCapacity(): number {
-    const table = this.db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_capacity_reservations'",
-      )
-      .get();
-    return table
+  /**
+   * Active turns holding capacity, and the configured limits as one comparable value; zero
+   * and empty before execution state exists.
+   */
+  capacity(): { reserved: number; limits: string } {
+    const present = (name: string) =>
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(name) !== undefined;
+    const reserved = present("execution_capacity_reservations")
       ? (
           this.db
             .prepare(
@@ -295,6 +299,24 @@ export class SchedulerStore {
             .get() as { count: number }
         ).count
       : 0;
+    const limits = [
+      ["scheduler_capacity_limits", "SELECT * FROM scheduler_capacity_limits"],
+      [
+        "scheduler_agent_capacity_limits",
+        "SELECT * FROM scheduler_agent_capacity_limits ORDER BY profileId",
+      ],
+      [
+        "scheduler_project_capacity_limits",
+        "SELECT * FROM scheduler_project_capacity_limits ORDER BY projectId",
+      ],
+    ]
+      .map(([table, sql]) =>
+        present(table as string)
+          ? JSON.stringify(this.db.prepare(sql as string).all())
+          : "",
+      )
+      .join("|");
+    return { reserved, limits };
   }
 
   nextEligibility(now = Date.now()): number | undefined {
@@ -543,7 +565,7 @@ export class TurnScheduler {
 
   constructor(
     private readonly store: SchedulerStore,
-    /** `capacityFreed` is true once a slot was released after this attempt began. */
+    /** `capacityFreed` is true once a slot was released or a limit changed after this attempt began. */
     private readonly attempt: (
       request: TurnRequest,
       capacityFreed: () => boolean,
@@ -614,26 +636,29 @@ export class TurnScheduler {
   private async drain(): Promise<void> {
     while (this.wakeAgain && !this.stopped) {
       this.wakeAgain = false;
-      let reserved = this.store.reservedCapacity();
+      let current = this.store.capacity();
+      // Admission only adds reservations, so fewer of them, or changed limits, may make
+      // room that higher-priority requests should get first.
+      const freed = (since: { reserved: number; limits: string }) => {
+        const now = this.store.capacity();
+        return now.reserved < since.reserved || now.limits !== since.limits;
+      };
       for (const request of this.store.queued(this.now())) {
         if (this.stopped) return;
-        // A freed slot starts the pass again from the highest-priority request, so it
-        // never goes to a later one; an attempt that sees a slot freed while it awaited
-        // gives way instead of taking it. Other wakes let the pass finish, then rerun it.
-        if (this.store.reservedCapacity() < reserved) {
+        // Freed room starts the pass again from the highest-priority request, so it never
+        // goes to a later one; an attempt that sees room freed while it awaited gives way
+        // instead of taking it. Other wakes let the pass finish, then rerun it.
+        if (freed(current)) {
           this.wakeAgain = true;
           break;
         }
-        const before = reserved;
-        await this.attempt(
-          request,
-          () => this.store.reservedCapacity() < before,
-        );
-        reserved = this.store.reservedCapacity();
-        if (reserved < before) {
+        const before = current;
+        await this.attempt(request, () => freed(before));
+        if (freed(before)) {
           this.wakeAgain = true;
           break;
         }
+        current = this.store.capacity();
       }
     }
   }
