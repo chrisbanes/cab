@@ -3220,8 +3220,10 @@ export class DomainStore {
           (command.diagnosticCapture ??
             this.diagnosticCaptureMode(command.projectId)) !== "enhanced"
         )
-          throw new DomainConflictError(
+          throw new DomainPolicyError(
+            "invalid-input",
             "Reasoning summaries require enhanced diagnostic capture",
+            ["reasoningSummaries"],
           );
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
         // Saving under its own name (or only changing its case) never conflicts with itself.

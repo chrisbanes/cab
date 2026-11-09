@@ -45,7 +45,7 @@ test("reasoning opt-in validates resulting capture and deletion is confirmed, ve
         configure({ diagnosticCapture: "baseline", reasoningSummaries: true }),
       )
     ).status,
-    409,
+    400,
   );
   assert.equal(version(), before);
   assert.equal(d.diagnosticCaptureMode(s.projectId), "enhanced");
@@ -58,7 +58,7 @@ test("reasoning opt-in validates resulting capture and deletion is confirmed, ve
   assert.equal(d.reasoningSummaries(s.projectId), false);
   assert.equal(
     (await post(configure({ reasoningSummaries: true }))).status,
-    409,
+    400,
   );
   assert.equal(
     (await post(configure({ diagnosticCapture: "enhanced" }))).status,
