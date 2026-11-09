@@ -1100,7 +1100,7 @@ export class DeliveryCoordinator {
       this.options.feedback?.(
         before.binding.taskId,
         `The unknown outcome of ${before.request.action.kind} (${before.operationId}) was resolved: ${after.state}. The external action uncertainty hold cleared.`,
-        `external-action-resolved:${before.operationId}`,
+        `external-action-resolved:${before.operationId}:${before.attempts}`,
       );
   }
   private recordPublicationAware(
@@ -1115,11 +1115,17 @@ export class DeliveryCoordinator {
           : observation.outsideDeleted
             ? null
             : undefined);
+    const newOutside =
+      action.kind.startsWith("branch.") &&
+      outside !== undefined &&
+      this.store.taskBranch(record.binding.taskId, action.target.repositoryId)
+        ?.outsideHeadSha !== (outside ?? absentBranchHead);
     return this.store.recordObservation(
       record.operationId,
       observation,
       (updated) => {
-        this.actionResolved(record, updated);
+        // A new outside-branch notice already wakes the lead with the settled action's cause.
+        if (!newOutside) this.actionResolved(record, updated);
         if (observation.reason === "branch-outside-cleared") {
           // The branch is back at cab's own push: only the head this recovery named is obsolete.
           const named = isRecoveryAction(action) ? action.outsideHeadSha : null;

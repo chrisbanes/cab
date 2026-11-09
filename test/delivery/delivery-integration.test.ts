@@ -1089,7 +1089,7 @@ for (const cancelled of [false, true])
           .prepare(
             "SELECT e.recipientAssignmentId,e.payload FROM coordination_inbox_events e JOIN coordination_external_delivery_notices n ON n.eventId=e.eventId WHERE n.taskId=? AND n.identity=?",
           )
-          .all(f.taskId, `external-action-resolved:${operationId}`);
+          .all(f.taskId, `external-action-resolved:${operationId}:1`);
         assert.equal(events.length, cancelled ? 0 : 1);
         if (!cancelled) {
           assert.equal(
