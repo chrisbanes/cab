@@ -1,4 +1,5 @@
 import { randomUUID } from "./browser-crypto.js";
+import { ProjectDeliveryWarning } from "./project-delivery-warning.js";
 import { visibleProjects } from "./project-lifecycle-model.js";
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
@@ -1386,6 +1387,15 @@ export function App() {
                 {pathname === "/" && (
                   <GettingStarted mode="home" {...waitProps} />
                 )}
+                {showBoard &&
+                  (projectId ? (
+                    <ProjectDeliveryWarning
+                      client={client}
+                      projectId={projectId}
+                      scope={session.csrfToken}
+                      refreshNonce={refreshNonce}
+                    />
+                  ) : null)}
                 {showBoard && (
                   <TaskViews
                     state={tasks.state}

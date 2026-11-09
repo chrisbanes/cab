@@ -129,3 +129,9 @@ Creation starts no execution; Resume is an explicit operator action; repository
 access is exactly the list in step 3; discovery imports nothing until a source is
 previewed and activated; the ready check's Preview and import now does so only on an
 explicit press.
+
+## Repair delivery setup
+
+A project with a lead agent shows a delivery warning on its overview when no repository is confirmed usable or a linked repository has unmet delivery needs. Follow **Fix delivery setup** to the Delivery tab. Each repository shows its grouped effective authority before the grant rows and lists which needs are met. Set a usable credential, restore host access or fix the repository link, and apply Open PRs or edit the missing grants. A merge level also needs Through merge completion, a permitted merge method and required checks.
+
+Grant edits immediately update the effective authority and derived level. Credential edits stay unconfirmed until Save delivery and Refresh. Return to the project overview to see resolved warnings clear; Refresh rechecks host access. Saving remains available with warnings. Code-host permissions and each PR's branch rules are still checked when acting.

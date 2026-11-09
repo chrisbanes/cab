@@ -49,6 +49,9 @@ import { Alert } from "./ui/alert.js";
 import { ghLoginCopy } from "./discovery-credential.js";
 import {
   codeHostChecksSummary,
+  repositoryDeliveryNeeds,
+  repositoryCredentialState,
+  repositoryAuthorityGroups,
   deliveryCredentialLimit,
   deliveryCredentialSummary,
   deliveryLevelLabels,
@@ -603,6 +606,24 @@ function DeliveryPolicyForm(p: TabProps) {
                   draft.grants,
                   link.repositoryId,
                 );
+                const read = requirements.find(
+                  (r) => r.repositoryId === link.repositoryId,
+                );
+                const credential = repositoryCredentialState(
+                  saved,
+                  link.codeHost,
+                  read,
+                  draft.credentialIntent,
+                );
+                const needs = link.repositoryId
+                  ? repositoryDeliveryNeeds(
+                      draft,
+                      link.repositoryId,
+                      link.codeHost,
+                      credential,
+                      read,
+                    )
+                  : [];
                 return (
                   <section
                     key={link.repositoryId ?? i}
@@ -613,6 +634,41 @@ function DeliveryPolicyForm(p: TabProps) {
                       {label(link.repositoryId) ?? "Unavailable repository"}
                     </h3>
                     <p>{deliveryLevelLabels[level]}</p>
+                    {link.repositoryId && (
+                      <section
+                        aria-label={`Effective authority for ${label(link.repositoryId)}`}
+                      >
+                        <h4 className="small-heading">Effective authority</h4>
+                        <p>
+                          Grants describe configured authority. Credentials,
+                          completion mode and runtime gates can hold an action.
+                        </p>
+                        {repositoryAuthorityGroups(
+                          draft.grants,
+                          link.repositoryId,
+                          credential,
+                          sentences,
+                        ).map(({ group, lines }) => (
+                          <div key={group}>
+                            <h5>{group}</h5>
+                            <ul>
+                              {lines.map((line) => (
+                                <li key={line}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </section>
+                    )}
+                    <ul
+                      aria-label={`Delivery needs for ${label(link.repositoryId)}`}
+                    >
+                      {needs.map((need) => (
+                        <li key={need.text}>
+                          {need.met ? "Met" : "Needs attention"}: {need.text}
+                        </li>
+                      ))}
+                    </ul>
                     {level === "merge-when-ready" &&
                       draft.mode !== "through-merge" && (
                         <p>
