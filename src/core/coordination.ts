@@ -774,6 +774,12 @@ export class CoordinationStore {
         recipientAssignmentId TEXT NOT NULL,
         eventId TEXT NOT NULL UNIQUE REFERENCES coordination_inbox_events(eventId),
         PRIMARY KEY(nodeId, generation, recipientAssignmentId)
+      );
+      CREATE TABLE IF NOT EXISTS coordination_source_hold_releases (
+        nodeId TEXT NOT NULL, generation INTEGER NOT NULL,
+        recipientAssignmentId TEXT NOT NULL,
+        eventId TEXT NOT NULL UNIQUE REFERENCES coordination_inbox_events(eventId),
+        PRIMARY KEY(nodeId, generation, recipientAssignmentId)
       );`);
       this.db.exec(taskCommentSchemaSql);
       const interactionColumns = this.db
@@ -3436,6 +3442,12 @@ export class CoordinationStore {
     const payload = JSON.stringify({
       reason: input.reason,
       disposition: "safe-stop-new-work",
+      ...(input.reason === "withdrawn" || input.reason === "readiness-lost"
+        ? {
+            guidance:
+              "Stop new work and wait. This hold clears automatically after a complete source read lists the issue again while the task is Ready.",
+          }
+        : {}),
     });
     return transaction(this.db, () => {
       const existing = this.one(
@@ -3467,6 +3479,85 @@ export class CoordinationStore {
         .prepare(
           "INSERT INTO coordination_source_hold_notices (nodeId, generation, recipientAssignmentId, eventId) VALUES (?, ?, ?, ?)",
         )
+        .run(input.nodeId, input.generation, recipient, event.eventId);
+      return event;
+    });
+  }
+
+  sourceHoldReleases(): {
+    nodeId: string;
+    generation: number;
+    taskId: string;
+    recipientAssignmentId: string;
+    reason: string;
+  }[] {
+    return this.db
+      .prepare(`SELECT notice.nodeId, notice.generation, event.taskId,
+      notice.recipientAssignmentId, released.reason
+      FROM coordination_source_hold_notices notice
+      JOIN coordination_inbox_events event ON event.eventId = notice.eventId
+      JOIN external_items item ON item.externalId = notice.nodeId AND item.taskId = event.taskId
+      JOIN source_hold_release_records released ON released.provider = item.provider
+        AND released.instance = item.instance AND released.externalId = item.externalId
+        AND released.generation = notice.generation AND released.taskId = event.taskId
+      WHERE released.reason IN ('withdrawn', 'readiness-lost')
+        AND NOT EXISTS (SELECT 1 FROM coordination_source_hold_releases released_event
+          WHERE released_event.nodeId = notice.nodeId AND released_event.generation = notice.generation
+            AND released_event.recipientAssignmentId = notice.recipientAssignmentId)
+      ORDER BY event.sequence`)
+      .all()
+      .map((row) => ({
+        nodeId: String((row as Row).nodeId),
+        generation: Number((row as Row).generation),
+        taskId: String((row as Row).taskId),
+        recipientAssignmentId: String((row as Row).recipientAssignmentId),
+        reason: String((row as Row).reason),
+      }));
+  }
+
+  ensureSourceHoldReleasedEvent(input: {
+    nodeId: string;
+    generation: number;
+    taskId: string;
+    recipientAssignmentId: string;
+    reason: string;
+  }): InboxEvent {
+    const recipient = uuid.parse(input.recipientAssignmentId);
+    const taskId = uuid.parse(input.taskId);
+    const payload = JSON.stringify({
+      reason: input.reason,
+      message: `The ${input.reason} source hold cleared after a complete read listed the issue again while it was Ready. Work may continue.`,
+    });
+    return transaction(this.db, () => {
+      const existing = this.one(
+        `SELECT event.sequence, event.eventId, event.taskId,
+        event.recipientAssignmentId, event.eventType, event.resultId, event.interactionId,
+        event.payload, event.createdAt FROM coordination_source_hold_releases released_event
+        JOIN coordination_inbox_events event ON event.eventId = released_event.eventId
+        WHERE released_event.nodeId = ? AND released_event.generation = ? AND released_event.recipientAssignmentId = ?`,
+        input.nodeId,
+        input.generation,
+        recipient,
+      );
+      if (existing) {
+        if (
+          existing.taskId !== taskId ||
+          existing.eventType !== "source-hold-released" ||
+          existing.payload !== payload
+        )
+          throw new Error("Source hold release event conflict");
+        return this.parseEvent(existing);
+      }
+      const event = this.newEvent(
+        taskId,
+        recipient,
+        "source-hold-released",
+        null,
+        payload,
+      );
+      this.db
+        .prepare(`INSERT INTO coordination_source_hold_releases
+        (nodeId, generation, recipientAssignmentId, eventId) VALUES (?, ?, ?, ?)`)
         .run(input.nodeId, input.generation, recipient, event.eventId);
       return event;
     });

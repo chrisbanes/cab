@@ -4744,6 +4744,9 @@ export class StandaloneService {
       for (const recipientAssignmentId of recipients)
         coordination.ensureSourceHoldEvent({ ...hold, recipientAssignmentId });
     }
+    for (const release of coordination.sourceHoldReleases())
+      if (leadByTask.get(release.taskId) === release.recipientAssignmentId)
+        coordination.ensureSourceHoldReleasedEvent(release);
   }
 
   routingAvailability(projectId: string): RoutingAvailability {

@@ -1303,14 +1303,40 @@ export class GitHubSourceStore {
    * for `source.review`, and a partial read never calls this.
    */
   private releaseSourceHold(taskId: string): void {
-    const released = this.db
+    const releasable = this.db
       .prepare(
-        `UPDATE source_holds SET active = 0 WHERE active = 1 AND reason IN ('withdrawn', 'readiness-lost')
-          AND (provider, instance, externalId) = (SELECT e.provider, e.instance, e.externalId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId
-            WHERE e.taskId = ? AND t.ready = 1)`,
+        `SELECT hold.provider, hold.instance, hold.externalId, hold.generation, hold.reason
+          FROM source_holds hold JOIN external_items item ON item.provider = hold.provider
+            AND item.instance = hold.instance AND item.externalId = hold.externalId
+          JOIN domain_tasks task ON task.id = item.taskId
+          WHERE item.taskId = ? AND task.ready = 1 AND hold.active = 1
+            AND hold.reason IN ('withdrawn', 'readiness-lost')`,
       )
-      .run(taskId) as { changes: number | bigint };
-    if (Number(released.changes) > 0)
+      .all(taskId) as Row[];
+    for (const hold of releasable) {
+      this.db
+        .prepare(`INSERT INTO source_hold_release_records
+          (provider, instance, externalId, generation, reason, taskId) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(provider, instance, externalId, generation) DO NOTHING`)
+        .run(
+          String(hold.provider),
+          String(hold.instance),
+          String(hold.externalId),
+          Number(hold.generation),
+          String(hold.reason),
+          taskId,
+        );
+      this.db
+        .prepare(`UPDATE source_holds SET active = 0 WHERE provider = ? AND instance = ?
+          AND externalId = ? AND generation = ? AND active = 1`)
+        .run(
+          String(hold.provider),
+          String(hold.instance),
+          String(hold.externalId),
+          Number(hold.generation),
+        );
+    }
+    if (releasable.length > 0)
       this.db
         .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
         .run(taskId);

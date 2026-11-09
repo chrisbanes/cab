@@ -1223,6 +1223,18 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "source_hold_release_records",
+      values: {
+        provider: "github",
+        instance: "github.com",
+        externalId: i.externalId,
+        generation: 1,
+        reason: "readiness-lost",
+        taskId: i.taskId,
+      },
+    },
+    {
+      shared: false,
       table: "source_dependency_observations",
       values: {
         provider: "github",
@@ -1930,6 +1942,16 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     {
       shared: false,
       table: "coordination_source_hold_notices",
+      values: {
+        nodeId: i.externalId,
+        generation: 1,
+        recipientAssignmentId: i.assignmentId,
+        eventId: i.eventId,
+      },
+    },
+    {
+      shared: false,
+      table: "coordination_source_hold_releases",
       values: {
         nodeId: i.externalId,
         generation: 1,

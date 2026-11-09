@@ -492,7 +492,11 @@ to resume, except confirmed closure from this task's own delivery and the two so
 that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
 releases nothing, and every other source hold, including closure, still needs
-the operator to resume it. External closure
+the operator to resume it. A withdrawn or readiness-lost hold notice tells the
+recipient to stop new work and wait; when a previously announced hold clears,
+one durable Inbox release event goes to the task lead and says the complete read
+listed the issue again while it was Ready. A hold created and cleared in one
+refresh emits neither event. External closure
 after import holds the task in both closed-issue modes, whatever its readiness. Under
 Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
 is complete and its execution has settled, with no writer, ambiguity or unfinished

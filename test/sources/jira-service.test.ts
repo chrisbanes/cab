@@ -718,14 +718,96 @@ test("a Jira readiness loss gives the lead one source-hold notice, and a repeat 
           .get(leadId) as { count: number }
       ).count,
     );
+  const releaseEvents = () =>
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold-released'",
+          )
+          .get(leadId) as { count: number }
+      ).count,
+    );
   f.state.issues["project = ABC"] = [
     jiraIssue(1, { status: { id: "3", name: "In Progress" } }),
   ];
   await f.api.refreshSources();
   assert.equal(stores.hold("10001")?.reason, "readiness-lost");
   assert.equal(notices(), 1);
+  const holdPayload = JSON.parse(
+    String(
+      (
+        db
+          .prepare(
+            "SELECT payload FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+          )
+          .get(leadId) as { payload: string }
+      ).payload,
+    ),
+  ) as { guidance: string };
+  assert.match(holdPayload.guidance, /Stop new work and wait/);
+  assert.match(holdPayload.guidance, /complete source read/);
+  f.state.issues["project = ABC"] = [jiraIssue(1)];
+  f.state.fail["project = ABC"] = 500;
   await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.reason, "readiness-lost");
+  assert.equal(releaseEvents(), 0);
+  delete f.state.fail["project = ABC"];
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.active, 0);
+  assert.equal(releaseEvents(), 1);
+  await f.api.refreshSources();
+  assert.equal(releaseEvents(), 1);
   assert.equal(notices(), 1);
+});
+
+test("a hold created and cleared within one complete Jira refresh emits neither event", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  const first = "project = ABC";
+  const second = "project = ABC AND fixVersion IS NOT EMPTY";
+  await f.configureJira(
+    [
+      { id: "S-1", kind: "jql", jql: first },
+      { id: "S-2", kind: "jql", jql: second },
+    ],
+    1,
+    {
+      mode: "all",
+      conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+    },
+  );
+  f.state.issues[first] = [jiraIssue(1)];
+  f.state.issues[second] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(f.service.domain().ensureLeadAssignment(taskId)?.id);
+  f.state.issues[first] = [
+    jiraIssue(1, { status: { id: "3", name: "In Progress" } }),
+  ];
+  f.state.issues[second] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.active, 0);
+  const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  try {
+    assert.equal(
+      Number(
+        (
+          db
+            .prepare(
+              "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType IN ('source-hold', 'source-hold-released')",
+            )
+            .get(leadId) as { count: number }
+        ).count,
+      ),
+      0,
+    );
+  } finally {
+    db.close();
+  }
 });
 
 test("a project without select-field conditions never hides another project's observed fields on a shared issue", async (t) => {
