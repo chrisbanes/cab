@@ -3,7 +3,8 @@
 // Two cells in fresh fixtures: dangerouslySkipSandbox off (both must fail), then on (both must
 // work). Each cell also checks the admitted value, the policy actually sent to the runtime
 // (Codex turn/start, Claude query options) and turn completion. Prints sanitised evidence JSON;
-// reads only CLAUDE_CODE_OAUTH_TOKEN (Claude), never operator data or ~/.env.
+// Claude uses the service user's native Claude Code login (cab no longer takes a token);
+// reads no secret and never operator data or ~/.env.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -41,20 +42,17 @@ if (
 }
 const codexExecutable =
   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
-const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
 const adb = join(homedir(), "Library/Android/sdk/platform-tools/adb");
 if (
-  (harness === "codex" ? !existsSync(codexExecutable) : !token) ||
+  (harness === "codex" && !existsSync(codexExecutable)) ||
   !existsSync(adb) ||
   !existsSync(join(homedir(), "Library/Android/sdk/emulator/emulator"))
 ) {
   process.stderr.write(
-    "Refusing: the approved Codex launcher or CLAUDE_CODE_OAUTH_TOKEN, or the Android SDK, is absent.\n",
+    "Refusing: the approved Codex launcher or the Android SDK is absent.\n",
   );
   process.exit(2);
 }
-const tokenVariable = "CAB_SKIP_SANDBOX_CLAUDE_TOKEN";
-delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 // The turn environment comes from this process; the emulator wait can exceed the Bash tool's
 // 2 minute default.
 process.env.BASH_DEFAULT_TIMEOUT_MS = "600000";
@@ -196,17 +194,6 @@ async function runCell(skip) {
       service
         .domain()
         .execute({ key: randomUUID(), actor: "operator", ...body });
-    if (harness === "claude") {
-      // The token enters this process only after the reference exists and the first generation stopped.
-      exec({
-        type: "claude-token.configure",
-        credentialRef: `env:${tokenVariable}`,
-      });
-      await service.stop();
-      process.env[tokenVariable] = token;
-      await service.start();
-      assert.equal(service.claudeTokenStatus().state, "available");
-    }
     const d = service.domain();
     if (!evidence.runtime.version)
       evidence.runtime =
@@ -358,7 +345,7 @@ evidence.verdict = {
 evidence.pass =
   Object.values(evidence.verdict).every(Boolean) && evidence.failure === null;
 let output = JSON.stringify(evidence, null, 2);
-for (const secret of [token, ...roots, homedir()].filter(Boolean))
+for (const secret of [...roots, homedir()].filter(Boolean))
   output = output.replaceAll(secret, secret === homedir() ? "~" : "<redacted>");
 process.stdout.write(`${output}\n`);
 process.exitCode = evidence.pass ? 0 : 1;
