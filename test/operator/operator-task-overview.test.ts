@@ -325,6 +325,28 @@ test("task strip shows one distinct reason", () => {
     } as unknown as Data),
     "waiting for capacity",
   );
+  assert.equal(
+    taskStripReason({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, writer: true, capacity: true },
+      },
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    null,
+  );
+  assert.equal(
+    taskStripReason({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, stop: true, writer: true, capacity: true },
+      },
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    "effects may continue",
+  );
 });
 
 test("stopConsequences counts unfinished delegated assignments", () => {

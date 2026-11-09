@@ -166,6 +166,14 @@ export function taskStripReason(data: Omit<StatusData, "lead">) {
   if (readiness === "Stopping; effects may continue")
     return "effects may continue";
   if (readiness === "Execution uncertain") return "ownership uncertain";
+  if (
+    data.execution.state === "running" &&
+    !data.execution.holds.stop &&
+    !data.execution.holds.uncertainty &&
+    !data.source?.hold?.active &&
+    reason === "waiting for capacity"
+  )
+    return null;
   return reason;
 }
 

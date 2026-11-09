@@ -316,8 +316,9 @@ export function taskAttentionProjection(
     });
   for (const code of attentionCodes)
     if (
-      code !== "execution-uncertain" ||
-      !actions.some((item) => item.id === "execution-uncertain")
+      (code !== "execution-uncertain" ||
+        !executionHolds.some((hold) => hold.kind === "uncertainty")) &&
+      !actions.some((item) => item.id === code)
     )
       actions.push({
         id: code,
@@ -335,7 +336,11 @@ export function taskAttentionProjection(
     requests.length ||
       actions.length ||
       executionHolds.length ||
-      notices.some((notice) => notice.id === "source-held"),
+      notices.some(
+        (notice) =>
+          notice.id === "source-held" ||
+          notice.id === "assignment-recovery-unresolved",
+      ),
   );
   const rows: TaskAttentionRow[] = pinned
     ? [
