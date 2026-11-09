@@ -29,6 +29,7 @@ import {
   CommandNetworkLine,
   LocalListeningLine,
   PolicyDisclosure,
+  SkipSandboxLine,
 } from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
@@ -1679,6 +1680,7 @@ export function TaskWorkspace({
           {execution.harness === "claude" && (
             <LocalListeningLine generation={a.executionGeneration} />
           )}
+          <SkipSandboxLine generation={a.executionGeneration} />
           <PolicyDisclosure harness={execution.harness} workspace={workspace} />
         </details>
         <ApplyInstructions

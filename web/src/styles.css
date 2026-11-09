@@ -1045,12 +1045,15 @@ nav {
   padding: 10px 0;
   overflow-wrap: anywhere;
 }
+.changes-workbench-host {
+  min-width: 0;
+}
+/* Stacked: a card too narrow to put the files beside the diff. */
 .changes-workbench {
   display: grid;
-  grid-template-columns: 238px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   min-width: 0;
-  min-height: 360px;
 }
 .changes-rail,
 .changes-reading-area {
@@ -1060,48 +1063,138 @@ nav {
   background: var(--color-card);
 }
 .changes-rail {
+  display: flex;
+  flex-direction: column;
   max-height: 75vh;
-  overflow: auto;
-  padding: 12px 8px;
+  padding: 12px 0 4px;
 }
-.changes-rail h5 {
-  margin: 0 8px 8px;
+/* Files and diff share one card; the divider is the only separation. */
+.changes-workbench-split {
+  min-height: 360px;
+  max-height: 75vh;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-card);
+  overflow: hidden;
 }
-.changes-entry {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
+.changes-workbench-split .changes-tree {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
+.changes-workbench-split .changes-rail,
+.changes-workbench-split .changes-reading-area {
+  height: 100%;
+  max-height: none;
   border: 0;
-  border-bottom: 1px solid var(--color-border);
-  padding: 4px 8px;
+  border-radius: 0;
+}
+/* A 1px hairline whose hit area extends either side. */
+.changes-workbench-handle {
+  position: relative;
+  width: 1px;
+  background: var(--color-border);
+  outline: none;
+}
+.changes-workbench-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+  z-index: 2;
+}
+.changes-workbench-handle:hover,
+.changes-workbench-handle[data-separator="active"] {
+  background: var(--line-strong);
+}
+.changes-workbench-handle:focus-visible {
+  background: var(--color-ring);
+  box-shadow: 0 0 0 1px var(--color-ring);
+}
+.changes-files-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-inline-end: 4px;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
-  color: inherit;
-  text-align: left;
+  color: var(--muted-foreground);
   cursor: pointer;
 }
-.changes-entry:hover,
-.changes-entry:focus-visible,
-.changes-entry[aria-current="true"] {
-  background: color-mix(in srgb, var(--color-muted) 24%, transparent);
+.changes-files-toggle:hover,
+.changes-files-toggle:focus-visible {
+  background: var(--color-accent);
+  color: var(--color-foreground);
 }
-.changes-entry-path,
-.changes-entry-set {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.changes-files-toggle:focus-visible {
+  outline: 2px solid var(--color-ring);
 }
+.changes-empty-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+/* @pierre/trees virtualises its rows, so it needs a definite height: its rows, up to half the
+   screen, or the panel it fills. */
+.changes-tree {
+  flex: none;
+  height: min(
+    50vh,
+    calc(var(--changes-tree-rows, 6) * var(--trees-item-height, 30px) + 8px)
+  );
+  --trees-font-family-override: var(--font-sans);
+  --trees-font-size-override: var(--type-sm);
+  --trees-bg-override: var(--color-card);
+  --trees-fg-override: var(--color-foreground);
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-border-color-override: var(--color-border);
+  --trees-selected-bg-override: var(--color-accent);
+  --trees-focus-ring-color-override: var(--color-ring);
+}
+.changes-rail h5 {
+  margin: 0 12px 8px;
+}
+/* The change set beside the diff header's line counts. */
 .changes-entry-set {
   color: var(--muted-foreground);
   font-size: var(--type-xs);
+  white-space: nowrap;
 }
 .changes-reading-area {
   max-height: 75vh;
   overflow: auto;
-  padding: 12px;
+  padding: 0;
+}
+.changes-reading-area > :not(.changes-diff-keys, .changes-file-diff) {
+  margin-inline: 12px;
+}
+/* @pierre/diffs renders in a shadow root; its custom properties inherit through it. */
+.changes-file-diff {
+  --diffs-font-family: var(--font-mono);
+  --diffs-header-font-family: var(--font-sans);
+  --diffs-font-size: 12px;
+  --diffs-line-height: 20px;
+  display: block;
+}
+.changes-diff-keys {
+  display: block;
+}
+.changes-diff-keys:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: -2px;
+}
+.changes-file-diff .changes-layout-controls {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: 8px;
+}
+.changes-file-diff .changes-layout-controls [data-slot="button"] {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: var(--type-xs);
 }
 .changes-back {
   display: none;
@@ -1114,108 +1207,6 @@ nav {
   overflow-wrap: anywhere;
   color: var(--muted-foreground);
   font-size: var(--type-xs);
-}
-.changes-hunk {
-  min-width: 0;
-  margin: 12px 0;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.changes-hunk-heading {
-  margin: 0;
-  padding: 8px;
-  color: var(--muted-foreground);
-  font: 12px var(--font-mono);
-  background: color-mix(in srgb, var(--color-muted) 30%, transparent);
-}
-.changes-diff-split {
-  display: none;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-.changes-diff-split.is-active {
-  display: grid;
-}
-.changes-diff-side {
-  min-width: 0;
-  overflow-x: auto;
-}
-.changes-diff-side + .changes-diff-side {
-  border-left: 1px solid var(--color-border);
-}
-.changes-diff-side h6 {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  height: 32px;
-  margin: 0;
-  padding: 8px;
-  background: var(--color-card);
-  border-bottom: 1px solid var(--color-border);
-}
-.changes-diff-unified {
-  display: none;
-  min-width: 0;
-  overflow-x: auto;
-}
-.changes-diff-unified.is-active {
-  display: block;
-}
-.changes-line {
-  display: grid;
-  grid-template-columns: 56px max-content;
-  align-items: center;
-  width: max-content;
-  min-width: 100%;
-  height: 24px;
-  min-height: 24px;
-  border: 0;
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--color-border) 45%, transparent);
-  padding: 0;
-  color: inherit;
-  text-align: left;
-  font: 12px var(--font-mono);
-}
-.changes-line-number {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  width: 56px;
-  padding-right: 8px;
-  color: var(--muted-foreground);
-  text-align: right;
-  background: var(--color-card);
-}
-.changes-line-unified {
-  grid-template-columns: 44px 44px 16px max-content;
-}
-.changes-line-unified .changes-line-number {
-  width: 44px;
-  padding-right: 6px;
-}
-.changes-line-unified .changes-line-new {
-  left: 44px;
-}
-.changes-line-marker {
-  text-align: center;
-  color: var(--muted-foreground);
-}
-.changes-line-unified.changes-line-note {
-  grid-template-columns: 44px 44px 16px max-content;
-}
-.changes-unified-head {
-  display: grid;
-  grid-template-columns: 44px 44px;
-  margin: 0;
-  padding: 4px 0;
-  color: var(--muted-foreground);
-  font: 12px var(--font-mono);
-  text-align: right;
-  border-bottom: 1px solid var(--color-border);
-}
-.changes-unified-head span {
-  padding-right: 6px;
 }
 .range-controls {
   align-items: center;
@@ -1234,34 +1225,6 @@ nav {
 }
 .retained-diff {
   min-width: 0;
-}
-.changes-line code {
-  padding-right: 12px;
-  white-space: pre;
-  font: inherit;
-}
-.changes-line-deleted {
-  background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
-}
-.changes-line-added {
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-}
-.changes-line-note {
-  grid-template-columns: minmax(0, 1fr);
-  color: var(--muted-foreground);
-}
-.changes-line-empty {
-  background: color-mix(in srgb, var(--color-muted) 14%, transparent);
-}
-.changes-selectable-line {
-  cursor: pointer;
-}
-.changes-selectable-line:hover,
-.changes-selectable-line:focus-visible,
-.changes-selectable-line.is-selected {
-  outline: 2px solid var(--color-ring);
-  outline-offset: -2px;
-  background-color: color-mix(in srgb, var(--color-primary) 26%, transparent);
 }
 .changes-pending-turn {
   padding: 12px;
@@ -1348,8 +1311,7 @@ nav {
   padding: 12px;
   background: transparent;
 }
-.file-entry-list,
-.changes-entry-list {
+.file-entry-list {
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -1704,26 +1666,10 @@ nav {
   .changes-rail {
     overflow: visible;
   }
-  .changes-entry {
-    min-height: 44px;
-    height: 44px;
-  }
   .changes-back {
     display: inline-flex;
     min-height: 44px;
     margin-bottom: 8px;
-  }
-  .changes-diff-split,
-  .changes-diff-split.is-active {
-    display: none;
-  }
-  .changes-diff-unified,
-  .changes-diff-unified.is-active {
-    display: block;
-  }
-  /* Phone shows only the unified diff, so there is no layout to choose. */
-  .changes-layout-controls {
-    display: none;
   }
   .artifact-comparisons {
     grid-template-columns: 1fr;

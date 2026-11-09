@@ -217,6 +217,8 @@ const commandSchema = z.discriminatedUnion("type", [
       commandNetworkAccess: z.boolean().optional(),
       // Applies to turns admitted afterwards; absent leaves it unchanged.
       localListening: z.boolean().optional(),
+      // Applies to turns admitted afterwards; absent leaves it unchanged.
+      dangerouslySkipSandbox: z.boolean().optional(),
       // Applies to dependents not yet started; absent leaves it unchanged.
       stacking: z.boolean().optional(),
     })
@@ -794,6 +796,10 @@ export class DomainStore {
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
         CREATE TABLE IF NOT EXISTS project_local_listening (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+        );
+        CREATE TABLE IF NOT EXISTS project_dangerously_skip_sandbox (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
@@ -2094,6 +2100,16 @@ export class DomainStore {
     );
   }
 
+  /** Skip the harness sandbox for new task turns; no row means off. */
+  dangerouslySkipSandbox(projectId: string): boolean {
+    return (
+      this.one(
+        "SELECT enabled FROM project_dangerously_skip_sandbox WHERE projectId = ?",
+        id.parse(projectId),
+      )?.enabled === 1
+    );
+  }
+
   /** Internal credential reference for the TypeSafe adapter; never part of routing(). */
   routingCredentialReference(projectId: string): string | null {
     const row = this.required(
@@ -3241,6 +3257,12 @@ export class DomainStore {
               "INSERT INTO project_local_listening (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
             )
             .run(command.projectId, Number(command.localListening));
+        if (command.dangerouslySkipSandbox !== undefined)
+          this.db
+            .prepare(
+              "INSERT INTO project_dangerously_skip_sandbox (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
+            )
+            .run(command.projectId, Number(command.dangerouslySkipSandbox));
         if (command.stacking !== undefined)
           this.db
             .prepare(

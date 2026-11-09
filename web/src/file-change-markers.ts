@@ -114,12 +114,25 @@ export function changeLineCounts(comparison: {
     return { files };
   let added = 0;
   let removed = 0;
-  for (const entry of entries)
-    for (const hunk of entry.hunks)
-      for (const line of hunk.patch.split("\n")) {
-        if (line.startsWith("@@") || line.startsWith("\\ No newline")) continue;
-        if (line.startsWith("+")) added++;
-        else if (line.startsWith("-")) removed++;
-      }
+  for (const entry of entries) {
+    const counts = entryLineCounts(entry);
+    added += counts.added;
+    removed += counts.removed;
+  }
   return { files, added, removed };
+}
+
+/** One file's `+` and `-` lines across its hunks, by the same rule as the rail total. */
+export function entryLineCounts(entry: {
+  hunks: ReadonlyArray<{ patch: string }>;
+}) {
+  let added = 0;
+  let removed = 0;
+  for (const hunk of entry.hunks)
+    for (const line of hunk.patch.split("\n")) {
+      if (line.startsWith("@@") || line.startsWith("\\ No newline")) continue;
+      if (line.startsWith("+")) added++;
+      else if (line.startsWith("-")) removed++;
+    }
+  return { added, removed };
 }

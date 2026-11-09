@@ -3584,6 +3584,43 @@ test("a turn sends network access only when its admission policy enables it", as
   }
 });
 
+test("a skip-sandbox task turn sends full access, never to a read-only turn", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "skip", undefined, {
+        networkAccess: false,
+        skipSandbox: true,
+      }),
+      3000,
+    );
+    await bounded(runtime.startTurn("thread-1", root, "off"), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "draft", undefined, {
+        networkAccess: false,
+        access: "read-only",
+        skipSandbox: true,
+      }),
+      3000,
+    );
+    const turns = requests("turn/start") as {
+      sandboxPolicy: unknown;
+      approvalPolicy: unknown;
+    }[];
+    assert.deepEqual(turns[0]?.sandboxPolicy, { type: "dangerFullAccess" });
+    assert.equal(turns[0]?.approvalPolicy, "never");
+    assert.deepEqual(turns[1]?.sandboxPolicy, executionPolicy(root));
+    assert.deepEqual(turns[2]?.sandboxPolicy, {
+      type: "readOnly",
+      networkAccess: false,
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
 test("a task turn's Git roots join the workspace in its writable roots, never a read-only turn's", async () => {
   const { root, runtime, requests, cleanup } = settingsFakeRuntime();
   const gitWritableRoots = [
