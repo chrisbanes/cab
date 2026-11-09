@@ -1199,6 +1199,15 @@ nav {
 .changes-back {
   display: none;
 }
+.changes-file-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+.changes-file-title h5 {
+  margin: 0;
+}
 .changes-file-heading h5 {
   overflow-wrap: anywhere;
 }

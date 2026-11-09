@@ -885,7 +885,11 @@ export function TaskWorkspaceChanges({
                   selected.state === "unsupported" ||
                   selected.state === "gap" ? (
                     <div className="changes-file-heading">
-                      <h5>{selected.path}</h5>
+                      {/* No diff header here, so the files toggle sits beside the path. */}
+                      <div className="changes-file-title">
+                        <FilesPanelToggle />
+                        <h5>{selected.path}</h5>
+                      </div>
                       {selected.previousPath && (
                         <p>Before path: {selected.previousPath}</p>
                       )}

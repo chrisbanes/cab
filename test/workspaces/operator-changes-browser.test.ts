@@ -1427,6 +1427,16 @@ test("production Changes separates staged and unstaged snapshots and retains exp
       (entry) => entry.path === "binary.bin" && entry.state === "binary",
     ),
   );
+  // A file without a text diff keeps the files toggle, so hidden files can come back.
+  await changedFile(changes, "binary.bin").click();
+  await changes.getByText("Text diff is unavailable for this file.").waitFor();
+  await changes
+    .getByRole("button", { name: "Hide changed files", exact: true })
+    .click();
+  await changes
+    .getByRole("button", { name: "Show changed files", exact: true })
+    .click();
+  await changedFile(changes, "binary.bin").waitFor();
   assert.ok(
     unstaged.data.comparison.entries.some(
       (entry) => entry.path === "untracked.txt" && entry.change === "added",
