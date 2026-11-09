@@ -1381,7 +1381,7 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
   await row.getByText(counts, { exact: true }).waitFor();
   await row.getByText(warning, { exact: false }).waitFor();
   await row.getByRole("link", { name: "Check readiness conditions" }).click();
-  await page.waitForURL(/tab=github#source-readiness$/);
+  await page.waitForURL(/tab=source#source-readiness$/);
   await page.waitForFunction(
     () => document.activeElement?.id === "source-readiness",
   );

@@ -116,6 +116,12 @@ note, **Cancel** and then **Create paused project** at every width.
   with no ready check and no leave prompt. A project created in another tab does not
   change the first-project heading until the next visit.
 
+The Task source choice in step 1 defaults to GitHub. Jira Cloud records only the
+tracker: setup collects no Jira site, credential or JQL. The ready check links to
+Task source to configure them afterwards. Repository discovery and code hosts remain
+independent; Jira setup can still link GitHub repositories, but does not link a
+GitHub Project or record a GitHub source credential.
+
 ## Recovery
 
 - The ready check is shown once, right after creation. Later, Resume is the Pause

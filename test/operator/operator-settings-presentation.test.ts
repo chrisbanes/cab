@@ -61,6 +61,8 @@ import {
 import {
   holdPills,
   projectStateSummary,
+  projectTab,
+  projectTabs,
   recoveryRecordRuns,
   readinessNextStep,
   repositoryLines,
@@ -77,6 +79,37 @@ import {
 import { clockLabel } from "../../web/src/presentation.js";
 
 const id = () => randomUUID();
+test("Task source is canonical and old GitHub links keep their destination", () => {
+  for (const query of [
+    "?tab=source",
+    "?tab=github",
+    "?tab=github&tracker=jira",
+  ])
+    assert.equal(projectTab(query), "source");
+  assert.deepEqual(
+    projectTabs.find((t) => t.id === "source"),
+    { id: "source", label: "Task source" },
+  );
+});
+
+test("settings summaries name the saved tracker for active and inactive selections", () => {
+  for (const jira of [false, true])
+    for (const active of [false, true]) {
+      const c = config();
+      if (jira) c.source.tracker = "jira";
+      c.source.selections = [
+        { id: "S-1", kind: jira ? "jql" : "search", descriptor: null, active },
+      ];
+      const state = projectStateSummary(c, null, [], () => "Project").state;
+      assert.ok(
+        state.some((line) =>
+          line.startsWith(
+            `${jira ? "Jira" : "GitHub"} S-1 ${active ? "active" : "inactive"}`,
+          ),
+        ),
+      );
+    }
+});
 const mira = id(),
   jonas = id(),
   worker = id(),
@@ -949,7 +982,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
         { label: "Settings", href: "/settings" },
         { label: "Projects" },
         { label: "Atlas", href: `/projects/${projectId}/settings` },
-        { label: "GitHub source" },
+        { label: "Task source" },
       ],
     },
   );
@@ -1009,7 +1042,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   );
   assert.equal(
     unusable.next,
-    "Set or change the credential in GitHub source settings, then preview this source version.",
+    "Set or change the credential in Task source settings, then preview this source version.",
   );
   assert.deepEqual(
     holdPills({

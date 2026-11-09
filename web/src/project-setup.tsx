@@ -100,6 +100,7 @@ const blank = () => ({
   name: "",
   leadProfileId: "",
   instructions: "",
+  tracker: "github",
   rows: rowsToDraft([emptyRow("discovered")]),
   gitlabRows: gitLabRowsToDraft([]),
   githubProject: "",
@@ -435,6 +436,8 @@ export function ProjectSetup(
     name: String(d.values.name ?? ""),
     leadProfileId: String(d.values.leadProfileId ?? ""),
     instructions: String(d.values.instructions ?? ""),
+    tracker:
+      d.values.tracker === "jira" ? ("jira" as const) : ("github" as const),
     ...(d.values.createdLeadId === d.values.leadProfileId &&
     Array.isArray(d.values.candidateProfileIds)
       ? { candidateProfileIds: d.values.candidateProfileIds }
@@ -673,6 +676,17 @@ export function ProjectSetup(
             <h2 className="settings-panel-title">1 · Project and lead</h2>
             <div className="settings-fields">
               <DraftField draft={d} field="name" label="Project name" />
+              <DraftField draft={d} field="tracker" label="Task source">
+                <option value="github">GitHub</option>
+                <option value="jira">Jira Cloud</option>
+              </DraftField>
+              {values.tracker === "jira" && (
+                <p className="metadata muted">
+                  Configure the Jira site, credentials and JQL selections in
+                  Task source after creating this project. Repository access
+                  below is independent of the task tracker.
+                </p>
+              )}
               {!inlineProfile && (
                 <DraftField draft={d} field="leadProfileId" label="Lead agent">
                   <option value="">Unconfigured</option>
@@ -1264,18 +1278,20 @@ export function ProjectSetup(
                       </fieldset>
                     );
                   })}
-                  <ProjectChoice
-                    disabled={disabled}
-                    discoveryReady={Boolean(ready)}
-                    repo={projectKey}
-                    data={projects}
-                    value={chosenProject}
-                    onChange={(id) => {
-                      projectChoiceTouched.current = projectKey;
-                      d.set("githubProject", id);
-                    }}
-                  />
-                  {rowIndex.length > 0 && (
+                  {values.tracker !== "jira" && (
+                    <ProjectChoice
+                      disabled={disabled}
+                      discoveryReady={Boolean(ready)}
+                      repo={projectKey}
+                      data={projects}
+                      value={chosenProject}
+                      onChange={(id) => {
+                        projectChoiceTouched.current = projectKey;
+                        d.set("githubProject", id);
+                      }}
+                    />
+                  )}
+                  {values.tracker !== "jira" && rowIndex.length > 0 && (
                     <p className="metadata muted">
                       {setupSourceCredentialCopy(sourceGh)}
                     </p>

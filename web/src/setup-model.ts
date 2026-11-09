@@ -116,6 +116,7 @@ export function buildProjectCreate(
     name: string;
     leadProfileId: string;
     instructions: string;
+    tracker?: "github" | "jira";
     candidateProfileIds?: string[];
   },
   rows: SetupRow[],
@@ -129,6 +130,7 @@ export function buildProjectCreate(
     key: values.key,
     projectId: values.projectId,
     name: values.name,
+    ...(values.tracker === "jira" ? { tracker: "jira" as const } : {}),
     leadProfileId: values.leadProfileId || null,
     ...(values.candidateProfileIds?.length
       ? { candidateProfileIds: values.candidateProfileIds }
@@ -150,12 +152,14 @@ export function buildProjectCreate(
           }),
         }
       : {}),
-    ...(githubProjectNodeId
+    ...(values.tracker !== "jira" && githubProjectNodeId
       ? { githubProject: { projectNodeId: githubProjectNodeId } }
       : {}),
     // Omitted, never undefined, so a create without it keeps its payload hash. A project
     // without a repository has no source to use it, and setup shows the line only with one.
-    ...(sourceGh?.state === "signed-in" && included.length
+    ...(values.tracker !== "jira" &&
+    sourceGh?.state === "signed-in" &&
+    included.length
       ? { sourceCredentialRef: "gh:github.com" }
       : {}),
     // Guided setup grants Open PRs on what it links, and delivers with the same login when it is usable.
@@ -391,8 +395,8 @@ export function setupSourceCredentialCopy(
 ) {
   if (sourceGh === undefined) return "GitHub source credential: checking…";
   return sourceGh?.state === "signed-in"
-    ? `GitHub source credential: GitHub CLI · @${sourceGh.login}. Change or clear it later in the project's GitHub source settings.`
-    : `GitHub source credential: none. ${sourceGh ? "No usable GitHub CLI login was detected" : "The GitHub CLI login could not be checked"}, so the source starts without a credential and won't sync until one is set in its GitHub source settings.`;
+    ? `GitHub source credential: GitHub CLI · @${sourceGh.login}. Change or clear it later in the project's Task source settings.`
+    : `GitHub source credential: none. ${sourceGh ? "No usable GitHub CLI login was detected" : "The GitHub CLI login could not be checked"}, so the source starts without a credential and won't sync until one is set in its Task source settings.`;
 }
 
 /** The delivery default guided setup will record, stated before Create. */
@@ -489,8 +493,8 @@ export function sourceCredentialLine(
   if (source === null)
     return { text: "GitHub source credential: status unavailable." };
   const link = {
-    label: "GitHub source settings",
-    href: `/projects/${projectId}/settings?tab=github`,
+    label: "Task source settings",
+    href: `/projects/${projectId}/settings?tab=source`,
   };
   const status = source.credential;
   if (!source.credentialConfigured)

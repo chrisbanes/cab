@@ -181,8 +181,8 @@ export const reasonLabels = {
   "local-dependency": "Waiting on a task dependency",
   "stacked-blocker-unpublished": "Waiting for the blocker's change request",
   "stacked-blocker-unknown": "Blocker's change request unconfirmed",
-  "imported-blockers-unknown": "GitHub dependencies unavailable",
-  "imported-blockers-blocked": "Waiting on a GitHub dependency",
+  "imported-blockers-unknown": "Source dependencies unavailable",
+  "imported-blockers-blocked": "Waiting on a source dependency",
   "source-held": "Source requires review",
   "admission-blocked": "Waiting to start",
 } satisfies Record<string, string>;
@@ -234,9 +234,9 @@ export function taskReasonItems(task: TaskListSummary): TaskReason[] {
       ),
   ];
   const first = (text: string) => reasons.unshift({ text });
-  if (task.source?.closure === "held") first("Held · closed on GitHub");
+  if (task.source?.closure === "held") first("Held · closed at source");
   if (task.source?.closure === "completed")
-    first("Closed on GitHub, not delivered by cab");
+    first("Closed at source, not delivered by cab");
   if (task.source?.closure === "unattributed")
     first("Held · closure not attributed to cab");
   if (task.execution.holds.stop) first("Stop requested; effects may continue");

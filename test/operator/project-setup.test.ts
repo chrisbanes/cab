@@ -31,6 +31,11 @@ import {
 import { verifiedRepository } from "../../src/standalone/repository-verification.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { checkout, createSetupHome } from "../fixtures/setup-home.js";
+import {
+  jiraEditorState,
+  parseRule,
+  ruleLines,
+} from "../../web/src/jira-readiness.js";
 
 async function setupWorld(t: { after(fn: () => unknown): void }) {
   const f = await createOperatorFixture();
@@ -75,6 +80,139 @@ const create = (extra: Record<string, unknown>) => ({
   name: `Atlas ${randomUUID().slice(0, 8)}`,
   leadProfileId: null,
   ...extra,
+});
+
+test("saving a zero-selection Jira source with a redacted site retains visible and private readiness", async (t) => {
+  const { f, api } = await setupWorld(t);
+  const domain = f.service.domain();
+  const site = "fixture.atlassian.net";
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: site,
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_SITE",
+      emailRef: "env:FIXTURE_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_TOKEN",
+    },
+  });
+  for (const hidden of [false, true]) {
+    const command = create({ tracker: "jira" });
+    await api.execute(command);
+    const projectId = String(command.projectId);
+    const rule = {
+      mode: "any" as const,
+      conditions: [
+        {
+          kind: "label" as const,
+          operator: "has" as const,
+          name: hidden ? site : "ready",
+        },
+      ],
+    };
+    domain.execute({
+      type: "jira.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      instance: site,
+      selections: [],
+      readiness: rule,
+    });
+    await api.execute({
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      instructions: site,
+    });
+    const source = (await api.readProjectConfiguration(projectId)).data.source;
+    assert.equal(source.instance, null);
+    assert.deepEqual(source.selections, []);
+    assert.equal(source.readiness.kind, hidden ? "unavailable" : "rule");
+    assert.equal(JSON.stringify(source).includes(site), false);
+    const editor = jiraEditorState(source);
+    assert.equal(editor.saved, true);
+    assert.equal(editor.unconfigured, false);
+    const readiness = parseRule(
+      editor.rule?.mode ?? "all",
+      ruleLines(editor.rule),
+    );
+    assert.ok("rule" in readiness);
+    // The component omits a withheld site and readiness, allowing the service to retain them.
+    await api.execute({
+      type: "jira.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: source.version,
+      selections: [],
+      closedIssues: "done",
+      ...(editor.withheld ? {} : { readiness: readiness.rule }),
+    });
+    assert.equal(domain.jiraConfiguration(projectId)?.instance, site);
+    assert.deepEqual(domain.jiraConfiguration(projectId)?.readiness, rule);
+    assert.equal(domain.jiraConfiguration(projectId)?.closedIssues, "done");
+  }
+});
+
+test("Jira setup persists an unconfigured tracker, replays, and can configure a site later", async (t) => {
+  const { f, api, db } = await setupWorld(t);
+  const command = create({ tracker: "jira" });
+  const receipt = await api.execute(command);
+  assert.deepEqual(await api.execute(command), receipt);
+  const projectId = String(command.projectId);
+  const source = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(source.tracker, "jira");
+  assert.equal(source.instance, "");
+  assert.equal(source.credentialConfigured, false);
+  assert.deepEqual(source.selections, []);
+  const stored = db
+    .prepare(
+      "SELECT provider, instance, credentialRef FROM project_task_sources WHERE projectId = ?",
+    )
+    .get(projectId);
+  assert.deepEqual(
+    { ...stored },
+    { provider: "jira", instance: "", credentialRef: null },
+  );
+  // Refreshing an unconfigured tracker must not construct or call a Jira reader.
+  await api.refreshSources();
+  f.service.domain().execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: "fixture.atlassian.net",
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_SITE",
+      emailRef: "env:FIXTURE_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_TOKEN",
+    },
+  });
+  await api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instance: "fixture.atlassian.net",
+    selections: [],
+    readiness: null,
+  });
+  assert.equal(
+    (await api.readProjectConfiguration(projectId)).data.source.instance,
+    "fixture.atlassian.net",
+  );
+  for (const incompatible of [
+    { sourceCredentialRef: "gh:github.com" },
+    { githubProject: { projectNodeId: "PVT_1" } },
+  ])
+    await assert.rejects(
+      api.execute(create({ tracker: "jira", ...incompatible })),
+      /Jira setup cannot configure a GitHub task source/,
+    );
 });
 
 test("origin parsing accepts github.com forms and never returns the URL", () => {

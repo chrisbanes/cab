@@ -1,15 +1,24 @@
-# Import issues from GitHub
+# Import issues from a task source
 
 **Status:** implemented, with the budget asserted by the journey test.
 
 ## Goal
 
-After the operator saves a GitHub source, the same screen previews and activates the
+Choose GitHub or Jira Cloud at the top of the project's **Task source** tab.
+The chooser is locked while any saved selection remains, active or inactive;
+imported tasks also prevent changing tracker. Old `?tab=github` links still open
+Task source, including `?tab=github&tracker=jira` for an unused source.
+
+For Jira Cloud, add the site credential, choose the site, enter JQL selections and
+save. The Jira editor previews queries and refreshes its saved selections. Setup
+links here after recording the Jira tracker without a site or selections.
+
+For GitHub, after the operator saves a source, the same screen previews and activates the
 saved sources and reads them from GitHub, then says which were imported.
 
 ## Entry points
 
-- GitHub source tab of project configuration, after Save changes: the Import issues
+- Task source tab of project configuration, after Save changes: the Import issues
   panel. It is also offered whenever a saved source is inactive or has never been read,
   so it survives leaving the tab and a lost reply.
 - Ready check after [project setup](project-setup.md) with a linked GitHub Project:
@@ -38,7 +47,7 @@ saved sources and reads them from GitHub, then says which were imported.
 
 | Entry point | Interactions to imported tasks | First screen must show |
 | --- | --- | --- |
-| Unsaved source on the GitHub source tab | 2 (Save changes, Preview and import now) | after Save, the Import issues panel and its action; after the press, the activation line, the read line and View imported tasks |
+| Unsaved source on the Task source tab | 2 (Save changes, Preview and import now) | after Save, the Import issues panel and its action; after the press, the activation line, the read line and View imported tasks |
 | Ready check with a linked GitHub Project | 1 (Preview and import now; creating the project is not part of it) | the panel and its action before Resume; after the press, the activation line, the read line and View imported tasks |
 
 The journey test asserts the count, that each first screen is in view at 1366 × 900

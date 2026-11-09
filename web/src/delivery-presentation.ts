@@ -37,19 +37,23 @@ export const deliveryBlockerSentence = (code: string, codeHost?: CodeHost) =>
     "Delivery is waiting on a condition this version can't describe.",
   );
 
-const mergeBlockerSentences: Record<string, string> = {
+const mergeBlockerSentences = (
+  codeHost: CodeHost | undefined,
+): Record<string, string> => ({
   "no-required-checks":
     "No required checks: neither the code host nor cab requires a check, so the merge is held.",
   "merge-method-not-configured":
     "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
-  "pr-base-change-held":
-    "Base changed: the code host moved this pull request to a base cab has not accepted, so its actions are held until it is restored or the branch it was stacked on merges.",
-};
+  "pr-base-change-held": `Base changed: ${codeHostName(codeHost)} moved this ${codeHost === "gitlab" ? "merge request" : "pull request"} to a base cab has not accepted, so its actions are held until it is restored or the branch it was stacked on merges.`,
+});
 /** A merge-gate code as a sentence when it has one; any other code is shown as it is. */
-export const mergeBlockerText = (code: string) =>
-  Object.hasOwn(mergeBlockerSentences, code)
-    ? mergeBlockerSentences[code]!
+export const mergeBlockerText = (code: string, codeHost?: CodeHost) =>
+  Object.hasOwn(mergeBlockerSentences(codeHost), code)
+    ? mergeBlockerSentences(codeHost)[code]!
     : code;
+
+export const reviewHeadComparison = (matches: boolean, codeHost?: CodeHost) =>
+  `${matches ? "Matches" : "Checked an earlier head than"} the current ${codeHost === "gitlab" ? "merge request" : "pull request"} head`;
 
 /** What a code-host action acts on, named for its host; null for an action that is not one. */
 export function codeHostActionLabel(

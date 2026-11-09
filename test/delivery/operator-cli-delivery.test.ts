@@ -15,6 +15,96 @@ import { labelAndFieldReady } from "../fixtures/task-publication.js";
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
 
+test("CLI settle refusals name GitHub pull requests and GitLab merge requests", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
+  for (const host of ["github", "gitlab"] as const) {
+    const name = host === "gitlab" ? "GitLab" : "GitHub";
+    const noun = host === "gitlab" ? "merge request" : "pull request";
+    for (const state of ["merged", "draft", "closed", "unread"] as const) {
+      let posts = 0;
+      const rewrite: typeof fetch = async (input, init) => {
+        if (init?.method === "POST") posts++;
+        const response = await fetch(input, init);
+        if (String(input).endsWith(`/api/operator/tasks/${w.f.taskId}`)) {
+          const read = (await response.json()) as Json;
+          Object.assign(read.data.delivery.binding, {
+            codeHost: host,
+            state:
+              state === "merged"
+                ? "MERGED"
+                : state === "closed"
+                  ? "CLOSED"
+                  : "OPEN",
+            draft: state === "draft",
+            readError: state === "unread" ? "provider-error" : null,
+          });
+          return new Response(JSON.stringify(read), {
+            status: response.status,
+            headers: response.headers,
+          });
+        }
+        return response;
+      };
+      const refused = await w.h.run(
+        [...settleArgs(w, "--decision", "accepted"), "--connection", "rw"],
+        { fetch: rewrite },
+      );
+      assert.equal(refused.code, 4, refused.err);
+      assert.match(
+        refused.err,
+        new RegExp(
+          state === "unread" ? `last ${name} read failed` : `The ${noun} is`,
+        ),
+      );
+      if (state === "draft")
+        assert.match(
+          refused.err,
+          new RegExp(`Mark it ready for review on ${name}`),
+        );
+      if (state === "closed")
+        assert.match(refused.err, new RegExp(`Reopen it on ${name}`));
+      assert.equal(posts, 0);
+    }
+  }
+});
+
+test("CLI comment receipts describe either tracker's source issue", async (t) => {
+  const w = await deliveryWorld(t);
+  for (const jira of [false, true]) {
+    const rewrite: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (jira && String(input).endsWith(`/api/operator/tasks/${w.f.taskId}`)) {
+        const read = (await response.json()) as Json;
+        read.data.source.identity.tracker = "jira";
+        read.data.source.key = "ABC-1";
+        return new Response(JSON.stringify(read), {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+      return response;
+    };
+    const result = await w.h.run(
+      [
+        "delivery",
+        "send-comment",
+        w.f.taskId,
+        "--body-file",
+        w.file(`comment-${jira}.txt`, `Presentation receipt ${jira}`),
+        "--expected-task-version",
+        String((await w.task()).task.version),
+        "--connection",
+        "rw",
+      ],
+      { fetch: rewrite },
+    );
+    assert.equal(result.code, 0, result.err);
+    assert.match(result.out, /Posted the comment on the task's source issue/);
+    assert.doesNotMatch(result.out, /GitHub issue/);
+  }
+});
+
 test("delivery get shows the PR, actions and comment policy without provider access", async (t) => {
   const w = await deliveryWorld(t);
   await w.f.register();

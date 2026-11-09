@@ -167,6 +167,7 @@ const commandSchema = z.discriminatedUnion("type", [
         .optional(),
       instructions: prose.optional(),
       repositories: setupRepositoriesSchema.optional(),
+      tracker: z.enum(["github", "jira"]).optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
       // Guided setup's default: the detected GitHub CLI login, stated before creation.
       sourceCredentialRef: z.literal("gh:github.com").optional(),
@@ -182,6 +183,15 @@ const commandSchema = z.discriminatedUnion("type", [
       {
         path: ["deliveryDefault"],
         message: "A delivery default needs repositories",
+      },
+    )
+    .refine(
+      (command) =>
+        command.tracker !== "jira" ||
+        (!command.githubProject && !command.sourceCredentialRef),
+      {
+        path: ["tracker"],
+        message: "Jira setup cannot configure a GitHub task source",
       },
     ),
   projectDeleteCommandSchema,
@@ -3122,12 +3132,15 @@ export class DomainStore {
           )
           .run(
             command.projectId,
-            githubIssueTracker.provider,
-            githubIssueTracker.instance,
-            command.sourceCredentialRef ?? null,
+            command.tracker === "jira" ? "jira" : githubIssueTracker.provider,
+            // An empty instance records the chosen tracker before a Jira site is configured.
+            command.tracker === "jira" ? "" : githubIssueTracker.instance,
+            command.tracker === "jira"
+              ? null
+              : (command.sourceCredentialRef ?? null),
             // A linked GitHub Project is an inactive source: nothing is active until preview.
             JSON.stringify(
-              command.githubProject
+              command.tracker !== "jira" && command.githubProject
                 ? [
                     {
                       id: "S-1",

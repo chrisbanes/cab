@@ -630,7 +630,7 @@ test("Delivery names what the saved mapping allows, links to its editor and clai
   assert.equal(await page.getByRole("alert").count(), 0);
   await page.getByRole("button", { name: "Discard changes" }).click();
   await page.getByRole("link", { name: "Edit status mapping" }).click();
-  await page.waitForURL(/tab=github#status-mapping$/);
+  await page.waitForURL(/tab=source#status-mapping$/);
   await page
     .getByRole("heading", { name: "Status mapping", exact: true })
     .waitFor();

@@ -2988,6 +2988,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .optional(),
       instructions: text.optional(),
       repositories: setupRepositoriesSchema.optional(),
+      tracker: z.enum(["github", "jira"]).optional(),
       githubProject: z
         .object({ projectNodeId: z.string().trim().min(1).max(512) })
         .strict()
@@ -3004,6 +3005,15 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       {
         path: ["deliveryDefault"],
         message: "A delivery default needs repositories",
+      },
+    )
+    .refine(
+      (command) =>
+        command.tracker !== "jira" ||
+        (!command.githubProject && !command.sourceCredentialRef),
+      {
+        path: ["tracker"],
+        message: "Jira setup cannot configure a GitHub task source",
       },
     ),
   z
@@ -4148,7 +4158,7 @@ export const projectConfigurationSchema = envelope(
       source: z
         .object({
           version: revision,
-          /** Absent for GitHub; for Jira, `instance` names the site. */
+          /** Absent for GitHub; Jira's instance is empty before setup, null when withheld, otherwise its site. */
           tracker: z.literal("jira").optional(),
           instance: safeText.optional(),
           credentialConfigured: z.boolean(),

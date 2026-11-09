@@ -113,8 +113,8 @@ owns delivery scope and status.
   operator CLI does not offer it.
 - **Status mapping.** A project can map four of cab's work events (first turn
   started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
-  Project's Status, set on the GitHub source tab, or to Jira status IDs, set on the Jira
-  source tab. The service writes them through the delivery lifecycle under the saved
+  Project's Status or to Jira status IDs, both set on the Task source tab. The
+  service writes them through the delivery lifecycle under the saved
   mapping's own authority, with no delivery grant, only for tasks already Ready (or
   Done once the issue is closed), and skips a write when the card or issue moved since cab
   last saw it; on Jira it also skips when the issue is already there or not exactly one

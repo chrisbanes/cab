@@ -398,7 +398,7 @@ export function ImportPanel(
             tone="error"
             message={sourceCredentialCopy(data.source.credential?.reason)}
           >
-            <a href={`/projects/${projectId}/settings?tab=github`} {...tab}>
+            <a href={`/projects/${projectId}/settings?tab=source`} {...tab}>
               Set or change source credential
             </a>
           </ActionOutcome>

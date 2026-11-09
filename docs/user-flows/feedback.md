@@ -1,7 +1,7 @@
 # Action feedback
 
 **Status:** implemented for configuration saves in Settings (projects, agents,
-routing, GitHub source, sync preview and placement, discovery credential, Claude
+routing, task source, sync preview and placement, discovery credential, Claude
 token, capacity and project setup) and for the task-side writes: the task composer,
 question answers, replies, comment review, local review, sign-out, CLI credentials
 and the Stop confirmation, plus the read-only status copy of the task screens. They

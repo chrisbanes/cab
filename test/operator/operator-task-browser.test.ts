@@ -246,7 +246,7 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
   // Both group in the Paused column; only the reason tells them apart.
   const closureHeld = await facts(held.taskId);
   assert.equal(closureHeld.state, "Paused");
-  assert.equal(closureHeld.reasons[0], "Held · closed on GitHub");
+  assert.equal(closureHeld.reasons[0], "Held · closed at source");
   assert.ok(!closureHeld.reasons.includes("Project paused"));
   const projectPaused = await facts(paused.taskId);
   assert.equal(projectPaused.state, "Paused");
@@ -258,7 +258,7 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
       .locator(`#column-Paused [data-task-id="${held.taskId}"] .task-reason`)
       .first()
       .innerText(),
-    "Held · closed on GitHub",
+    "Held · closed at source",
   );
   assert.equal(
     await page
@@ -276,14 +276,14 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
     return line.innerText();
   };
   assert.equal(
-    await statusLine(held.taskId, /^Held · closed on GitHub/),
-    "Held · closed on GitHub",
+    await statusLine(held.taskId, /^Held · closed at source/),
+    "Held · closed at source",
   );
   assert.equal(
     await statusLine(paused.taskId, /^Draft · project paused/),
     "Draft · project paused",
   );
-  assert.equal(await page.getByText("closed on GitHub").count(), 0);
+  assert.equal(await page.getByText("closed at source").count(), 0);
 });
 test("Save draft and Create and start record real task outcomes without claiming running", async (_t, journey) => {
   let routeCalls = 0;

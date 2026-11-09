@@ -185,7 +185,7 @@ test("preview preserves a credential refusal returned after a usable preflight",
   const error = refused.json().error;
   assert.equal(
     error.message,
-    "GitHub CLI is not signed in. Run gh auth login on the service host or change the credential in GitHub source settings, then retry preview.",
+    "GitHub CLI is not signed in. Run gh auth login on the service host or change the credential in Task source settings, then retry preview.",
   );
   assert.deepEqual(
     {

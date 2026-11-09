@@ -31,6 +31,72 @@ const variables = {
   FIXTURE_JIRA_BROWSER_TOKEN: "jira-browser-token-canary-1318",
 };
 
+for (const hidden of [false, true])
+  test(`redacted configured Jira site with no selections keeps its ${hidden ? "private" : "visible"} readiness on save`, async (_t, journey) => {
+    const { f, web, page } = await setupJourney(journey, { projects: true });
+    const domain = f.service.domain();
+    const projectId = String(domain.projects()[0]?.id);
+    const rule = {
+      mode: "any" as const,
+      conditions: [
+        {
+          kind: "label" as const,
+          operator: "has" as const,
+          name: hidden ? site : "ready",
+        },
+      ],
+    };
+    domain.execute({
+      type: "issue-tracker-credential.configure",
+      actor: "operator",
+      key: randomUUID(),
+      issueTracker: "jira",
+      instance: site,
+      credential: {
+        siteRef: "env:FIXTURE_JIRA_BROWSER_SITE",
+        emailRef: "env:FIXTURE_JIRA_BROWSER_EMAIL",
+        tokenRef: "env:FIXTURE_JIRA_BROWSER_TOKEN",
+      },
+    });
+    domain.execute({
+      type: "jira.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      instance: site,
+      selections: [],
+      readiness: rule,
+    });
+    domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+      instructions: site,
+    });
+    await page.goto(`${web.origin}/projects/${projectId}/settings?tab=source`);
+    const selector = page.getByLabel("Jira site", { exact: true });
+    assert.equal(await selector.inputValue(), "");
+    assert.equal(await selector.isDisabled(), true);
+    if (!hidden)
+      assert.equal(
+        await page
+          .getByLabel("Readiness conditions, one per line")
+          .inputValue(),
+        "label has ready",
+      );
+    await page.getByLabel("Closed Jira issues").selectOption("done");
+    const sent = commandRequest(page);
+    await page.getByRole("button", { name: "Save Jira source" }).click();
+    const command = (await sent).postDataJSON();
+    assert.equal("instance" in command, false);
+    assert.equal("readiness" in command, !hidden);
+    await savedOutcome(page);
+    assert.deepEqual(domain.jiraConfiguration(projectId)?.readiness, rule);
+  });
+
 for (const schedule of [
   "deleted query",
   "untouched query",

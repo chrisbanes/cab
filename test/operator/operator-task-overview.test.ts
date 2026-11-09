@@ -18,10 +18,56 @@ import {
   sourceHoldResumeCaveat,
   stopConsequences,
   taskIdentity,
+  trackerName,
+  sourceStateText,
+  issueCommentNote,
   taskReadiness,
 } from "../../web/src/task-overview.js";
 
 type Data = TaskRead["data"];
+test("source states, identities and comment copy follow GitHub and Jira", () => {
+  for (const jira of [false, true]) {
+    const source = {
+      identity: {
+        provider: jira ? "fixture.atlassian.net" : "github.com",
+        ...(jira ? { tracker: "jira" as const } : {}),
+        repositoryId: "R_1",
+        nodeId: "I_1",
+      },
+      repositoryName: "acme/atlas",
+      number: 42,
+      url: null,
+      state: "closed",
+      ...(jira ? { key: "ABC-42" } : {}),
+    } as NonNullable<Data["source"]>;
+    const name = jira ? "Jira" : "GitHub";
+    assert.equal(trackerName(source), name);
+    assert.equal(sourceStateText(source), `${name} source: closed`);
+    assert.equal(
+      sourceStateText({ ...source, state: null }),
+      `${name} source: state unavailable`,
+    );
+    assert.equal(
+      taskIdentity({ source }).label,
+      jira ? "ABC-42" : "acme/atlas#42",
+    );
+    if (jira) {
+      const { key: _key, ...withheld } = source;
+      assert.equal(
+        taskIdentity({ source: withheld }).label,
+        "Jira issue · key unavailable",
+      );
+    }
+    assert.equal(
+      issueCommentNote(source, false),
+      `Posts a comment on the ${name} issue.`,
+    );
+    assert.equal(
+      issueCommentNote(source, true),
+      `You review the exact comment before it posts to the ${name} issue.`,
+    );
+  }
+});
 const holds = {
   stop: false,
   writer: false,
@@ -158,7 +204,7 @@ test("taskReadiness states recorded state and wait", () => {
       task: { state: "open", ready: false },
       source: { closure: "held" },
     }),
-    "Held · closed on GitHub",
+    "Held · closed at source",
   );
   assert.equal(
     line({
@@ -166,7 +212,7 @@ test("taskReadiness states recorded state and wait", () => {
       source: { closure: "held" },
       execution: { state: "running", holds },
     }),
-    "Held · closed on GitHub · running",
+    "Held · closed at source · running",
   );
   assert.equal(
     line({
@@ -180,7 +226,7 @@ test("taskReadiness states recorded state and wait", () => {
       task: { state: "done", ready: false },
       source: { closure: "completed" },
     }),
-    "Done · closed on GitHub",
+    "Done · closed at source",
   );
   assert.equal(
     line({ task: { state: "done", ready: false }, source: { closure: null } }),
@@ -237,7 +283,7 @@ test("taskReadiness states recorded state and wait", () => {
       admission: { reasons: ["imported-blockers-unknown"] },
       waits: [{ code: "imported-blockers-unknown" }],
     }),
-    "Ready · GitHub dependencies unconfirmed",
+    "Ready · source dependencies unconfirmed",
   );
   // The header names the first wait in the flow's order.
   assert.equal(

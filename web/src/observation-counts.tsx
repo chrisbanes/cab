@@ -27,7 +27,7 @@ export function ObservationCounts({
   projectId: string;
   rule: Project["readiness"];
   counts: Project["selections"][number]["counts"] | undefined;
-  /** On the GitHub source tab the link moves focus to the Readiness panel in place. */
+  /** On the Task source tab the link moves focus to the Readiness panel in place. */
   sameTab?: boolean;
   /** The counts live in the row's Details; only the zero-match warning stays visible. */
   warningOnly?: boolean;
@@ -57,7 +57,7 @@ export function ObservationCounts({
             href={
               sameTab
                 ? `#${readinessAnchor}`
-                : `/projects/${projectId}/settings?tab=github#${readinessAnchor}`
+                : `/projects/${projectId}/settings?tab=source#${readinessAnchor}`
             }
             onClick={
               sameTab

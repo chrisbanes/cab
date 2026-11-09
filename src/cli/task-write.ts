@@ -81,16 +81,16 @@ export function requiredVersion(ctx: WriteContext) {
   return version;
 }
 
-/** ` (closed on GitHub…)` for a task closed on its provider, shared by every task view. */
+/** ` (closed at source…)` for a task closed on its provider, shared by every task view. */
 export function closureSuffix(
   closure: "held" | "completed" | "unattributed" | null | undefined,
 ) {
   return closure === "held"
-    ? " (closed on GitHub; held)"
+    ? " (closed at source; held)"
     : closure === "completed"
-      ? " (closed on GitHub)"
+      ? " (closed at source)"
       : closure === "unattributed"
-        ? " (closed on GitHub; closure not attributed to cab; held)"
+        ? " (closed at source; closure not attributed to cab; held)"
         : "";
 }
 

@@ -66,3 +66,18 @@ export const savedRule = (
   const rule = schema.nullable().safeParse(readinessCommandValue(view));
   return rule.success ? rule.data : null;
 };
+
+/** Withheld or older site reads keep the saved rule and site; only setup's explicit empty site is unconfigured. */
+export function jiraEditorState(source: {
+  tracker?: "jira" | undefined;
+  instance?: string | null | undefined;
+  readiness: Parameters<typeof savedRule>[0];
+}) {
+  const saved = source.tracker === "jira";
+  return {
+    saved,
+    unconfigured: !saved || source.instance === "",
+    rule: saved ? savedRule(source.readiness) : null,
+    withheld: saved && source.readiness.kind === "unavailable",
+  };
+}

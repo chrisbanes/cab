@@ -1192,7 +1192,7 @@ operator dismisses it for the installation; Show getting started undoes that. A 
 shared by Settings and the operator CLI, reports what the running service can use
 and one fix per problem. The [user flows](user-flows/) define these journeys.
 
-Use a short guided project setup: project name, lead agent, instructions and
+Use a short guided project setup: project name, lead agent, task tracker, instructions and
 optional repository access. Choose each repository and ref from lists discovered
 on GitHub, with the default branch preselected, and choose its local checkout with
 a folder picker. The service verifies that the folder is a checkout of the chosen
@@ -1203,6 +1203,13 @@ configuration. When discovery is unavailable or a list is truncated, setup accep
 typed values and says so. The service lists folders only under the operator's home folder, and a typed
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
+Task tracker defaults to GitHub. Jira Cloud records the chosen tracker without a site,
+credential or selections; the ready check links to Task source to configure them.
+Repository/code-host setup remains independent of the task tracker. Jira setup never
+links a GitHub Project or records a GitHub source credential.
+The Task source tab configures either tracker and shows a top-level chooser, locked
+while any saved selection remains (including inactive selections). Imported tasks also
+prevent changing tracker. Old `?tab=github` links, including `tracker=jira`, remain aliases.
 A project name is unique after trimming and Unicode default case folding after
 normalization (Straße matches STRASSE, ς matches σ; dotless ı and dotted İ are not
 unified with I, and lookalike letters from other scripts and spacing inside a name

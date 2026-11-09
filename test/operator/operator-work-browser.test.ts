@@ -1661,7 +1661,7 @@ test("overview work sits in a panel beside Projects and Completed work and stack
   );
   const serviceText = await service.innerText();
   assert.match(serviceText, /Lead · Accountable lead/);
-  assert.match(serviceText, /1 from GitHub/);
+  assert.match(serviceText, /1 imported/);
   assert.match(serviceText, /^\d+ uncertain( · \d+ \w+)*$/m);
   const paused = await links.filter({ hasText: "Paused project" }).innerText();
   assert.match(paused, /Project paused/);
@@ -2320,7 +2320,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   );
   assert.equal(
     squash(await page.locator(".board-footer").innerText()),
-    "Columns describe cab work, not GitHub issue state. Cards open the task; nothing here changes state, and there is no drag and drop.",
+    "Columns describe cab work, not source issue state. Cards open the task; nothing here changes state, and there is no drag and drop.",
   );
   assert.ok(await noPageOverflow(page));
   await shot(page, "390-board-waiting-tabs");

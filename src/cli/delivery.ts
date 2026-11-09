@@ -499,6 +499,9 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         // Advisory only, and never for a key that may already have applied: the service decides.
         if (!reached) {
           if (!d || !b || d.mode !== "reviewable-pr") throw noHandback(taskId);
+          const host = b.codeHost === "gitlab" ? "GitLab" : "GitHub";
+          const noun =
+            b.codeHost === "gitlab" ? "merge request" : "pull request";
           const view = `Run 'cab delivery get ${taskId}' to see the handback.`;
           const settled = currentSettlement(d);
           if (settled)
@@ -507,22 +510,22 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               `${view} If an earlier attempt's reply was lost, it was recorded; a new push or policy change needs a new settlement.`,
             );
           if (b.state === "MERGED")
-            refuse("The pull request is already merged.", view);
+            refuse(`The ${noun} is already merged.`, view);
           if (b.readError)
             refuse(
-              `The last GitHub read failed (${b.readError}).`,
+              `The last ${host} read failed (${b.readError}).`,
               `Run 'cab delivery refresh ${taskId}', then settle again.`,
             );
           if (decision === "accepted") {
             if (b.draft)
               refuse(
-                "The pull request is a draft, so it cannot be accepted.",
-                `Mark it ready for review on GitHub and run 'cab delivery refresh ${taskId}', or settle it as closed.`,
+                `The ${noun} is a draft, so it cannot be accepted.`,
+                `Mark it ready for review on ${host} and run 'cab delivery refresh ${taskId}', or settle it as closed.`,
               );
             if (b.state === "CLOSED")
               refuse(
-                "The pull request is closed, so it cannot be accepted.",
-                `Reopen it on GitHub and run 'cab delivery refresh ${taskId}', or settle it as closed.`,
+                `The ${noun} is closed, so it cannot be accepted.`,
+                `Reopen it on ${host} and run 'cab delivery refresh ${taskId}', or settle it as closed.`,
               );
             if (d.blockers.includes("task-branch-outside-change"))
               refuse(
@@ -952,7 +955,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           human: [
             reached
               ? `This request was sent before; the service returned its recorded outcome: the comment is posted (operation ${key}). Nothing new was posted.`
-              : `Posted the comment on the task's GitHub issue (operation ${key}).`,
+              : `Posted the comment on the task's source issue (operation ${key}).`,
             "The comment is public and the CLI cannot edit or retract it. Rerunning this exact command replays this receipt; a deliberate second comment needs a new --request-id.",
           ].join("\n"),
         };

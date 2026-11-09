@@ -21,6 +21,7 @@ import {
   stubReadiness,
 } from "../fixtures/setup-browser.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
+import { fakeJira, json } from "../fixtures/fake-jira.js";
 import { git } from "../fixtures/setup-home.js";
 import {
   outcomeMessages,
@@ -28,6 +29,101 @@ import {
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-setup-browser");
+
+test("Jira setup persists the tracker and opens Task source with a usable site chooser", async (_t, journey) => {
+  const site = "fixture.atlassian.net";
+  for (const [name, value] of Object.entries({
+    FIXTURE_SETUP_JIRA_SITE: `https://${site}`,
+    FIXTURE_SETUP_JIRA_EMAIL: "fixture@example.test",
+    FIXTURE_SETUP_JIRA_TOKEN: "fixture-setup-jira-token",
+  })) {
+    const previous = process.env[name];
+    journey.cleanup(async () => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }, `restore-${name}`);
+    process.env[name] = value;
+  }
+  const jira = fakeJira((request) =>
+    request.url.pathname.endsWith("/myself")
+      ? json({ accountId: "fixture", displayName: "Fixture" })
+      : json({ issues: [] }),
+  );
+  const { f, page } = await setupJourney(journey, {
+    jiraFetcher: jira.fetcher,
+  });
+  f.service.jiraJqlErrors = async () => [];
+  assert.equal(
+    await page.getByLabel("Task source", { exact: true }).inputValue(),
+    "github",
+  );
+  await page.getByLabel("Task source", { exact: true }).selectOption("jira");
+  assert.equal(
+    await page.getByLabel("GitHub Project", { exact: true }).count(),
+    0,
+  );
+  assert.equal(await page.getByLabel("Jira site", { exact: true }).count(), 0);
+  const sent = sentCommands(page);
+  const { projectId, ready } = await createProject(page, sent);
+  assert.equal(f.service.domain().jiraConfiguration(projectId)?.instance, "");
+  const link = ready.getByRole("link", {
+    name: "Configure Task source",
+    exact: true,
+  });
+  assert.equal(
+    await link.getAttribute("href"),
+    `/projects/${projectId}/settings?tab=source`,
+  );
+  await link.click();
+  await page
+    .getByRole("heading", { name: "Jira source", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("Issue tracker", { exact: true }).inputValue(),
+    "jira",
+  );
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).isEnabled(),
+    true,
+  );
+  f.service.domain().execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: site,
+    credential: {
+      siteRef: "env:FIXTURE_SETUP_JIRA_SITE",
+      emailRef: "env:FIXTURE_SETUP_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_SETUP_JIRA_TOKEN",
+    },
+  });
+  await page.reload();
+  assert.equal(
+    await page.getByLabel("Issue tracker", { exact: true }).inputValue(),
+    "jira",
+  );
+  await page.getByLabel("Jira site", { exact: true }).selectOption(site);
+  await page.getByLabel("JQL queries, one per line").fill("project = ABC");
+  await page
+    .getByRole("button", { name: "Save Jira source", exact: true })
+    .click();
+  await savedOutcome(page);
+  assert.equal(f.service.domain().jiraConfiguration(projectId)?.instance, site);
+  assert.equal(
+    f.service.domain().jiraConfiguration(projectId)?.selections[0]?.jql,
+    "project = ABC",
+  );
+  await page.reload();
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).inputValue(),
+    site,
+  );
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).isDisabled(),
+    true,
+  );
+});
 
 const fixFields =
   /Fix the (\d+ )?highlighted fields?\. Your changes are still here\./;

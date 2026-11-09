@@ -811,7 +811,7 @@ test("task get, the task read and the catalog agree on GitHub closure", async (t
     assert.ok(list.out.includes(state), list.out);
   };
   observe();
-  await agree("held", "Paused (closed on GitHub; held)");
+  await agree("held", "Paused (closed at source; held)");
   const { version } = d.githubConfiguration(s.projectId);
   d.execute({
     type: "github.configure",
@@ -840,7 +840,7 @@ test("task get, the task read and the catalog agree on GitHub closure", async (t
     sources.completeFromProviderClosure(taskId, () => true),
     true,
   );
-  await agree("completed", "Done (closed on GitHub)");
+  await agree("completed", "Done (closed at source)");
 });
 
 test("a pending own-delivery closure proof is not shown as GitHub closure in the task read, list and CLI", async (t) => {
@@ -881,7 +881,7 @@ test("a pending own-delivery closure proof is not shown as GitHub closure in the
   ]) {
     const human = await o.h.run([...args, "--connection", "ro"]);
     assert.equal(human.code, 0, human.err);
-    assert.ok(!human.out.includes("closed on GitHub"), human.out);
+    assert.ok(!human.out.includes("closed at source"), human.out);
   }
 });
 
