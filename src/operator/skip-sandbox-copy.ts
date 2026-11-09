@@ -18,6 +18,12 @@ export const skipSandboxRiskLines = [
   "Processes it starts, such as emulators and browsers, can outlive the turn; cab does not clean them up. The Claude subprocess environment scrub, per-task temporary directory confinement and Seatbelt self-test no longer hold. Only macOS is qualified.",
 ];
 
+/** Both harnesses' grants, for surfaces that show the setting rather than one harness. */
+export const skipSandboxGrantLines = [
+  codexSkipSandboxLine,
+  claudeSkipSandboxLine,
+];
+
 /** The risks as one paragraph, for the CLI and the confirmation dialog. */
 export const skipSandboxRisk = skipSandboxRiskLines.join(" ");
 

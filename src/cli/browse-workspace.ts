@@ -14,6 +14,7 @@ import {
 } from "../operator/contracts.js";
 import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import {
+  skipSandboxGrantLines,
   skipSandboxRisk,
   skipSandboxSupersededLine,
 } from "../operator/skip-sandbox-copy.js";
@@ -273,7 +274,11 @@ const projectGet: BrowseCommand = {
           : []),
         commandNetworkDisclosure,
         ...(d.dangerouslySkipSandbox
-          ? [skipSandboxSupersededLine, skipSandboxRisk]
+          ? [
+              ...skipSandboxGrantLines,
+              skipSandboxSupersededLine,
+              skipSandboxRisk,
+            ]
           : []),
         "",
         d.profiles.length

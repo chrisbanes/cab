@@ -24,6 +24,7 @@ import {
 } from "../../src/operator/local-listening-copy.js";
 import {
   skipSandboxAppliesNote,
+  skipSandboxGrantLines,
   skipSandboxRisk,
   skipSandboxSupersededLine,
   projectSkipSandboxLine,
@@ -554,7 +555,8 @@ function GeneralTab(p: TabProps) {
                 />
                 <p className="metadata muted">
                   {projectSkipSandboxLine(data.dangerouslySkipSandbox)}{" "}
-                  {skipSandboxAppliesNote} {skipSandboxRisk}
+                  {skipSandboxAppliesNote} {skipSandboxGrantLines.join(" ")}{" "}
+                  {skipSandboxRisk}
                 </p>
               </>
             )}

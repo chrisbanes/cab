@@ -2169,6 +2169,14 @@ test("skip sandbox asks for confirmation when turned on and saves off without on
   await skip.waitFor();
   assert.equal(await skip.isChecked(), false);
   await page.getByText("Skip sandbox is disabled for this project.").waitFor();
+  await page
+    .getByText(/dangerFullAccess/)
+    .first()
+    .waitFor();
+  await page
+    .getByText(/Claude Code's sandbox disabled/)
+    .first()
+    .waitFor();
   const save = page.getByRole("button", { name: "Save project", exact: true });
   const dialog = page.getByRole("alertdialog");
 
