@@ -645,6 +645,58 @@ test("assignment get states local listening for a Claude assignment only", async
   assert.doesNotMatch(await lines(seed.betaSharedTaskId), /local listening/i);
 });
 
+test("assignment get states skip sandbox for both harnesses", async (t) => {
+  const { s, seed, h, ok } = await setup(t);
+  // A Claude assignment not yet admitted, and Beta's Codex lead.
+  const claudeId = randomUUID();
+  s.f.service.domain().execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: seed.alphaId,
+    taskId: seed.alphaSharedTaskId,
+    assignmentId: claudeId,
+    profileId: seed.alphaLeadId,
+    brief: "Skip",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const codexId = (await ok(["task", "get", seed.betaSharedTaskId])).data
+    .leadAssignmentId as string;
+  for (const id of [claudeId, codexId]) {
+    const human = (await h.run(["assignment", "get", id])).out;
+    assert.ok(
+      human.includes(
+        "No skip-sandbox admission recorded; the project's setting at admission applies.",
+      ),
+      human,
+    );
+  }
+});
+
+test("project get shows skip sandbox and marks network access and local listening superseded when on", async (t) => {
+  const { seed, h, d } = await setup(t);
+  const row = (out: string, label: string) =>
+    out.split("\n").find((l) => l.startsWith(`${label}:`)) ?? "";
+  const get = async () => (await h.run(["project", "get", seed.alphaId])).out;
+  let out = await get();
+  assert.match(row(out, "Skip sandbox"), /disabled/);
+  assert.doesNotMatch(out, /superseded/i);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: seed.alphaId,
+    expectedVersion: Number(d.project(seed.alphaId).version),
+    dangerouslySkipSandbox: true,
+  });
+  out = await get();
+  assert.match(row(out, "Skip sandbox"), /enabled/);
+  assert.match(row(out, "Command network access"), /superseded/);
+  assert.match(row(out, "Local listening"), /superseded/);
+  assert.match(out, /full filesystem, process, network and credential access/);
+});
+
 test("task get names the lead assignment, execution and who acts next", async (t) => {
   const { s, seed, h, ok, api } = await setup(t);
   const line = (out: string, label: string) =>

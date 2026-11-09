@@ -12,6 +12,10 @@ import {
   localListeningLimit,
 } from "../operator/local-listening-copy.js";
 import {
+  skipSandboxAppliesNote,
+  skipSandboxRisk,
+} from "../operator/skip-sandbox-copy.js";
+import {
   stackingAppliesNote,
   stackingDisclosure,
 } from "../operator/stacking-copy.js";
@@ -220,10 +224,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
                 : String(currentSkipSandbox),
             to: String(skipSandbox),
           });
-          // Plain note for now; the disclosure copy module replaces it.
-          notes.push(
-            "Applies to task turns admitted after the change; running turns keep their policy.",
-          );
+          notes.push(skipSandboxAppliesNote, skipSandboxRisk);
         }
         const currentStacking = config.data.stacking;
         if (stacking !== undefined && stacking !== currentStacking) {

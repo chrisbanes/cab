@@ -5,6 +5,11 @@ import {
   codexLocalListeningLine,
   localListeningLimit,
 } from "../operator/local-listening-copy.js";
+import {
+  claudeSkipSandboxLine,
+  codexSkipSandboxLine,
+  skipSandboxRiskLines,
+} from "../operator/skip-sandbox-copy.js";
 
 export interface PolicyDisclosure {
   lines: string[];
@@ -34,8 +39,9 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
       "Command network access is disabled unless the project enables it. Approval policy is never.",
       codexLocalListeningLine,
       localListeningLimit,
+      codexSkipSandboxLine,
+      ...skipSandboxRiskLines,
       taskGitDisclosure,
-
       nativeSetupDisclosure,
     ],
     limits: [
@@ -85,7 +91,8 @@ export function claudePolicyDisclosure(
       "Command network access is denied. There are no interactive approvals.",
       claudeLocalListeningLine,
       localListeningLimit,
-
+      claudeSkipSandboxLine,
+      ...skipSandboxRiskLines,
       nativeSetupDisclosure,
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
       taskGitDisclosure,
