@@ -471,6 +471,20 @@ export function TaskWorkspaceChanges({
 
   const current = cached;
   const snapshot = snapshotFor(current);
+  const latestKnownTurnAt = Object.values(state.comparisonReads).reduce(
+    (latest, read) => {
+      const turn = snapshotFor(read);
+      return turn?.target === "turn"
+        ? Math.max(latest, turn.observedAt)
+        : latest;
+    },
+    0,
+  );
+  const staleWorkspaceSnapshot =
+    snapshot?.target !== "turn" &&
+    snapshot !== undefined &&
+    ((repositoriesResource.state.data?.observedAt ?? 0) > snapshot.observedAt ||
+      latestKnownTurnAt > snapshot.observedAt);
   const currentRequest = request.key === key ? request : null;
   const id = responseId(current);
   const reason = current && "reason" in current ? current.reason : undefined;
@@ -749,6 +763,12 @@ export function TaskWorkspaceChanges({
               : current.state}
           </StatusBadge>
           {snapshot && <span>As of {dateLabel(snapshot.observedAt)}</span>}
+          {staleWorkspaceSnapshot && (
+            <span role="status">
+              A newer workspace observation or turn capture is already known.
+              These results stay fixed until Refresh.
+            </span>
+          )}
           {snapshot && snapshot.target !== "turn" && snapshot.baseline && (
             <span className="changes-baseline" title={snapshot.baseline.commit}>
               {snapshot.baseline.branch ?? "HEAD"} @{" "}
@@ -764,6 +784,30 @@ export function TaskWorkspaceChanges({
             </span>
           )}
           {reasonSentence && <span>{reasonSentence}</span>}
+          {current.state === "unavailable" &&
+            reason === "workspace-unavailable" && (
+              <span>
+                Not read yet: workspace was unavailable. Refresh to try again.
+              </span>
+            )}
+          {reason === "time-limit" && (
+            <span>
+              The comparison exceeded its 5-second observation budget. Reduce
+              the comparison scope or refresh.
+            </span>
+          )}
+          {reason === "output-limit" && (
+            <span>
+              The comparison exceeded a bounded output limit. Reduce the
+              comparison scope or refresh.
+            </span>
+          )}
+          {snapshot && (
+            <span>
+              Current workspace snapshots stay fixed until Refresh. Last turn is
+              a separate actual runtime capture.
+            </span>
+          )}
           <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
@@ -805,7 +849,33 @@ export function TaskWorkspaceChanges({
       )}
       {current?.state === "unavailable" && (
         <p role="status">
-          No current comparison is available for this selection.
+          {current.reason === "workspace-unavailable"
+            ? "Not read yet: workspace was unavailable."
+            : "No current comparison is available for this selection."}
+        </p>
+      )}
+      {current?.state === "unavailable" &&
+        current.reason === "workspace-unavailable" && (
+          <Button
+            variant="secondary"
+            onClick={refresh}
+            disabled={currentRequest?.pending}
+          >
+            Refresh comparison
+          </Button>
+        )}
+      {snapshot?.entries.some((entry) => entry.reason === "too-large") && (
+        <p role="status">
+          Named files exceed the 1 MiB per-file or per-side limit. Reduce the
+          comparison scope or inspect a smaller change.
+        </p>
+      )}
+      {snapshot?.entries.some((entry) => entry.reason === "output-limit") && (
+        <p role="status">
+          A named file exceeded a comparison output bound; the available reason
+          does not identify whether this was the 2,048-lines-per-side or 1 MiB
+          rendered-diff limit. Reduce the comparison scope or inspect a smaller
+          change.
         </p>
       )}
       {current?.state === "gap" && (
@@ -984,11 +1054,7 @@ export function TaskWorkspaceChanges({
           }
         />
       )}
-      <p>
-        Current workspace snapshots stay fixed until Refresh. Last turn is a
-        separate actual runtime capture; recorded result and delivery changes
-        remain below.
-      </p>
+      <p>Recorded result and delivery changes remain below.</p>
     </section>
   );
 }
