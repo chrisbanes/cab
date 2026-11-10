@@ -252,7 +252,7 @@ test("a failed private read names searches neutrally", async (_t, journey) => {
     route.fulfill({ status: 500, json: { error: "unavailable" } }),
   );
   await s.page.goto(
-    `${s.web.origin}/projects/${s.ids.atlas}/settings?tab=github`,
+    `${s.web.origin}/projects/${s.ids.atlas}/settings?tab=source`,
   );
   await row(s.page, "Saved search").first().waitFor();
   const headings = (await rowHeadings(s.page)).filter((h) => /search/.test(h));
@@ -487,7 +487,7 @@ test("a preview that never reached the service is checked with the same key", as
   await page.getByRole("link", { name: "Sync & placement" }).click();
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
   await check.waitFor();
-  await page.getByRole("link", { name: "GitHub source" }).click();
+  await page.getByRole("link", { name: "Task source" }).click();
   await check.waitFor();
   assert.equal(seen.previews.length, 1);
   await check.click();
@@ -559,7 +559,7 @@ test("a lost refresh reply that never reached the service is offered again after
   drop = false;
   await page.getByRole("link", { name: "Sync & placement" }).click();
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
-  await page.getByRole("link", { name: "GitHub source" }).click();
+  await page.getByRole("link", { name: "Task source" }).click();
   await importPanel(page).waitFor();
   const before = seen.previews.length;
   await importButton(page).click();
@@ -590,7 +590,7 @@ test("a lost refresh reply that reached the service leaves nothing to import aft
     .waitFor(refreshed);
   await page.getByRole("link", { name: "Sync & placement" }).click();
   await page.getByRole("heading", { name: "Source sync" }).waitFor();
-  await page.getByRole("link", { name: "GitHub source" }).click();
+  await page.getByRole("link", { name: "Task source" }).click();
   await row(page, "acme/atlas")
     .getByText(/^Synced \d\d:\d\d/)
     .waitFor();

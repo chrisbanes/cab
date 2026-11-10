@@ -138,7 +138,8 @@ export function ReadyCheck({
   // project shows no credential line and has none to check again.
   // The source credential line concerns GitHub sources only.
   const withRepositories = Boolean(
-    created.repositories?.some((r) => r.codeHost !== "gitlab"),
+    created.tracker !== "jira" &&
+      created.repositories?.some((r) => r.codeHost !== "gitlab"),
   );
   // A source fixed in another tab is re-read by Check again, as readiness items are.
   const recheckCredential =
@@ -191,6 +192,18 @@ export function ReadyCheck({
       >
         <ul className="body setup-recorded">
           <li>Nothing has run.</li>
+          {created.tracker === "jira" && (
+            <li>
+              Task source: Jira Cloud.{" "}
+              <ActionLink
+                variant="secondary"
+                href={`/projects/${projectId}/settings?tab=source`}
+              >
+                Configure Task source
+              </ActionLink>{" "}
+              to add a Jira site, credentials and JQL selections.
+            </li>
+          )}
           <li>
             {created.instructions
               ? "Instructions saved."

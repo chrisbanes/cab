@@ -41,13 +41,14 @@ export const projectTabs = [
   { id: "permitted-agents", label: "Permitted agents" },
   { id: "routing", label: "Routing" },
   { id: "repositories", label: "Repositories" },
-  { id: "github", label: "GitHub source" },
+  { id: "source", label: "Task source" },
   { id: "delivery", label: "Delivery" },
   { id: "sync", label: "Sync & placement" },
 ] as const;
 export type ProjectTab = (typeof projectTabs)[number]["id"];
 export function projectTab(query: string): ProjectTab {
-  const tab = new URLSearchParams(query).get("tab");
+  const requested = new URLSearchParams(query).get("tab");
+  const tab = requested === "github" ? "source" : requested;
   return projectTabs.find((t) => t.id === tab)?.id ?? "general";
 }
 
@@ -309,7 +310,7 @@ export const diagnosticCaptureAppliesNote =
   "A change applies to executions started afterwards and erases no stored diagnostics.";
 
 export const readinessNextStep =
-  "Check the readiness conditions in GitHub source settings.";
+  "Check the readiness conditions in Task source settings.";
 
 /** Phone summary of one project's configuration: what is true now and the next step. */
 export function projectStateSummary(
@@ -354,9 +355,9 @@ export function projectStateSummary(
     ...(c.source.selections.length
       ? c.source.selections.map((s) => {
           const o = observed?.selections.find((o) => o.selectionId === s.id);
-          return `GitHub ${s.id ?? "selection"} ${s.active ? "active" : "inactive"} · ${observationLabel(o).toLowerCase()}${o?.counts && observed ? ` · ${selectionCountsText(o.counts, observed.readiness)}` : ""}`;
+          return `${c.source.tracker === "jira" ? "Jira" : "GitHub"} ${s.id ?? "selection"} ${s.active ? "active" : "inactive"} · ${observationLabel(o).toLowerCase()}${o?.counts && observed ? ` · ${selectionCountsText(o.counts, observed.readiness)}` : ""}`;
         })
-      : ["No GitHub source"]),
+      : [`No ${c.source.tracker === "jira" ? "Jira" : "GitHub"} selections`]),
     ...c.placements.map(
       (p) =>
         `${p.title ?? "A task"} held: choose its project (${p.choices.map(choiceText).join(" or ")})`,
@@ -368,7 +369,7 @@ export function projectStateSummary(
     : c.placements.length
       ? `Choose the project for ${c.placements[0]?.title ?? "the conflicting task"} in Sync & placement.`
       : c.source.selections.length && c.source.credential?.usable === false
-        ? "Set or change the credential in GitHub source settings, then preview this source version."
+        ? "Set or change the credential in Task source settings, then preview this source version."
         : observed?.selections.some((o) =>
               zeroMatchWarning(
                 o.counts,

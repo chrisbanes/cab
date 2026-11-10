@@ -7419,7 +7419,10 @@ export class OperatorApi {
           ...(jira
             ? {
                 tracker: "jira" as const,
-                instance: this.exact(jira.instance, excluded),
+                instance:
+                  jira.instance === ""
+                    ? ""
+                    : this.exact(jira.instance, excluded),
               }
             : {}),
           credentialConfigured: jira

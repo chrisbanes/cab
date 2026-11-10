@@ -224,7 +224,7 @@ export function TaskToolbar({
               >
                 <option value="">All sources</option>
                 <option value="local">Local</option>
-                <option value="github">GitHub</option>
+                <option value="github">Imported</option>
               </NativeSelect>
             </label>
             <label className="field body" htmlFor="task-ready">

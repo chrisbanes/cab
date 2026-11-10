@@ -44,6 +44,7 @@ import {
 } from "./composer-drafting.js";
 import { type DraftStart, startOf } from "./composer-release.js";
 import "./composer.css";
+import { taskIdentity } from "./task-overview.js";
 export function TaskComposer({
   client,
   session,
@@ -557,9 +558,7 @@ export function TaskComposer({
                           <span>{d.title ?? "Title unavailable"}</span>
                           <span className="metadata muted">
                             {d.state}
-                            {d.source
-                              ? ` · GitHub #${d.source.number ?? "?"}`
-                              : ""}
+                            {d.source ? ` · ${taskIdentity(d).label}` : ""}
                           </span>
                         </label>
                       ))}

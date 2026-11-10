@@ -128,10 +128,10 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
         ? active
           ? `${terminal} · ${execution.state}`
           : data.source?.closure === "completed"
-            ? `${terminal} · closed on GitHub`
+            ? `${terminal} · closed at source`
             : terminal
         : data.source?.closure === "held"
-          ? `Held · closed on GitHub${active ? ` · ${execution.state}` : ""}`
+          ? `Held · closed at source${active ? ` · ${execution.state}` : ""}`
           : data.source?.closure === "unattributed"
             ? `Held · closure not attributed to cab${active ? ` · ${execution.state}` : ""}`
             : paused
@@ -182,13 +182,19 @@ export function taskStripReason(data: Omit<StatusData, "lead">) {
 }
 
 /** The ID slot: `repository#number` for an imported task, otherwise "Local task". */
-export function taskIdentity(data: Pick<Data, "source">) {
+export function taskIdentity(data: {
+  source: Pick<
+    NonNullable<Data["source"]>,
+    "identity" | "key" | "repositoryName" | "number" | "url"
+  > | null;
+}) {
   const s = data.source;
   return s
     ? {
         label:
-          s.key ??
-          `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
+          s.identity.tracker === "jira"
+            ? (s.key ?? "Jira issue · key unavailable")
+            : `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
         url: s.url,
       }
     : { label: "Local task", url: null };
@@ -201,8 +207,19 @@ export const jiraFacts = (source: NonNullable<Data["source"]>) => ({
 });
 
 /** The issue tracker a task was imported from, as the operator reads it. */
-export const trackerName = (source: Data["source"]) =>
-  source?.identity.tracker === "jira" ? "Jira" : "GitHub";
+export const trackerName = (
+  source: { identity: { tracker?: "jira" | undefined } } | null,
+) => (source?.identity.tracker === "jira" ? "Jira" : "GitHub");
+
+export const sourceStateText = (source: {
+  identity: { tracker?: "jira" | undefined };
+  state: string | null;
+}) => `${trackerName(source)} source: ${source.state ?? "state unavailable"}`;
+
+export const issueCommentNote = (source: Data["source"], approval: boolean) =>
+  approval
+    ? `You review the exact comment before it posts to the ${trackerName(source)} issue.`
+    : `Posts a comment on the ${trackerName(source)} issue.`;
 
 /** The imported issue's Project field values as `field: option`, falling back to the option's ID. */
 export const projectFieldRows = (source: NonNullable<Data["source"]>) =>

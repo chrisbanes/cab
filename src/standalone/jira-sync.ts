@@ -43,7 +43,7 @@ export class JiraSynchronizer {
     for (const project of this.domain.projects()) {
       if (project.archived) continue;
       const config = this.domain.jiraConfiguration(String(project.id));
-      if (!config) continue;
+      if (!config?.instance) continue;
       const ids = new Set(fieldsBySite.get(config.instance));
       for (const c of config.readiness?.conditions ?? [])
         if (c.kind === "select-field") ids.add(c.fieldId);
@@ -53,7 +53,7 @@ export class JiraSynchronizer {
       if (project.archived) continue;
       const projectId = String(project.id);
       const config = this.domain.jiraConfiguration(projectId);
-      if (!config) continue;
+      if (!config?.instance) continue;
       const active = new Set(this.domain.githubActiveSelectionIds(projectId));
       const reader = this.readerFactory(config.instance);
       const fieldIds = fieldsBySite.get(config.instance) ?? [];

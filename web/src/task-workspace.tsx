@@ -84,6 +84,7 @@ import {
   codeHostName,
   deliveryBlockerSentence,
   mergeBlockerText,
+  reviewHeadComparison,
   pullRequestReference,
   pullRequestStateLabel,
   safePullRequestUrl,
@@ -161,6 +162,7 @@ import {
   deliveryApplies,
   taskNextActor,
   trackerName,
+  issueCommentNote,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { ApplyInstructions, TaskExecution } from "./task-execution.js";
@@ -2088,9 +2090,10 @@ export function TaskWorkspace({
                 ? leadReceivesNotice(leadName)
                 : leadUnavailableNotice(leadName)
           : (comment.sentence ??
-            (data.commentPolicy?.mode === "approval"
-              ? "You review the exact comment before it posts to the GitHub issue."
-              : "Posts a comment on the GitHub issue."));
+            issueCommentNote(
+              data.source,
+              data.commentPolicy?.mode === "approval",
+            ));
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
@@ -2139,7 +2142,7 @@ export function TaskWorkspace({
               changed();
             }}
           >
-            Post GitHub comment
+            Post {trackerName(data.source)} comment
           </Button>
         )}
         {data.source && comment.sentence && (
@@ -2201,7 +2204,7 @@ export function TaskWorkspace({
               })
             }
           >
-            Review exact GitHub comment
+            Review exact {trackerName(data.source)} comment
           </Button>
           {state.commentReview && (
             <CommentReview
@@ -3447,8 +3450,11 @@ function ReviewEvidence({
               {unknown
                 ? "Head comparison unknown"
                 : v.checkedHead === head
-                  ? "Matches the current pull request head"
-                  : "Checked an earlier head than the current pull request head"}
+                  ? reviewHeadComparison(true, data.delivery?.binding?.codeHost)
+                  : reviewHeadComparison(
+                      false,
+                      data.delivery?.binding?.codeHost,
+                    )}
             </p>
           );
         })
@@ -3786,7 +3792,9 @@ function Changes({
                 {[
                   ...new Set(
                     d.binding.mergeBlockers.map((code) =>
-                      code === null ? "Unavailable" : mergeBlockerText(code),
+                      code === null
+                        ? "Unavailable"
+                        : mergeBlockerText(code, d.binding?.codeHost),
                     ),
                   ),
                 ].map((text) => (

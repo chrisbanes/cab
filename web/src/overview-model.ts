@@ -19,6 +19,9 @@ import {
   taskReasonItems,
 } from "./tasks.js";
 
+export const importedTaskCountText = (count: number) =>
+  count ? `${count} imported` : "No imported tasks";
+
 /**
  * The Overview stat strip, installation-wide (the Project filter does not apply). A figure the
  * reads cannot support is null and shows as "—": Needs you without a complete, current whole-Inbox

@@ -19,6 +19,76 @@ after(() => {
   else process.env.FIXTURE_GITHUB = sourceFixtureValue;
 });
 const test = browserSuite("operator-settings-browser");
+
+test("Task source chooser supports both old aliases and locks all saved selections", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const ids = seedSettings(f);
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage();
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  const base = `/projects/${ids.projectId}/settings`;
+  await signIn(page, web, `${base}?tab=github`);
+  const choice = page.getByLabel("Issue tracker", { exact: true });
+  assert.equal(await choice.inputValue(), "github");
+  await choice.selectOption("jira");
+  await page
+    .getByRole("heading", { name: "Jira source", exact: true })
+    .waitFor();
+  await choice.selectOption("github");
+  await page
+    .getByRole("heading", { name: "1 · Discovery sources", exact: true })
+    .waitFor();
+  await page.goto(`${web.origin}${base}?tab=github&tracker=jira`);
+  assert.equal(await choice.inputValue(), "jira");
+  f.service.domain().execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: "S-1", kind: "search", query: "repo:acme/atlas is:issue" },
+    ],
+    readiness: null,
+  });
+  for (const active of [false, true]) {
+    if (active)
+      f.seedPersistedState((db) =>
+        db
+          .prepare(
+            "INSERT INTO project_active_selections (projectId, selectionId, configVersion) VALUES (?, ?, ?)",
+          )
+          .run(ids.projectId, "S-1", 2),
+      );
+    await page.reload();
+    assert.equal(
+      await choice.inputValue(),
+      "github",
+      "locked sources override a conflicting alias",
+    );
+    assert.equal(await choice.isDisabled(), true);
+    await page
+      .getByText(
+        /Current tracker: GitHub\. Remove all saved selections, including inactive ones/,
+      )
+      .waitFor();
+  }
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Task source", exact: true })
+    .click();
+  assert.equal(new URL(page.url()).search, "?tab=source");
+});
 import { actionKinds } from "../../src/core/delivery.js";
 import {
   openAccountMenu,
@@ -271,7 +341,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   assert.ok(contrast(actionStyle.foreground, actionStyle.background) >= 4.5);
 
   await page.goto(
-    `${web.origin}/projects/${ids.projectId}/settings?tab=github`,
+    `${web.origin}/projects/${ids.projectId}/settings?tab=source`,
   );
   // Ordinary navigation remains distinct from styled command buttons.
   assert.equal(
@@ -785,7 +855,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
     0,
   );
   assert.equal(f.service.domain().repositoryLinks(ids.projectId).version, 3);
-  await sections.getByRole("link", { name: "GitHub source" }).click();
+  await sections.getByRole("link", { name: "Task source" }).click();
   await page
     .getByLabel("Closed issues at import", { exact: true })
     .selectOption("done");
@@ -1418,15 +1488,15 @@ test("mounted reference and placement fields have unique associated controls", a
   });
   for (const [tab, value] of [
     ["Routing", "env:ROUTING_NEW"],
-    ["GitHub source", "env:SOURCE_NEW"],
+    ["Task source", "env:SOURCE_NEW"],
   ] as const) {
     await sections.getByRole("link", { name: tab, exact: true }).click();
-    if (tab === "GitHub source")
+    if (tab === "Task source")
       await page
         .getByRole("button", { name: /(?:Set|Change) source credential/ })
         .click();
     const reference = page.getByLabel(
-      tab === "GitHub source"
+      tab === "Task source"
         ? "Source credential choice"
         : "Credential reference change",
       {

@@ -296,13 +296,13 @@ export function SettingsWorkspace(
                     </dd>
                   </div>
                   <div>
-                    <dt>Discovery</dt>
+                    <dt>Task source</dt>
                     <dd>
                       {c.source.selections.length === 0 ? (
                         c.source.tracker === "jira" ? (
                           "No Jira selections"
                         ) : (
-                          "No GitHub source"
+                          "No GitHub selections"
                         )
                       ) : (
                         <ul>
@@ -498,7 +498,7 @@ export function SettingsWorkspace(
   return (
     <div className="settings-page">
       <p className="introduction muted">
-        Configure paused projects, reusable agents, routing, GitHub sources and
+        Configure paused projects, reusable agents, routing, task sources and
         installation capacity. Each change is saved separately. Saving never
         resumes work, clears holds or grants repository access.
       </p>

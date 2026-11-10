@@ -812,7 +812,7 @@ test("task get, the task read and the catalog agree on GitHub closure", async (t
     assert.ok(list.out.includes(state), list.out);
   };
   observe();
-  await agree("held", "Paused (closed on GitHub; held)");
+  await agree("held", "Paused (closed at source; held)");
   const { version } = d.githubConfiguration(s.projectId);
   d.execute({
     type: "github.configure",
@@ -841,7 +841,7 @@ test("task get, the task read and the catalog agree on GitHub closure", async (t
     sources.completeFromProviderClosure(taskId, () => true),
     true,
   );
-  await agree("completed", "Done (closed on GitHub)");
+  await agree("completed", "Done (closed at source)");
 });
 
 test("a pending own-delivery closure proof is not shown as GitHub closure in the task read, list and CLI", async (t) => {
@@ -882,7 +882,7 @@ test("a pending own-delivery closure proof is not shown as GitHub closure in the
   ]) {
     const human = await o.h.run([...args, "--connection", "ro"]);
     assert.equal(human.code, 0, human.err);
-    assert.ok(!human.out.includes("closed on GitHub"), human.out);
+    assert.ok(!human.out.includes("closed at source"), human.out);
   }
 });
 
@@ -1735,17 +1735,17 @@ test("a create whose post-read fails still names the next command", async (t) =>
 });
 
 test("the task state suffix names what a closure hold waits on", () => {
-  assert.equal(closureSuffix("held"), " (closed on GitHub; held)");
+  assert.equal(closureSuffix("held"), " (closed at source; held)");
   assert.equal(
     closureSuffix("held", { kind: "change-request", number: 123 }),
-    " (closed on GitHub; held; completes when PR #123 merges or closes)",
+    " (closed at source; held; completes when change request #123 merges or closes)",
   );
   assert.equal(
     closureSuffix("held", { kind: "delivery-action", action: "pr.merge" }),
-    " (closed on GitHub; held; completes when the outcome of its pr.merge action is known)",
+    " (closed at source; held; completes when the outcome of its pr.merge action is known)",
   );
   assert.equal(
     closureSuffix("completed", { kind: "change-request", number: 1 }),
-    " (closed on GitHub)",
+    " (closed at source)",
   );
 });

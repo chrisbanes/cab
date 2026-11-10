@@ -726,9 +726,9 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
   await line.waitFor();
   assert.equal(
     await ready
-      .getByRole("link", { name: "GitHub source settings" })
+      .getByRole("link", { name: "Task source settings" })
       .getAttribute("href"),
-    `/projects/${projectId}/settings?tab=github`,
+    `/projects/${projectId}/settings?tab=source`,
   );
   assert.equal(
     f.service.domain().githubConfiguration(projectId).credentialRef,
@@ -1203,7 +1203,7 @@ test("Setup's ready check keeps Preview and import now focusable with the unusab
   await t.importButton.waitFor();
   t.gh.set("not-signed-in");
   await t.ready.getByRole("button", { name: "Check again" }).click();
-  await t.ready.getByRole("link", { name: "GitHub source settings" }).waitFor();
+  await t.ready.getByRole("link", { name: "Task source settings" }).waitFor();
   assert.equal(await t.importButton.getAttribute("aria-disabled"), "true");
   const reason = await t.importButton.evaluate((el) => {
     const id = el.getAttribute("aria-describedby");
@@ -1216,7 +1216,7 @@ test("Setup's ready check keeps Preview and import now focusable with the unusab
   });
   assert.equal(reason.id, "source-credential-reason");
   assert.match(reason.text, /^GitHub source credential: GitHub CLI\./);
-  assert.equal(reason.link, "GitHub source settings");
+  assert.equal(reason.link, "Task source settings");
   await t.importButton.click({ force: true });
   await t.page.evaluate(
     () => new Promise((done) => requestAnimationFrame(() => done(null))),

@@ -148,7 +148,7 @@ test("every resolution failure is safe, incomplete and makes no provider request
     const text = JSON.stringify(results) + sourceCredentialExplanation(reason);
     assert.equal(text.includes(fakeGhToken), false);
     assert.equal(text.includes("keyring failed"), false);
-    assert.match(sourceCredentialExplanation(reason), /GitHub source settings/);
+    assert.match(sourceCredentialExplanation(reason), /Task source settings/);
   }
 });
 

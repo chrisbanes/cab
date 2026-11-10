@@ -71,6 +71,7 @@ import {
   type TaskFilters,
 } from "./tasks.js";
 import "./work.css";
+import { taskIdentity, trackerName, sourceStateText } from "./task-overview.js";
 
 export const stateIcons: Record<TaskColumn, LucideIcon> = {
   Ready: CircleDot,
@@ -103,10 +104,7 @@ function ColumnMark({
 const TaskStateMark = ({ task }: { task: TaskListSummary }) => (
   <ColumnMark column={taskColumn(task)} />
 );
-const identity = (task: TaskListSummary) =>
-  task.source
-    ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
-    : "Local task";
+const identity = (task: TaskListSummary) => taskIdentity(task).label;
 function TaskFacts({
   task,
   shared = [],
@@ -161,7 +159,7 @@ export function TaskRow({
         <TaskFacts task={task} shared={shared ?? []} />
         {task.source && task.source.state !== "open" && (
           <p className="metadata muted task-source-state">
-            GitHub source: {task.source.state ?? "state unavailable"}
+            {sourceStateText(task.source)}
           </p>
         )}
       </div>
@@ -217,7 +215,10 @@ export function TaskCard({
             >
               {identity(task)}
               <ArrowUpRight aria-hidden="true" />
-              <span className="sr-only"> (opens GitHub)</span>
+              <span className="sr-only">
+                {" "}
+                (opens {trackerName(task.source)})
+              </span>
             </a>
           ) : (
             <span className={task.source ? "task-identity" : undefined}>
@@ -228,7 +229,7 @@ export function TaskCard({
         <TaskFacts task={task} shared={shared ?? []} />
         {task.source && task.source.state !== "open" && (
           <p className="metadata muted task-source-state">
-            GitHub source: {task.source.state ?? "state unavailable"}
+            {sourceStateText(task.source)}
           </p>
         )}
         <div className="metadata task-card-footer">
@@ -469,7 +470,7 @@ export function TaskBoard({
         </Button>
       </div>
       <p className="metadata muted board-footer">
-        Columns describe cab work, not GitHub issue state. Cards open the task;
+        Columns describe cab work, not source issue state. Cards open the task;
         nothing here changes state, and there is no drag and drop.
       </p>
     </div>

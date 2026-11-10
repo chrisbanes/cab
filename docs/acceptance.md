@@ -477,7 +477,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   The Jira variant (#1321, ADR-1020) is **Bounded.** Deterministic tests cover the mapping save rules by
   readiness, the service-only `issue.status` authority from the saved mapping, the single-transition write with its
   four skips, the status-write queue and its limit, Done on closure, `issue.close` narrowed to the mapped
-  done status, and the Jira source tab editor and task notes (`status-mapping-jira-store`,
+  done status, and the Task source tab's Jira editor and task notes (`status-mapping-jira-store`,
   `status-mapping-jira-service`, `jira-issue-delivery-provider`, `operator-api`,
   `operator-jira-source-browser`, `status-mapping-draft`, `operator-delivery-presentation`). One bounded live
   run on Jira Cloud and gitlab.com (`jira-delivery-live-harness`, guarded to the fixtures, 15 planned writes,

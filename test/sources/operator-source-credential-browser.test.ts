@@ -244,7 +244,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
   await page.setViewportSize({ width: 390, height: 844 });
   await page
     .getByRole("region", { name: "Next step" })
-    .getByText("Set or change the credential in GitHub source settings", {
+    .getByText("Set or change the credential in Task source settings", {
       exact: false,
     })
     .waitFor();
@@ -351,7 +351,7 @@ test("Source and sync recover from an explicitly missing GitHub CLI executable",
     .first();
   assert.equal(
     await recovery.getAttribute("href"),
-    `/projects/${projectId}/settings?tab=github`,
+    `/projects/${projectId}/settings?tab=source`,
   );
   await recovery.click();
   await page

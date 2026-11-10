@@ -27,6 +27,7 @@ import {
   orderAttention,
   overviewStats,
   projectRows,
+  importedTaskCountText,
 } from "./overview-model.js";
 import { QuestionHolds } from "./question-response.js";
 import { StartAgainAction } from "./task-restart.js";
@@ -543,9 +544,7 @@ export function ProjectsPanel({
                 ].join(" · ")}
               </span>
               <span className="metadata muted">
-                {row.imported
-                  ? `${row.imported} from GitHub`
-                  : "No imported tasks"}
+                {importedTaskCountText(row.imported)}
               </span>
             </a>
           </li>

@@ -8,6 +8,7 @@ import {
 const test = browserSuite("operator-task-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { taskListPageSchema } from "../../src/operator/contracts.js";
 import {
   openMoreFilters,
   seedCatalog,
@@ -33,6 +34,97 @@ async function signIn(
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
 }
+test("hidden-draft controls preserve provider identities and source facts in List and Board", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const ids = await seedCatalog(f);
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  let jira = true;
+  await page.route("**/api/operator/task-list", async (route) => {
+    const response = await route.fetch();
+    const body = taskListPageSchema.parse(await response.json());
+    const task = body.data.tasks.find((task) => task.id === ids.importedId)!;
+    assert.ok(task.source);
+    task.ready = false;
+    task.admission.reasons = ["task-unready"];
+    task.execution.state = "idle";
+    task.lead = { profileId: ids.profileId, name: "Accountable lead" };
+    task.source.state = null;
+    if (jira) {
+      task.source.identity.tracker = "jira";
+      task.source.identity.provider = "fixture.atlassian.net";
+      task.source.key = "ABC-42";
+      task.source.url = "https://fixture.atlassian.net/browse/ABC-42";
+    }
+    await route.fulfill({ response, json: taskListPageSchema.parse(body) });
+  });
+  await signIn(page, web.origin, web.password, "/tasks?view=list");
+  for (const isJira of [true, false]) {
+    jira = isJira;
+    if (!isJira) await page.goto(`${web.origin}/tasks?view=list`);
+    const name = isJira ? "Jira" : "GitHub";
+    const identity = isJira ? "ABC-42" : "fixture/source#42";
+    await page
+      .getByRole("button", { name: "Show 3 hidden tasks", exact: true })
+      .click();
+    for (const surface of [".task-list", ".board-columns"]) {
+      if (surface === ".board-columns")
+        await page.getByRole("button", { name: "Board", exact: true }).click();
+      const card = page.locator(
+        `${surface} [data-task-id="${ids.importedId}"]`,
+      );
+      await card
+        .getByText(`${name} source: state unavailable`, { exact: true })
+        .waitFor();
+      assert.ok(
+        (await card.locator(".task-project-metadata").innerText()).includes(
+          identity,
+        ),
+      );
+      assert.equal(await card.locator(".task-lead").count(), 0);
+      assert.equal(
+        await card
+          .locator(".task-reason")
+          .filter({ hasText: "Draft: not Ready" })
+          .count(),
+        0,
+      );
+      await page
+        .getByText(
+          "3 tasks share this readiness/dependency reason: Draft: not Ready.",
+          { exact: true },
+        )
+        .waitFor();
+      if (surface === ".board-columns") {
+        assert.equal(
+          await card
+            .getByRole("link", {
+              name: `${identity} (opens ${name})`,
+              exact: true,
+            })
+            .getAttribute("href"),
+          isJira
+            ? "https://fixture.atlassian.net/browse/ABC-42"
+            : "https://github.com/fixture/source/issues/42",
+        );
+      }
+    }
+  }
+});
+
 test("composer preselects its sole visible project", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
@@ -339,7 +431,7 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
   // Both group in the Paused column; only the reason tells them apart.
   const closureHeld = await facts(held.taskId);
   assert.equal(closureHeld.state, "Paused");
-  assert.equal(closureHeld.reasons[0], "Held · closed on GitHub");
+  assert.equal(closureHeld.reasons[0], "Held · closed at source");
   assert.ok(!closureHeld.reasons.includes("Project paused"));
   const projectPaused = await facts(paused.taskId);
   assert.equal(projectPaused.state, "Paused");
@@ -351,7 +443,7 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
       .locator(`#column-Paused [data-task-id="${held.taskId}"] .task-reason`)
       .first()
       .innerText(),
-    "Held · closed on GitHub",
+    "Held · closed at source",
   );
   assert.equal(
     await page
@@ -369,14 +461,14 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
     return line.innerText();
   };
   assert.equal(
-    await statusLine(held.taskId, /^Held · closed on GitHub/),
-    "Held · closed on GitHub",
+    await statusLine(held.taskId, /^Held · closed at source/),
+    "Held · closed at source",
   );
   assert.equal(
     await statusLine(paused.taskId, /^project paused/),
     "project paused",
   );
-  assert.equal(await page.getByText("closed on GitHub").count(), 0);
+  assert.equal(await page.getByText("closed at source").count(), 0);
 });
 test("Save draft and Create and start record real task outcomes without claiming running", async (_t, journey) => {
   let routeCalls = 0;

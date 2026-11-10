@@ -21,6 +21,7 @@ import {
   deliveryActionLine,
   deliveryBlockerSentence,
   mergeBlockerText,
+  reviewHeadComparison,
   pullRequestReference,
   pullRequestRepository,
   pullRequestStateLabel,
@@ -408,6 +409,26 @@ test("later overlapping Project options and supplemental branch scopes cannot ov
 
 const fallback =
   "Delivery is waiting on a condition this version can't describe.";
+
+test("base changes and review head comparisons name the code host's request", () => {
+  for (const host of ["github", "gitlab"] as const) {
+    const noun = host === "gitlab" ? "merge request" : "pull request";
+    assert.match(
+      mergeBlockerText("pr-base-change-held", host),
+      new RegExp(
+        `${host === "gitlab" ? "GitLab" : "GitHub"} moved this ${noun}`,
+      ),
+    );
+    assert.equal(
+      reviewHeadComparison(true, host),
+      `Matches the current ${noun} head`,
+    );
+    assert.equal(
+      reviewHeadComparison(false, host),
+      `Checked an earlier head than the current ${noun} head`,
+    );
+  }
+});
 
 test("delivery blockers read as sentences and unknown codes fall back", () => {
   const known = {

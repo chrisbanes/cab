@@ -24,7 +24,7 @@ import {
   usePrivateValues,
 } from "./settings.js";
 import { clockLabel } from "./presentation.js";
-import { parseRule, ruleLines, savedRule } from "./jira-readiness.js";
+import { jiraEditorState, parseRule, ruleLines } from "./jira-readiness.js";
 import {
   closedIssueLabels,
   closureCompletionNote,
@@ -231,11 +231,7 @@ export function JiraSourceTab(
 ) {
   const { data, projectId } = p;
   const siteId = useId();
-  const saved = data.source.tracker === "jira";
-  // A GitHub project's rule never carries over to Jira.
-  const rule = saved ? savedRule(data.source.readiness) : null;
-  // A rule the read withholds cannot be shown, so a save leaves it as it is.
-  const withheld = saved && data.source.readiness.kind === "unavailable";
+  const { saved, unconfigured, rule, withheld } = jiraEditorState(data.source);
   const savedRuleLines = ruleLines(rule);
   const d = useDraft(p.drafts, `jira.configure:${projectId}`, p.readOnly);
   const priv = usePrivateValues(
@@ -289,7 +285,10 @@ export function JiraSourceTab(
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const instance = String(d.values.instance ?? "");
+  // Keep the saved site visible before the draft's passive initialization.
+  const instance = String(
+    d.values.instance ?? (saved ? (data.source.instance ?? "") : ""),
+  );
   const [previews, setPreviews] = useState<Preview[] | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const preview = async () => {
@@ -340,8 +339,8 @@ export function JiraSourceTab(
     retainedRows.filter((row) => !row.removed).length + lines.length;
   const blocked =
     loadedQueries.incomplete ||
-    (!saved && !instance) ||
-    (!saved && count === 0) ||
+    (unconfigured && !instance) ||
+    (unconfigured && count === 0) ||
     count > 30;
   const readiness = parseRule(
     String(d.values.readinessMode ?? "all"),
@@ -350,13 +349,6 @@ export function JiraSourceTab(
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
-        {!saved && (
-          <p className="metadata muted">
-            <a href={`/projects/${projectId}/settings?tab=github`}>
-              Use GitHub for this project instead
-            </a>
-          </p>
-        )}
         <Panel
           id="jira-source"
           title="Jira source"
@@ -400,12 +392,12 @@ export function JiraSourceTab(
                 id={siteId}
                 aria-label="Jira site"
                 className="control"
-                disabled={locked(d) || saved}
+                disabled={locked(d) || !unconfigured}
                 value={instance}
                 onChange={(e) => d.set("instance", e.target.value)}
               >
                 <option value="">
-                  {saved && !instance
+                  {!unconfigured && !instance
                     ? "Saved site unavailable"
                     : "Choose a site"}
                 </option>
@@ -421,7 +413,7 @@ export function JiraSourceTab(
                 ))}
               </NativeSelect>
             </label>
-            {usable.length === 0 && !saved && (
+            {usable.length === 0 && unconfigured && (
               <p className="metadata muted">
                 Add a Jira site credential below first.
               </p>

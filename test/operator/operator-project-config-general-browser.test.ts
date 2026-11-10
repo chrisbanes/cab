@@ -194,9 +194,9 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   );
   assert.equal(
     await references
-      .getByRole("link", { name: "Change in GitHub source" })
+      .getByRole("link", { name: "Change in Task source" })
       .getAttribute("href"),
-    `/projects/${ids.atlas}/settings?tab=github`,
+    `/projects/${ids.atlas}/settings?tab=source`,
   );
   assert.equal(
     await references
@@ -798,7 +798,7 @@ test("the source tab reads again by itself when the first read settles older tha
     stale,
   );
   // The first read is out when a refresh advances the loaded version; it settles older.
-  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await projectTabs(page).getByRole("link", { name: "Task source" }).click();
   await page.getByText("Loading search query", { exact: false }).waitFor();
   await external("NEWER QUERY");
   await refresh(page);
@@ -830,7 +830,7 @@ test("a read that fails after a refresh advanced the version is read again once"
     "",
   );
   // The request starts at version N and is held; a refresh moves the form to N+1; then it fails.
-  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await projectTabs(page).getByRole("link", { name: "Task source" }).click();
   await page.getByText("Loading search query", { exact: false }).waitFor();
   await api.execute({
     type: "github.configure",
@@ -894,7 +894,7 @@ test("an older read is retried at most twice per version, and a failure waits fo
   await refresh(page);
   // Every read is older than the loaded version: the first plus two retries, then it stops.
   const older = await scriptReads(page, () => "stale", stale);
-  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await projectTabs(page).getByRole("link", { name: "Task source" }).click();
   const retry = page.getByRole("button", {
     name: /^Try again to load the search query/,
   });
@@ -925,7 +925,7 @@ test("an older read is retried at most twice per version, and a failure waits fo
     (n) => (n === 1 ? "fail" : "real"),
     stale,
   );
-  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await projectTabs(page).getByRole("link", { name: "Task source" }).click();
   await page.getByText("Query unavailable", { exact: true }).waitFor();
   await settled(page);
   assert.equal(
@@ -2070,7 +2070,7 @@ test("phone project settings lead with state and next step and keep the form usa
   await page
     .getByRole("region", { name: "Next step" })
     .getByText(
-      "Set or change the credential in GitHub source settings, then preview this source version.",
+      "Set or change the credential in Task source settings, then preview this source version.",
     )
     .waitFor();
   await page.getByLabel("Project name", { exact: true }).fill("Atlas phone");

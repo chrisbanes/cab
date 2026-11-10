@@ -2,7 +2,7 @@ import { projectSchema } from "../../src/operator/contracts.js";
 import { ProjectLifecyclePanel, DeletedProject } from "./project-lifecycle.js";
 import { sourceCredentialSummary } from "./settings-view.js";
 import { Circle, CircleCheck, CirclePause } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import {
   projectConfigurationSchema,
   projectPrivateValuesSchema,
@@ -91,6 +91,8 @@ import { SourceTab } from "./source-config.js";
 import { readinessAnchor } from "./observation-counts.js";
 import { SyncTab } from "./sync-placement.js";
 import { JiraSourceTab } from "./jira-source.js";
+import { NativeSelect } from "./ui/native-select.js";
+import type { ObservationResource } from "./sync-placement.js";
 
 export interface TabProps extends SettingsProps {
   projectId: string;
@@ -236,33 +238,16 @@ export function ProjectConfiguration(
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
-          ) : tab === "github" && jiraSource(data, p.query) ? (
-            <JiraSourceTab
+          ) : tab === "source" ? (
+            <TaskSourceTab
+              key={`${projectId}:${p.query}`}
               {...tabProps}
               data={data}
+              query={p.query}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
               observations={observations}
             />
-          ) : tab === "github" ? (
-            <>
-              {data.source.selections.length === 0 && (
-                <p className="metadata muted">
-                  <a
-                    href={`/projects/${projectId}/settings?tab=github&tracker=jira`}
-                  >
-                    Use Jira Cloud for this project instead
-                  </a>
-                </p>
-              )}
-              <SourceTab
-                {...tabProps}
-                data={data}
-                loadedAt={resource.state.fetchedAt}
-                refreshConfiguration={refreshConfiguration}
-                observations={observations}
-              />
-            </>
           ) : tab === "delivery" ? (
             <DeliveryTab
               {...tabProps}
@@ -300,11 +285,59 @@ export function ProjectConfiguration(
   );
 }
 
-/** A Jira project shows the Jira source; an unused GitHub one may switch with `tracker=jira`. */
-function jiraSource(data: ProjectConfigurationData, query: string) {
+function TaskSourceTab(
+  p: TabProps & { query: string; observations: ObservationResource },
+) {
+  const trackerId = useId();
+  const locked = p.data.source.selections.length > 0;
+  const saved = p.data.source.tracker === "jira" ? "jira" : "github";
+  const preferred =
+    !locked && new URLSearchParams(p.query).get("tracker") === "jira"
+      ? "jira"
+      : saved;
+  const [choice, setChoice] = useState({
+    version: p.data.source.version,
+    tracker: preferred,
+  });
+  const tracker = locked
+    ? saved
+    : choice.version === p.data.source.version
+      ? choice.tracker
+      : preferred;
   return (
-    data.source.tracker === "jira" ||
-    new URLSearchParams(query).get("tracker") === "jira"
+    <>
+      <Panel
+        title="Task source"
+        description="Choose the issue tracker that supplies this project's tasks. Repository code hosts are configured separately."
+      >
+        <label className="field body" htmlFor={trackerId}>
+          <span>Issue tracker</span>
+          <NativeSelect
+            id={trackerId}
+            aria-label="Issue tracker"
+            className="control"
+            value={tracker}
+            disabled={locked || p.readOnly}
+            onChange={(e) =>
+              setChoice({
+                version: p.data.source.version,
+                tracker: e.target.value,
+              })
+            }
+            aria-describedby="tracker-choice-note"
+          >
+            <option value="github">GitHub</option>
+            <option value="jira">Jira Cloud</option>
+          </NativeSelect>
+        </label>
+        <p id="tracker-choice-note" className="metadata muted">
+          {locked
+            ? `Current tracker: ${saved === "jira" ? "Jira Cloud" : "GitHub"}. Remove all saved selections, including inactive ones, before changing tracker. Imported tasks also prevent a tracker change.`
+            : "The tracker is recorded when you save its source configuration. Imported tasks prevent a tracker change."}
+        </p>
+      </Panel>
+      {tracker === "jira" ? <JiraSourceTab {...p} /> : <SourceTab {...p} />}
+    </>
   );
 }
 
@@ -345,9 +378,12 @@ function statusLine(
         : "No delivery credential configured.",
       data.delivery ? saved("delivery.configure", data.delivery.version) : null,
     );
-  if (tab === "github")
+  if (tab === "source")
     return [
-      saved("github.configure", data.source.version),
+      saved(
+        data.source.tracker === "jira" ? "jira.configure" : "github.configure",
+        data.source.version,
+      ),
       sourceCredentialSummary(data.source),
     ]
       .filter(Boolean)
@@ -384,13 +420,13 @@ function ProjectStateCards({
         <h2 className="small-heading">Next step</h2>
         <p className="body">{next}</p>
         {next.includes("credential") && (
-          <a href={`/projects/${projectId}/settings?tab=github`}>
+          <a href={`/projects/${projectId}/settings?tab=source`}>
             Set or change source credential
           </a>
         )}
         {next === readinessNextStep && (
           <a
-            href={`/projects/${projectId}/settings?tab=github#${readinessAnchor}`}
+            href={`/projects/${projectId}/settings?tab=source#${readinessAnchor}`}
           >
             Check readiness conditions
           </a>
@@ -818,7 +854,7 @@ function CredentialReferences({
   return (
     <Panel
       title="Credential and environment references"
-      description="Routing uses env:NAME. GitHub sources accept a GitHub CLI login or env:NAME; values stay server-side."
+      description="Routing uses env:NAME. GitHub sources accept a GitHub CLI login or env:NAME; Jira uses site credentials. Values stay server-side."
     >
       {row(
         "Routing · TypeSafe",
@@ -830,11 +866,11 @@ function CredentialReferences({
         "Change in Routing",
       )}
       {row(
-        "GitHub source",
+        `Task source · ${data.source.tracker === "jira" ? "Jira Cloud" : "GitHub"}`,
         sourceCredentialSummary(data.source),
         source,
-        `${page}?tab=github`,
-        "Change in GitHub source",
+        `${page}?tab=source`,
+        "Change in Task source",
       )}
       {row(
         "Delivery policy, authority grants and required checks",
