@@ -395,7 +395,7 @@ test("mixed dependency holds stay attributed in List, Board, Overview and projec
       assert.equal(
         await reason.innerText(),
         index < 2
-          ? "GitHub dependencies unavailable"
+          ? "Source dependencies unavailable"
           : "Blocker's change request unconfirmed",
         path,
       );
