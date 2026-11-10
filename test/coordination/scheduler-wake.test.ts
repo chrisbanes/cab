@@ -1160,7 +1160,7 @@ test("request-only refusal rejects execution evidence and completed history", as
   });
 });
 
-test("request-only refusal leaves independent task holds and unfinished callbacks authoritative", async () => {
+async function refusalCallbackLifecycle(assignmentChanged: boolean) {
   await withFixture(async (fixture) => {
     const c = await seedRevisionCollision(fixture);
     execute(fixture.service, {
@@ -1173,20 +1173,82 @@ test("request-only refusal leaves independent task holds and unfinished callback
     });
     await fixture.wake();
     assert.equal(c.state.refusedBeforeStart(c.request.workId), true);
-    const callback = deferred();
-    fixture.service.registerExecutionCallback(
-      c.request.workId,
-      callback.promise,
-    );
-    assert.equal(fixture.service.notStartedWork(c.request.workId), false);
-    assert.deepEqual(fixture.service.startAgainAvailability(c.taskId), {
-      available: false,
-      reason: "execution-unresolved",
+    if (assignmentChanged)
+      access(fixture.service)
+        .db.prepare(
+          "UPDATE domain_assignments SET version=version+1 WHERE id=?",
+        )
+        .run(c.assignmentId);
+    const api = new OperatorApi(fixture.service);
+    const item = (await api.readInbox()).data.items.find(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === c.taskId &&
+        i.attentionCode === "not-started",
+    )!;
+    const refused = c.schedulerStore.byWorkId(c.request.workId);
+    for (const dismissed of [false, true]) {
+      if (dismissed)
+        await api.execute({
+          type: "inbox.dismiss",
+          key: randomUUID(),
+          itemId: item.id,
+          expectedRevision: item.lifecycle!.revision,
+        });
+      const callback = deferred();
+      fixture.service.registerExecutionCallback(
+        c.request.workId,
+        callback.promise,
+      );
+      try {
+        assert.equal(fixture.service.notStartedWork(c.request.workId), false);
+        assert.deepEqual(fixture.service.startAgainAvailability(c.taskId), {
+          available: false,
+          reason: "execution-unresolved",
+        });
+        const during = (await api.readInbox()).data.items;
+        assert.equal(
+          fixture.service.inboxLifecycle().get(item.id)?.status,
+          dismissed ? "dismissed" : "actionable",
+        );
+        if (!dismissed) {
+          assert.equal(
+            during.find((i) => i.id === item.id)?.dismissible,
+            false,
+          );
+          await assert.rejects(
+            api.execute({
+              type: "inbox.dismiss",
+              key: randomUUID(),
+              itemId: item.id,
+              expectedRevision: item.lifecycle!.revision,
+            }),
+            /conflict/,
+          );
+        }
+      } finally {
+        callback.resolve();
+      }
+      await Promise.resolve();
+      await fixture.wake();
+      await api.readInbox();
+      assert.equal(fixture.service.notStartedWork(c.request.workId), true);
+      assert.equal(
+        fixture.service.inboxLifecycle().get(item.id)?.status,
+        dismissed ? "dismissed" : "actionable",
+      );
+      assert.deepEqual(c.schedulerStore.byWorkId(c.request.workId), refused);
+    }
+    await api.execute({
+      type: "inbox.restore",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision + 1,
     });
-    callback.resolve();
-    await Promise.resolve();
-    await fixture.wake();
-    assert.equal(fixture.service.notStartedWork(c.request.workId), true);
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.id === item.id),
+      true,
+    );
     const domain = fixture.service.domain();
     const admission = domain.admission;
     domain.admission = function (...args) {
@@ -1232,7 +1294,10 @@ test("request-only refusal leaves independent task holds and unfinished callback
     });
     assert.equal(fixture.runtime.turns, 0);
   });
-});
+}
+for (const assignmentChanged of [false, true])
+  test(`request-only refusal leaves independent task holds and unfinished callbacks authoritative (${assignmentChanged ? "moved assignment" : "current assignment"})`, () =>
+    refusalCallbackLifecycle(assignmentChanged));
 
 test("an admitted revision collision keeps execution ownership and never refuses older history", async () => {
   await withFixture(async (fixture) => {

@@ -4993,7 +4993,7 @@ export class StandaloneService {
   }
 
   inboxConditions(taskId: string) {
-    const { domain, coordination, schedulerStore } = this.started(),
+    const { domain, coordination, schedulerStore, state } = this.started(),
       task = domain.task(taskId);
     const conditions: Array<{
       code:
@@ -5015,20 +5015,23 @@ export class StandaloneService {
         s.request?.state === "active" &&
         ["running", "submitting"].includes(s.intent?.state ?? "");
       if (
-        (s.request?.state === "held" && !notStarted) ||
+        (request?.state === "held" && !notStarted) ||
         (s.request?.state === "active" && !confirmed) ||
         Boolean(
           (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
         )
       )
         held.push(
-          `${domain.profile(String(a.profileId)).name} · ${a.id} (${s.request?.workId ?? s.record?.workId ?? "ownership"})`,
+          `${domain.profile(String(a.profileId)).name} · ${a.id} (${request?.workId ?? s.record?.workId ?? "ownership"})`,
         );
-      if (task.state === "open" && notStarted && request)
+      // A temporary callback blocks Start again, not the durable refusal episode.
+      if (request?.state === "held" && state.refusedBeforeStart(request.workId))
         conditions.push({
           code: "not-started",
           key: `refused:${request.workId}`,
-          reason: "Refused before it started; nothing ran",
+          reason: notStarted
+            ? "Refused before it started; nothing ran"
+            : "Refused request is waiting for execution ownership to settle",
         });
     }
     if (this.hasNonStopTaskHold(taskId))
