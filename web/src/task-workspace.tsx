@@ -1603,8 +1603,11 @@ export function TaskWorkspace({
           !openRequests.some((q) => q.interactionId === state.inlineAnswer)) ||
         startedAgain === taskId ||
         resumedSource?.taskId === taskId ||
-        // A Resume project outcome (an unknown save above all) outlives the wait it cleared.
-        drafts.phase(`project.resume-fix:${data.task.projectId}`) !== "editing",
+        // A Resume project save in flight or unknown outlives the wait it cleared; a rejected
+        // or conflicting one matters only while its wait, which pins the card, remains.
+        ["pending", "unknown"].includes(
+          drafts.phase(`project.resume-fix:${data.task.projectId}`),
+        ),
     ),
     attentionPinned = attention.pinned || retainedAttention,
     // One rule for the banner and the collapse it toggles, so a collapsed card can always reopen.
@@ -2491,13 +2494,6 @@ export function TaskWorkspace({
         {attention.cardNotices.length > 0 && (
           <QuestionHolds holds={attention.cardNotices} />
         )}
-        {!nextActor.operator &&
-          !data.source?.hold?.active &&
-          !data.completionRequests.some((r) => r.status === "pending") &&
-          !data.waits.length &&
-          !Object.values(data.execution.holds).some(Boolean) && (
-            <p className="muted">No operator decision needed.</p>
-          )}
         {/* The merged approval wait is left out: the open approvals are rows above. */}
         <WaitReasons
           waits={attention.cardWaits}
