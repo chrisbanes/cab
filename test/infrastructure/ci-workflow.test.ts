@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 const { ciFailures } = (await import(
   pathToFileURL(resolve("scripts/check-ci-results.mjs")).href
 )) as {
-  ciFailures(jobs: unknown, run?: boolean, names?: string[]): string[];
+  ciFailures(jobs: unknown, run?: boolean): string[];
 };
 const { previousNightlyRun, nightlyChanged, docsOnly } = (await import(
   pathToFileURL(resolve("scripts/check-changes.mjs")).href
@@ -175,52 +175,9 @@ const successful = {
   changes: { result: "success" },
   quality: { result: "success" },
   suites: { result: "success" },
-  reftable: { result: "success" },
 };
 test("aggregate check accepts a complete run", () => {
   assert.deepEqual(ciFailures(successful), []);
-});
-test("a historical run is judged against its own dependency set", () => {
-  const { reftable: _, ...historical } = successful;
-  assert.deepEqual(
-    ciFailures(historical, true, ["changes", "quality", "suites"]),
-    [],
-  );
-  assert.deepEqual(ciFailures(historical), [
-    "reftable: expected success, observed missing",
-  ]);
-});
-test("the reftable job runs delivery and workspaces in a detached worktree of a bare reftable repository", () => {
-  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const job = workflow.slice(
-    workflow.indexOf("\n  reftable:\n"),
-    workflow.indexOf("\n  check:\n"),
-  );
-  assert.match(job, /needs: quality\n/);
-  assert.match(
-    job,
-    /git init --quiet --bare --template= --ref-format=reftable "\$managed"/,
-  );
-  assert.match(
-    job,
-    /\$PWD\/\.git\/objects" > "\$managed\/objects\/info\/alternates"/,
-  );
-  for (const config of [
-    "gc.auto 0",
-    "maintenance.auto false",
-    "core.logAllRefUpdates true",
-  ])
-    assert.ok(job.includes(`git -C "$managed" config ${config}`), config);
-  assert.match(job, /worktree add --quiet --detach "\$workspace"/);
-  assert.match(
-    job,
-    /test "\$\(git -C "\$workspace" rev-parse --show-ref-format\)" = reftable/,
-  );
-  assert.match(
-    job,
-    /working-directory: \$\{\{ runner\.temp \}\}\/cab-task\/repo-1\n\s+run: npm run test:built -- --suite=delivery,workspaces --profile=service/,
-  );
-  assert.match(workflow, /needs: \[changes, quality, suites, reftable\]/);
 });
 test("unchanged nightly and documentation-only skips require a successful change gate and every test job skipped", () => {
   const skipped = Object.fromEntries(

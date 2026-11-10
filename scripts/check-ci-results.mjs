@@ -1,15 +1,12 @@
 import { pathToFileURL } from "node:url";
 
-/** `names` defaults to this workflow's dependencies; reports pass a historical run's own set. */
-export function ciFailures(
-  jobs,
-  run = true,
-  names = ["changes", "quality", "suites", "reftable"],
-) {
+export function ciFailures(jobs, run = true) {
   const result = run ? "success" : "skipped";
-  const expected = Object.fromEntries(
-    names.map((name) => [name, name === "changes" ? "success" : result]),
-  );
+  const expected = {
+    changes: "success",
+    quality: result,
+    suites: result,
+  };
   if (!jobs || typeof jobs !== "object" || Array.isArray(jobs))
     return ["CI needs must be an object"];
   const failures = Object.keys(jobs)

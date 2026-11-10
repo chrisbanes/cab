@@ -416,38 +416,29 @@ async function candidateAttempts(
 
 function accountAggregateFailure(attempt, logs) {
   // Only these retrieved topologies (before and after browser lanes stopped repeating
-  // service cases, then with the reftable job) are qualified; other or extra jobs remain unknown.
+  // service cases) are qualified; other or extra jobs remain unknown.
   const jobs = attempt.jobs;
-  const splitLanes = [
-    "integrations-1",
-    ...[1, 2, 3, 4].flatMap((shard) => [
-      `operator-${shard}`,
-      `service-${shard}`,
-    ]),
-  ];
-  const topology = [
-    {
-      lanes: [
-        "integrations-1",
-        "execution-1",
-        "execution-2",
-        "workspaces-1",
-        "operator-1",
-        "operator-2",
-        "service-1",
-        "service-2",
-      ],
-      jobs: [],
-    },
-    { lanes: splitLanes, jobs: [] },
-    { lanes: splitLanes, jobs: ["reftable"] },
-  ].find(
-    (candidate) =>
-      candidate.lanes.length + candidate.jobs.length + 3 === jobs.length,
-  );
-  if (!topology) return;
-  const lanes = topology.lanes;
-  const names = ["changes", "quality", ...lanes, ...topology.jobs, "check"];
+  const lanes = [
+    [
+      "integrations-1",
+      "execution-1",
+      "execution-2",
+      "workspaces-1",
+      "operator-1",
+      "operator-2",
+      "service-1",
+      "service-2",
+    ],
+    [
+      "integrations-1",
+      ...[1, 2, 3, 4].flatMap((shard) => [
+        `operator-${shard}`,
+        `service-${shard}`,
+      ]),
+    ],
+  ].find((candidate) => candidate.length + 3 === jobs.length);
+  if (!lanes) return;
+  const names = ["changes", "quality", ...lanes, "check"];
   if (
     jobs.length !== names.length ||
     new Set(jobs.map((job) => job.id)).size !== jobs.length ||
@@ -538,14 +529,8 @@ function accountAggregateFailure(attempt, logs) {
         ? "failure"
         : "success",
     },
-    ...Object.fromEntries(
-      topology.jobs.map((name) => [
-        name,
-        { result: jobs.find((job) => job.name === name).conclusion },
-      ]),
-    ),
   };
-  const diagnostics = ciFailures(needs, true, Object.keys(needs));
+  const diagnostics = ciFailures(needs);
   if (
     !diagnostics.length ||
     JSON.stringify(lines.slice(groupEnd + 1, exit)) !==

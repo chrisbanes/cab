@@ -37,11 +37,6 @@ check's time, so refresh the weights below when one shard finishes well after th
 others. Logical suites remain separate directories even when they
 share a CI lane. Runtime retention tests are split by terminal events, threads and
 native input so the expensive workloads can run on different service shards.
-A separate `reftable` job runs the delivery and workspaces suites with the service
-profile in the checkout shape cab gives a task: a detached worktree of a bare
-reftable repository that borrows the checkout's objects, configured as
-`src/standalone/workspaces.ts` creates one. A test that reads the checkout's own `refs/`
-or `packed-refs` instead of asking Git fails there.
 
 Shards use separate `all`, `chromium` and `service` weights in
 `scripts/test-timings.json`. Weights measure complete file durations, including
@@ -167,7 +162,10 @@ path as the runner does.
 
 Agents run the full check in their cab-managed task workspaces. A task's checkout
 there is a detached worktree of a bare reftable repository, and its commands run in
-the harness sandbox. Browser engines do not start in these sandboxes,
+the harness sandbox. CI and developer checkouts use the `files` ref format, so read refs
+through Git commands, never from the checkout's `refs/` or `packed-refs`;
+`test/delivery/stack-source-identity.test.ts` covers the stack qualification in both
+formats and in a cab-shaped worktree. Browser engines do not start in these sandboxes,
 so the check there runs with the service profile: `npm ci`, then
 `npm run typecheck`, `npm run lint` and `npm run format:check`, then
 `npm run build && npm run test:built -- --profile=service`. The workspace needs this

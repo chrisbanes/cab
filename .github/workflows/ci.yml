@@ -129,56 +129,10 @@ jobs:
           path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
-  reftable:
-    # Delivery and workspaces in the checkout shape cab gives a task: a detached worktree of
-    # a bare reftable repository that borrows the source's objects (src/standalone/workspaces.ts).
-    needs: quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
-      - run: git --version && node --version && npm --version
-      - name: Create a cab-managed reftable workspace
-        run: |
-          managed="$RUNNER_TEMP/cab-managed"
-          workspace="$RUNNER_TEMP/cab-task/repo-1"
-          git init --quiet --bare --template= --ref-format=reftable "$managed"
-          printf '%s\n' "$PWD/.git/objects" > "$managed/objects/info/alternates"
-          git -C "$managed" config gc.auto 0
-          git -C "$managed" config maintenance.auto false
-          git -C "$managed" config core.logAllRefUpdates true
-          git -C "$managed" worktree add --quiet --detach "$workspace" "$(git rev-parse HEAD)"
-          test "$(git -C "$workspace" rev-parse --show-ref-format)" = reftable
-          mkdir -p "$RUNNER_TEMP/cab-fixture-tmp" "$RUNNER_TEMP/cab-test-evidence"
-          printf 'TMPDIR=%s\nCAB_TEST_EVIDENCE_DIR=%s\nPLAYWRIGHT_BROWSERS_PATH=%s\n' "$RUNNER_TEMP/cab-fixture-tmp" "$RUNNER_TEMP/cab-test-evidence" "$RUNNER_TEMP/cab-no-browsers" >> "$GITHUB_ENV"
-      - working-directory: ${{ runner.temp }}/cab-task/repo-1
-        run: npm ci
-      - uses: actions/download-artifact@v8
-        with:
-          name: cab-build
-          path: ${{ runner.temp }}/cab-task/repo-1/dist
-      - name: Run delivery and workspaces in the reftable workspace
-        working-directory: ${{ runner.temp }}/cab-task/repo-1
-        run: npm run test:built -- --suite=delivery,workspaces --profile=service
-      - name: Upload synthetic test evidence
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: evidence-reftable-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cab-test-evidence
-          retention-days: 3
-          if-no-files-found: error
   check:
     name: check
     if: always()
-    needs: [changes, quality, suites, reftable]
+    needs: [changes, quality, suites]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
