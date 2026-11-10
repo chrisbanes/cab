@@ -276,6 +276,57 @@ test("unmet delivery needs point to existing repair controls", () => {
   );
 });
 
+test("opaque grants cannot let later visible Project or branch grants claim effective authority", () => {
+  const opaque = {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: {
+      projectId: "project",
+      section: "delivery-grants",
+      version: 1,
+      index: 0,
+    },
+  } satisfies DeliveryPolicyValues["grants"][number];
+  // An earlier approval grant can be withheld for one excluded option or supplemental scope.
+  for (const visible of [
+    {
+      action: "project.field",
+      repositoryId: "R",
+      mode: "allow",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: ["ready"],
+    },
+    { action: "branch.push", repositoryId: "R", mode: "allow" },
+  ] satisfies DeliveryPolicyValues["grants"]) {
+    assert.match(
+      repositoryAuthorityGroups([visible], "R", "usable")
+        .flatMap((g) => g.lines)
+        .join(" "),
+      /Allow:/,
+    );
+    for (const credential of ["usable", "unknown", "unusable"] as const) {
+      const groups = repositoryAuthorityGroups(
+        [opaque, visible],
+        "R",
+        credential,
+      );
+      assert.equal(groups.length, 4);
+      assert.doesNotMatch(groups.flatMap((g) => g.lines).join(" "), /Allow:/);
+      for (const { lines } of groups) {
+        assert.match(
+          lines.join(" "),
+          /Effective authority is unconfirmed.*Refresh/,
+        );
+        assert.doesNotMatch(
+          lines.join(" "),
+          /Allow:|No grants|No Project grants/,
+        );
+      }
+    }
+  }
+});
+
 test("later overlapping Project options and supplemental branch scopes cannot overstate effective authority", () => {
   const grants: DeliveryPolicyValues["grants"] = [
     {

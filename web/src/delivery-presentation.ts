@@ -420,7 +420,16 @@ export function repositoryAuthorityGroups(
   sentences?: readonly (string | undefined)[],
 ) {
   const seen = new Set<string>();
+  const opaque = grants.some((g) => "savedRow" in g);
   return (["Branch", "PR", "Merge", "Project/status"] as const).map((group) => {
+    // An opaque row may precede any visible grant, so effective precedence is unknown.
+    if (opaque)
+      return {
+        group,
+        lines: [
+          "Effective authority is unconfirmed because some grants are unavailable. Refresh with access to their details.",
+        ],
+      };
     const lines = grants.flatMap((g, i) => {
       if ("savedRow" in g || g.repositoryId !== repositoryId) return [];
       const target = g.action.startsWith("branch.")
