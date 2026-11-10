@@ -548,3 +548,31 @@ test("bound recovery lost response reads back its receipt without another reconc
   assert.equal(w.checks(), checks);
   assert.equal(w.runtime.turnInvocations.length, 1);
 });
+
+test("a held resume's no-turn adoption names its predecessor and leaves a refusal Start again can run", async (t) => {
+  const w = await cliGeneration(t, "pre-turn-defect");
+  const { key, evidence, attestation, ...expected } = w.g.resumeAdoption();
+  assert.ok(key);
+  const adopt = await prepare(w, "no-turn-adopt", [
+    ...work(w),
+    "--evidence-file",
+    w.evidenceFile({ evidence, attestation }),
+  ]);
+  assert.equal(adopt.r.code, 0, adopt.r.err);
+  const document = JSON.parse(readFileSync(adopt.file, "utf8"));
+  assert.deepEqual(document.command, {
+    type: "recovery.no-turn.adopt",
+    assignmentId: w.g.assignmentId,
+    ...expected,
+    evidence,
+    attestation,
+  });
+  const r = await w.cli("rw", ["recovery", "submit", "--file", adopt.file]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json().data.receipt.kind, "recovery-adoption");
+  assert.deepEqual(w.s.f.service.startAgainAvailability(w.g.taskId), {
+    available: true,
+    assignmentId: w.g.assignmentId,
+    workId: w.g.workId,
+  });
+});

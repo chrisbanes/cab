@@ -39,6 +39,7 @@ import type {
   RuntimeProcessIdentity,
 } from "./recovery-types.js";
 import { captureProcessIdentity } from "./termination.js";
+import { RuntimeRequestRejectedError } from "./pre-turn-failure.js";
 import {
   ArchivedResumeRejectedError,
   archivedResumeRejectionSchema,
@@ -2446,7 +2447,7 @@ export class CodexRuntime implements Runtime {
               message.params === undefined &&
               message.result === undefined
               ? new ArchivedResumeRejectedError(rejection.data)
-              : new Error(JSON.stringify(message.error)),
+              : new RuntimeRequestRejectedError(JSON.stringify(message.error)),
           );
         } else {
           try {

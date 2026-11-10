@@ -206,8 +206,9 @@ and roles.
 _Avoid_: Agent concurrency setting in the agent revision
 
 **Start again**:
-The operator action that queues an assignment's request again when it was refused at
-admission before it ran, at the current revisions. The refused request stays as history.
+The operator action that queues an assignment's request again when it was refused before it
+ran, at admission or before any turn was submitted, at the current revisions. The refused
+request stays as history.
 _Avoid_: Retry, which resends work that may have run
 
 **Reset task**:

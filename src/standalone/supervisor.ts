@@ -359,6 +359,29 @@ export class ExecutionSupervisor {
     return "refusal" in result ? [result.blocker] : [];
   }
 
+  /**
+   * Advisory only, for the pre-turn and no-turn recover paths: whether the held
+   * generation's process is proven ended, read as their command reads it.
+   */
+  async unboundTurnTerminationBlockers(
+    workId: string,
+  ): Promise<BoundTurnRecoveryBlocker[]> {
+    const before = this.state.recoveryIdentity(workId);
+    if (!before?.processIdentity) return ["context-unavailable"];
+    const result = await this.terminationProof(before.processIdentity);
+    const after = this.state.recoveryIdentity(workId);
+    if (
+      !after?.processIdentity ||
+      after.workRevision !== before.workRevision ||
+      after.requestSequence !== before.requestSequence ||
+      after.threadId !== before.threadId ||
+      after.turnId !== before.turnId ||
+      !exactProcessIdentity(after.processIdentity, before.processIdentity)
+    )
+      return ["identity-changed"];
+    return "refusal" in result ? [result.blocker] : [];
+  }
+
   recordObservation(
     workId: string,
     kind: string,

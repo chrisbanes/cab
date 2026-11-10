@@ -3900,6 +3900,7 @@ export const recoveryBlockerSchema = z.enum([
   "other-witness",
   "already-reconciled",
   "reason-withheld",
+  "reason-mismatch",
   "identity-withheld",
   "task-held",
   "unresolved-execution",

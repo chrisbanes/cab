@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
+import { bindLegacyHold, failing } from "../fixtures/recovery-generations.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type {
@@ -34,6 +35,7 @@ function deferred() {
   return { promise, resolve };
 }
 class RecoveryContinuationRuntime implements Runtime {
+  beforeFailure: ((error: Error) => void) | undefined;
   turns = 0;
   threads = 0;
   prompts: string[] = [];
@@ -62,15 +64,18 @@ class RecoveryContinuationRuntime implements Runtime {
   rejectResume = false;
   resumeError: Error | undefined;
   async resumeThread(threadId: string) {
-    if (this.resumeError) throw this.resumeError;
+    if (this.resumeError) throw failing(this.beforeFailure, this.resumeError);
     if (this.rejectResume)
-      throw new ArchivedResumeRejectedError({
-        method: "thread/resume",
-        requestId: 4,
-        threadId,
-        processIdentity: this.identity,
-        error: { code: -32600, message: archivedResumeMessage(threadId) },
-      });
+      throw failing(
+        this.beforeFailure,
+        new ArchivedResumeRejectedError({
+          method: "thread/resume",
+          requestId: 4,
+          threadId,
+          processIdentity: this.identity,
+          error: { code: -32600, message: archivedResumeMessage(threadId) },
+        }),
+      );
   }
   async startTurn(_thread: string, _workspace: string, prompt: string) {
     this.prompts.push(prompt);
@@ -158,25 +163,28 @@ async function heldFixture(
   if (preTurn) runtime.failedTurn = 0;
   let verified = true;
   const makeService = () =>
-    new StandaloneService(join(directory, "data"), () => runtime, undefined, {
-      power: { enabled: false },
-      routingClient: null,
-      terminationVerifier: {
-        async verify(identity) {
-          return verified
-            ? {
-                kind: "verified",
-                processIdentity: identity,
-                verifiedAt: "2026-10-03T10:05:00.000Z",
-                method: "mac-pid-absent-same-boot",
-              }
-            : {
-                kind: "unknown",
-                reason: "Synthetic process is not proven ended",
-              };
+    bindLegacyHold(
+      runtime,
+      new StandaloneService(join(directory, "data"), () => runtime, undefined, {
+        power: { enabled: false },
+        routingClient: null,
+        terminationVerifier: {
+          async verify(identity) {
+            return verified
+              ? {
+                  kind: "verified",
+                  processIdentity: identity,
+                  verifiedAt: "2026-10-03T10:05:00.000Z",
+                  method: "mac-pid-absent-same-boot",
+                }
+              : {
+                  kind: "unknown",
+                  reason: "Synthetic process is not proven ended",
+                };
+          },
         },
-      },
-    });
+      }),
+    );
   const service = makeService();
   const projectId = randomUUID(),
     taskId = randomUUID(),

@@ -12,11 +12,19 @@ import {
   recoveryRpcErrorSchema,
   replaceConversationBodySchema,
 } from "../core/recovery-contracts.js";
+import { RuntimeRequestRejectedError } from "./pre-turn-failure.js";
 
 export { processIdentitySchema };
 
 export function archivedResumeMessage(threadId: string): string {
   return `session ${threadId} is archived. Run \`codex unarchive ${threadId}\` to unarchive it first.`;
+}
+/** How a pre-turn RPC rejection was held, which historical pre-turn adoption restates. */
+export function rejectedRequestHoldReason(error: {
+  code: number;
+  message: string;
+}): string {
+  return `Runtime submission or observation uncertain: Error: ${JSON.stringify({ code: error.code, message: error.message })}`;
 }
 export const archivedResumeRejectionSchema = z
   .object({
@@ -36,7 +44,7 @@ export type ArchivedResumeRejection = z.infer<
 >;
 
 /** Produced only from a correlated response to the owned runtime request. */
-export class ArchivedResumeRejectedError extends Error {
+export class ArchivedResumeRejectedError extends RuntimeRequestRejectedError {
   readonly rejection: ArchivedResumeRejection;
   constructor(rejection: ArchivedResumeRejection) {
     super(JSON.stringify(rejection.error));
@@ -65,7 +73,13 @@ export type HistoricalPreTurnAdoption = z.infer<
 >;
 export const historicalNoTurnAdoptionSchema = historicalNoTurnAdoptionBodySchema
   .extend({ key })
-  .strict();
+  .strict()
+  .refine(
+    (v) =>
+      (v.predecessorWorkId === undefined) ===
+      (v.predecessorThreadId === undefined),
+    "A predecessor needs both its work and thread",
+  );
 export type HistoricalNoTurnAdoption = z.infer<
   typeof historicalNoTurnAdoptionSchema
 >;

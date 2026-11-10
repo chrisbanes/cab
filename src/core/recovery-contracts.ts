@@ -66,6 +66,9 @@ export const historicalPreTurnAdoptionBodySchema = recoveryGenerationSchema
 export const historicalNoTurnAdoptionBodySchema = recoveryGenerationSchema
   .extend({
     kind: z.literal("historical-no-turn-submission"),
+    /** Both present for a resume of a known completed predecessor; both absent otherwise. */
+    predecessorWorkId: z.string().min(1).max(512).optional(),
+    predecessorThreadId: z.string().min(1).max(512).optional(),
     conversationRevision: z.number().int().positive(),
     writerSequence: z.number().int().positive().safe(),
     retainedReason: z.string().min(1).max(4000),

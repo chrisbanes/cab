@@ -267,7 +267,6 @@ import {
   type PowerEventSource,
 } from "./power.js";
 import {
-  ArchivedResumeRejectedError,
   type BoundTurnRecoveryCommand,
   boundTurnRecoveryCommandSchema,
   type HistoricalNoTurnAdoption,
@@ -278,6 +277,12 @@ import {
   preTurnRecoveryCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import {
+  type PreTurnStage,
+  preTurnFailureClass,
+  preTurnHoldReason,
+  preTurnRefusalReason,
+} from "./pre-turn-failure.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import type {
   RecoveryReceipt,
@@ -543,6 +548,7 @@ const draftingStoppedReason = "You stopped the draft";
 const draftingTimeLimitReason = "The 10 minute time limit was reached";
 const draftingRestartedReason = "The service restarted";
 const draftingUnverifiedReason = "Waiting to confirm the runtime stopped";
+const draftingNotStartedReason = "The lead's turn could not start";
 const draftingCleanupReason = "Waiting to remove the working copy";
 const draftingWorkspaceFailedReason = "The working copy could not be prepared";
 
@@ -3334,6 +3340,9 @@ export class StandaloneService {
       () => this.started().supervisor.resolveHeldExecution(receipt),
     );
   }
+  unboundTurnTerminationBlockers(workId: string) {
+    return this.started().supervisor.unboundTurnTerminationBlockers(workId);
+  }
   boundTurnRecoveryEligibility(workId: string, assignmentId: string) {
     return this.started().supervisor.boundTurnRecoveryEligibility(
       workId,
@@ -3409,7 +3418,11 @@ export class StandaloneService {
     );
   }
   adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
-    return this.started().state.adoptHistoricalNoTurnSubmission(command);
+    const result =
+      this.started().state.adoptHistoricalNoTurnSubmission(command);
+    // Adopting a held resume refuses it and frees its capacity for queued work.
+    this.wakeAfterCommit();
+    return result;
   }
   recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
     const value = noTurnRecoveryCommandSchema.parse(command);
@@ -7148,6 +7161,54 @@ export class StandaloneService {
   }
 
   /**
+   * A submission that failed before `startTurn` was called sent no turn, so nothing ran.
+   * An assignment request is refused for Start again; a drafting run fails. False when
+   * anything else holds the execution (Stop, task hold, callback, known survivor), which
+   * then keeps its hold. cab never retries it automatically.
+   */
+  private async refuseBeforeTurn(
+    request: TurnRequest,
+    intent: ExecutionIntent,
+    stage: PreTurnStage,
+    error: unknown,
+    draftingRunId: string | undefined,
+  ): Promise<boolean> {
+    const { state, supervisor, drafting } = this.started();
+    try {
+      if (
+        (this.callbacks.get(request.workId)?.size ?? 0) > 0 ||
+        supervisor.hasKnownRisk(request.workId) ||
+        state.get(intent.id).state !== "submitting"
+      )
+        return false;
+      const failureClass = preTurnFailureClass(error);
+      const reason = preTurnRefusalReason(stage, failureClass, error);
+      if (request.kind === "assignment")
+        return state.refusePreTurn(intent.id, {
+          stage,
+          failureClass,
+          reason,
+          threadId: state.get(intent.id).threadId,
+        });
+      if (!draftingRunId) return false;
+      const run = drafting.get(draftingRunId);
+      if (run?.state !== "running" && run?.state !== "stopping") return false;
+      const [outcome, settled] =
+        run.state === "running"
+          ? (["failed", draftingNotStartedReason] as const)
+          : (["interrupted", run.reason ?? draftingStoppedReason] as const);
+      if (run.state === "running")
+        drafting.transition(draftingRunId, "stopping", settled);
+      state.releaseDraftingExecution(request.workId);
+      await this.settleUnadmitted(draftingRunId, outcome, settled);
+      return true;
+    } catch {
+      // Storage failure: the execution keeps today's uncertain hold.
+      return false;
+    }
+  }
+
+  /**
    * The turn ended. Capacity is released only on an observed terminal status
    * with nothing unfinished; the copy is then deleted and the run settled.
    */
@@ -8874,7 +8935,8 @@ export class StandaloneService {
     const state = this.started().state;
     const harness = harnessForWork(state, request.workId);
     const runtime = this.runtimes.get(harness);
-    let submissionStage: "resume" | "thread" | "bound" | "turn" = "thread";
+    // `turn` only from the statement that calls `startTurn`: anything earlier sent no turn.
+    let submissionStage: PreTurnStage | "turn" = "thread";
     let captureThreadId: string | undefined;
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
     let conversationCapture: ConversationHistoryCapture | undefined;
@@ -9030,7 +9092,6 @@ export class StandaloneService {
         runtime,
         threadId,
       );
-      submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
       const settings = this.turnSettings(request);
       // Only a completed predecessor is known to hold its prompt; an interrupted one
@@ -9080,6 +9141,7 @@ export class StandaloneService {
               ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
             }
           : undefined;
+      submissionStage = "turn";
       const turnId = await guard(
         policy
           ? runtime.startTurn(threadId, workspace, prompt, settings, policy)
@@ -9374,22 +9436,31 @@ export class StandaloneService {
         }
       }
     } catch (error) {
-      if (
-        submissionStage === "resume" &&
-        error instanceof ArchivedResumeRejectedError &&
-        previous?.threadId === error.rejection.threadId &&
-        state.get(intent.id).state === "submitting"
-      )
-        state.capturePreTurnRejection(request.workId, error.rejection);
-      if (state.get(intent.id).state !== "held")
+      const refused =
+        submissionStage !== "turn" &&
+        (await this.refuseBeforeTurn(
+          request,
+          intent,
+          submissionStage,
+          error,
+          draftingRunId,
+        ));
+      if (!refused && state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
           error instanceof PreviousHarnessHomeError
             ? error.message
-            : `Runtime submission or observation uncertain: ${String(error)}`,
+            : submissionStage !== "turn"
+              ? preTurnHoldReason(
+                  submissionStage,
+                  preTurnFailureClass(error),
+                  error,
+                )
+              : `Runtime submission or observation uncertain: ${String(error)}`,
         );
       // The run stays held, with its capacity, until the next start verifies the runtime ended.
       if (
+        !refused &&
         draftingRunId &&
         this.current?.drafting.get(draftingRunId)?.state === "running"
       )
