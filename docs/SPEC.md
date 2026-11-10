@@ -126,10 +126,11 @@ and drive the existing refresh, handback settlement and staged comment commands;
 `result deliver` delivers an undelivered result to its permitted recipient; and
 `delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
 publish a local task as a GitHub issue with the operator UI's own commands. `recovery
-get|prepare|submit` inspect an assignment's held generations and submit the
-existing adoption, pre-turn, no-turn and bound-turn recovery and conversation-replacement
-commands from an owner-only, digest-bound document built from observed identity and
-an explicit operator evidence file; none resumes or dispatches work. Further CLI
+get|release|prepare|submit` inspect an assignment's held generations, release one that
+never sent a turn after confirmation, and submit the existing pre-turn, no-turn and
+bound-turn recovery and conversation-replacement commands from an owner-only,
+digest-bound document built from observed identity and an explicit operator evidence
+file; none resumes or dispatches work. Further CLI
 delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/cab/issues/893).
 
@@ -877,20 +878,30 @@ turn-start response, keeps the uncertain hold and the recovery below. A direct r
 outside a task keeps the uncertain hold, since nothing can start it again.
 
 A generation held before pre-turn failures became refusals has no persisted stage, so
-the rule above does not apply to it, and an error string alone is not proof. Such a
-generation that positively records an archived `thread/resume` rejection has a
-separate pre-turn recovery proof: either the runtime witness captured at the time (the
-exact correlated RPC request, predecessor thread, `-32600` archived-session response and
-runtime process identity, persisted against the admitted request sequence, work revision
-and assignment binding), or explicit authenticated operator adoption. Adoption's
-immutable command receipt binds the exact held generation, predecessor, process and
-persisted response to operator attestations and reviewed source/harness/evidence/approval
-references, and it accepts only a held reason that is exactly that archived rejection.
-The host operator verifies those artifacts; valid metadata syntax alone does not
-establish proof. Model tools cannot adopt evidence. Command replay returns the same result
-and rejects altered material or retargeting. Adoption and recovery are authenticated
-advanced operator routes; they grant no new model tool authority or automatic recovery
-control. cab no longer captures this witness for new failures.
+the rule above does not apply to it, and an error string alone is not proof. cab saves
+a generation's thread binding before it calls `startTurn`, and a failed save stops the
+submission first; neither harness sends input before `startTurn`. So a held generation
+whose saved thread and turn are both null never sent a turn, on any build. cab releases
+such a generation, whatever its hold reason, when it still holds capacity and nothing
+else holds it: no pre-turn or no-turn witness, Stop, task hold, unfinished callback,
+known survivor or pending effect other than its result. A release records the same
+refusal a new pre-turn failure records, with its own reason, in one transaction that
+frees writer and capacity, so Start again is offered with no operator evidence; cab
+never starts it again automatically. An idle thread may exist that cab never saw. At
+startup, before admission, cab releases every eligible generation and logs each one; a
+generation that fails any check is left unchanged. `recovery release` (and the recovery
+page's Release action) reads the same checks and, after one confirmation, submits a
+release bound to the generation read. The service reruns every check and refuses,
+changing nothing, when one fails or the generation changed. A request key replays its
+recorded result. A generation with a saved thread or turn is never released this way.
+
+Such a generation that positively records an archived `thread/resume` rejection may
+instead hold the runtime witness captured at the time (the exact correlated RPC request,
+predecessor thread, `-32600` archived-session response and runtime process identity,
+persisted against the admitted request sequence, work revision and assignment binding),
+or an operator-adopted witness an earlier build recorded. A witnessed generation is not
+released; it recovers as below. cab no longer captures or adopts this witness, and
+receipts of the retired adoption commands still read back unchanged.
 
 A keyed pre-turn recovery receipt requires the persisted witness, truthful null
 thread/turn identities, independent exact-process termination verification and
@@ -905,18 +916,9 @@ replay. Admission, completion and external actions revalidate the pre-turn witne
 receipt and continuation audit at use time. Independent holds, current admission
 gates and persistent late-callback/survivor holds remain enforced.
 
-A distinct historical no-turn-submission proof covers a held generation with unbound
-thread/turn identities and either a captured known-null predecessor or a resume of a
-known completed predecessor. It is operator-only adoption of independently reviewed
-frozen source, harness and a complete synchronous write-ahead invocation ledger
-establishing that `startTurn` was never called for the exact generation at that build.
-A generic stop error, missing identities, process absence or metadata syntax alone
-cannot establish this proof. An initial `thread/start` or a resume may have left an
-unobserved idle thread; this contract does not claim thread noncreation, a positive
-archived-resume rejection or successful work. Adopting a resume refuses the generation
-before it ran in the same transaction, exactly as a new pre-turn failure is refused, so
-Start again is offered and no termination proof is needed; the refusal's identity is the
-adoption's witness. Adopting a first turn records its no-turn witness for recovery.
+An earlier build could also record an operator-adopted no-turn-submission witness for a
+held generation with unbound thread/turn identities. That witness does not claim thread
+noncreation, a positive archived-resume rejection or successful work.
 
 The no-turn witness and receipt discriminator bind request/work,
 conversation/writer revisions, assignment snapshots, process and immutable operator
@@ -931,8 +933,8 @@ late callbacks or known survivors persist a hold and retract successors across
 restart. The advanced authenticated host routes expose bounded acknowledgement,
 with no new model tool authority or forms in the curated operator UI. The recovery
 read reports a path eligible only when the checks its command runs can pass, including
-the exact archived reason for pre-turn adoption and the termination proof for recovery,
-and names the failing check otherwise.
+the release checks and the termination proof for recovery, and names the failing check
+otherwise.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash releases neither writer ownership nor capacity. No

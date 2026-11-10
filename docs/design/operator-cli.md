@@ -382,7 +382,7 @@ Node.js version and package tooling; distribution follows
 | `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material |
 | `execution`, `logs`, `doctor` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow; the service readiness checks |
 | `runtime` | List each execution runtime's setting, state and bound tasks; enable or disable one (`disable` needs `--yes` when bound tasks use it) |
-| `recovery` | Inspect eligibility/holds; prepare and submit the existing evidence-bearing operations |
+| `recovery` | Inspect eligibility/holds; release a generation that never sent a turn; prepare and submit the existing evidence-bearing operations |
 | `result`, `artifact`, `delivery` | Inspect results/retained evidence and existing delivery state; existing refresh and staged comment operations |
 | `operation` | Read an existing mutation receipt and reconcile an uncertain command outcome |
 
@@ -638,46 +638,54 @@ create's marker and text, and `publish-abandon` warns that a duplicate may exist
 live under `delivery` because the task area's usage block stays within one screen. Creating the
 issue is irreversible from cab; closing it on GitHub is the only recovery.
 
-Recovery drives the five existing evidence-bearing operations through receipted
+Recovery drives the release and the existing evidence-bearing operations through receipted
 commands on `POST /api/operator/commands`, scoped `assignment:<id>`:
-`recovery.pre-turn.adopt`, `recovery.pre-turn.recover`, `recovery.no-turn.adopt`,
-`recovery.no-turn.recover` and `recovery.conversation.replace`. Each carries
-`assignmentId` and the existing service command's fields; the API checks the work is
-bound to that assignment and calls the unchanged service method with exactly the
-inner command the retained `/runtime/control/*` session routes pass, so a key
+`recovery.release`, `recovery.pre-turn.recover`, `recovery.no-turn.recover`,
+`recovery.bound-turn.recover` and `recovery.conversation.replace`.
+`recovery.release {assignmentId, workId, workRevision, requestSequence}` binds the generation
+the operator read; the others carry `assignmentId` and the existing service command's fields.
+The API checks the work is bound to that assignment and calls the unchanged service method
+with exactly the inner command the retained `/runtime/control/*` session routes pass, so a key
 recorded through either entry point replays through the other. Receipts are
-`recovery-adoption {path, assignmentId, workId, witnessId}`, `recovery-resolution
+`recovery-release {path, assignmentId, workId, refusalId}`, `recovery-resolution
 {path, assignmentId, workId, receiptId, state: "reconciled"}` and
-`conversation-replacement {assignmentId, revision}`. Definite refusals (stale or
-mismatched identity, unverified termination, an existing or missing witness, a
-reconciled generation, stale replacement versions, unresolved execution, a task
-hold, a key reused for other material or another type) are `409`; malformed
-commands are `400`; other failures stay `command-outcome-unknown`.
+`conversation-replacement {assignmentId, revision}`; a key recorded by the retired
+`recovery.pre-turn.adopt` or `recovery.no-turn.adopt` still reads back as
+`recovery-adoption {path, assignmentId, workId, witnessId}`, but neither type is accepted.
+Definite refusals (stale or mismatched identity, unverified termination, an existing or
+missing witness, a saved thread or turn, an independent hold, a reconciled or released
+generation, stale replacement versions, unresolved execution, a task hold, a key reused for
+other material or another type) are `409`; malformed commands are `400`; other failures stay
+`command-outcome-unknown`.
 `GET /api/operator/assignments/:id/recovery-options` (read scope) lists the
 assignment's own generations (newest 20, filtered before the bound; writer, capacity
 and uncertainty holds are this assignment's, Stop and task holds task-wide) with the
 exact identity each command binds and advisory per-path
 eligibility with closed blockers (`not-held`, `ownership-released`,
-`context-unavailable`, `witness-missing`, `witness-present`, `other-witness`,
-`already-reconciled`, `reason-withheld`, `reason-mismatch`, `identity-withheld`, `task-held`,
-`unresolved-execution`, plus the termination blockers `termination-live`,
-`termination-conflict`, `termination-unknown` and `identity-changed` that the recover paths
-share with bound-turn recovery). A path is eligible only when the checks its command runs can
-pass: `pre-turn-adopt` needs the held reason to be the exact archived-resume rejection, and the
-recover paths need the stored process proven ended. `no-turn-adopt` also accepts a held resume
-of a known completed predecessor; its command then names `predecessorWorkId` and
-`predecessorThreadId`, and adoption refuses the generation before it ran so Start again applies. It discloses the held process identity to both credential
-scopes as permitted diagnostic content; a string redaction would change reads
-`null` and blocks the paths that would send it. `recovery prepare` writes an
+`context-unavailable`, `thread-bound`, `turn-bound`, `independent-hold`, `callback-pending`,
+`known-survivor`, `witness-missing`, `witness-present`, `other-witness`,
+`already-reconciled`, `identity-withheld`, `task-held`, `unresolved-execution`, plus the
+termination blockers `termination-live`, `termination-conflict`, `termination-unknown` and
+`identity-changed` that the recover paths share with bound-turn recovery). A path is eligible
+only when the checks its command runs can pass: `release` needs a held generation that still
+holds capacity, has no saved thread or turn, no witness and no independent hold; the recover
+paths need the stored process proven ended. It discloses the held process identity to both
+credential scopes as permitted diagnostic content; a string redaction would change reads
+`null` and blocks the paths that would send it.
+`recovery release ASSIGNMENT_ID [--work WORK_ID] [--yes] [--request-id UUID]` picks the held
+generation (`--work` names one when several are held). Without `--yes` it prints the release
+eligibility or each blocker and writes nothing; with `--yes` it sends `recovery.release` bound
+to that read under the default journal key rule, exits 4 naming the blockers when the service
+refuses, and settles a lost reply like `recovery submit`. `recovery prepare` writes an
 `cab.cli.recovery/v1` document (owner-only, at most 512 KiB, canonical-JSON
-SHA-256 digest) from that read plus a strict `cab.cli.recovery-evidence/v1`
-operator file; attestations remain operator assertions the service cannot verify.
-`recovery submit` uses the default journal key rule: an identical rerun replays, and
-a definitely refused key is not reused. Adoption, recovery and replacement are
-irreversible; none resumes or dispatches work, and continuation still needs
-replacement plus a new message. Operator Stop/Resume are unchanged; there is no
-force unlock, release by time or acknowledgement, and no route for the keyless
-bound-turn recovery.
+SHA-256 digest) for the other paths from that read plus a strict
+`cab.cli.recovery-evidence/v1` operator file; its assertions remain operator assertions the
+service cannot verify. `recovery submit` uses the default journal key rule: an identical
+rerun replays, and a definitely refused key is not reused. Release, recovery and replacement
+are irreversible; none resumes or dispatches work. Release leaves Start again available;
+continuation after recovery still needs replacement plus a new message. Operator Stop/Resume
+are unchanged; there is no force unlock, release by time or acknowledgement, and no route for
+the keyless bound-turn recovery.
 
 ## Acceptance scenarios
 

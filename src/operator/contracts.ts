@@ -87,11 +87,11 @@ import {
 import {
   boundTurnRecoveryBodySchema,
   boundTurnRecoveryBlockers,
-  historicalNoTurnAdoptionBodySchema,
-  historicalPreTurnAdoptionBodySchema,
   noTurnRecoveryBodySchema,
   preTurnRecoveryBodySchema,
   recoveryPaths,
+  releaseBlockers,
+  releaseBodySchema,
   replaceConversationBodySchema,
 } from "../core/recovery-contracts.js";
 import {
@@ -3544,13 +3544,12 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision.optional(),
     })
     .strict(),
-  // Evidence-bearing recovery: the inner service command plus its assignment scope.
+  // Recovery: the inner service command plus its assignment scope.
   z
     .object({
       ...base,
-      type: z.literal("recovery.pre-turn.adopt"),
-      assignmentId: uuid,
-      ...historicalPreTurnAdoptionBodySchema.shape,
+      type: z.literal("recovery.release"),
+      ...releaseBodySchema.shape,
     })
     .strict(),
   z
@@ -3559,14 +3558,6 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("recovery.pre-turn.recover"),
       assignmentId: uuid,
       ...preTurnRecoveryBodySchema.shape,
-    })
-    .strict(),
-  z
-    .object({
-      ...base,
-      type: z.literal("recovery.no-turn.adopt"),
-      assignmentId: uuid,
-      ...historicalNoTurnAdoptionBodySchema.shape,
     })
     .strict(),
   z
@@ -3899,12 +3890,15 @@ export const recoveryBlockerSchema = z.enum([
   "witness-present",
   "other-witness",
   "already-reconciled",
-  "reason-withheld",
-  "reason-mismatch",
   "identity-withheld",
+  "thread-bound",
+  "turn-bound",
+  "independent-hold",
   "task-held",
   "unresolved-execution",
 ]);
+// Every release blocker is a reportable recovery blocker.
+releaseBlockers satisfies readonly z.infer<typeof recoveryBlockerSchema>[];
 export const recoveryPathSchema = z.enum(recoveryPaths);
 const boundedText = z.string().max(4000);
 /** Exact recovery identity of one assignment's generations, with advisory eligibility. */
@@ -4685,6 +4679,17 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("recovery-release"),
+      key: uuid,
+      recorded: z.literal(true),
+      path: z.literal("release"),
+      assignmentId: uuid,
+      workId: z.string().min(1).max(512),
+      refusalId: uuid,
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("recovery-resolution"),
       key: uuid,
       recorded: z.literal(true),
@@ -5309,6 +5314,7 @@ export const operationTypeSchema = z.enum([
   "repositories.configure",
   "status-mapping.configure",
   "github.preview",
+  "recovery.release",
   "recovery.pre-turn.adopt",
   "recovery.pre-turn.recover",
   "recovery.no-turn.adopt",

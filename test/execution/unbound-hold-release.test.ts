@@ -28,9 +28,7 @@ function holdRows(w: World) {
       capacity: one(
         "SELECT 1 AS held FROM execution_capacity_reservations WHERE workId=?",
       ),
-      writer: one(
-        "SELECT sequence FROM task_writer_admissions WHERE workId=?",
-      ),
+      writer: one("SELECT sequence FROM task_writer_admissions WHERE workId=?"),
       refusal: one(
         "SELECT reason FROM execution_request_refusals WHERE workId=?",
       ),
@@ -120,15 +118,13 @@ for (const [mode, reason] of [
     const receipt = await w.s.f.service.startAgain({
       key: randomUUID(),
       taskId: w.g.taskId,
-      expectedVersion: Number(
-        w.s.f.service.domain().task(w.g.taskId).version,
-      ),
+      expectedVersion: Number(w.s.f.service.domain().task(w.g.taskId).version),
       workId: w.g.workId,
     });
     await until(
       () =>
-        w.s.f.service.list().find((i) => i.workId === receipt.workId)
-          ?.state === "completed",
+        w.s.f.service.list().find((i) => i.workId === receipt.workId)?.state ===
+        "completed",
       "started again",
     );
   });

@@ -334,7 +334,9 @@ export class ExecutionSupervisor {
   /** In-process holds a release must also respect: an unfinished callback or a known survivor. */
   releaseBlockers(workId: string): ReleaseBlocker[] {
     return [
-      ...(this.hasPendingCallbacks(workId) ? (["callback-pending"] as const) : []),
+      ...(this.hasPendingCallbacks(workId)
+        ? (["callback-pending"] as const)
+        : []),
       ...(this.survivors.has(workId) ? (["known-survivor"] as const) : []),
     ];
   }

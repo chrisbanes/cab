@@ -43,7 +43,7 @@ async function prepare(
   ]);
   return { r, file };
 }
-const adoptEvidence = (w: World) => w.evidenceFile(w.g.adoptionEvidence());
+const recoverEvidence = (w: World) => w.evidenceFile(w.receiptEvidence);
 const work = (w: World) => ["--work", w.g.workId];
 
 /** Rewrites a document with a fresh digest, as a careless editor would. */
@@ -55,20 +55,27 @@ function rewrite(file: string, change: (document: Json) => void) {
   writeFileSync(file, JSON.stringify({ ...rest, digest }), { mode: 0o600 });
 }
 
-test("prepare writes an exact, owner-only, version-bound document and sends nothing", async (t) => {
+/** A held no-turn generation with the witness an earlier build's adoption recorded. */
+async function witnessed(t: Parameters<typeof cliGeneration>[0]) {
   const w = await cliGeneration(t, "no-turn");
+  const witnessId = w.g.adoptAsBefore();
+  return { ...w, witnessId };
+}
+
+test("prepare writes an exact, owner-only, version-bound document and sends nothing", async (t) => {
+  const w = await witnessed(t);
   const before = posts(w);
-  const { r, file } = await prepare(w, "no-turn-adopt", [
+  const { r, file } = await prepare(w, "no-turn-recover", [
     ...work(w),
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
   ]);
   assert.equal(r.code, 0, r.err);
   assert.equal(posts(w), before, "prepare sends no command");
   assert.equal(statSync(file).mode & 0o777, 0o600);
   const document = JSON.parse(readFileSync(file, "utf8"));
   assert.equal(document.schema, "cab.cli.recovery/v1");
-  assert.equal(document.path, "no-turn-adopt");
+  assert.equal(document.path, "no-turn-recover");
   assert.deepEqual(document.target, {
     scope: `assignment:${w.g.assignmentId}`,
     assignmentId: w.g.assignmentId,
@@ -78,88 +85,38 @@ test("prepare writes an exact, owner-only, version-bound document and sends noth
   });
   assert.equal(document.bound.workRevision, w.g.workRevision);
   assert.equal(document.bound.requestSequence, w.g.requestSequence);
-  const { key, ...expected } = w.g.adoption();
+  const { key, ...expected } = w.g.recovery(w.witnessId);
   assert.ok(key);
   assert.deepEqual(document.command, {
-    type: "recovery.no-turn.adopt",
+    type: "recovery.no-turn.recover",
     assignmentId: w.g.assignmentId,
     ...expected,
   });
   assert.equal(r.json().data.document.digest, document.digest);
-  const human = await prepare(w, "no-turn-adopt", [
+  const human = await prepare(w, "no-turn-recover", [
     ...work(w),
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
   ]);
   assert.equal(human.r.code, 0);
   assert.match(
     human.r.out,
-    /You assert: completeSynchronousWriteAheadLedger, noStartTurnInvocation, independentlyReviewed, idleThreadMayExist/,
+    /You assert: termination \{\\"kind\\":\\"process-exit\\"\}, effects settled, workspace preserved/,
   );
   assert.match(human.r.out, /cannot be undone/);
 });
 
-test("missing, false, extra or malformed evidence and confirmation flags never produce a request", async (t) => {
-  const w = await cliGeneration(t, "no-turn");
-  const evidence = w.g.adoptionEvidence() as {
-    evidence: Json;
-    attestation: Json;
-  };
+test("missing, extra or malformed evidence and confirmation flags never produce a request", async (t) => {
+  const w = await witnessed(t);
+  const evidence = w.receiptEvidence;
   const files: Array<[string, string]> = [];
   const add = (name: string, body: Json) =>
     files.push([name, w.evidenceFile(body)]);
-  for (const field of Object.keys(evidence.evidence)) {
-    const { [field]: _gone, ...rest } = evidence.evidence;
-    add(`evidence.${field} absent`, { ...evidence, evidence: rest });
-    add(`evidence.${field} malformed`, {
-      ...evidence,
-      evidence: { ...evidence.evidence, [field]: "x" },
-    });
-  }
-  for (const field of Object.keys(evidence.attestation)) {
-    const { [field]: _gone, ...rest } = evidence.attestation;
-    add(`attestation.${field} absent`, { ...evidence, attestation: rest });
-    add(`attestation.${field} false`, {
-      ...evidence,
-      attestation: { ...evidence.attestation, [field]: false },
-    });
-  }
   add("extra key", { ...evidence, note: "trust me" });
-  add("rpcError on no-turn", {
+  add("adoption evidence", {
     ...evidence,
-    rpcError: { code: -32600, message: "x" },
+    attestation: { independentlyReviewed: true },
   });
-  files.push([
-    "wrong schema",
-    w.file("wrong.json", JSON.stringify({ schema: "other", ...evidence })),
-  ]);
-  files.push(["non-JSON", w.file("bad.json", "{")]);
-  files.push([
-    "oversized",
-    w.file(
-      "big.json",
-      JSON.stringify({ ...evidence, pad: "x".repeat(70 * 1024) }),
-    ),
-  ]);
-  const journalBefore = journal(w),
-    postsBefore = posts(w),
-    fetchesBefore = w.h.fetches.length;
-  for (const [name, file] of files) {
-    const { r, file: output } = await prepare(w, "no-turn-adopt", [
-      ...work(w),
-      "--evidence-file",
-      file,
-    ]);
-    assert.equal(r.code, 2, `${name}: ${r.out}`);
-    assert.match(r.json().error.message, /--evidence-file/, name);
-    assert.equal(existsSync(output), false, name);
-  }
-  assert.equal(
-    w.h.fetches.length,
-    fetchesBefore,
-    "rejected before any request",
-  );
-  // Recovery assertions.
   for (const [name, receipt] of [
     ["termination absent", { effects: "settled", workspace: "preserved" }],
     [
@@ -186,48 +143,73 @@ test("missing, false, extra or malformed evidence and confirmation flags never p
         workspace: "discarded",
       },
     ],
-  ] as const) {
-    const { r, file } = await prepare(w, "no-turn-recover", [
-      ...work(w),
-      "--evidence-file",
-      w.evidenceFile({ receipt }),
-    ]);
-    assert.equal(r.code, 2, name);
-    assert.equal(existsSync(file), false);
-  }
-  // Pre-turn adoption needs the persisted rpcError.
-  const preTurn = await prepare(w, "pre-turn-adopt", [
-    ...work(w),
-    "--evidence-file",
-    w.evidenceFile({ evidence: evidence.evidence, attestation: {} }),
+  ] as const)
+    add(name, { receipt });
+  files.push([
+    "wrong schema",
+    w.file("wrong.json", JSON.stringify({ schema: "other", ...evidence })),
   ]);
-  assert.equal(preTurn.r.code, 2);
-  for (const flag of ["--yes", "--confirm", "--force", "--attest"]) {
-    const { r } = await prepare(w, "no-turn-adopt", [
+  files.push(["non-JSON", w.file("bad.json", "{")]);
+  files.push([
+    "oversized",
+    w.file(
+      "big.json",
+      JSON.stringify({ ...evidence, pad: "x".repeat(70 * 1024) }),
+    ),
+  ]);
+  const journalBefore = journal(w),
+    postsBefore = posts(w),
+    fetchesBefore = w.h.fetches.length;
+  for (const [name, file] of files) {
+    const { r, file: output } = await prepare(w, "no-turn-recover", [
       ...work(w),
       "--evidence-file",
-      adoptEvidence(w),
+      file,
+    ]);
+    assert.equal(r.code, 2, `${name}: ${r.out}`);
+    assert.match(r.json().error.message, /--evidence-file/, name);
+    assert.equal(existsSync(output), false, name);
+  }
+  assert.equal(
+    w.h.fetches.length,
+    fetchesBefore,
+    "rejected before any request",
+  );
+  // The retired adoption paths, and release, are not prepared.
+  for (const path of ["no-turn-adopt", "pre-turn-adopt", "release"]) {
+    const { r } = await prepare(w, path, [
+      ...work(w),
+      "--evidence-file",
+      recoverEvidence(w),
+    ]);
+    assert.equal(r.code, 2, path);
+  }
+  for (const flag of ["--yes", "--confirm", "--force", "--attest"]) {
+    const { r } = await prepare(w, "no-turn-recover", [
+      ...work(w),
+      "--evidence-file",
+      recoverEvidence(w),
       flag,
     ]);
     assert.equal(r.code, 2, flag);
   }
-  for (const missing of [["--evidence-file", adoptEvidence(w)], work(w)]) {
-    const { r } = await prepare(w, "no-turn-adopt", missing);
+  for (const missing of [["--evidence-file", recoverEvidence(w)], work(w)]) {
+    const { r } = await prepare(w, "no-turn-recover", missing);
     assert.equal(r.code, 2);
   }
   const noOut = await w.cli("ro", [
     "recovery",
     "prepare",
-    "no-turn-adopt",
+    "no-turn-recover",
     w.g.assignmentId,
     ...work(w),
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
   ]);
   assert.equal(noOut.code, 2);
   let replace = await prepare(w, "conversation-replace", [
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
     "--expected-version",
     "1",
     "--expected-conversation-revision",
@@ -243,19 +225,19 @@ test("missing, false, extra or malformed evidence and confirmation flags never p
   assert.equal(posts(w), postsBefore);
 
   // Ineligible paths and unlisted work are refused without a document.
-  const ineligible = await prepare(w, "no-turn-recover", [
+  const ineligible = await prepare(w, "pre-turn-recover", [
     ...work(w),
     "--evidence-file",
-    w.evidenceFile(w.receiptEvidence),
+    recoverEvidence(w),
   ]);
   assert.equal(ineligible.r.code, 4);
   assert.match(ineligible.r.json().error.message, /witness-missing/);
   assert.equal(existsSync(ineligible.file), false);
-  const unlisted = await prepare(w, "no-turn-adopt", [
+  const unlisted = await prepare(w, "no-turn-recover", [
     "--work",
     "assignment:other",
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
   ]);
   assert.equal(unlisted.r.code, 2);
   replace = await prepare(w, "conversation-replace", [
@@ -269,47 +251,23 @@ test("missing, false, extra or malformed evidence and confirmation flags never p
 });
 
 test("submit sends a document once, replays it exactly and reports what did not happen", async (t) => {
-  const w = await cliGeneration(t, "no-turn");
-  const adopt = await prepare(w, "no-turn-adopt", [
+  const w = await witnessed(t);
+  const recover = await prepare(w, "no-turn-recover", [
     ...work(w),
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
   ]);
-  assert.equal(adopt.r.code, 0, adopt.r.err);
+  assert.equal(recover.r.code, 0, recover.r.err);
   const refused = await w.cli("ro", [
     "recovery",
     "submit",
     "--file",
-    adopt.file,
+    recover.file,
   ]);
   assert.equal(refused.code, 3);
-  let r = await w.cli("rw", ["recovery", "submit", "--file", adopt.file]);
-  assert.equal(r.code, 0, r.err);
-  let envelope = r.json();
-  assert.equal(envelope.data.effect, "saved");
-  assert.equal(envelope.data.receipt.kind, "recovery-adoption");
-  assert.equal(envelope.data.receipt.witnessId, w.g.witnessId());
-  assert.deepEqual(Object.keys(envelope.request).sort(), [
-    "key",
-    "scope",
-    "service",
-    "type",
-  ]);
-  assert.equal(envelope.request.scope, `assignment:${w.g.assignmentId}`);
-  assert.equal(envelope.request.type, "recovery.no-turn.adopt");
-  const again = await w.cli("rw", ["recovery", "submit", "--file", adopt.file]);
-  assert.equal(again.code, 0);
-  assert.deepEqual(again.json().data.receipt, envelope.data.receipt);
-  assert.equal(again.json().request.key, envelope.request.key);
 
   // A lost reply is uncertain with full identity; a rerun replays; operation get settles.
-  const recover = await prepare(w, "no-turn-recover", [
-    ...work(w),
-    "--evidence-file",
-    w.evidenceFile(w.receiptEvidence),
-  ]);
-  assert.equal(recover.r.code, 0, recover.r.err);
-  r = await w.cli("rw", ["recovery", "submit", "--file", recover.file], {
+  let r = await w.cli("rw", ["recovery", "submit", "--file", recover.file], {
     fetch: w.lostReply,
   });
   assert.equal(r.code, 6);
@@ -330,10 +288,26 @@ test("submit sends a document once, replays it exactly and reports what did not 
   assert.equal(get.json().data.state, "recorded");
   r = await w.cli("rw", ["recovery", "submit", "--file", recover.file]);
   assert.equal(r.code, 0, r.err);
-  envelope = r.json();
+  const envelope = r.json();
   assert.equal(envelope.request.key, lost.request.key);
+  assert.deepEqual(Object.keys(envelope.request).sort(), [
+    "key",
+    "scope",
+    "service",
+    "type",
+  ]);
+  assert.equal(envelope.request.scope, `assignment:${w.g.assignmentId}`);
   assert.equal(envelope.data.effect, "completed");
   assert.equal(envelope.data.receipt.state, "reconciled");
+  const again = await w.cli("rw", [
+    "recovery",
+    "submit",
+    "--file",
+    recover.file,
+  ]);
+  assert.equal(again.code, 0);
+  assert.deepEqual(again.json().data.receipt, envelope.data.receipt);
+  assert.equal(again.json().request.key, envelope.request.key);
   const human = await w.h.run([
     "recovery",
     "submit",
@@ -345,16 +319,6 @@ test("submit sends a document once, replays it exactly and reports what did not 
   assert.match(human.out, /Not resumed; nothing was dispatched/);
   assert.match(human.out, /needs conversation replacement/);
   assert.match(human.out, /cannot be undone/);
-  const adoptHuman = await w.h.run([
-    "recovery",
-    "submit",
-    "--file",
-    adopt.file,
-    "--connection",
-    "rw",
-  ]);
-  assert.match(adoptHuman.out, /Next: recover the generation/);
-  assert.doesNotMatch(adoptHuman.out, /needs conversation replacement/);
   assert.equal(
     w.s.f.service.turnRequests().find((x) => x.workId === w.g.workId)?.state,
     "held",
@@ -385,12 +349,11 @@ test("submit sends a document once, replays it exactly and reports what did not 
 });
 
 test("refused submissions exit with a conflict and the current blockers; nothing is reused", async (t) => {
-  const w = await cliGeneration(t, "no-turn");
-  w.s.f.service.adoptHistoricalNoTurnSubmission(w.g.adoption() as never);
+  const w = await witnessed(t);
   const recover = await prepare(w, "no-turn-recover", [
     ...work(w),
     "--evidence-file",
-    w.evidenceFile(w.receiptEvidence),
+    recoverEvidence(w),
   ]);
   assert.equal(recover.r.code, 0, recover.r.err);
   w.verifier.set("unknown");
@@ -431,11 +394,11 @@ test("refused submissions exit with a conflict and the current blockers; nothing
 });
 
 test("submit refuses altered, unsafe or foreign documents before sending", async (t) => {
-  const w = await cliGeneration(t, "no-turn");
-  const base = await prepare(w, "no-turn-adopt", [
+  const w = await witnessed(t);
+  const base = await prepare(w, "no-turn-recover", [
     ...work(w),
     "--evidence-file",
-    adoptEvidence(w),
+    recoverEvidence(w),
   ]);
   assert.equal(base.r.code, 0);
   const text = readFileSync(base.file, "utf8");
@@ -449,6 +412,7 @@ test("submit refuses altered, unsafe or foreign documents before sending", async
     "tampered.json",
     text.replace(/"workRevision": \d+/, '"workRevision": 99'),
   );
+  assert.notEqual(readFileSync(tampered, "utf8"), text);
   const readable = copy("readable.json", text, 0o640);
   const big = copy("big.json", " ".repeat(513 * 1024));
   const link = join(w.h.dir, "link.json");
@@ -463,7 +427,11 @@ test("submit refuses altered, unsafe or foreign documents before sending", async
   });
   const otherPath = copy("other-path.json");
   rewrite(otherPath, (d) => {
-    d.path = "pre-turn-adopt";
+    d.path = "pre-turn-recover";
+  });
+  const retired = copy("retired-path.json");
+  rewrite(retired, (d) => {
+    d.path = "no-turn-adopt";
   });
   const before = posts(w);
   for (const file of [
@@ -474,6 +442,7 @@ test("submit refuses altered, unsafe or foreign documents before sending", async
     foreign,
     disagree,
     otherPath,
+    retired,
   ]) {
     const r = await w.cli("rw", ["recovery", "submit", "--file", file]);
     assert.equal(r.code, 2, `${file}: ${r.out}`);
@@ -549,30 +518,104 @@ test("bound recovery lost response reads back its receipt without another reconc
   assert.equal(w.runtime.turnInvocations.length, 1);
 });
 
-test("a held resume's no-turn adoption names its predecessor and leaves a refusal Start again can run", async (t) => {
+const release = (w: World, ...extra: string[]) => [
+  "recovery",
+  "release",
+  w.g.assignmentId,
+  ...extra,
+];
+
+test("recovery release reads eligibility without --yes, then releases once and replays", async (t) => {
   const w = await cliGeneration(t, "pre-turn-defect");
-  const { key, evidence, attestation, ...expected } = w.g.resumeAdoption();
-  assert.ok(key);
-  const adopt = await prepare(w, "no-turn-adopt", [
-    ...work(w),
-    "--evidence-file",
-    w.evidenceFile({ evidence, attestation }),
-  ]);
-  assert.equal(adopt.r.code, 0, adopt.r.err);
-  const document = JSON.parse(readFileSync(adopt.file, "utf8"));
-  assert.deepEqual(document.command, {
-    type: "recovery.no-turn.adopt",
-    assignmentId: w.g.assignmentId,
-    ...expected,
-    evidence,
-    attestation,
-  });
-  const r = await w.cli("rw", ["recovery", "submit", "--file", adopt.file]);
+  const postsBefore = posts(w),
+    journalBefore = journal(w);
+  let r = await w.cli("ro", release(w));
   assert.equal(r.code, 0, r.err);
-  assert.equal(r.json().data.receipt.kind, "recovery-adoption");
+  assert.deepEqual(r.json().data, {
+    ...r.json().data,
+    workId: w.g.workId,
+    eligible: true,
+    blockedBy: [],
+  });
+  const read = await w.h.run([...release(w), "--connection", "ro"]);
+  assert.match(read.out, /no thread or turn was saved/);
+  assert.match(read.out, /Held reason \(evidence only\): .*invalid_value/s);
+  assert.match(read.out, /Eligible\. Release with: .*--yes/);
+  assert.match(read.out, /Nothing was written/);
+  assert.equal(posts(w), postsBefore, "nothing sent without --yes");
+  assert.equal(journal(w), journalBefore);
+  assert.equal(
+    w.s.f.service.startAgainAvailability(w.g.taskId).available,
+    false,
+  );
+  // A read-only connection cannot release.
+  assert.equal((await w.cli("ro", release(w, "--yes"))).code, 3);
+
+  const key = randomUUID();
+  r = await w.cli("rw", release(w, "--yes", "--request-id", key));
+  assert.equal(r.code, 0, r.err + r.out);
+  const envelope = r.json();
+  assert.equal(envelope.request.type, "recovery.release");
+  assert.equal(envelope.request.scope, `assignment:${w.g.assignmentId}`);
+  assert.equal(envelope.data.effect, "completed");
+  assert.equal(envelope.data.receipt.kind, "recovery-release");
+  assert.equal(envelope.data.receipt.workId, w.g.workId);
   assert.deepEqual(w.s.f.service.startAgainAvailability(w.g.taskId), {
     available: true,
     assignmentId: w.g.assignmentId,
     workId: w.g.workId,
   });
+  // The same request ID replays the recorded receipt.
+  r = await w.cli("rw", release(w, "--yes", "--request-id", key));
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.json().data.receipt, envelope.data.receipt);
+  // An identical rerun replays too; a new request finds it released.
+  r = await w.cli("rw", release(w, "--yes"));
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.json().data.receipt, envelope.data.receipt);
+  r = await w.cli("rw", release(w, "--yes", "--request-id", randomUUID()));
+  assert.equal(r.code, 4);
+  assert.match(r.json().error.message, /ownership-released/);
+  r = await w.cli("ro", release(w));
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.json().data.blockedBy, ["ownership-released"]);
+  assert.equal(
+    (await w.cli("ro", release(w, "--work", "assignment:other"))).code,
+    2,
+  );
+});
+
+test("recovery release settles a lost reply and refuses a generation changed after its read", async (t) => {
+  const w = await cliGeneration(t, "no-turn");
+  const key = randomUUID();
+  let r = await w.cli("rw", release(w, "--yes", "--request-id", key), {
+    fetch: w.lostReply,
+  });
+  assert.equal(r.code, 6, r.err + r.out);
+  const lost = r.json().error;
+  assert.equal(lost.outcome, "unknown");
+  assert.equal(lost.request.type, "recovery.release");
+  r = await w.cli("rw", release(w, "--yes", "--request-id", key));
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json().data.receipt.kind, "recovery-release");
+
+  // A Stop recorded between the read and the send is caught by the service's recheck.
+  const stopped = await cliGeneration(t, "pre-turn-defect");
+  const stopFirst: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/api/operator/commands"))
+      await stopped.s.f.service.controlTask({
+        type: "task.stop",
+        key: randomUUID(),
+        taskId: stopped.g.taskId,
+      });
+    return fetch(input, init);
+  };
+  r = await stopped.cli("rw", release(stopped, "--yes"), { fetch: stopFirst });
+  assert.equal(r.code, 4, r.err + r.out);
+  assert.equal(r.json().error.outcome, "not-applied");
+  assert.match(r.json().error.message, /independent-hold/);
+  assert.equal(
+    stopped.s.f.service.startAgainAvailability(stopped.g.taskId).available,
+    false,
+  );
 });

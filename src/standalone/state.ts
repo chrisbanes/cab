@@ -27,7 +27,6 @@ import {
   replaceConversationCommandSchema,
   type ArchivedResumeRejection,
   type HistoricalPreTurnAdoption,
-  type HistoricalNoTurnAdoption,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
 import { createDraftingTable } from "./drafting.js";
@@ -62,7 +61,6 @@ import type {
 } from "./runtime-retention.js";
 import { previousHarnessHomeMessage } from "./runtime-retention.js";
 import {
-  adoptedPreTurnRefusalReason,
   type PreTurnFailureClass,
   type PreTurnStage,
   preTurnRefusalPrefix,
@@ -3528,155 +3526,6 @@ export class ExecutionState {
       return undefined;
     }
   }
-  adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption): {
-    witnessId: string;
-    workId: string;
-  } {
-    const value = historicalNoTurnAdoptionSchema.parse(command);
-    const replay = this.preTurnCommandReplay("adopt-no-turn", value);
-    if (replay)
-      return z
-        .object({ witnessId: z.string().uuid(), workId: z.string().min(1) })
-        .strict()
-        .parse(replay);
-    if (value.predecessorWorkId !== undefined)
-      return this.adoptHistoricalResumeNoTurn(value);
-    return transaction(this.db, () => {
-      const context = this.noTurnContext(value.workId);
-      const intent = this.db
-        .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      const request = this.db
-        .prepare("SELECT state,reason FROM turn_requests WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      if (
-        !context ||
-        intent?.state !== "held" ||
-        request?.state !== "held" ||
-        intent.reason !== value.retainedReason ||
-        request.reason !== value.retainedReason ||
-        context.workRevision !== value.workRevision ||
-        context.requestSequence !== value.requestSequence ||
-        context.conversationRevision !== value.conversationRevision ||
-        context.writerSequence !== value.writerSequence ||
-        context.processId !== value.processIdentity.processId ||
-        context.processStartedAt !== value.processIdentity.processStartedAt ||
-        context.bootId !== value.processIdentity.bootId ||
-        !this.db
-          .prepare(
-            "SELECT 1 FROM execution_capacity_reservations WHERE workId=?",
-          )
-          .get(value.workId) ||
-        this.db
-          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical no-turn adoption does not match the exact held generation",
-        );
-      if (
-        this.db
-          .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical no-turn submission is already recorded for this generation",
-        );
-      const result = { witnessId: randomUUID(), workId: value.workId };
-      this.db
-        .prepare(
-          "INSERT INTO execution_no_turn_submissions (id,workId,contextMaterial,evidenceMaterial) VALUES (?,?,?,?)",
-        )
-        .run(
-          result.witnessId,
-          value.workId,
-          canonicalMaterial(context),
-          canonicalMaterial(value),
-        );
-      this.recordPreTurnCommand("adopt-no-turn", value, result);
-      return result;
-    });
-  }
-
-  /**
-   * A held resume of a known completed predecessor, from before pre-turn failures became
-   * refusals, whose operator-reviewed evidence shows `startTurn` was never called. It is
-   * refused before it ran in the same transaction, so Start again can queue it afresh;
-   * no process proof is needed because nothing ran. The refusal id is the witness id.
-   */
-  private adoptHistoricalResumeNoTurn(value: HistoricalNoTurnAdoption): {
-    witnessId: string;
-    workId: string;
-  } {
-    return transaction(this.db, () => {
-      assertOwnedWorkWritable(this.db, value.workId);
-      const context = this.preTurnContext(value.workId);
-      const intent = this.db
-        .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      const request = this.db
-        .prepare("SELECT state,reason FROM turn_requests WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      if (
-        !context ||
-        intent?.state !== "held" ||
-        request?.state !== "held" ||
-        intent.reason !== value.retainedReason ||
-        request.reason !== value.retainedReason ||
-        context.workRevision !== value.workRevision ||
-        context.requestSequence !== value.requestSequence ||
-        context.conversationRevision !== value.conversationRevision ||
-        context.writerSequence !== value.writerSequence ||
-        context.predecessorWorkId !== value.predecessorWorkId ||
-        context.predecessorThreadId !== value.predecessorThreadId ||
-        context.processId !== value.processIdentity.processId ||
-        context.processStartedAt !== value.processIdentity.processStartedAt ||
-        context.bootId !== value.processIdentity.bootId ||
-        !this.db
-          .prepare(
-            "SELECT 1 FROM execution_capacity_reservations WHERE workId=?",
-          )
-          .get(value.workId) ||
-        this.db
-          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
-          .get(value.workId) ||
-        this.db
-          .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
-          .get(value.workId) ||
-        this.db
-          .prepare("SELECT 1 FROM execution_request_refusals WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical no-turn adoption does not match the exact held generation",
-        );
-      const result = { witnessId: randomUUID(), workId: value.workId };
-      this.db
-        .prepare(
-          "UPDATE execution_intents SET reason = ? WHERE workId = ? AND state = 'held'",
-        )
-        .run(adoptedPreTurnRefusalReason, value.workId);
-      this.recordPreTurnRefusalWithin(
-        value.workId,
-        adoptedPreTurnRefusalReason,
-        {
-          origin: "operator-adopted",
-          stage: null,
-          failureClass: null,
-          threadId: null,
-        },
-        result.witnessId,
-      );
-      // A Stop target, a pending effect or another binding would leave it unresolved.
-      if (!this.refusedBeforeStart(value.workId))
-        throw new RecoveryRejectedError(
-          "Historical no-turn adoption cannot refuse this generation before it ran",
-        );
-      this.recordPreTurnCommand("adopt-no-turn", value, result);
-      return result;
-    });
-  }
-
   private witnessForWork(workId: string):
     | {
         id: string;
@@ -3763,71 +3612,6 @@ export class ExecutionState {
         );
       this.hold(intent.id, rejectedRequestHoldReason(value.error));
       return true;
-    });
-  }
-  adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption): {
-    witnessId: string;
-    workId: string;
-  } {
-    const value = historicalPreTurnAdoptionSchema.parse(command);
-    const replay = this.preTurnCommandReplay("adopt", value);
-    if (replay)
-      return z
-        .object({ witnessId: z.string().uuid(), workId: z.string().min(1) })
-        .strict()
-        .parse(replay);
-    return transaction(this.db, () => {
-      const context = this.preTurnContext(value.workId);
-      const intent = this.db
-        .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      const request = this.db
-        .prepare("SELECT state,reason FROM turn_requests WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      if (
-        !context ||
-        intent?.state !== "held" ||
-        request?.state !== "held" ||
-        intent.reason !== value.retainedReason ||
-        request.reason !== value.retainedReason ||
-        value.retainedReason !== rejectedRequestHoldReason(value.rpcError) ||
-        context.workRevision !== value.workRevision ||
-        context.requestSequence !== value.requestSequence ||
-        context.predecessorWorkId !== value.predecessorWorkId ||
-        context.predecessorThreadId !== value.predecessorThreadId ||
-        context.processId !== value.processIdentity.processId ||
-        context.processStartedAt !== value.processIdentity.processStartedAt ||
-        context.bootId !== value.processIdentity.bootId ||
-        !this.db
-          .prepare(
-            "SELECT 1 FROM execution_capacity_reservations WHERE workId=?",
-          )
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical pre-turn adoption does not match the exact held generation",
-        );
-      if (
-        this.db
-          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Pre-turn rejection witness is already recorded for this generation",
-        );
-      const result = { witnessId: randomUUID(), workId: value.workId };
-      this.db
-        .prepare(
-          "INSERT INTO execution_pre_turn_rejections (id,workId,source,contextMaterial,evidenceMaterial) VALUES (?,?,'operator-adopted',?,?)",
-        )
-        .run(
-          result.witnessId,
-          value.workId,
-          canonicalMaterial(context),
-          canonicalMaterial(value),
-        );
-      this.recordPreTurnCommand("adopt", value, result);
-      return result;
     });
   }
   replaceConversationCommand(command: ReplaceConversationCommand): {
@@ -5096,7 +4880,11 @@ export class ExecutionState {
             LEFT JOIN task_work_revisions revision ON revision.workId=request.workId
             WHERE request.workId=?`)
           .get(workId) as
-          | { workRevision: number | null; sequence: number; assignmentId: string }
+          | {
+              workRevision: number | null;
+              sequence: number;
+              assignmentId: string;
+            }
           | undefined;
         if (
           value.workId !== workId ||

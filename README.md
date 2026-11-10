@@ -194,9 +194,10 @@ owns delivery scope and status.
   activates a selection after a complete provider read, places conflicting imported
   tasks, inspects and refreshes delivery, and stages issue comments through review,
   confirmation and one receipted send. It shows each held generation's exact identity,
-  holds and recovery paths, and submits the existing evidence-bearing adoption,
+  holds and recovery paths, releases a held generation for which cab saved no thread
+  or turn after one confirmation (startup releases them too), and submits the existing
   recovery and conversation-replacement operations from prepared documents whose
-  evidence and attestations the operator states explicitly. A bounded live Codex
+  assertions the operator states explicitly. A bounded live Codex
   journey through the packaged CLI on this host is recorded in the
   [CLI8 record](docs/evidence/issue-901-cli8-2026-10-12.md); use from a second
   privately connected machine is unproved because none was available. See

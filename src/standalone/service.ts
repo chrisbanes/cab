@@ -269,8 +269,6 @@ import {
 import {
   type BoundTurnRecoveryCommand,
   boundTurnRecoveryCommandSchema,
-  type HistoricalNoTurnAdoption,
-  type HistoricalPreTurnAdoption,
   type NoTurnRecoveryCommand,
   noTurnRecoveryCommandSchema,
   type PreTurnRecoveryCommand,
@@ -3456,9 +3454,6 @@ export class StandaloneService {
       );
     }
   }
-  adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption) {
-    return this.started().state.adoptHistoricalPreTurnRejection(command);
-  }
   recoverPreTurnExecution(command: PreTurnRecoveryCommand) {
     const value = preTurnRecoveryCommandSchema.parse(command);
     const replay = this.started().state.preTurnCommandReplay("recover", value);
@@ -3479,13 +3474,6 @@ export class StandaloneService {
       () =>
         this.started().supervisor.resolveHeldExecution(value.receipt, value),
     );
-  }
-  adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
-    const result =
-      this.started().state.adoptHistoricalNoTurnSubmission(command);
-    // Adopting a held resume refuses it and frees its capacity for queued work.
-    this.wakeAfterCommit();
-    return result;
   }
   recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
     const value = noTurnRecoveryCommandSchema.parse(command);
