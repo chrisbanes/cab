@@ -1563,11 +1563,17 @@ async function assertConversationViewport(page: Page) {
 async function assertReplyUsable(page: Page) {
   const reply = page.locator("#reply");
   const remove = reply.getByRole("button", { name: /^Remove @/ });
-  while (await remove.count()) await remove.first().click();
+  while (await remove.count()) {
+    await remove.first().click();
+    // Removal returns focus to the trigger on the next frame; settle it before typing.
+    await page.waitForFunction(() =>
+      document.activeElement?.textContent?.includes("Add recipient"),
+    );
+  }
   const editor = page.getByLabel("Editable reply", { exact: true });
   await editor.fill("Viewport reply");
   await editor.press("End");
-  await page.keyboard.type(" typed with keyboard");
+  await editor.pressSequentially(" typed with keyboard");
   assert.equal(await editor.inputValue(), "Viewport reply typed with keyboard");
   const send = reply.getByRole("button", { name: "Send comment", exact: true });
   for (
