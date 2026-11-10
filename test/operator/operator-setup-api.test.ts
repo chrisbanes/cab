@@ -94,7 +94,7 @@ test("repositories.configure expands home-relative GitHub paths and keeps the ve
   assert.deepEqual(await api.execute(homeRelative), result);
   assert.equal(
     f.service.domain().repositoryLinks(projectId).links[0]?.path,
-    join(home.home, "src", "atlas"),
+    await realpath(join(home.home, "src", "atlas")),
   );
   const kept = await api.execute({
     type: "repositories.configure",
@@ -113,7 +113,7 @@ test("repositories.configure expands home-relative GitHub paths and keeps the ve
   assert.equal(kept.kind, "configuration");
   assert.equal(
     f.service.domain().repositoryLinks(projectId).links[0]?.path,
-    join(home.home, "src", "atlas"),
+    await realpath(join(home.home, "src", "atlas")),
   );
   await assert.rejects(
     api.execute({

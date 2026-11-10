@@ -728,6 +728,6 @@ test("CLI prepare-repositories applies a home-relative GitHub checkout as an abs
   assert.equal(applied.code, 0, applied.err);
   assert.equal(
     f.service.domain().repositoryLinks(projectId).links[0]?.path,
-    join(home.home, "src", "atlas"),
+    await realpath(join(home.home, "src", "atlas")),
   );
 });
