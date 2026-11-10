@@ -555,14 +555,17 @@ test("the ready check fails closed while loading and never blocks on capacity", 
     capacityFull: false,
   });
   assert.equal(readyCheckItems(input({ workspace: null })).checking, true);
-  for (const capacity of [
-    { ...free, projectUsage: 2 },
-    { ...free, globalUsage: 4 },
-  ]) {
-    const full = readyCheckItems(input({ capacity }));
-    assert.equal(full.capacityFull, true);
-    assert.equal(full.blocked, false);
-  }
+  const full = readyCheckItems(
+    input({ capacity: { ...free, globalUsage: 4 } }),
+  );
+  assert.equal(full.capacityFull, true);
+  assert.equal(full.blocked, false);
+  // A full project limit does not hold the lead's first turn.
+  assert.equal(
+    readyCheckItems(input({ capacity: { ...free, projectUsage: 2 } }))
+      .capacityFull,
+    false,
+  );
   assert.equal(readyCheckItems(input({ capacity: null })).capacityFull, false);
 });
 

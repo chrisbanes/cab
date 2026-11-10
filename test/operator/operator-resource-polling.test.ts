@@ -208,3 +208,39 @@ test("beforeApply runs as a successful read lands, before it is published", asyn
     "a failed read captures nothing",
   );
 });
+
+test("a transient read is read again within a limit, publishing only the last attempt", async () => {
+  const published: Array<string | null> = [];
+  const controller = new ResourceController<string>(
+    (state) => published.push(state.data),
+    (data) => data.startsWith("conflict"),
+  );
+  await controller.load(async () => "ready");
+  published.length = 0;
+
+  // A background read keeps the last good result while it rereads, then lands the ready one.
+  const answers = ["conflict 1", "conflict 2", "ready again"];
+  let reads = 0;
+  await controller.load(async () => answers[reads++] ?? "unexpected", {
+    background: true,
+  });
+  assert.equal(reads, 3);
+  assert.deepEqual(published, ["ready again"]);
+
+  // One that stays transient stops after three rereads and publishes what it last read.
+  published.length = 0;
+  reads = 0;
+  await controller.load(async () => `conflict ${++reads}`);
+  assert.equal(reads, 4);
+  assert.equal(controller.state.data, "conflict 4");
+  assert.deepEqual(published, ["ready again", "conflict 4"]);
+
+  // A newer read cancels the pending reread.
+  reads = 0;
+  const abandoned = controller.load(async () => `conflict ${++reads}`);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await controller.load(async () => "newer");
+  await abandoned;
+  assert.equal(reads, 1);
+  assert.equal(controller.state.data, "newer");
+});

@@ -46,6 +46,7 @@ import {
   sessionOf,
 } from "../fixtures/claude-sdk.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { slashTmpDenied } from "../fixtures/host-access.js";
 
 test.after(closeRuntimeSafetyFixtures);
 
@@ -277,7 +278,9 @@ test("every coordination tool converts to a real SDK MCP tool without defaults",
   }
 });
 
-test("a Claude turn runs one native query, releases its prompt only after the process is recorded, then resumes the session", async () => {
+test("a Claude turn runs one native query, releases its prompt only after the process is recorded, then resumes the session", {
+  skip: slashTmpDenied(),
+}, async () => {
   const scripts: Script[] = [
     async function* (session) {
       yield init(sessionOf(session));
@@ -408,7 +411,9 @@ test("a Claude turn runs one native query, releases its prompt only after the pr
   }
 });
 
-test("the settings read and every turn run the PATH-resolved claude, resolved once per start", async () => {
+test("the settings read and every turn run the PATH-resolved claude, resolved once per start", {
+  skip: slashTmpDenied(),
+}, async () => {
   let resolved = 0;
   const script: Script = async function* (session) {
     yield init(sessionOf(session));
@@ -461,7 +466,9 @@ test("a missing claude rejects start before any query and leaves the runtime sto
   }
 });
 
-test("each Claude result error maps to visible failure evidence", async () => {
+test("each Claude result error maps to visible failure evidence", {
+  skip: slashTmpDenied(),
+}, async () => {
   const cases: Array<[Record<string, unknown>, string, string]> = [
     [
       { subtype: "error_during_execution", is_error: true },
@@ -531,7 +538,9 @@ test("each Claude result error maps to visible failure evidence", async () => {
   }
 });
 
-test("interrupting a Claude turn aborts its query and ends it as interrupted", async () => {
+test("interrupting a Claude turn aborts its query and ends it as interrupted", {
+  skip: slashTmpDenied(),
+}, async () => {
   let reached!: () => void;
   const streaming = new Promise<void>((resolve) => {
     reached = resolve;
@@ -564,7 +573,9 @@ test("interrupting a Claude turn aborts its query and ends it as interrupted", a
   }
 });
 
-test("a subagent's prose is not the lead's conversation", async () => {
+test("a subagent's prose is not the lead's conversation", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     scripts: [
       async function* (session) {
@@ -600,7 +611,9 @@ test("a subagent's prose is not the lead's conversation", async () => {
   }
 });
 
-test("losing the Claude process mid-tool reports an anomaly and never a terminal", async () => {
+test("losing the Claude process mid-tool reports an anomaly and never a terminal", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     scripts: [
       async function* (session) {
@@ -632,7 +645,9 @@ test("losing the Claude process mid-tool reports an anomaly and never a terminal
   }
 });
 
-test("a malformed SDK message aborts the query and reports an anomaly", async () => {
+test("a malformed SDK message aborts the query and reports an anomaly", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     scripts: [
       async function* () {
@@ -663,7 +678,9 @@ test("a malformed SDK message aborts the query and reports an anomaly", async ()
   }
 });
 
-test("an unverified Claude process exit reports an anomaly", async () => {
+test("an unverified Claude process exit reports an anomaly", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     verified: false,
     scripts: [
@@ -687,7 +704,9 @@ test("an unverified Claude process exit reports an anomaly", async () => {
   }
 });
 
-test("a Claude turn whose process cannot be recorded never receives its prompt", async () => {
+test("a Claude turn whose process cannot be recorded never receives its prompt", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     record: () => false,
     scripts: [
@@ -735,7 +754,9 @@ test("an unavailable token prevents the turn without revealing it", async () => 
   }
 });
 
-test("coordination calls carry the hook's tool-use ID and uncorrelated calls are refused", async () => {
+test("coordination calls carry the hook's tool-use ID and uncorrelated calls are refused", {
+  skip: slashTmpDenied(),
+}, async () => {
   const outcomes: unknown[] = [];
   const f = fixture({
     scripts: [
@@ -796,7 +817,9 @@ test("coordination calls carry the hook's tool-use ID and uncorrelated calls are
   }
 });
 
-test("the Claude token never appears in anything the runtime emits", async () => {
+test("the Claude token never appears in anything the runtime emits", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     scripts: [
       async function* (session) {
@@ -840,7 +863,9 @@ test("the Claude token never appears in anything the runtime emits", async () =>
   }
 });
 
-test("the PreToolUse hook allows calls inside policy and denies the rest", async () => {
+test("the PreToolUse hook allows calls inside policy and denies the rest", {
+  skip: slashTmpDenied(),
+}, async () => {
   const decisions: unknown[] = [];
   let outside = "";
   const f = fixture({
@@ -894,7 +919,9 @@ test("the PreToolUse hook allows calls inside policy and denies the rest", async
   }
 });
 
-test("a task turn's Git roots are writable to sandboxed commands but not to file-editing tools", async () => {
+test("a task turn's Git roots are writable to sandboxed commands but not to file-editing tools", {
+  skip: slashTmpDenied(),
+}, async () => {
   const decisions: unknown[] = [];
   let gitRoot = "";
   const f = fixture({
@@ -936,7 +963,9 @@ test("a task turn's Git roots are writable to sandboxed commands but not to file
   }
 });
 
-test("a task turn with local listening can bind loopback ports and keeps network denied", async () => {
+test("a task turn with local listening can bind loopback ports and keeps network denied", {
+  skip: slashTmpDenied(),
+}, async () => {
   const turnScript = async function* (
     session: Parameters<typeof sessionOf>[0],
   ) {
@@ -975,7 +1004,9 @@ test("a task turn with local listening can bind loopback ports and keeps network
   }
 });
 
-test("a skip-sandbox task turn disables only the sandbox and keeps the tool policy and hook roots", async () => {
+test("a skip-sandbox task turn disables only the sandbox and keeps the tool policy and hook roots", {
+  skip: slashTmpDenied(),
+}, async () => {
   let outside = "";
   const decisions: unknown[] = [];
   const turnScript = async function* (
@@ -1055,7 +1086,9 @@ test("a skip-sandbox task turn disables only the sandbox and keeps the tool poli
   }
 });
 
-test("preflight with the skip-sandbox hint ignores the self-test and leaves a passed probe unconsumed", async () => {
+test("preflight with the skip-sandbox hint ignores the self-test and leaves a passed probe unconsumed", {
+  skip: slashTmpDenied(),
+}, async () => {
   let runs = 0;
   let passing = false;
   const f = fixture({
@@ -1098,7 +1131,9 @@ test("preflight with the skip-sandbox hint ignores the self-test and leaves a pa
   }
 });
 
-test("a read-only turn can write only the temporary base, in the sandbox and the hook", async () => {
+test("a read-only turn can write only the temporary base, in the sandbox and the hook", {
+  skip: slashTmpDenied(),
+}, async () => {
   const decisions: unknown[] = [];
   const f = fixture({
     scripts: [
@@ -1142,7 +1177,9 @@ test("a read-only turn can write only the temporary base, in the sandbox and the
   }
 });
 
-test("preflight waits for a failed sandbox self-test, unsupported settings or a missing token before any query", async () => {
+test("preflight waits for a failed sandbox self-test, unsupported settings or a missing token before any query", {
+  skip: slashTmpDenied(),
+}, async () => {
   let selfTest = false;
   let environment: ClaudeTurnEnvironment = { env: {} };
   const f = fixture({
@@ -1198,7 +1235,9 @@ test("preflight waits for a failed sandbox self-test, unsupported settings or a 
   }
 });
 
-test("preflight refuses a sandbox temporary base that is not private", async () => {
+test("preflight refuses a sandbox temporary base that is not private", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture();
   const base = claudeTemporaryBase(f.workspace);
   try {
@@ -1244,7 +1283,9 @@ test("the effective policy discloses hook confinement, the redirected temporary 
     assert.match(limits, pattern);
 });
 
-test("a planted symlink in the sandbox temporary base is removed before the turn", async () => {
+test("a planted symlink in the sandbox temporary base is removed before the turn", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture();
   const base = claudeTemporaryBase(f.workspace);
   const uid = process.getuid?.() ?? 0;
@@ -1268,7 +1309,9 @@ test("a planted symlink in the sandbox temporary base is removed before the turn
   }
 });
 
-test("coordination arguments parsed by the advertised schema keep their hook correlation, and extra keys fail closed", async () => {
+test("coordination arguments parsed by the advertised schema keep their hook correlation, and extra keys fail closed", {
+  skip: slashTmpDenied(),
+}, async () => {
   const outcomes: Array<{ isError: boolean }> = [];
   const resultId = "70000000-0000-4000-8000-000000000001";
   const inputs: Array<[string, Record<string, unknown>]> = [
@@ -1319,7 +1362,9 @@ test("coordination arguments parsed by the advertised schema keep their hook cor
   }
 });
 
-test("stopping the runtime ends a settings read that is still waiting", async () => {
+test("stopping the runtime ends a settings read that is still waiting", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({ hangModels: true });
   const reading = "Claude runtime unavailable: reading supported models";
   const untilReading = async () => {
@@ -1375,7 +1420,9 @@ async function diagnosticTurn(
   }
 }
 
-test("a Bash tool use is recorded as a command item with exit status and bounded output", async () => {
+test("a Bash tool use is recorded as a command item with exit status and bounded output", {
+  skip: slashTmpDenied(),
+}, async () => {
   const command = "echo hi";
   const run = await diagnosticTurn(async (session) => {
     await session.hook("Bash", { command }, "toolu_ok");
@@ -1469,7 +1516,9 @@ test("a Bash tool use is recorded as a command item with exit status and bounded
   assert.equal("aggregatedOutput" in completed("toolu_bad"), false);
 });
 
-test("oversized Claude commands and output are replaced whole, as for Codex", async () => {
+test("oversized Claude commands and output are replaced whole, as for Codex", {
+  skip: slashTmpDenied(),
+}, async () => {
   const command = "x".repeat(5 * 1024);
   const run = await diagnosticTurn(async (session) => {
     await session.hook("Bash", { command }, "toolu_big");
@@ -1491,7 +1540,9 @@ test("oversized Claude commands and output are replaced whole, as for Codex", as
   });
 });
 
-test("file changes and allowlisted tools record a relative path or target, never content or input", async () => {
+test("file changes and allowlisted tools record a relative path or target, never content or input", {
+  skip: slashTmpDenied(),
+}, async () => {
   const script = async (session: Parameters<Script>[0]) => {
     const path = join(String(session.options.cwd), "secret-name.txt");
     await session.hook("Write", { file_path: path, content: "BODY" }, "w1");
@@ -1568,7 +1619,9 @@ test("file changes and allowlisted tools record a relative path or target, never
   }
 });
 
-test("cab tools emit nothing and refused calls are recorded as declined", async () => {
+test("cab tools emit nothing and refused calls are recorded as declined", {
+  skip: slashTmpDenied(),
+}, async () => {
   const run = await diagnosticTurn(async (session) => {
     await session.hook("mcp__cab__cab_report_result", {}, "c1");
     await session.postHook("mcp__cab__cab_report_result", {}, "c1", {
@@ -1603,7 +1656,9 @@ test("cab tools emit nothing and refused calls are recorded as declined", async 
   assert.equal(JSON.stringify(run.diagnostics).includes("/etc/x"), false);
 });
 
-test("a failing diagnostic listener changes no hook result or turn outcome", async () => {
+test("a failing diagnostic listener changes no hook result or turn outcome", {
+  skip: slashTmpDenied(),
+}, async () => {
   const script = async (session: Parameters<Script>[0]) => {
     const cwd = String(session.options.cwd);
     const results: unknown[] = [];
@@ -1658,7 +1713,9 @@ async function pluginFixture(root: string) {
   return writePluginFixture(root, { nonce: "unit" });
 }
 
-test("native extensions keep built-in tool controls for lead and subagents", async () => {
+test("native extensions keep built-in tool controls for lead and subagents", {
+  skip: slashTmpDenied(),
+}, async () => {
   const decisions: unknown[] = [];
   let outside = "";
   const f = fixture({
@@ -1738,7 +1795,9 @@ test("native extensions keep built-in tool controls for lead and subagents", asy
   }
 });
 
-test("legacy profile selections do not override native skill discovery", async () => {
+test("legacy profile selections do not override native skill discovery", {
+  skip: slashTmpDenied(),
+}, async () => {
   const f = fixture({
     scripts: [
       async function* (session) {
@@ -1763,7 +1822,9 @@ test("legacy profile selections do not override native skill discovery", async (
   }
 });
 
-test("native skills are admitted without a cab selection", async () => {
+test("native skills are admitted without a cab selection", {
+  skip: slashTmpDenied(),
+}, async () => {
   const decisions: unknown[] = [];
   const f = fixture({
     scripts: [
@@ -1803,7 +1864,9 @@ test("native skills are admitted without a cab selection", async () => {
   }
 });
 
-test("a subagent's tool calls are recorded with their attribution, and a denied call as declined", async () => {
+test("a subagent's tool calls are recorded with their attribution, and a denied call as declined", {
+  skip: slashTmpDenied(),
+}, async () => {
   const run = await diagnosticTurn(async (session) => {
     const subagent = { id: "agent-7", type: "general-purpose" };
     await session.hook("Agent", { description: "d", prompt: "p" }, "a1");
@@ -1854,7 +1917,9 @@ test("the TodoWrite gates override the service environment", () => {
   assert.equal(env.CLAUDE_CODE_ENABLE_TODO_TOOLS, "1");
 });
 
-test("the lead's TodoWrite calls feed plan events and never tool rows", async () => {
+test("the lead's TodoWrite calls feed plan events and never tool rows", {
+  skip: slashTmpDenied(),
+}, async () => {
   const decisions: unknown[] = [];
   const todos = (...statuses: string[]) => ({
     todos: statuses.map((status, index) => ({
@@ -1942,6 +2007,7 @@ test("the lead's TodoWrite calls feed plan events and never tool rows", async ()
 });
 
 test("settings probe cleanup awaits its existing SIGKILL fallback", {
+  skip: slashTmpDenied(),
   timeout: 10000,
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-claude-probe-exit-"));
@@ -2016,7 +2082,9 @@ test("settings probe cleanup awaits its existing SIGKILL fallback", {
 });
 
 for (const sources of [[], ["project"], ["sdk", "project"], ["sdk", "sdk"]])
-  test(`ambiguous or missing cab MCP provenance refuses the prompt: ${sources.join(",")}`, async () => {
+  test(`ambiguous or missing cab MCP provenance refuses the prompt: ${sources.join(",")}`, {
+    skip: slashTmpDenied(),
+  }, async () => {
     const f = fixture({
       mcpSources: sources,
       scripts: [

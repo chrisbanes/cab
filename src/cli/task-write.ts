@@ -3,6 +3,10 @@ import {
   type TaskRead,
   taskSchema,
 } from "../operator/contracts.js";
+import {
+  type ClosureWait,
+  closureWaitClause,
+} from "../operator/closed-issue-copy.js";
 import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
 import {
   type RestartDestination,
@@ -84,9 +88,12 @@ export function requiredVersion(ctx: WriteContext) {
 /** ` (closed at source…)` for a task closed on its provider, shared by every task view. */
 export function closureSuffix(
   closure: "held" | "completed" | "unattributed" | null | undefined,
+  wait: ClosureWait | null = null,
 ) {
   return closure === "held"
-    ? " (closed at source; held)"
+    ? wait
+      ? ` (closed at source; held; ${closureWaitClause(wait)})`
+      : " (closed at source; held)"
     : closure === "completed"
       ? " (closed at source)"
       : closure === "unattributed"
@@ -101,7 +108,7 @@ export function taskStatusLines(task: TaskData): [string, string][] {
     ["Task", task.task.id],
     [
       "State",
-      `${taskColumnOf(task)}${closureSuffix(task.source?.closure)}, version ${task.task.version}`,
+      `${taskColumnOf(task)}${closureSuffix(task.source?.closure, task.source?.closureWait)}, version ${task.task.version}`,
     ],
     [
       "Waiting",

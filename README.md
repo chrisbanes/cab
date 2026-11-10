@@ -97,10 +97,10 @@ owns delivery scope and status.
   issue; delegation, writes, pull request actions, results and completion are refused,
   and the task stays not Ready. Codex runs it with a read-only sandbox policy and
   command network access off; cab claims no independent sandbox.
-- **Start again and Reset task.** A request refused at admission before it ran shows as
-  Not started, not Uncertain. Start again, from the task page, the Inbox, Home or
-  `cab task start-again`, queues it again at the current revisions in the same
-  workspace and keeps the refusal in the history. Reset task, from the task header or
+- **Start again and Reset task.** A request refused before it ran, at admission or because
+  its submission failed before any turn was sent, shows as Not started, not Uncertain.
+  Start again, from the task page, the Inbox, Home or `cab task start-again`, queues it
+  again at the current revisions in the same workspace and keeps the refusal in the history. Reset task, from the task header or
   `cab task reset`, replaces every assignment's conversation and starts the lead
   fresh in the same workspace; it cannot be undone. Neither forces an execution that may
   still be running: those stay with the `recovery` commands.
@@ -194,9 +194,10 @@ owns delivery scope and status.
   activates a selection after a complete provider read, places conflicting imported
   tasks, inspects and refreshes delivery, and stages issue comments through review,
   confirmation and one receipted send. It shows each held generation's exact identity,
-  holds and recovery paths, and submits the existing evidence-bearing adoption,
+  holds and recovery paths, releases a held generation for which cab saved no thread
+  or turn after one confirmation (startup releases them too), and submits the existing
   recovery and conversation-replacement operations from prepared documents whose
-  evidence and attestations the operator states explicitly. A bounded live Codex
+  assertions the operator states explicitly. A bounded live Codex
   journey through the packaged CLI on this host is recorded in the
   [CLI8 record](docs/evidence/issue-901-cli8-2026-10-12.md); use from a second
   privately connected machine is unproved because none was available. See

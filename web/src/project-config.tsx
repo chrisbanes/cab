@@ -41,9 +41,11 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  DialogTrigger,
 } from "./ui/dialog.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
+import { PermittedAgentsTab } from "./permitted-agents-config.js";
 import {
   privateField,
   projectChanges,
@@ -78,6 +80,7 @@ import {
   useHeaderRefresh,
   useLoadedDraft,
   editable,
+  locked,
   textHold,
   usePrivateValues,
   type SettingsProps,
@@ -221,6 +224,13 @@ export function ProjectConfiguration(
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
+          ) : tab === "permitted-agents" ? (
+            <PermittedAgentsTab
+              {...tabProps}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
           ) : tab === "repositories" ? (
             <RepositoryTab
               {...tabProps}
@@ -351,6 +361,11 @@ function statusLine(
         : admission,
       saved("routing.configure", data.routing.version),
     );
+  if (tab === "permitted-agents")
+    return withSaved(
+      admission,
+      saved("permitted-agents", data.routing.version),
+    );
   if (tab === "repositories")
     return withSaved(
       "Repository links are the checkouts workspaces and delivery use.",
@@ -441,6 +456,9 @@ function GeneralTab(p: TabProps) {
     ...(data.diagnosticCapture === undefined
       ? {}
       : { diagnosticCapture: data.diagnosticCapture }),
+    ...(data.reasoningSummaries === undefined
+      ? {}
+      : { reasoningSummaries: data.reasoningSummaries }),
     expectedVersion: String(data.project.version),
   };
   useLoadedDraft(d, initial, p.loadedAt);
@@ -496,6 +514,11 @@ function GeneralTab(p: TabProps) {
     ...(data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== data.diagnosticCapture
       ? { diagnosticCapture: v.diagnosticCapture }
+      : {}),
+    ...(data.reasoningSummaries !== undefined &&
+    v.diagnosticCapture !== "baseline" &&
+    Boolean(v.reasoningSummaries) !== data.reasoningSummaries
+      ? { reasoningSummaries: Boolean(v.reasoningSummaries) }
       : {}),
     ...privateField("instructions", v.instructions, revealed),
   });
@@ -618,6 +641,28 @@ function GeneralTab(p: TabProps) {
               {diagnosticCaptureLine(data.diagnosticCapture)}
               {data.diagnosticCapture && ` ${diagnosticCaptureAppliesNote}`}
             </p>
+            {data.reasoningSummaries !== undefined && (
+              <>
+                <DraftCheck
+                  draft={d}
+                  field="reasoningSummaries"
+                  label="Reasoning summaries"
+                  toggle
+                  checked={
+                    v.diagnosticCapture === "baseline"
+                      ? false
+                      : Boolean(v.reasoningSummaries)
+                  }
+                  disabled={v.diagnosticCapture !== "enhanced"}
+                />
+                <p className="metadata muted">
+                  {v.diagnosticCapture !== "enhanced" &&
+                    "Requires enhanced diagnostic capture. Saving Baseline turns this setting off. "}
+                  Applies to later admitted turns. Runtime reasoning capture is
+                  not implemented; no reasoning is collected.
+                </p>
+              </>
+            )}
             <PrivateTextField
               draft={d}
               field="instructions"
@@ -646,6 +691,7 @@ function GeneralTab(p: TabProps) {
               review={() => d.adoptLatest(data.project.version, initial)}
             />
           </form>
+          {data.reasoningSummaries !== undefined && <DeleteReasoning {...p} />}
           <Dialog open={confirmSkip} onOpenChange={setConfirmSkip}>
             <DialogContent role="alertdialog" className="stop-dialog">
               <DialogTitle>Skip the sandbox for this project?</DialogTitle>
@@ -701,6 +747,73 @@ function GeneralTab(p: TabProps) {
         />
       </div>
     </div>
+  );
+}
+
+function DeleteReasoning(p: TabProps) {
+  const [open, setOpen] = useState(false);
+  const d = useDraft(
+    p.drafts,
+    `project.reasoning.delete:${p.projectId}`,
+    p.readOnly,
+  );
+  const initial = { expectedVersion: String(p.data.project.version) };
+  useLoadedDraft(d, initial, p.loadedAt);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next && !locked(d)) reloadDraft(d, initial);
+        setOpen(next);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button type="button" variant="secondary" disabled={p.readOnly}>
+          Delete collected reasoning…
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete collected reasoning?</DialogTitle>
+        <DialogDescription>
+          Deletes this project's collected reasoning summaries. This cannot be
+          undone. The setting stays unchanged. No reasoning is collected yet, so
+          there is currently nothing to erase.
+        </DialogDescription>
+        <form
+          onSubmit={(e) =>
+            void submitDraft(
+              e,
+              d,
+              p.client,
+              p.session,
+              {
+                type: "project.reasoning.delete",
+                key: d.values.key,
+                projectId: p.projectId,
+                expectedVersion: Number(d.values.expectedVersion),
+                confirmed: true,
+              },
+              p.refreshConfiguration,
+            )
+          }
+        >
+          <DraftOutcome
+            draft={d}
+            client={p.client}
+            session={p.session}
+            label="Delete collected reasoning"
+            success="Collected reasoning cleared."
+            refresh={p.refreshConfiguration}
+            review={() => d.adoptLatest(p.data.project.version, initial)}
+          />
+        </form>
+        <DialogClose asChild>
+          <Button type="button" variant="secondary">
+            Close
+          </Button>
+        </DialogClose>
+      </DialogContent>
+    </Dialog>
   );
 }
 

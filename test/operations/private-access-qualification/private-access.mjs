@@ -230,6 +230,7 @@ if (args.length !== 1 || args[0] !== "--live") {
             type: "capacity.configure",
             key: randomUUID(),
             globalLimit: runtime.globalLimit,
+            minimumLeadSlots: 0,
             projectOverrides: { [config.projectId]: project.limit },
           },
         ])
@@ -244,13 +245,15 @@ if (args.length !== 1 || args[0] !== "--live") {
         type: "capacity.configure",
         key: randomUUID(),
         globalLimit: runtime.globalLimit,
+        minimumLeadSlots: runtime.minimumLeadSlots,
         projectOverrides: { [config.projectId]: project.override },
       };
-      const changed = project.limit === 1 ? 2 : project.limit - 1;
+      const changed = project.override === 1 ? 2 : 1;
       const change = {
         type: "capacity.configure",
         key: randomUUID(),
         globalLimit: runtime.globalLimit,
+        minimumLeadSlots: runtime.minimumLeadSlots,
         projectOverrides: { [config.projectId]: changed },
       };
       let receipt;

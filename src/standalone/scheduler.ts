@@ -34,7 +34,7 @@ export type TurnRequest = z.infer<typeof requestSchema> & {
   nextEligibleAt: number | null;
 };
 
-/** Durable request identity and fair FIFO order, separate from execution ownership. */
+/** Durable request identity and admission order, separate from execution ownership. */
 export class SchedulerStore {
   constructor(private readonly db: Database) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS turn_requests (
@@ -245,12 +245,78 @@ export class SchedulerStore {
     });
   }
 
+  /**
+   * Eligible queued requests, resumed work first, oldest first within each group. Work is
+   * resumed when its task already had a turn admitted (answers, results, follow-ups,
+   * operator messages, retries and newly delegated work on a task underway), when it
+   * continues admitted direct work, or when it is a retry or shutdown requeue, which is
+   * queued with its retry lineage before admission. A drafting run never counts as resumed.
+   */
   queued(now = Date.now()): TurnRequest[] {
+    const lineage = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_retry_generations'",
+      )
+      .get();
+    const admitted = lineage
+      ? "OR EXISTS (SELECT 1 FROM execution_retry_generations g WHERE g.workId = p.workId)"
+      : "";
+    const retried = lineage
+      ? "OR EXISTS (SELECT 1 FROM execution_retry_generations g WHERE g.workId = r.workId)"
+      : "";
     return this.db
-      .prepare(`SELECT * FROM turn_requests WHERE state = 'queued'
-        AND (nextEligibleAt IS NULL OR nextEligibleAt <= ?) ORDER BY sequence`)
+      .prepare(`SELECT r.*, r.kind != 'drafting' AND (EXISTS (
+          SELECT 1 FROM turn_requests p
+          WHERE p.sequence < r.sequence AND p.kind != 'drafting'
+            AND ((r.taskId IS NOT NULL AND p.taskId = r.taskId)
+              OR p.workId = r.previousWorkId)
+            AND (p.state IN ('active','completed') ${admitted})
+        ) ${retried}) AS resumed
+        FROM turn_requests r WHERE r.state = 'queued'
+        AND (r.nextEligibleAt IS NULL OR r.nextEligibleAt <= ?)
+        ORDER BY resumed DESC, r.sequence`)
       .all(now)
       .map((row) => this.parse(row as Record<string, unknown>));
+  }
+
+  /**
+   * Active turns holding capacity, and the configured limits as one comparable value; zero
+   * and empty before execution state exists.
+   */
+  capacity(): { reserved: number; limits: string } {
+    const present = (name: string) =>
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(name) !== undefined;
+    const reserved = present("execution_capacity_reservations")
+      ? (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM execution_capacity_reservations",
+            )
+            .get() as { count: number }
+        ).count
+      : 0;
+    const limits = [
+      ["scheduler_capacity_limits", "SELECT * FROM scheduler_capacity_limits"],
+      [
+        "scheduler_agent_capacity_limits",
+        "SELECT * FROM scheduler_agent_capacity_limits ORDER BY profileId",
+      ],
+      [
+        "scheduler_project_capacity_limits",
+        "SELECT * FROM scheduler_project_capacity_limits ORDER BY projectId",
+      ],
+    ]
+      .map(([table, sql]) =>
+        present(table as string)
+          ? JSON.stringify(this.db.prepare(sql as string).all())
+          : "",
+      )
+      .join("|");
+    return { reserved, limits };
   }
 
   nextEligibility(now = Date.now()): number | undefined {
@@ -499,7 +565,11 @@ export class TurnScheduler {
 
   constructor(
     private readonly store: SchedulerStore,
-    private readonly attempt: (request: TurnRequest) => Promise<void>,
+    /** `capacityFreed` is true once a slot was released or a limit changed after this attempt began. */
+    private readonly attempt: (
+      request: TurnRequest,
+      capacityFreed: () => boolean,
+    ) => Promise<void>,
     private readonly now: () => number = Date.now,
     private readonly onBackgroundFailure: (
       error: unknown,
@@ -566,9 +636,29 @@ export class TurnScheduler {
   private async drain(): Promise<void> {
     while (this.wakeAgain && !this.stopped) {
       this.wakeAgain = false;
+      let current = this.store.capacity();
+      // Admission only adds reservations, so fewer of them, or changed limits, may make
+      // room that higher-priority requests should get first.
+      const freed = (since: { reserved: number; limits: string }) => {
+        const now = this.store.capacity();
+        return now.reserved < since.reserved || now.limits !== since.limits;
+      };
       for (const request of this.store.queued(this.now())) {
         if (this.stopped) return;
-        await this.attempt(request);
+        // Freed room starts the pass again from the highest-priority request, so it never
+        // goes to a later one; an attempt that sees room freed while it awaited gives way
+        // instead of taking it. Other wakes let the pass finish, then rerun it.
+        if (freed(current)) {
+          this.wakeAgain = true;
+          break;
+        }
+        const before = current;
+        await this.attempt(request, () => freed(before));
+        if (freed(before)) {
+          this.wakeAgain = true;
+          break;
+        }
+        current = this.store.capacity();
       }
     }
   }

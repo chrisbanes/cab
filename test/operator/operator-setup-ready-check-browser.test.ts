@@ -265,7 +265,8 @@ test("Setup reports full capacity without disabling Resume", async (_t, journey)
   await page.route("**/composer-options", async (route) => {
     const response = await route.fetch();
     const body = await response.json();
-    body.data.capacity.projectUsage = body.data.capacity.projectLimit;
+    // The first task's turn is a lead turn, which only the global cap holds.
+    body.data.capacity.globalUsage = body.data.capacity.globalLimit;
     await route.fulfill({ response, json: body });
   });
   const { ready, resume } = await createProject(page, sentCommands(page));

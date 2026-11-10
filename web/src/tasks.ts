@@ -260,7 +260,8 @@ export function capacityNotice(tasks: readonly TaskListSummary[]) {
       t.state !== "done" &&
       t.state !== "cancelled" &&
       (t.capacity.globalUsage >= t.capacity.globalLimit ||
-        t.capacity.projectUsage >= t.capacity.projectLimit),
+        (t.capacity.projectLimit !== null &&
+          t.capacity.projectUsage >= t.capacity.projectLimit)),
   );
   if (!held.length) return null;
   const rechecks = "it rechecks as turns finish.";

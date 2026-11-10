@@ -244,6 +244,21 @@ test("executionFacts counts running assignments and states delivery", () => {
     }).delivery,
     "Through merge · acme/app#7 · open",
   );
+  const recovery =
+    "Created PR #7 in repository R1 (node P7); register PR #7 with cab_register_pr.";
+  assert.equal(
+    facts({ mode: "reviewable-pr", binding: null, unregisteredPr: recovery })
+      .delivery,
+    recovery,
+  );
+  assert.match(
+    facts({
+      mode: "reviewable-pr",
+      binding: { repositoryName: "R1", number: 9, state: "OPEN" },
+      unregisteredPr: recovery,
+    }).delivery,
+    /#9.*Created PR #7.*register PR #7/,
+  );
   // Without a verified link the name is the provider's opaque repository id, which is never shown.
   for (const url of [
     undefined,

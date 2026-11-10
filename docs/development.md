@@ -158,6 +158,54 @@ of a suite that starts a service, such as
 the service refuses that data directory, so pass the resolved `/private/var/...`
 path as the runner does.
 
+### Running the check in a cab-managed workspace
+
+Agents run the full check in their cab-managed task workspaces. A task's checkout
+there is a detached worktree of a bare reftable repository, and its commands run in
+the harness sandbox. CI and developer checkouts use the `files` ref format, so read refs
+through Git commands, never from the checkout's `refs/` or `packed-refs`;
+`test/delivery/stack-source-identity.test.ts` covers the stack qualification in both
+formats and in a cab-shaped worktree. Browser engines do not start in these sandboxes,
+so the check there runs with the service profile: `npm ci`, then
+`npm run typecheck`, `npm run lint` and `npm run format:check`, then
+`npm run build && npm run test:built -- --profile=service`. The workspace needs this
+environment:
+
+- **Codex:** the sandbox writes only the task workspace and the managed repository's
+  Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Set `TMPDIR`
+  and `npm_config_cache` to directories in the task workspace outside the checkout,
+  for example `../tmp` and `../npm-cache` from `repo-1`, before `npm ci`. Tests listen
+  on loopback, and Codex allows that only with the project's command network access
+  on.
+- **Claude:** the sandbox already points `TMPDIR` at the task's private temporary
+  directory. Set `npm_config_cache` as for Codex. Loopback listening needs the
+  project's local listening setting on.
+
+Tests that need host access a sandbox denies check it once, before they run, and
+skip with the reason (`# SKIP process identity is unavailable here: ...` or
+`# SKIP writing directly under /tmp is denied here ...`): reading process identity
+with `ps`, and creating the Claude runtime's `/tmp/ens-*` temporary base directly
+under `/tmp`. Everywhere the access works, including CI, those tests run in full. The
+probes are in `test/fixtures/host-access.ts`; mark a new test that needs such access
+with `{ skip: processIdentityDenied() }` or `{ skip: slashTmpDenied() }`. With `CI` set,
+a probe that finds its access denied fails the test run instead of skipping.
+
+To reproduce the Codex sandbox from a workspace's `repo-1` without a model, run each
+step (`npm ci`, `npm run build`, then the tests) through `codex sandbox` with the
+policy cab gives a task turn; the last step is:
+
+```sh
+W="$(cd .. && pwd)" M="$(git rev-parse --path-format=absolute --git-common-dir)"
+mkdir -p "$W/tmp" "$W/npm-cache"
+TMPDIR="$W/tmp" npm_config_cache="$W/npm-cache" codex sandbox \
+  -c 'sandbox_mode="workspace-write"' \
+  -c sandbox_workspace_write.exclude_slash_tmp=true \
+  -c sandbox_workspace_write.exclude_tmpdir_env_var=true \
+  -c sandbox_workspace_write.network_access=true \
+  -c "sandbox_workspace_write.writable_roots=[\"$W\",\"$M/objects\",\"$M/reftable\",\"$(git rev-parse --path-format=absolute --git-dir)\"]" \
+  -- npm run test:built -- --profile=service
+```
+
 Real App Server
 qualification is separate and runs only when requested explicitly, for example
 `npm run recovery:live`, `npm run planned-restart:live` and `npm run routing:live`,
@@ -409,7 +457,9 @@ name, version and preview digest. The service rechecks every confirmation atomic
 
 5. Configuration changes, with a read/write credential to apply:
    - `profile prepare PROFILE_ID`, `profile prepare-create`, `project prepare
-     PROJECT_ID`, `project prepare-create`, `project prepare-routing PROJECT_ID` and
+     PROJECT_ID`, `project prepare-create`, `project prepare-permitted-agents PROJECT_ID` and
+     its compatible alias `project prepare-routing PROJECT_ID` (the list flags are
+     `--permitted-agents` and `--candidates`, respectively), and
      `capacity prepare` read the current state and write a change document with mode
      `0600`, to `--out FILE` or by default to `./cab-<kind>-<id8>.json` (kind
      such as `project-configure`, id8 the first eight characters of the target's ID;
@@ -448,7 +498,8 @@ name, version and preview digest. The service rechecks every confirmation atomic
    - `--restore-revision N` proposes revision N's exact instructions as a new
      revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
      `--enabled`, `--candidates`, `--credential-ref env:NAME|none` and
-     `--project-limit PROJECT_ID=N|default` are the reverse paths. Creation is not
+     `--project-limit PROJECT_ID=N|none` and `--agent-limit AGENT_ID=N|none` are the
+     reverse paths. Creation is not
      reversible: revoke an agent or pause a project instead. Routing guidance is
      replace-only. Runtime, model, repository and GitHub settings are not offered.
    - `assignment apply-current ASSIGNMENT_ID --expected-version N` rebinds the
@@ -456,7 +507,12 @@ name, version and preview digest. The service rechecks every confirmation atomic
      active turn is not rewritten. Adoption is one-way: restore older text as a new
      revision and adopt again. A completed lead stays resumable: a later
      `task follow-up` resumes it under the adopted revisions.
-   - `capacity get` shows global and per-project limits and usage.
+   - `capacity get` shows the global limit, minimum lead slots and lead usage, and
+     each agent's and project's limit (`none` without one) and usage.
+     `capacity prepare` takes `--global-limit N`, `--min-lead-slots N`,
+     `--agent-limit AGENT_ID=N|none` and `--project-limit PROJECT_ID=N|none`; a
+     document prepared before minimum lead slots existed is refused and must be
+     prepared again.
    - `operation get REQUEST_ID --scope project:ID|profile:ID|system:capacity --type
      TYPE` reads a recorded receipt; the same UUID in another scope or type never
      selects it.
@@ -735,8 +791,9 @@ name, version and preview digest. The service rechecks every confirmation atomic
      `{"kind":"search","query"}` or `{"kind":"project","projectNodeId","filter"}`),
      `removeSelections` (ids), `readiness` (a rule replaces, `null` removes the
      rule, omitted keeps it; a saved rule the read withholds must be given),
-     `closedIssues` (`"skip"`
-     or `"done"`; omitted keeps the saved mode) and `credentialRef` (`"env:NAME"` or
+     `closedIssues` (Closed issues at import: `"skip"`
+     or `"done"`; omitted keeps the saved setting; it decides only first import, and an
+     imported task completes when its issue closes once its work and delivery have settled) and `credentialRef` (`"env:NAME"` or
      `null`). The repository keys of earlier releases are refused with a pointer to
      `project prepare-repositories`. Saving makes every selection inactive until it is
      previewed again and marks observations incomplete until the next sync
@@ -825,14 +882,15 @@ name, version and preview digest. The service rechecks every confirmation atomic
    `--expected-*` values, because a recorded settlement moves the binding revision and
    a recorded delivery leaves the unresolved list; `operation get` does not read them.
 
-9. Evidence-bearing recovery. `recovery get ASSIGNMENT_ID` and `recovery prepare`
-   work with either scope; `recovery submit` needs a read/write credential (a
-   read-only one exits 3 before anything is sent):
+9. Recovery. `recovery get ASSIGNMENT_ID`, `recovery prepare` and `recovery
+   release` without `--yes` work with either scope; `recovery release --yes` and
+   `recovery submit` need a read/write credential (a read-only one exits 3 before
+   anything is sent):
    - `recovery get ASSIGNMENT_ID` shows the assignment version, conversation
      revision, holds and up to the 20 newest recovery generations: work ID,
      generation, intent and request state, process identity, held reason,
      predecessor, witnesses, observations and receipt, and for each path
-     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`, `bound-turn-recover`,
+     (`release`, `pre-turn-recover`, `no-turn-recover`, `bound-turn-recover`,
      plus `conversation-replace` for the assignment) whether it is eligible, what
      blocks it and the inputs it requires. Eligibility is advisory; the service
      re-checks everything. A string that redaction would change is withheld (gap
@@ -840,46 +898,54 @@ name, version and preview digest. The service rechecks every confirmation atomic
      send it; older generations are gap `item-omitted`, none at all
      `evidence-unavailable`. `assignment get` prints a `Recovery:` pointer while the
      assignment is held.
+   - `recovery release ASSIGNMENT_ID [--work WORK_ID] [--yes] [--request-id UUID]`
+     handles a held generation for which cab saved no thread or turn: cab saves the
+     thread before it starts a turn, so such a generation never sent one. Without
+     `--yes` it prints the generation, its held reason as evidence, and whether it
+     can be released or each blocker (`thread-bound`, `turn-bound`,
+     `witness-present`, `independent-hold`, `callback-pending`, `known-survivor`,
+     `ownership-released`, …), and writes nothing. With `--yes` it sends a release
+     bound to that read: the generation is refused as never having run, writer and
+     capacity are freed (`completed`), and the task offers `task start-again`. A
+     generation that changed or fails a check is refused with exit 4 and the
+     current blockers. `--work` names the generation when several are held. The
+     service also releases every such generation itself at startup, so this is for
+     one it could not release then.
    - `recovery prepare PATH ASSIGNMENT_ID --out FILE --work WORK_ID
      --evidence-file FILE` (or, for `conversation-replace`, `--expected-version N
      --expected-conversation-revision N` and no evidence file) writes an owner-only
      `cab.cli.recovery/v1` document with the exact command, the observed
      versions and a digest, and sends nothing. The identity comes from the read; the
-     evidence file supplies everything the service cannot observe. It is strict
-     JSON of at most 64 KiB with `"schema": "cab.cli.recovery-evidence/v1"`
-     and, per path, exactly: `pre-turn-adopt` — `rpcError` (the persisted
-     `{code, message}`), `evidence` (`frozenSourceRevision`,
-     `frozenHarnessSha256`, `evidenceSha256`, `approvedDecisionSha256`,
-     `reviewReference`, `approvalReference`) and `attestation`
-     (`beforeTurnRejected`, `noTurnSubmitted`, `independentlyReviewed`, each
-     `true`); `no-turn-adopt` — `evidence` (the same plus `invocationLedgerSha256`)
-     and `attestation` (`completeSynchronousWriteAheadLedger`,
-     `noStartTurnInvocation`, `independentlyReviewed`, `idleThreadMayExist`);
-     each recovery — `receipt` (`termination: {"kind":"process-exit"}`,
-     `effects: "settled"`, `workspace: "preserved"|"reconciled"`). A missing,
-     `false`, extra or malformed item exits 2 before any request; there is no
-     `--yes`, `--confirm`, `--force` or attestation flag. An ineligible path exits 4
-     naming its blockers; an unlisted work exits 2.
+     evidence file supplies what the service cannot observe. It is strict JSON of
+     at most 64 KiB with `"schema": "cab.cli.recovery-evidence/v1"` and exactly
+     `receipt` (`termination: {"kind":"process-exit"}`, `effects: "settled"`,
+     `workspace: "preserved"|"reconciled"`). A missing, extra or malformed item
+     exits 2 before any request; there is no `--yes`, `--confirm`, `--force` or
+     attestation flag. `release` is not prepared. An ineligible path exits 4 naming
+     its blockers; an unlisted work exits 2.
    - `recovery submit --file FILE [--request-id UUID]` revalidates the document
-     (owner-only, digest, same installation) and sends it once. Adoption records an
-     immutable witness (`saved`); recovery verifies termination of the stored
-     process and reconciles ownership (`completed`); conversation replacement
-     increments the revision (`saved`). None resumes the task or dispatches work:
-     after replacement, continue with a new `task message`. A refusal (stale
-     identity, unverified termination, an existing witness, a stale revision or a
-     task hold) exits 4 with the current blockers and observations; missing,
-     expired or stale evidence is never a successful recovery, and that key is not
-     reused. An identical rerun replays the recorded receipt; a lost reply exits 6
-     and is settled with `operation get KEY --scope assignment:ID --type TYPE` or
-     the same command.
+     (owner-only, digest, same installation) and sends it once. Recovery verifies
+     termination of the stored process and reconciles ownership (`completed`);
+     conversation replacement increments the revision (`saved`). Neither resumes
+     the task or dispatches work: after replacement, continue with a new
+     `task message`. A refusal (stale identity, unverified termination, a missing
+     witness, a stale revision or a task hold) exits 4 with the current blockers
+     and observations; missing, expired or stale evidence is never a successful
+     recovery, and that key is not reused.
 
-   Adoption, recovery and replacement cannot be undone, and adoption here records
-   evidence: it is unrelated to `assignment apply-current`. Bound-turn recovery
-   uses `recovery prepare bound-turn-recover` and the corresponding operator
-   recovery controls. Browser assertions and pending request state are local to
-   the page visit: navigation, sign-out or full reload discards them. Preserve the
-   original command/key before leaving an uncertain outcome; recorded server
-   receipts remain durable and can be read back through the operation endpoint.
+   For `release --yes` and `submit`, an identical rerun replays the recorded
+   receipt; a lost reply exits 6 and is settled with `operation get KEY --scope
+   assignment:ID --type TYPE` or the same command. A key recorded by the retired
+   `recovery.pre-turn.adopt` or `recovery.no-turn.adopt` commands still reads back
+   with `operation get`.
+
+   Release, recovery and replacement cannot be undone. Bound-turn recovery uses
+   `recovery prepare bound-turn-recover` and the corresponding operator recovery
+   controls; the recovery page also offers Release with a confirmation. Browser
+   assertions and pending request state are local to the page visit: navigation,
+   sign-out or full reload discards them. Preserve the original command/key before
+   leaving an uncertain outcome; recorded server receipts remain durable and can be
+   read back through the operation endpoint.
 
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. For a configured LAN

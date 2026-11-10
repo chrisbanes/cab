@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { sourceObservationSchema } from "../../src/operator/contracts.js";
 import {
+  type ProjectSelection,
   selectionCountsText,
   zeroMatchWarning,
 } from "../../src/operator/readiness-text.js";
@@ -21,6 +22,7 @@ export function ObservationCounts({
   sameTab = false,
   warningOnly = false,
   private: isPrivate = false,
+  projectSelections,
 }: {
   /** Names the selection where the row does not. */
   label?: string;
@@ -33,9 +35,10 @@ export function ObservationCounts({
   warningOnly?: boolean;
   /** The label is saved private text, so evidence masks it. */
   private?: boolean;
+  projectSelections?: readonly ProjectSelection[];
 }) {
   if (!counts) return null;
-  const warning = zeroMatchWarning(counts, rule);
+  const warning = zeroMatchWarning(counts, rule, projectSelections);
   return (
     <>
       {!warningOnly && (

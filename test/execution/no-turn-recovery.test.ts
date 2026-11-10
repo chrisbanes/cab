@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "../fixtures/temp.js";
+import {
+  adoptAsBefore,
+  bindLegacyHold,
+  failing,
+} from "../fixtures/recovery-generations.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import type {
   Runtime,
@@ -19,6 +24,7 @@ import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
 
 class NoTurnRuntime implements Runtime {
+  beforeFailure: ((error: Error) => void) | undefined;
   rejectStart = true;
   threads = 0;
   turnInvocations: string[] = [];
@@ -40,7 +46,8 @@ class NoTurnRuntime implements Runtime {
   }
   async startThread() {
     const id = `possibly-created-idle-thread-${++this.threads}`;
-    if (this.rejectStart) throw new Error("Runtime stopped");
+    if (this.rejectStart)
+      throw failing(this.beforeFailure, new Error("Runtime stopped"));
     return id;
   }
   async resumeThread() {
@@ -92,25 +99,28 @@ async function fixture() {
   const runtime = new NoTurnRuntime();
   let verified = true;
   const makeService = () =>
-    new StandaloneService(join(directory, "data"), () => runtime, undefined, {
-      power: { enabled: false },
-      routingClient: null,
-      terminationVerifier: {
-        async verify(identity) {
-          return verified
-            ? {
-                kind: "verified",
-                processIdentity: identity,
-                verifiedAt: "2026-10-03T10:05:00.000Z",
-                method: "mac-pid-absent-same-boot",
-              }
-            : {
-                kind: "unknown",
-                reason: "Independent termination unavailable",
-              };
+    bindLegacyHold(
+      runtime,
+      new StandaloneService(join(directory, "data"), () => runtime, undefined, {
+        power: { enabled: false },
+        routingClient: null,
+        terminationVerifier: {
+          async verify(identity) {
+            return verified
+              ? {
+                  kind: "verified",
+                  processIdentity: identity,
+                  verifiedAt: "2026-10-03T10:05:00.000Z",
+                  method: "mac-pid-absent-same-boot",
+                }
+              : {
+                  kind: "unknown",
+                  reason: "Independent termination unavailable",
+                };
+          },
         },
-      },
-    });
+      }),
+    );
   const service = makeService();
   await service.start();
   const profileId = randomUUID(),
@@ -161,7 +171,11 @@ async function fixture() {
     expectedVersion: Number(service.domain().task(taskId).version),
     title: "Current",
   });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   const initial = required(
     service.turnRequests().find((r) => r.workId.endsWith(":initial")),
   );
@@ -322,7 +336,7 @@ function replace(f: Awaited<ReturnType<typeof fixture>>, service = f.service) {
   });
 }
 
-test("authenticated historical no-turn adoption recovers exact admitted ownership without claiming thread noncreation", async () => {
+test("a no-turn witness adopted by an earlier build recovers exact admitted ownership without claiming thread noncreation", async () => {
   const f = await fixture();
   let service = f.service;
   try {
@@ -334,11 +348,7 @@ test("authenticated historical no-turn adoption recovers exact admitted ownershi
         ?.noTurnSubmission,
       undefined,
     );
-    const adopted = service.adoptHistoricalNoTurnSubmission(f.adoption);
-    assert.deepEqual(
-      service.adoptHistoricalNoTurnSubmission(f.adoption),
-      adopted,
-    );
+    const adopted = { witnessId: adoptAsBefore(service, f.adoption) };
     assert.equal(
       service.recoveryView().find((r) => r.workId === f.old.workId)?.holds
         .capacity,
@@ -452,10 +462,6 @@ test("authenticated historical no-turn adoption recovers exact admitted ownershi
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(
-      service.adoptHistoricalNoTurnSubmission(f.adoption),
-      adopted,
-    );
     assert.deepEqual(await service.recoverNoTurnExecution(input), results[0]);
     assert.deepEqual(service.replaceConversationCommand(replacement), {
       revision: 2,
@@ -468,96 +474,10 @@ test("authenticated historical no-turn adoption recovers exact admitted ownershi
   }
 });
 
-test("no-turn adoption rejects stale generation, missing attestation, altered keys and predecessor identity", async (t) => {
-  for (const field of [
-    "work",
-    "revision",
-    "sequence",
-    "conversation",
-    "writer",
-    "process",
-    "birth",
-    "boot",
-    "reason",
-    "digest",
-    "ledger",
-    "incomplete",
-    "called-turn",
-    "unreviewed",
-    "idle-denied",
-    "predecessor",
-    "identity",
-    "capacity",
-  ] as const)
-    await t.test(field, async () => {
-      const f = await fixture();
-      try {
-        const input = structuredClone(f.adoption);
-        if (field === "work") input.workId = "other";
-        if (field === "revision") input.workRevision++;
-        if (field === "sequence") input.requestSequence++;
-        if (field === "conversation") input.conversationRevision++;
-        if (field === "writer") input.writerSequence++;
-        if (field === "process") input.processIdentity.processId = "other";
-        if (field === "birth") input.processIdentity.processStartedAt = "other";
-        if (field === "boot") input.processIdentity.bootId = "other";
-        if (field === "reason") input.retainedReason = "Other error";
-        if (field === "digest") input.evidence.frozenHarnessSha256 = "invalid";
-        if (field === "ledger")
-          input.evidence.invocationLedgerSha256 = "invalid";
-        if (field === "incomplete")
-          Object.assign(input.attestation, {
-            completeSynchronousWriteAheadLedger: false,
-          });
-        if (field === "called-turn")
-          Object.assign(input.attestation, { noStartTurnInvocation: false });
-        if (field === "unreviewed")
-          Object.assign(input.attestation, { independentlyReviewed: false });
-        if (field === "idle-denied")
-          Object.assign(input.attestation, { idleThreadMayExist: false });
-        if (field === "predecessor")
-          db(f.service)
-            .prepare(
-              "UPDATE execution_request_predecessors SET predecessorKnown=0 WHERE workId=?",
-            )
-            .run(f.old.workId);
-        if (field === "identity")
-          db(f.service)
-            .prepare(
-              "UPDATE execution_recovery_identities SET threadId='unknown-bound-thread' WHERE workId=?",
-            )
-            .run(f.old.workId);
-        if (field === "capacity")
-          db(f.service)
-            .prepare(
-              "DELETE FROM execution_capacity_reservations WHERE workId=?",
-            )
-            .run(f.old.workId);
-        assert.throws(() => f.service.adoptHistoricalNoTurnSubmission(input));
-        assert.equal(
-          db(f.service)
-            .prepare(
-              "SELECT 1 FROM execution_no_turn_submissions WHERE workId=?",
-            )
-            .get(f.old.workId),
-          undefined,
-        );
-        assert.equal(f.runtime.turnInvocations.length, 0);
-      } finally {
-        await close(f);
-      }
-    });
+test("an earlier adoption's key keeps its scope and its witness keeps recovery's checks", async () => {
   const f = await fixture();
   try {
-    const adopted = f.service.adoptHistoricalNoTurnSubmission(f.adoption);
-    assert.throws(
-      () =>
-        f.service.adoptHistoricalNoTurnSubmission({
-          ...f.adoption,
-          retainedReason: "changed",
-        }),
-      /key.*different material/,
-    );
+    const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
     assert.throws(
       () =>
         f.service.replaceConversationCommand({
@@ -616,7 +536,7 @@ test("R4 proof and current gates are revalidated after operator audit, including
     await t.test(gate, async () => {
       const f = await fixture();
       try {
-        const adopted = f.service.adoptHistoricalNoTurnSubmission(f.adoption);
+        const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
         await f.service.recoverNoTurnExecution(recovery(f, adopted.witnessId));
         replace(f);
         command(f.service, {
@@ -737,7 +657,7 @@ test("R4 late callback and known survivor retract successors and persist hold af
       const f = await fixture();
       let service = f.service;
       try {
-        const adopted = service.adoptHistoricalNoTurnSubmission(f.adoption);
+        const adopted = { witnessId: adoptAsBefore(service, f.adoption) };
         await service.recoverNoTurnExecution(recovery(f, adopted.witnessId));
         replace(f);
         f.runtime.rejectStart = false;
@@ -781,11 +701,7 @@ test("JSON no-turn commands retain bounded witnesses in the curated API", async 
   const f = await fixture();
   try {
     const api = new OperatorApi(f.service, [f.directory]);
-    await api.execute({
-      type: "recovery.no-turn.adopt",
-      assignmentId: f.assignmentId,
-      ...f.adoption,
-    });
+    adoptAsBefore(f.service, f.adoption);
     const witness = required(
       f.service.recoveryView().find((r) => r.workId === f.old.workId)
         ?.noTurnSubmission,
@@ -813,7 +729,7 @@ test("JSON no-turn commands retain bounded witnesses in the curated API", async 
 test("R4 current external completion actions and terminal completion reject invalidated historical proof", async () => {
   const f = await fixture();
   try {
-    const adopted = f.service.adoptHistoricalNoTurnSubmission(f.adoption);
+    const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
     await f.service.recoverNoTurnExecution(recovery(f, adopted.witnessId));
     replace(f);
     let before = snapshot(f.service, f.old.workId);

@@ -228,7 +228,11 @@ test("Start again moves a refused follow-up's inbox batch to the new request", a
       () => f.service.turnRequests(),
     );
     unpause(f);
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     const read = (await api.readTask(f.taskId)).data;
     assert.ok(read.startAgain?.available, JSON.stringify(read.startAgain));
     const refusedId = read.startAgain.workId ?? "";
@@ -452,6 +456,7 @@ test("Start again is refused with its reason when something may have run", async
           unpause(f);
           await f.service.configureCapacity({
             key: randomUUID(),
+            minimumLeadSlots: 0,
             globalLimit: 1,
           });
           assert.equal(f.runtime.turns, 0, `${name} never runs`);
@@ -478,7 +483,11 @@ test("a restarted request that is refused again stays eligible across a restart"
       expectedVersion: version(service, f.taskId),
       outcome: "SECOND_OUTCOME",
     });
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     await waitUntil(
       () =>
         service.turnRequests().find((r) => r.workId === first.workId)?.state ===
@@ -614,7 +623,11 @@ test("Reset after completed turns replaces every conversation and restarts only 
       resultDestination: "lead",
       requesterAssignmentId: f.assignmentId,
     });
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     const settled = () =>
       f.service.domain().assignment(workerId).state === "completed" &&
       !f.service

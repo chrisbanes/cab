@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { closureSuffix } from "../../src/cli/task-write.js";
 import { derivedUuid } from "../../src/cli/write.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { completedLead, configure, until } from "../fixtures/completed-lead.js";
@@ -1730,5 +1731,21 @@ test("a create whose post-read fails still names the next command", async (t) =>
   assert.equal(
     (await o.cli("ro", ["task", "get", taskId])).json().data.task.id,
     taskId,
+  );
+});
+
+test("the task state suffix names what a closure hold waits on", () => {
+  assert.equal(closureSuffix("held"), " (closed at source; held)");
+  assert.equal(
+    closureSuffix("held", { kind: "change-request", number: 123 }),
+    " (closed at source; held; completes when change request #123 merges or closes)",
+  );
+  assert.equal(
+    closureSuffix("held", { kind: "delivery-action", action: "pr.merge" }),
+    " (closed at source; held; completes when the outcome of its pr.merge action is known)",
+  );
+  assert.equal(
+    closureSuffix("completed", { kind: "change-request", number: 1 }),
+    " (closed at source)",
   );
 });

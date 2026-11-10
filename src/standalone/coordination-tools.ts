@@ -23,14 +23,14 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
     type: "function",
     name: "cab_external_action",
     description:
-      "Request a policy-authorized code-host action. Intent precedes effect; uncertain actions hold this task. Never run git push: commit locally, then request branch.push (branch.force-push after rewriting) with its SHA. cab pushes only committed changes to the assigned task branch named in the receipt; use it as pr.create headRef. Stacked dependents must use the blocker task branch as baseRef; another base is refused before provider calls. GitLab pr.* uses the IID as number and receipt nodeId; slash-command body lines and draft-prefixed titles are held. Jira repositoryId is project ID, nodeId is issue ID; titles start with its key; no Closes/Fixes beside a key. For an outside branch change, operator approval must cover exact {branch, outsideHeadSha, lastPushedSha}: branch.adopt records that head (merge/rebase locally, then push); branch.force-push with that material and your commit overwrites it.",
+      "Request a policy-authorized code-host action. Intent precedes effect; uncertain actions hold this task. operationId: a fresh UUID v4 for every request, even after a refusal. Never run git push: commit locally, then request branch.push (branch.force-push after rewriting) with its SHA. branch.push takes only target.repositoryId; cab pushes committed changes to the task branch it assigns and names in the receipt; use it as pr.create headRef. Stacked dependents must use the blocker task branch as baseRef; another base is refused before provider calls. GitLab pr.* uses the IID as number and receipt nodeId; slash-command body lines and draft-prefixed titles are held. Jira repositoryId is project ID, nodeId is issue ID; titles start with its key; no Closes/Fixes beside a key. For an outside branch change, operator approval must cover exact {branch, outsideHeadSha, lastPushedSha}: branch.adopt records that head (merge/rebase locally, then push); branch.force-push with that material and your commit overwrites it.",
     inputSchema: z.toJSONSchema(externalActionArgumentsSchema),
   },
   {
     type: "function",
     name: "cab_register_pr",
     description:
-      "Bind an existing identity-verified PR or merge request (its IID as prNumber and the pr.create receipt's nodeId as expectedPrNodeId) to this task and retain its lead for delivery feedback.",
+      "Confirmed pr.create automatically binds when this task has no bound PR; a binding failure preserves the confirmed create and its receipt. Manually bind an existing identity-verified PR or merge request (its IID as prNumber and the pr.create receipt's nodeId as expectedPrNodeId) to this task and retain its task lead for delivery feedback. Only the task lead or the same-task assignment whose confirmed pr.create produced the exact repository/number/node identity may register.",
     inputSchema: object(
       {
         repositoryId: text,

@@ -124,7 +124,9 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
   const aside = page.getByRole("complementary", { name: "Before you create" });
   const panel = aside.getByRole("region", { name: "Inherited from Atlas" });
   await panel.getByText("Mira", { exact: true }).waitFor();
-  await panel.getByText(/^Capacity: \d+\/\d+ project/).waitFor();
+  await panel
+    .getByText(/^Capacity: no project limit · \d+\/\d+ global/)
+    .waitFor();
   // The caveat is part of a Will wait verdict only.
   const verdictPanel = aside.getByRole("region", {
     name: "If you create it now",

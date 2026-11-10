@@ -494,7 +494,11 @@ async function openFile(page: Page, name: RegExp) {
     const file = files
       .locator(".file-entry")
       .and(files.getByRole("button", { name }));
-    const title = await file.getAttribute("title");
+    // The explorer title appends the exact size; the open tab's title is the bare path.
+    const title = (await file.getAttribute("title"))?.replace(
+      / · [\d,]+ bytes$/,
+      "",
+    );
     assert.ok(title, "the requested explorer file has a scoped path");
     await file.click();
     const ready = files

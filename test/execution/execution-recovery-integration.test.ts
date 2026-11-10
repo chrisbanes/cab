@@ -303,6 +303,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
     );
     await first.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 1,
       projectOverrides: { [leadProject]: 1, [workerProject]: 1 },
     });
@@ -328,7 +329,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       1,
       "the child waits for the capacity-one lead turn",
     );
-    assert.equal(first.capacityLimits([leadProject]).currentUsage.global, 1);
+    assert.equal(first.capacityLimits().currentUsage.global, 1);
     assert.equal(
       first.turnRequests().find((request) => request.workId === child.workId)
         ?.state,
@@ -364,9 +365,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       .find((intent) => intent.workId === worker.workId);
     assert.equal(waitingWorker?.state, "capacity-waiting");
     assert.equal(
-      first.capacityLimits([workerProject]).currentUsage.projects[
-        workerProject
-      ] ?? 0,
+      first.capacityLimits().currentUsage.projects[workerProject] ?? 0,
       0,
     );
     command(first, {
@@ -384,7 +383,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       first.list().find((intent) => intent.workId === child.workId)?.state,
       "held",
     );
-    assert.equal(first.capacityLimits([leadProject]).currentUsage.global, 1);
+    assert.equal(first.capacityLimits().currentUsage.global, 1);
     crash(first);
 
     const restartRuntime = new IntegrationRuntime();
@@ -412,10 +411,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
     assert.equal(observed.holds.capacity, true);
     const resolved = await recovered.resolveHeldExecution(receiptFor(observed));
     assert.equal(resolved.state, "reconciled");
-    assert.equal(
-      recovered.capacityLimits([leadProject]).currentUsage.global,
-      0,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 0);
     assert.equal(recovered.taskHold(child.taskId), "Task stopped");
     assert.equal(
       recovered.recordTaskResult(child.workId, "stale child result"),
@@ -445,15 +441,22 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       ),
       paused: false,
     });
+    // The lead's reporting repair is resumed work, so it runs before the worker that
+    // has not started.
     await restartRuntime.waitForTurnNumber(2);
     assert.ok(
-      restartRuntime.prompts[1]?.startsWith("Independent worker task\n\n"),
-    );
-    assert.match(
-      restartRuntime.prompts[1] ?? "",
-      /Assignment role: project assignee/,
+      restartRuntime.prompts[1]?.startsWith("Lead task\n\nReporting repair"),
     );
     restartRuntime.complete(2);
+    await restartRuntime.waitForTurnNumber(3);
+    assert.ok(
+      restartRuntime.prompts[2]?.startsWith("Independent worker task\n\n"),
+    );
+    assert.match(
+      restartRuntime.prompts[2] ?? "",
+      /Assignment role: project assignee/,
+    );
+    restartRuntime.complete(3);
     await until(
       () =>
         recovered?.list().find((intent) => intent.workId === worker.workId)
@@ -465,7 +468,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
         .filter((request) => request.workId === worker.workId).length,
       1,
     );
-    assert.equal(restartRuntime.turns, 2);
+    assert.equal(restartRuntime.turns, 3);
   } finally {
     for (let turn = 1; turn <= firstRuntime.turns; turn++)
       firstRuntime.complete(turn);

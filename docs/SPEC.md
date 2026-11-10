@@ -126,10 +126,11 @@ and drive the existing refresh, handback settlement and staged comment commands;
 `result deliver` delivers an undelivered result to its permitted recipient; and
 `delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
 publish a local task as a GitHub issue with the operator UI's own commands. `recovery
-get|prepare|submit` inspect an assignment's held generations and submit the
-existing adoption, pre-turn, no-turn and bound-turn recovery and conversation-replacement
-commands from an owner-only, digest-bound document built from observed identity and
-an explicit operator evidence file; none resumes or dispatches work. Further CLI
+get|release|prepare|submit` inspect an assignment's held generations, release one that
+never sent a turn after confirmation, and submit the existing pre-turn, no-turn and
+bound-turn recovery and conversation-replacement commands from an owner-only,
+digest-bound document built from observed identity and an explicit operator evidence
+file; none resumes or dispatches work. Further CLI
 delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/cab/issues/893).
 
@@ -147,8 +148,16 @@ unless a project reduces capture to the baseline. General conversation history r
 instruction redaction; historical gaps remain explicit. The diagnostic payload
 retention policy does not delete durable safety records or change existing
 result/review evidence contracts. [ADR-1028](adr/1028-reasoning-summaries.md) accepts
-opt-in provider reasoning summaries for enhanced-capture projects; it is not yet
-implemented. The design defines capture limits, credential lifecycle, command
+opt-in provider reasoning summaries for enhanced-capture projects. The versioned,
+operator-only `reasoningSummaries` setting is off by default and applies to later
+admitted turns. Enabling it requires enhanced diagnostic capture; switching capture
+to baseline resets it to off atomically. Settings and `project get` expose it;
+`cab project prepare --reasoning-summaries true|false` prepares its configuration.
+Settings also offers **Delete collected reasoning** (`project.reasoning.delete`), with revision checking and
+explicit, irreversible confirmation. Deletion is safe to repeat and leaves the
+setting unchanged. Runtime requesting, storage and display are not implemented:
+cab still collects no reasoning, so deletion currently has nothing to erase.
+The design defines capture limits, credential lifecycle, command
 semantics and required acceptance evidence.
 
 ## First local-task journey
@@ -174,6 +183,13 @@ automated service/UI integration and bounded real-runtime validation before hand
 
 ## Assignment routing and accountability
 
+Each project has one **Permitted agents** list, editable on its own tab in
+project Settings and during project setup. It governs which agents the lead may
+delegate to whether routing is enabled or disabled. Routing chooses only from
+this same list; it has no separate candidate editor. The operator CLI prepares
+changes with `project prepare-permitted-agents --permitted-agents ID,ID|none`;
+`project prepare-routing --candidates ID,ID|none` remains a compatible alias.
+
 Routing is optional per project and part of the first standalone release. It
 requires explicit project opt-in and configured TypeSafe credentials. The service
 calls TypeSafe directly, with no PA agent turn. Supply the assignment brief,
@@ -198,8 +214,10 @@ for operator input on unresolved material scope or authority still applies.
 Initial assignment results return to the task-scoped lead conversation. Nested
 assignment results return to their requester; the lead can inspect all work without
 being woken for every child result. These destinations survive restart. All lead
-turns, including draft turns, use normal admission and capacity accounting, including project pause, task
-stop and writer controls. Project-wide coordination uses project context, separate from
+turns, including draft turns, use normal admission, including project pause, task
+stop and writer controls. For capacity they are lead turns: they may use the slots
+held for lead turns as well as any free slot, they count against the global cap and
+agent caps, and they do not count against a project cap. Project-wide coordination uses project context, separate from
 individual task histories. The lead assesses initial results and requests further
 work or task completion; the service enforces completion conditions and permissions.
 
@@ -302,10 +320,11 @@ membership satisfies readiness whatever its labels or Project fields. Absence of
 rule is stored explicitly (`null`), never as an empty condition list, and a rule
 withheld from a read is shown as unavailable, never as no rule. Readiness alone is
 not admission: activation, complete source observations, placement, repository
-access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub or Jira source also has a closed-issue mode, changed only through
-its versioned configuration: **Skip closed issues** (the default) never imports an
-issue first observed closed, and **Treat closure as Done** imports one as Done from a
-complete read only. Membership in another source cannot grant admission. Each selection's
+access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub or Jira source also has a **Closed issues at import** setting, changed only
+through its versioned configuration. It decides only first import: **Skip** (the default)
+never imports an issue first observed closed, and **Import as Done** imports one as Done
+from a complete read only. Under either setting, an imported task completes when its
+issue closes, once its work and delivery have settled. Membership in another source cannot grant admission. Each selection's
 source observation counts its observed items (including closed issues skipped without a
 task), open items and open items matching the readiness rule, and warns when a complete
 read matches none; an imported open Draft task names the conditions it does not meet.
@@ -322,8 +341,8 @@ Source syncs revise an imported task until its readiness and blockers settle, so
 first turn is queued only once the task is admissible, and a first turn that has never
 run, including one waiting for capacity, takes the task's current revision when it is
 admitted instead of being refused as stale.
-(A [drafting run](#drafting-runs) is not task work: it needs no Ready task but counts
-against the same global and project capacity. A [draft turn](#draft-turns) is task work
+(A [drafting run](#drafting-runs) is not task work: it needs no Ready task and counts
+as a lead turn against capacity. A [draft turn](#draft-turns) is task work
 whose only exemption is that the task is not Ready.) Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
@@ -488,28 +507,44 @@ between projects are deferred. Discovery grants no additional repository access.
 
 Losing readiness, leaving all selections or external closure holds new delegation
 and notifies the lead and active assignees to reach a safe stopping point. Operator resolution is needed
-to resume, except confirmed closure from this task's own delivery and the two source-caused holds
+to resume, except confirmed closure from this task's own delivery, external closure, which
+completes the task once settled (below), and the two source-caused holds
 that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
-releases nothing, and every other source hold, including closure, still needs
-the operator to resume it. External closure
-after import holds the task in both closed-issue modes, whatever its readiness. Under
-Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
-is complete and its execution has settled, with no writer, ambiguity or unfinished
-execution; provider closure never resolves uncertain execution or clears other holds.
+releases nothing, and every other source hold still needs the operator to resume it. A withdrawn or readiness-lost hold notice tells the
+recipient to stop new work and wait for the qualifying complete read, without
+asking the operator to clear it. When a previously announced hold clears,
+one durable Inbox release event goes to each notified recipient that is still the
+task lead or an active assignee, and says the complete read listed the issue again
+while it was Ready. A hold created and cleared in one
+refresh emits neither event. External closure
+after import holds the task with reason `closed` under either setting, whatever its
+readiness, and the task completes by provider closure: startup and recurring
+reconciliation complete it once current membership evidence is complete, its execution
+has settled, with no writer, ambiguity or unfinished execution, and its delivery has
+settled. Delivery is settled when the task has no open bound change request (a stacked
+task's own layer included) and no agent or operator delivery action, unstack or stacked
+link with an unknown outcome, such as an unproved push, merge or close. Status-mapping
+writes never wait, and neither does a created change request that was never registered,
+which cab cannot observe. While it waits, the hold keeps reason `closed` and the task
+names what it waits on, such as "Completes when change request #123 merges or closes"; the operator
+can still cancel it. Anyone's closure, including collaborators, automation and bots,
+completes the task; the record keeps provider closure distinct from cab or manual
+completion. Provider closure never resolves uncertain execution or clears other holds.
 When proving an own confirmed `issue.close`, a current, complete, uninvalidated settlement
 can also establish the readiness that the close removed by moving a referenced Project
 field from an accepted option set to a different nonempty unaccepted set. The same item
 and rule must still apply, and every other referenced input is compared; attribution,
 membership, execution and independent holds remain subject to their existing gates.
 Reopening returns a provider-completed task to open and recomputes readiness from the
-rule; reopening grants no readiness and keeps any closure hold. Switching a source to
-Skip reopens its provider-completed tasks under a closure hold. Under Treat closure
-as Done, a task the operator reopens while its issue stays closed is completed again
-once settled; switching the source to Skip keeps it open; no mode or switch
-deletes tasks or history. Once an issue this task's delivery closed is reopened, that
-own closure is superseded: a later closure, by anyone but a new confirmed cab
-closure, is provider closure in both modes. Supersession keeps the delivery history
+rule; reopening grants no readiness and keeps any closure hold. A task the operator
+reopens while its issue stays closed is completed again once settled. Changing the
+setting changes no existing task: switching to Skip leaves provider-completed tasks
+Done, and switching to Import as Done imports previously skipped closed issues as Done
+on the next complete read; no setting or switch deletes tasks or history. Once an issue
+this task's delivery closed is reopened, that own closure is superseded: a later
+closure, by anyone but a new confirmed cab closure, is provider closure under either
+setting. Supersession keeps the delivery history
 and any closure hold. When GitHub or Jira shows the issue closed but not provably by the
 task's own delivery, the task keeps the explained `closure-attribution-unproved`
 hold, never a pending read, and is never completed by that closure; reopening the
@@ -703,12 +738,36 @@ Existing finished cab threads already archived are included in this lifecycle;
 unrelated threads and conversations from the previous Codex home are left alone.
 cab's captured history remains readable through the operator UI.
 
-cab owns capacity admission with both a global active-turn cap and a cap for
-each project. Waiting for workers, people or external feedback
-releases an execution slot; capacity one must not deadlock delegation. Default
-to four active turns globally and two per project, editable in configuration.
-Lowering a cap holds new admissions until active usage fits; it does not silently
-terminate active turns. Fairness remains a technical contract to specify.
+cab owns capacity admission. Waiting for workers, people or external feedback
+releases an execution slot; capacity one must not deadlock delegation. A turn is a
+lead turn when it runs on a task's lead assignment, including a draft turn, or is a
+project drafting run; delegated assignments and direct work are other turns.
+
+- **Global cap.** Every active turn counts against it. New installations default
+  to six; an upgrade keeps the stored value.
+- **Minimum lead slots.** One global setting, default one, of at least zero and below
+  the global cap. That many global slots are held for lead turns: another turn starts
+  only while total usage is below the global cap minus the held slots that lead turns
+  are not using. Lead turns may also use any free slot. Held slots are never lent.
+  Zero gives a single shared pool. A store upgraded with a global cap of one gets
+  zero.
+- **Agent caps.** An optional cap per agent covers every turn that agent runs,
+  across projects and in both roles. An agent without one is bounded only by the
+  other caps. Direct work has no agent.
+- **Project caps.** An optional cap per project counts only that project's other
+  turns, so its workers never block its lead. A project without one has no project
+  limit.
+
+A capacity-waiting turn shows the limit that holds it: global active-turn limit,
+held for lead turns, agent active-turn limit or project active-turn limit. Lowering
+a cap or raising minimum lead slots holds new admissions until usage fits; it does
+not terminate active turns. Queued turns are tried resumed work first, then work
+that has not started, oldest first within each group. Resumed work continues an
+assignment or conversation that has already been admitted: answers, results,
+follow-ups, operator messages and confirmed-failure retries. Each request is tried on
+its own, so one held by an agent or project cap does not hold a later one, and a
+change in capacity starts the pass again from the first request. Resumed work can
+delay unstarted tasks for as long as it keeps arriving.
 Retry confirmed transient
 execution failures at most twice with backoff, persisting the allowance across
 restart. Blind relaunches cannot reset it. Uncertain acceptance/effects must be
@@ -795,24 +854,55 @@ continuation audit remain historical evidence, not a successful result or a forc
 unlock. Existing callbacks before any recorded continuation retain their previous
 recovery behaviour.
 
-A positively rejected archived `thread/resume` before turn submission has a
-separate pre-turn recovery proof. The Codex adapter retains the exact correlated
-RPC request, predecessor thread, `-32600` archived-session response and runtime
-process identity. The service persists that witness against the admitted request
-sequence, work revision and assignment binding before losing submission context.
-Missing thread/turn identities, a timeout, malformed response, another RPC error or
-a lost turn-start response cannot qualify. The never-admitted refusal and bound-turn
-recovery proofs remain distinct.
+A submission that fails before cab calls `startTurn` is refused before it ran, not held
+as uncertain. cab is the only sender of a turn, so its own record that `startTurn` was not
+called, known in the process that caught the failure, is the proof that nothing ran; no
+runtime evidence or process-termination proof is needed. The boundary is the `startTurn`
+call itself: a failure while starting, resuming, unarchiving or binding the thread, or
+while preparing the prompt, diagnostics or turn policy, qualifies on both harnesses. That
+includes a response cab's own parsing rejects, a runtime RPC error (an archived-session
+`thread/resume` rejection among them), a timeout, a transport loss or App Server failure,
+a thread identity mismatch and a conversation started under the previous harness home.
+A thread may exist (created, resumed or unarchived) and stay idle and unobserved; that
+is accepted. The refusal releases writer ownership and capacity at once, settles the
+pending assignment result and keeps the thread it bound, the submission stage and the
+failure class as its evidence. The task offers [Start again](#start-again-and-reset-task)
+with no operator evidence; cab never retries it automatically. A drafting run ends
+failed and releases its capacity. The reason names the class: *cab rejected the runtime's
+response*, which a fixed cab build is expected to help; *the runtime rejected the
+request*; or *the outcome is unknown*. A thread identity mismatch is the last, an anomaly
+in the runtime's reply rather than a cab defect. An execution already held for another
+reason (a Stop, a task hold, an unfinished callback, a known survivor or another pending
+effect) keeps that hold. A failure after `startTurn` was called, including a lost
+turn-start response, keeps the uncertain hold and the recovery below. A direct request
+outside a task keeps the uncertain hold, since nothing can start it again.
 
-A historical generation lacking that typed witness requires explicit authenticated
-operator adoption. Its immutable command receipt binds the exact held generation,
-predecessor, process and persisted response to operator attestations and reviewed
-source/harness/evidence/approval references. The host operator verifies those
-artifacts and the independently reviewed no-turn evidence; valid metadata syntax or
-an error string alone does not establish proof. Model tools cannot adopt evidence.
-Command replay returns the same result and rejects altered material or retargeting.
-Adoption and recovery are authenticated advanced operator routes; they grant no
-new model tool authority or automatic recovery control.
+A generation held before pre-turn failures became refusals has no persisted stage, so
+the rule above does not apply to it, and an error string alone is not proof. cab saves
+a generation's thread binding before it calls `startTurn`, and a failed save stops the
+submission first; neither harness sends input before `startTurn`. So a held generation
+whose saved thread and turn are both null never sent a turn, on any build. cab releases
+such a generation, whatever its hold reason, when it still holds capacity and nothing
+else holds it: no pre-turn or no-turn witness, Stop, task hold, unfinished callback,
+known survivor or pending effect other than its result. A release records the same
+refusal a new pre-turn failure records, with its own reason followed by the original
+hold reason as evidence, in one transaction that
+frees writer and capacity, so Start again is offered with no operator evidence; cab
+never starts it again automatically. An idle thread may exist that cab never saw. At
+startup, before admission, cab releases every eligible generation and logs each one; a
+generation that fails any check is left unchanged. `recovery release` (and the recovery
+page's Release action) reads the same checks and, after one confirmation, submits a
+release bound to the generation read. The service reruns every check and refuses,
+changing nothing, when one fails or the generation changed. A request key replays its
+recorded result. A generation with a saved thread or turn is never released this way.
+
+Such a generation that positively records an archived `thread/resume` rejection may
+instead hold the runtime witness captured at the time (the exact correlated RPC request,
+predecessor thread, `-32600` archived-session response and runtime process identity,
+persisted against the admitted request sequence, work revision and assignment binding),
+or an operator-adopted witness an earlier build recorded. A witnessed generation is not
+released; it recovers as below. cab no longer captures or adopts this witness, and
+receipts of the retired adoption commands still read back unchanged.
 
 A keyed pre-turn recovery receipt requires the persisted witness, truthful null
 thread/turn identities, independent exact-process termination verification and
@@ -827,17 +917,11 @@ replay. Admission, completion and external actions revalidate the pre-turn witne
 receipt and continuation audit at use time. Independent holds, current admission
 gates and persistent late-callback/survivor holds remain enforced.
 
-A distinct historical no-turn-submission proof covers an admitted generation
-with a captured known-null predecessor and unbound thread/turn identities. It is
-operator-only adoption of independently reviewed frozen source, harness and a
-complete synchronous write-ahead invocation ledger establishing that `startTurn`
-was never called for the exact generation. A generic stop error, missing identities,
-process absence or metadata syntax alone cannot establish this proof. An initial
-`thread/start` may have created an unobserved idle thread; this contract does not
-claim thread noncreation, a positive archived-resume rejection or successful work.
-The existing archived-resume predicate and bound-turn proofs remain unchanged.
+An earlier build could also record an operator-adopted no-turn-submission witness for a
+held generation with unbound thread/turn identities. That witness does not claim thread
+noncreation, a positive archived-resume rejection or successful work.
 
-The separate no-turn witness and receipt discriminator bind request/work,
+The no-turn witness and receipt discriminator bind request/work,
 conversation/writer revisions, assignment snapshots, process and immutable operator
 command material. Recovery independently verifies exact-process termination and
 requires settled current workspace/effects, preserving null identities and all
@@ -848,7 +932,10 @@ old batch records `operator-reconciled` processing without replay. Admission,
 completion and actions recheck the distinct witness/receipt/audit and current gates;
 late callbacks or known survivors persist a hold and retract successors across
 restart. The advanced authenticated host routes expose bounded acknowledgement,
-with no new model tool authority or forms in the curated operator UI.
+with no new model tool authority or forms in the curated operator UI. The recovery
+read reports a path eligible only when the checks its command runs can pass, including
+the release checks and the termination proof for recovery, and names the failing check
+otherwise.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash releases neither writer ownership nor capacity. No
@@ -1062,7 +1149,10 @@ Old `/app` and `/app/*` addresses permanently redirect (308) to the same path at
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions
-for its next turn. These use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
+for its next turn. Active and unsettled recovery records appear first; known terminal,
+effect-free records with no recorded holds are collapsed under a settled count. The
+evidence caveat stays visible, and every record remains available in the disclosure. These
+use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
 per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
@@ -1135,9 +1225,9 @@ view. Provide readable narrow-screen navigation between columns.
 
 Attention appears alongside work state rather than replacing it. Keep actionable
 readiness, successful completion, cancellation and provider closure without
-delivery visibly distinguishable. Provider closure alone does not establish task
-completion, except under a source's Treat closure as Done mode, which records the task
-as completed by provider closure, distinct from cab or manual completion. Prioritise the task's meaning, current situation and next actor;
+delivery visibly distinguishable. Provider closure completes an imported
+task only once its work and delivery have settled, and records it as completed by
+provider closure, distinct from cab or manual completion. Prioritise the task's meaning, current situation and next actor;
 supporting identifiers and timestamps must remain readable and accessible without
 competing with that information. These refinements do not change the existing
 board state mapping.
@@ -1177,10 +1267,11 @@ is queued for it. Revoked repository access (an imported task's ready workspace 
 repository the project no longer links) opens the project's repository settings, names no
 repository and grants nothing by itself. An assignment whose operator-reconciled
 recovery has no recorded continuation has no Fix and links to its recovery; opening
-it releases nothing. A request refused before it ran because the captured task or assignment
-revisions changed is shown as **Not started** (`not-started`, reason
-`refused-before-start`), not as a wait or as uncertain execution: Start again, a
-recovery or a fresh operator message clears it. A Fix never clears
+it releases nothing. A request refused before it ran, because the captured task or assignment
+revisions changed or because its submission failed before any turn was sent, is shown as **Not started** (`not-started`, reason
+`refused-before-start`), not as a wait or as uncertain execution. Start again, a recovery
+or a fresh operator message clears a revision refusal; a pre-turn refusal is cleared by
+Start again or Reset task. A Fix never clears
 holds or grants access by implication. These controls must preserve existing
 readiness and admission rules.
 
@@ -1236,10 +1327,10 @@ The three agents and the original keyed receipt commit atomically. An unknown
 bundle outcome retains the frozen IDs and command and re-reads its operation;
 missing or unreadable receipts retain the hold without resending creation. Creating
 the lead selects it without losing other setup values. Agent and project creation
-remain separate submissions. Only the subsequent project using that inline lead
-receives both workers as candidates, with routing disabled, blank guidance and no
-routing credential; its coordination context permits them. Changing the selected
-lead adds no starter candidates. If a worker is revoked before project creation,
+remain separate submissions. The subsequent project starts with both workers
+checked in its **Permitted agents** list, whichever lead is selected, with routing
+disabled, blank guidance and no routing credential; its coordination context permits
+them. The operator can change that list before creation. If a worker is revoked before project creation,
 setup offers an explicit way to continue without starter candidates while preserving
 the lead and remaining draft. Later projects use ordinary candidate selection.
 While discovery is unconfigured the repository step starts collapsed behind "Add
@@ -1378,7 +1469,10 @@ separate sections. Repository links are project configuration, not part of any
 source: each link records its code host and host name (GitHub on `github.com`, or
 GitLab on a configured host with the project's full path and numeric ID), and links
 change through one versioned, receipted `repositories.configure` command that
-verifies every checkout before anything is recorded. Settings, `project prepare-repositories`
+verifies every checkout before anything is recorded. Web and CLI repository-link
+configuration accept `~` and `~/…` checkout paths, which the service resolves
+against its home directory before verification and storage; omitting a saved
+link's path keeps the saved path. Settings, `project prepare-repositories`
 and the API each add GitHub and GitLab links, change a link's ref (and, in Settings, its
 local path) and remove links through that command; a saved link's code host, host, project
 path and project ID are its identity, so changing one means removing the link and adding
@@ -1570,8 +1664,9 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   This is not a read-only sandbox: reads keep the runtime's normal host access (see
   [Workspaces and execution access](#workspaces-and-execution-access)), and writes
   land only in the throwaway copy. The composer and docs say so.
-- **Capacity.** A drafting run counts against the global and project active-turn
-  limits and waits, with the same wait reason as any turn, when either is full. A
+- **Capacity.** A drafting run is a lead turn: it may use the slots held for lead
+  turns, counts against the global cap and its agent's cap but not the project cap,
+  and waits, with the same wait reason as any turn, when a limit is full. A
   paused project holds it like any other turn. Stop is available while it waits.
 - **Result.** The lead returns a title and an outcome through the result tool. The
   service validates them against the composer's field limits, with a non-blank outcome
@@ -1734,10 +1829,14 @@ remote-write reconciliation and permission rules.
 ### Task detail
 
 The task Overview is the task's conversation
-([ADR-1022](adr/1022-task-conversation-view.md)). An attention card pinned at the top
-lists the unresolved decisions waiting on the operator; beneath it the lead's
-conversation runs oldest to newest, and the reply composer is docked at the bottom.
-The outcome, current situation and next actor stay in the task header, and the brief,
+([ADR-1022](adr/1022-task-conversation-view.md)). The pinned Decisions and holds
+card lists open questions and approvals, execution uncertainty or Stop, active source
+holds, interventions, wait reasons and operator-action recovery. Normal writer and
+capacity holds while a turn starts or runs stay on Execution, and waiting for capacity
+is named by the strip, never pinned. Beneath the card the lead's conversation runs oldest
+to newest, and the reply composer is docked at the bottom. The outcome and current
+situation stay in the task header, while its strip shows a state badge and at most one
+distinct reason without repeating readiness or next-actor wording. The brief,
 evidence, delivery observations, artifacts, dependencies and assignments stay in the
 inspector. Understanding current work must not require reading raw runtime output.
 
@@ -1856,10 +1955,12 @@ is no way to release an execution that may still be writing, and interrupted, un
 submitting and held work stays with the `recovery` commands.
 
 - **Start again** (`task.start-again {key, taskId, expectedVersion, workId}`) queues an
-  assignment's newest request again when a witness-only proof shows it was refused at
-  admission before it ran: the request and intent are held with their matching revision
-  refusal and an exact binding; no thread or turn, writer admission, capacity
-  reservation, recovery identity, pending effect or stop target is recorded. It does not
+  assignment's newest request again when a witness-only proof shows it was refused before
+  it ran: the request and intent are held with their matching refusal and an exact
+  binding, and no turn, writer admission, capacity reservation, pending effect or stop
+  target is recorded. A refusal at admission also records no thread or recovery
+  identity; a [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
+  and its turn-less recovery identity. It does not
   read the refusal's reasons; every current admission check applies again to the new
   request. The refused request and its refusal stay in the history, linked to the new
   request by a restart record, so the restarted work is historically resolved. The new
@@ -2077,7 +2178,9 @@ they are not semantic secret scanning or host-wide read isolation.
 
 The Files section renders Markdown inertly with a Source view, fits/zooms/pans
 rasters, and renders PDFs through a pinned `pdfjs-dist` worker onto an app-owned
-canvas. There is no download, export or execute action. Opening current contents
+canvas. Directory rows come first, then other entries, alphabetically within each
+group; file sizes use readable units and retain exact bytes in row details. There
+is no download, export or execute action. Opening current contents
 from retained evidence is a separate explicit action. Read-only inspection
 rechecks may reuse a successful Git worktree identity read for up to 1 second
 while the worktree root and its `.git` entry keep the same filesystem identity.
@@ -2675,6 +2778,20 @@ human acceptance is required beyond configured instructions and permissions.
 Assignment completion alone cannot merge, close an issue, complete its task or
 remove a workspace.
 
+Confirmed `pr.create` automatically binds the created PR when the task has no bound
+PR, using the same fresh identity and outside-head checks as manual registration.
+The binding retains the task lead for feedback regardless of the creator; only the
+lead's work waits on the bound PR, so a delegate creator can still complete. Binding
+failure preserves the confirmed creation and receipt; task delivery summaries show
+the exact created PR and a `register PR #N` next step. When the task is already
+bound to another PR, the summary instead says the created PR is not this task's
+delivery and names the bound PR, because registration refuses a second PR. The
+task lead or the same-task
+assignment whose confirmed creation produced that exact repository, number and node
+identity may call `cab_register_pr`. Subsequent creates reuse a freshly verified open
+bound or earlier task-created PR on the same head ref, returning its receipt without
+another provider write; policy, authorization and stack checks still apply.
+
 Stable operation IDs retain exact material and bound caller revisions, including
 denied outcomes. Intent commits before an effect. Successful write responses alone
 do not establish success: provider readback must prove the exact target. Ambiguous
@@ -2777,9 +2894,9 @@ confirmed only when the issue is Done and exactly one status entry in its change
 made by the credential account, moves it to that status. A rejection of the single request (400, 401,
 403, 404 or 429) is a confirmed failure; any other failure after the request is sent is uncertain,
 kept across restart and never resent. A Done transition by anyone else, or by GitLab's Jira
-integration, is an external closure, which holds the task. With explicit Treat closure as Done,
-startup and recurring reconciliation may then complete it under the current membership,
-execution-settlement and independent-hold gates described above; Skip remains the default. A task imported from Jira has a task branch
+integration, is an external closure, which holds the task. Under either setting, startup and
+recurring reconciliation then complete it under the current membership, execution-settlement,
+delivery-settlement and independent-hold gates described above. A task imported from Jira has a task branch
 named `<prefix><KEY>-<task id>-<slug>`, assigned once like every task branch, and its change request
 title must start with the issue key. In a Jira project, change request titles and text with a closing
 keyword (close, fix, resolve or implement, in any form) followed by a Jira issue key on the same line
@@ -2869,7 +2986,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   the authority check refuses it unless the Status sent as expected is exactly that one.
   It is refused if that option is one the readiness rule accepts, a done task that is not Ready
   while its issue is open writes nothing until the issue closes, and a task first seen already
-  done (for example a closed issue a Done-mode source imports, or a Ready task done before the
+  done (for example a closed issue an Import as Done source imports, or a Ready task done before the
   mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
   readiness rule accepts (an `in` set holding it, a `not-in` set leaving it out), checked at save and again at write against the task's stored facts with only
   that value replaced; for Jira the rule's `status` conditions decide, and a rule with none accepts

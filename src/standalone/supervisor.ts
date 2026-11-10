@@ -1,4 +1,7 @@
-import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
+import type {
+  BoundTurnRecoveryBlocker,
+  ReleaseBlocker,
+} from "../core/recovery-contracts.js";
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { EventEmitter } from "node:events";
@@ -328,15 +331,31 @@ export class ExecutionSupervisor {
     }
   }
 
+  /**
+   * In-process holds release and bound-turn recovery both respect: an unfinished callback,
+   * or a known survivor even when no durable evidence of it could be written.
+   */
+  releaseBlockers(
+    workId: string,
+  ): Extract<ReleaseBlocker, BoundTurnRecoveryBlocker>[] {
+    return [
+      ...(this.hasPendingCallbacks(workId)
+        ? (["callback-pending"] as const)
+        : []),
+      ...(this.survivors.has(workId) ? (["known-survivor"] as const) : []),
+    ];
+  }
+
   private boundTurnBlockers(
     workId: string,
     assignmentId: string,
   ): BoundTurnRecoveryBlocker[] {
-    const blocked = this.state.boundTurnRecoveryBlockers(workId, assignmentId);
-    if (this.hasPendingCallbacks(workId)) blocked.push("callback-pending");
-    // Holds even when no durable survivor evidence could be written in this process.
-    if (this.survivors.has(workId)) blocked.push("known-survivor");
-    return [...new Set(blocked)];
+    return [
+      ...new Set([
+        ...this.state.boundTurnRecoveryBlockers(workId, assignmentId),
+        ...this.releaseBlockers(workId),
+      ]),
+    ];
   }
 
   /** Advisory only: no observations, ownership release or runtime/model calls. */
@@ -356,6 +375,29 @@ export class ExecutionSupervisor {
       return ["identity-changed"];
     const current = this.boundTurnBlockers(workId, assignmentId);
     if (current.length) return current;
+    return "refusal" in result ? [result.blocker] : [];
+  }
+
+  /**
+   * Advisory only, for the pre-turn and no-turn recover paths: whether the held
+   * generation's process is proven ended, read as their command reads it.
+   */
+  async unboundTurnTerminationBlockers(
+    workId: string,
+  ): Promise<BoundTurnRecoveryBlocker[]> {
+    const before = this.state.recoveryIdentity(workId);
+    if (!before?.processIdentity) return ["context-unavailable"];
+    const result = await this.terminationProof(before.processIdentity);
+    const after = this.state.recoveryIdentity(workId);
+    if (
+      !after?.processIdentity ||
+      after.workRevision !== before.workRevision ||
+      after.requestSequence !== before.requestSequence ||
+      after.threadId !== before.threadId ||
+      after.turnId !== before.turnId ||
+      !exactProcessIdentity(after.processIdentity, before.processIdentity)
+    )
+      return ["identity-changed"];
     return "refusal" in result ? [result.blocker] : [];
   }
 

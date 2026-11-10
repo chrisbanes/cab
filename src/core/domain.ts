@@ -26,6 +26,7 @@ import {
   glabReferenceMatchesHost,
 } from "./credential-reference.js";
 import {
+  type ClosureCompletionWait,
   DeliveryStore,
   deliveryPolicySchema,
   repositorySettingsSchema,
@@ -120,7 +121,6 @@ const label = z.string().trim().min(1).max(512);
 const prose = z.string().max(16000);
 const summary = z.string().trim().max(120);
 const actor = z.enum(["operator", "agent"]);
-const defaultProjectLimit = 2 as const;
 const commandBase = { key: id, actor };
 
 const commandSchema = z.discriminatedUnion("type", [
@@ -223,6 +223,7 @@ const commandSchema = z.discriminatedUnion("type", [
       leadProfileId: id.nullable().optional(),
       // Applies to executions admitted afterwards; absent leaves it unchanged.
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      reasoningSummaries: z.boolean().optional(),
       // Applies to turns admitted afterwards; absent leaves it unchanged.
       commandNetworkAccess: z.boolean().optional(),
       // Applies to turns admitted afterwards; absent leaves it unchanged.
@@ -231,6 +232,15 @@ const commandSchema = z.discriminatedUnion("type", [
       dangerouslySkipSandbox: z.boolean().optional(),
       // Applies to dependents not yet started; absent leaves it unchanged.
       stacking: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("project.reasoning.delete"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+      confirmed: z.literal(true),
     })
     .strict(),
   z
@@ -439,21 +449,33 @@ const commandSchema = z.discriminatedUnion("type", [
       ...commandBase,
       type: z.literal("capacity.configure"),
       globalLimit: z.number().int().positive(),
+      minimumLeadSlots: z.number().int().nonnegative(),
       projectOverrides: z
+        .record(id, z.number().int().positive().nullable())
+        .default({}),
+      agentOverrides: z
         .record(id, z.number().int().positive().nullable())
         .default({}),
       // Optional compare-and-swap: omitted, the command hashes and behaves as before.
       expectedCurrent: z
         .object({
           globalLimit: z.number().int().positive(),
+          minimumLeadSlots: z.number().int().nonnegative(),
           projectOverrides: z
+            .record(id, z.number().int().positive().nullable())
+            .default({}),
+          agentOverrides: z
             .record(id, z.number().int().positive().nullable())
             .default({}),
         })
         .strict()
         .optional(),
     })
-    .strict(),
+    .strict()
+    .refine((command) => command.minimumLeadSlots < command.globalLimit, {
+      path: ["minimumLeadSlots"],
+      message: "Minimum lead slots must be below the global active-turn cap",
+    }),
   z
     .object({
       ...commandBase,
@@ -529,10 +551,39 @@ export type CapacityConfigureCommand = Extract<
 >;
 export interface CapacityLimits {
   globalLimit: number;
-  defaultProjectLimit: 2;
+  minimumLeadSlots: number;
   projectOverrides: Record<string, number>;
-  currentUsage: { global: number; projects: Record<string, number> };
-  effectiveProjectLimits: Record<string, number>;
+  agentOverrides: Record<string, number>;
+  /** Projects count only non-lead turns; agents count every turn they run. */
+  currentUsage: {
+    global: number;
+    lead: number;
+    projects: Record<string, number>;
+    agents: Record<string, number>;
+  };
+}
+
+/**
+ * Adds lead slots and agent caps to capacity configuration. A store from before lead
+ * slots keeps its global cap and gets one lead slot, or none when its cap is one.
+ */
+export function migrateCapacityLimits(db: Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS scheduler_agent_capacity_limits (
+    profileId TEXT PRIMARY KEY, agentLimit INTEGER NOT NULL CHECK(agentLimit > 0)
+  )`);
+  const columns = db
+    .prepare("PRAGMA table_info(scheduler_capacity_limits)")
+    .all() as Array<{ name: string }>;
+  if (
+    columns.length > 0 &&
+    !columns.some(({ name }) => name === "minimumLeadSlots")
+  ) {
+    db.exec(`ALTER TABLE scheduler_capacity_limits ADD COLUMN minimumLeadSlots
+      INTEGER NOT NULL DEFAULT 1 CHECK(minimumLeadSlots >= 0)`);
+    db.exec(
+      "UPDATE scheduler_capacity_limits SET minimumLeadSlots = MIN(1, globalLimit - 1)",
+    );
+  }
 }
 type ParsedCommand = z.output<typeof commandSchema>;
 type Row = Record<string, string | number | null>;
@@ -770,7 +821,8 @@ export class DomainStore {
         );
         CREATE TABLE IF NOT EXISTS scheduler_capacity_limits (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-          globalLimit INTEGER NOT NULL CHECK(globalLimit > 0)
+          globalLimit INTEGER NOT NULL CHECK(globalLimit > 0),
+          minimumLeadSlots INTEGER NOT NULL DEFAULT 1 CHECK(minimumLeadSlots >= 0)
         );
         CREATE TABLE IF NOT EXISTS installation_discovery (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -806,6 +858,10 @@ export class DomainStore {
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
         CREATE TABLE IF NOT EXISTS project_local_listening (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+        );
+        CREATE TABLE IF NOT EXISTS project_reasoning_summaries (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
@@ -955,9 +1011,10 @@ export class DomainStore {
       );
       this.db
         .prepare(
-          "INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit) VALUES (1, 4)",
+          "INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit) VALUES (1, 6)",
         )
         .run();
+      migrateCapacityLimits(this.db);
       this.db
         .prepare(
           "INSERT OR IGNORE INTO installation_discovery (singleton, credentialRef) VALUES (1, NULL)",
@@ -1106,11 +1163,8 @@ export class DomainStore {
               ),
             );
           } catch (error) {
-            // GitLab rows name the failing row and reason; GitHub keeps its generic refusal.
-            if (
-              link.codeHost === "gitlab" &&
-              error instanceof RepositoryVerificationError
-            )
+            // The refusal names the row and reason without exposing checkout details.
+            if (error instanceof RepositoryVerificationError)
               throw new RepositoryVerificationRefusedError(error.reason, index);
             throw error;
           }
@@ -1616,7 +1670,7 @@ export class DomainStore {
   }
 
   /** Whether the task is being published: its text, Ready and dependencies are frozen until that ends. */
-  private publicationSending(taskId: string): boolean {
+  publicationSending(taskId: string): boolean {
     return (
       this.one(
         "SELECT 1 AS present FROM task_publications WHERE taskId = ? AND state = 'sending'",
@@ -1678,29 +1732,23 @@ export class DomainStore {
     ).map((row) => String(row.selectionId));
   }
 
-  capacityLimits(projectIds: string[] = []): CapacityLimits {
+  capacityLimits(): CapacityLimits {
     const config = this.required(
-      "SELECT globalLimit FROM scheduler_capacity_limits WHERE singleton = 1",
+      "SELECT globalLimit, minimumLeadSlots FROM scheduler_capacity_limits WHERE singleton = 1",
     );
-    const projectOverrides: Record<string, number> = Object.fromEntries(
-      (
-        this.db
-          .prepare(
-            "SELECT projectId, projectLimit FROM scheduler_project_capacity_limits ORDER BY projectId",
-          )
-          .all() as Row[]
-      ).map((row) => [String(row.projectId), Number(row.projectLimit)]),
-    );
-    const effectiveProjectLimits: Record<string, number> = {};
-    for (const projectId of new Set(
-      projectIds.map((value) => id.parse(value)),
-    )) {
-      this.project(projectId);
-      effectiveProjectLimits[projectId] =
-        projectOverrides[projectId] ?? defaultProjectLimit;
-    }
-
-    const currentUsage = { global: 0, projects: {} as Record<string, number> };
+    const overrides = (sql: string) =>
+      Object.fromEntries(
+        (this.db.prepare(sql).all() as Row[]).map((row) => [
+          String(row.id),
+          Number(row.limit),
+        ]),
+      ) as Record<string, number>;
+    const currentUsage: CapacityLimits["currentUsage"] = {
+      global: 0,
+      lead: 0,
+      projects: {},
+      agents: {},
+    };
     if (
       this.one(
         "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'execution_capacity_reservations'",
@@ -1708,22 +1756,35 @@ export class DomainStore {
     ) {
       const reservations = this.db
         .prepare(
-          "SELECT projectId, COUNT(*) AS count FROM execution_capacity_reservations GROUP BY projectId",
+          "SELECT projectId, agentId, lead, COUNT(*) AS count FROM execution_capacity_reservations GROUP BY projectId, agentId, lead",
         )
         .all() as Row[];
       for (const row of reservations) {
         const count = Number(row.count);
         currentUsage.global += count;
-        if (row.projectId !== null)
-          currentUsage.projects[String(row.projectId)] = count;
+        if (Number(row.lead) === 1) currentUsage.lead += count;
+        else if (row.projectId !== null) {
+          const project = String(row.projectId);
+          currentUsage.projects[project] =
+            (currentUsage.projects[project] ?? 0) + count;
+        }
+        if (row.agentId !== null) {
+          const agent = String(row.agentId);
+          currentUsage.agents[agent] =
+            (currentUsage.agents[agent] ?? 0) + count;
+        }
       }
     }
     return {
       globalLimit: Number(config.globalLimit),
-      defaultProjectLimit,
-      projectOverrides,
+      minimumLeadSlots: Number(config.minimumLeadSlots),
+      projectOverrides: overrides(
+        'SELECT projectId AS id, projectLimit AS "limit" FROM scheduler_project_capacity_limits ORDER BY projectId',
+      ),
+      agentOverrides: overrides(
+        'SELECT profileId AS id, agentLimit AS "limit" FROM scheduler_agent_capacity_limits ORDER BY profileId',
+      ),
       currentUsage,
-      effectiveProjectLimits,
     };
   }
 
@@ -2090,6 +2151,16 @@ export class DomainStore {
     return row?.mode === "baseline" ? "baseline" : "enhanced";
   }
 
+  /** Opt-in for later turns; no row means off. Runtime capture is not implemented. */
+  reasoningSummaries(projectId: string): boolean {
+    return (
+      this.one(
+        "SELECT enabled FROM project_reasoning_summaries WHERE projectId = ?",
+        id.parse(projectId),
+      )?.enabled === 1
+    );
+  }
+
   /** Command network access for new Codex turns; no row means off. */
   commandNetworkAccess(projectId: string): boolean {
     return (
@@ -2215,6 +2286,12 @@ export class DomainStore {
         String(row.nodeId),
       )
       ? "held"
+      : null;
+  }
+  /** What a closure-held task waits on before provider closure completes it; null otherwise. */
+  providerClosureWait(taskId: string): ClosureCompletionWait | null {
+    return this.providerClosure(taskId) === "held"
+      ? new DeliveryStore(this.db).closureCompletionWait(taskId)
       : null;
   }
   admission(
@@ -3220,6 +3297,16 @@ export class DomainStore {
         this.operator(command);
         const current = this.project(command.projectId);
         this.version(current, command.expectedVersion);
+        if (
+          command.reasoningSummaries === true &&
+          (command.diagnosticCapture ??
+            this.diagnosticCaptureMode(command.projectId)) !== "enhanced"
+        )
+          throw new DomainPolicyError(
+            "invalid-input",
+            "Reasoning summaries require enhanced diagnostic capture",
+            ["reasoningSummaries"],
+          );
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
         // Saving under its own name (or only changing its case) never conflicts with itself.
         if (
@@ -3264,6 +3351,22 @@ export class DomainStore {
               "INSERT INTO project_command_network_access (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
             )
             .run(command.projectId, Number(command.commandNetworkAccess));
+        if (
+          command.reasoningSummaries !== undefined ||
+          command.diagnosticCapture === "baseline"
+        )
+          this.db
+            .prepare(
+              "INSERT INTO project_reasoning_summaries (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
+            )
+            .run(
+              command.projectId,
+              Number(
+                command.diagnosticCapture === "baseline"
+                  ? false
+                  : command.reasoningSummaries,
+              ),
+            );
         if (command.localListening !== undefined)
           this.db
             .prepare(
@@ -3282,6 +3385,17 @@ export class DomainStore {
               "INSERT INTO project_stacking (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
             )
             .run(command.projectId, Number(command.stacking));
+        return this.project(command.projectId);
+      }
+      case "project.reasoning.delete": {
+        this.operator(command);
+        this.version(this.project(command.projectId), command.expectedVersion);
+        // shortcut: no reasoning is stored yet, add erasure when summary storage lands.
+        this.db
+          .prepare(
+            "UPDATE domain_projects SET version = version + 1 WHERE id = ?",
+          )
+          .run(command.projectId);
         return this.project(command.projectId);
       }
       case "task.create": {
@@ -3572,14 +3686,6 @@ export class DomainStore {
             .run(command.projectId, selectionIds);
         const sources = new GitHubSourceStore(this.db);
         for (const taskId of affectedTasks) sources.updateReadiness(taskId);
-        // Skip never leaves a provider closure as Done: reopen those tasks under their
-        // closure hold now, since retained selections stay inactive until previewed.
-        if (current.closedIssues === "done" && command.closedIssues === "skip")
-          for (const row of this.db
-            .prepare(`SELECT p.taskId FROM source_completions p
-              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
-            .all(command.projectId) as Row[])
-            sources.updateReadiness(String(row.taskId));
         this.db
           .prepare(
             "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
@@ -3683,14 +3789,6 @@ export class DomainStore {
             .run(command.projectId, selection.id, Number(row.version) + 1);
         const sources = new GitHubSourceStore(this.db);
         for (const taskId of affectedTasks) sources.updateReadiness(taskId);
-        if (row.closedIssues === "done" && closedIssues === "skip")
-          for (const completed of this.db
-            .prepare(`SELECT p.taskId FROM source_completions p
-              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
-            .all(command.projectId) as Row[])
-            sources
-              .forTracker({ provider: "jira", instance: command.instance })
-              .updateReadiness(String(completed.taskId));
         this.db
           .prepare(
             "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
@@ -3902,7 +4000,7 @@ export class DomainStore {
         )
           throw new DomainPolicyError(
             "forbidden",
-            "Profile is not permitted for this project",
+            "Profile is not permitted for this project. Add it in Permitted agents in project Settings.",
           );
         if (command.requesterAssignmentId) {
           const requester = this.assignment(command.requesterAssignmentId);
@@ -4098,41 +4196,58 @@ export class DomainStore {
       }
       case "capacity.configure": {
         this.operator(command);
+        const current = this.capacityLimits();
         if (command.expectedCurrent) {
-          const current = this.capacityLimits();
           const expected = command.expectedCurrent;
+          const differs = (
+            stored: Record<string, number>,
+            wanted: Record<string, number | null>,
+          ) =>
+            Object.entries(wanted).some(
+              ([key, limit]) => (stored[key] ?? null) !== limit,
+            );
           if (
             current.globalLimit !== expected.globalLimit ||
-            Object.entries(expected.projectOverrides).some(
-              ([projectId, limit]) =>
-                (current.projectOverrides[projectId] ?? null) !== limit,
-            )
+            current.minimumLeadSlots !== expected.minimumLeadSlots ||
+            differs(current.projectOverrides, expected.projectOverrides) ||
+            differs(current.agentOverrides, expected.agentOverrides)
           )
             throw new DomainConflictError("Capacity limits changed");
         }
         this.db
           .prepare(
-            "UPDATE scheduler_capacity_limits SET globalLimit = ? WHERE singleton = 1",
+            "UPDATE scheduler_capacity_limits SET globalLimit = ?, minimumLeadSlots = ? WHERE singleton = 1",
           )
-          .run(command.globalLimit);
-        for (const [projectId, projectLimit] of Object.entries(
-          command.projectOverrides,
-        )) {
-          this.project(projectId);
-          if (projectLimit === null)
-            this.db
-              .prepare(
-                "DELETE FROM scheduler_project_capacity_limits WHERE projectId = ?",
-              )
-              .run(projectId);
-          else
-            this.db
-              .prepare(`INSERT INTO scheduler_project_capacity_limits
-                (projectId, projectLimit) VALUES (?, ?)
-                ON CONFLICT(projectId) DO UPDATE SET projectLimit = excluded.projectLimit`)
-              .run(projectId, projectLimit);
-        }
-        return this.capacityLimits(Object.keys(command.projectOverrides));
+          .run(command.globalLimit, command.minimumLeadSlots);
+        for (const [table, column, value, limits, check] of [
+          [
+            "scheduler_project_capacity_limits",
+            "projectId",
+            "projectLimit",
+            command.projectOverrides,
+            (key: string) => this.project(key),
+          ],
+          [
+            "scheduler_agent_capacity_limits",
+            "profileId",
+            "agentLimit",
+            command.agentOverrides,
+            (key: string) => this.profile(key),
+          ],
+        ] as const)
+          for (const [key, limit] of Object.entries(limits)) {
+            check(key);
+            if (limit === null)
+              this.db
+                .prepare(`DELETE FROM ${table} WHERE ${column} = ?`)
+                .run(key);
+            else
+              this.db
+                .prepare(`INSERT INTO ${table} (${column}, ${value}) VALUES (?, ?)
+                  ON CONFLICT(${column}) DO UPDATE SET ${value} = excluded.${value}`)
+                .run(key, limit);
+          }
+        return this.capacityLimits();
       }
     }
   }

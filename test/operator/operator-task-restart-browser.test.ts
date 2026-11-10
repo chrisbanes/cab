@@ -85,7 +85,11 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // Home shows its board once a task has started a turn: let the restarted one run.
     configure(f, detail.projectId, false);
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 8 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 8,
+    });
     await until(() => f.runtime.hasPending(1), "the restarted turn starts");
 
     // A hold that may be live shows its reason and the recovery, and sends nothing.
@@ -183,7 +187,11 @@ for (const [name, viewport] of Object.entries(viewports)) {
       expectedVersion: Number(domain.task(again.taskId).version),
       outcome: "Changed again after the restart",
     } as never);
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 3 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 3,
+    });
     await page.getByRole("button", { name: "Refresh task" }).click();
     await startAgain().waitFor();
     assert.equal(commands.length, 5);
@@ -502,7 +510,11 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
   await page.getByRole("button", { name: "Start again", exact: true }).click();
   await page.getByText(/Queued again\./).waitFor();
   configure(f, task.projectId, false);
-  await f.service.configureCapacity({ key: randomUUID(), globalLimit: 8 });
+  await f.service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 8,
+  });
   await until(() => f.runtime.hasPending(1), "the restarted turn starts");
 
   // Home lists interventions, which carry no time, by task id. Fix the ids up front so the

@@ -12,7 +12,12 @@ import {
   issueCurrentBodyLimit,
   issueTitleLimit,
 } from "./issue-text-limits.js";
-import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
+import {
+  DeliveryApprovalRequiredError,
+  DeliveryHoldError,
+  DomainConflictError,
+  DomainPolicyError,
+} from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sourceCredentialReference } from "./credential-reference.js";
@@ -872,6 +877,43 @@ const actionRecordSchema = z
   })
   .strict();
 export type DeliveryActionRecord = z.output<typeof actionRecordSchema>;
+/** What a closure-held task waits on before provider closure completes it. */
+export type ClosureCompletionWait =
+  | { kind: "change-request"; number: number }
+  | { kind: "delivery-action"; action: string };
+/** Whether a stack action has no nested provider effect left to drain or prove. */
+function stackDrained(record: DeliveryActionRecord): boolean {
+  const { stackCreate: create, stackLink: link, observation } = record;
+  // A proved refusal before creating a PR has no nested provider effect to drain.
+  const noEffect =
+    !link &&
+    !observation?.receipt &&
+    !observation?.ambiguous &&
+    ((record.state === "denied" && record.attempts === 0) ||
+      (record.state === "confirmed-failure" &&
+        observation?.state === "confirmed-failure"));
+  const receipt = observation?.receipt;
+  const settled =
+    record.state === "confirmed-success" &&
+    observation?.state === "confirmed-success" &&
+    create &&
+    link?.phase === "link-attempting" &&
+    link.target !== undefined &&
+    record.request.action.kind === "pr.create" &&
+    create.repositoryId === record.request.action.target.repositoryId &&
+    create.blockerBranch === record.request.action.target.baseRef &&
+    create.blockerTaskId === link.identity.blockerTaskId &&
+    create.repositoryId === link.identity.repositoryId &&
+    create.blockerBranch === link.identity.blockerBranch &&
+    create.blockerPrNodeId === link.identity.blockerPrNodeId &&
+    create.blockerPrNumber === link.identity.blockerPrNumber &&
+    receipt?.nodeId === link.identity.dependentPrNodeId &&
+    receipt?.number === link.identity.dependentPrNumber &&
+    receipt?.headSha === record.request.action.target.expectedHeadSha &&
+    observation.stack !== undefined &&
+    (observation.stack !== null || observation.stackLinkRefused === true);
+  return Boolean(noEffect || settled);
+}
 const taskBranchSchema = z
   .object({
     repositoryId: identity,
@@ -1041,36 +1083,7 @@ export class DeliveryStore {
           record.binding.projectId !== projectId
         )
           throw new Error("Stack action ownership mismatch");
-        const { stackCreate: create, stackLink: link, observation } = record;
-        // A proved refusal before creating a PR has no nested provider effect to drain.
-        const noEffect =
-          !link &&
-          !observation?.receipt &&
-          !observation?.ambiguous &&
-          ((record.state === "denied" && record.attempts === 0) ||
-            (record.state === "confirmed-failure" &&
-              observation?.state === "confirmed-failure"));
-        const receipt = observation?.receipt;
-        const settled =
-          record.state === "confirmed-success" &&
-          observation?.state === "confirmed-success" &&
-          create &&
-          link?.phase === "link-attempting" &&
-          link.target !== undefined &&
-          record.request.action.kind === "pr.create" &&
-          create.repositoryId === record.request.action.target.repositoryId &&
-          create.blockerBranch === record.request.action.target.baseRef &&
-          create.blockerTaskId === link.identity.blockerTaskId &&
-          create.repositoryId === link.identity.repositoryId &&
-          create.blockerBranch === link.identity.blockerBranch &&
-          create.blockerPrNodeId === link.identity.blockerPrNodeId &&
-          create.blockerPrNumber === link.identity.blockerPrNumber &&
-          receipt?.nodeId === link.identity.dependentPrNodeId &&
-          receipt?.number === link.identity.dependentPrNumber &&
-          receipt?.headSha === record.request.action.target.expectedHeadSha &&
-          observation.stack !== undefined &&
-          (observation.stack !== null || observation.stackLinkRefused === true);
-        if (noEffect || settled) return [];
+        if (stackDrained(record)) return [];
       } catch {
         // Unknown phases, malformed saved values and mismatched identities cannot prove drain.
       }
@@ -1123,6 +1136,31 @@ export class DeliveryStore {
         exceptOperationId,
       ),
     ];
+  }
+  /**
+   * The delivery a provider closure waits on before completing the task: its bound open PR
+   * (a stacked task's own layer) or one whose latest read failed, so its last observed state
+   * may be stale, an unresolved agent or operator action, or a stack create
+   * whose nested link is unproved. A status-mapping write never waits, as for completion, and
+   * an unregistered PR does not either: nobody can register or observe it once work settled.
+   */
+  closureCompletionWait(taskId: string): ClosureCompletionWait | null {
+    const binding = this.delivery(taskId);
+    if (binding?.observation.state === "OPEN" || binding?.readError)
+      return { kind: "change-request", number: binding.observation.number };
+    if (new UnstackStore(this.db).pending(taskId).length)
+      return { kind: "delivery-action", action: "unstack" };
+    const pending = this.actions(taskId).find(
+      (record) =>
+        !isServiceDeliveryCaller(record.binding) &&
+        (["prepared", "attempting", "uncertain"].includes(record.state) ||
+          ((record.stackCreate !== undefined ||
+            record.stackLink !== undefined) &&
+            !stackDrained(record))),
+    );
+    return pending
+      ? { kind: "delivery-action", action: pending.request.action.kind }
+      : null;
   }
   /**
    * Status-mapping writes still in flight: they serialize the task's next status write. An
@@ -1240,7 +1278,10 @@ export class DeliveryStore {
       )
         approved = this.operatorApprovalCurrent(request, binding);
     } else if (request.operatorReviewId)
-      throw Error("Runtime caller cannot use an operator confirmation");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Runtime caller cannot use an operator confirmation",
+      );
     if (
       request.action.kind === "issue.status" &&
       !isServiceDeliveryCaller(binding)
@@ -1263,7 +1304,7 @@ export class DeliveryStore {
         "Only the operator's task publication may use this action",
       );
     if (policyVersion !== undefined && policy.version !== policyVersion)
-      throw new Error("Delivery policy changed");
+      throw new DomainPolicyError("forbidden", "Delivery policy changed");
     const action = request.action;
     // The saved status mapping, checked above, is the service's authority; no grant is consulted for it.
     const grant = isServiceDeliveryCaller(binding)
@@ -1295,7 +1336,7 @@ export class DeliveryStore {
         isRecoveryAction(action)) &&
       !approved
     )
-      throw new Error("Exact material approval required");
+      throw new DeliveryApprovalRequiredError();
     if (isRecoveryAction(action)) {
       const branch = this.taskBranch(
         binding.taskId,
@@ -1307,15 +1348,24 @@ export class DeliveryStore {
         branch.outsideHeadSha !== action.outsideHeadSha ||
         branch.lastPushedSha !== action.lastPushedSha
       )
-        throw new Error("Recovery material is not the recorded outside change");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Recovery material is not the recorded outside change",
+        );
       if (
         action.kind === "branch.adopt" &&
         action.outsideHeadSha === absentBranchHead
       )
-        throw new Error("A deleted branch cannot be adopted");
+        throw new DomainPolicyError(
+          "forbidden",
+          "A deleted branch cannot be adopted",
+        );
     }
     if (action.kind === "pr.merge" && policy.mode !== "through-merge")
-      throw new Error("Project delivery mode forbids merge");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Project delivery mode forbids merge",
+      );
     if ("headRef" in action.target) {
       const branch = this.taskBranch(
         binding.taskId,
@@ -1325,7 +1375,10 @@ export class DeliveryStore {
         action.kind === "pr.create" &&
         branch?.branch !== action.target.headRef
       )
-        throw new Error("PR head is not the task's assigned branch");
+        throw new DomainPolicyError(
+          "forbidden",
+          "PR head is not the task's assigned branch",
+        );
       // A PR from the task branch may only be acted on at the commit cab last pushed there.
       if (
         branch?.branch === action.target.headRef &&
@@ -1333,7 +1386,10 @@ export class DeliveryStore {
           branch.outsideHeadSha !== null ||
           action.target.expectedHeadSha !== branch.lastPushedSha)
       )
-        throw new Error("PR head is not the task branch's last cab push");
+        throw new DomainPolicyError(
+          "forbidden",
+          "PR head is not the task branch's last cab push",
+        );
     }
     if (
       action.kind === "pr.thread.reply" ||
@@ -1349,7 +1405,10 @@ export class DeliveryStore {
           (t) => t.nodeId === action.target.threadNodeId,
         )
       )
-        throw new Error("Review thread is not on the task's bound PR");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Review thread is not on the task's bound PR",
+        );
     }
     const boundPr = this.boundPrOf(binding.taskId, action);
     if (
@@ -1358,7 +1417,10 @@ export class DeliveryStore {
         ("baseRef" in action.target &&
           action.target.baseRef !== boundPr.acceptedBaseRef))
     )
-      throw new Error("PR base is not the delivery's accepted base");
+      throw new DomainPolicyError(
+        "forbidden",
+        "PR base is not the delivery's accepted base",
+      );
     const source = this.db
       .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(binding.projectId) as { readiness: string } | undefined;
@@ -1384,7 +1446,10 @@ export class DeliveryStore {
           (action.kind === "issue.create" &&
             action.labels.some((l) => readinessLabels.has(l.toLowerCase()))))
       )
-        throw new Error("Agent cannot change readiness labels");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Agent cannot change readiness labels",
+        );
       if (
         !exempt &&
         action.kind === "project.field" &&
@@ -1395,7 +1460,10 @@ export class DeliveryStore {
             c.fieldNodeId === action.fieldNodeId,
         )
       )
-        throw new Error("Agent cannot change readiness fields");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Agent cannot change readiness fields",
+        );
     }
   }
   /**
@@ -1998,10 +2066,12 @@ export class DeliveryStore {
     caller: DeliveryCaller,
     approved: boolean,
     admission: () => void = () => {},
+    onRefused?: (error: unknown) => void,
   ): DeliveryActionRecord {
     const request = externalActionArgumentsSchema.parse(input),
       binding = bindingSchema.parse(caller);
-    return this.transaction(() => {
+    let refusal: { error: unknown } | undefined;
+    const prepared = this.transaction(() => {
       const prior = this.db
         .prepare(
           "SELECT materialHash FROM delivery_actions WHERE operationId=?",
@@ -2026,7 +2096,7 @@ export class DeliveryStore {
             : this.actionBlockers(binding.taskId)
           ).length
         )
-          throw new Error("Task has unresolved external action");
+          throw new DeliveryHoldError("Task has unresolved external action");
         if (approved && request.approval && isRuntimeDeliveryCaller(binding)) {
           if (
             !this.approvalCurrent(
@@ -2036,7 +2106,10 @@ export class DeliveryStore {
               request.operationId,
             )
           )
-            throw new Error("Approval is stale or bound to another operation");
+            throw new DomainPolicyError(
+              "forbidden",
+              "Approval is stale or bound to another operation",
+            );
           this.db
             .prepare(
               "UPDATE delivery_approval_bindings SET operationId=? WHERE interactionId=? AND (operationId IS NULL OR operationId=?)",
@@ -2047,8 +2120,9 @@ export class DeliveryStore {
               request.operationId,
             );
         }
-      } catch {
+      } catch (error) {
         denied = true;
+        refusal = { error };
       }
       if (!denied && request.action.kind.startsWith("branch."))
         this.assignTaskBranchWithinTransaction(
@@ -2089,6 +2163,9 @@ export class DeliveryStore {
         );
       return record;
     });
+    // Reported only after the denial is committed, so the caller can explain it.
+    if (refusal) onRefused?.(refusal.error);
+    return prepared;
   }
   beginAttempt(
     operationId: string,
@@ -2724,9 +2801,11 @@ export class DeliveryStore {
     assertOwnedTaskWritable(this.db, caller.taskId);
     const current = this.delivery(caller.taskId),
       policy = this.configuration(caller.projectId);
-    this.db
-      .prepare("INSERT OR IGNORE INTO delivery_waiting_work VALUES (?,?,?)")
-      .run(caller.workId, caller.taskId, leadAssignmentId);
+    // A delegate's work must not wait on the lead's delivery, or the delegate never completes.
+    if (caller.assignmentId === leadAssignmentId)
+      this.db
+        .prepare("INSERT OR IGNORE INTO delivery_waiting_work VALUES (?,?,?)")
+        .run(caller.workId, caller.taskId, leadAssignmentId);
     if (current) {
       if (
         current.observation.nodeId !== observation.nodeId ||
@@ -3149,6 +3228,30 @@ export class DeliveryStore {
         }
       : binding;
   }
+  unregisteredPr(taskId: string): string | null {
+    const bound = this.delivery(taskId)?.observation;
+    const created = this.actions(taskId)
+      .reverse()
+      .find(
+        (a) =>
+          a.state === "confirmed-success" &&
+          a.request.action.kind === "pr.create" &&
+          a.observation?.receipt?.number &&
+          !(
+            a.request.action.target.repositoryId === bound?.repositoryId &&
+            a.observation.receipt.number === bound.number &&
+            a.observation.receipt.nodeId === bound.nodeId
+          ),
+      );
+    if (!created) return null;
+    const receipt = created.observation!.receipt!;
+    const target = created.request.action.target;
+    const createdText = `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${receipt.headSha ? `, head ${receipt.headSha}` : "expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""})`;
+    // Registration refuses a second PR while a binding exists, so only report the mismatch.
+    return bound
+      ? `${createdText} is not this task's delivery; the task is bound to PR #${bound.number}.`
+      : `${createdText}; register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
+  }
   publicTask(taskId: string) {
     const task = this.db
       .prepare("SELECT projectId,version FROM domain_tasks WHERE id=?")
@@ -3207,6 +3310,7 @@ export class DeliveryStore {
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.withBaseHold(this.delivery(taskId)),
+      unregisteredPr: this.unregisteredPr(taskId),
       branches: this.taskBranches(taskId),
       blockers: this.completionBlockers(taskId, task.version),
       actions: this.actions(taskId).map((a) => ({

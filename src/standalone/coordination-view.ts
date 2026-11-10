@@ -878,6 +878,13 @@ export class CoordinationView {
             .strict()
             .parse(JSON.parse(event.payload)).reason,
         };
+      case "source-hold-released":
+        return {
+          ...base,
+          text: z
+            .object({ message: z.string() })
+            .parse(JSON.parse(event.payload)).message,
+        };
       case "operator-message": {
         const payload = assignmentMessageSchema.parse(
           JSON.parse(event.payload),

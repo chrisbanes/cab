@@ -250,6 +250,52 @@ test("a link that fails verification, or has no saved path, records nothing", as
   }
 });
 
+test("GitHub verification failures name their row and reason without checkout details", async (t) => {
+  const home = await createSetupHome();
+  t.after(() => home.close());
+  const checkoutPath = join(home.home, "src", "atlas");
+  const f = fixture(undefined, verifiedRepository);
+  t.after(() => f.close());
+  const cases = [
+    ["relative/private-checkout", "path-invalid", "repositories.1.path"],
+    [
+      join(home.home, "src", "notes.txt"),
+      "not-checkout",
+      "repositories.1.path",
+    ],
+    [checkoutPath, "ref-unavailable", "repositories.1.ref"],
+  ] as const;
+  for (const [path, reason, field] of cases) {
+    const key = randomUUID();
+    await assert.rejects(
+      f.configure(
+        1,
+        [link("R_atlas", checkoutPath), link("R_other", path, "missing-ref")],
+        key,
+      ),
+      (error) =>
+        error instanceof RepositoryVerificationRefusedError &&
+        error.reason === reason &&
+        error.fieldPaths?.[0] === field &&
+        error.message ===
+          `Repository 2: ${
+            reason === "path-invalid"
+              ? "the path is not an absolute directory path"
+              : reason === "not-checkout"
+                ? "the path is not a Git checkout"
+                : "the ref does not name a commit in the checkout"
+          }.` &&
+        !error.message.includes(path) &&
+        !error.message.includes("acme/atlas"),
+    );
+    assert.equal(f.domain.recordedResult(f.projectId, key), undefined);
+  }
+  assert.deepEqual(f.domain.repositoryLinks(f.projectId), {
+    version: 1,
+    links: [],
+  });
+});
+
 test("GitHub source configuration refuses links but older recorded commands still replay", async () => {
   const f = fixture();
   try {

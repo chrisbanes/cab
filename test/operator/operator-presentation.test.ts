@@ -23,11 +23,14 @@ import {
 import {
   clockLabel,
   codeSentence,
+  fileSizeLabel,
   midSentence,
   outcomeLine,
   repositoryLabel,
   shortId,
+  sortFileEntries,
   updatedLabel,
+  workspaceStateText,
 } from "../../web/src/presentation.js";
 
 test("clock label is two-digit local hours and minutes", () => {
@@ -52,10 +55,109 @@ test("the updated label shows one time unless the reads show different clock lab
   );
 });
 
+test("a workspace read that stayed in conflict is worded plainly; other states keep their name", () => {
+  assert.equal(
+    workspaceStateText(
+      "Repository listing",
+      "conflict",
+      "repository identity is unavailable",
+    ),
+    "Repository listing could not be read consistently, usually because the workspace changed while it was read; repository identity is unavailable. Refresh to try again.",
+  );
+  assert.equal(
+    workspaceStateText(
+      "Preview",
+      "conflict",
+      "file bytes are unavailable",
+      "too-large",
+    ),
+    "Preview could not be read consistently, usually because the workspace changed while it was read; file bytes are unavailable. Refresh to try again.",
+  );
+  assert.equal(
+    workspaceStateText(
+      "This location",
+      "missing",
+      "file bytes are not available",
+    ),
+    "This location is missing; file bytes are not available.",
+  );
+  assert.equal(
+    workspaceStateText(
+      "Preview",
+      "metadata-only",
+      "file bytes are unavailable",
+      "unsupported-format",
+    ),
+    "Preview is metadata-only (unsupported-format); file bytes are unavailable.",
+  );
+});
+
 test("short identifier keeps the first eight characters unless told otherwise", () => {
   assert.equal(shortId("9bd4c1e2f00d4a7b"), "9bd4c1e2");
   assert.equal(shortId("A-9bd4"), "A-9bd4");
+  assert.equal(shortId("550e8400-e29b-41d4-a716-446655440000"), "550e8400");
   assert.equal(shortId("9bd4c1e2f00d4a7b", 4), "9bd4");
+});
+
+test("compound assignment work ids retain identifying parts across generated forms", () => {
+  assert.equal(
+    shortId("assignment:12345678-aaaa:initial"),
+    "assignment:12345678…initial",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v1:inbox:87654321-bbbb"),
+    "assignment:12345678…inbox:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v1:draft:87654321-bbbb"),
+    "assignment:12345678…draft:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v2:restart:87654321-bbbb"),
+    "assignment:12345678…restart:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v3:reset:87654321-bbbb"),
+    "assignment:12345678…reset:87654321",
+  );
+  assert.equal(
+    shortId("assignment:12345678-aaaa:v4:repair:12"),
+    "assignment:12345678…repair:12",
+  );
+});
+
+test("file entries group directories first and sort names within each group", () => {
+  const entries = [
+    { kind: "file", name: "zeta.txt" },
+    { kind: "directory", name: "zoo" },
+    { kind: "repository", repositoryId: "beta" },
+    { kind: "directory", name: "Alpha" },
+    { kind: "file", name: "beta.txt" },
+  ] as const;
+  assert.deepEqual(
+    sortFileEntries(entries).map((entry) =>
+      entry.kind === "repository" ? entry.repositoryId : entry.name,
+    ),
+    ["Alpha", "zoo", "beta", "beta.txt", "zeta.txt"],
+  );
+  assert.deepEqual(
+    sortFileEntries(
+      [
+        { kind: "repository", repositoryId: "R2" },
+        { kind: "repository", repositoryId: "R1" },
+      ],
+      (id) => ({ R1: "zulu/repo", R2: "alpha/repo" })[id] ?? id,
+    ).map((entry) => entry.repositoryId),
+    ["R2", "R1"],
+  );
+});
+
+test("file sizes use readable binary units", () => {
+  assert.equal(fileSizeLabel(12), "12 bytes");
+  assert.equal(fileSizeLabel(1024), "1 KB");
+  assert.equal(fileSizeLabel(1536), "1.5 KB");
+  assert.equal(fileSizeLabel(1_572_864), "1.5 MB");
+  assert.equal(fileSizeLabel(1_073_741_824), "1 GB");
 });
 
 test("a reason code reads as its sentence and an unmapped code never leaks", () => {
@@ -123,7 +225,8 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
     "assignment-profile-revoked": "assignment agent revoked",
     "assignment-profile-stale": "assignment agent changed",
     "assignment-instructions-stale": "assignment instructions changed",
-    "assignment-profile-not-permitted": "assignment agent not permitted",
+    "assignment-profile-not-permitted":
+      "assignment agent not permitted · edit Permitted agents in project Settings",
     "assignment-held": "assignment held",
     "assignment-recovery-unresolved": "assignment recovery unresolved",
     "local-dependency": "blocked by a task dependency",

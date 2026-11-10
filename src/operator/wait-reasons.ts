@@ -92,7 +92,8 @@ export const waitLabels: Record<WaitCode, string> = {
   "assignment-profile-revoked": "Assignment agent revoked",
   "assignment-profile-stale": "Assignment agent changed",
   "assignment-instructions-stale": "Assignment instructions changed",
-  "assignment-profile-not-permitted": "Assignment agent not permitted",
+  "assignment-profile-not-permitted":
+    "Assignment agent not permitted · edit Permitted agents in project Settings",
   "assignment-held": "Assignment held",
   "assignment-recovery-unresolved": "Assignment recovery unresolved",
   "local-dependency": "Blocked by a task dependency",

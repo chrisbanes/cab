@@ -22,6 +22,7 @@ import {
   sourceStateText,
   issueCommentNote,
   taskReadiness,
+  taskStripReason,
 } from "../../web/src/task-overview.js";
 
 type Data = TaskRead["data"];
@@ -351,6 +352,49 @@ test("taskReadiness states recorded state and wait", () => {
   );
 });
 
+test("task strip shows one distinct reason", () => {
+  const base = {
+    task: { state: "open", ready: true },
+    execution: { state: "idle", holds },
+    admission: { eligible: true, reasons: [] },
+    waits: [],
+    source: null,
+    attention: { codes: [], count: 0 },
+    questions: [],
+    approvals: [],
+  };
+  assert.equal(taskStripReason(base as unknown as Data), null);
+  assert.equal(
+    taskStripReason({
+      ...base,
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    "waiting for capacity",
+  );
+  assert.equal(
+    taskStripReason({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, writer: true, capacity: true },
+      },
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    null,
+  );
+  assert.equal(
+    taskStripReason({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, stop: true, writer: true, capacity: true },
+      },
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    "effects may continue",
+  );
+});
+
 test("stopConsequences counts unfinished delegated assignments", () => {
   const lead = randomUUID();
   const a = (state: string, id = randomUUID()) => ({ assignmentId: id, state });
@@ -518,15 +562,43 @@ test("sourceFacts reports the latest successful sync across every selection", ()
   assert.equal(sourceFacts(source([membership(null)])).synced, null);
 });
 
-test("sourceHoldReasonText names every hold reason and tells closed ones to reopen first", () => {
-  const texts = sourceHoldReasonSchema.options.map(sourceHoldReasonText);
+test("sourceHoldReasonText names every hold reason and what a closure hold waits on", () => {
+  const texts = sourceHoldReasonSchema.options.map((reason) =>
+    sourceHoldReasonText(reason),
+  );
   assert.equal(new Set(texts).size, texts.length);
   for (const reason of [
-    "closed",
     "closure-read-unavailable",
     "closure-attribution-unproved",
   ] as const)
-    assert.match(sourceHoldReasonText(reason), /Reopen the issue|Reopen it/);
+    assert.match(sourceHoldReasonText(reason), /Reopen the issue/);
+  assert.match(
+    sourceHoldReasonText("closed"),
+    /completes once its work and delivery settle/,
+  );
+  assert.equal(
+    sourceHoldReasonText("closed", { kind: "change-request", number: 123 }),
+    `${sourceHoldReasonText("closed")} Completes when change request #123 merges or closes.`,
+  );
+  assert.match(
+    sourceHoldReasonText("closed", {
+      kind: "delivery-action",
+      action: "pr.merge",
+    }),
+    /Completes when the outcome of its pr\.merge action is known\.$/,
+  );
+  assert.match(
+    sourceHoldReasonText("closed", {
+      kind: "delivery-action",
+      action: "unstack",
+    }),
+    /Completes when its unstack settles\.$/,
+  );
+  // Only a closure hold names a wait.
+  assert.equal(
+    sourceHoldReasonText("withdrawn", { kind: "change-request", number: 1 }),
+    sourceHoldReasonText("withdrawn"),
+  );
   assert.match(sourceHoldReasonText("readiness-lost"), /ready/);
   assert.equal(sourceHoldReasonText(null), "The source holds this task.");
   // Neither a provider's name nor the hold code leaks into the wording.

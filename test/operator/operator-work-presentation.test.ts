@@ -330,6 +330,7 @@ test("source summaries only accept https links", () => {
       url,
       state: "open",
       closure: null,
+      closureWait: null,
       readiness: {
         rule: { kind: "none" },
         outcome: "not-evaluated",

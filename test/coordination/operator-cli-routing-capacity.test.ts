@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { digestOf } from "../../src/cli/change-document.js";
 import { harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { seedInstructionHistory } from "../fixtures/instruction-history.js";
@@ -39,6 +40,56 @@ async function setup(t: After) {
   const out = () => join(h.dir, `${randomUUID()}.json`);
   return { s, seed, h, cli, out, d: s.f.service.domain() };
 }
+
+test("Permitted agents have a dedicated reviewed CLI command", async (t) => {
+  const { seed, cli, out, d } = await setup(t);
+  const other = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: other,
+    name: "Permitted worker",
+    instructions: "work",
+    capabilities: "build",
+  });
+  const before = d.routing(seed.projectA);
+  const file = out();
+  const prepared = await cli("ro", [
+    "project",
+    "prepare-permitted-agents",
+    seed.projectA,
+    "--permitted-agents",
+    other,
+    "--out",
+    file,
+  ]);
+  assert.equal(prepared.code, 0, prepared.err + prepared.out);
+  const document = prepared.json().data.document;
+  assert.deepEqual(
+    document.preview.changes.map((c: Json) => c.field),
+    ["candidateProfileIds"],
+  );
+  const applied = await cli("rw", ["project", "apply", "--file", file]);
+  assert.equal(applied.code, 0, applied.err + applied.out);
+  const receipt = applied.json().data.receipt;
+  assert.equal(Boolean(receipt.result.enabled), Boolean(before.enabled));
+  const journal = await cli("ro", [
+    "operation",
+    "get",
+    receipt.key,
+    "--scope",
+    `project:${seed.projectA}`,
+    "--type",
+    "routing.configure",
+  ]);
+  assert.deepEqual(journal.json().data, { state: "recorded", receipt });
+  assert.deepEqual(
+    d.routingCandidates(seed.projectA).map((r) => String(r.profileId)),
+    [other],
+  );
+  assert.equal(d.routing(seed.projectA).guidance, before.guidance);
+});
 
 test("routing changes through reviewed documents", async (t) => {
   const { s, seed, h, cli, out, d } = await setup(t);
@@ -194,14 +245,33 @@ test("routing changes through reviewed documents", async (t) => {
 });
 
 test("capacity reads, prepares and applies with a server-side guard", async (t) => {
-  const { s, seed, cli, out, d } = await setup(t);
+  const { s, seed, h, cli, out, d } = await setup(t);
   const before = databaseDigest(s.f);
   let r = await cli("ro", ["capacity", "get"]);
   assert.equal(r.code, 0, r.err + r.out);
-  assert.equal(r.json().data.globalLimit, 4);
-  assert.equal(r.json().data.defaultProjectLimit, 2);
-  assert.ok(
-    r.json().data.projects.some((p: Json) => p.projectId === seed.projectA),
+  assert.equal(r.json().data.globalLimit, 6);
+  assert.equal(r.json().data.minimumLeadSlots, 1);
+  assert.equal(r.json().data.leadUsage, 0);
+  assert.deepEqual(
+    r.json().data.projects.find((p: Json) => p.projectId === seed.projectA)
+      .limit,
+    null,
+  );
+  assert.deepEqual(
+    r.json().data.agents.find((a: Json) => a.agentId === seed.profileId),
+    {
+      agentId: seed.profileId,
+      name: r.json().data.agents[0].name,
+      limit: null,
+      usage: 0,
+    },
+  );
+  const human = await h.run(["capacity", "get", "--connection", "ro"]);
+  assert.equal(human.code, 0, human.err);
+  assert.match(human.out, /^Minimum lead slots: 1$/m);
+  assert.match(
+    human.out,
+    new RegExp(`^${seed.projectA}\\s+Alpha\\s+none\\s+0$`, "m"),
   );
   assert.ok(!("tasks" in r.json().data.projects[0]));
   assert.equal(typeof r.json().coverage.observedAt, "number");
@@ -212,25 +282,52 @@ test("capacity reads, prepares and applies with a server-side guard", async (t) 
     "capacity",
     "prepare",
     "--global-limit",
-    "6",
+    "7",
+    "--min-lead-slots",
+    "0",
     "--project-limit",
     `${seed.projectA}=3`,
+    "--agent-limit",
+    `${seed.profileId}=2`,
     "--out",
     doc,
   ]);
   assert.equal(r.code, 0, r.err + r.out);
   const document = JSON.parse(readFileSync(doc, "utf8")) as Json;
+  assert.equal(document.command.minimumLeadSlots, 0);
+  assert.deepEqual(document.command.agentOverrides, { [seed.profileId]: 2 });
   assert.deepEqual(document.command.expectedCurrent, {
-    globalLimit: 4,
+    globalLimit: 6,
+    minimumLeadSlots: 1,
     projectOverrides: { [seed.projectA]: null },
+    agentOverrides: { [seed.profileId]: null },
   });
+  // A document prepared before lead slots and agent caps is refused, not applied.
+  const stale = JSON.parse(readFileSync(doc, "utf8")) as Json;
+  const { digest: _digest, ...staleBody } = stale;
+  delete staleBody.command.minimumLeadSlots;
+  delete staleBody.command.agentOverrides;
+  delete staleBody.command.expectedCurrent.minimumLeadSlots;
+  delete staleBody.command.expectedCurrent.agentOverrides;
+  const staleDoc = out();
+  writeFileSync(
+    staleDoc,
+    JSON.stringify({ ...staleBody, digest: digestOf(staleBody) }),
+    { mode: 0o600 },
+  );
+  const beforeStale = databaseDigest(s.f);
+  r = await cli("rw", ["capacity", "apply", "--file", staleDoc]);
+  assert.notEqual(r.code, 0, r.out);
+  assert.equal(databaseDigest(s.f), beforeStale);
   r = await cli("rw", ["capacity", "apply", "--file", doc]);
   assert.equal(r.code, 0, r.err + r.out);
   const receipt = r.json().data.receipt;
   assert.deepEqual(receipt.result.projectOverrides, { [seed.projectA]: 3 });
+  assert.deepEqual(receipt.result.agentOverrides, { [seed.profileId]: 2 });
+  assert.equal(receipt.result.minimumLeadSlots, 0);
   assert.match(
     (await cli("rw", ["capacity", "apply", "--file", doc])).out,
-    /"globalLimit":6/,
+    /"globalLimit":7/,
   );
   r = await cli("ro", [
     "operation",
@@ -248,7 +345,9 @@ test("capacity reads, prepares and applies with a server-side guard", async (t) 
     "capacity",
     "prepare",
     "--project-limit",
-    `${seed.projectA}=default`,
+    `${seed.projectA}=none`,
+    "--agent-limit",
+    `${seed.profileId}=none`,
     "--out",
     doc,
   ]);
@@ -256,6 +355,7 @@ test("capacity reads, prepares and applies with a server-side guard", async (t) 
   r = await cli("rw", ["capacity", "apply", "--file", doc]);
   assert.equal(r.code, 0, r.err + r.out);
   assert.deepEqual(d.capacityLimits().projectOverrides, {});
+  assert.deepEqual(d.capacityLimits().agentOverrides, {});
 
   // A browser change between prepare and apply is detected by the server guard.
   doc = out();
@@ -272,6 +372,7 @@ test("capacity reads, prepares and applies with a server-side guard", async (t) 
     type: "capacity.configure",
     key: randomUUID(),
     globalLimit: 5,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   assert.equal(browser.status, 200);
@@ -283,6 +384,12 @@ test("capacity reads, prepares and applies with a server-side guard", async (t) 
   for (const args of [
     ["--project-limit", `${randomUUID()}=1`],
     ["--project-limit", `${seed.projectA}=0`],
+    ["--project-limit", `${seed.projectA}=default`],
+    ["--agent-limit", `${randomUUID()}=1`],
+    ["--agent-limit", `${seed.profileId}=0`],
+    ["--min-lead-slots", "-1"],
+    ["--min-lead-slots", "x"],
+    ["--min-lead-slots", "5"],
     ["--global-limit", "5"],
   ]) {
     r = await cli("ro", ["capacity", "prepare", ...args, "--out", out()]);

@@ -672,11 +672,13 @@ export function TaskComposer({
                         : "The project lead is assigned unless you pick one."}
                     </p>
                     <p className="body muted">
-                      Capacity: {o.capacity.projectUsage}/
-                      {o.capacity.projectLimit} project ·{" "}
-                      {o.capacity.globalUsage}/{o.capacity.globalLimit} global.
-                      Dependencies, Stop and ownership are checked again when
-                      work starts.
+                      Capacity:{" "}
+                      {o.capacity.projectLimit === null
+                        ? "no project limit"
+                        : `${o.capacity.projectUsage}/${o.capacity.projectLimit} project`}{" "}
+                      · {o.capacity.globalUsage}/{o.capacity.globalLimit}{" "}
+                      global. Dependencies, Stop and ownership are checked again
+                      when work starts.
                     </p>
                     <a
                       className="body"

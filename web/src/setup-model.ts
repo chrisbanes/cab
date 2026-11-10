@@ -381,10 +381,9 @@ export function readyCheckItems(input: {
     items,
     checking,
     blocked: checking || items.length > 0,
+    // The first task's turn is a lead turn: a project limit never holds it.
     capacityFull:
-      capacity !== null &&
-      (capacity.projectUsage >= capacity.projectLimit ||
-        capacity.globalUsage >= capacity.globalLimit),
+      capacity !== null && capacity.globalUsage >= capacity.globalLimit,
   };
 }
 

@@ -188,6 +188,7 @@ function SourceObservations(
               projectId={p.projectId}
               rule={observed.readiness}
               counts={s.counts}
+              projectSelections={p.data.source.selections}
             />
           </article>
         );

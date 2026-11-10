@@ -6,6 +6,25 @@ type Data = TaskRead["data"];
 type Holds = Execution["holds"];
 type Recovery = NonNullable<Data["executionRecovery"]>;
 type RecoveryHolds = Pick<Recovery, "holds">;
+type RecoveryRecord = Recovery["records"][number];
+
+/** A settled record is terminal, effect-free and unheld; unknown or incomplete state stays visible. */
+export function partitionRecoveryRecords(records: readonly RecoveryRecord[]) {
+  const settled = records.filter(
+    (record) =>
+      record.requestState === "completed" &&
+      ["completed", "reconciled", "resolved-failed"].includes(
+        record.intentState,
+      ) &&
+      record.pendingEffectCount === 0 &&
+      Object.values(record.holds).every((hold) => !hold),
+  );
+  const settledSet = new Set(settled);
+  return {
+    active: records.filter((record) => !settledSet.has(record)),
+    settled,
+  };
+}
 
 const stateLabels: Record<Execution["state"], string> = {
   idle: "No active execution is reported",

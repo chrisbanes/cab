@@ -1,14 +1,9 @@
 import { open } from "node:fs/promises";
 import { z } from "zod";
 import {
-  noTurnAttestationSchema,
-  noTurnEvidenceSchema,
-  preTurnAttestationSchema,
   preTurnRecoveryReceiptSchema,
   type RecoveryPath,
-  recoveryEvidenceSchema,
   recoveryPaths,
-  recoveryRpcErrorSchema,
 } from "../core/recovery-contracts.js";
 import { writeOut } from "./browse-evidence.js";
 import { readSealedDocument, sealDocument } from "./change-document.js";
@@ -18,10 +13,16 @@ export const RECOVERY_SCHEMA = "cab.cli.recovery/v1";
 export const EVIDENCE_SCHEMA = "cab.cli.recovery-evidence/v1";
 const MAX_EVIDENCE_BYTES = 64 * 1024;
 
+/** Paths prepared as a document; release is confirmed directly by 'cab recovery release'. */
+export type PreparedPath = Exclude<RecoveryPath, "release">;
+export const preparedPaths = recoveryPaths.filter(
+  (p): p is PreparedPath => p !== "release",
+);
+
 const recoveryDocumentSchema = z
   .object({
     schema: z.literal(RECOVERY_SCHEMA),
-    path: z.enum(recoveryPaths),
+    path: z.enum(preparedPaths),
     preparedAt: z.number().int().nonnegative(),
     service: z
       .object({ installationId: z.uuid(), origin: z.string() })
@@ -91,33 +92,10 @@ const receiptAssertions = z
       .strict(),
   })
   .strict();
-/** What the operator must supply per path; nothing here is ever defaulted or inferred. */
-const evidenceFileSchemas: Record<
-  Exclude<RecoveryPath, "conversation-replace">,
-  z.ZodType
-> = {
-  "pre-turn-adopt": z
-    .object({
-      rpcError: recoveryRpcErrorSchema,
-      evidence: recoveryEvidenceSchema,
-      attestation: preTurnAttestationSchema,
-    })
-    .strict(),
-  "no-turn-adopt": z
-    .object({
-      evidence: noTurnEvidenceSchema,
-      attestation: noTurnAttestationSchema,
-    })
-    .strict(),
-  "pre-turn-recover": receiptAssertions,
-  "no-turn-recover": receiptAssertions,
-  "bound-turn-recover": receiptAssertions,
-};
-
 /** Reads and strictly validates an operator evidence file for one path. */
 export async function readEvidenceFile(
   path: string,
-  recoveryPath: Exclude<RecoveryPath, "conversation-replace">,
+  recoveryPath: Exclude<PreparedPath, "conversation-replace">,
 ): Promise<Record<string, unknown>> {
   let text: string;
   try {
@@ -150,7 +128,8 @@ export async function readEvidenceFile(
       "invalid-input",
       `--evidence-file must declare "schema": "${EVIDENCE_SCHEMA}".`,
     );
-  const parsed = evidenceFileSchemas[recoveryPath].safeParse(rest);
+  // Every prepared generation path needs the same receipt assertions; nothing is defaulted or inferred.
+  const parsed = receiptAssertions.safeParse(rest);
   if (!parsed.success)
     throw new CliError(
       "invalid-input",

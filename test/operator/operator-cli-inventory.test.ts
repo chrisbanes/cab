@@ -52,6 +52,7 @@ const documentedWrites = [
   "profile apply",
   "project prepare",
   "project prepare-create",
+  "project prepare-permitted-agents",
   "project prepare-routing",
   "project prepare-repositories",
   "project apply",
@@ -93,6 +94,7 @@ const documentedWrites = [
   "delivery confirm-comment",
   "delivery send-comment",
   "recovery prepare",
+  "recovery release",
   "recovery submit",
   "runtime enable",
   "runtime disable",
@@ -120,7 +122,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
   assert.match(help.out, /Reverse pairs: task stop\/resume/);
   assert.match(
     help.out,
-    /Adoption, recovery and\nconversation replacement cannot be undone/,
+    /Release, recovery and conversation replacement cannot be undone/,
   );
   for (const command of [...browseCommands.values(), ...writeCommands.values()])
     assert.ok(help.out.includes(command.usage), command.usage);

@@ -1107,6 +1107,7 @@ async function setCapacity(page, origin, limit) {
     type: "capacity.configure",
     key: randomUUID(),
     globalLimit: limit,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
 }

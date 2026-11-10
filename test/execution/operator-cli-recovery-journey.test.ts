@@ -56,37 +56,31 @@ for (const mode of [
   "pre-turn-historical",
   "pre-turn-runtime",
 ] as const satisfies readonly GenerationMode[])
-  test(`${mode}: inspect, adopt, fail closed, recover, replace, then only a new message admits work`, async (t) => {
+  test(`${mode}: inspect a witnessed generation, fail closed, recover, replace, then only a new message admits work`, async (t) => {
     const w = await cliGeneration(t, mode);
     const start = turns(w);
     let r = await w.cli("ro", ["recovery", "get", w.g.assignmentId]);
     assert.equal(r.code, 0, r.err);
     assert.equal(r.json().data.held, true);
-    const adoptPath = mode === "no-turn" ? "no-turn-adopt" : "pre-turn-adopt";
     const recoverPath =
       mode === "no-turn" ? "no-turn-recover" : "pre-turn-recover";
     if (mode !== "pre-turn-runtime") {
-      const adopt = await prepare(w, adoptPath, [
-        "--work",
-        w.g.workId,
-        "--evidence-file",
-        w.evidenceFile(w.g.adoptionEvidence()),
-      ]);
-      r = await submit(w, adopt);
-      assert.equal(r.code, 0, r.err);
-      assert.equal(r.json().data.effect, "saved");
-      // The retained UI read sees the witness the CLI recorded.
+      // A witness an earlier build's adoption recorded.
+      const witnessId = w.g.adoptAsBefore();
+      // The retained UI read sees it.
       const ui = await sessionRecovery(w);
       const record = ui.records.find((x) => x.workId === w.g.workId);
       assert.equal(
         record?.noTurnSubmission?.id ?? record?.preTurnRejection?.id,
-        r.json().data.receipt.witnessId,
+        witnessId,
       );
-      // Restart and resubmission replay the same receipt.
+      // A witnessed generation is not released at startup.
       await w.s.restart();
-      const replay = await submit(w, adopt);
-      assert.equal(replay.code, 0, replay.err);
-      assert.deepEqual(replay.json().data.receipt, r.json().data.receipt);
+      assert.ok(
+        w.s.f.service
+          .recoveryForTask(w.g.taskId)
+          .find((x) => x.workId === w.g.workId)?.holds.capacity,
+      );
     }
     const recover = await prepare(w, recoverPath, [
       "--work",
@@ -145,39 +139,55 @@ for (const mode of [
     await until(() => turns(w) > start, "new message admits work");
   });
 
+for (const mode of [
+  "no-turn",
+  "pre-turn-defect",
+] as const satisfies readonly GenerationMode[])
+  test(`${mode}: inspect, release, then Start again admits work`, async (t) => {
+    const w = await cliGeneration(t, mode);
+    const start = turns(w);
+    let r = await w.cli("ro", ["recovery", "get", w.g.assignmentId]);
+    assert.equal(r.code, 0, r.err);
+    const record = r
+      .json()
+      .data.records.find((x: { workId: string }) => x.workId === w.g.workId);
+    assert.deepEqual(
+      record.paths.find((p: { path: string }) => p.path === "release"),
+      { path: "release", eligible: true, blockedBy: [] },
+    );
+    r = await w.cli("rw", ["recovery", "release", w.g.assignmentId, "--yes"]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(requestState(w), "held", "the refused request stays held");
+    assert.equal(turns(w), start, "release dispatches nothing");
+    if (w.runtime instanceof NoTurnRuntime) w.runtime.rejectStart = false;
+    else w.runtime.resumeError = undefined;
+    r = await w.cli("rw", [
+      "task",
+      "start-again",
+      w.g.taskId,
+      "--expected-version",
+      String(w.s.f.service.domain().task(w.g.taskId).version),
+    ]);
+    assert.equal(r.code, 0, r.err + r.out);
+    await until(() => turns(w) > start, "Start again admits work");
+  });
+
 test("concurrent, stale and read-only submissions apply at most once", async (t) => {
   const w = await cliGeneration(t, "no-turn");
-  const evidence = w.evidenceFile(w.g.adoptionEvidence());
-  const adopt = await prepare(w, "no-turn-adopt", [
-    "--work",
-    w.g.workId,
-    "--evidence-file",
-    evidence,
-  ]);
-  // Read-only: prepare is allowed, submit is refused and nothing changes.
-  const before = databaseDigest(w.s.f);
-  let r = await submit(w, adopt, "ro");
-  assert.equal(r.code, 3);
-  assert.equal(databaseDigest(w.s.f), before);
-
-  // A document prepared before a separate JSON command acted is refused.
-  await w.s.sessionPost("/api/operator/commands", {
-    type: "recovery.no-turn.adopt",
-    assignmentId: w.g.assignmentId,
-    ...w.g.adoption(),
-  });
-  const witness = w.g.witnessId();
-  r = await submit(w, adopt);
-  assert.equal(r.code, 4);
-  assert.equal(w.g.witnessId(), witness, "nothing applied");
-
-  // Two concurrent submissions of one recovery settle exactly once.
+  w.g.adoptAsBefore();
   const recover = await prepare(w, "no-turn-recover", [
     "--work",
     w.g.workId,
     "--evidence-file",
     w.evidenceFile(w.receiptEvidence),
   ]);
+  // Read-only: prepare is allowed, submit is refused and nothing changes.
+  const before = databaseDigest(w.s.f);
+  let r = await submit(w, recover, "ro");
+  assert.equal(r.code, 3);
+  assert.equal(databaseDigest(w.s.f), before);
+
+  // Two concurrent submissions of one recovery settle exactly once.
   const results = await Promise.all([submit(w, recover), submit(w, recover)]);
   assert.ok(results.some((x) => x.code === 0));
   for (const x of results) assert.ok([0, 4].includes(x.code), x.out);
@@ -187,6 +197,32 @@ test("concurrent, stale and read-only submissions apply at most once", async (t)
       .map((x) => x.json().data.receipt.receiptId),
   );
   assert.equal(receipts.size, 1);
+
+  // A document prepared before a separate JSON command acted is refused.
+  const replace = await prepare(w, "conversation-replace", [
+    "--expected-version",
+    "1",
+    "--expected-conversation-revision",
+    "1",
+  ]);
+  await w.s.sessionPost("/api/operator/commands", {
+    type: "recovery.conversation.replace",
+    key: randomUUID(),
+    assignmentId: w.g.assignmentId,
+    expectedAssignmentVersion: 1,
+    expectedConversationRevision: 1,
+  });
+  r = await submit(w, replace);
+  assert.equal(r.code, 4);
+
+  // Two concurrent releases of one generation apply once.
+  const other = await cliGeneration(t, "pre-turn-defect");
+  const releases = await Promise.all(
+    [0, 1].map(() =>
+      other.cli("rw", ["recovery", "release", other.g.assignmentId, "--yes"]),
+    ),
+  );
+  assert.deepEqual(releases.map((x) => x.code).sort(), [0, 4]);
 });
 
 for (const harness of ["codex", "claude"] as const)

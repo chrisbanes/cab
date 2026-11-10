@@ -1,9 +1,12 @@
+import { execFile } from "node:child_process";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { z } from "zod";
+import { gitEnvironment } from "../../../src/core/child-environment.js";
 import { DeliveryStore } from "../../../src/core/delivery.js";
 import { DomainStore } from "../../../src/core/domain.js";
 import { UnstackStore } from "../../../src/core/unstack.js";
@@ -23,6 +26,8 @@ import {
   materialHash,
   type StackV2Authority,
 } from "./stack-authority.js";
+
+const execFileAsync = promisify(execFile);
 
 const configurationTables = [
   "domain_projects",
@@ -228,13 +233,34 @@ export function capturePreparedStackDatabase(databasePath: string) {
   }
 }
 
-/** Capture actual Git metadata; HEAD explicitly represents a detached checkout. */
+/**
+ * Capture the files that store the source's HEAD and branch, for pinning; HEAD explicitly
+ * represents a detached checkout. Values are always read through Git, never from these files.
+ */
 export async function captureSourceReferencePaths(
   root: string,
   git: (...args: string[]) => string,
 ) {
-  const sourceHeadFile = resolve(root, git("rev-parse", "--git-path", "HEAD"));
   const sourceBranch = git("branch", "--show-current") || "HEAD";
+  if (git("rev-parse", "--show-ref-format") === "reftable") {
+    // HEAD lives in the worktree's own stack and branches in the common one; every ref
+    // update in a stack rewrites its tables.list, so pinning it is as strong as packed-refs.
+    const sourceHeadFile = resolve(
+      root,
+      git("rev-parse", "--git-path", "reftable/tables.list"),
+    );
+    const sourceRefFile =
+      sourceBranch === "HEAD"
+        ? sourceHeadFile
+        : resolve(
+            root,
+            git("rev-parse", "--git-common-dir"),
+            "reftable",
+            "tables.list",
+          );
+    return { sourceHeadFile, sourceBranch, sourceRefFile };
+  }
+  const sourceHeadFile = resolve(root, git("rev-parse", "--git-path", "HEAD"));
   const loose = resolve(
     root,
     git("rev-parse", "--git-path", `refs/heads/${sourceBranch}`),
@@ -252,23 +278,35 @@ export async function captureSourceReferencePaths(
   return { sourceHeadFile, sourceBranch, sourceRefFile };
 }
 
-/** Exact commit identity for loose, packed and detached Git storage forms. */
+/**
+ * Exact commit identity from Git's own reads, in every ref storage format: `symbolic` is
+ * `git rev-parse --symbolic-full-name HEAD` and `head` is `git rev-parse --verify HEAD`.
+ */
 export function sourceReferenceMatches(
   branch: string,
+  symbolic: string,
   head: string,
-  ref: string,
   commit: string,
-  packed: boolean,
 ) {
-  if (branch === "HEAD")
-    return !packed && head.trim() === commit && ref.trim() === commit;
-  const name = `refs/heads/${branch}`;
-  if (head.trim() !== `ref: ${name}`) return false;
-  if (!packed) return ref.trim() === commit;
-  const entries = ref
-    .split(/\r?\n/)
-    .filter((line) => line.split(" ")[1] === name);
-  return entries.length === 1 && entries[0] === `${commit} ${name}`;
+  return (
+    symbolic.trim() === (branch === "HEAD" ? "HEAD" : `refs/heads/${branch}`) &&
+    head.trim() === commit
+  );
+}
+
+/** Read the source's HEAD through Git, as `verifySourceIdentity` does, for `sourceReferenceMatches`. */
+export async function readSourceReference(gitExecutable: string, root: string) {
+  const git = async (...args: string[]) =>
+    (
+      await execFileAsync(gitExecutable, ["-C", root, ...args], {
+        env: gitEnvironment(),
+        timeout: 3000,
+      })
+    ).stdout;
+  return {
+    symbolic: await git("rev-parse", "--symbolic-full-name", "HEAD"),
+    head: await git("rev-parse", "--verify", "HEAD"),
+  };
 }
 
 export async function verifyPreparedStackResources(
@@ -366,13 +404,15 @@ export async function verifyPreparedStackResources(
   if (
     (host.sourceBranch === "HEAD" &&
       host.sourceHeadFile !== host.sourceRefFile) ||
-    !sourceReferenceMatches(
-      host.sourceBranch,
-      await readFile(host.sourceHeadFile, "utf8"),
-      await readFile(host.sourceRefFile, "utf8"),
-      authority.readiness.sourceCommit,
-      host.sourceRefFile.endsWith("/packed-refs"),
-    )
+    !(await readSourceReference(host.gitExecutable.path, host.sourceRoot).then(
+      ({ symbolic, head }) =>
+        sourceReferenceMatches(
+          host.sourceBranch,
+          symbolic,
+          head,
+          authority.readiness.sourceCommit,
+        ),
+    ))
   )
     throw Error("v2-source-head-changed");
   for (const pin of [host.runtimeExecutable, host.gitExecutable])
@@ -464,7 +504,7 @@ export async function verifyPreparedStackResources(
   const taskIds = [m.resource.lowerTask, m.resource.upperTask];
   if (
     observed.schemaFingerprint !==
-      "8ba6991a76347b881e3a144d747ae5bcf16daa9a55d54560d9977640bfb5232f" ||
+      "fa0d59290d2982c50fb1b80fc81f6bf5c30015fa4b57131e34678192f30c0f1e" ||
     observed.schemaFingerprint !== host.schemaFingerprint ||
     observed.configSha256 !== host.configSha256 ||
     observed.projects.length !== 1 ||

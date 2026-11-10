@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import {
   browserSuite,
   type BrowserJourney,
@@ -114,9 +114,12 @@ async function startChangesJourney(
     recordResult = true,
     alphaRef,
     beforeOpen,
+    listing,
   }: {
     recordResult?: boolean;
     alphaRef?: string;
+    /** Routes the page's reads before it opens; the caller then waits for the listing itself. */
+    listing?: (page: Page) => Promise<unknown>;
     beforeOpen?: (
       alphaWorkspacePath: string,
       context: {
@@ -258,6 +261,7 @@ async function startChangesJourney(
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const changes = page.locator("#changes");
   const directPath = `/tasks/${task.taskId}?section=changes`;
+  await listing?.(page);
   await page.goto(web.origin + directPath);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -267,6 +271,12 @@ async function startChangesJourney(
   await changes
     .getByRole("heading", { name: "Workspace comparisons", exact: true })
     .waitFor();
+  // The repository listing must land before a test changes the task: a listing that overlaps
+  // a task change answers "conflict", which leaves Branch disabled until a reread is ready.
+  if (!listing)
+    await changes
+      .locator('#changes-target option[value="branch"]:not([disabled])')
+      .waitFor({ state: "attached" });
   const comparisonTargetControl = changes.getByLabel("Comparison target");
 
   return {
@@ -426,6 +436,69 @@ test("Changes labels repositories by verified name, selects by ID and falls back
   );
   await select.selectOption("repo-beta");
   assert.equal(await select.inputValue(), "repo-beta");
+});
+
+test("Changes reads a conflicted repository listing again on its own, and says so plainly once rereads run out", async (_t, j) => {
+  // Each workspace listing read answers as one that overlapped a task change while this is
+  // positive. Files reads the same listing at the same moment, so both first reads conflict.
+  let conflicts = 2;
+  let reads = 0;
+  let repositoryReads = 0;
+  const { changes } = await startChangesJourney(j, {
+    recordResult: false,
+    listing: (page) => {
+      page.on("request", (request) => {
+        if (request.url().includes("/files?scope=repository"))
+          repositoryReads++;
+      });
+      return page.route(
+        /\/api\/operator\/tasks\/[^/]+\/files\?scope=workspace&/,
+        async (route) => {
+          reads++;
+          if (conflicts-- <= 0) return route.continue();
+          const response = await route.fetch();
+          const body = (await response.json()) as { data: object };
+          body.data = {
+            ...body.data,
+            state: "conflict",
+            entries: [],
+            truncated: false,
+          };
+          await route.fulfill({ response, json: body });
+        },
+      );
+    },
+  });
+  const enabled = (target: string) =>
+    changes
+      .locator(`#changes-target option[value="${target}"]:not([disabled])`)
+      .waitFor({ state: "attached" });
+  // The first read conflicted; a later one is ready, and nothing was clicked.
+  await enabled("branch");
+  await enabled("uncommitted");
+  // Files recovers too and moves to the repository root, leaving the workspace listing to Changes.
+  await until(() => repositoryReads > 0, "Files to open the repository root");
+  assert.equal(reads, 4);
+
+  // A listing that stays in conflict stops after three rereads and says so without the state name.
+  conflicts = Number.POSITIVE_INFINITY;
+  reads = 0;
+  const refresh = changes.getByRole("button", { name: "Refresh repositories" });
+  await refresh.click();
+  await changes
+    .getByText(
+      "Repository listing could not be read consistently, usually because the workspace changed while it was read; repository identity is unavailable. Refresh to try again.",
+    )
+    .waitFor();
+  assert.equal(await changes.getByText(/is conflict/).count(), 0);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  assert.equal(reads, 4);
+
+  // Refresh reads again.
+  conflicts = 0;
+  await refresh.click();
+  await enabled("branch");
+  assert.equal(reads, 5);
 });
 
 test("Changes names the configured default branch when it has no merge base", async (_t, j) => {

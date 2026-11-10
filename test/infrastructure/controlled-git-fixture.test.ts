@@ -13,6 +13,7 @@ import {
 } from "../fixtures/controlled-git.js";
 import { startStalledGit } from "../fixtures/controlled-git-owner.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 const harness = fileURLToPath(
   new URL("../fixtures/controlled-git-owner.js", import.meta.url),
@@ -115,7 +116,9 @@ async function withHarness(
   }
 }
 
-test("fixture processes exit when their owning test process is killed", async () => {
+test("fixture processes exit when their owning test process is killed", {
+  skip: processIdentityDenied(),
+}, async () => {
   await withHarness("owner-hold", async ({ child, started }) => {
     const { identities } = await started();
     assert.equal(identities.length, 2);
@@ -127,7 +130,9 @@ test("fixture processes exit when their owning test process is killed", async ()
   });
 });
 
-test("fixture processes exit when a test fails and cleans up", async () => {
+test("fixture processes exit when a test fails and cleans up", {
+  skip: processIdentityDenied(),
+}, async () => {
   const { controlled, git, identities } = await startStalledGit();
   try {
     assert.equal(identities.length, 2);
@@ -148,7 +153,9 @@ test("fixture processes exit when a test fails and cleans up", async () => {
   }
 });
 
-test("fixture processes exit when a test times out", async () => {
+test("fixture processes exit when a test times out", {
+  skip: processIdentityDenied(),
+}, async () => {
   await withHarness("timeout", async ({ child, output, started }) => {
     const { identities } = await started();
     assert.equal(identities.length, 2);
@@ -159,7 +166,9 @@ test("fixture processes exit when a test times out", async () => {
   });
 });
 
-test("an early fake git kill leaves the pipe holder until cleanup", async () => {
+test("an early fake git kill leaves the pipe holder until cleanup", {
+  skip: processIdentityDenied(),
+}, async () => {
   const { controlled, git, identities } = await startStalledGit();
   try {
     const descendant = identities.find((identity) =>
@@ -204,7 +213,9 @@ test("cleanup stops the remaining recorded processes after one fails", async () 
   assert.deepEqual(called, [1, 2, 3]);
 });
 
-test("cleanup removes the fixture root once every process is stopped", async () => {
+test("cleanup removes the fixture root once every process is stopped", {
+  skip: processIdentityDenied(),
+}, async () => {
   const { controlled, git, identities } = await startStalledGit();
   try {
     await controlled.cleanup();

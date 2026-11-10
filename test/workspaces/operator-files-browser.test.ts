@@ -381,6 +381,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
       "gone.txt": "This file will be removed after its first preview.\n",
       "docs/child.txt": "Arrow key folder child.\n",
       "example.ts": 'export const answer = 42;\nconsole.log("source only");\n',
+      "large.txt": "x".repeat(1536),
       "unsafe.svg":
         "<svg><script>window.filePreviewInjected = true</script></svg>\n",
       [longName]: "long filename fixture\n",
@@ -519,6 +520,46 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .evaluateAll((entries) =>
       entries.map((entry) => entry.getAttribute("aria-label")),
     );
+  const entryNames = await page.locator(".file-entry-name").allTextContents();
+  const directoryCount = explorerLabels.filter((label) =>
+    label?.includes(", directory,"),
+  ).length;
+  assert.ok(directoryCount > 0);
+  assert.ok(
+    explorerLabels
+      .slice(0, directoryCount)
+      .every((label) => label?.includes(", directory,")),
+  );
+  assert.ok(
+    explorerLabels
+      .slice(directoryCount)
+      .every((label) => Boolean(label && !label.includes(", directory,"))),
+  );
+  const sortedNames = (names: string[]) =>
+    [...names].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  assert.deepEqual(
+    entryNames
+      .slice(0, directoryCount)
+      .map((name) => name.trim().replace(/^▸\s*/, "")),
+    sortedNames(
+      entryNames
+        .slice(0, directoryCount)
+        .map((name) => name.trim().replace(/^▸\s*/, "")),
+    ),
+  );
+  assert.deepEqual(
+    entryNames.slice(directoryCount).map((name) => name.trim()),
+    sortedNames(entryNames.slice(directoryCount).map((name) => name.trim())),
+  );
+  const largeEntry = page.getByRole("button", { name: /large\.txt/ });
+  await largeEntry.waitFor();
+  assert.match(
+    await largeEntry.locator(".file-entry-metadata").innerText(),
+    /1\.5 KB/,
+  );
+  assert.match((await largeEntry.getAttribute("title")) ?? "", /1,536 bytes$/);
   const guideIndex = explorerLabels.findIndex((label) =>
     label?.includes("guide.md"),
   );
@@ -565,7 +606,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   const longEntry = page.getByRole("button", { name: new RegExp(longName) });
   assert.equal(
     await longEntry.getAttribute("title"),
-    `Repository alpha/${longName}`,
+    `Repository alpha/${longName} · 22 bytes`,
   );
   const longNameStyle = await longEntry
     .locator(".file-entry-name")
@@ -1304,6 +1345,7 @@ async function startMarkedFiles(
     locale,
     prepare,
     named = {},
+    beforeOpen,
   }: {
     repositories: Array<{ id: string; ref?: string }>;
     /** Verified names by repository ID, as observed issues give them. */
@@ -1313,6 +1355,8 @@ async function startMarkedFiles(
     locale?: string;
     /** Adds files to the task workspaces before the page opens. */
     prepare?: (workspaces: Record<string, string>) => void;
+    /** Routes the page's reads before it opens. */
+    beforeOpen?: (page: Page) => Promise<unknown>;
   },
 ) {
   const fixture = await j.start("fixture.create", () =>
@@ -1369,6 +1413,7 @@ async function startMarkedFiles(
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
+  await beforeOpen?.(page);
   await page.goto(`${web.origin}/tasks/${task.taskId}${path}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -1956,6 +2001,49 @@ test("Files keeps one toolbar Refresh, a reversible Show ignored checkbox and a 
       `Add review comment overlaps ${other.name}`,
     );
   assert.deepEqual(s.consoleErrors, []);
+});
+
+test("Files reads a conflicted listing and preview again on its own", async (_t, j) => {
+  // The first read of each location and file answers as one that overlapped a task change.
+  const conflicted = new Set<string>();
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "alpha", ref: "main" }],
+    beforeOpen: (page) =>
+      page.route(
+        /\/api\/operator\/tasks\/[^/]+\/(files|preview)\?/,
+        async (route) => {
+          const url = route.request().url();
+          if (conflicted.has(url)) return route.continue();
+          conflicted.add(url);
+          const response = await route.fetch();
+          const body = (await response.json()) as {
+            data: Record<string, unknown>;
+          };
+          const { metadata: _metadata, preview: _preview, ...data } = body.data;
+          body.data = {
+            ...data,
+            state: "conflict",
+            ...(url.includes("/files?")
+              ? { entries: [], truncated: false }
+              : {}),
+          };
+          await route.fulfill({ response, json: body });
+        },
+      ),
+  });
+  const { files } = s;
+  // The workspace listing conflicted first, yet Files still opens the repository root.
+  await s.list("Repository alpha").waitFor();
+  await files.getByRole("button", { name: /^keep\.txt,/ }).click();
+  await files.getByRole("button", { name: "Line 1: unchanged" }).waitFor();
+  // Only Files reads the repository root and the file, so both of those recovered here.
+  const served = [...conflicted];
+  assert.ok(served.some((url) => url.includes("/files?scope=repository")));
+  assert.ok(served.some((url) => url.includes("/preview?")));
+  assert.equal(
+    await files.getByText(/is conflict|could not be read/).count(),
+    0,
+  );
 });
 
 test("Files one toolbar Refresh re-reads the listing and the open file, and keeps both when a read fails", async (_t, j) => {
