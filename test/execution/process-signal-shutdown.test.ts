@@ -11,6 +11,7 @@ import {
   record,
   until,
 } from "./signal-qualification/trace.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 function identity(pid: number) {
   const row = execFileSync(
@@ -209,7 +210,7 @@ for (const [harness, signal, mode] of [
 ] as const) {
   test(`${harness} ${signal} ${mode}: calibrated owned-process shutdown`, {
     timeout: 30000,
-    skip: process.platform !== "darwin",
+    skip: process.platform !== "darwin" || processIdentityDenied(),
   }, async (t) => {
     const evidence =
       process.env.SIGNAL_EVIDENCE_DIR ?? join(tmpdir(), "cab-signal-evidence");

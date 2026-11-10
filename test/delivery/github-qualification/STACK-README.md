@@ -40,8 +40,11 @@ Root must capture these actual inputs for each independent pair:
 - Source root/branch/commit/tree, HEAD/ref metadata and exact loaded module hashes,
   pinned Git/Node/Codex executable hashes, `.nvmrc`, package/lock hashes, versions,
   and the required package manager. Source HEAD/tree are checked with pinned
-  offline Git before service construction. Loose and packed refs and an explicitly
-  pinned detached HEAD are supported; a later loose override of a packed ref
+  offline Git before service construction. HEAD and branch values are read through
+  Git; the pinned storage is the loose ref, `packed-refs` or `HEAD` file for the
+  `files` ref format, and the `reftable/tables.list` of the stack holding the ref
+  for `reftable`, which every ref update in that stack rewrites. An explicitly
+  pinned detached HEAD is supported; a later loose override of a packed ref
   invalidates its capture.
 - Checkpointed SQLite bytes, the build's migration level and schema fingerprint, exact
   project/task/lead/assignment configuration and immutable profile settings.

@@ -44,6 +44,7 @@ import {
   startedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
+import { slashTmpDenied } from "../fixtures/host-access.js";
 
 const processIdentity = {
   processId: "4242",
@@ -634,7 +635,9 @@ test("codex: a drafting run uses the lead profile's captured model and effort", 
 });
 
 for (const harness of harnesses) {
-  test(`${harness}: a drafting run proposes from a disposable copy at the configured commit and creates no task`, async (t) => {
+  test(`${harness}: a drafting run proposes from a disposable copy at the configured commit and creates no task`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open();
     const { service } = opened;
@@ -699,7 +702,9 @@ for (const harness of harnesses) {
     assert.deepEqual(readdirSync(join(w.dataDir, "drafting-workspaces")), []);
   });
 
-  test(`${harness}: an invalid proposal is refused so the lead can retry, and a turn with no proposal fails`, async (t) => {
+  test(`${harness}: an invalid proposal is refused so the lead can retry, and a turn with no proposal fails`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open();
     const { service } = opened;
@@ -751,7 +756,9 @@ for (const harness of harnesses) {
     assert.equal(w.tracked(service).usage(projectId).global, 0);
   });
 
-  test(`${harness}: Stop interrupts a running draft, which settles as interrupted with capacity freed and the copy deleted`, async (t) => {
+  test(`${harness}: Stop interrupts a running draft, which settles as interrupted with capacity freed and the copy deleted`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open();
     const { service } = opened;
@@ -784,7 +791,9 @@ for (const harness of harnesses) {
     assert.equal(service.readDrafting(runId)?.proposal, null);
   });
 
-  test(`${harness}: the time limit stops a draft the same way`, async (t) => {
+  test(`${harness}: the time limit stops a draft the same way`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open({ draftingTimeLimitMs: 300 });
     const { service } = opened;
@@ -1779,7 +1788,9 @@ const issueProposal = {
 };
 const issueIdea = "Mention the command menu";
 for (const harness of harnesses) {
-  test(`${harness}: an issue run proposes a title and body from the synced text and creates nothing`, async (t) => {
+  test(`${harness}: an issue run proposes a title and body from the synced text and creates nothing`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open({ issue: {} });
     const { service } = opened;

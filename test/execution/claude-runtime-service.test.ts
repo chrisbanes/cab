@@ -32,6 +32,7 @@ import { stopWithoutDrain } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { failureNotice } from "../../web/src/execution-runtime.js";
+import { slashTmpDenied } from "../fixtures/host-access.js";
 
 /** Captures the spawn context; never starts a turn. */
 class ContextRuntime implements Runtime {
@@ -657,7 +658,9 @@ const releaseTemporaryBase = (workspace: string | undefined) => {
     rmSync(claudeTemporaryBase(workspace), { recursive: true, force: true });
 };
 
-test("a native Claude assignment completes with its bound coordination callback", async (t) => {
+test("a native Claude assignment completes with its bound coordination callback", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
@@ -693,7 +696,9 @@ test("a native Claude assignment completes with its bound coordination callback"
   assert.equal(JSON.stringify(codexEnvironment).includes(T6_TOKEN), false);
 });
 
-test("native execution ignores unavailable historical plugin selections and records no new selected-plugin evidence", async (t) => {
+test("native execution ignores unavailable historical plugin selections and records no new selected-plugin evidence", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
@@ -720,7 +725,9 @@ test("native execution ignores unavailable historical plugin selections and reco
   });
 });
 
-test("a Claude turn records its commands as runtime items with exit status and redacted output", async (t) => {
+test("a Claude turn records its commands as runtime items with exit status and redacted output", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
@@ -784,7 +791,9 @@ test("a Claude turn records its commands as runtime items with exit status and r
   assert.equal(JSON.stringify(items).includes(T6_TOKEN), false);
 });
 
-test("native authentication ignores a retained historical token file", async (t) => {
+test("native authentication ignores a retained historical token file", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const path = tokenFile(t);
   const run = await claudeServiceRun(
     t,
@@ -824,7 +833,9 @@ test("native authentication ignores a retained historical token file", async (t)
   assert.equal(JSON.stringify(codexEnvironment).includes(FILE_TOKEN), false);
 });
 
-test("a failed sandbox self-test keeps Claude work waiting without holds while Codex proceeds", async (t) => {
+test("a failed sandbox self-test keeps Claude work waiting without holds while Codex proceeds", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const controls = { selfTest: false, verified: true };
   const run = await claudeServiceRun(
     t,
@@ -887,7 +898,9 @@ test("a failed sandbox self-test keeps Claude work waiting without holds while C
   }
 });
 
-test("an invalid Claude token fails the turn visibly as unauthorized and is not retried", async (t) => {
+test("an invalid Claude token fails the turn visibly as unauthorized and is not retried", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
@@ -945,7 +958,9 @@ test("an invalid Claude token fails the turn visibly as unauthorized and is not 
   );
 });
 
-test("losing the Claude process mid-tool holds the work with its writer and capacity", async (t) => {
+test("losing the Claude process mid-tool holds the work with its writer and capacity", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));
@@ -973,7 +988,9 @@ test("losing the Claude process mid-tool holds the work with its writer and capa
 });
 
 for (const verified of [true, false])
-  test(`Stop of a running Claude turn ${verified ? "observes its terminal" : "keeps the hold when exit is unverified"}`, async (t) => {
+  test(`Stop of a running Claude turn ${verified ? "observes its terminal" : "keeps the hold when exit is unverified"}`, {
+    skip: slashTmpDenied(),
+  }, async (t) => {
     const controls = { selfTest: true, verified };
     let streaming!: () => void;
     const reached = new Promise<void>((resolve) => {
@@ -1011,7 +1028,9 @@ for (const verified of [true, false])
     }
   });
 
-test("a restart with a running Claude execution holds it as unknown", async (t) => {
+test("a restart with a running Claude execution holds it as unknown", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const scripts: Script[] = [
     async function* (session) {
       yield init(sessionOf(session));
@@ -1046,7 +1065,9 @@ test("a restart with a running Claude execution holds it as unknown", async (t) 
   );
 });
 
-test("a planned restart with a running Claude execution interrupts and releases it", async (t) => {
+test("a planned restart with a running Claude execution interrupts and releases it", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const scripts: Script[] = [
     async function* (session) {
       yield init(sessionOf(session));
@@ -1079,7 +1100,9 @@ test("a planned restart with a running Claude execution interrupts and releases 
   );
 });
 
-test("a hanging Claude settings read never delays queued Codex work", async (t) => {
+test("a hanging Claude settings read never delays queued Codex work", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [], {
     selfTest: true,
     verified: true,
@@ -1110,7 +1133,9 @@ test("a hanging Claude settings read never delays queued Codex work", async (t) 
   assert.equal(run.intent(workId)?.state, "ready");
 });
 
-test("a restart before the Claude process identity was recorded reports no proof and keeps the hold", async (t) => {
+test("a restart before the Claude process identity was recorded reports no proof and keeps the hold", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(
     t,
     [
@@ -1188,7 +1213,9 @@ test("a service whose host has no claude starts with Claude not enabled, and its
   assert.deepEqual(missing.queries, []);
 });
 
-test("a started Claude runtime's supported settings and effective policy parse into the harness status", async (t) => {
+test("a started Claude runtime's supported settings and effective policy parse into the harness status", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const run = await claudeServiceRun(t, [
     async function* (session) {
       yield init(sessionOf(session));

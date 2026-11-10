@@ -24,6 +24,7 @@ import type {
 } from "../../src/standalone/codex.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
 import { QUIET_WINDOW_MS } from "../fixtures/until.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 class GatedRuntime implements Runtime {
   starts = 0;
@@ -416,7 +417,9 @@ test("eligible pending assignments dispatch once and retain request identity aft
   }
 });
 
-test("service stop cancels ready-workspace Git before scheduler settlement and preserves uncertainty", async (t) => {
+test("service stop cancels ready-workspace Git before scheduler settlement and preserves uncertainty", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-scheduler-git-drain-"));
   const controlled = controlledGit();
   const source = repository(root, "source");
