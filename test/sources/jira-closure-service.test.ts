@@ -9,8 +9,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { databaseOf } from "../fixtures/service-internals.js";
 import { jiraIssue, json } from "../fixtures/fake-jira.js";
 import { tmpdir } from "../fixtures/temp.js";
-import { prObservation, seedPrBinding } from "../fixtures/closure-delivery.js";
-import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import { seedPrBinding } from "../fixtures/closure-delivery.js";
 
 async function fixture(
   t: { after: (f: () => Promise<void> | void) => void },
@@ -289,7 +288,8 @@ test("a Jira closure under Skip waits for and names an open bound PR, then compl
   const held = (await f.read()).source;
   assert.equal(held?.closure, "held");
   assert.deepEqual(held?.closureWait, { kind: "change-request", number: 7 });
-  // No code host reads it here, so unbinding stands in for the PR closing.
+  // This fixture's PR reads fail, which also keeps the wait; unbinding stands in for the PR
+  // closing. A read that shows the PR closed is covered by the GitHub service test.
   databaseOf(f.service)
     .prepare("DELETE FROM delivery_pr_bindings WHERE taskId = ?")
     .run(f.taskId);
