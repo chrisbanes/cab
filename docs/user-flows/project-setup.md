@@ -120,6 +120,12 @@ note, **Cancel** and then **Create paused project** at every width.
   with no ready check and no leave prompt. A project created in another tab does not
   change the first-project heading until the next visit.
 
+The Task source choice in step 1 defaults to GitHub. Jira Cloud records only the
+tracker: setup collects no Jira site, credential or JQL. The ready check links to
+Task source to configure them afterwards. Repository discovery and code hosts remain
+independent; Jira setup can still link GitHub repositories, but does not link a
+GitHub Project or record a GitHub source credential.
+
 ## Recovery
 
 - The ready check is shown once, right after creation. Later, Resume is the Pause
@@ -133,3 +139,9 @@ Creation starts no execution; Resume is an explicit operator action; repository
 access is exactly the list in step 3; discovery imports nothing until a source is
 previewed and activated; the ready check's Preview and import now does so only on an
 explicit press.
+
+## Repair delivery setup
+
+A project with a lead agent shows a delivery warning on its overview when no repository is confirmed usable or a linked repository has unmet delivery needs. Follow **Fix delivery setup** to the Delivery tab. Each repository shows its grouped effective authority before the grant rows and lists which needs are met. Unmet needs offer buttons to focus the relevant Delivery control or Refresh host access; GitLab credential needs link to Settings. PR edits and branch adoption always need approval, and force-push recovery from an outside change needs approval even with an Allow grant. Set a usable credential, restore host access or fix the repository link, and apply Open PRs or edit the missing grants. A merge level also needs Through merge completion, a permitted merge method and required checks.
+
+Grant edits immediately update the effective authority and derived level. Credential edits stay unconfirmed until Save delivery and Refresh. Return to the project overview to see resolved warnings clear; Refresh rechecks host access. Saving remains available with warnings. Code-host permissions and each PR's branch rules are still checked when acting.

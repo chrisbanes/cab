@@ -2,6 +2,28 @@ import type { Database } from "../core/store.js";
 
 /** Explicit whole-row ownership and every column, refreshed from the pinned service schema. */
 export const projectDeletionInventory = {
+  inbox_lifecycle: {
+    columns: [
+      "id",
+      "taskId",
+      "kind",
+      "sourceKey",
+      "dataJson",
+      "status",
+      "revision",
+      "createdAt",
+      "resolvedAt",
+      "resolution",
+      "dismissedAt",
+      "note",
+      "obsolete",
+    ],
+    ownership: "taskId in T; KEEP runtime episodes",
+  },
+  inbox_lifecycle_receipts: {
+    columns: ["key", "taskId", "itemId", "payloadHash", "result"],
+    ownership: "taskId in T; KEEP runtime receipts",
+  },
   assignment_conversations: {
     columns: ["assignmentId", "revision"],
     ownership: "assignmentId in A",
@@ -781,6 +803,10 @@ export const projectDeletionInventory = {
   },
   execution_pre_turn_refusals: {
     columns: ["workId", "id", "origin", "stage", "failureClass", "threadId"],
+    ownership: "workId in W",
+  },
+  assignment_request_refusals: {
+    columns: ["workId", "reason"],
     ownership: "workId in W",
   },
   execution_request_refusals: {

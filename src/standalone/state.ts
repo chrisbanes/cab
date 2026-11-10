@@ -956,6 +956,24 @@ export class ExecutionState {
         )
         .get() !== undefined;
     if (this.hasTurnRequests) {
+      // Restart lineage belongs to requests, including ones that never acquired an intent.
+      const restartForeignKey = this.db
+        .prepare("PRAGMA foreign_key_list(turn_request_restarts)")
+        .get() as { table: string };
+      if (restartForeignKey.table === "execution_intents")
+        transaction(this.db, () => {
+          this.db.exec(`CREATE TABLE turn_request_restarts_next (
+          refusedWorkId TEXT PRIMARY KEY REFERENCES turn_requests(workId),
+          workId TEXT NOT NULL UNIQUE, taskId TEXT NOT NULL, key TEXT NOT NULL
+        );
+        INSERT INTO turn_request_restarts_next SELECT * FROM turn_request_restarts;
+        DROP TABLE turn_request_restarts;
+        ALTER TABLE turn_request_restarts_next RENAME TO turn_request_restarts;`);
+        });
+      this.db.exec(`CREATE TABLE IF NOT EXISTS assignment_request_refusals (
+        workId TEXT PRIMARY KEY REFERENCES turn_requests(workId),
+        reason TEXT NOT NULL
+      )`);
       this.db.exec(`INSERT OR IGNORE INTO execution_recovery_identities
         (workId, workRevision, requestSequence, processId, processStartedAt,
           bootId, threadId, turnId)
@@ -2322,6 +2340,164 @@ export class ExecutionState {
    * idle thread it bound and its turn-less recovery identity. It does not look at the
    * refusal's reasons or the work identity; admission applies again when the work is requeued.
    */
+  /** No execution/binding/capture may have existed for this request-only refusal. */
+  private uncapturedAssignmentRequest(workId: string) {
+    if (!this.hasTurnRequests) return undefined;
+    return this.db
+      .prepare(`SELECT request.workId AS id, request.taskId, request.assignmentId,
+      request.assignmentVersion, request.state, request.reason,
+      (request.taskVersion <> task.version OR request.assignmentVersion <> assignment.version
+        OR request.instructionsRevision <> assignment.instructionsRevision
+        OR request.profileRevision <> assignment.profileRevision
+        OR request.instructionsRevision <> project.instructionsRevision
+        OR request.profileRevision <> profile.version) AS stale
+      FROM turn_requests request
+      JOIN domain_tasks task ON task.id=request.taskId AND task.projectId=request.projectId
+      JOIN domain_assignments assignment ON assignment.id=request.assignmentId
+        AND assignment.taskId=request.taskId AND assignment.projectId=request.projectId
+      JOIN domain_projects project ON project.id=request.projectId
+      JOIN profiles profile ON profile.id=assignment.profileId
+      WHERE request.workId=? AND request.kind='assignment' AND request.draftTurn=0
+        AND request.state IN ('queued','held')
+        AND request.taskVersion IS NOT NULL AND request.assignmentVersion IS NOT NULL
+        AND request.instructionsRevision IS NOT NULL AND request.profileRevision IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM execution_intents WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM task_execution_bindings WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM task_work_revisions WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM task_writer_admissions WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM execution_capacity_reservations WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM execution_recovery_identities WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM execution_recovery_observations WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM execution_recovery_receipts WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM execution_stop_targets WHERE workId=request.workId)
+        AND NOT EXISTS (SELECT 1 FROM execution_pending_effects WHERE workId=request.workId AND state='pending')`)
+      .get(workId) as
+      | {
+          id: string;
+          taskId: string;
+          assignmentId: string;
+          assignmentVersion: number;
+          state: string;
+          reason: string | null;
+          stale: number;
+        }
+      | undefined;
+  }
+
+  /** Refusal history is stable after later task edits; absence of execution is checked on every read. */
+  requestOnlyRefusal(workId: string) {
+    const request = this.uncapturedAssignmentRequest(workId);
+    if (request?.state !== "held") return undefined;
+    const refusal = this.db
+      .prepare("SELECT reason FROM assignment_request_refusals WHERE workId=?")
+      .get(workId) as { reason: string } | undefined;
+    if (!refusal || request.reason !== refusal.reason) return undefined;
+    return {
+      id: request.id,
+      taskId: request.taskId,
+      assignmentId: request.assignmentId,
+      assignmentVersion: request.assignmentVersion,
+      draftTurn: 0,
+      preTurn: false,
+      refusalReason: refusal.reason,
+    };
+  }
+
+  refuseUncapturedRevision(workId: string): boolean {
+    return transaction(this.db, () => {
+      if (this.requestOnlyRefusal(workId)) return true;
+      const request = this.uncapturedAssignmentRequest(workId);
+      if (!request?.stale || !workAcceptsWrites(this.db, workId)) return false;
+      assertOwnedWorkWritable(this.db, workId);
+      const reason =
+        "Request refused: prepared against older task or assignment revisions and never ran. Start again when independent holds allow it.";
+      this.db
+        .prepare(
+          "INSERT INTO assignment_request_refusals (workId,reason) VALUES (?,?)",
+        )
+        .run(workId, reason);
+      this.db
+        .prepare(
+          "UPDATE turn_requests SET state='held',reason=? WHERE workId=?",
+        )
+        .run(reason, workId);
+      if (!this.requestOnlyRefusal(workId))
+        throw new Error("Request-only refusal proof changed");
+      return true;
+    });
+  }
+
+  /** Stale captures are terminal refusals only on the same no-admission proof used by Start again. */
+  refuseStaleRevision(workId: string, reasons: string[]): boolean {
+    if (this.refuseUncapturedRevision(workId)) return true;
+    if (!this.hasTurnRequests || !workAcceptsWrites(this.db, workId))
+      return false;
+    const stale = reasons.filter((reason) =>
+      [
+        "task-revision-changed",
+        "assignment-revision-changed",
+        "assignment-instructions-changed",
+        "assignment-profile-changed",
+        "assignment-instructions-revision-stale",
+        "assignment-profile-revision-stale",
+      ].includes(reason),
+    );
+    if (!stale.length) return false;
+    try {
+      return transaction(this.db, () => {
+        const intent = this.byWorkId(workId);
+        const request = this.db
+          .prepare(
+            "SELECT kind,draftTurn,state FROM turn_requests WHERE workId=?",
+          )
+          .get(workId) as
+          | { kind: string; draftTurn: number; state: string }
+          | undefined;
+        if (
+          !intent ||
+          !["ready", "capacity-waiting", "held"].includes(intent.state) ||
+          intent.threadId !== null ||
+          intent.turnId !== null ||
+          request?.kind !== "assignment" ||
+          request.draftTurn !== 0 ||
+          !["queued", "held"].includes(request.state) ||
+          this.db
+            .prepare(`SELECT 1 FROM execution_recovery_observations WHERE workId=?
+              UNION ALL SELECT 1 FROM execution_recovery_receipts WHERE workId=? LIMIT 1`)
+            .get(workId, workId)
+        )
+          return false;
+        const reason = `${refusedRevisionPrefix}${stale.join(", ")})`;
+        this.db
+          .prepare(
+            "UPDATE execution_intents SET state='held',reason=? WHERE workId=?",
+          )
+          .run(reason, workId);
+        this.db
+          .prepare(
+            "UPDATE turn_requests SET state='held',reason=? WHERE workId=?",
+          )
+          .run(reason, workId);
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO execution_request_refusals(workId,reason) VALUES (?,?)",
+          )
+          .run(workId, reason);
+        this.db
+          .prepare(
+            "UPDATE execution_pending_effects SET state='settled',reason='Request refused before admission' WHERE workId=? AND effectKey='assignment-result'",
+          )
+          .run(workId);
+        if (!this.refusedBeforeStart(workId))
+          throw new PreTurnRefusalUnprovenError();
+        return true;
+      });
+    } catch (error) {
+      if (error instanceof PreTurnRefusalUnprovenError) return false;
+      throw error;
+    }
+  }
+
   refusedBeforeStart(workId: string): boolean {
     return this.refusedBeforeStartRow(workId) !== undefined;
   }
@@ -2329,6 +2505,8 @@ export class ExecutionState {
   private refusedBeforeStartRow(workId: string) {
     const id = z.string().min(1).max(512).parse(workId);
     if (!this.hasTurnRequests) return undefined;
+    const uncaptured = this.requestOnlyRefusal(id);
+    if (uncaptured) return uncaptured;
     const row = this.db
       .prepare(`SELECT request.kind, request.draftTurn, request.taskId, request.projectId,
         request.assignmentId, request.taskVersion, request.assignmentVersion,
@@ -2461,6 +2639,7 @@ export class ExecutionState {
       return false;
     const row = this.refusedBeforeStartRow(workId);
     if (!row) return false;
+    if (this.requestOnlyRefusal(workId)) return false;
     // A pre-turn refusal sent no turn: a draft turn's message was never delivered, so it is
     // given back like an admission refusal. Other work was admitted and is not withdrawn.
     if (row.preTurn) return row.draftTurn === 1;
@@ -4554,6 +4733,19 @@ export class ExecutionState {
       taskId,
       alsoWorkId ?? null,
     );
+  }
+
+  /** Assignments with held writer ownership, without loading retained execution history. */
+  uncertainAssignmentsForTask(taskId: string): string[] {
+    const rows = this.db
+      .prepare(`SELECT DISTINCT binding.assignmentId
+      FROM task_writer_admissions admission
+      JOIN execution_intents intent ON intent.workId=admission.workId
+      JOIN task_execution_bindings binding ON binding.workId=intent.workId
+      JOIN execution_recovery_identities identity ON identity.workId=intent.workId
+      WHERE binding.taskId=? AND intent.state='held'`)
+      .all(taskId) as Array<{ assignmentId: string }>;
+    return rows.map((row) => row.assignmentId);
   }
 
   /**

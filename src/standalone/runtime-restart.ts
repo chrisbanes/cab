@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
@@ -33,6 +34,8 @@ export const defaultRestartClock: SupervisorClock = {
 
 /** One harness's in-memory schedule; see StandaloneService.noteRuntimeUnavailable. */
 export interface RestartState {
+  /** Distinguishes failures even if the wall clock repeats or moves backwards. */
+  episodeId: string;
   /** Attempts consumed since the last reset (0..3). */
   attempts: number;
   history: RuntimeRestartAttempt[];
@@ -56,6 +59,7 @@ export interface RestartState {
 
 export function newRestartState(): RestartState {
   return {
+    episodeId: randomUUID(),
     attempts: 0,
     history: [],
     availableAt: undefined,

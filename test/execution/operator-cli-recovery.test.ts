@@ -186,3 +186,36 @@ test("a service without recovery capabilities is unsupported after identity only
   assert.equal(r.json().error.code, "unsupported-service");
   assert.equal(fake.hits.length, seen + 1);
 });
+
+test("recovery get renders a request-only refusal separately from generations", async (t) => {
+  const w = await cliGeneration(t, "no-turn");
+  const assignment = w.s.f.service.domain().assignment(w.g.assignmentId);
+  w.s.f.seedPersistedState((db) => {
+    const reason = "Prepared against older revisions and never ran.";
+    db.prepare(`INSERT INTO turn_requests (requestKey,workId,kind,taskId,projectId,assignmentId,taskVersion,
+      assignmentVersion,instructionsRevision,profileRevision,prompt,state,reason)
+      VALUES ('uncaptured-cli','uncaptured-cli','assignment',?,?,?,1,?,?,?,'p','held',?)`).run(
+      w.g.taskId,
+      String(assignment.projectId),
+      w.g.assignmentId,
+      Number(assignment.version),
+      Number(assignment.instructionsRevision),
+      Number(assignment.profileRevision),
+      reason,
+    );
+    db.prepare(
+      "INSERT INTO assignment_request_refusals VALUES ('uncaptured-cli',?)",
+    ).run(reason);
+  });
+  const human = await w.h.run([
+    "recovery",
+    "get",
+    w.g.assignmentId,
+    "--connection",
+    "ro",
+  ]);
+  assert.equal(human.code, 0, human.err);
+  assert.match(human.out, /older revisions and never ran/);
+  assert.match(human.out, /Start again is available on the task/);
+  assert.match(human.out, new RegExp(`Task: cab task get ${w.g.taskId}`));
+});

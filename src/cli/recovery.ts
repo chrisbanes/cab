@@ -1,3 +1,4 @@
+import { requestRefusalText } from "../operator/task-restart-copy.js";
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import {
@@ -169,6 +170,13 @@ const recoveryGet: BrowseCommand = {
               : `blocked by ${d.replacement.blockedBy.join(", ")}`,
           ],
         ]),
+        ...(d.requestRefusal
+          ? [
+              "",
+              requestRefusalText(d.requestRefusal),
+              `Task: cab task get ${d.taskId}`,
+            ]
+          : []),
         ...(d.records.length
           ? d.records.flatMap(recordLines)
           : ["", "No recovery generations are recorded for this assignment."]),

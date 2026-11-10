@@ -3,6 +3,7 @@ import {
   starterOptionCopy,
 } from "../../web/src/setup-model.js";
 import type { Workspace } from "../../src/operator/contracts.js";
+import { githubReadinessSchema } from "../../src/core/github-source-contracts.js";
 import { sourceCredentialExplanation } from "../../src/standalone/github-source-credential.js";
 import {
   commandNetworkAppliesNote,
@@ -64,6 +65,8 @@ import {
 import {
   holdPills,
   projectStateSummary,
+  projectTab,
+  projectTabs,
   recoveryRecordRuns,
   readinessNextStep,
   repositoryLines,
@@ -80,6 +83,37 @@ import {
 import { clockLabel } from "../../web/src/presentation.js";
 
 const id = () => randomUUID();
+test("Task source is canonical and old GitHub links keep their destination", () => {
+  for (const query of [
+    "?tab=source",
+    "?tab=github",
+    "?tab=github&tracker=jira",
+  ])
+    assert.equal(projectTab(query), "source");
+  assert.deepEqual(
+    projectTabs.find((t) => t.id === "source"),
+    { id: "source", label: "Task source" },
+  );
+});
+
+test("settings summaries name the saved tracker for active and inactive selections", () => {
+  for (const jira of [false, true])
+    for (const active of [false, true]) {
+      const c = config();
+      if (jira) c.source.tracker = "jira";
+      c.source.selections = [
+        { id: "S-1", kind: jira ? "jql" : "search", descriptor: null, active },
+      ];
+      const state = projectStateSummary(c, null, [], () => "Project").state;
+      assert.ok(
+        state.some((line) =>
+          line.startsWith(
+            `${jira ? "Jira" : "GitHub"} S-1 ${active ? "active" : "inactive"}`,
+          ),
+        ),
+      );
+    }
+});
 const mira = id(),
   jonas = id(),
   worker = id(),
@@ -851,6 +885,57 @@ test("a new GitLab link names its project path and reads like the CLI preview; a
   );
 });
 
+test("switching from Jira initializes only GitHub source data", () => {
+  for (const conditions of [
+    [
+      {
+        kind: "status" as const,
+        operator: "in" as const,
+        statusIds: ["10001"],
+      },
+    ],
+    [
+      {
+        kind: "select-field" as const,
+        operator: "in" as const,
+        fieldId: "customfield_10010",
+        optionIds: ["20"],
+      },
+    ],
+  ]) {
+    const source = {
+      ...config().source,
+      tracker: "jira" as const,
+      selections: [],
+      readiness: { kind: "rule" as const, mode: "any" as const, conditions },
+    };
+    const loaded = sourceRowsFrom(source);
+    const command = sourceCommand(projectId, {
+      expectedVersion: String(source.version),
+      selections: JSON.stringify(loaded.selections),
+      conditions: JSON.stringify(loaded.conditions),
+      mode: loaded.mode,
+      closedIssues: loaded.closedIssues,
+      preserveReadiness: loaded.preserveReadiness,
+    });
+    assert.deepEqual(loaded.conditions, []);
+    assert.equal(loaded.preserveReadiness, false);
+    assert.equal(command.readiness, null);
+    assert.equal(
+      githubReadinessSchema.nullable().safeParse(command.readiness).success,
+      true,
+    );
+  }
+  assert.equal(
+    sourceRowsFrom({
+      ...config().source,
+      tracker: "jira",
+      readiness: { kind: "unavailable" },
+    }).preserveReadiness,
+    false,
+  );
+});
+
 test("no readiness rule loads no condition, saves null and never clears an unavailable rule silently", () => {
   const c = config();
   const none = { ...c.source, readiness: { kind: "none" as const } };
@@ -981,7 +1066,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
         { label: "Settings", href: "/settings" },
         { label: "Projects" },
         { label: "Atlas", href: `/projects/${projectId}/settings` },
-        { label: "GitHub source" },
+        { label: "Task source" },
       ],
     },
   );
@@ -1041,7 +1126,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   );
   assert.equal(
     unusable.next,
-    "Set or change the credential in GitHub source settings, then preview this source version.",
+    "Set or change the credential in Task source settings, then preview this source version.",
   );
   assert.deepEqual(
     holdPills({

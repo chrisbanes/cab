@@ -1,5 +1,5 @@
 import { attentionNext } from "../../src/operator/attention.js";
-import { unmetReason } from "../../src/operator/readiness-text.js";
+import { ruleText, unmetReason } from "../../src/operator/readiness-text.js";
 import {
   taskListPageSchema,
   uuid,
@@ -34,6 +34,15 @@ export function columnCounts(tasks: readonly TaskListSummary[]) {
   >;
   for (const task of tasks) counts[taskColumn(task)]++;
   return counts;
+}
+export function readinessHiddenCounts(tasks: readonly TaskListSummary[]) {
+  const counts = columnCounts(tasks.filter((task) => !task.ready));
+  return {
+    drafts: counts.Draft,
+    other: Object.entries(counts)
+      .filter(([column]) => column !== "Draft")
+      .reduce((total, [, count]) => total + count, 0),
+  };
 }
 export interface TaskAggregate {
   tasks: TaskListSummary[];
@@ -126,6 +135,13 @@ export function parseTaskFilters(search: string): TaskFilters {
     view: p.get("view") === "board" ? "board" : "list",
   };
 }
+/** Resolve the task filters the address represents, including a bare remembered visit. */
+export function taskFiltersForPath(path: string, bareDefaults = false) {
+  const query = path.includes("?") ? path.slice(path.indexOf("?")) : "";
+  return query || bareDefaults
+    ? parseTaskFilters(query)
+    : parseTaskFilters(rememberedTaskQuery());
+}
 export function taskFiltersUrl(path: string, filters: TaskFilters) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters))
@@ -181,8 +197,8 @@ export const reasonLabels = {
   "local-dependency": "Waiting on a task dependency",
   "stacked-blocker-unpublished": "Waiting for the blocker's change request",
   "stacked-blocker-unknown": "Blocker's change request unconfirmed",
-  "imported-blockers-unknown": "GitHub dependencies unavailable",
-  "imported-blockers-blocked": "Waiting on a GitHub dependency",
+  "imported-blockers-unknown": "Source dependencies unavailable",
+  "imported-blockers-blocked": "Waiting on a source dependency",
   "source-held": "Source requires review",
   "admission-blocked": "Waiting to start",
 } satisfies Record<string, string>;
@@ -234,9 +250,9 @@ export function taskReasonItems(task: TaskListSummary): TaskReason[] {
       ),
   ];
   const first = (text: string) => reasons.unshift({ text });
-  if (task.source?.closure === "held") first("Held · closed on GitHub");
+  if (task.source?.closure === "held") first("Held · closed at source");
   if (task.source?.closure === "completed")
-    first("Closed on GitHub, not delivered by cab");
+    first("Closed at source, not delivered by cab");
   if (task.source?.closure === "unattributed")
     first("Held · closure not attributed to cab");
   if (task.execution.holds.stop) first("Stop requested; effects may continue");
@@ -250,6 +266,59 @@ export function taskReasonItems(task: TaskListSummary): TaskReason[] {
 }
 export const taskReasons = (task: TaskListSummary) =>
   taskReasonItems(task).map((r) => r.text);
+export const taskLeadLabel = (task: TaskListSummary) =>
+  task.lead !== null &&
+  task.project.leadProfileId !== null &&
+  task.lead.profileId === task.project.leadProfileId
+    ? null
+    : (task.lead?.name ??
+      (task.lead ? "Name unavailable" : "No lead configured"));
+/** Identical readiness rules are shown once for the current result set. */
+export function sharedTaskReasons(tasks: readonly TaskListSummary[]) {
+  const counts = new Map<string, number>();
+  const readinessRules = new Map<string, number>();
+  const unmetReasons = new Map<string, number>();
+  const sharedReason = (reason: string) =>
+    reason === reasonLabels["task-unready"] ||
+    reason === reasonLabels["local-dependency"] ||
+    reason === reasonLabels["stacked-blocker-unpublished"] ||
+    reason === reasonLabels["stacked-blocker-unknown"] ||
+    reason === reasonLabels["imported-blockers-unknown"];
+  for (const task of tasks) {
+    const rule = task.source?.readiness.rule;
+    if (
+      !task.ready &&
+      task.state !== "done" &&
+      task.state !== "cancelled" &&
+      rule?.kind === "rule"
+    ) {
+      const text = `Readiness rule: ${ruleText(rule)}`;
+      readinessRules.set(text, (readinessRules.get(text) ?? 0) + 1);
+    }
+    for (const reason of taskReasonItems(task)) {
+      if (reason.text.startsWith("Not Ready:"))
+        unmetReasons.set(reason.text, (unmetReasons.get(reason.text) ?? 0) + 1);
+      else if (sharedReason(reason.text))
+        counts.set(reason.text, (counts.get(reason.text) ?? 0) + 1);
+    }
+  }
+  // A subset summary cannot identify which rows have a dependency hold.
+  for (const [reason, count] of counts)
+    if (reason !== reasonLabels["task-unready"] && count !== tasks.length)
+      counts.delete(reason);
+  // Different unmet conditions are exceptions; keep them beside their own task.
+  for (const reasons of [readinessRules, unmetReasons]) {
+    if (reasons.size === 1) {
+      const shared = reasons.entries().next().value;
+      if (shared) counts.set(...shared);
+    }
+  }
+  return [...counts].filter(([, count]) => count > 1);
+}
+export const taskVisibilityText = (visible: number, eligible: number) =>
+  `${visible} Ready of ${eligible} eligible tasks`;
+export const sharedTaskReasonText = (count: number, reason: string) =>
+  `${count} tasks share this readiness/dependency reason: ${reason}.`;
 /**
  * Capacity is stated once for the visible work, not on every task it holds: a sentence when an open
  * task waits on the global limit, or else on a project's, otherwise null.
@@ -295,12 +364,7 @@ export function taskRouteSubtitle(
   if (kind === "overview")
     return "Decisions first. Work and completed results stay separate.";
   if (!tasks) return undefined;
-  const scoped = tasks.filter(
-    (t) =>
-      (kind === "tasks" || t.projectId === projectId) &&
-      isActiveColumn(taskColumn(t)),
-  );
-  const count = plural(scoped.length, "active task");
+  const count = `${plural(tasks.length, "task")} shown`;
   if (kind === "tasks")
     return `${count} · ${plural(workspace?.projects.length ?? new Set(tasks.map((t) => t.projectId)).size, "project")}`;
   const leadId = workspace?.projects.find(

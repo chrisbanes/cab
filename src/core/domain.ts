@@ -167,6 +167,7 @@ const commandSchema = z.discriminatedUnion("type", [
         .optional(),
       instructions: prose.optional(),
       repositories: setupRepositoriesSchema.optional(),
+      tracker: z.enum(["github", "jira"]).optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
       // Guided setup's default: the detected GitHub CLI login, stated before creation.
       sourceCredentialRef: z.literal("gh:github.com").optional(),
@@ -182,6 +183,15 @@ const commandSchema = z.discriminatedUnion("type", [
       {
         path: ["deliveryDefault"],
         message: "A delivery default needs repositories",
+      },
+    )
+    .refine(
+      (command) =>
+        command.tracker !== "jira" ||
+        (!command.githubProject && !command.sourceCredentialRef),
+      {
+        path: ["tracker"],
+        message: "Jira setup cannot configure a GitHub task source",
       },
     ),
   projectDeleteCommandSchema,
@@ -714,6 +724,11 @@ export class DomainStore {
     private readonly onChange?: () => void,
     private readonly verifyRepository: RepositoryVerifier = unconfiguredVerifier,
     private readonly lifecycleFacts?: ProjectLifecycleFacts,
+    private readonly stackedBlockerCleared?: (
+      taskId: string,
+      blockerTaskId: string,
+      version: number,
+    ) => void,
   ) {}
 
   /** Credential references a command selected but has not recorded yet; see select. */
@@ -2457,13 +2472,27 @@ export class DomainStore {
       ? edge
       : null;
   }
+  /** The selected edge's evidence, independent of other dependency holds. */
+  stackedBlockerGate(taskId: string) {
+    const edge = this.activeStackedDependency(taskId);
+    return edge
+      ? this.blockerGate(edge.blockerTaskId, edge.repositoryId, true)
+      : null;
+  }
   /** The selected failed edge remains actionable even while independent dependencies also hold. */
   failedStackedBlocker(taskId: string): boolean {
-    const edge = this.activeStackedDependency(taskId);
-    return (
-      !!edge &&
-      this.blockerGate(edge.blockerTaskId, edge.repositoryId, true) === "failed"
-    );
+    return this.stackedBlockerGate(taskId) === "failed";
+  }
+  failedStackedDependents(blockerTaskId: string): string[] {
+    return this.tasks(String(this.task(blockerTaskId).projectId))
+      .filter(
+        (task) =>
+          task.state === "open" &&
+          this.activeStackedDependency(String(task.id))?.blockerTaskId ===
+            blockerTaskId &&
+          this.failedStackedBlocker(String(task.id)),
+      )
+      .map((task) => String(task.id));
   }
 
   /** Whether the task stacks or waits on a single blocker, and why; null when that does not apply. */
@@ -3199,12 +3228,15 @@ export class DomainStore {
           )
           .run(
             command.projectId,
-            githubIssueTracker.provider,
-            githubIssueTracker.instance,
-            command.sourceCredentialRef ?? null,
+            command.tracker === "jira" ? "jira" : githubIssueTracker.provider,
+            // An empty instance records the chosen tracker before a Jira site is configured.
+            command.tracker === "jira" ? "" : githubIssueTracker.instance,
+            command.tracker === "jira"
+              ? null
+              : (command.sourceCredentialRef ?? null),
             // A linked GitHub Project is an inactive source: nothing is active until preview.
             JSON.stringify(
-              command.githubProject
+              command.tracker !== "jira" && command.githubProject
                 ? [
                     {
                       id: "S-1",
@@ -3431,6 +3463,10 @@ export class DomainStore {
         this.preflightTaskConfigure(command);
         const current = this.task(command.taskId);
         this.version(current, command.expectedVersion);
+        const failedDependents =
+          command.state !== undefined
+            ? this.failedStackedDependents(command.taskId)
+            : [];
         if (command.title !== undefined)
           this.db
             .prepare("UPDATE tasks SET title = ? WHERE id = ?")
@@ -3452,6 +3488,13 @@ export class DomainStore {
           this.db
             .prepare("DELETE FROM source_completions WHERE taskId = ?")
             .run(command.taskId);
+        for (const taskId of failedDependents)
+          if (!this.failedStackedBlocker(taskId))
+            this.stackedBlockerCleared?.(
+              taskId,
+              command.taskId,
+              Number(current.version) + 1,
+            );
         return this.task(command.taskId);
       }
       case "profile.create": {

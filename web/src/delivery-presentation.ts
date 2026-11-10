@@ -5,7 +5,14 @@ import {
   statusMappingActionNote,
 } from "../../src/operator/status-mapping-copy.js";
 import type { StatusMappingEvent } from "../../src/core/status-mapping-contracts.js";
-import { deliveryActionLabel } from "../../src/operator/delivery-action-copy.js";
+import {
+  deliveryActionLabel,
+  grantSentence,
+} from "../../src/operator/delivery-action-copy.js";
+import type {
+  DeliveryPolicyValues,
+  RepositoryDeliveryRead,
+} from "./delivery-policy-draft.js";
 import { codeSentence } from "./presentation.js";
 
 export type CodeHost = "github" | "gitlab";
@@ -37,19 +44,23 @@ export const deliveryBlockerSentence = (code: string, codeHost?: CodeHost) =>
     "Delivery is waiting on a condition this version can't describe.",
   );
 
-const mergeBlockerSentences: Record<string, string> = {
+const mergeBlockerSentences = (
+  codeHost: CodeHost | undefined,
+): Record<string, string> => ({
   "no-required-checks":
     "No required checks: neither the code host nor cab requires a check, so the merge is held.",
   "merge-method-not-configured":
     "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
-  "pr-base-change-held":
-    "Base changed: the code host moved this pull request to a base cab has not accepted, so its actions are held until it is restored or the branch it was stacked on merges.",
-};
+  "pr-base-change-held": `Base changed: ${codeHostName(codeHost)} moved this ${codeHost === "gitlab" ? "merge request" : "pull request"} to a base cab has not accepted, so its actions are held until it is restored or the branch it was stacked on merges.`,
+});
 /** A merge-gate code as a sentence when it has one; any other code is shown as it is. */
-export const mergeBlockerText = (code: string) =>
-  Object.hasOwn(mergeBlockerSentences, code)
-    ? mergeBlockerSentences[code]!
+export const mergeBlockerText = (code: string, codeHost?: CodeHost) =>
+  Object.hasOwn(mergeBlockerSentences(codeHost), code)
+    ? mergeBlockerSentences(codeHost)[code]!
     : code;
+
+export const reviewHeadComparison = (matches: boolean, codeHost?: CodeHost) =>
+  `${matches ? "Matches" : "Checked an earlier head than"} the current ${codeHost === "gitlab" ? "merge request" : "pull request"} head`;
 
 /** What a code-host action acts on, named for its host; null for an action that is not one. */
 export function codeHostActionLabel(
@@ -263,4 +274,243 @@ export function deliveryCredentialSummary(
   if (status.usable)
     return `${kind}${status.gh.login && status.source === "gh" ? ` · @${status.gh.login}` : ""} · usable`;
   return `${kind} · unavailable: ${(status.reason && deliveryCredentialReasons[status.reason]) ?? "status unavailable"}.`;
+}
+
+export function repositoryCredentialState(
+  saved: {
+    credentialConfigured: boolean;
+    credential?: { usable: boolean } | undefined;
+  },
+  host: CodeHost,
+  read: RepositoryDeliveryRead | undefined,
+  intent: "preserve" | "clear" | "set" = "preserve",
+): "usable" | "unusable" | "unknown" {
+  if (host === "gitlab")
+    return read?.codeHost.status === "live"
+      ? "usable"
+      : read?.codeHost.reason === "credential-missing"
+        ? "unusable"
+        : "unknown";
+  if (intent === "clear") return "unusable";
+  if (intent === "set") return "unknown";
+  return !saved.credentialConfigured || saved.credential?.usable === false
+    ? "unusable"
+    : saved.credential?.usable
+      ? "usable"
+      : "unknown";
+}
+
+/** Setup guidance only: the actual PR's permissions and branch rules remain runtime gates. */
+export function repositoryDeliveryNeeds(
+  policy: DeliveryPolicyValues,
+  repositoryId: string,
+  host: CodeHost,
+  credential: "usable" | "unusable" | "unknown",
+  read: RepositoryDeliveryRead | undefined,
+) {
+  const has = (action: string) =>
+    policy.grants.some(
+      (g) =>
+        "action" in g && g.repositoryId === repositoryId && g.action === action,
+    );
+  const needs: {
+    met: boolean;
+    text: string;
+    fix:
+      | "credential"
+      | "settings"
+      | "refresh"
+      | "grants"
+      | "mode"
+      | "method"
+      | "checks";
+  }[] = [
+    {
+      met: credential === "usable",
+      fix: host === "gitlab" ? "settings" : "credential",
+      text:
+        credential === "usable"
+          ? "Delivery credential is usable; write permissions are checked when acting."
+          : credential === "unusable"
+            ? `Delivery credential is missing or unusable. ${host === "gitlab" ? "Configure the installation's GitLab credential in Settings." : "Set a usable credential in Delivery."}`
+            : "Delivery credential usability is unconfirmed. Save credential changes and Refresh to check it.",
+    },
+    {
+      met: read?.codeHost.status === "live",
+      fix: "refresh",
+      text:
+        read?.codeHost.status === "live"
+          ? `${codeHostName(host)} requirements were read. Branch rules and permissions are checked again when acting.`
+          : `${codeHostName(host)} requirements are unavailable${read?.codeHost.status === "unavailable" ? ` (${requirementUnavailable[read.codeHost.reason]})` : ""}. Check the credential, repository link and host access, then Refresh.`,
+    },
+  ];
+  for (const [action, label] of [
+    ["branch.push", "push branches"],
+    ["pr.create", "open pull requests"],
+  ] as const)
+    needs.push({
+      met: has(action),
+      fix: policy.grants.some((g) => "savedRow" in g) ? "refresh" : "grants",
+      text: has(action)
+        ? `Grant to ${label} is present.`
+        : policy.grants.some((g) => "savedRow" in g)
+          ? `Grant to ${label} is unconfirmed. Refresh with access to the unavailable grant details.`
+          : `Cannot ${label}. Apply Open PRs or add the missing grant below.`,
+    });
+  if (has("pr.merge")) {
+    needs.push({
+      met: policy.mode === "through-merge",
+      fix: "mode",
+      text:
+        policy.mode === "through-merge"
+          ? "Completion mode permits merging."
+          : "Merging is refused in Reviewable PR mode. Change Completion mode to Through merge.",
+    });
+    const row = policy.repositories?.find(
+      (r) => r.repositoryId === repositoryId,
+    );
+    const method = row?.mergeMethod;
+    needs.push({
+      met: Boolean(
+        method &&
+          read?.codeHost.status === "live" &&
+          read.codeHost.allowedMethods.includes(method),
+      ),
+      fix:
+        !row || (method && read?.codeHost.status !== "live")
+          ? "refresh"
+          : "method",
+      text: !method
+        ? row
+          ? "Choose a merge method below before cab can merge."
+          : "Repository merge settings are unavailable. Refresh or update the service to configure a merge method."
+        : read?.codeHost.status !== "live"
+          ? "Allowed merge methods are unconfirmed. Restore host access and Refresh."
+          : !read.codeHost.allowedMethods.includes(method)
+            ? `${mergeMethodNotAllowedWarning(method)} Choose an allowed method below or change the host rules.`
+            : "The selected merge method is allowed on the default branch; other branches follow their own rules.",
+    });
+    const checks = row?.additionalChecks ?? policy.requiredChecks;
+    const configuredCheck = checks.some(
+      (c) => "savedRow" in c || ("name" in c && Boolean(c.name.trim())),
+    );
+    const checksMet =
+      configuredCheck ||
+      Boolean(read?.codeHost.status === "live" && read.codeHost.checks.length);
+    needs.push({
+      met: checksMet,
+      fix: row ? "checks" : "refresh",
+      text: checksMet
+        ? "Required checks are configured; each merge must pass its actual gate."
+        : read?.codeHost.status === "live"
+          ? noRequiredChecksWarning(host)
+          : "Required checks are unconfirmed. Add an additional required check below or restore host access and Refresh.",
+    });
+  }
+  if (policy.grants.some((g) => "savedRow" in g))
+    needs.push({
+      met: false,
+      fix: "refresh",
+      text: "Some grants are unavailable. Refresh with access to their details before relying on this summary.",
+    });
+  return needs;
+}
+
+/** First matching grant wins at runtime; retain each Project scope's sentence. */
+export function repositoryAuthorityGroups(
+  grants: DeliveryPolicyValues["grants"],
+  repositoryId: string,
+  credential: "usable" | "unusable" | "unknown",
+  sentences?: readonly (string | undefined)[],
+) {
+  const seen = new Set<string>();
+  const opaque = grants.some((g) => "savedRow" in g);
+  return (["Branch", "PR", "Merge", "Project/status"] as const).map((group) => {
+    // An opaque row may precede any visible grant, so effective precedence is unknown.
+    if (opaque)
+      return {
+        group,
+        lines: [
+          "Effective authority is unconfirmed because some grants are unavailable. Refresh with access to their details.",
+        ],
+      };
+    const lines = grants.flatMap((g, i) => {
+      if ("savedRow" in g || g.repositoryId !== repositoryId) return [];
+      const target = g.action.startsWith("branch.")
+        ? "Branch"
+        : g.action === "pr.merge"
+          ? "Merge"
+          : g.action.startsWith("pr.")
+            ? "PR"
+            : g.action.startsWith("project.")
+              ? "Project/status"
+              : null;
+      if (target !== group) return [];
+      const identity = JSON.stringify([
+        g.action,
+        ...(g.action.startsWith("project.")
+          ? [
+              g.projectNodeId,
+              g.action === "project.field" ? g.fieldNodeId : null,
+            ]
+          : []),
+      ]);
+      const prefix =
+        credential === "usable"
+          ? ""
+          : credential === "unusable"
+            ? "Unavailable until credential is fixed · "
+            : "Credential unconfirmed · ";
+      if (g.action === "project.field") {
+        if (!g.projectNodeId || !g.fieldNodeId || !g.optionNodeIds?.length)
+          return [
+            "Incomplete Project field grant. Choose its Project, field and options below.",
+          ];
+        // The first matching grant wins for each option, including overlapping scopes.
+        const options = g.optionNodeIds.filter((option) => {
+          const key = JSON.stringify([identity, option]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        if (!options.length) return [];
+        const sentence =
+          options.length === g.optionNodeIds.length
+            ? sentences?.[i]
+            : undefined;
+        return [
+          `${prefix}${sentence ?? grantSentence({ ...g, optionNodeIds: options })}`,
+        ];
+      }
+      if (seen.has(identity)) return [];
+      seen.add(identity);
+      const alwaysApproval =
+        g.action === "branch.adopt" || g.action === "pr.edit";
+      const configuredLine = sentences?.[i] ?? grantSentence(g);
+      const line = alwaysApproval
+        ? configuredLine.replace(/^Allow:/, "Require approval:")
+        : configuredLine;
+      return [
+        g.action === "project.item.add"
+          ? `${line} (operator publication only).`
+          : `${prefix}${line}${
+              alwaysApproval
+                ? " (always requires approval)"
+                : g.action === "branch.force-push"
+                  ? " (recovery from an outside change always requires approval)"
+                  : ""
+            }`,
+      ];
+    });
+    return {
+      group,
+      lines: lines.length
+        ? lines
+        : [
+            group === "Project/status"
+              ? "No Project grants. Status mapping has separate authority; see its summary above."
+              : "No grants.",
+          ],
+    };
+  });
 }

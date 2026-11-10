@@ -163,7 +163,7 @@ test("sources and delivery journey through the CLI, read back as the operator UI
   assert.equal(blocked.code, 4, blocked.out);
   assert.match(
     blocked.json().error.message,
-    /GitHub source credential required.*GitHub source settings/,
+    /GitHub source credential required.*Task source settings/,
   );
   assert.equal((await configuration()).source.selections[0].active, false);
   const observations = await session("/api/operator/source-observations");

@@ -376,7 +376,7 @@ for (const engine of [
       for (const hold of ["Writer ownership", "Capacity", "Uncertainty"])
         await execution.getByText(hold, { exact: true }).waitFor();
       await execution
-        .getByText(/holds are still recorded; recovery is required/)
+        .getByText("Uncertain or held; recovery is required", { exact: true })
         .waitFor();
       assert.equal(
         await execution.getByText("Operator Stop", { exact: true }).count(),

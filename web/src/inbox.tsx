@@ -1,3 +1,5 @@
+import { Textarea } from "./ui/textarea.js";
+import type { OperatorCommand } from "../../src/operator/contracts.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Card } from "./ui/card.js";
 import {
@@ -79,7 +81,11 @@ export interface InboxHeader {
     action?: ReactNode;
   };
 }
-export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
+export async function loadInbox(
+  client: OperatorClient,
+  signal: AbortSignal,
+  status = "actionable",
+) {
   // A notification that arrives while this read is in flight is newer than what it saw.
   const startedAt = Date.now();
   const items: InboxItem[] = [];
@@ -87,7 +93,7 @@ export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
   const seen = new Set<string>();
   for (;;) {
     const page: import("zod").infer<typeof inboxReadSchema> = await client.read(
-      `/api/operator/inbox${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/api/operator/inbox${status === "actionable" && !cursor ? "" : `?${new URLSearchParams({ ...(status === "actionable" ? {} : { status }), ...(cursor ? { cursor } : {}) })}`}`,
       inboxReadSchema,
       signal,
     );
@@ -95,7 +101,8 @@ export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
     if (!page.data.nextCursor) {
       // Both callers (the shell's summary and this route) pass through here, so a notification
       // whose request is no longer waiting closes after whichever read happens.
-      void closeResolvedNotifications(items, page.data.complete, startedAt);
+      if (status === "actionable")
+        void closeResolvedNotifications(items, page.data.complete, startedAt);
       return {
         items,
         complete: page.data.complete,
@@ -138,12 +145,26 @@ export function Inbox({
   /** On a phone the header has no Refresh, so the filter row ends with it. */
   queueRefresh?: { onRefresh: () => void; refreshing: boolean } | undefined;
 }) {
+  const requestedStatus =
+    new URLSearchParams(path.split("?")[1] ?? "").get("status") ?? "actionable";
+  const status = ["actionable", "resolved", "dismissed"].includes(
+    requestedStatus,
+  )
+    ? requestedStatus
+    : "actionable";
   const loader = useCallback(
-    (signal: AbortSignal) => loadInbox(client, signal),
-    [client],
+    async (signal: AbortSignal) => {
+      const actionable = await loadInbox(client, signal);
+      const view =
+        status === "actionable"
+          ? actionable
+          : await loadInbox(client, signal, status);
+      return { ...view, actionable, viewStatus: status };
+    },
+    [client, status],
   );
   const resource = useOperatorResource(
-      `${session.csrfToken}:action-inbox`,
+      `${session.csrfToken}:action-inbox:${status}`,
       loader,
     ),
     poll = useRef(resource.poll);
@@ -152,8 +173,12 @@ export function Inbox({
     const timer = setInterval(() => poll.current(), 15000);
     return () => clearInterval(timer);
   }, []);
-  const count = inboxSummaryOf(resource.state)?.count,
-    projectCount = inboxSummaryOf(resource.state)?.projects;
+  const actionableSummary = inboxSummaryOf({
+    data: resource.state.data?.actionable ?? null,
+    error: resource.state.error,
+  });
+  const count = actionableSummary?.count,
+    projectCount = actionableSummary?.projects;
   useEffect(() => {
     onSummary?.(
       count === undefined || projectCount === undefined
@@ -235,7 +260,12 @@ export function Inbox({
   // Open the first request once per visit when the first fresh read arrives on a wide layout.
   const autoDone = useRef(false);
   useEffect(() => {
-    if (autoDone.current || resource.state.status !== "fresh") return;
+    if (
+      autoDone.current ||
+      resource.state.status !== "fresh" ||
+      resource.state.data?.viewStatus !== status
+    )
+      return;
     autoDone.current = true;
     const first = rows[0];
     if (!single && !urlId && !state.selected && !state.auto && first) {
@@ -276,15 +306,17 @@ export function Inbox({
         questions.recordedHere(selected.taskId, selected.id),
     );
   const subtitle =
-    count === undefined || projectCount === undefined
-      ? undefined
-      : leftQueue && recorded
-        ? `${count} unresolved · confirmation retained`
-        : count === 0
-          ? "0 unresolved across your projects"
-          : projectCount === 0
-            ? `${count} unresolved`
-            : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
+    status !== "actionable"
+      ? `${resource.state.data?.items.length ?? 0} ${status} · ${count ?? "—"} actionable`
+      : count === undefined || projectCount === undefined
+        ? undefined
+        : leftQueue && recorded
+          ? `${count} unresolved · confirmation retained`
+          : count === 0
+            ? "0 unresolved across your projects"
+            : projectCount === 0
+              ? `${count} unresolved`
+              : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
   const detailTitle = single && selected ? heading : null,
     detailSubtitle =
       (selected?.kind === "runtime" ? null : selected?.projectName) ??
@@ -352,7 +384,10 @@ export function Inbox({
         rows.findIndex((r) => r.id === item.id),
       ),
     };
-    navigate(inboxSelectionHref(item));
+    navigate(
+      inboxSelectionHref(item) +
+        (status === "actionable" ? "" : `&status=${status}`),
+    );
   };
   /** After a recorded answer: leave the confirmation without opening another request. */
   const back = () => {
@@ -460,6 +495,21 @@ export function Inbox({
           )}
           <div className="inbox-filters">
             <NativeSelect
+              aria-label="Inbox status"
+              value={status}
+              onChange={(e) => {
+                state.clear();
+                autoDone.current = false;
+                navigate(
+                  `/inbox${e.target.value === "actionable" ? "" : `?status=${e.target.value}`}`,
+                );
+              }}
+            >
+              <option value="actionable">Actionable</option>
+              <option value="resolved">Resolved</option>
+              <option value="dismissed">Dismissed</option>
+            </NativeSelect>
+            <NativeSelect
               aria-label="Project"
               value={state.project}
               onChange={(e) => {
@@ -564,8 +614,9 @@ export function Inbox({
           )}
         </div>
         <p className="inbox-caption">
-          Only items that need your decision or intervention. Routine progress
-          stays in task views.
+          {status === "actionable"
+            ? "Only items that need your decision or intervention. Routine progress stays in task views."
+            : "Inbox history. Dismissed requests do not block completion; no answer, approval or execution release is implied."}
         </p>
       </div>
       <section className="inbox-detail" aria-label="Selected request">
@@ -648,7 +699,26 @@ export function Inbox({
                 </div>
               )}
               {!isQuestion && meta}
-              {isQuestion && taskId ? (
+              {selected && (
+                <InboxVisibility
+                  key={`${selected.id}:${selected.lifecycle?.status}`}
+                  item={selected}
+                  client={client}
+                  session={session}
+                  onChanged={resource.refresh}
+                />
+              )}
+              {selected?.lifecycle &&
+              selected.lifecycle.status !== "actionable" ? (
+                <p>
+                  {selected.lifecycle.status === "resolved"
+                    ? "This request is resolved and cannot be answered or restored."
+                    : selected.kind === "question" ||
+                        selected.kind === "approval"
+                      ? "Dismissed. This request remains unanswered but is no longer required for completion."
+                      : "Dismissed from Inbox. The underlying condition is unchanged."}
+                </p>
+              ) : isQuestion && taskId ? (
                 <QuestionResponse
                   client={client}
                   session={session}
@@ -701,5 +771,102 @@ export function Inbox({
         />
       )}
     </section>
+  );
+}
+
+function InboxVisibility({
+  item,
+  client,
+  session,
+  onChanged,
+}: {
+  item: InboxItem;
+  client: OperatorClient;
+  session: Session;
+  onChanged: () => void;
+}) {
+  const [note, setNote] = useState(""),
+    [pending, setPending] = useState<OperatorCommand | null>(null),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false),
+    [recorded, setRecorded] = useState(false);
+  const lifecycle = item.lifecycle;
+  if (!lifecycle) return null;
+  const action = lifecycle.status === "dismissed" ? "restore" : "dismiss";
+  const run = async () => {
+    const command = pending ?? {
+      type: `inbox.${action}` as "inbox.dismiss" | "inbox.restore",
+      key: crypto.randomUUID(),
+      itemId: item.id,
+      expectedRevision: lifecycle.revision,
+      ...(action === "dismiss" && note ? { note } : {}),
+    };
+    setPending(command);
+    setBusy(true);
+    try {
+      const result = await client.command(command, session.csrfToken);
+      if (result.state === "recorded") {
+        setRecorded(true);
+        setPending(null);
+        setMessage(
+          action === "dismiss"
+            ? item.kind === "question" || item.kind === "approval"
+              ? "Dismissed. No answer or agent input was sent. This request is no longer required for completion."
+              : "Dismissed. Only Inbox visibility changed; the underlying condition is unchanged."
+            : item.kind === "question" || item.kind === "approval"
+              ? "Restored. No work was started. A pending request is required for completion again."
+              : "Restored. No work was started.",
+        );
+        onChanged();
+      } else {
+        setMessage(
+          result.state === "unknown"
+            ? "Reply unavailable. Retry to reconcile the same request."
+            : "The item changed or this action is unavailable. Refresh Inbox.",
+        );
+        if (result.state !== "unknown") setPending(null);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="inbox-lifecycle">
+      <p>
+        {lifecycle.status === "resolved"
+          ? lifecycle.resolution
+          : lifecycle.status === "dismissed"
+            ? `Dismissed ${lifecycle.dismissedAt === null ? "" : new Date(lifecycle.dismissedAt).toLocaleString()}`
+            : null}
+      </p>
+      {lifecycle.note && <p>{lifecycle.note}</p>}
+      {message && <p role="status">{message}</p>}
+      {!recorded &&
+        lifecycle.status !== "resolved" &&
+        (action === "restore" || item.dismissible) && (
+          <>
+            {action === "dismiss" && (
+              <Textarea
+                aria-label="Dismissal note (optional)"
+                maxLength={4096}
+                value={note}
+                disabled={busy || !!pending}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            )}
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void run()}
+            >
+              {pending
+                ? "Retry visibility change"
+                : action === "dismiss"
+                  ? "Dismiss"
+                  : "Restore"}
+            </Button>
+          </>
+        )}
+    </div>
   );
 }

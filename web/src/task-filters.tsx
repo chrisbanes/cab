@@ -4,7 +4,12 @@ import { workspaceLabels } from "../../src/operator/project-labels.js";
 import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
-import { activeFilterCount, columns, type TaskFilters } from "./tasks.js";
+import {
+  activeFilterCount,
+  columns,
+  taskVisibilityText,
+  type TaskFilters,
+} from "./tasks.js";
 
 /** One row: heading, List/Board switch, inline Project and State dropdowns, count, refresh. */
 export function TaskToolbar({
@@ -15,6 +20,9 @@ export function TaskToolbar({
   overview,
   count,
   total,
+  eligible,
+  hiddenDrafts,
+  hiddenOther,
   loaded,
   reset,
   refresh,
@@ -28,6 +36,9 @@ export function TaskToolbar({
   projectId: string | undefined;
   overview: boolean;
   count: number;
+  eligible: number;
+  hiddenDrafts: number;
+  hiddenOther: number;
   /** Tasks in scope before any filter, so "no tasks" and "no matches" read differently. */
   total: number;
   /** The task list has been read, so a zero total is real. */
@@ -95,15 +106,29 @@ export function TaskToolbar({
       </span>
     </>
   );
-  const countLine = !overview && (
+  const countLine = (
     <p className="metadata muted work-count">
       {loaded && total === 0
         ? "No tasks"
         : loaded && count === 0
           ? "No tasks match these filters"
-          : `${count} task${count === 1 ? "" : "s"}`}
+          : filters.ready === "yes"
+            ? taskVisibilityText(count, eligible)
+            : `${count} task${count === 1 ? "" : "s"}`}
+      {hiddenDrafts > 0 && ` · ${hiddenDrafts} drafts hidden`}
+      {hiddenOther > 0 && ` · ${hiddenOther} other not-Ready tasks hidden`}
     </p>
   );
+  const showDrafts =
+    hiddenDrafts + hiddenOther > 0 ? (
+      <Button
+        variant="secondary"
+        className="work-reset"
+        onClick={() => update({ ready: "any" })}
+      >
+        Show {hiddenDrafts + hiddenOther} hidden tasks
+      </Button>
+    ) : null;
   const resetButton =
     activeFilterCount(filters, projectId) > 0 ? (
       <Button variant="secondary" className="work-reset" onClick={reset}>
@@ -112,6 +137,7 @@ export function TaskToolbar({
     ) : (
       // The default view hides drafts and finished work; an empty one would otherwise dead-end.
       loaded &&
+      hiddenDrafts + hiddenOther === 0 &&
       count === 0 &&
       total > 0 && (
         <Button
@@ -198,7 +224,7 @@ export function TaskToolbar({
               >
                 <option value="">All sources</option>
                 <option value="local">Local</option>
-                <option value="github">GitHub</option>
+                <option value="github">Imported</option>
               </NativeSelect>
             </label>
             <label className="field body" htmlFor="task-ready">
@@ -218,6 +244,7 @@ export function TaskToolbar({
             </label>
           </div>
         </details>
+        {showDrafts}
         {resetButton}
       </div>
     </div>

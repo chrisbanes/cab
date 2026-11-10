@@ -125,7 +125,10 @@ export interface DeliveryCoordinatorOptions {
     run: (current: () => boolean) => Promise<T>,
   ) => Promise<T>;
   leadAssignmentId?: (taskId: string) => string;
-  feedback?: (taskId: string, reason: string, identity: string) => void;
+  observedPr?: (taskId: string, observation: PrDeliveryObservation) => void;
+  /** Return false when no new notice was recorded (for example, a duplicate). */
+  feedback?: (taskId: string, reason: string, identity: string) => unknown;
+  failedStackedDependents?: (blockerTaskId: string) => string[];
   /** Offline check of a push's commit in the task worktree; null when it cannot be verified. */
   verifyPush?: (input: {
     taskId: string;
@@ -216,6 +219,8 @@ export function deliveryToolFailureText(error: unknown): string {
       .join("; ")}`.slice(0, 500);
   if (error instanceof DeliveryApprovalRequiredError)
     return `Approval required: ${error.message}. Request approval with cab_request_approval, then send the action again with its approval and a new operationId.`;
+  if (error instanceof DeliveryHoldError && error.attentionCode)
+    return `Held: ${error.attentionCode === "stacked-blocker-failed" ? "Stacked blocker failed; Unstack or Cancel this task" : "External action outcome is unknown; Refresh delivery or check the action"}. The operator was notified in the Inbox. Stop and do not raise a question.`;
   if (error instanceof DeliveryHoldError)
     return `Held: ${error.message}. Once it clears, send the action again with a new operationId; the operator resolves a task hold.`;
   if (
@@ -338,15 +343,18 @@ export class DeliveryCoordinator {
       // The recovery's approval binds exactly these values, so the lead gets them as recorded.
       const recorded = this.store.taskBranch(taskId, repositoryId);
       const material = `branch ${recorded?.branch ?? "unknown"}, outsideHeadSha ${sha ?? absentBranchHead}, lastPushedSha ${recorded?.lastPushedSha ?? "null"}`;
-      this.options.feedback?.(
-        taskId,
-        sha
-          ? `The task branch changed outside cab (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
-          : `The task branch was deleted outside cab. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
-        `outside-push:${repositoryId}:${sha ?? "absent"}`,
+      return (
+        this.options.feedback?.(
+          taskId,
+          sha
+            ? `The task branch changed outside cab (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
+            : `The task branch was deleted outside cab. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
+          `outside-push:${repositoryId}:${sha ?? "absent"}`,
+        ) !== false
       );
     } catch {
       // The outside head is already recorded; a task without a lead has nobody to wake.
+      return false;
     }
   }
   private serialize<T>(keys: string[], run: () => Promise<T>): Promise<T> {
@@ -441,7 +449,15 @@ export class DeliveryCoordinator {
           throw new DomainConflictError(
             "The action does not have an unknown outcome",
           );
-        return this.store.recordObservation(operationId, observation, within);
+        const current = this.store.action(operationId);
+        return this.store.recordObservation(
+          operationId,
+          observation,
+          (record) => {
+            within?.(record);
+            this.actionResolved(current, record);
+          },
+        );
       },
     );
   }
@@ -1164,6 +1180,22 @@ export class DeliveryCoordinator {
       });
     }
   }
+  private actionResolved(
+    before: DeliveryActionRecord,
+    after: DeliveryActionRecord,
+  ) {
+    if (
+      before.state === "uncertain" &&
+      !isServiceDeliveryCaller(before.binding) &&
+      ["confirmed-success", "confirmed-failure"].includes(after.state) &&
+      !this.store.hasUncertainAction(before.binding.taskId)
+    )
+      this.options.feedback?.(
+        before.binding.taskId,
+        `The unknown outcome of ${before.request.action.kind} (${before.operationId}) was resolved: ${after.state}. The external action uncertainty hold cleared.`,
+        `external-action-resolved:${before.operationId}:${before.attempts}`,
+      );
+  }
   private recordPublicationAware(
     record: DeliveryActionRecord,
     observation: ProviderActionObservation,
@@ -1176,27 +1208,34 @@ export class DeliveryCoordinator {
           : observation.outsideDeleted
             ? null
             : undefined);
-    return this.store.recordObservation(record.operationId, observation, () => {
-      if (observation.reason === "branch-outside-cleared") {
-        // The branch is back at cab's own push: only the head this recovery named is obsolete.
-        const named = isRecoveryAction(action) ? action.outsideHeadSha : null;
-        if (
-          this.store.taskBranch(
+    return this.store.recordObservation(
+      record.operationId,
+      observation,
+      (updated) => {
+        let outsideNotified = false;
+        if (observation.reason === "branch-outside-cleared") {
+          // The branch is back at cab's own push: only the head this recovery named is obsolete.
+          const named = isRecoveryAction(action) ? action.outsideHeadSha : null;
+          if (
+            this.store.taskBranch(
+              record.binding.taskId,
+              action.target.repositoryId,
+            )?.outsideHeadSha === named
+          )
+            this.store.clearOutsideHead(
+              record.binding.taskId,
+              action.target.repositoryId,
+            );
+        } else if (action.kind.startsWith("branch.") && outside !== undefined)
+          outsideNotified = this.outsidePush(
             record.binding.taskId,
             action.target.repositoryId,
-          )?.outsideHeadSha === named
-        )
-          this.store.clearOutsideHead(
-            record.binding.taskId,
-            action.target.repositoryId,
+            outside,
           );
-      } else if (action.kind.startsWith("branch.") && outside !== undefined)
-        this.outsidePush(
-          record.binding.taskId,
-          action.target.repositoryId,
-          outside,
-        );
-    });
+        // A historical outside notice cannot replace this uncertainty episode's clearance.
+        if (!outsideNotified) this.actionResolved(record, updated);
+      },
+    );
   }
   async registerPr(input: unknown, caller: DeliveryCaller) {
     if (!isRuntimeDeliveryCaller(caller))
@@ -1270,12 +1309,15 @@ export class DeliveryCoordinator {
         caller.taskId,
         observation,
       );
+      const failedDependents =
+        this.options.failedStackedDependents?.(caller.taskId) ?? [];
       const registered = this.store.registerPrWithinTransaction(
         caller,
         observation,
         lead,
         this.codeHost(caller.projectId, observation.repositoryId).ref,
       );
+      this.failedBlockerCleared(caller.taskId, failedDependents);
       if (outside)
         this.outsidePush(
           caller.taskId,
@@ -1433,7 +1475,10 @@ export class DeliveryCoordinator {
     } catch {
       const failed = this.store.transaction(() => {
         if (!inspectionCurrent()) return false;
+        const failedDependents =
+          this.options.failedStackedDependents?.(taskId) ?? [];
         this.store.recordPrReadFailureWithinTransaction(taskId);
+        this.failedBlockerCleared(taskId, failedDependents);
         return true;
       });
       if (!failed) return this.store.delivery(taskId) ?? binding;
@@ -1442,11 +1487,15 @@ export class DeliveryCoordinator {
     const updated = this.store.transaction(() => {
       const current = inspectionCurrent();
       if (!current) return null;
+      const failedDependents =
+        this.options.failedStackedDependents?.(taskId) ?? [];
       const result = this.store.observePrWithinTransaction(
         taskId,
         observation,
         this.codeHost(current.projectId, observation.repositoryId).ref,
       );
+      this.failedBlockerCleared(taskId, failedDependents);
+      this.options.observedPr?.(taskId, observation);
       // One event: an outside head is the more specific notice for a changed PR.
       if (result.outsideHead)
         this.outsidePush(taskId, observation.repositoryId, observation.headSha);
@@ -1468,6 +1517,18 @@ export class DeliveryCoordinator {
     if (!updated) return this.store.delivery(taskId) ?? binding;
     await this.options.postMergeRebase?.(taskId, provider);
     return this.store.delivery(taskId) ?? updated;
+  }
+  private failedBlockerCleared(blockerTaskId: string, before: string[]) {
+    const remaining =
+      this.options.failedStackedDependents?.(blockerTaskId) ?? [];
+    const binding = this.store.delivery(blockerTaskId)!;
+    for (const taskId of before)
+      if (!remaining.includes(taskId))
+        this.options.feedback?.(
+          taskId,
+          `The stacked blocker no longer has a confirmed failure (current state: ${binding.readError ? "unknown" : binding.observation.state}). The failed stacked blocker hold cleared; other admission holds still apply.`,
+          `stacked-blocker-cleared:${blockerTaskId}:${binding.revision}`,
+        );
   }
   async settleHandback(input: unknown) {
     const command = handbackSettlementSchema.parse(input);

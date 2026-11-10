@@ -1,4 +1,5 @@
 import { randomUUID } from "./browser-crypto.js";
+import { ProjectDeliveryWarning } from "./project-delivery-warning.js";
 import { visibleProjects } from "./project-lifecycle-model.js";
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
@@ -56,9 +57,11 @@ import { notificationOpenPath } from "./notifications-model.js";
 import { migrateLegacyPush } from "./notifications.js";
 import { Alert } from "./ui/alert.js";
 import {
+  filterTasks,
   isActiveColumn,
   loadTaskList,
   taskColumn,
+  taskFiltersForPath,
   taskRouteSubtitle,
 } from "./tasks.js";
 import { useDraftReleases } from "./composer-drafting.js";
@@ -941,12 +944,21 @@ export function App() {
   const taskRoute =
     pathname === "/" || pathname === "/tasks" || Boolean(projectId);
   const newTaskHref = `/tasks/new${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
+  const taskHeaderFilters = taskFiltersForPath(
+    path,
+    Boolean(
+      history.state?.taskDefaults && history.state.entryUrl === location.href,
+    ),
+  );
+  const headerTasks = tasks.state.data
+    ? filterTasks(tasks.state.data.tasks, taskHeaderFilters, projectId)
+    : undefined;
   const headerSubtitle = unknownRoute
     ? notFoundSubtitle
     : taskRoute
       ? taskRouteSubtitle(
           projectId ? "project" : pathname === "/" ? "overview" : "tasks",
-          tasks.state.data?.tasks,
+          headerTasks,
           workspace.state.data?.data ?? null,
           projectId,
         )
@@ -964,7 +976,7 @@ export function App() {
   const refreshAll = () => {
     workspace.refresh();
     if (!onInboxRoute) inboxSummary.refresh();
-    if (settingsPage) setRefreshNonce((n) => n + 1);
+    if (settingsPage || projectId) setRefreshNonce((n) => n + 1);
   };
   // These pages own a refresh that already re-reads their data, or are create forms with nothing to refresh.
   const ownsRefresh =
@@ -1386,6 +1398,15 @@ export function App() {
                 {pathname === "/" && (
                   <GettingStarted mode="home" {...waitProps} />
                 )}
+                {showBoard &&
+                  (projectId ? (
+                    <ProjectDeliveryWarning
+                      client={client}
+                      projectId={projectId}
+                      scope={session.csrfToken}
+                      refreshNonce={refreshNonce}
+                    />
+                  ) : null)}
                 {showBoard && (
                   <TaskViews
                     state={tasks.state}

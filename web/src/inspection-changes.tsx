@@ -19,11 +19,17 @@ import {
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
+import {
+  comparisonEntryLimitSentence,
+  comparisonObservationTimes,
+  comparisonReasonSentence,
+  isWorkspaceComparisonStale,
+} from "./inspection-changes-presentation.js";
 import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
 import { changeLineCounts } from "./file-change-markers.js";
 import { failureCause } from "./outcome-copy.js";
-import { codeSentence, shortId, workspaceStateText } from "./presentation.js";
+import { shortId, workspaceStateText } from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
 import { ChangesWorkbench, FilesPanelToggle } from "./changes-pane.js";
 import { treePaths } from "./diff-model.js";
@@ -256,6 +262,7 @@ export function TaskWorkspaceChanges({
   taskId,
   assignments,
   state,
+  knownWorkspaceObservationAt,
   changed,
 }: {
   client: OperatorClient;
@@ -263,6 +270,7 @@ export function TaskWorkspaceChanges({
   taskId: string;
   assignments: Array<{ assignmentId: string; name: string | null }>;
   state: TaskChangesState;
+  knownWorkspaceObservationAt: number | null;
   changed: () => void;
 }) {
   const repositoryName = useRepositoryLabel();
@@ -473,25 +481,31 @@ export function TaskWorkspaceChanges({
 
   const current = cached;
   const snapshot = snapshotFor(current);
+  const reason = current && "reason" in current ? current.reason : undefined;
+  const workspaceUnavailable = reason === "workspace-unavailable";
+  const unavailableEmptySnapshot =
+    workspaceUnavailable && snapshot?.entries.length === 0;
+  const notReadYet =
+    workspaceUnavailable &&
+    state.target !== "last-turn" &&
+    (!snapshot || snapshot.entries.length === 0);
+  const knownObservationTimes = [
+    knownWorkspaceObservationAt,
+    repositoriesResource.state.data?.observedAt ?? null,
+    ...Object.values(state.comparisonReads).flatMap(comparisonObservationTimes),
+  ].filter((observedAt): observedAt is number => observedAt !== null);
+  const staleWorkspaceSnapshot =
+    !unavailableEmptySnapshot &&
+    snapshot?.target !== "turn" &&
+    snapshot !== undefined &&
+    isWorkspaceComparisonStale(snapshot.observedAt, knownObservationTimes);
   const currentRequest = request.key === key ? request : null;
   const id = responseId(current);
-  const reason = current && "reason" in current ? current.reason : undefined;
-  const reasonSentence = reason
-    ? codeSentence(
-        reason,
-        {
-          "base-branch-required":
-            "The configured ref is not a local branch. Select a local branch; none is inferred or checked out.",
-          "base-branch-unavailable":
-            "The selected local branch is not available. Select another local branch.",
-          "no-merge-base":
-            "The selected local branch has no usable merge base.",
-          "workspace-changed":
-            "The workspace changed while this comparison was read. Refresh to read it again.",
-        },
-        "The comparison could not be read completely.",
-      )
-    : "";
+  const reasonSentence = comparisonReasonSentence(
+    reason,
+    state.target,
+    Boolean(snapshot?.entries.length),
+  );
   const detailFields = (
     [
       ["Comparison", id ?? undefined],
@@ -755,6 +769,12 @@ export function TaskWorkspaceChanges({
               : current.state}
           </StatusBadge>
           {snapshot && <span>As of {dateLabel(snapshot.observedAt)}</span>}
+          {staleWorkspaceSnapshot && (
+            <span role="status">
+              Stale. A newer workspace observation or turn capture is already
+              known. These results stay fixed until Refresh.
+            </span>
+          )}
           {snapshot && snapshot.target !== "turn" && snapshot.baseline && (
             <span className="changes-baseline" title={snapshot.baseline.commit}>
               {snapshot.baseline.branch ?? "HEAD"} @{" "}
@@ -770,6 +790,12 @@ export function TaskWorkspaceChanges({
             </span>
           )}
           {reasonSentence && <span>{reasonSentence}</span>}
+          {snapshot &&
+            snapshot.target !== "turn" &&
+            !notReadYet &&
+            !unavailableEmptySnapshot && (
+              <span>Current workspace snapshots stay fixed until Refresh.</span>
+            )}
           <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
@@ -809,12 +835,12 @@ export function TaskWorkspaceChanges({
           <OutcomeDetails fields={[["Code", currentRequest.error]]} />
         </div>
       )}
-      {current?.state === "unavailable" && (
+      {current?.state === "unavailable" && !workspaceUnavailable && (
         <p role="status">
           No current comparison is available for this selection.
         </p>
       )}
-      {current?.state === "gap" && (
+      {current?.state === "gap" && !notReadYet && (
         <p role="status">
           This comparison has gaps; unavailable or unsupported entries stay
           marked as such.
@@ -828,7 +854,7 @@ export function TaskWorkspaceChanges({
             turns cannot be reconstructed from a result revision.
           </p>
         )}
-      {snapshot && (
+      {snapshot && !unavailableEmptySnapshot && (
         <ChangesWorkbench
           mobileView={state.mobileView}
           files={
@@ -908,7 +934,8 @@ export function TaskWorkspaceChanges({
                         )}
                       </p>
                       <p role="status">
-                        Text diff is unavailable for this file.
+                        {comparisonEntryLimitSentence(selected) ??
+                          "Text diff is unavailable for this file."}
                       </p>
                     </div>
                   ) : (
@@ -990,11 +1017,7 @@ export function TaskWorkspaceChanges({
           }
         />
       )}
-      <p>
-        Current workspace snapshots stay fixed until Refresh. Last turn is a
-        separate actual runtime capture; recorded result and delivery changes
-        remain below.
-      </p>
+      <p>Recorded result and delivery changes remain below.</p>
     </section>
   );
 }

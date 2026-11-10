@@ -84,6 +84,7 @@ import {
   codeHostName,
   deliveryBlockerSentence,
   mergeBlockerText,
+  reviewHeadComparison,
   pullRequestReference,
   pullRequestStateLabel,
   safePullRequestUrl,
@@ -161,6 +162,7 @@ import {
   deliveryApplies,
   taskNextActor,
   trackerName,
+  issueCommentNote,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { ApplyInstructions, TaskExecution } from "./task-execution.js";
@@ -470,7 +472,15 @@ export function TaskWorkspace({
     changed();
   };
   const [, render] = useState(0),
-    changed = () => render((n) => n + 1);
+    changed = useCallback(() => render((n) => n + 1), []),
+    recordWorkspaceObservation = useCallback(
+      (observedAt: number) => {
+        if (observedAt <= (state.files.workspaceObservedAt ?? 0)) return;
+        state.files.workspaceObservedAt = observedAt;
+        changed();
+      },
+      [state.files, changed],
+    );
   const [sendingNow, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
   // A write sent before the page was left may still be in flight when it is reopened.
@@ -1611,7 +1621,7 @@ export function TaskWorkspace({
   }
   const requestId = state.cardRequest,
     openRequests = [...data.questions, ...data.approvals].filter(
-      (q) => q.status === "open",
+      (q) => q.status === "open" && q.lifecycle?.status !== "dismissed",
     ),
     nextActor = taskNextActor(data),
     inView = openRequests.find(
@@ -1668,8 +1678,14 @@ export function TaskWorkspace({
     inline: state.inlineAnswer,
     card: requestId,
     status: (id) =>
-      [...data.questions, ...data.approvals].find((q) => q.interactionId === id)
-        ?.status,
+      (() => {
+        const request = [...data.questions, ...data.approvals].find(
+          (q) => q.interactionId === id,
+        );
+        return request?.lifecycle?.status === "dismissed"
+          ? "dismissed"
+          : request?.status;
+      })(),
     answerHere: (id) => {
       state.inlineAnswer = id;
       if (state.cardRequest === id) state.cardRequest = null;
@@ -2110,9 +2126,10 @@ export function TaskWorkspace({
                 ? leadReceivesNotice(leadName)
                 : leadUnavailableNotice(leadName)
           : (comment.sentence ??
-            (data.commentPolicy?.mode === "approval"
-              ? "You review the exact comment before it posts to the GitHub issue."
-              : "Posts a comment on the GitHub issue."));
+            issueCommentNote(
+              data.source,
+              data.commentPolicy?.mode === "approval",
+            ));
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
@@ -2161,7 +2178,7 @@ export function TaskWorkspace({
               changed();
             }}
           >
-            Post GitHub comment
+            Post {trackerName(data.source)} comment
           </Button>
         )}
         {data.source && comment.sentence && (
@@ -2223,7 +2240,7 @@ export function TaskWorkspace({
               })
             }
           >
-            Review exact GitHub comment
+            Review exact {trackerName(data.source)} comment
           </Button>
           {state.commentReview && (
             <CommentReview
@@ -2491,6 +2508,39 @@ export function TaskWorkspace({
               The lead's completion request was rejected at this task version.
               The lead continues on its next turn.
             </p>
+            {data.completionRequests
+              .filter(
+                (c) =>
+                  c.status === "rejected" &&
+                  c.taskVersion === data.task.version,
+              )
+              .map((c) => (
+                <div key={c.requestId}>
+                  {!!c.blockingInteractions?.length && (
+                    <p>
+                      {c.blockingInteractionsBasis === "current"
+                        ? "Current open requests (not captured with this historical rejection):"
+                        : "Requests recorded with this rejection:"}
+                    </p>
+                  )}
+                  {c.blockingInteractions?.map((i) => (
+                    <p key={i.interactionId}>
+                      {i.kind === "question" ? "Question" : "Approval"}{" "}
+                      {i.interactionId} ·{" "}
+                      {i.state === "required"
+                        ? "Answer or dismiss in Inbox to clear this completion requirement. Dismissal grants no approval."
+                        : i.state === "dismissed"
+                          ? "Dismissed; no longer required for completion."
+                          : "Resolved; no longer required for completion."}{" "}
+                      <ActionLink variant="secondary" href={i.destination}>
+                        {i.state === "required"
+                          ? "Review or dismiss request"
+                          : "View request history"}
+                      </ActionLink>
+                    </p>
+                  ))}
+                </div>
+              ))}
             <ActionLink
               variant="secondary"
               href={`/tasks/${taskId}?section=reply`}
@@ -3219,6 +3269,7 @@ export function TaskWorkspace({
             taskId={taskId}
             state={state.files}
             changes={state.changes}
+            onObservation={recordWorkspaceObservation}
           />
         </TabPanel>
         <TabPanel tab="changes" active={state.tab}>
@@ -3439,8 +3490,11 @@ function ReviewEvidence({
               {unknown
                 ? "Head comparison unknown"
                 : v.checkedHead === head
-                  ? "Matches the current pull request head"
-                  : "Checked an earlier head than the current pull request head"}
+                  ? reviewHeadComparison(true, data.delivery?.binding?.codeHost)
+                  : reviewHeadComparison(
+                      false,
+                      data.delivery?.binding?.codeHost,
+                    )}
             </p>
           );
         })
@@ -3669,6 +3723,7 @@ function Changes({
         taskId={taskId}
         assignments={data.assignments}
         state={state.changes}
+        knownWorkspaceObservationAt={state.files.workspaceObservedAt}
         changed={changed}
       />
       {changes && (
@@ -3777,7 +3832,9 @@ function Changes({
                 {[
                   ...new Set(
                     d.binding.mergeBlockers.map((code) =>
-                      code === null ? "Unavailable" : mergeBlockerText(code),
+                      code === null
+                        ? "Unavailable"
+                        : mergeBlockerText(code, d.binding?.codeHost),
                     ),
                   ),
                 ].map((text) => (

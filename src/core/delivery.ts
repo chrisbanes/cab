@@ -1175,6 +1175,12 @@ export class DeliveryStore {
       ["prepared", "attempting"],
     );
   }
+  /** Unknown outcomes that hold work, excluding independent status-mapping writes. */
+  hasUncertainAction(taskId: string, exceptOperationId?: string): boolean {
+    return this.actionBlockers(taskId, exceptOperationId).includes(
+      "external-action-uncertain",
+    );
+  }
   hasAction(operationId: string): boolean {
     return (
       this.db
@@ -2048,6 +2054,13 @@ export class DeliveryStore {
           operationId: string | null;
         }
       | undefined;
+    if (
+      row &&
+      this.db
+        .prepare("SELECT 1 FROM inbox_lifecycle WHERE id=? AND obsolete=1")
+        .get(interactionId)
+    )
+      return false;
     return Boolean(
       row &&
         row.taskId === caller.taskId &&
@@ -2096,7 +2109,13 @@ export class DeliveryStore {
             : this.actionBlockers(binding.taskId)
           ).length
         )
-          throw new DeliveryHoldError("Task has unresolved external action");
+          throw new DeliveryHoldError(
+            "Task has unresolved external action",
+            !isServiceDeliveryCaller(binding) &&
+              this.hasUncertainAction(binding.taskId)
+              ? "external-action-uncertain"
+              : undefined,
+          );
         if (approved && request.approval && isRuntimeDeliveryCaller(binding)) {
           if (
             !this.approvalCurrent(

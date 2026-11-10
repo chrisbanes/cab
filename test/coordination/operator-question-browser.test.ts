@@ -419,6 +419,22 @@ test("production mixed form preserves literal schema, keyboard input, field erro
       exact: true,
     });
     await action.scrollIntoViewIfNeeded();
+    // Resizing also reflows the sticky footer; measure once that layout has settled.
+    await page.waitForFunction(() => {
+      const button = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".question-submit button",
+        ),
+      ].find((b) => b.textContent === "Check whether it saved");
+      if (!button) return false;
+      const rect = button.getBoundingClientRect();
+      return (
+        rect.top >= 0 &&
+        rect.bottom <= innerHeight &&
+        rect.left >= 0 &&
+        rect.right <= innerWidth
+      );
+    });
     const rect = await action.boundingBox();
     assert.ok(rect && rect.height >= 44);
     const footer = await form.locator(".question-submit").evaluate((el) => ({

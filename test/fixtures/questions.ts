@@ -152,5 +152,39 @@ export async function seedOwnIntervention(
   f.seedPersistedState((db) =>
     new ExecutionState(db).hold(intent.id, "Fixture ownership unknown"),
   );
+  f.service.reconcileInbox();
   return { ...a, workId: work.workId };
+}
+
+/** A historical completion rejection for testing its privacy-safe operator projection. */
+export function seedInteractionRejection(
+  f: Fixture,
+  request: { taskId: string; interactionId: string },
+) {
+  const view = f.service.coordinationView().readTask(request.taskId);
+  const interaction = [...view.questions, ...view.approvals].find(
+    (i) => i.interactionId === request.interactionId,
+  )!;
+  assert.ok(interaction);
+  const requestId = randomUUID();
+  f.seedPersistedState((db) =>
+    db
+      .prepare(`INSERT INTO coordination_completion_requests
+    (requestId,taskId,leadAssignmentId,leadWorkId,leadWorkRevision,taskVersion,reviewedResultIds,status,rejectionReasons,revision)
+    VALUES (?,?,?,?,?,?,?,'rejected',?,1)`)
+      .run(
+        requestId,
+        request.taskId,
+        interaction.requestingAssignmentId,
+        interaction.requestingWorkId,
+        interaction.requestingWorkRevision,
+        Number(f.service.domain().task(request.taskId).version),
+        "[]",
+        JSON.stringify({
+          reasons: ["open-interaction", "current-results-not-fully-reviewed"],
+          blockingInteractionIds: [request.interactionId],
+        }),
+      ),
+  );
+  return requestId;
 }

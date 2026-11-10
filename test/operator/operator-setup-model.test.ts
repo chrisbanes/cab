@@ -46,6 +46,36 @@ const values = {
   instructions: "  ",
 };
 
+test("Jira setup keeps code-host defaults but excludes GitHub task-source fields", () => {
+  const row = {
+    ...emptyRow("discovered"),
+    repositoryId: "R_atlas",
+    owner: "acme",
+    name: "atlas",
+    path: "~/atlas",
+    ref: "main",
+  };
+  const { command } = buildProjectCreate(
+    { ...values, tracker: "jira" },
+    [row],
+    "PVT_1",
+    { state: "signed-in", login: "fixture" },
+  );
+  assert.equal(command.type, "project.create");
+  if (command.type !== "project.create") return;
+  assert.equal(command.tracker, "jira");
+  assert.equal("githubProject" in command, false);
+  assert.equal("sourceCredentialRef" in command, false);
+  assert.equal(command.repositories?.[0]?.repositoryId, "R_atlas");
+  assert.deepEqual(command.deliveryDefault, { credentialRef: "gh:github.com" });
+  assert.equal(operatorCommandSchema.safeParse(command).success, true);
+  assert.equal(
+    "tracker" in buildProjectCreate(values, [], "").command,
+    false,
+    "old GitHub payload stays unchanged",
+  );
+});
+
 test("typed repositories and rows build the one create command", () => {
   assert.equal(typedRepositoryId("Acme", "Atlas"), "github.com/acme/atlas");
   for (const bad of [
@@ -661,8 +691,8 @@ test("setup sends the source credential only for a signed-in login and at least 
 test("the ready check states the recorded source credential with a settings link when it cannot sync", () => {
   const id = "p1";
   const link = {
-    label: "GitHub source settings",
-    href: "/projects/p1/settings?tab=github",
+    label: "Task source settings",
+    href: "/projects/p1/settings?tab=source",
   };
   const credential = (
     over: Partial<{

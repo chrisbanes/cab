@@ -12,6 +12,7 @@ import {
   capacityNotice,
   columnCounts,
   columns,
+  defaultTaskFilters,
   filterTasks,
   nextActor,
   operatorNext,
@@ -30,6 +31,34 @@ import {
   requestKindLabel,
 } from "../../web/src/request-presentation.js";
 import { summary, type Overrides } from "../fixtures/task-summary.js";
+import { closureSuffix } from "../../src/cli/task-write.js";
+import { waitLabels } from "../../src/operator/wait-reasons.js";
+
+test("closure and dependency copy remains accurate for either issue tracker", () => {
+  for (const jira of [false, true]) {
+    const task = summary({
+      closure: "held",
+      reasons: ["imported-blockers-blocked", "imported-blockers-unknown"],
+    });
+    if (jira && task.source) task.source.identity.tracker = "jira";
+    assert.ok(taskReasons(task).includes("Held · closed at source"));
+    assert.match(closureSuffix("held"), /closed at source; held/);
+    assert.equal(closureSuffix("completed"), " (closed at source)");
+    assert.match(
+      closureSuffix("unattributed"),
+      /closure not attributed to cab; held/,
+    );
+    assert.doesNotMatch(taskReasons(task).join(" "), /GitHub|Jira/);
+    assert.equal(
+      waitLabels["imported-blockers-blocked"],
+      "Blocked by a source dependency",
+    );
+    assert.equal(
+      waitLabels["imported-blockers-unknown"],
+      "Source dependencies unconfirmed",
+    );
+  }
+});
 
 test("an imported Draft task names its unmet readiness conditions; other tasks keep the generic reason", () => {
   const label = (name: string) => ({ kind: "label", operator: "has", name });
@@ -70,7 +99,7 @@ test("an imported Draft task names its unmet readiness conditions; other tasks k
     assert.equal(taskColumn(task), "Draft");
   }
   const held = draft({ rule, outcome: "not-evaluated", unmet: [] }, "held");
-  assert.deepEqual(taskReasons(held), ["Held · closed on GitHub"]);
+  assert.deepEqual(taskReasons(held), ["Held · closed at source"]);
   assert.equal(
     taskColumn(draft({ rule, outcome: "unmet", unmet: [label("a")] })),
     "Draft",
@@ -85,7 +114,7 @@ test("closure provenance places held tasks in Paused and names provider completi
       reasons: ["task-unready", "source-held"],
     });
     assert.equal(taskColumn(held), "Paused");
-    assert.ok(taskReasons(held).includes("Held · closed on GitHub"));
+    assert.ok(taskReasons(held).includes("Held · closed at source"));
     assert.equal(taskReasons(held).includes("Draft: not Ready"), false);
     const unattributed = summary({
       ready,
@@ -102,7 +131,7 @@ test("closure provenance places held tasks in Paused and names provider completi
   const completed = summary({ state: "done", closure: "completed" });
   assert.equal(taskColumn(completed), "Done");
   assert.ok(
-    taskReasons(completed).includes("Closed on GitHub, not delivered by cab"),
+    taskReasons(completed).includes("Closed at source, not delivered by cab"),
   );
   for (const plain of [
     summary({ state: "done", closure: null }),
@@ -278,12 +307,12 @@ test("a GitHub blocker imported as a cab task is named by its title and links to
       text: "Waiting on Ship the API (acme/atlas#7)",
       href: `/tasks/${blockerId}`,
     },
-    { text: "Waiting on a GitHub dependency" },
+    { text: "Waiting on a source dependency" },
   ]);
   // No recorded blockers keeps the generic wording.
   assert.deepEqual(
     taskReasons(summary({ reasons: ["imported-blockers-blocked"] })),
-    ["Waiting on a GitHub dependency"],
+    ["Waiting on a source dependency"],
   );
 });
 
@@ -316,7 +345,7 @@ test("source summaries only accept https links", () => {
     assert.equal(source(bad), false);
 });
 
-test("route subtitles count active tasks and name the accountable lead", () => {
+test("route subtitles count filtered tasks and name the accountable lead", () => {
   const a = randomUUID(),
     b = randomUUID(),
     lead = randomUUID();
@@ -333,24 +362,35 @@ test("route subtitles count active tasks and name the accountable lead", () => {
     summary({ projectId: b }),
     summary({ projectId: b, state: "done" }),
   ];
+  const visible = filterTasks(tasks, defaultTaskFilters);
   assert.equal(
-    taskRouteSubtitle("tasks", tasks, workspace),
-    "3 active tasks · 2 projects",
+    taskRouteSubtitle("tasks", visible, workspace),
+    "3 tasks shown · 2 projects",
   );
   assert.equal(
     taskRouteSubtitle("tasks", [tasks[0] as TaskListSummary], {
       ...workspace,
       projects: [workspace.projects[0] as never],
     }),
-    "1 active task · 1 project",
+    "1 task shown · 1 project",
   );
   assert.equal(
-    taskRouteSubtitle("project", tasks, workspace, a),
-    "2 active tasks · accountable lead Mira Chen",
+    taskRouteSubtitle(
+      "project",
+      filterTasks(tasks, defaultTaskFilters, a),
+      workspace,
+      a,
+    ),
+    "2 tasks shown · accountable lead Mira Chen",
   );
   assert.equal(
-    taskRouteSubtitle("project", tasks, workspace, b),
-    "1 active task · no accountable lead",
+    taskRouteSubtitle(
+      "project",
+      filterTasks(tasks, defaultTaskFilters, b),
+      workspace,
+      b,
+    ),
+    "1 task shown · no accountable lead",
   );
   assert.equal(taskRouteSubtitle("tasks", undefined, workspace), undefined);
   assert.equal(
@@ -475,5 +515,26 @@ test("stack markers use exactly the recorded blocker PR number and invent no ide
       membershipKnown: false,
     }) ?? "",
     /membership unconfirmed/,
+  );
+});
+
+test("request-only refusal copy names Start again or its independent blocker", async () => {
+  const { requestRefusalText } = await import(
+    "../../src/operator/task-restart-copy.js"
+  );
+  const request = {
+    workId: "old-request",
+    reason: "Prepared against older revisions and never ran.",
+  };
+  assert.match(
+    requestRefusalText({ ...request, startAgain: { available: true } }),
+    /never ran.*Start again is available/,
+  );
+  assert.match(
+    requestRefusalText({
+      ...request,
+      startAgain: { available: false, reason: "source-held" },
+    }),
+    /source.*held/,
   );
 });

@@ -9,6 +9,8 @@ import type {
 export const attentionCodes = [
   "execution-uncertain",
   "not-started",
+  "stacked-blocker-failed",
+  "external-action-uncertain",
   "approval",
   "question",
   "unresolved-result",
@@ -41,6 +43,18 @@ export const attentionNext: Record<
     action: "start again",
     reason: "Refused before it started; nothing ran",
     inboxAction: "Start again",
+  },
+  "stacked-blocker-failed": {
+    operator: true,
+    action: "Unstack or Cancel this task",
+    reason: "Stacked blocker failed; Unstack or Cancel this task",
+    inboxAction: "Unstack or Cancel",
+  },
+  "external-action-uncertain": {
+    operator: true,
+    action: "Refresh delivery or check the action",
+    reason: "External action outcome is unknown",
+    inboxAction: "Refresh delivery or check the action",
   },
   approval: {
     operator: true,

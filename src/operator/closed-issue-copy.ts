@@ -15,7 +15,7 @@ export type ClosureWait =
 /** What a closure-held task waits on before it completes, as a clause. */
 export const closureWaitClause = (wait: ClosureWait) =>
   wait.kind === "change-request"
-    ? `completes when PR #${wait.number} merges or closes`
+    ? `completes when change request #${wait.number} merges or closes`
     : wait.action === "unstack"
       ? "completes when its unstack settles"
       : `completes when the outcome of its ${wait.action} action is known`;

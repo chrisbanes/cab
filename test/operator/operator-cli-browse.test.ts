@@ -48,6 +48,64 @@ async function setup(t: After) {
 }
 
 const strip = ({ nextCursor, catalogFingerprint, ...rest }: Json) => rest;
+
+test("CLI task and Inbox output name each delivery intervention and its operator action", async (t) => {
+  const { s, h } = await setup(t);
+  const q = await seedOwnQuestion(s.f);
+  for (const [code, reason, action] of [
+    [
+      "stacked-blocker-failed",
+      "Stacked blocker failed; Unstack or Cancel this task",
+      "Unstack or Cancel this task",
+    ],
+    [
+      "external-action-uncertain",
+      "External action outcome is unknown",
+      "Refresh delivery or check the action",
+    ],
+  ] as const) {
+    const fetcher: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (!response.ok) return response;
+      const body = (await response.json()) as Json;
+      const url = String(input);
+      if (url.endsWith(`/api/operator/tasks/${q.taskId}`))
+        body.data.attention = {
+          ...body.data.attention,
+          codes: [code],
+          count: 1,
+        };
+      if (url.includes("/api/operator/inbox"))
+        body.data.items = body.data.items.map((i: Json) =>
+          i.taskId === q.taskId
+            ? {
+                ...i,
+                kind: "intervention",
+                attentionCode: code,
+                reason,
+                interactionId: null,
+              }
+            : i,
+        );
+      return new Response(JSON.stringify(body), {
+        status: response.status,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const task = await h.run(["task", "get", q.taskId], { fetch: fetcher });
+    assert.equal(task.code, 0, task.err);
+    assert.ok(task.out.includes(`you · ${action}`), task.out);
+    const inbox = await h.run(["inbox", "list"], { fetch: fetcher });
+    assert.equal(inbox.code, 0, inbox.err);
+    assert.ok(inbox.out.includes(reason), inbox.out);
+    assert.ok(
+      inbox.out.includes(
+        code === "stacked-blocker-failed" ? "Unstack or Cancel" : action,
+      ),
+      inbox.out,
+    );
+  }
+});
 const forge = (kind: string, q: string, c: string) =>
   Buffer.from(JSON.stringify({ v: 1, k: kind, q, c })).toString("base64url");
 

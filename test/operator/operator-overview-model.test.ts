@@ -1,4 +1,11 @@
 import assert from "node:assert/strict";
+import { importedTaskCountText } from "../../web/src/overview-model.js";
+
+test("import counts describe tasks from either tracker", () => {
+  assert.equal(importedTaskCountText(0), "No imported tasks");
+  assert.equal(importedTaskCountText(1), "1 imported");
+  assert.equal(importedTaskCountText(2), "2 imported");
+});
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type {

@@ -19,6 +19,184 @@ import {
 } from "../../src/standalone/delivery.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
+import { coordinationFixture } from "../fixtures/coordination.js";
+
+for (const disposition of ["open", "cancelled", "unbound"] as const)
+  test(`a repeated outside head preserves uncertainty clearance wakes (${disposition} task)`, async () => {
+    const f = coordinationFixture();
+    const binding = f.domain.leadBindings()[0]!;
+    const taskId = String(binding.taskId),
+      assignmentId = String(binding.assignmentId);
+    const projectId = String(f.domain.task(taskId).projectId);
+    let store = new DeliveryStore(f.db);
+    store.migrate();
+    f.domain.execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      mode: "through-merge",
+      credentialRef: null,
+      grants: [{ action: "branch.push", repositoryId: "R1", mode: "allow" }],
+      requiredChecks: [],
+    });
+    const caller: DeliveryCaller = {
+      projectId,
+      taskId,
+      assignmentId,
+      taskVersion: Number(f.domain.task(taskId).version),
+      assignmentVersion: 1,
+      workId: "w",
+      workRevision: 1,
+      conversationRevision: 1,
+    };
+    const outside = "9".repeat(40);
+    const provider: CodeHostDeliveryProvider = {
+      async inspectPr() {
+        throw new Error("unused");
+      },
+      async preflight() {
+        throw new Error("reconciliation must not send");
+      },
+      async performAction() {
+        throw new Error("reconciliation must not send");
+      },
+      async inspectAction(record) {
+        const action = record.request.action;
+        assert.equal(action.kind, "branch.push");
+        assert.ok("commitSha" in action);
+        return {
+          state: "confirmed-success",
+          reason: "branch-push-confirmed-outside-change",
+          receipt: { nodeId: "R1", headSha: action.commitSha },
+          outsideHeadSha: outside,
+        };
+      },
+    };
+    let failClearance = false;
+    const coordinatorFor = () =>
+      new DeliveryCoordinator(store, {
+        providerFactories: { github: () => provider },
+        authorize: () => {},
+        approved: () => false,
+        feedback: (id, reason, identity) => {
+          if (failClearance && identity.startsWith("external-action-resolved:"))
+            throw new Error("clearance-transaction-fault");
+          if (
+            f.domain.task(id).state === "open" &&
+            f.domain.leadBindings().some((b) => b.taskId === id)
+          )
+            return f.coordination.ensureDeliveryEventWithinTransaction(
+              id,
+              reason,
+              identity,
+            );
+          return false;
+        },
+      });
+    let coordinator = coordinatorFor();
+    const uncertainPush = (sha: string) => {
+      const record = store.prepareAction(
+        {
+          operationId: randomUUID(),
+          action: {
+            kind: "branch.push",
+            target: { repositoryId: "R1" },
+            commitSha: sha,
+          },
+        },
+        caller,
+        false,
+      );
+      assert.equal(record.state, "prepared");
+      store.beginAttempt(record.operationId, {});
+      store.recordObservation(record.operationId, {
+        state: "uncertain",
+        reason: "provider-effect-unproved",
+        receipt: null,
+      });
+      return record.operationId;
+    };
+    const notices = () =>
+      f.db
+        .prepare(
+          "SELECT n.identity,e.recipientAssignmentId,e.payload FROM coordination_external_delivery_notices n JOIN coordination_inbox_events e ON e.eventId=n.eventId WHERE n.taskId=? ORDER BY e.rowid",
+        )
+        .all(taskId);
+    try {
+      // The first visit to X records one outside notice, which also covers the clearance.
+      uncertainPush("1".repeat(40));
+      await coordinator.reconcile();
+      assert.deepEqual(
+        notices().map((n) => n.identity),
+        [`outside-push:R1:${outside}`],
+      );
+      // Recover from X, then encounter it again in two separate uncertain push episodes.
+      for (const sha of ["2".repeat(40), "3".repeat(40)]) {
+        store.transaction(() => store.clearOutsideHead(taskId, "R1"));
+        const operationId = uncertainPush(sha);
+        if (disposition === "cancelled")
+          f.domain.execute({
+            type: "task.configure",
+            actor: "operator",
+            key: randomUUID(),
+            projectId,
+            taskId,
+            expectedVersion: Number(f.domain.task(taskId).version),
+            state: "cancelled",
+          });
+        else if (disposition === "unbound")
+          f.db
+            .prepare("DELETE FROM task_lead_bindings WHERE taskId=?")
+            .run(taskId);
+        const before = notices().length;
+        if (disposition === "open") {
+          failClearance = true;
+          await assert.rejects(
+            coordinator.reconcile(),
+            /clearance-transaction-fault/,
+          );
+          assert.equal(store.hasUncertainAction(taskId), true);
+          assert.equal(store.taskBranch(taskId, "R1")?.outsideHeadSha, null);
+          assert.equal(notices().length, before);
+          failClearance = false;
+        }
+        await coordinator.reconcile();
+        assert.equal(store.hasUncertainAction(taskId), false);
+        assert.equal(store.taskBranch(taskId, "R1")?.outsideHeadSha, outside);
+        const events = notices();
+        assert.equal(events.length, before + (disposition === "open" ? 1 : 0));
+        if (disposition === "open") {
+          assert.equal(
+            events.at(-1)!.identity,
+            `external-action-resolved:${operationId}:1`,
+          );
+          assert.equal(events.at(-1)!.recipientAssignmentId, assignmentId);
+          assert.match(
+            String(events.at(-1)!.payload),
+            /branch.push.*confirmed-success/,
+          );
+        }
+        await coordinator.reconcile();
+        await coordinator.stop();
+        f.reopen();
+        store = new DeliveryStore(f.db);
+        store.migrate();
+        coordinator = coordinatorFor();
+        await coordinator.reconcile();
+        assert.deepEqual(
+          notices(),
+          events,
+          "replay and restart add no notices",
+        );
+        if (disposition !== "open") break;
+      }
+    } finally {
+      await coordinator.stop();
+      f.close();
+    }
+  });
 
 test("unchanged feedback is deduplicated and cached settlement never qualifies a changed provider head", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-feedback-restart-"));

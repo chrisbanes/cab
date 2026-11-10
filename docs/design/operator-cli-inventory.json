@@ -1043,13 +1043,47 @@
         "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
-      "effect": "Lists question, approval and intervention items with ids and revisions; --kind and --project filter on the server; --limit pages through More:.",
+      "effect": "Lists request and failure episodes with IDs, lifecycle revisions and actionable/resolved/dismissed history; --status, --kind and --project filter on the server; --limit pages through More:.",
       "denial": "n/a: read-only; a token from other filters exits 2.",
       "revision": "A cursor the service rejects exits 4 cursor-stale.",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
       "gap": "The inbox scans every task per read (#875). Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
+      "id": "inbox dismiss",
+      "kind": "command",
+      "area": "inbox/question/approval",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/coordination/operator-cli-attention.test.ts",
+        "test/operator/operator-inbox.test.ts"
+      ],
+      "effect": "Records Inbox dismissal and an optional note. A question or approval remains unanswered but is no longer required for completion; no work starts or ownership releases.",
+      "denial": "Requires attention.write. The service rejects ownership-blocking dismissal and obsolete or terminal restoration.",
+      "revision": "Requires the exact Inbox lifecycle --expected-revision; stale item revisions conflict.",
+      "retry": "Uses the keyed write journal and operation receipts; dismissal replay is exercised without duplicate effects.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI and isolated service with real SQLite and fake runtimes; no installed-binary live or second-machine journey for these commands. Service denials are covered at the API boundary."
+    },
+    {
+      "id": "inbox restore",
+      "kind": "command",
+      "area": "inbox/question/approval",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/coordination/operator-cli-attention.test.ts",
+        "test/operator/operator-inbox.test.ts"
+      ],
+      "effect": "Restores a still-actionable dismissed Inbox item and its interaction completion requirement without starting work or releasing ownership.",
+      "denial": "Requires attention.write. The service rejects ownership-blocking dismissal and obsolete or terminal restoration.",
+      "revision": "Requires the exact Inbox lifecycle --expected-revision; stale item revisions conflict.",
+      "retry": "Uses the keyed write journal and operation receipts; dismissal replay is exercised without duplicate effects.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI and isolated service with real SQLite and fake runtimes; no installed-binary live or second-machine journey for these commands. Service denials are covered at the API boundary."
     },
     {
       "id": "question get",

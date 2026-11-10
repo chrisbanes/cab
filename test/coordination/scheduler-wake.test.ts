@@ -1,3 +1,4 @@
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
@@ -925,3 +926,648 @@ test("a failed wake after a committed delegation still reports success", async (
     gate.resolve();
   });
 });
+
+async function seedRevisionCollision(fixture: Fixture) {
+  const { service, projectId } = fixture;
+  const { taskId, assignmentId } = await fixture.addTask({
+    ready: false,
+    assignment: "Collision",
+  });
+  assert.ok(assignmentId);
+  const { coordination, schedulerStore, state } = startedOf(service);
+  const assignment = service.domain().assignment(assignmentId);
+  coordination.postOperatorMessage({
+    actor: "operator",
+    key: randomUUID(),
+    taskId,
+    recipientAssignmentId: assignmentId,
+    expectedAssignmentVersion: Number(assignment.version),
+    message: "PRESERVED_COLLISION_INPUT",
+  });
+  const event = coordination.pendingEvents(assignmentId)[0]!;
+  const delivery = coordination.bindDeliveryBatch(
+    assignmentId,
+    `assignment:${assignmentId}:v${assignment.version}:inbox:${event.eventId}`,
+    Number(assignment.version),
+  );
+  assert.ok(delivery);
+  const prompt = (
+    service as unknown as {
+      assignmentPrompt(
+        brief: string,
+        batch: NonNullable<typeof delivery>,
+      ): string;
+    }
+  ).assignmentPrompt(String(assignment.brief), delivery);
+  fixture.insertRequest("unrelated-old-work", assignmentId, "completed");
+  const request = schedulerStore.createAssignment(
+    {
+      taskId,
+      projectId,
+      assignmentId,
+      taskVersion: Number(service.domain().task(taskId).version),
+      assignmentVersion: Number(assignment.version),
+      instructionsRevision: Number(assignment.instructionsRevision),
+      profileRevision: Number(assignment.profileRevision),
+      prompt,
+      previousWorkId: null,
+    },
+    { requestKey: delivery.deliveryWorkId, workId: delivery.deliveryWorkId },
+  );
+  return { taskId, assignmentId, request, state, coordination, schedulerStore };
+}
+
+test("an exact uncaptured revision collision is refused once and Start again retains its inbox and conversation", async () => {
+  await withFixture(async (fixture) => {
+    const c = await seedRevisionCollision(fixture);
+    execute(fixture.service, {
+      type: "task.configure",
+      actor: "operator",
+      projectId: fixture.projectId,
+      taskId: c.taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    await fixture.wake();
+    const old = c.schedulerStore.byWorkId(c.request.workId);
+    assert.equal(old.state, "held");
+    assert.match(old.reason ?? "", /older.*never ran.*Start again/);
+    assert.equal(c.state.byWorkId(old.workId), undefined);
+    assert.equal(c.state.refusedBeforeStart(old.workId), true);
+    assert.equal(
+      c.schedulerStore.byWorkId("unrelated-old-work").state,
+      "completed",
+    );
+    await fixture.wake();
+    assert.deepEqual(c.schedulerStore.byWorkId(old.workId), old);
+    assert.equal(
+      fixture.count(
+        "SELECT COUNT(*) AS count FROM assignment_request_refusals WHERE workId=?",
+        old.workId,
+      ),
+      1,
+    );
+    const api = new OperatorApi(fixture.service);
+    const taskRead = (await api.readTask(c.taskId)).data;
+    assert.equal(taskRead.execution.state, "not-started");
+    assert.match(
+      taskRead.assignments.find((a) => a.assignmentId === c.assignmentId)
+        ?.requestRefusal?.reason ?? "",
+      /never ran/,
+    );
+    const recovery = (await api.readAssignmentRecovery(c.assignmentId)).data;
+    assert.equal(recovery.records.length, 0);
+    assert.equal(
+      recovery.assignment.requestRefusal?.startAgain.available,
+      true,
+    );
+    const options = (await api.readRecoveryOptions(c.assignmentId)).data;
+    assert.equal(options.requestRefusal?.workId, old.workId);
+    assert.equal(options.records.length, 0);
+    const item = (await api.readInbox()).data.items.find(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === c.taskId &&
+        i.attentionCode === "not-started",
+    )!;
+    assert.equal(item.dismissible, true);
+    const turnsBeforeDismiss = fixture.runtime.turns;
+    await api.execute({
+      type: "inbox.dismiss",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision,
+    });
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.id === item.id),
+      false,
+    );
+    assert.deepEqual(c.schedulerStore.byWorkId(old.workId), old);
+    assert.equal(c.state.byWorkId(old.workId), undefined);
+    assert.equal(fixture.runtime.turns, turnsBeforeDismiss);
+    await api.execute({
+      type: "inbox.restore",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision + 1,
+    });
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.id === item.id),
+      true,
+    );
+    const availability = fixture.service.startAgainAvailability(c.taskId);
+    assert.equal(availability.available, true);
+    const conversation = fixture.sql(
+      "SELECT revision FROM assignment_conversations WHERE assignmentId=?",
+      c.assignmentId,
+    );
+    const receipt = await fixture.service.startAgain({
+      key: randomUUID(),
+      taskId: c.taskId,
+      expectedVersion: Number(fixture.service.domain().task(c.taskId).version),
+      workId: old.workId,
+    });
+    const fresh = c.schedulerStore.byWorkId(receipt.workId);
+    assert.equal(
+      fresh.taskVersion,
+      Number(fixture.service.domain().task(c.taskId).version),
+    );
+    assert.equal(
+      fresh.profileRevision,
+      Number(
+        fixture.service.domain().assignment(c.assignmentId).profileRevision,
+      ),
+    );
+    assert.equal(
+      fresh.instructionsRevision,
+      Number(
+        fixture.service.domain().assignment(c.assignmentId)
+          .instructionsRevision,
+      ),
+    );
+    assert.deepEqual(
+      fixture.sql(
+        "SELECT revision FROM assignment_conversations WHERE assignmentId=?",
+        c.assignmentId,
+      ),
+      conversation,
+    );
+    assert.equal(fresh.prompt.split("PRESERVED_COLLISION_INPUT").length - 1, 1);
+    fixture.runtime.asksQuestion = true;
+    await fixture.wake();
+    assert.equal(await waitUntil(() => fixture.runtime.turns === 1), true);
+    assert.deepEqual(c.schedulerStore.byWorkId(old.workId), old);
+  });
+});
+
+test("startup repairs a persisted obsolete uncaptured request and preserves the refusal over another restart", async () => {
+  await withFixture(async (fixture) => {
+    const c = await seedRevisionCollision(fixture);
+    await fixture.service.stop();
+    // The old build held this request before creating any execution intent.
+    const database = new (await import("node:sqlite")).DatabaseSync(
+      (fixture.service as unknown as { dataDir: string }).dataDir +
+        "/standalone.sqlite",
+    );
+    try {
+      database
+        .prepare("UPDATE domain_tasks SET version=version+1 WHERE id=?")
+        .run(c.taskId);
+      database
+        .prepare(
+          "UPDATE turn_requests SET state='held',reason=? WHERE workId=?",
+        )
+        .run(
+          "Assignment request became obsolete: Error: Turn request identity already used with different captured revisions",
+          c.request.workId,
+        );
+    } finally {
+      database.close();
+    }
+    await fixture.service.start();
+    assert.equal(
+      startedOf(fixture.service).state.refusedBeforeStart(c.request.workId),
+      true,
+    );
+    await fixture.service.stop();
+    await fixture.service.start();
+    assert.equal(
+      startedOf(fixture.service).state.refusedBeforeStart(c.request.workId),
+      true,
+    );
+    assert.equal(fixture.runtime.turns, 0);
+  });
+});
+
+test("request-only refusal rejects execution evidence and completed history", async () => {
+  await withFixture(async (fixture) => {
+    const c = await seedRevisionCollision(fixture);
+    access(fixture.service)
+      .db.prepare("UPDATE domain_tasks SET version=version+1 WHERE id=?")
+      .run(c.taskId);
+    c.state.create(c.request.workId, c.request.prompt, "/recorded-workspace");
+    assert.equal(c.state.refuseUncapturedRevision(c.request.workId), false);
+    access(fixture.service)
+      .db.prepare("UPDATE turn_requests SET state='completed' WHERE workId=?")
+      .run(c.request.workId);
+    assert.equal(c.state.refuseUncapturedRevision(c.request.workId), false);
+    assert.equal(
+      fixture.count(
+        "SELECT COUNT(*) AS count FROM assignment_request_refusals",
+      ),
+      0,
+    );
+  });
+});
+
+async function refusalCallbackLifecycle(assignmentChanged: boolean) {
+  await withFixture(async (fixture) => {
+    const c = await seedRevisionCollision(fixture);
+    execute(fixture.service, {
+      type: "task.configure",
+      actor: "operator",
+      projectId: fixture.projectId,
+      taskId: c.taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    await fixture.wake();
+    assert.equal(c.state.refusedBeforeStart(c.request.workId), true);
+    if (assignmentChanged)
+      access(fixture.service)
+        .db.prepare(
+          "UPDATE domain_assignments SET version=version+1 WHERE id=?",
+        )
+        .run(c.assignmentId);
+    const api = new OperatorApi(fixture.service);
+    const item = (await api.readInbox()).data.items.find(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === c.taskId &&
+        i.attentionCode === "not-started",
+    )!;
+    const refused = c.schedulerStore.byWorkId(c.request.workId);
+    for (const dismissed of [false, true]) {
+      if (dismissed)
+        await api.execute({
+          type: "inbox.dismiss",
+          key: randomUUID(),
+          itemId: item.id,
+          expectedRevision: item.lifecycle!.revision,
+        });
+      const callback = deferred();
+      fixture.service.registerExecutionCallback(
+        c.request.workId,
+        callback.promise,
+      );
+      try {
+        assert.equal(fixture.service.notStartedWork(c.request.workId), false);
+        assert.deepEqual(fixture.service.startAgainAvailability(c.taskId), {
+          available: false,
+          reason: "execution-unresolved",
+        });
+        const during = (await api.readInbox()).data.items;
+        assert.equal(
+          fixture.service.inboxLifecycle().get(item.id)?.status,
+          dismissed ? "dismissed" : "actionable",
+        );
+        if (!dismissed) {
+          assert.equal(
+            during.find((i) => i.id === item.id)?.dismissible,
+            false,
+          );
+          await assert.rejects(
+            api.execute({
+              type: "inbox.dismiss",
+              key: randomUUID(),
+              itemId: item.id,
+              expectedRevision: item.lifecycle!.revision,
+            }),
+            /conflict/,
+          );
+        }
+      } finally {
+        callback.resolve();
+      }
+      await Promise.resolve();
+      await fixture.wake();
+      await api.readInbox();
+      assert.equal(fixture.service.notStartedWork(c.request.workId), true);
+      assert.equal(
+        fixture.service.inboxLifecycle().get(item.id)?.status,
+        dismissed ? "dismissed" : "actionable",
+      );
+      assert.deepEqual(c.schedulerStore.byWorkId(c.request.workId), refused);
+    }
+    await api.execute({
+      type: "inbox.restore",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision + 1,
+    });
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.id === item.id),
+      true,
+    );
+    const domain = fixture.service.domain();
+    const admission = domain.admission;
+    domain.admission = function (...args) {
+      const facts = admission.apply(this, args);
+      return {
+        ...facts,
+        eligible: false,
+        reasons: [...facts.reasons, "source-hold"],
+      };
+    };
+    try {
+      const api = new OperatorApi(fixture.service);
+      assert.deepEqual((await api.readTask(c.taskId)).data.startAgain, {
+        available: false,
+        reason: "source-held",
+      });
+      assert.equal(
+        (await api.readRecoveryOptions(c.assignmentId)).data.requestRefusal
+          ?.startAgain.reason,
+        "source-held",
+      );
+      await assert.rejects(
+        fixture.service.startAgain({
+          key: randomUUID(),
+          taskId: c.taskId,
+          expectedVersion: Number(domain.task(c.taskId).version),
+          workId: c.request.workId,
+        }),
+        /source/,
+      );
+      assert.equal(fixture.runtime.turns, 0);
+    } finally {
+      domain.admission = admission;
+    }
+    access(fixture.service)
+      .db.prepare(
+        "INSERT INTO task_writer_ambiguity_holds(taskId,reason) VALUES (?,?)",
+      )
+      .run(c.taskId, "Independent ownership hold");
+    assert.deepEqual(fixture.service.startAgainAvailability(c.taskId), {
+      available: false,
+      reason: "execution-unresolved",
+    });
+    assert.equal(fixture.runtime.turns, 0);
+  });
+}
+for (const assignmentChanged of [false, true])
+  test(`request-only refusal leaves independent task holds and unfinished callbacks authoritative (${assignmentChanged ? "moved assignment" : "current assignment"})`, () =>
+    refusalCallbackLifecycle(assignmentChanged));
+
+test("an admitted revision collision keeps execution ownership and never refuses older history", async () => {
+  await withFixture(async (fixture) => {
+    const c = await seedRevisionCollision(fixture);
+    const request = c.request;
+    const intent = c.state.create(
+      request.workId,
+      request.prompt,
+      "/admitted-collision",
+    );
+    c.state.bindTask(request.workId, {
+      taskId: c.taskId,
+      assignmentId: c.assignmentId,
+      assignmentVersion: request.assignmentVersion!,
+      instructionsRevision: request.instructionsRevision!,
+      profileRevision: request.profileRevision!,
+    });
+    assert.equal(
+      c.state.begin(intent.id, { projectId: fixture.projectId }),
+      true,
+    );
+    execute(fixture.service, {
+      type: "task.configure",
+      actor: "operator",
+      projectId: fixture.projectId,
+      taskId: c.taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    await fixture.wake();
+    assert.equal(c.state.refusedBeforeStart(request.workId), false);
+    assert.equal(
+      fixture.count(
+        "SELECT COUNT(*) AS count FROM assignment_request_refusals",
+      ),
+      0,
+    );
+    assert.equal(
+      c.schedulerStore.byWorkId("unrelated-old-work").state,
+      "completed",
+    );
+    assert.equal(
+      fixture.count(
+        "SELECT COUNT(*) AS count FROM task_writer_admissions WHERE workId=?",
+        request.workId,
+      ),
+      1,
+    );
+    assert.equal(fixture.runtime.turns, 0);
+  });
+});
+
+for (const dimension of [
+  "task",
+  "assignment",
+  "profile",
+  "instructions",
+] as const)
+  for (const bound of [false, true])
+    test(`startup refuses a stale ${dimension} capture ${bound ? "with an unadmitted intent" : "without an intent"} and Start again captures current revisions`, async () => {
+      await withFixture(async (fixture) => {
+        const c = await seedRevisionCollision(fixture);
+        if (bound) {
+          c.state.create(
+            c.request.workId,
+            c.request.prompt,
+            "/waiting-capture",
+          );
+          c.state.bindTask(c.request.workId, {
+            taskId: c.taskId,
+            assignmentId: c.assignmentId,
+            assignmentVersion: c.request.assignmentVersion!,
+            instructionsRevision: c.request.instructionsRevision!,
+            profileRevision: c.request.profileRevision!,
+          });
+        }
+        if (dimension === "task")
+          execute(fixture.service, {
+            type: "task.configure",
+            actor: "operator",
+            projectId: fixture.projectId,
+            taskId: c.taskId,
+            expectedVersion: 1,
+            title: "Changed task",
+          });
+        if (dimension === "assignment")
+          access(fixture.service)
+            .db.prepare(
+              "UPDATE domain_assignments SET version=version+1 WHERE id=?",
+            )
+            .run(c.assignmentId);
+        if (dimension === "profile")
+          execute(fixture.service, {
+            type: "profile.configure",
+            actor: "operator",
+            profileId: fixture.profileId,
+            expectedVersion: Number(
+              fixture.service.domain().profile(fixture.profileId).version,
+            ),
+            instructions: "Changed agent",
+          });
+        if (dimension === "instructions")
+          execute(fixture.service, {
+            type: "project.configure",
+            actor: "operator",
+            projectId: fixture.projectId,
+            expectedVersion: Number(
+              fixture.service.domain().project(fixture.projectId).version,
+            ),
+            instructions: "Changed instructions",
+          });
+        const dataPath = (fixture.service as unknown as { dataDir: string })
+          .dataDir;
+        await fixture.service.stop();
+        const database = new (await import("node:sqlite")).DatabaseSync(
+          join(dataPath, "standalone.sqlite"),
+        );
+        try {
+          database
+            .prepare(
+              "UPDATE turn_requests SET state='held',reason='Old stale revision hold' WHERE workId=?",
+            )
+            .run(c.request.workId);
+          if (bound)
+            database
+              .prepare(
+                "UPDATE execution_intents SET state='held',reason='Old stale revision hold' WHERE workId=?",
+              )
+              .run(c.request.workId);
+        } finally {
+          database.close();
+        }
+        await fixture.service.start();
+        const state = startedOf(fixture.service).state;
+        assert.equal(state.refusedBeforeStart(c.request.workId), true);
+        assert.equal(
+          fixture.service.startAgainAvailability(c.taskId).available,
+          true,
+        );
+        const read = (await new OperatorApi(fixture.service).readTask(c.taskId))
+          .data;
+        assert.match(
+          read.assignments.find((a) => a.assignmentId === c.assignmentId)
+            ?.requestRefusal?.reason ?? "",
+          /never ran/,
+        );
+        await fixture.service.stop();
+        await fixture.service.start();
+        assert.equal(
+          startedOf(fixture.service).state.refusedBeforeStart(c.request.workId),
+          true,
+        );
+        const receipt = await fixture.service.startAgain({
+          key: randomUUID(),
+          taskId: c.taskId,
+          workId: c.request.workId,
+          expectedVersion: Number(
+            fixture.service.domain().task(c.taskId).version,
+          ),
+        });
+        const fresh = startedOf(fixture.service).schedulerStore.byWorkId(
+          receipt.workId,
+        );
+        const assignment = fixture.service.domain().assignment(c.assignmentId);
+        assert.equal(
+          fresh.taskVersion,
+          Number(fixture.service.domain().task(c.taskId).version),
+        );
+        assert.equal(fresh.assignmentVersion, Number(assignment.version));
+        assert.equal(fresh.profileRevision, Number(assignment.profileRevision));
+        assert.equal(
+          fresh.instructionsRevision,
+          Number(assignment.instructionsRevision),
+        );
+        assert.equal(
+          fixture.runtime.turns,
+          0,
+          "an unready task still cannot run",
+        );
+      });
+    });
+
+for (const evidence of [
+  "thread",
+  "turn",
+  "writer",
+  "capacity",
+  "effect",
+  "stop",
+] as const)
+  test(`stale refusal rolls back unchanged when ${evidence} evidence remains`, async () => {
+    await withFixture(async (fixture) => {
+      const c = await seedRevisionCollision(fixture);
+      c.state.create(c.request.workId, c.request.prompt, "/evidence-workspace");
+      c.state.bindTask(c.request.workId, {
+        taskId: c.taskId,
+        assignmentId: c.assignmentId,
+        assignmentVersion: c.request.assignmentVersion!,
+        instructionsRevision: c.request.instructionsRevision!,
+        profileRevision: c.request.profileRevision!,
+      });
+      access(fixture.service)
+        .db.prepare("UPDATE domain_tasks SET version=version+1 WHERE id=?")
+        .run(c.taskId);
+      const database = access(fixture.service).db;
+      if (evidence === "thread")
+        database
+          .prepare(
+            "UPDATE execution_intents SET threadId='possibly-started' WHERE workId=?",
+          )
+          .run(c.request.workId);
+      if (evidence === "turn")
+        database
+          .prepare(
+            "UPDATE execution_intents SET turnId='sent-turn' WHERE workId=?",
+          )
+          .run(c.request.workId);
+      if (evidence === "writer")
+        database
+          .prepare(
+            "INSERT INTO task_writer_admissions(workId,workspace) VALUES (?,?)",
+          )
+          .run(c.request.workId, "/evidence-workspace");
+      if (evidence === "capacity")
+        database
+          .prepare(
+            "INSERT INTO execution_capacity_reservations(workId,projectId) VALUES (?,?)",
+          )
+          .run(c.request.workId, fixture.projectId);
+      if (evidence === "effect")
+        database
+          .prepare(
+            "INSERT INTO execution_pending_effects(workId,effectKey,state,reason) VALUES (?,'known-survivor','pending','Still active')",
+          )
+          .run(c.request.workId);
+      if (evidence === "stop")
+        database
+          .prepare(`INSERT INTO execution_stop_targets(taskId,workId,threadId,turnId,interruptState,terminalState,reason,requestedAt)
+        VALUES (?,?,NULL,NULL,'unbound','unknown','Operator Stop',1)`)
+          .run(c.taskId, c.request.workId);
+      const before = {
+        request: c.schedulerStore.byWorkId(c.request.workId),
+        intent: c.state.byWorkId(c.request.workId),
+      };
+      assert.equal(
+        c.state.refuseStaleRevision(c.request.workId, [
+          "task-revision-changed",
+        ]),
+        false,
+      );
+      assert.deepEqual(
+        {
+          request: c.schedulerStore.byWorkId(c.request.workId),
+          intent: c.state.byWorkId(c.request.workId),
+        },
+        before,
+      );
+      assert.equal(
+        fixture.count(
+          "SELECT COUNT(*) AS count FROM execution_request_refusals WHERE workId=?",
+          c.request.workId,
+        ),
+        0,
+      );
+      assert.equal(
+        fixture.count(
+          "SELECT COUNT(*) AS count FROM assignment_request_refusals WHERE workId=?",
+          c.request.workId,
+        ),
+        0,
+      );
+    });
+  });

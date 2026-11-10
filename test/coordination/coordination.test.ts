@@ -2415,7 +2415,7 @@ test("contextual feedback to a completed lead carries its reference on the follo
   }
 });
 
-test("completion requires current lead work and all durable task gates", () => {
+function completionGates(clear: "answer" | "dismiss") {
   const f = fixture();
   try {
     const nestedResult = f.coordination.recordResult(
@@ -2516,20 +2516,72 @@ test("completion requires current lead work and all durable task gates", () => {
       "successfully terminal rejected lead work settles only its own effect",
     );
     const questionId = question.text.split(" ").at(-1) ?? "";
-    const answer = f.coordination.answerQuestion({
-      actor: "operator",
-      key: "60000000-0000-4000-8000-000000000009",
-      interactionId: questionId,
-      expectedRevision: 1,
-      answer: "Approved wording.",
-    });
-    const answerDelivery = f.coordination.bindDeliveryBatch(
-      leadId,
-      "delivery-completion-answer",
-    );
-    assert.ok(answerDelivery);
-    assert.equal(answerDelivery.events[0]?.eventId, answer.eventId);
-    f.coordination.completeDeliveryBatch(answerDelivery.deliveryWorkId);
+    assert.deepEqual(blocked.request.blockingInteractionIds, [questionId]);
+    if (clear === "dismiss") {
+      const lifecycle = f.coordination.inboxLifecycle(),
+        before = f.coordination.inboxEvents(leadId).length;
+      lifecycle.command(
+        {
+          type: "inbox.dismiss",
+          key: nextCommand(),
+          itemId: questionId,
+          expectedRevision: 1,
+        },
+        () => {},
+      );
+      assert.equal(
+        f.coordination.openInteractionsForCompletion(taskA).length,
+        0,
+      );
+      lifecycle.command(
+        {
+          type: "inbox.restore",
+          key: nextCommand(),
+          itemId: questionId,
+          expectedRevision: 2,
+        },
+        () => {},
+      );
+      assert.equal(
+        f.coordination.openInteractionsForCompletion(taskA).length,
+        1,
+      );
+      lifecycle.command(
+        {
+          type: "inbox.dismiss",
+          key: nextCommand(),
+          itemId: questionId,
+          expectedRevision: 3,
+        },
+        () => {},
+      );
+      assert.equal(f.coordination.inboxEvents(leadId).length, before);
+      assert.equal(
+        f.coordination
+          .interactions(taskA)
+          .find((i) => i.interactionId === questionId)?.status,
+        "open",
+      );
+      assert.equal(
+        f.coordination.openInteractionsForCompletion(taskA).length,
+        0,
+      );
+    } else {
+      const answer = f.coordination.answerQuestion({
+        actor: "operator",
+        key: "60000000-0000-4000-8000-000000000009",
+        interactionId: questionId,
+        expectedRevision: 1,
+        answer: "Approved wording.",
+      });
+      const answerDelivery = f.coordination.bindDeliveryBatch(
+        leadId,
+        "delivery-completion-answer",
+      );
+      assert.ok(answerDelivery);
+      assert.equal(answerDelivery.events[0]?.eventId, answer.eventId);
+      f.coordination.completeDeliveryBatch(answerDelivery.deliveryWorkId);
+    }
     const unpaused = f.domain.project(projectId);
     f.domain.execute({
       key: nextCommand(),
@@ -2651,7 +2703,10 @@ test("completion requires current lead work and all durable task gates", () => {
   } finally {
     f.close();
   }
-});
+}
+for (const clear of ["answer", "dismiss"] as const)
+  test(`completion requires current lead work and all durable task gates (${clear})`, () =>
+    completionGates(clear));
 
 for (const prior of [
   "completed",

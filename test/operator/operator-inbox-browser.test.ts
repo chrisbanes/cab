@@ -1047,15 +1047,15 @@ test("an intervention shows its recorded reason and links to the execution", asy
   const detail = page.getByRole("region", { name: "Selected request" });
   await page.locator(".inbox-row").click();
   await detail.getByText("Intervention", { exact: true }).waitFor();
-  await detail.getByText("Execution ownership is uncertain").waitFor();
+  await detail.getByText("Still waiting on Task lead").waitFor();
   // The row leads with the task and keeps the recorded reason, which has no headline to replace it.
   const row = page.locator('.inbox-row[data-kind="intervention"]');
   assert.equal(
     await row.locator("strong").textContent(),
     "Restore webhook delivery",
   );
-  await row.getByText("Execution ownership is uncertain").waitFor();
-  // The seeded intervention has no requester and no timestamp: both are omitted everywhere.
+  await row.getByText("Still waiting on Task lead").waitFor();
+  // The episode has a recorded time but no requester; no unknown identity is invented.
   const aside = page.getByRole("complementary", { name: "Task context" });
   await aside.waitFor();
   for (const text of [
@@ -1065,17 +1065,14 @@ test("an intervention shows its recorded reason and links to the execution", asy
   ])
     assert.doesNotMatch(text, /Age unknown|Responsibility unknown/);
   assert.equal(await aside.getByText("Requester", { exact: true }).count(), 0);
-  assert.equal(await detail.locator(".inbox-identity").count(), 0);
-  assert.equal(await page.locator(".inbox-row-meta").count(), 0);
+  assert.match(
+    await detail.locator(".inbox-identity").innerText(),
+    /\d\d:\d\d/,
+  );
+  assert.equal(await page.locator(".inbox-row-meta").count(), 1);
   // Uncertain ownership is stated once in the request pane's headline, not again in the inspector.
-  assert.equal(
-    await detail.getByText("Execution ownership is uncertain").count(),
-    1,
-  );
-  assert.equal(
-    await aside.getByText("Execution ownership is uncertain").count(),
-    0,
-  );
+  assert.equal(await detail.getByText("Still waiting on Task lead").count(), 1);
+  assert.equal(await aside.getByText("Still waiting on Task lead").count(), 0);
   // Ownership stays held is stated once, in the request pane, as on the Home card.
   assert.equal(
     await detail.getByText("Ownership stays held", { exact: true }).count(),
@@ -1146,7 +1143,7 @@ test("an intervention that leaves the queue stops saying ownership stays held", 
     await detail.getByText("Ownership stays held", { exact: true }).count(),
     0,
   );
-  await detail.getByText("Execution ownership is uncertain").waitFor();
+  await detail.getByText("Still waiting on Task lead").waitFor();
 });
 
 test("an incomplete refresh that omits an intervention keeps saying ownership stays held", async (_t, j) => {
@@ -1500,7 +1497,11 @@ test("the request pane shows kind, position, identities and a sticky response ba
   );
   await serveSourceHold(page, approval.taskId);
   const taskReads: string[] = [];
+  let phase = "before-click";
+  const readJournal: string[] = [];
   page.on("request", (request) => {
+    if (/\/api\/operator\/(inbox|tasks\/)/.test(request.url()))
+      readJournal.push(`${phase} request ${request.url()}`);
     if (
       new URL(request.url()).pathname ===
       `/api/operator/tasks/${approval.taskId}`
@@ -1533,6 +1534,8 @@ test("the request pane shows kind, position, identities and a sticky response ba
   await until(() => inboxInFlight === 0, "no Inbox read in flight");
   await settle(page);
   const inboxReadsBeforeClick = inboxReads;
+  phase = "selection";
+  readJournal.push(`selection starts with ${taskReads.length} task reads`);
   await page.locator('.inbox-row[data-kind="approval"]').click();
   await detail
     .getByText("Execution blocked by dependency", { exact: true })
@@ -1586,9 +1589,14 @@ test("the request pane shows kind, position, identities and a sticky response ba
     await settle(page);
     const p = (await pane.boundingBox())!,
       b = (await bar.boundingBox())!;
+    const atFoot = Math.abs(b.y + b.height - (p.y + p.height)) <= 1;
+    if (!atFoot)
+      await captureBrowserEvidence(page, "approval-footer-mismatch", {
+        fullPage: false,
+      });
     assert.ok(
-      Math.abs(b.y + b.height - (p.y + p.height)) <= 1,
-      `bar at the pane's foot at ${where}`,
+      atFoot,
+      `bar at the pane's foot at ${where}: ${JSON.stringify({ pane: p, bar: b, scroll: await pane.evaluate((e) => ({ top: e.scrollTop, height: e.scrollHeight, client: e.clientHeight })), inboxInFlight, taskReads })}`,
     );
   }
   await captureBrowserEvidence(page, "1366-inbox-approval-pane", {
@@ -1600,7 +1608,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
   assert.ok(
     taskReads.length >= 1 &&
       taskReads.length - 1 <= inboxReads - inboxReadsBeforeClick,
-    `${taskReads.length} task reads for ${inboxReads - inboxReadsBeforeClick} Inbox reads`,
+    `${taskReads.length} task reads for ${inboxReads - inboxReadsBeforeClick} Inbox reads; ${JSON.stringify(readJournal)}`,
   );
   const reread = page.waitForResponse(
     (r) =>
@@ -2020,7 +2028,14 @@ for (const [name, viewport] of [
       .getByRole("heading", { name: "Codex runtime unavailable" })
       .waitFor();
     const url = new URL(page.url());
-    assert.equal(url.searchParams.get("request"), "runtime:codex");
+    assert.match(
+      url.searchParams.get("request")!,
+      /^runtime:codex:[0-9a-f-]{36}$/,
+    );
+    assert.equal(
+      url.searchParams.get("request"),
+      await runtimeRow.getAttribute("data-record-id"),
+    );
     assert.equal(url.searchParams.has("task"), false);
     assert.ok(url.search.includes("request=runtime%3Acodex"), url.search);
 
@@ -2147,4 +2162,129 @@ test("an Inbox holding only an exhausted runtime counts it without naming projec
     await page.locator(".inbox-summary").textContent(),
     "1 unresolved",
   );
+});
+
+test("Inbox dismissal keeps the question draft and history restoration starts no work", async (_t, j) => {
+  const { page, f, seeded } = await openInbox(j, 1, {
+    width: 1366,
+    height: 1000,
+  });
+  await page.getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+  const turns = f.runtime.turns;
+  await page
+    .getByRole("textbox", { name: "Your answer: Optional", exact: true })
+    .fill("Keep this draft");
+  await page
+    .getByLabel("Dismissal note (optional)")
+    .fill("Waiting for context");
+  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await page
+    .getByText(
+      "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
+      { exact: true },
+    )
+    .waitFor();
+  const historyRead = page.waitForResponse((r) =>
+    r.url().includes("/api/operator/inbox?status=dismissed"),
+  );
+  await page
+    .getByLabel("Inbox status", { exact: true })
+    .selectOption("dismissed");
+  const history = await historyRead;
+  assert.equal(history.status(), 200);
+  try {
+    await page.getByRole("button", { name: "Restore", exact: true }).waitFor();
+  } catch (error) {
+    _t.diagnostic(
+      JSON.stringify({
+        history: await history.json(),
+        body: await page.locator("body").innerText(),
+      }),
+    );
+    await captureBrowserEvidence(page, "inbox-history-selection-failure");
+    throw error;
+  }
+  await page.getByText("Waiting for context", { exact: true }).waitFor();
+  assert.equal(f.runtime.turns, turns);
+  assert.equal(
+    f.service.coordinationView().readTask(seeded[0]!.taskId).questions[0]
+      ?.status,
+    "open",
+  );
+  await page.getByRole("button", { name: "Restore", exact: true }).click();
+  await page
+    .getByText(
+      "Restored. No work was started. A pending request is required for completion again.",
+      { exact: true },
+    )
+    .waitFor();
+  await page
+    .getByLabel("Inbox status", { exact: true })
+    .selectOption("actionable");
+  await page.getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("textbox", { name: "Your answer: Optional", exact: true })
+      .inputValue(),
+    "Keep this draft",
+  );
+  assert.equal(f.runtime.turns, turns);
+});
+
+test("a completion rejection links to dismissal of its exact withheld request without exposing its form", async (_t, j) => {
+  const { seedInteractionRejection } = await import("../fixtures/questions.js");
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnQuestion(f);
+  seedInteractionRejection(f, a);
+  const web = await j.start("fixture.web", () =>
+    f.startWeb([f.directory, "Explain"]),
+  );
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 1000 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?section=decisions`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const action = page.getByRole("link", {
+    name: "Review or dismiss request",
+    exact: true,
+  });
+  await action.waitFor();
+  assert.equal(
+    (await page.locator("body").innerText()).includes("Explain"),
+    false,
+  );
+  await action.click();
+  await page.getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+  assert.match(page.url(), new RegExp(a.interactionId));
+  assert.equal(
+    await page
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
+      .count(),
+    0,
+  );
+  const turns = f.runtime.turns;
+  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await page
+    .getByText(
+      "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
+      { exact: true },
+    )
+    .waitFor();
+  await page.goto(`${web.origin}/tasks/${a.taskId}?section=decisions`);
+  await page
+    .getByText(/Dismissed; no longer required for completion/)
+    .waitFor();
+  assert.equal(f.runtime.turns, turns);
 });

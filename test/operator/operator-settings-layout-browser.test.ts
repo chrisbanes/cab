@@ -50,7 +50,7 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
   );
   // Relay and Fieldnotes link no repository; only Atlas has a GitHub source.
   assert.equal(await projects.getByText("None · repository-free").count(), 2);
-  assert.equal(await projects.getByText("No GitHub source").count(), 2);
+  assert.equal(await projects.getByText("No GitHub selections").count(), 2);
   await projects
     .getByText(
       "Discovery and readiness never grant repository access; each is listed separately.",

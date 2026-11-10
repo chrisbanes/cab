@@ -16,7 +16,7 @@ const ask = (threadId: string, turnId: string) => ({
 });
 
 const unfinished = (scheduler: SchedulerStore) =>
-  scheduler.unfinishedDraftTurns(task).map((request) => request.workId);
+  scheduler.draftTurnCandidates(task).map((request) => request.workId);
 
 /** The lead's bound work with its request; the lead assignment stays pending. */
 function leadTurn(
@@ -71,7 +71,7 @@ test("a draft turn keeps the lead pending and still binds its callbacks", () => 
   }
 });
 
-test("every unfinished draft request of a task is listed, oldest first", () => {
+test("every queued, held or active draft request of a task is listed, oldest first", () => {
   const f = coordinationFixture();
   try {
     const scheduler = new SchedulerStore(f.db);
@@ -160,7 +160,7 @@ function refuse(f: ReturnType<typeof coordinationFixture>, workId: string) {
     .run(workId, refusal);
 }
 
-test("a draft request stores its task digest and a refusal before it ran finishes it", () => {
+test("a draft request keeps its digest and refused history available for current risk checks", () => {
   const f = coordinationFixture();
   try {
     const scheduler = new SchedulerStore(f.db);
@@ -193,7 +193,7 @@ test("a draft request stores its task digest and a refusal before it ran finishe
       state.isNeverAdmittedRefusedAssignmentWork("work-draft"),
       true,
     );
-    assert.deepEqual(unfinished(scheduler), []);
+    assert.deepEqual(unfinished(scheduler), ["work-draft"]);
     // Evidence of a stop target means it is not never-admitted history.
     f.db
       .prepare(

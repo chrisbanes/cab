@@ -24,15 +24,19 @@ export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 /** The request's action: its attention code's when it has one, otherwise its kind's. */
 export const requestActionLabel = (
   item:
-    | Pick<TaskInboxItem, "kind" | "attentionCode">
-    | Pick<RuntimeInboxItem, "kind">,
+    | Pick<TaskInboxItem, "kind" | "attentionCode" | "lifecycle">
+    | Pick<RuntimeInboxItem, "kind" | "lifecycle">,
 ) =>
-  item.kind === "runtime"
-    ? runtimeSettingsAction
-    : attentionNext[
-        item.attentionCode ??
-          (item.kind === "intervention" ? "execution-uncertain" : item.kind)
-      ].inboxAction;
+  item.lifecycle?.status === "resolved"
+    ? "View resolved item"
+    : item.lifecycle?.status === "dismissed"
+      ? "View dismissed item"
+      : item.kind === "runtime"
+        ? runtimeSettingsAction
+        : attentionNext[
+            item.attentionCode ??
+              (item.kind === "intervention" ? "execution-uncertain" : item.kind)
+          ].inboxAction;
 
 /**
  * What a request is called in the queue and the pane: the question or exact action when the read
@@ -256,7 +260,8 @@ export function taskAttentionProjection(
   deciding: string | null,
 ) {
   const requests = [...task.approvals, ...task.questions].filter(
-      (request) => request.status === "open",
+      (request) =>
+        request.status === "open" && request.lifecycle?.status !== "dismissed",
     ),
     normalRunning =
       // Submission reports a healthy turn start as starting, with the same writer and capacity.
@@ -490,7 +495,7 @@ export const taskContext = (
         "task" | "execution" | "admission" | "source" | "lead" | "attention"
       >
     | undefined,
-  item: Pick<TaskInboxItem, "kind" | "attentionCode">,
+  item: Pick<TaskInboxItem, "kind" | "attentionCode" | "lifecycle">,
   open: boolean,
 ) => ({
   source: !task

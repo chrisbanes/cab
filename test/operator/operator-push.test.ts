@@ -1198,8 +1198,8 @@ test("exhausting a runtime sends exactly one push with only its name", async () 
       {
         v: 1,
         title: "Codex runtime unavailable",
-        url: "/inbox?request=runtime%3Acodex",
-        tag: `runtime:codex:${runtime.since}`,
+        url: `/inbox?request=${encodeURIComponent(runtime.id)}`,
+        tag: `${runtime.id}:${runtime.since}`,
       },
     ]);
   } finally {
@@ -1258,7 +1258,7 @@ test("recovery clears the alert and a later exhaustion fires another with the ne
     await x.exhaustion!.exhaust(x.f.runtime);
     await x.tick();
     const first = sent(x.fake, a.device)[0];
-    assert.match(first?.tag, /^runtime:codex:\d+$/);
+    assert.match(first?.tag, /^runtime:codex:[0-9a-f-]{36}:\d+$/);
     assert.deepEqual(ledger(x.f), [first.tag]);
     x.exhaustion!.gate.failStarts = false;
     await x.f.service.configureRuntime({
@@ -1280,7 +1280,8 @@ test("recovery clears the alert and a later exhaustion fires another with the ne
     const second = sent(x.fake, a.device)[1];
     assert.notEqual(second.tag, first.tag);
     assert.ok(
-      Number(second.tag.split(":")[2]) > Number(first.tag.split(":")[2]),
+      Number(second.tag.split(":").at(-1)) >
+        Number(first.tag.split(":").at(-1)),
     );
   } finally {
     await x.f.close();

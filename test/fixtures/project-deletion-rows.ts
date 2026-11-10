@@ -1478,6 +1478,43 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "inbox_lifecycle",
+      values: {
+        id: i.uuid("inbox-episode"),
+        taskId: i.taskId,
+        kind: "intervention",
+        sourceKey: i.uuid("inbox-source"),
+        dataJson: '{"code":"not-started"}',
+        status: "dismissed",
+        obsolete: 0,
+        revision: 2,
+        createdAt: 1,
+        resolvedAt: null,
+        resolution: null,
+        dismissedAt: 2,
+        note: `Private Inbox note ${i.taskId}`,
+      },
+    },
+    {
+      shared: false,
+      table: "inbox_lifecycle_receipts",
+      values: {
+        key: i.uuid("inbox-receipt"),
+        taskId: i.taskId,
+        itemId: i.uuid("inbox-episode"),
+        payloadHash: "a".repeat(64),
+        result: JSON.stringify({
+          kind: "inbox",
+          key: i.uuid("inbox-receipt"),
+          recorded: true,
+          itemId: i.uuid("inbox-episode"),
+          revision: 2,
+          status: "dismissed",
+        }),
+      },
+    },
+    {
+      shared: false,
       table: "inbox_request_supersessions",
       values: {
         oldWorkId: i.workId,
@@ -1599,6 +1636,11 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
         failureClass: "response-rejected",
         threadId: null,
       },
+    },
+    {
+      shared: false,
+      table: "assignment_request_refusals",
+      values: { workId: i.workId, reason: "fixture-reason" },
     },
     {
       shared: false,

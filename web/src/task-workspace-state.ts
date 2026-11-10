@@ -120,6 +120,7 @@ export class TaskFilesState {
   directory: WorkspaceDirectory | null = null;
   directoryKey: string | null = null;
   directoryObservedAt: number | null = null;
+  workspaceObservedAt: number | null = null;
   /** Why a direct file link was not opened. */
   linkNotice = "";
   /** The jump from the workspace listing to a repository root happens at most once. */

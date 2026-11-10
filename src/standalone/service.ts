@@ -1,3 +1,5 @@
+import { selectAssignmentExecution } from "./operator-runtime.js";
+import { attentionNext } from "../operator/attention.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
@@ -313,6 +315,7 @@ import {
 import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
   SchedulerStore,
+  CapturedRevisionCollision,
   type TurnRequest,
   TurnScheduler,
 } from "./scheduler.js";
@@ -330,6 +333,7 @@ import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
   ExecutionState,
+  refusedRevisionPrefix,
   harnessRetrySupported,
   type DraftTurnReceipt,
   type StartAgainReceipt,
@@ -704,6 +708,7 @@ interface Started {
   workspaceComparisons: SqliteWorkspaceComparisonStore;
   operatorCredentials: OperatorCredentialStore;
   operatorPush: OperatorPushStore;
+  reobservedTaskVersions: Map<string, number>;
   schedulerStore: SchedulerStore;
   wakeQueries: SchedulerWakeQueries;
   inboxStartup: InboxStartupReconciliation;
@@ -711,7 +716,6 @@ interface Started {
    * Imported tasks' versions just before startup's provider invalidation. A shutdown
    * requeue captured at that version may take the re-observed one once, when admissible.
    */
-  reobservedTaskVersions: Map<string, number>;
   supervisor: ExecutionSupervisor;
   scheduler: TurnScheduler;
   /** Absent when power supervision is disabled. */
@@ -1084,6 +1088,14 @@ export class StandaloneService {
               reason: "An execution callback has not ended",
             })),
         ],
+        (taskId, blockerTaskId, version) => {
+          if (domain.leadBindings().some((b) => b.taskId === taskId))
+            coordination.ensureDeliveryEventWithinTransaction(
+              taskId,
+              "The stacked blocker's task state changed and its failure hold cleared; other admission holds still apply.",
+              `stacked-blocker-cleared:${blockerTaskId}:task:${version}`,
+            );
+        },
       );
       domain.migrate();
       let diagnostics: ExecutionDiagnosticsStore | undefined;
@@ -1448,12 +1460,25 @@ export class StandaloneService {
               domain.leadBindings().find((b) => b.taskId === taskId)
                 ?.assignmentId ?? "",
             ),
-          feedback: (taskId, reason, identity) =>
-            coordination.ensureDeliveryEventWithinTransaction(
+          observedPr: (taskId, observation) =>
+            coordination.supersedePrApprovalsWithinTransaction(
               taskId,
-              reason,
-              identity,
+              observation,
             ),
+          failedStackedDependents: (blockerTaskId) =>
+            domain.failedStackedDependents(blockerTaskId),
+          feedback: (taskId, reason, identity) => {
+            if (
+              domain.task(taskId).state === "open" &&
+              domain.leadBindings().some((b) => b.taskId === taskId)
+            )
+              return coordination.ensureDeliveryEventWithinTransaction(
+                taskId,
+                reason,
+                identity,
+              );
+            return false;
+          },
           taskWorkspace,
           projectWrite: (taskId, run) =>
             this.withProjectWrite(
@@ -1788,6 +1813,28 @@ export class StandaloneService {
         );
       await supervisor.reconcileOnStart();
       this.releaseUnboundHoldsOnStart(state, supervisor);
+      // Old obsolete requests have no execution generation for recovery release to find.
+      let refusedAfter = 0;
+      for (;;) {
+        const page = db
+          .prepare(`SELECT sequence,workId FROM turn_requests
+          WHERE sequence>? AND state='held' AND kind='assignment' AND draftTurn=0
+          ORDER BY sequence LIMIT 100`)
+          .all(refusedAfter) as Array<{ sequence: number; workId: string }>;
+        if (!page.length) break;
+        for (const request of page) {
+          refusedAfter = request.sequence;
+          if (
+            !supervisor.hasKnownRisk(request.workId) &&
+            !this.callbacks.get(request.workId)?.size
+          )
+            this.refuseStaleRequest(
+              schedulerStore.byWorkId(request.workId),
+              state,
+              domain,
+            );
+        }
+      }
       await this.resolveDraftingOnStart({
         drafting,
         draftingBindings,
@@ -1910,9 +1957,9 @@ export class StandaloneService {
         operatorCredentials,
         operatorPush,
         schedulerStore,
+        reobservedTaskVersions,
         wakeQueries,
         inboxStartup,
-        reobservedTaskVersions,
         supervisor,
         scheduler,
         power,
@@ -2294,6 +2341,7 @@ export class StandaloneService {
     const delay = runtimeRestartDelaysMs[state.attempts];
     if (delay === undefined) {
       state.exhaustedAt = this.wallNow();
+      if (this.current) this.reconcileInbox();
       return;
     }
     const token = {};
@@ -3183,6 +3231,10 @@ export class StandaloneService {
     return this.started().state.recoveryForTask(taskId, alsoWorkId);
   }
 
+  uncertainAssignmentsForTask(taskId: string): string[] {
+    return this.started().state.uncertainAssignmentsForTask(taskId);
+  }
+
   powerStatus() {
     return this.current?.power?.status() ?? null;
   }
@@ -3540,6 +3592,10 @@ export class StandaloneService {
     version: number,
   ): TurnRequest | undefined {
     return this.started().schedulerStore.current(assignmentId, version);
+  }
+
+  latestTurnRequest(assignmentId: string): TurnRequest | undefined {
+    return this.started().schedulerStore.latest(assignmentId);
   }
 
   turnRequestsForTask(taskId: string): TurnRequest[] {
@@ -4086,6 +4142,9 @@ export class StandaloneService {
     )
       throw new DeliveryHoldError(
         "Stacked blocker failed; Unstack or Cancel the dependent",
+        domain.task(caller.taskId).state === "open"
+          ? "stacked-blocker-failed"
+          : undefined,
       );
     if (domain.project(caller.projectId).archived)
       throw new DomainConflictError("Archived projects are read-only");
@@ -4150,6 +4209,11 @@ export class StandaloneService {
     });
     if (canonicalMaterial(current) !== canonicalMaterial(caller))
       throw new Error("Delivery caller revision changed");
+    if (deliveryStore.hasUncertainAction(caller.taskId, exceptOperationId))
+      throw new DeliveryHoldError(
+        "External action outcome is unknown",
+        "external-action-uncertain",
+      );
     if (state.taskHold(caller.taskId))
       throw new DeliveryHoldError("Task is held");
     const draftTurn =
@@ -4874,6 +4938,219 @@ export class StandaloneService {
     };
   }
 
+  inboxLifecycle() {
+    return this.started().coordination.inboxLifecycle();
+  }
+
+  /** Reconcile recorded facts without changing execution or response state. */
+  reconcileInbox(): void {
+    const { domain, coordination } = this.started();
+    coordination.reconcileInboxInteractions();
+    const lifecycle = coordination.inboxLifecycle();
+    for (const project of domain.projects())
+      for (const task of domain.tasks(String(project.id))) {
+        const taskId = String(task.id),
+          active = new Set<string>();
+        const conditions = this.inboxConditions(taskId);
+        for (const condition of conditions) {
+          const row = lifecycle.observe({
+            id: `intervention:${taskId}:${randomUUID()}`,
+            taskId,
+            kind: "intervention",
+            sourceKey: condition.key,
+            data: { code: condition.code },
+          });
+          active.add(row.id);
+        }
+        for (const row of lifecycle.rows(taskId))
+          if (
+            row.kind === "intervention" &&
+            row.status !== "resolved" &&
+            (task.state !== "open" || !active.has(row.id))
+          )
+            lifecycle.resolve(
+              row.id,
+              task.state !== "open"
+                ? task.state === "done"
+                  ? "Task is Done"
+                  : "Task is Cancelled"
+                : "The intervention condition cleared",
+            );
+      }
+    const activeRuntimes = new Set<string>();
+    for (const status of this.harnessStatuses()) {
+      if (
+        status.state === "unavailable" &&
+        status.restart?.state === "exhausted"
+      ) {
+        const existing = lifecycle
+          .rows()
+          .find(
+            (row) =>
+              row.kind === "runtime" &&
+              row.status !== "resolved" &&
+              JSON.parse(row.dataJson).harness === status.harness,
+          );
+        const sourceKey =
+          existing?.sourceKey ??
+          `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`;
+        const row = lifecycle.observe({
+          id: existing?.id ?? sourceKey,
+          taskId: null,
+          kind: "runtime",
+          sourceKey,
+          data: { harness: status.harness, ...status.restart },
+          createdAt: status.restart.since,
+        });
+        activeRuntimes.add(row.id);
+      }
+      // Availability or explicit disabling is positive evidence; an incomplete restart is not.
+      if (
+        (status.state === "available" &&
+          this.runtimes.has(status.harness) &&
+          !this.runtimeStarting.has(status.harness)) ||
+        (status.state === "not-configured" && status.reason === "disabled")
+      )
+        for (const row of lifecycle.rows())
+          if (
+            row.kind === "runtime" &&
+            row.status !== "resolved" &&
+            JSON.parse(row.dataJson).harness === status.harness &&
+            !activeRuntimes.has(row.id)
+          )
+            lifecycle.resolve(
+              row.id,
+              "Runtime is available or was disabled by the operator",
+            );
+    }
+  }
+
+  inboxConditions(taskId: string) {
+    const { domain, coordination, schedulerStore, state } = this.started(),
+      task = domain.task(taskId);
+    const conditions: Array<{
+      code:
+        | "execution-uncertain"
+        | "not-started"
+        | "stacked-blocker-failed"
+        | "external-action-uncertain"
+        | "unresolved-result"
+        | "completion-rejected";
+      key: string;
+      reason: string;
+    }> = [];
+    if (task.state !== "open") return conditions;
+    const edge = domain.activeStackedDependency(taskId);
+    if (edge) {
+      const prefix = `stack-failure:${JSON.stringify([taskId, edge.blockerTaskId, edge.repositoryId])}:`;
+      const existing = this.inboxLifecycle()
+        .rows(taskId)
+        .find(
+          (r) =>
+            r.kind === "intervention" &&
+            r.status !== "resolved" &&
+            r.sourceKey.startsWith(prefix),
+        );
+      const gate = domain.stackedBlockerGate(taskId);
+      const failed = gate === "failed";
+      const unknown = gate === "unknown";
+      // A failed refresh cannot clear an observed episode or discard its dismissal.
+      if (failed || (existing && unknown))
+        conditions.push({
+          code: "stacked-blocker-failed",
+          key: existing?.sourceKey ?? `${prefix}${randomUUID()}`,
+          reason: failed
+            ? attentionNext["stacked-blocker-failed"].reason
+            : "Stacked blocker state is unknown; refresh delivery evidence",
+        });
+    }
+    for (const action of this.delivery().actions(taskId))
+      if (
+        action.state === "uncertain" &&
+        !isServiceDeliveryCaller(action.binding)
+      )
+        conditions.push({
+          code: "external-action-uncertain",
+          key: `external-action:${action.operationId}:${action.attempts}`,
+          reason: attentionNext["external-action-uncertain"].reason,
+        });
+    const held: string[] = [];
+    const assignments = domain.assignments(taskId);
+    for (const a of assignments) {
+      const s = selectAssignmentExecution(a, this);
+      const request = s.request ?? schedulerStore.latest(String(a.id));
+      const refused =
+        request?.state === "held" &&
+        request.kind === "assignment" &&
+        state.refusedBeforeStart(request.workId);
+      const notStarted =
+        request?.state === "held" && this.notStartedWork(request.workId);
+      const settledDraft =
+        request?.draftTurn && this.settledDraftRefusal(request.workId);
+      const confirmed =
+        s.request?.state === "active" &&
+        ["running", "submitting"].includes(s.intent?.state ?? "");
+      if (
+        (request?.state === "held" && !notStarted && !settledDraft) ||
+        (s.request?.state === "active" && !confirmed) ||
+        Boolean(
+          (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
+        )
+      )
+        held.push(String(domain.profile(String(a.profileId)).name));
+      // A temporary callback blocks Start again, not the durable refusal episode.
+      if (refused && request && !request.draftTurn)
+        conditions.push({
+          code: "not-started",
+          key: `refused:${request.workId}`,
+          reason: notStarted
+            ? "Refused before it started; nothing ran"
+            : "Refused request is waiting for execution ownership to settle",
+        });
+    }
+    if (this.hasNonStopTaskHold(taskId))
+      held.push(`task hold: ${this.nonStopTaskHoldReason(taskId)}`);
+    if (!held.length)
+      for (const id of this.uncertainAssignmentsForTask(taskId)) {
+        const assignment = assignments.find((a) => a.id === id);
+        held.push(
+          assignment
+            ? String(domain.profile(String(assignment.profileId)).name)
+            : "retained execution ownership",
+        );
+      }
+    if (held.length) {
+      // Keep a combined ownership episode while any hold remains; it cannot be dismissed.
+      const existing = this.inboxLifecycle()
+        .rows(taskId)
+        .find(
+          (r) =>
+            r.kind === "intervention" &&
+            r.status !== "resolved" &&
+            JSON.parse(r.dataJson).code === "execution-uncertain",
+        );
+      conditions.push({
+        code: "execution-uncertain",
+        key: existing?.sourceKey ?? `hold:${taskId}:${randomUUID()}`,
+        reason: `Still waiting on ${held.join("; ")}`,
+      });
+    }
+    for (const r of coordination.unresolvedResultDestinations(taskId))
+      conditions.push({
+        code: "unresolved-result",
+        key: `result:${r.resultId}:${r.revision}`,
+        reason: "Result destination needs attention",
+      });
+    for (const c of coordination.completionRequests(taskId))
+      if (c.status === "rejected" && c.taskVersion === Number(task.version))
+        conditions.push({
+          code: "completion-rejected",
+          key: `completion:${c.requestId}:${c.revision}`,
+          reason: "Completion requires review",
+        });
+    return conditions;
+  }
+
   coordinationView(): CoordinationView {
     const { domain, coordination, state, routingAttempts } = this.started();
     return new CoordinationView(
@@ -5427,9 +5704,11 @@ export class StandaloneService {
       // A draft request that a completed retry or shutdown requeue replaced stays held as history.
       draftTurnActive:
         this.started()
-          .schedulerStore.unfinishedDraftTurns(taskId)
+          .schedulerStore.draftTurnCandidates(taskId)
           .some(
             (request) =>
+              (this.callbacks.get(request.workId)?.size ?? 0) > 0 ||
+              this.started().supervisor.hasKnownRisk(request.workId) ||
               !this.started().coordination.isHistoricalWorkResolved(
                 request.workId,
               ),
@@ -5519,8 +5798,39 @@ export class StandaloneService {
       request !== undefined &&
       request.kind === "assignment" &&
       !request.draftTurn &&
+      !this.callbacks.get(workId)?.size &&
+      !this.started().supervisor.hasKnownRisk(workId) &&
       this.started().state.refusedBeforeStart(workId)
     );
+  }
+
+  /** A refused draft is history only after its callbacks and known execution risks settle. */
+  settledDraftRefusal(workId: string): boolean {
+    const { schedulerStore, state, supervisor } = this.started();
+    const request = schedulerStore.find(workId);
+    return (
+      request?.kind === "assignment" &&
+      request.draftTurn &&
+      request.state === "held" &&
+      !this.callbacks.get(workId)?.size &&
+      !supervisor.hasKnownRisk(workId) &&
+      state.refusedBeforeStart(workId)
+    );
+  }
+
+  requestRefusalForAssignment(assignmentId: string) {
+    const request = this.started().schedulerStore.latest(assignmentId);
+    if (!request || !this.notStartedWork(request.workId)) return undefined;
+    const uncaptured = this.started().state.requestOnlyRefusal(request.workId);
+    if (uncaptured) return uncaptured;
+    if (!request.reason?.startsWith(refusedRevisionPrefix)) return undefined;
+    return {
+      id: request.workId,
+      taskId: String(request.taskId),
+      assignmentId,
+      refusalReason:
+        "This request was prepared against older task, assignment or agent revisions and never ran. Use Start again when independent holds allow it.",
+    };
   }
 
   /** Whether the assignment's newest request was refused before it ran. */
@@ -5534,8 +5844,7 @@ export class StandaloneService {
     if (request.state !== "held") return "settled";
     const { state } = this.started();
     if (this.notStartedWork(request.workId)) return "refused";
-    if (request.draftTurn && state.refusedBeforeStart(request.workId))
-      return "settled";
+    if (this.settledDraftRefusal(request.workId)) return "settled";
     const intent = state.byWorkId(request.workId);
     return intent?.state === "submitting" ||
       (intent &&
@@ -7414,6 +7723,7 @@ export class StandaloneService {
     } = this.current;
     if (this.current.taskUnstack.hasPending())
       await this.current.taskUnstack.reconcileAll();
+    this.reconcileInbox();
     this.flushRuntimeAnswers();
     // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
     // fails is reported and retried on the next wake; the others and the wake go on.
@@ -7807,6 +8117,21 @@ export class StandaloneService {
             : undefined,
         );
       } catch (error) {
+        if (error instanceof CapturedRevisionCollision) {
+          const workId = error.request.workId;
+          if (state.requestOnlyRefusal(workId)) continue;
+          if (
+            !this.started().supervisor.hasKnownRisk(workId) &&
+            !this.callbacks.get(workId)?.size &&
+            state.refuseUncapturedRevision(workId)
+          )
+            continue;
+          store.hold(
+            workId,
+            `Assignment request became obsolete: ${String(error)}`,
+          );
+          continue;
+        }
         const existing = queries.oldestAssignmentWorkId(assignmentId);
         if (existing)
           store.hold(
@@ -8522,6 +8847,38 @@ export class StandaloneService {
     return runtime?.startedUnderPreviousHome?.(threadId) ?? false;
   }
 
+  private refuseStaleRequest(
+    request: TurnRequest,
+    state: ExecutionState,
+    domain: DomainStore,
+  ): boolean {
+    if (
+      request.kind !== "assignment" ||
+      request.draftTurn ||
+      !request.assignmentId ||
+      request.taskVersion === null ||
+      request.assignmentVersion === null ||
+      request.instructionsRevision === null ||
+      request.profileRevision === null ||
+      this.callbacks.get(request.workId)?.size
+    )
+      return false;
+    const reasons = domain.assignmentAdmission(request.assignmentId, {
+      taskVersion: request.taskVersion,
+      assignmentVersion: request.assignmentVersion,
+      instructionsRevision: request.instructionsRevision,
+      profileRevision: request.profileRevision,
+    }).reasons;
+    // Queued work keeps waits and revision mismatches that normal first-turn admission can refresh.
+    if (
+      request.state === "queued" &&
+      (reasons.some((reason) => !immutableRevisionMismatches.has(reason)) ||
+        reasons.every((reason) => this.firstTurnResolves(request, reason)))
+    )
+      return false;
+    return state.refuseStaleRevision(request.workId, reasons);
+  }
+
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
@@ -8664,6 +9021,12 @@ export class StandaloneService {
         throw new Error("Workspace must be an existing real directory");
       store.setWorkspace(request.workId, workspaceKey);
     } catch (error) {
+      if (
+        !this.started().supervisor.hasKnownRisk(request.workId) &&
+        !this.reobservedAllowance(request) &&
+        this.refuseStaleRequest(request, state, this.domain())
+      )
+        return;
       const reason = `Workspace admission waiting: ${String(error)}`;
       store.wait(request.workId, reason);
       const queuedIntent = state.byWorkId(request.workId);

@@ -593,7 +593,7 @@ export function RepositoryTab(p: TabProps) {
               />
             )}
             <p className="metadata muted">
-              Saving verifies every checkout and changes no GitHub source.
+              Saving verifies every checkout and changes no task source.
             </p>
           </ChangeList>
           <Aside

@@ -211,7 +211,10 @@ test("a late landing is still recognised after a retry that never started", asyn
   assert.equal(w.store.action(record.operationId).state, "confirmed-success");
   assert.equal(branchOf(w)?.lastPushedSha, sha);
   assert.equal(branchOf(w)?.outsideHeadSha, null);
-  assert.deepEqual(w.wakes, []);
+  assert.deepEqual(
+    w.wakes.map((wake) => wake.identity),
+    [`external-action-resolved:${record.operationId}:1`],
+  );
 });
 
 test("a push Git reported done stays unproved while the read lags, and settles when it shows", async (t) => {
@@ -476,7 +479,10 @@ test("an update Git rejected never owns an equal head, even when its readback fa
     unchanged.store.action(again.operationId).observation?.reason,
     "branch-push-rejected",
   );
-  assert.deepEqual(unchanged.wakes, []);
+  assert.deepEqual(
+    unchanged.wakes.map((wake) => wake.identity),
+    [`external-action-resolved:${again.operationId}:1`],
+  );
 });
 
 test("a branch deleted after cab's push is an outside change, not a clean success", async (t) => {
@@ -546,7 +552,14 @@ test("a retry whose earlier attempt landed finds Git sending nothing and is sett
   await coordinator.reconcile();
   assert.equal(w.store.action(record.operationId).state, "confirmed-success");
   assert.equal(branchOf(w)?.lastPushedSha, sha);
-  assert.deepEqual(w.wakes, []);
+  await coordinator.reconcile();
+  assert.deepEqual(
+    w.wakes.map((wake) => wake.identity),
+    [
+      `external-action-resolved:${record.operationId}:1`,
+      `external-action-resolved:${record.operationId}:2`,
+    ],
+  );
 });
 
 test("an ambiguous push keeps its possible ownership when a later read shows a third head", async (t) => {

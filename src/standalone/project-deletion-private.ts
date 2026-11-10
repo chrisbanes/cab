@@ -64,6 +64,8 @@ function repositoryPaths(value: unknown): string[] {
 }
 function rowsPrivate(rows: Record<string, readonly Row[]>): string[] {
   const values: string[] = [];
+  for (const row of rows.inbox_lifecycle ?? [])
+    if (typeof row.note === "string") values.push(row.note);
   for (const row of rows.project_instruction_revisions ?? []) {
     if (typeof row.instructions !== "string")
       throw new Error("Private instruction inputs unavailable");

@@ -21,13 +21,180 @@ import {
   stubReadiness,
 } from "../fixtures/setup-browser.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
+import { fakeJira, json } from "../fixtures/fake-jira.js";
 import { git } from "../fixtures/setup-home.js";
+import { refresh } from "../fixtures/project-config-browser.js";
 import {
   outcomeMessages,
   savedOutcome,
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-setup-browser");
+
+test("Jira setup persists the tracker and opens Task source with a usable site chooser", async (_t, journey) => {
+  const site = "fixture.atlassian.net";
+  for (const [name, value] of Object.entries({
+    FIXTURE_SETUP_JIRA_SITE: `https://${site}`,
+    FIXTURE_SETUP_JIRA_EMAIL: "fixture@example.test",
+    FIXTURE_SETUP_JIRA_TOKEN: "fixture-setup-jira-token",
+  })) {
+    const previous = process.env[name];
+    journey.cleanup(async () => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }, `restore-${name}`);
+    process.env[name] = value;
+  }
+  const jira = fakeJira((request) =>
+    request.url.pathname.endsWith("/myself")
+      ? json({ accountId: "fixture", displayName: "Fixture" })
+      : json({ issues: [] }),
+  );
+  const { f, page } = await setupJourney(journey, {
+    jiraFetcher: jira.fetcher,
+  });
+  f.service.jiraJqlErrors = async () => [];
+  assert.equal(
+    await page.getByLabel("Task source", { exact: true }).inputValue(),
+    "github",
+  );
+  await page.getByLabel("Task source", { exact: true }).selectOption("jira");
+  assert.equal(
+    await page.getByLabel("GitHub Project", { exact: true }).count(),
+    0,
+  );
+  assert.equal(await page.getByLabel("Jira site", { exact: true }).count(), 0);
+  const sent = sentCommands(page);
+  const { projectId, ready } = await createProject(page, sent);
+  assert.equal(f.service.domain().jiraConfiguration(projectId)?.instance, "");
+  const link = ready.getByRole("link", {
+    name: "Configure Task source",
+    exact: true,
+  });
+  assert.equal(
+    await link.getAttribute("href"),
+    `/projects/${projectId}/settings?tab=source`,
+  );
+  await link.click();
+  await page
+    .getByRole("heading", { name: "Jira source", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("Issue tracker", { exact: true }).inputValue(),
+    "jira",
+  );
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).isEnabled(),
+    true,
+  );
+  f.service.domain().execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: site,
+    credential: {
+      siteRef: "env:FIXTURE_SETUP_JIRA_SITE",
+      emailRef: "env:FIXTURE_SETUP_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_SETUP_JIRA_TOKEN",
+    },
+  });
+  let releasePrivate!: () => void;
+  const privateGate = new Promise<void>((resolve) => {
+    releasePrivate = resolve;
+  });
+  journey.cleanup(async () => releasePrivate(), "release-setup-private-read");
+  let privateReceived!: () => void;
+  const received = new Promise<void>((resolve) => {
+    privateReceived = resolve;
+  });
+  const privatePath = `**/api/operator/projects/${projectId}/private-values`;
+  await page.route(privatePath, async (route) => {
+    const response = await route.fetch();
+    privateReceived();
+    await privateGate;
+    await route.fulfill({ response });
+  });
+  await page.reload();
+  await received;
+  assert.equal(
+    await page.getByLabel("Issue tracker", { exact: true }).inputValue(),
+    "jira",
+  );
+  await page.getByLabel("Jira site", { exact: true }).selectOption(site);
+  await page.getByLabel("JQL queries, one per line").fill("project = ABC");
+  for (let reread = 0; reread < 2; reread++) {
+    await refresh(page);
+    assert.equal(
+      await page.getByLabel("Jira site", { exact: true }).inputValue(),
+      site,
+    );
+    assert.equal(
+      await page.getByLabel("JQL queries, one per line").inputValue(),
+      "project = ABC",
+    );
+  }
+  releasePrivate();
+  await page
+    .getByText("Loading saved queries; kept as unavailable rows.", {
+      exact: true,
+    })
+    .waitFor({ state: "hidden" });
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).inputValue(),
+    site,
+  );
+  assert.equal(
+    await page.getByLabel("JQL queries, one per line").inputValue(),
+    "project = ABC",
+  );
+  await page.unroute(privatePath);
+  await page
+    .getByRole("button", { name: "Save Jira source", exact: true })
+    .click();
+  await page
+    .locator(".settings-status")
+    .filter({ hasText: /Saved \d\d:\d\d/ })
+    .waitFor();
+  assert.equal(f.service.domain().jiraConfiguration(projectId)?.instance, site);
+  assert.equal(
+    f.service.domain().jiraConfiguration(projectId)?.selections[0]?.jql,
+    "project = ABC",
+  );
+  await page.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      const select = document.querySelector<HTMLSelectElement>(
+        'select[aria-label="Jira site"]',
+      );
+      if (select) {
+        select.dataset.siteAtMount = select.value;
+        observer.disconnect();
+      }
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
+  await page.reload();
+  const siteControl = page.locator(
+    'select[aria-label="Jira site"][data-site-at-mount]',
+  );
+  await siteControl.waitFor();
+  assert.equal(await siteControl.getAttribute("data-site-at-mount"), site);
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).inputValue(),
+    site,
+  );
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).isDisabled(),
+    true,
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="JQL queries, one per line"]',
+      )?.value === "project = ABC",
+  );
+  assert.equal(await siteControl.inputValue(), site);
+});
 
 const fixFields =
   /Fix the (\d+ )?highlighted fields?\. Your changes are still here\./;

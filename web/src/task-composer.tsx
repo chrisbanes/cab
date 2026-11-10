@@ -44,6 +44,7 @@ import {
 } from "./composer-drafting.js";
 import { type DraftStart, startOf } from "./composer-release.js";
 import "./composer.css";
+import { taskIdentity } from "./task-overview.js";
 export function TaskComposer({
   client,
   session,
@@ -84,6 +85,15 @@ export function TaskComposer({
     state.activate(() => render((n) => n + 1));
     return () => state.dispose();
   }, [state]);
+  const recovered = state.recovered,
+    projectId = state.input.projectId;
+  useEffect(() => {
+    if (!workspace || recovered || projectId) return;
+    const projects = visibleProjects(workspace.data.projects);
+    if (projects.length !== 1) return;
+    state.input = { ...state.input, projectId: projects[0]!.id };
+    render((n) => n + 1);
+  }, [workspace, state, recovered, projectId]);
   const [resumed, setResumed] = useState(
       !state.recovered || state.phase === "unknown",
     ),
@@ -548,9 +558,7 @@ export function TaskComposer({
                           <span>{d.title ?? "Title unavailable"}</span>
                           <span className="metadata muted">
                             {d.state}
-                            {d.source
-                              ? ` · GitHub #${d.source.number ?? "?"}`
-                              : ""}
+                            {d.source ? ` · ${taskIdentity(d).label}` : ""}
                           </span>
                         </label>
                       ))}

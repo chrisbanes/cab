@@ -915,6 +915,7 @@ export function TaskFiles({
   taskId,
   state,
   changes,
+  onObservation,
 }: {
   client: OperatorClient;
   session: Session;
@@ -922,6 +923,7 @@ export function TaskFiles({
   state: TaskFilesState;
   /** Read-only: the Branch comparisons the Changes tab has already read. Files never reads one. */
   changes: TaskChangesState;
+  onObservation: (observedAt: number) => void;
 }) {
   const [, render] = useState(0);
   const readingArea = useRef<HTMLDivElement>(null);
@@ -958,7 +960,18 @@ export function TaskFiles({
     if (!directoryResource.state.data) return;
     state.directory = directoryResource.state.data.data;
     state.directoryKey = directoryKey;
-  }, [directoryResource.state.data, directoryKey, state]);
+    if (state.directoryObservedAt !== directoryResource.state.data.observedAt) {
+      state.directoryObservedAt = directoryResource.state.data.observedAt;
+      changed();
+    }
+    onObservation(directoryResource.state.data.observedAt);
+  }, [
+    directoryResource.state.data,
+    directoryKey,
+    state,
+    changed,
+    onObservation,
+  ]);
   const directory =
     directoryResource.state.data?.data ??
     (state.directoryKey === directoryKey ? state.directory : null);
@@ -1070,8 +1083,15 @@ export function TaskFiles({
     activeTab.preview = response.response.data;
     activeTab.previewKey = previewKey;
     activeTab.observedAt = response.response.observedAt;
+    onObservation(response.response.observedAt);
     changed();
-  }, [previewResource.state.data, previewKey, activeTab, changed]);
+  }, [
+    previewResource.state.data,
+    previewKey,
+    activeTab,
+    changed,
+    onObservation,
+  ]);
   const currentPreviewResponse =
     activeTab &&
     previewResource.state.data?.tabKey === activeTab.key &&

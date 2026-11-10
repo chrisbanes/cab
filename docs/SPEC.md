@@ -527,7 +527,7 @@ task's own layer included) and no agent or operator delivery action, unstack or 
 link with an unknown outcome, such as an unproved push, merge or close. Status-mapping
 writes never wait, and neither does a created change request that was never registered,
 which cab cannot observe. While it waits, the hold keeps reason `closed` and the task
-names what it waits on, such as "Completes when PR #123 merges or closes"; the operator
+names what it waits on, such as "Completes when change request #123 merges or closes"; the operator
 can still cancel it. Anyone's closure, including collaborators, automation and bots,
 completes the task; the record keeps provider closure distinct from cab or manual
 completion. Provider closure never resolves uncertain execution or clears other holds.
@@ -1194,6 +1194,49 @@ then questions and approvals oldest first. Show project and task context on each
 task item, or the runtime for a runtime problem. Unresolved questions, pending approvals and failures remain visible even
 when related history is collapsed.
 
+The Actionable view excludes Done/cancelled tasks and operator-dismissed items. Resolved
+and Dismissed views retain history with reasons and times, without timed deletion. A
+terminal task's execution holds remain accessible through Execution and recovery. Clearing
+one delegate's hold does not clear the lead's: a remaining intervention names the actual
+assignment/work or task hold still requiring action.
+
+Dismiss records a time and optional note. A dismissed question or approval remains unanswered
+but no longer blocks completion as an open interaction. A withheld question is dismissible
+without disclosing or reconstructing its form. Restore reinstates the completion requirement
+only while the request remains actionable. Completion rejection identifies the blocking
+interaction and links to its answer/dismiss controls; historical rejections without captured
+identities label any listed blockers as current. Other result-review and ownership gates remain.
+Dismiss sends no answer, decision or agent input,
+starts no work and releases no ownership. Ownership-blocking interventions cannot be
+dismissed, including when a hold arose after the operator read the item. Restore brings
+back only a still-actionable dismissed item; obsolete items stay resolved. Dismissal is
+scoped to the request or failure episode and survives refresh/restart, so a new episode
+can alert again. Unanswered dismissed requests remain on task detail, and genuine blockers
+remain on List/Board. Inbox badges count actionable items; task blocker counts describe
+underlying blockers and can differ.
+
+A successful current provider read confirming the exact approval target PR merged or
+closed supersedes its pending approval. Unknown/stale observations and unrelated PRs are
+insufficient. On an open task, the requesting assignment receives one durable notice that
+no approval was granted, through ordinary scheduling and its existing admission/hold checks.
+Obsolete requests cannot accept new answers or decisions. Actual refusals retain manual
+Start again under ADR-1031; ordinary capacity waiting continues automatically.
+
+Failed stacked blockers and unresolved external actions with unknown outcomes use
+the existing intervention kind, derived from current state without a recorded
+refusal. Their operator-owned attention codes rank after Not started, before
+approvals and questions. A failed blocker says "Stacked blocker failed; Unstack or
+Cancel this task", with next action "Unstack or Cancel this task". An unknown
+action outcome says "Refresh delivery or check the action". Independent
+status-mapping writes do not raise this intervention. Each intervention clears
+with its condition; a failed provider refresh preserves an observed blocker's
+Inbox episode and dismissal, describing its state as unknown until a confirmed
+read clears it. Clearing wakes an open task's retained lead once with what
+changed, including the existing Unstack restack notice. Cancellation removes the
+intervention without a wake. Delivery tools refused by either typed hold name
+the cause, say the operator was notified in the Inbox, and tell the agent to stop
+and not raise a question. Other refusal guidance is unchanged.
+
 Each attention item explains the decision or intervention needed, its requester
 when known, why the operator is needed, and the available response. Keep relevant
 evidence beside the response or directly accessible within the task context.
@@ -1283,7 +1326,7 @@ operator dismisses it for the installation; Show getting started undoes that. A 
 shared by Settings and the operator CLI, reports what the running service can use
 and one fix per problem. The [user flows](user-flows/) define these journeys.
 
-Use a short guided project setup: project name, lead agent, instructions and
+Use a short guided project setup: project name, lead agent, task tracker, instructions and
 optional repository access. Choose each repository and ref from lists discovered
 on GitHub, with the default branch preselected, and choose its local checkout with
 a folder picker. The service verifies that the folder is a checkout of the chosen
@@ -1294,6 +1337,13 @@ configuration. When discovery is unavailable or a list is truncated, setup accep
 typed values and says so. The service lists folders only under the operator's home folder, and a typed
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
+Task tracker defaults to GitHub. Jira Cloud records the chosen tracker without a site,
+credential or selections; the ready check links to Task source to configure them.
+Repository/code-host setup remains independent of the task tracker. Jira setup never
+links a GitHub Project or records a GitHub source credential.
+The Task source tab configures either tracker and shows a top-level chooser, locked
+while any saved selection remains (including inactive selections). Imported tasks also
+prevent changing tracker. Old `?tab=github` links, including `tracker=jira`, remain aliases.
 A project name is unique after trimming and Unicode default case folding after
 normalization (Straße matches STRASSE, ς matches σ; dotless ı and dotted İ are not
 unified with I, and lookalike letters from other scripts and spacing inside a name
@@ -1965,7 +2015,19 @@ submitting and held work stays with the `recovery` commands.
   it ran: the request and intent are held with their matching refusal and an exact
   binding, and no turn, writer admission, capacity reservation, pending effect or stop
   target is recorded. A refusal at admission also records no thread or recovery
-  identity; a [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
+  identity. A captured-revision collision that never acquired an execution intent or
+  binding has a request-only refusal instead: cab verifies that it has no capture,
+  admission, capacity, recovery, stop or pending-effect evidence. This refusal preserves
+  the old request and offers Start again, without creating an execution generation.
+  Startup repairs eligible stale requests on the same evidence, including old task,
+  assignment, agent and instructions captures and obsolete key collisions; it never
+  retries them. A stale request with an existing intent and exact binding is refused
+  only when its saved thread and turn are null and the admission proof passes. A saved
+  thread or turn, ownership, recovery evidence, Stop or pending external effect keeps
+  its existing recovery authority. Readiness waits and normal pre-admission source
+  revalidation keep their existing behavior.
+  Task and recovery reads name the refusal and Start again or its independent blocker.
+  A [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
   and its turn-less recovery identity. It does not
   read the refusal's reasons; every current admission check applies again to the new
   request. The refused request and its refusal stay in the history, linked to the new
@@ -2729,6 +2791,10 @@ The additive Settings Delivery tab (`/projects/:id/settings?tab=delivery`) edits
 A grant row reads as a sentence of names ("Allow: set Status to Ready on Project Atlas roadmap for issues in acme/atlas"); an ID no read names shows as "<ID> (name not found)", and a row still being filled in shows "(not chosen)". Its Action select shows each kind's plain label and a one-line description, from the one wording the task's delivery actions and `cab delivery get` also use (a recorded action whose kind this version does not know keeps its recorded text). Its Repository is chosen from the project's linked repositories and, when GitHub discovery lists them, the others the credential can see; its Project, field and options are chosen from what discovery lists, the Project from the owner's Projects as well as those linked, with Other… to type a Project's node ID. Where discovery cannot list a value, or the saved value is not in the list, the control is a typed node-ID field labelled as the fallback and stays typed while it is shown. A Jira container is a typed Jira project ID, as no read lists them. Stored grants, the `delivery.configure` command and replay are unchanged: names are display only, and every value stays an ID. A save the service refuses for a named field shows the service's fixed sentence for it in the save outcome, as a refused status mapping does, with a Go to field action that focuses the first highlighted control; the draft stays.
 
 The Delivery tab derives each linked repository's shepherd level from its grants: **Open PRs** allows pushing, creating/editing/readying PRs and replying to/resolving review threads, with force-push requiring approval; **Merge with my approval** adds merge approval; **Merge when ready** adds allowed merge authority. The operator merges at Open PRs. A repository with no code-host grants is **Not set up**; noncanonical grant sets are **Custom**. Branch adoption and tracker authority remain separate. Duplicate or supplemental-scoped level actions are Custom. Withheld grant or repository facts remain unavailable rather than implying no authority.
+
+Before the grant rows, Delivery shows each linked repository's effective authority grouped as Branch, PR, Merge and Project/status. PR edits and branch adoption always require exact-material approval; force-push recovery from an outside change also requires it even with an Allow grant. It preserves approval and Project scopes, distinguishes separate status-mapping authority, and qualifies grants when credential usability is unknown or unavailable. Editing grants updates both the summary and derived level. Each repository lists met and unmet credential, host-read and push/open-PR needs; merge authority also lists completion mode, required checks and allowed merge method, with buttons that focus the credential, level, completion-mode, merge-method or additional-check control, re-read host access, or link to installation GitLab Settings for each unmet need. Draft credential changes remain unconfirmed until saved and refreshed. These warnings do not block saving.
+
+A project overview with a lead agent reads the same delivery configuration and flags no confirmed usable repository or linked repositories with unmet delivery needs, with a link to Delivery settings. Refresh rechecks the saved setup and clears resolved warnings. These are setup signals, not proof of code-host write permissions or the actual PR branch rules; those remain runtime gates.
 
 The project lead's context for each turn states every linked repository's level from the current policy's grants, using the Delivery tab's rules, so a policy change reaches its next wake. At **Open PRs** it stops at a green PR because the operator merges; at either merge level it requests (**Merge with my approval**, which waits for operator approval) or performs (**Merge when ready**) the merge once the PR has no merge blockers; **Not set up** and **Custom** say which code-host actions are granted. Where `pr.merge` is granted, the line names the repository's configured merge method, or says that no method is configured so `pr.merge` is held until the operator sets one. When the delivery mode is not through-merge, the merge levels add that `pr.merge` is refused, so the lead stops at a green PR. At every level the lead is told to ask the operator through `cab_ask_question` after three unsuccessful repairs of the same failure or when reviewers give conflicting direction. This guidance is advisory and not enforced: cab tools still enforce grants, and project instructions apply in addition. Assignee prompts do not carry it.
 

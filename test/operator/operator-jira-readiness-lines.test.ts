@@ -1,6 +1,64 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseRule, ruleLines } from "../../web/src/jira-readiness.js";
+import {
+  jiraEditorState,
+  parseRule,
+  ruleLines,
+} from "../../web/src/jira-readiness.js";
+
+test("only an explicit empty Jira setup site unlocks site selection; withheld reads retain saved readiness", () => {
+  const readiness = {
+    kind: "rule" as const,
+    mode: "any" as const,
+    conditions: [
+      { kind: "label" as const, operator: "has" as const, name: "ready" },
+    ],
+  };
+  for (const instance of ["example.atlassian.net", null, undefined]) {
+    const state = jiraEditorState({ tracker: "jira", instance, readiness });
+    assert.equal(state.saved, true);
+    assert.equal(state.unconfigured, false);
+    assert.deepEqual(parseRule(state.rule!.mode, ruleLines(state.rule)), {
+      rule: { mode: "any", conditions: readiness.conditions },
+    });
+    const hidden = jiraEditorState({
+      tracker: "jira",
+      instance,
+      readiness: { kind: "unavailable" },
+    });
+    assert.equal(hidden.withheld, true);
+    assert.equal(hidden.saved, true);
+    assert.equal(hidden.unconfigured, false);
+  }
+  assert.deepEqual(
+    jiraEditorState({
+      tracker: "jira",
+      instance: "",
+      readiness: { kind: "none" },
+    }),
+    { saved: true, unconfigured: true, rule: null, withheld: false },
+  );
+});
+
+test("switching from GitHub does not carry visible or withheld readiness into Jira", () => {
+  for (const readiness of [
+    { kind: "unavailable" as const },
+    {
+      kind: "rule" as const,
+      mode: "all" as const,
+      conditions: [
+        { kind: "label" as const, operator: "has" as const, name: "ready" },
+      ],
+    },
+  ]) {
+    assert.deepEqual(jiraEditorState({ readiness }), {
+      saved: false,
+      unconfigured: true,
+      rule: null,
+      withheld: false,
+    });
+  }
+});
 
 test("readiness lines round-trip every Jira condition kind", () => {
   const text = [
