@@ -3275,16 +3275,24 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const result = page.locator(`#review [data-record-id="${r2.resultId}"]`);
   await result.waitFor();
+  assert.equal(await result.getAttribute("aria-label"), "Result R2");
+  assert.equal(
+    await result
+      .locator(":scope > p.metadata")
+      .filter({ hasText: "work revision" })
+      .count(),
+    0,
+  );
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/;
 
-  // Metadata shows 8 mono characters; the full value is the title; no full id is visible.
+  // Task details keeps 8 mono characters; the full value is the title; no full id is visible.
   await openOverviewCard(page, "brief");
   const brief = page.locator("#brief .metadata").filter({ hasText: "source" });
   assert.match(
     await brief.innerText(),
     /^Local source · revision 1 · [0-9a-f]{8}$/,
   );
-  const meta = result.locator("p.metadata").first();
+  const meta = page.locator("#result-details p.metadata");
   assert.match(
     await meta.innerText(),
     /^R2 · [0-9a-f]{8} · assignment [0-9a-f]{8} · work revision \d+ · /,
@@ -3305,12 +3313,7 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
             ),
           ].map((el) => [el.title, el.textContent, el.tabIndex]),
         ),
-      [
-        [
-          "#brief .metadata",
-          `#review [data-record-id="${r2.resultId}"] p.metadata`,
-        ],
-      ],
+      [["#brief .metadata", "#result-details p.metadata"]],
     ),
     [
       [a.source.sourceId, a.source.sourceId.slice(0, 8), 0],

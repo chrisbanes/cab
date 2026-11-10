@@ -126,11 +126,17 @@ const markDone = (s: { f: Fixture; taskId: string }) =>
 
 /** Opens Evidence by its summary and shows its records in the viewport. */
 async function openEvidence(page: Page) {
+  let interactions = 0;
   const fold = page.locator("details.inspector-fold");
-  if ((await fold.getAttribute("open")) === null)
+  if ((await fold.getAttribute("open")) === null) {
     await fold.locator("> summary").click();
+    interactions++;
+  }
   const card = overviewCard(page, "evidence");
-  await card.locator("> summary").click();
+  if ((await card.getAttribute("open")) === null) {
+    await card.locator("> summary").click();
+    interactions++;
+  }
   await card.and(page.locator("[open]")).waitFor();
   const record = card.getByText("Unit tests").first();
   await record.waitFor();
@@ -142,13 +148,14 @@ async function openEvidence(page: Page) {
     `the evidence is in view ${JSON.stringify(await record.boundingBox())}`,
   );
   await noPageOverflow(page);
+  return interactions;
 }
 
 for (const [label, viewport] of [
   ["1366 x 900", desktop],
   ["390 x 844", phone],
 ] as const) {
-  test(`review a result budget: one interaction from task detail (${label})`, async (_t, journey) => {
+  test(`review a result budget: ${viewport === phone ? "two interactions" : "one interaction"} from task detail (${label})`, async (_t, journey) => {
     const s = await start(
       journey,
       viewport,
@@ -208,13 +215,27 @@ for (const [label, viewport] of [
       assert.ok(box.height >= 44, `Ask lead is a 44px target ${box.height}`);
       assert.ok(box.width <= 120, `Ask lead stays narrow ${box.width}`);
     }
-    let interactions = 0;
-    await openEvidence(s.page);
-    interactions++;
-    assert.equal(interactions, 1);
+    const result = s.page.locator(`#review [data-record-id="${s.resultId}"]`);
+    assert.equal(await result.getAttribute("aria-label"), "Result R1");
+    const metadata = s.page.locator("#result-details p.metadata");
+    assert.equal(
+      await metadata.isVisible(),
+      viewport !== phone,
+      "result provenance follows the existing Task details fold",
+    );
+    assert.equal(
+      await result
+        .locator(":scope > p.metadata")
+        .filter({ hasText: "work revision" })
+        .count(),
+      0,
+    );
+    const interactions = await openEvidence(s.page);
+    assert.equal(interactions, viewport === phone ? 2 : 1);
+    assert.equal(await metadata.isVisible(), true);
   });
 
-  test(`review a result budget: two interactions from Home Completed work (${label})`, async (_t, journey) => {
+  test(`review a result budget: ${viewport === phone ? "three interactions" : "two interactions"} from Home Completed work (${label})`, async (_t, journey) => {
     const s = await start(journey, viewport, seedFourCriteria, () => "/");
     markDone(s);
     await s.page.reload();
@@ -235,9 +256,27 @@ for (const [label, viewport] of [
       s.page,
       s.page.getByRole("heading", { name: "Reply", exact: true }),
     );
-    await openEvidence(s.page);
-    interactions++;
-    assert.equal(interactions, 2);
+    interactions += await openEvidence(s.page);
+    assert.equal(interactions, viewport === phone ? 3 : 2);
+  });
+
+  test(`an explicit evidence link needs no extra disclosure click (${label})`, async (_t, journey) => {
+    const s = await start(
+      journey,
+      viewport,
+      seedFourCriteria,
+      ({ taskId }) => `/tasks/${taskId}?section=result-evidence`,
+    );
+    assert.equal(await openEvidence(s.page), 0);
+    assert.equal(
+      await s.page.locator("#result-details p.metadata").isVisible(),
+      true,
+    );
+    assert.equal(
+      await openEvidence(s.page),
+      0,
+      "already-open disclosures stay open",
+    );
   });
 
   test(`review a result budget: one interaction from the Inbox evidence link (${label})`, async (_t, journey) => {

@@ -4,14 +4,15 @@
 sits beside the conversation on desktop and follows it on phones, with its summary and
 the first three criterion outcomes; further criteria sit behind "N more". No
 criterion-to-evidence relationship is recorded, so the evidence is the Evidence
-card, one step away. The Recent results strip on Home is not built; Home reaches
+card. The phone review flow opens Task details before Evidence; desktop Task details
+is already open. The Recent results strip on Home is not built; Home reaches
 results through Completed work. The budget below is asserted by
 `test/operator/operator-review-result-browser.test.ts`.
 
 ## Goal
 
 When a lead reports a result, the operator reads the summary against the task's
-criteria, opens the evidence behind any criterion in one step, and decides what
+criteria, opens the supplied evidence, and decides what
 to say to the lead.
 
 ## Entry points
@@ -29,19 +30,21 @@ to say to the lead.
    recorded decisions attributed to who made them.
 2. A criterion without a recorded outcome reads Unverified. Every criterion offers
    Ask lead about criterion. No verified outcome is inferred.
-3. Changes and retained evidence are one step away; earlier results are listed
-   beneath the latest, not above it.
+3. Changes is one step away. To review retained evidence, open Task details if closed,
+   then Evidence. Earlier results are listed beneath the latest, not above it.
 4. Message lead sends feedback on the result; completion stays the lead's decision.
 
 ## Budget
 
-| Entry point | Interactions to the evidence | First screen must show |
-| --- | --- | --- |
-| Task detail | 1 (Evidence) | latest conversation and Reply; Latest result follows on a phone |
-| Home Completed work | 2 (the task, Evidence) | the task in Completed work (below the first screen on a phone); after the first interaction, the latest conversation on the task page |
+| Entry point | Desktop interactions | Phone interactions | First screen must show |
+| --- | --- | --- | --- |
+| Fresh task detail | 1 (Evidence) | 2 (Task details, Evidence) | latest conversation and Reply; Latest result follows on a phone |
+| Home Completed work | 2 (the task, Evidence) | 3 (the task, Task details, Evidence) | the task in Completed work (below the first screen on a phone); after the first interaction, the latest conversation on the task page |
 
 Explicit result, source, record and section links keep their named target. Returning
 to a task preserves reading position, expanded criteria and unfinished replies.
+An explicit Evidence section link opens both disclosures, so it needs no extra
+opening click; already-open disclosures are left open.
 
 Home's Completed work lists the task title only, so the summary is not on Home. On a
 phone the panel sits below Home's first screen; scrolling is not an interaction.
@@ -49,8 +52,8 @@ phone the panel sits below Home's first screen; scrolling is not an interaction.
 An Inbox evidence link lands on the task's conversation in one interaction; it does not
 name a single result.
 
-Identifiers (result, assignment, revision) appear as short metadata, never in a
-sentence.
+Latest-result identifiers, work revision and recorded date sit in Task details.
+The summary and criteria remain outside that fold.
 The operator CLI is outside the budget: it has no screens.
 
 ## Recovery

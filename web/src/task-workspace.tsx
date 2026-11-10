@@ -2816,14 +2816,10 @@ export function TaskWorkspace({
                         </p>
                       )}
                       {selected ? (
-                        <div data-record-id={selected.resultId}>
-                          <p className="metadata muted">
-                            R{data.results.indexOf(selected) + 1} ·{" "}
-                            <ShortId value={selected.resultId} /> · assignment{" "}
-                            <ShortId value={selected.assignmentId} /> · work
-                            revision {selected.workRevision} ·{" "}
-                            {date(selected.createdAt)}
-                          </p>
+                        <article
+                          data-record-id={selected.resultId}
+                          aria-label={`Result R${data.results.indexOf(selected) + 1}`}
+                        >
                           <Literal text={selected.summary} />
                           <p className="metadata">
                             <ActionLink
@@ -2873,7 +2869,7 @@ export function TaskWorkspace({
                           >
                             Ask lead about result
                           </Button>
-                        </div>
+                        </article>
                       ) : (
                         !state.selectedResult && <p>No result recorded.</p>
                       )}
@@ -2978,6 +2974,19 @@ export function TaskWorkspace({
                   </>
                 }
               >
+                {selected && (
+                  <section
+                    id="result-details"
+                    aria-label="Selected result details"
+                  >
+                    <p className="metadata muted">
+                      R{data.results.indexOf(selected) + 1} ·{" "}
+                      <ShortId value={selected.resultId} /> · assignment{" "}
+                      <ShortId value={selected.assignmentId} /> · work revision{" "}
+                      {selected.workRevision} · {date(selected.createdAt)}
+                    </p>
+                  </section>
+                )}
                 <section id="brief">
                   <details
                     className="overview-disclosure"
