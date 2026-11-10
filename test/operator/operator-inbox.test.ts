@@ -998,7 +998,8 @@ test("ownership intervention cannot be dismissed and terminal visibility never r
       (i) => i.kind === "intervention",
     )!;
     assert.equal(item.dismissible, false);
-    assert.match(item.reason ?? "", new RegExp(a.assignmentId));
+    assert.equal(item.reason, "Still waiting on Task lead");
+    assert.ok(!item.reason.includes(a.assignmentId));
     await assert.rejects(
       api.execute({
         type: "inbox.dismiss",

@@ -1047,15 +1047,15 @@ test("an intervention shows its recorded reason and links to the execution", asy
   const detail = page.getByRole("region", { name: "Selected request" });
   await page.locator(".inbox-row").click();
   await detail.getByText("Intervention", { exact: true }).waitFor();
-  await detail.getByText("Execution ownership is uncertain").waitFor();
+  await detail.getByText("Still waiting on Task lead").waitFor();
   // The row leads with the task and keeps the recorded reason, which has no headline to replace it.
   const row = page.locator('.inbox-row[data-kind="intervention"]');
   assert.equal(
     await row.locator("strong").textContent(),
     "Restore webhook delivery",
   );
-  await row.getByText("Execution ownership is uncertain").waitFor();
-  // The seeded intervention has no requester and no timestamp: both are omitted everywhere.
+  await row.getByText("Still waiting on Task lead").waitFor();
+  // The episode has a recorded time but no requester; no unknown identity is invented.
   const aside = page.getByRole("complementary", { name: "Task context" });
   await aside.waitFor();
   for (const text of [
@@ -1065,17 +1065,14 @@ test("an intervention shows its recorded reason and links to the execution", asy
   ])
     assert.doesNotMatch(text, /Age unknown|Responsibility unknown/);
   assert.equal(await aside.getByText("Requester", { exact: true }).count(), 0);
-  assert.equal(await detail.locator(".inbox-identity").count(), 0);
-  assert.equal(await page.locator(".inbox-row-meta").count(), 0);
+  assert.match(
+    await detail.locator(".inbox-identity").innerText(),
+    /\d\d:\d\d/,
+  );
+  assert.equal(await page.locator(".inbox-row-meta").count(), 1);
   // Uncertain ownership is stated once in the request pane's headline, not again in the inspector.
-  assert.equal(
-    await detail.getByText("Execution ownership is uncertain").count(),
-    1,
-  );
-  assert.equal(
-    await aside.getByText("Execution ownership is uncertain").count(),
-    0,
-  );
+  assert.equal(await detail.getByText("Still waiting on Task lead").count(), 1);
+  assert.equal(await aside.getByText("Still waiting on Task lead").count(), 0);
   // Ownership stays held is stated once, in the request pane, as on the Home card.
   assert.equal(
     await detail.getByText("Ownership stays held", { exact: true }).count(),
@@ -1146,7 +1143,7 @@ test("an intervention that leaves the queue stops saying ownership stays held", 
     await detail.getByText("Ownership stays held", { exact: true }).count(),
     0,
   );
-  await detail.getByText("Execution ownership is uncertain").waitFor();
+  await detail.getByText("Still waiting on Task lead").waitFor();
 });
 
 test("an incomplete refresh that omits an intervention keeps saying ownership stays held", async (_t, j) => {
@@ -2031,7 +2028,14 @@ for (const [name, viewport] of [
       .getByRole("heading", { name: "Codex runtime unavailable" })
       .waitFor();
     const url = new URL(page.url());
-    assert.equal(url.searchParams.get("request"), "runtime:codex");
+    assert.match(
+      url.searchParams.get("request")!,
+      /^runtime:codex:[0-9a-f-]{36}$/,
+    );
+    assert.equal(
+      url.searchParams.get("request"),
+      await runtimeRow.getAttribute("data-record-id"),
+    );
     assert.equal(url.searchParams.has("task"), false);
     assert.ok(url.search.includes("request=runtime%3Acodex"), url.search);
 

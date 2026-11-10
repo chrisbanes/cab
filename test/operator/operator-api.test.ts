@@ -2750,7 +2750,7 @@ test("an answered native question awaiting delivery is cab's, not an operator qu
       {
         kind: "intervention",
         attentionCode: "execution-uncertain",
-        reason: `Still waiting on ${task.assignmentId} (${work.workId})`,
+        reason: "Still waiting on Retention worker",
       },
       {
         kind: "question",

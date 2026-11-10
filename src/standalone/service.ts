@@ -3231,6 +3231,10 @@ export class StandaloneService {
     return this.started().state.recoveryForTask(taskId, alsoWorkId);
   }
 
+  uncertainAssignmentsForTask(taskId: string): string[] {
+    return this.started().state.uncertainAssignmentsForTask(taskId);
+  }
+
   powerStatus() {
     return this.current?.power?.status() ?? null;
   }
@@ -5071,7 +5075,8 @@ export class StandaloneService {
           reason: attentionNext["external-action-uncertain"].reason,
         });
     const held: string[] = [];
-    for (const a of domain.assignments(taskId)) {
+    const assignments = domain.assignments(taskId);
+    for (const a of assignments) {
       const s = selectAssignmentExecution(a, this);
       const request = s.request ?? schedulerStore.latest(String(a.id));
       const refused =
@@ -5092,9 +5097,7 @@ export class StandaloneService {
           (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
         )
       )
-        held.push(
-          `${domain.profile(String(a.profileId)).name} · ${a.id} (${request?.workId ?? s.record?.workId ?? "ownership"})`,
-        );
+        held.push(String(domain.profile(String(a.profileId)).name));
       // A temporary callback blocks Start again, not the durable refusal episode.
       if (refused && request && !request.draftTurn)
         conditions.push({
@@ -5108,11 +5111,14 @@ export class StandaloneService {
     if (this.hasNonStopTaskHold(taskId))
       held.push(`task hold: ${this.nonStopTaskHoldReason(taskId)}`);
     if (!held.length)
-      for (const r of this.recoveryForTask(taskId))
-        if (r.holds.uncertainty)
-          held.push(
-            `${r.binding?.assignmentId ?? "unbound execution"} (${r.workId})`,
-          );
+      for (const id of this.uncertainAssignmentsForTask(taskId)) {
+        const assignment = assignments.find((a) => a.id === id);
+        held.push(
+          assignment
+            ? String(domain.profile(String(assignment.profileId)).name)
+            : "retained execution ownership",
+        );
+      }
     if (held.length) {
       // Keep a combined ownership episode while any hold remains; it cannot be dismissed.
       const existing = this.inboxLifecycle()

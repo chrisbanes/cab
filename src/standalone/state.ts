@@ -4735,6 +4735,19 @@ export class ExecutionState {
     );
   }
 
+  /** Assignments with held writer ownership, without loading retained execution history. */
+  uncertainAssignmentsForTask(taskId: string): string[] {
+    const rows = this.db
+      .prepare(`SELECT DISTINCT binding.assignmentId
+      FROM task_writer_admissions admission
+      JOIN execution_intents intent ON intent.workId=admission.workId
+      JOIN task_execution_bindings binding ON binding.workId=intent.workId
+      JOIN execution_recovery_identities identity ON identity.workId=intent.workId
+      WHERE binding.taskId=? AND intent.state='held'`)
+      .all(taskId) as Array<{ assignmentId: string }>;
+    return rows.map((row) => row.assignmentId);
+  }
+
   /**
    * The rows `recoveryForTask(taskId)` would load (without `alsoWorkId`), counted
    * up to `limit`, reading at most `limit` index entries.

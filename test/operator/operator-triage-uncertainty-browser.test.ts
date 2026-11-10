@@ -19,7 +19,7 @@ import { stubReadiness } from "../fixtures/setup-browser.js";
 
 // The budget is the table under "Budget" in docs/user-flows/triage-uncertainty.md.
 const test = browserSuite("triage-uncertainty-budget");
-const uncertain = "Execution ownership is uncertain";
+const uncertain = "Still waiting on Task lead";
 
 /** One task whose execution ownership is unknown, one Chromium page at `viewport`, signed in on `path`. */
 async function start(

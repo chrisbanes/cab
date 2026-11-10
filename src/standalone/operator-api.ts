@@ -2438,9 +2438,7 @@ export class OperatorApi {
       capacity: selections.some((s) => s.record?.holds.capacity),
       uncertainty:
         selections.some((s) => s.record?.holds.uncertainty) ||
-        this.service
-          .recoveryForTask(String(task.id))
-          .some((r) => r.holds.uncertainty),
+        this.service.uncertainAssignmentsForTask(String(task.id)).length > 0,
       task:
         Boolean(this.service.taskHold(String(task.id))) ||
         selections.some((s) => s.record?.holds.task),
