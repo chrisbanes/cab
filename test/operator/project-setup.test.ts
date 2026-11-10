@@ -30,6 +30,7 @@ import {
 } from "../../src/standalone/operator-api.js";
 import { verifiedRepository } from "../../src/standalone/repository-verification.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { loginCli, serveCli } from "../fixtures/operator-cli.js";
 import { checkout, createSetupHome } from "../fixtures/setup-home.js";
 
 async function setupWorld(t: { after(fn: () => unknown): void }) {
@@ -683,4 +684,50 @@ test("verification Git never inherits a credential the command selects before it
     "env:FIXTURE_PENDING_SOURCE",
   );
   assert.deepEqual(f.service.domain().pendingCredentialReferences(), []);
+});
+
+test("CLI prepare-repositories applies a home-relative GitHub checkout as an absolute path", async (t) => {
+  const { f, home } = await setupWorld(t);
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "CLI home-relative repositories",
+    leadProfileId: null,
+  });
+  const served = await serveCli(t, f, { setup: { home: home.home } });
+  const { cli, file, h } = await loginCli(t, served);
+  const edit = file(
+    "repository-edit.json",
+    JSON.stringify({
+      linkRepositories: [
+        {
+          repositoryId: "R_atlas",
+          path: "~/src/atlas",
+          ref: "main",
+        },
+      ],
+    }),
+  );
+  const prepared = join(h.dir, "repositories.json");
+  const preparation = await cli("rw", [
+    "project",
+    "prepare-repositories",
+    projectId,
+    "--edit-file",
+    edit,
+    "--out",
+    prepared,
+  ]);
+  assert.equal(preparation.code, 0, preparation.err);
+  const document = JSON.parse(await readFile(prepared, "utf8"));
+  assert.equal(document.command.repositories[0].path, "~/src/atlas");
+  const applied = await cli("rw", ["project", "apply", "--file", prepared]);
+  assert.equal(applied.code, 0, applied.err);
+  assert.equal(
+    f.service.domain().repositoryLinks(projectId).links[0]?.path,
+    await realpath(join(home.home, "src", "atlas")),
+  );
 });

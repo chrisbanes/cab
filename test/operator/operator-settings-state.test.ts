@@ -1152,6 +1152,39 @@ test("a refused project name shows the service's message under the name field", 
     assert.equal(draft.values.name, "atlas", command.type);
   }
 });
+test("a repository verification refusal shows its sentence under the failing path field", async () => {
+  const draft = new ConfigurationDraft();
+  const message =
+    "Repository 2: the origin remote is a different project than configured.";
+  await draft.submit(
+    rejectWith(["repositories.1.path"], message),
+    {
+      type: "repositories.configure" as const,
+      key: randomUUID(),
+      projectId: randomUUID(),
+      expectedVersion: 1,
+      repositories: [
+        {
+          codeHost: "github" as const,
+          host: "github.com" as const,
+          repositoryId: "R_one",
+          path: "/private/checkout-one",
+          ref: "main",
+        },
+        {
+          codeHost: "github" as const,
+          host: "github.com" as const,
+          repositoryId: "R_two",
+          path: "/private/checkout-two",
+          ref: "main",
+        },
+      ],
+    },
+    "csrf",
+  );
+  assert.equal(draft.phase, "rejected");
+  assert.deepEqual(draft.errors, { "repositories.1.path": message });
+});
 test("only a refused project name carries the service's message", async () => {
   const other = new ConfigurationDraft();
   await other.submit(

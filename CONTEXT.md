@@ -29,6 +29,11 @@ A container for tasks, optional linked repositories, agents, instructions, and p
 Its identity belongs to cab and is independent of the application hosting it.
 _Avoid_: Board or GitHub Project when referring to the cab container
 
+**Permitted agents**:
+The project-level list of agents the lead may delegate to. It applies whether
+automatic routing is on or off; Routing chooses only from this list.
+_Avoid_: Routing candidates as a separate permission list
+
 **Task**:
 A piece of work belonging to one project, created locally or linked to an external item.
 _Avoid_: Issue when referring to work independently of its external provider

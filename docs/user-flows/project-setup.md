@@ -35,11 +35,15 @@ note, **Cancel** and then **Create paused project** at every width.
    copied instructions are editable; the Reviewer
    file-change restriction is advisory. There is no prescribed execution order.
    Unchecking preserves lead-only creation. The subsequent project receives the workers
-   as candidates only while the inline lead stays selected; routing remains disabled,
-   with blank guidance and no credential. Later projects choose candidates normally.
+   as permitted agents. Routing remains disabled, with blank guidance and no
+   credential. The **Permitted agents** list is editable in setup and later in
+   project Settings.
    If a worker is revoked before project creation, setup offers **Continue without
    starter candidates**, preserving the lead and every other field; it does not
-   silently remove candidates or restore the revoked agent.
+   silently remove candidates or restore the revoked agent. The **Permitted agents**
+   list in this step chooses who the lead may delegate to, whether routing is on or
+   off. Routing chooses from this same list and has no second candidate editor. It
+   can also be changed later on the Permitted agents tab of project Settings.
 2. **Instructions.** Unchanged.
 3. **Repositories.** Discovered repository and ref, folder picker, checkout
    verification, typed fallback. While discovery is unconfigured the step starts

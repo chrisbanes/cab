@@ -765,7 +765,9 @@ function schemaDigest(data: string): string {
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
   // Reasoning summaries add the project setting and per-turn opt-in tables.
-  19: "72b55e667b4e3182bf259e1ff25a49d27d4328ec71c1b0521b8c1fe6fbdc920b",
+  20: "e859135b764a04ca14786b9e75948f7971cc88bb88e27b44b65a9677245eddd3",
+  // Source hold release records and their lead/assignee Inbox events.
+  19: "b6c05bb7d274d9d74657fe3ee992975a141341d8fe2497da1e7dc6d98caeb2e4",
   // Capacity reservations record lead and agent; lead slots and agent caps.
   18: "3bb5f450441df390a887a1a456422d556c45cb6c7f54f97bea9153a6998f31aa",
   17: "8ba6991a76347b881e3a144d747ae5bcf16daa9a55d54560d9977640bfb5232f",
@@ -838,10 +840,10 @@ test("the service entry reports a refused startup in its log with nothing listen
   }
 });
 
-test("reasoning migration protects the level 18 schema before adding either table and refuses older builds", async () => {
+test("reasoning migration protects the level 19 schema before adding either table and refuses older builds", async () => {
   const dirs = layout();
   try {
-    await run(dirs.data, 18);
+    await run(dirs.data, 19);
     const database = join(dirs.data, "standalone.sqlite");
     const projectId = randomUUID(),
       intentId = randomUUID();
@@ -879,7 +881,7 @@ test("reasoning migration protects the level 18 schema before adding either tabl
       before.close();
     }
     // Pin the whole prior main schema, including its sandbox settings.
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[18]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[19]);
     const read = (file: string) => {
       const db = new DatabaseSync(file, { readOnly: true });
       try {
@@ -914,7 +916,7 @@ test("reasoning migration protects the level 18 schema before adding either tabl
       run(dirs.data, MIGRATION_LEVEL, (point) => {
         if (point === "after-startup-snapshot-record") {
           assert.deepEqual(read(database), retained);
-          assert.equal(recordedLevel(dirs.data), 18);
+          assert.equal(recordedLevel(dirs.data), 19);
           throw new Error(
             "Stopped after verified reasoning migration snapshot",
           );
@@ -923,12 +925,12 @@ test("reasoning migration protects the level 18 schema before adding either tabl
       /Stopped after verified reasoning migration snapshot/,
     );
     const state = readStartupState(dirs.data);
-    assert.equal(state?.snapshot?.from, 18);
+    assert.equal(state?.snapshot?.from, 19);
     assert.equal(state?.snapshot?.to, MIGRATION_LEVEL);
     const snapshot = state?.snapshot?.path;
     assert.ok(snapshot);
     await verifySnapshot(snapshot);
-    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[18]);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[19]);
     assert.deepEqual(read(join(snapshot, "standalone.sqlite")), retained);
     assert.deepEqual(read(database), retained);
     await run(dirs.data);
@@ -967,7 +969,7 @@ test("reasoning migration protects the level 18 schema before adding either tabl
     assert.deepEqual(startupSnapshots(dirs.snapshots), snapshots);
     assert.deepEqual(readStartupState(dirs.data), state);
     const bytes = readFileSync(database);
-    await assert.rejects(run(dirs.data, 18), refusal("startup-schema-newer"));
+    await assert.rejects(run(dirs.data, 19), refusal("startup-schema-newer"));
     assert.deepEqual(readFileSync(database), bytes);
     assert.deepEqual(readStartupState(dirs.data), state);
     assert.deepEqual(startupSnapshots(dirs.snapshots), snapshots);

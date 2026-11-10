@@ -45,6 +45,7 @@ import {
 } from "./ui/dialog.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
+import { PermittedAgentsTab } from "./permitted-agents-config.js";
 import {
   privateField,
   projectChanges,
@@ -221,6 +222,13 @@ export function ProjectConfiguration(
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
+          ) : tab === "permitted-agents" ? (
+            <PermittedAgentsTab
+              {...tabProps}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
           ) : tab === "repositories" ? (
             <RepositoryTab
               {...tabProps}
@@ -319,6 +327,11 @@ function statusLine(
         ? `Paused: new tasks wait to start. Routing changes do not resume ${data.project.name ?? "this project"}.`
         : admission,
       saved("routing.configure", data.routing.version),
+    );
+  if (tab === "permitted-agents")
+    return withSaved(
+      admission,
+      saved("permitted-agents", data.routing.version),
     );
   if (tab === "repositories")
     return withSaved(

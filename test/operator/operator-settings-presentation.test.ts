@@ -43,8 +43,10 @@ import {
   repositoryChanges,
   repositoryCommand,
   repositoryRowsFrom,
+  permittedAgentsChanges,
   routingChanges,
   routingCommand,
+  selectableCandidates,
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
@@ -392,6 +394,14 @@ test("routing lines and command keep guidance out unless edited", () => {
     "PRIVATE",
   );
   assert.equal((edited as Record<string, unknown>).guidance, "NEW");
+});
+
+test("permitted-agent preview matches save when a drafted profile is revoked", () => {
+  const c = config();
+  c.routing.candidateProfileIds = [worker];
+  const draft = [worker, reviewer];
+  assert.deepEqual(permittedAgentsChanges(c, draft), []);
+  assert.deepEqual(selectableCandidates(c, draft), [worker]);
 });
 
 test("source rows, change lines and command use keep markers and never put a value in a line", () => {
@@ -1360,6 +1370,66 @@ test("the phone summary appends stored counts and points to readiness when nothi
   assert.equal(partial.next, "Nothing needs attention here.");
   const none = projectStateSummary(c, observations(null), []);
   assert.equal(none.state[1], "GitHub S-1 active · synced");
+});
+
+test("the phone summary names a missing or inactive Project field selection and respects unknown IDs", () => {
+  const zero = {
+    observed: 3,
+    open: 3,
+    closedSkipped: 0,
+    matching: 0,
+    complete: true,
+  };
+  const observation = (mode: "all" | "any", projectNodeId: string) =>
+    ({
+      projects: [
+        {
+          projectId,
+          readiness: {
+            kind: "rule" as const,
+            mode,
+            conditions: [
+              {
+                kind: "project-field" as const,
+                projectNodeId,
+                fieldNodeId: "FIELD_status",
+                operator: "in" as const,
+                optionNodeIds: ["OPTION_ready"],
+              },
+            ],
+          },
+          selections: [
+            {
+              selectionId: "S-1",
+              state: "complete" as const,
+              lastAttemptAt: null,
+              lastSuccessfulAt: null,
+              counts: zero,
+            },
+          ],
+        },
+      ],
+    }) as Parameters<typeof projectStateSummary>[1];
+  const c = config();
+  const missing = projectStateSummary(c, observation("all", "PVT_missing"), []);
+  assert.equal(
+    missing.next,
+    "The readiness rule can never match: Project field condition references GitHub Project PVT_missing with no active selection. Add that Project as a selection.",
+  );
+  c.source.selections[1] = {
+    ...c.source.selections[1]!,
+    descriptor: "PVT_missing",
+  };
+  assert.equal(
+    projectStateSummary(c, observation("any", "PVT_missing"), []).next,
+    "A Project field condition never applies: Project field condition references inactive GitHub Project PVT_missing. Activate that selection to supply fields.",
+  );
+  c.source.selections[1] = { ...c.source.selections[1]!, descriptor: null };
+  assert.equal(
+    projectStateSummary(c, observation("all", "PVT_missing"), []).next,
+    readinessNextStep,
+    "an opaque Project identity does not support an absence claim",
+  );
 });
 
 test("recovery records collapse only consecutive records that display the same state", () => {

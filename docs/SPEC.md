@@ -182,6 +182,13 @@ automated service/UI integration and bounded real-runtime validation before hand
 
 ## Assignment routing and accountability
 
+Each project has one **Permitted agents** list, editable on its own tab in
+project Settings and during project setup. It governs which agents the lead may
+delegate to whether routing is enabled or disabled. Routing chooses only from
+this same list; it has no separate candidate editor. The operator CLI prepares
+changes with `project prepare-permitted-agents --permitted-agents ID,ID|none`;
+`project prepare-routing --candidates ID,ID|none` remains a compatible alias.
+
 Routing is optional per project and part of the first standalone release. It
 requires explicit project opt-in and configured TypeSafe credentials. The service
 calls TypeSafe directly, with no PA agent turn. Supply the assignment brief,
@@ -502,7 +509,13 @@ to resume, except confirmed closure from this task's own delivery and the two so
 that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
 releases nothing, and every other source hold, including closure, still needs
-the operator to resume it. External closure
+the operator to resume it. A withdrawn or readiness-lost hold notice tells the
+recipient to stop new work and wait for the qualifying complete read, without
+asking the operator to clear it. When a previously announced hold clears,
+one durable Inbox release event goes to each notified recipient that is still the
+task lead or an active assignee, and says the complete read listed the issue again
+while it was Ready. A hold created and cleared in one
+refresh emits neither event. External closure
 after import holds the task in both closed-issue modes, whatever its readiness. Under
 Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
 is complete and its execution has settled, with no writer, ambiguity or unfinished
@@ -1096,7 +1109,10 @@ Old `/app` and `/app/*` addresses permanently redirect (308) to the same path at
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions
-for its next turn. These use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
+for its next turn. Active and unsettled recovery records appear first; known terminal,
+effect-free records with no recorded holds are collapsed under a settled count. The
+evidence caveat stays visible, and every record remains available in the disclosure. These
+use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
 per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
@@ -1263,10 +1279,10 @@ The three agents and the original keyed receipt commit atomically. An unknown
 bundle outcome retains the frozen IDs and command and re-reads its operation;
 missing or unreadable receipts retain the hold without resending creation. Creating
 the lead selects it without losing other setup values. Agent and project creation
-remain separate submissions. Only the subsequent project using that inline lead
-receives both workers as candidates, with routing disabled, blank guidance and no
-routing credential; its coordination context permits them. Changing the selected
-lead adds no starter candidates. If a worker is revoked before project creation,
+remain separate submissions. The subsequent project starts with both workers
+checked in its **Permitted agents** list, whichever lead is selected, with routing
+disabled, blank guidance and no routing credential; its coordination context permits
+them. The operator can change that list before creation. If a worker is revoked before project creation,
 setup offers an explicit way to continue without starter candidates while preserving
 the lead and remaining draft. Later projects use ordinary candidate selection.
 While discovery is unconfigured the repository step starts collapsed behind "Add
@@ -1405,7 +1421,10 @@ separate sections. Repository links are project configuration, not part of any
 source: each link records its code host and host name (GitHub on `github.com`, or
 GitLab on a configured host with the project's full path and numeric ID), and links
 change through one versioned, receipted `repositories.configure` command that
-verifies every checkout before anything is recorded. Settings, `project prepare-repositories`
+verifies every checkout before anything is recorded. Web and CLI repository-link
+configuration accept `~` and `~/…` checkout paths, which the service resolves
+against its home directory before verification and storage; omitting a saved
+link's path keeps the saved path. Settings, `project prepare-repositories`
 and the API each add GitHub and GitLab links, change a link's ref (and, in Settings, its
 local path) and remove links through that command; a saved link's code host, host, project
 path and project ID are its identity, so changing one means removing the link and adding
@@ -2105,7 +2124,9 @@ they are not semantic secret scanning or host-wide read isolation.
 
 The Files section renders Markdown inertly with a Source view, fits/zooms/pans
 rasters, and renders PDFs through a pinned `pdfjs-dist` worker onto an app-owned
-canvas. There is no download, export or execute action. Opening current contents
+canvas. Directory rows come first, then other entries, alphabetically within each
+group; file sizes use readable units and retain exact bytes in row details. There
+is no download, export or execute action. Opening current contents
 from retained evidence is a separate explicit action. Read-only inspection
 rechecks may reuse a successful Git worktree identity read for up to 1 second
 while the worktree root and its `.git` entry keep the same filesystem identity.
@@ -2702,6 +2723,20 @@ imposed. Non-code tasks record the requested outcome and evidence; no universal
 human acceptance is required beyond configured instructions and permissions.
 Assignment completion alone cannot merge, close an issue, complete its task or
 remove a workspace.
+
+Confirmed `pr.create` automatically binds the created PR when the task has no bound
+PR, using the same fresh identity and outside-head checks as manual registration.
+The binding retains the task lead for feedback regardless of the creator; only the
+lead's work waits on the bound PR, so a delegate creator can still complete. Binding
+failure preserves the confirmed creation and receipt; task delivery summaries show
+the exact created PR and a `register PR #N` next step. When the task is already
+bound to another PR, the summary instead says the created PR is not this task's
+delivery and names the bound PR, because registration refuses a second PR. The
+task lead or the same-task
+assignment whose confirmed creation produced that exact repository, number and node
+identity may call `cab_register_pr`. Subsequent creates reuse a freshly verified open
+bound or earlier task-created PR on the same head ref, returning its receipt without
+another provider write; policy, authorization and stack checks still apply.
 
 Stable operation IDs retain exact material and bound caller revisions, including
 denied outcomes. Intent commits before an effect. Successful write responses alone

@@ -4761,6 +4761,21 @@ export class StandaloneService {
       for (const recipientAssignmentId of recipients)
         coordination.ensureSourceHoldEvent({ ...hold, recipientAssignmentId });
     }
+    // Every live recipient of the hold notice hears that it cleared.
+    for (const release of coordination.sourceHoldReleases())
+      if (
+        this.writableTask(release.taskId) &&
+        (leadByTask.get(release.taskId) === release.recipientAssignmentId ||
+          domain
+            .assignments(release.taskId)
+            .some(
+              (assignment) =>
+                String(assignment.id) === release.recipientAssignmentId &&
+                (assignment.state === "pending" ||
+                  assignment.state === "running"),
+            ))
+      )
+        coordination.ensureSourceHoldReleasedEvent(release);
   }
 
   routingAvailability(projectId: string): RoutingAvailability {
@@ -6135,7 +6150,7 @@ export class StandaloneService {
             call as CoordinationCall,
             caller,
             {
-              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}`,
+              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}${result.request.action.kind === "pr.create" && result.state === "confirmed-success" ? `\n${this.delivery().unregisteredPr(caller.taskId) ?? ""}` : ""}`,
               success: result.state === "confirmed-success",
             },
           );

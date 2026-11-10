@@ -162,8 +162,25 @@ export const runtimeChanged = (runtime: ProfileRuntime, v: Values) =>
 /** Candidates a routing save can keep: revoked profiles are not selectable. */
 const selectable = (data: ProjectConfigurationData, ids: string[]) =>
   ids.filter((id) => !data.profiles.find((p) => p.id === id)?.revoked);
+export const selectableCandidates = selectable;
 export const savedCandidates = (data: ProjectConfigurationData) =>
   selectable(data, data.routing.candidateProfileIds);
+
+export function permittedAgentsChanges(
+  data: ProjectConfigurationData,
+  ids: string[],
+) {
+  const saved = savedCandidates(data),
+    next = selectable(data, ids);
+  return [
+    ...next
+      .filter((id) => !saved.includes(id))
+      .map((id) => `Agent added: ${nameOf(data.profiles, id)}`),
+    ...saved
+      .filter((id) => !next.includes(id))
+      .map((id) => `Agent removed: ${nameOf(data.profiles, id)}`),
+  ];
+}
 
 export function routingChanges(
   data: ProjectConfigurationData,

@@ -251,7 +251,9 @@ export function TaskInspector({
           </dl>
         </Group>
         <Group label="Results & artifacts">
-          {data.results.length || data.delivery?.binding ? (
+          {data.results.length ||
+          data.delivery?.binding ||
+          data.delivery?.unregisteredPr ? (
             <ul className="inspector-rows">
               {data.results
                 .map((r, i) => ({ r, i }))
@@ -267,6 +269,9 @@ export function TaskInspector({
                     </a>
                   </li>
                 ))}
+              {data.delivery?.unregisteredPr && (
+                <li>{data.delivery.unregisteredPr}</li>
+              )}
               {data.delivery?.binding && (
                 <li>
                   {pullRequestRepository(data.delivery.binding)

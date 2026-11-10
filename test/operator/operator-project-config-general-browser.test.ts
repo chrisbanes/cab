@@ -142,7 +142,7 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
   });
-  assert.equal(await tabs.getByRole("link").count(), 6);
+  assert.equal(await tabs.getByRole("link").count(), 7);
   assert.equal(
     await tabs
       .getByRole("link", { name: "General" })
@@ -1442,10 +1442,10 @@ test("routing and profile saves wait for the comparison read after Review change
   await assertOffHold(page, "Save agent");
 });
 
-test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
+test("a reverted permitted-agents edit leaves the form clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=permitted-agents",
   );
   const d = f.service.domain();
   const candidate = (n: string) =>
@@ -1469,21 +1469,6 @@ test("a reverted routing edit leaves the form clean and picks up a later read", 
       0,
     );
   }
-  // Hidden input behind a choice that is switched off is not an edit either.
-  const mode = page.getByLabel("Credential reference change", { exact: true });
-  await mode.selectOption({ label: "Set new environment reference" });
-  await page
-    .getByLabel("New environment reference", { exact: true })
-    .fill("env:HIDDEN_REFERENCE");
-  await mode.selectOption({ label: "Preserve current reference" });
-  await revealButton(page, "routing guidance").click();
-  const field = page.getByRole("textbox", {
-    name: "Routing guidance",
-    exact: true,
-  });
-  await field.fill("CHANGED");
-  await field.fill("PRIVATE ROUTING GUIDANCE");
-  await assertClean(page, "Save routing");
   d.execute({
     type: "routing.configure",
     actor: "operator",
@@ -1494,15 +1479,9 @@ test("a reverted routing edit leaves the form clean and picks up a later read", 
     candidateProfileIds: [ids.profiles.Mira as string],
   });
   await refresh(page);
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll("input[type=checkbox]")].some(
-      (e) =>
-        (e as HTMLInputElement).checked &&
-        e.closest("label")?.textContent?.startsWith("Mira"),
-    ),
-  );
+  assert.equal(await candidate("Mira").isChecked(), true);
   assert.equal(await candidate("Eli").isChecked(), false);
-  await assertClean(page, "Save routing");
+  await assertClean(page, "Save permitted agents");
 });
 
 test("a reverted source edit leaves the form clean and picks up a later read", async (_t, journey) => {

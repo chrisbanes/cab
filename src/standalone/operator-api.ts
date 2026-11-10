@@ -6320,6 +6320,7 @@ export class OperatorApi {
       blockers: v.blockers.slice(0, 128),
       omittedBlockerCount: Math.max(0, v.blockers.length - 128),
       omittedActionCount: Math.max(0, v.actions.length - 128),
+      unregisteredPr: this.safe(v.unregisteredPr, excluded),
       ...this.authorityField(
         String(this.requireTask(taskId).projectId),
         excluded,
@@ -9186,7 +9187,11 @@ export class OperatorApi {
     const normalized = (() => {
       if (c.type === "repositories.configure") {
         const expanded = c.repositories.map((row, index) => {
-          if (!("savedRow" in row)) return row;
+          // Expand before the replay check so a same-key retry hashes as recorded.
+          if (!("savedRow" in row))
+            return row.path === undefined
+              ? row
+              : { ...row, path: resolveHomePath(row.path, this.home()) };
           const link =
             repositories.links[
               resolve(
