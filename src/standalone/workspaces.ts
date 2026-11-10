@@ -347,6 +347,10 @@ class WorkspaceManagerCancelledError extends Error {
   }
 }
 
+/** Placed where SQLite's ADD COLUMN puts it, so a migrated table's schema text equals a fresh one's. */
+const holdReleasableColumn =
+  "holdReleasable INTEGER NOT NULL DEFAULT 0 CHECK(holdReleasable IN (0,1))";
+
 /** Call after Store.ensureHost; owns only the workspace-binding table. */
 export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   /** `table` lets disposable drafting worktrees use their own bindings. */
@@ -367,10 +371,9 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       state TEXT NOT NULL CHECK(state IN ('provisioning','ready','held','archiving','archived')),
       reason TEXT,
       gitUncertain INTEGER NOT NULL DEFAULT 0 CHECK(gitUncertain IN (0,1)),
-      holdReleasable INTEGER NOT NULL DEFAULT 0 CHECK(holdReleasable IN (0,1)),
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
-    )`);
+    , ${holdReleasableColumn})`);
     const columns = this.db
       .prepare(`PRAGMA table_info(${this.table})`)
       .all() as Array<{ name: string }>;
@@ -381,9 +384,9 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     if (!columns.some(({ name }) => name === "holdReleasable")) {
       // Runs once, with the column: holds written before it was recorded keep their old wording.
       const migrate = () => {
-        this.db.exec(`ALTER TABLE ${this.table}
-          ADD COLUMN holdReleasable INTEGER NOT NULL DEFAULT 0
-          CHECK(holdReleasable IN (0,1))`);
+        this.db.exec(
+          `ALTER TABLE ${this.table} ADD COLUMN ${holdReleasableColumn}`,
+        );
         this.db.exec(`UPDATE ${this.table} SET holdReleasable = 1
           WHERE state = 'held' AND gitUncertain = 0
             AND reason LIKE 'Task workspace unavailable: Incomplete workspace files for %'`);

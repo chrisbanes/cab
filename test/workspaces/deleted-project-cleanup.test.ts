@@ -210,7 +210,7 @@ for (const change of [
       const now = new Date().toISOString();
       databaseOf(f.service)
         .prepare(
-          "INSERT INTO task_workspace_bindings VALUES (?,?,?,'[]','ready',NULL,0,?,?)",
+          "INSERT INTO task_workspace_bindings VALUES (?,?,?,'[]','ready',NULL,0,?,?,0)",
         )
         .run(f.blockerB, randomUUID(), path, now, now);
     }
@@ -407,7 +407,7 @@ test("a new binding committed during async identity inspection prevents the phys
         inserted = true;
         const now = new Date().toISOString();
         db.prepare(
-          "INSERT INTO task_workspace_bindings VALUES (?,?,?,'[]','ready',NULL,0,?,?)",
+          "INSERT INTO task_workspace_bindings VALUES (?,?,?,'[]','ready',NULL,0,?,?,0)",
         ).run(f.blockerB, randomUUID(), f.binding!.path, now, now);
       },
     },
@@ -466,7 +466,7 @@ for (const owner of [
       } else if (owner === "draft-binding") {
         const now = new Date().toISOString();
         db.prepare(
-          "INSERT INTO drafting_workspace_bindings VALUES (?,?,?,'[]','ready',NULL,0,?,?)",
+          "INSERT INTO drafting_workspace_bindings VALUES (?,?,?,'[]','ready',NULL,0,?,?,0)",
         ).run(f.blockerB, randomUUID(), path, now, now);
       } else if (owner === "request") {
         db.prepare("UPDATE turn_requests SET workspace=? WHERE workId=?").run(
