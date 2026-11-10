@@ -48,7 +48,7 @@ test("task visibility and shared readiness copy stay concise", () => {
       unavailable,
       summary({ reasons: ["imported-blockers-unknown"] }),
     ]),
-    [["Source dependencies unconfirmed", 2]],
+    [["Source dependencies unavailable", 2]],
   );
   const readinessRule = {
     kind: "rule",
@@ -109,8 +109,8 @@ test("mixed generic dependency holds remain attributed to their Waiting rows", (
   assert.deepEqual(tasks.map(taskColumn), Array(4).fill("Waiting"));
   assert.deepEqual(sharedTaskReasons(tasks), []);
   assert.deepEqual(tasks.map(taskReasonItems), [
-    [{ text: "Source dependencies unconfirmed" }],
-    [{ text: "Source dependencies unconfirmed" }],
+    [{ text: "Source dependencies unavailable" }],
+    [{ text: "Source dependencies unavailable" }],
     [{ text: "Blocker's change request unconfirmed" }],
     [{ text: "Blocker's change request unconfirmed" }],
   ]);
