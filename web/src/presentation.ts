@@ -32,7 +32,49 @@ export const repositoryLabel = (
 ) => names?.find((n) => n.repositoryId === repositoryId)?.name || repositoryId;
 
 /** A short identifier for mono metadata; the caller carries the full value on hover or in Details. */
-export const shortId = (value: string, length = 8) => value.slice(0, length);
+export const shortId = (value: string, length = 8) => {
+  const work = /^assignment:([^:]+):(?:v\d+:([^:]+)(?::(.+))?|([^:]+))$/.exec(
+    value,
+  );
+  if (!work) return value.slice(0, length);
+  const assignment = work[1]?.slice(0, length);
+  const kind = work[2] ?? work[4];
+  return work[3]
+    ? `assignment:${assignment}…${kind}:${work[3].split(":").at(-1)?.slice(0, length)}`
+    : `assignment:${assignment}…${kind}`;
+};
+
+type FileEntry = {
+  kind: string;
+  name?: string;
+  repositoryId?: string;
+};
+
+/** Directories first, then every other entry by its displayed name. */
+export function sortFileEntries<T extends FileEntry>(
+  entries: readonly T[],
+  repositoryName: (id: string) => string = (id) => id,
+): T[] {
+  const name = (entry: T) =>
+    entry.kind === "repository"
+      ? repositoryName(entry.repositoryId ?? "")
+      : (entry.name ?? "");
+  return [...entries].sort(
+    (a, b) =>
+      Number(b.kind === "directory") - Number(a.kind === "directory") ||
+      name(a).localeCompare(name(b), undefined, { sensitivity: "base" }) ||
+      name(a).localeCompare(name(b)) ||
+      a.kind.localeCompare(b.kind),
+  );
+}
+
+/** A compact binary size label; exact bytes remain available in row metadata. */
+export function fileSizeLabel(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  const unit = bytes < 1024 ** 2 ? "KB" : bytes < 1024 ** 3 ? "MB" : "GB";
+  const divisor = unit === "KB" ? 1024 : unit === "MB" ? 1024 ** 2 : 1024 ** 3;
+  return `${(bytes / divisor).toFixed(1).replace(/\.0$/, "")} ${unit}`;
+}
 
 /** A reason or state code as a sentence; an unmapped code gets the fallback, never the raw code. */
 export const codeSentence = (

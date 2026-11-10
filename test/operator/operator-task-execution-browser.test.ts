@@ -529,3 +529,115 @@ for (const engine of [
     },
   );
 }
+
+test(
+  "the Execution tab keeps unsettled evidence open and discloses settled records",
+  { browserEngine: "chromium" },
+  async (_t, j) => {
+    const f = await j.start("fixture.create", () =>
+      createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+    );
+    let browser: Browser | undefined;
+    j.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const a = await seedReviewTask(
+      f,
+      "Recovery display project",
+      "Recovery display task",
+    );
+    const web = await j.start("fixture.web", () => f.startWeb());
+    browser = await j.start("browser.launch.chromium", () => chromium.launch());
+    const page = await browser.newPage({
+      viewport: { width: 1366, height: 900 },
+    });
+    j.observe(page);
+    page.setDefaultTimeout(5000);
+    const holds = {
+      stop: false,
+      writer: false,
+      capacity: false,
+      uncertainty: false,
+      task: false,
+    };
+    await page.route(`**/api/operator/tasks/${a.taskId}*`, async (route) => {
+      const response = await route.fetch();
+      const payload = (await response.json()) as {
+        data: { executionRecovery?: unknown };
+      };
+      payload.data.executionRecovery = {
+        holds,
+        evidenceAvailable: true,
+        omittedCount: 0,
+        records: [
+          {
+            workId: `assignment:${a.assignmentId}:v1:inbox:${randomUUID()}`,
+            generation: { workRevision: 2, requestSequence: 3 },
+            binding: {
+              assignmentId: a.assignmentId,
+              assignmentVersion: 1,
+              instructionsRevision: 1,
+              profileRevision: 1,
+            },
+            intentState: "running",
+            requestState: "active",
+            holds: { ...holds, writer: true },
+            observations: [],
+            pendingEffectCount: 1,
+            receiptRecorded: false,
+            workspace: "unknown",
+          },
+          {
+            workId: `assignment:${a.assignmentId}:v1:draft:${randomUUID()}`,
+            generation: { workRevision: 1, requestSequence: 1 },
+            binding: {
+              assignmentId: a.assignmentId,
+              assignmentVersion: 1,
+              instructionsRevision: 1,
+              profileRevision: 1,
+            },
+            intentState: "completed",
+            requestState: "completed",
+            holds,
+            observations: [],
+            pendingEffectCount: 0,
+            receiptRecorded: true,
+            workspace: "preserved",
+          },
+        ],
+      };
+      await route.fulfill({ response, json: payload });
+    });
+    await signIn(
+      page,
+      web.origin,
+      web.password,
+      `/tasks/${a.taskId}?section=execution`,
+    );
+    const execution = page.locator("section#execution");
+    await execution.getByText(/request 3 · Intent running/).waitFor();
+    const settled = execution.locator("details.execution-settled");
+    await settled.getByText("1 settled", { exact: true }).waitFor();
+    const settledRecord = settled.getByText(/request 1 · Intent completed/);
+    assert.equal(await settled.getAttribute("open"), null);
+    assert.equal(await settledRecord.isVisible(), false);
+    await settled.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await settledRecord.waitFor({ state: "visible" });
+    assert.notEqual(await settled.getAttribute("open"), null);
+    await page.keyboard.press("Enter");
+    await settledRecord.waitFor({ state: "hidden" });
+    assert.equal(await settled.getAttribute("open"), null);
+    await execution
+      .getByText(
+        /identities, observations, receipts and dispositions are evidence only/,
+      )
+      .waitFor();
+    assert.match(
+      (await execution.locator("abbr").first().getAttribute("title")) ?? "",
+      /^assignment:/,
+    );
+  },
+);
