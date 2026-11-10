@@ -58,6 +58,7 @@ import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { fakeStatusGh } from "../fixtures/fake-status-gh.js";
 import { markedDataDirectory } from "../fixtures/marked-data.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 /** The owner of what these tests create, whoever runs them: the fake host's uid is never the process's. */
 const UID = (() => {
@@ -2194,7 +2195,9 @@ test("an interrupt during the tarball extraction stops before the auth file, the
   }
 });
 
-test("the default tar extraction is killed when its signal aborts", async (t) => {
+test("the default tar extraction is killed when its signal aborts", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-extract-"));
   // tar blocks opening a FIFO that has no writer, standing in for a long extraction.
   const fifo = join(root, "release.tar.gz");

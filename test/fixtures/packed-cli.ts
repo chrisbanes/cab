@@ -7,10 +7,16 @@ import { promisify } from "node:util";
 import { packTarball } from "./npm-package.js";
 
 const run = promisify(execFile);
-// Configuration exported by an enclosing `npm run` must not leak into the nested installs.
-const npmEnv = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => !/^npm_/i.test(key)),
-);
+// Configuration exported by an enclosing `npm run` must not leak into the nested installs,
+// except its cache: that is what serves --offline, and in a sandbox the only writable one.
+const npmEnv = {
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !/^npm_/i.test(key)),
+  ),
+  ...(process.env.npm_config_cache
+    ? { NPM_CONFIG_CACHE: process.env.npm_config_cache }
+    : {}),
+};
 // Compiled to dist/test/fixtures, three levels below the repository root.
 const root = join(import.meta.dirname, "../../..");
 

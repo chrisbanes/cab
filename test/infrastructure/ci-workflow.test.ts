@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 const { ciFailures } = (await import(
   pathToFileURL(resolve("scripts/check-ci-results.mjs")).href
 )) as {
-  ciFailures(jobs: unknown, run?: boolean): string[];
+  ciFailures(jobs: unknown, run?: boolean, names?: string[]): string[];
 };
 const { previousNightlyRun, nightlyChanged, docsOnly } = (await import(
   pathToFileURL(resolve("scripts/check-changes.mjs")).href

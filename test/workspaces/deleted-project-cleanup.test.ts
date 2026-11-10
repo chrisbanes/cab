@@ -26,12 +26,15 @@ import {
   cleanupGit,
   deletedCleanupFixture,
 } from "../fixtures/deleted-project-cleanup.js";
+import { slashTmpDenied } from "../fixtures/host-access.js";
 
 async function absent(path: string) {
   await assert.rejects(lstat(path), { code: "ENOENT" });
 }
 
-test("postcommit cleanup force-discards captured dirty task/draft worktrees and private temp, retaining shared Git refs", async (t) => {
+test("postcommit cleanup force-discards captured dirty task/draft worktrees and private temp, retaining shared Git refs", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const f = await deletedCleanupFixture(t, {
     workspaces: true,
     draft: true,
@@ -76,7 +79,9 @@ test("postcommit cleanup force-discards captured dirty task/draft worktrees and 
   assert.equal(f.fixture.runtime.turns, 0);
 });
 
-test("startup resumes pending cleanup after commit with no live project, bindings or intents", async (t) => {
+test("startup resumes pending cleanup after commit with no live project, bindings or intents", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const f = await deletedCleanupFixture(t, {
     workspaces: true,
     draft: true,
@@ -229,7 +234,9 @@ for (const change of [
   });
 
 for (const change of ["unsafe-mode", "symlink", "replacement"] as const)
-  test(`captured Claude temporary cleanup refuses ${change} without discarding unrelated files`, async (t) => {
+  test(`captured Claude temporary cleanup refuses ${change} without discarding unrelated files`, {
+    skip: slashTmpDenied(),
+  }, async (t) => {
     const f = await deletedCleanupFixture(t, { workspaces: true, temp: true });
     await f.commit();
     const temp = f.temp!,
@@ -259,7 +266,9 @@ for (const change of ["unsafe-mode", "symlink", "replacement"] as const)
       assert.equal(await readFile(join(temp, "keep"), "utf8"), "Replacement");
   });
 
-test("missing worktrees/temp converge and duplicate sweeps share one bounded pass", async (t) => {
+test("missing worktrees/temp converge and duplicate sweeps share one bounded pass", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const f = await deletedCleanupFixture(t, { workspaces: true, temp: true });
   await f.commit();
   for (const repository of f.binding!.repositories)
@@ -851,7 +860,9 @@ test("a failed write-ahead reservation prevents destructive Git dispatch", async
 
 for (const reservation of ["legacy-unknown", "git-removal"] as const) {
   for (const restart of [false, true]) {
-    test(`${reservation} cleanup reservations allow later items to progress${restart ? " after restart" : ""}`, async (t) => {
+    test(`${reservation} cleanup reservations allow later items to progress${restart ? " after restart" : ""}`, {
+      skip: slashTmpDenied(),
+    }, async (t) => {
       const f = await deletedCleanupFixture(t, {
         workspaces: true,
         temp: true,

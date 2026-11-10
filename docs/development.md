@@ -37,6 +37,11 @@ check's time, so refresh the weights below when one shard finishes well after th
 others. Logical suites remain separate directories even when they
 share a CI lane. Runtime retention tests are split by terminal events, threads and
 native input so the expensive workloads can run on different service shards.
+A separate `reftable` job runs the delivery and workspaces suites with the service
+profile in the checkout shape cab gives a task: a detached worktree of a bare
+reftable repository that borrows the checkout's objects, configured as
+`src/standalone/workspaces.ts` creates one. A test that reads `refs/` or `packed-refs`
+directly instead of asking Git fails there.
 
 Shards use separate `all`, `chromium` and `service` weights in
 `scripts/test-timings.json`. Weights measure complete file durations, including
@@ -157,6 +162,45 @@ of a suite that starts a service, such as
 `dist/test/execution/process-signal-shutdown.test.js`, needs a symlink-free `TMPDIR`. On macOS the default `/var/folders/...` resolves through `/var`, and
 the service refuses that data directory, so pass the resolved `/private/var/...`
 path as the runner does.
+
+### Running the check in a cab-managed workspace
+
+Agents run the full check in their cab-managed task workspaces, as anywhere else. A
+task's checkout there is a detached worktree of a bare reftable repository, and its
+commands run in the harness sandbox, so the workspace needs this environment:
+
+- **Codex:** the sandbox writes only the task workspace and the managed repository's
+  Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Set `TMPDIR`
+  and `npm_config_cache` to directories in the task workspace outside the checkout,
+  for example `../tmp` and `../npm-cache` from `repo-1`, before `npm ci`. Tests listen
+  on loopback, and Codex allows that only with the project's command network access
+  on.
+- **Claude:** the sandbox already points `TMPDIR` at the task's private temporary
+  directory. Set `npm_config_cache` as for Codex. Loopback listening needs the
+  project's local listening setting on.
+
+Tests that need host access a sandbox denies check it once, before they run, and
+skip with the reason (`# SKIP process identity is unavailable here: ...` or
+`# SKIP writing directly under /tmp is denied here ...`): reading process identity
+with `ps`, and creating the Claude runtime's `/tmp/ens-*` temporary base directly
+under `/tmp`. Everywhere the access works, including CI, those tests run in full. The
+probes are in `test/fixtures/host-access.ts`; mark a new test that needs such access
+with `{ skip: processIdentityDenied() }` or `{ skip: slashTmpDenied() }`.
+
+To reproduce the Codex sandbox from a workspace's `repo-1` without a model, run the
+check through `codex sandbox` with the policy cab gives a task turn:
+
+```sh
+W="$(cd .. && pwd)" M="$(git rev-parse --path-format=absolute --git-common-dir)"
+mkdir -p "$W/tmp" "$W/npm-cache"
+TMPDIR="$W/tmp" npm_config_cache="$W/npm-cache" codex sandbox \
+  -c 'sandbox_mode="workspace-write"' \
+  -c sandbox_workspace_write.exclude_slash_tmp=true \
+  -c sandbox_workspace_write.exclude_tmpdir_env_var=true \
+  -c sandbox_workspace_write.network_access=true \
+  -c "sandbox_workspace_write.writable_roots=[\"$W\",\"$M/objects\",\"$M/reftable\",\"$(git rev-parse --path-format=absolute --git-dir)\"]" \
+  -- npm run test:built -- --profile=service
+```
 
 Real App Server
 qualification is separate and runs only when requested explicitly, for example

@@ -66,6 +66,7 @@ import {
   type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
 import { until } from "../fixtures/until.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
@@ -2236,7 +2237,9 @@ test("project task summaries share task workspace and repository exclusions", as
   assert.doesNotMatch(String(project), /synthetic/);
 });
 
-test("polled task list, project and Inbox reads redact stored workspace paths without launching Git", async (t) => {
+test("polled task list, project and Inbox reads redact stored workspace paths without launching Git", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-polled-redaction-")),
     source = join(root, "source");
   mkdirSync(source);
