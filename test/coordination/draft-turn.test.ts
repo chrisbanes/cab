@@ -377,6 +377,33 @@ for (const edit of [
     assert.deepEqual((await task.api.readTask(task.taskId)).data.draftTurn, {
       available: true,
     });
+    const interventions = async () =>
+      (await task.api.readInbox()).data.items.filter(
+        (i) => i.kind === "intervention" && i.taskId === task.taskId,
+      );
+    assert.deepEqual(await interventions(), []);
+    const refused = f.service
+      .turnRequestsForTask(task.taskId)
+      .find((r) => r.draftTurn && r.state === "held")!;
+    let finishCallback = () => {};
+    const callback = new Promise<void>((resolve) => {
+      finishCallback = resolve;
+    });
+    f.service.registerExecutionCallback(refused.workId, callback);
+    try {
+      const pending = await interventions();
+      assert.deepEqual(
+        pending.map((i) =>
+          i.kind === "intervention" ? i.attentionCode : null,
+        ),
+        ["execution-uncertain"],
+      );
+      assert.equal(pending[0]?.dismissible, false);
+    } finally {
+      finishCallback();
+    }
+    await Promise.resolve();
+    assert.deepEqual(await interventions(), []);
     // The released message reaches the next draft turn.
     await task.api.execute(startCommand(f, task.taskId, "Second question."));
     await until(() => f.runtime.hasPending(1), "second draft turn");

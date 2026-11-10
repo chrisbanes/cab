@@ -4993,7 +4993,8 @@ export class StandaloneService {
   }
 
   inboxConditions(taskId: string) {
-    const { domain, coordination, schedulerStore, state } = this.started(),
+    const { domain, coordination, schedulerStore, state, supervisor } =
+        this.started(),
       task = domain.task(taskId);
     const conditions: Array<{
       code:
@@ -5009,13 +5010,22 @@ export class StandaloneService {
     for (const a of domain.assignments(taskId)) {
       const s = selectAssignmentExecution(a, this);
       const request = s.request ?? schedulerStore.latest(String(a.id));
+      const refused =
+        request?.state === "held" &&
+        request.kind === "assignment" &&
+        state.refusedBeforeStart(request.workId);
       const notStarted =
         request?.state === "held" && this.notStartedWork(request.workId);
+      const settledDraft =
+        refused &&
+        request?.draftTurn &&
+        !this.callbacks.get(request.workId)?.size &&
+        !supervisor.hasKnownRisk(request.workId);
       const confirmed =
         s.request?.state === "active" &&
         ["running", "submitting"].includes(s.intent?.state ?? "");
       if (
-        (request?.state === "held" && !notStarted) ||
+        (request?.state === "held" && !notStarted && !settledDraft) ||
         (s.request?.state === "active" && !confirmed) ||
         Boolean(
           (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
@@ -5025,7 +5035,7 @@ export class StandaloneService {
           `${domain.profile(String(a.profileId)).name} · ${a.id} (${request?.workId ?? s.record?.workId ?? "ownership"})`,
         );
       // A temporary callback blocks Start again, not the durable refusal episode.
-      if (request?.state === "held" && state.refusedBeforeStart(request.workId))
+      if (refused && request && !request.draftTurn)
         conditions.push({
           code: "not-started",
           key: `refused:${request.workId}`,
