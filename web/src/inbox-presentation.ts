@@ -259,7 +259,9 @@ export function taskAttentionProjection(
       (request) => request.status === "open",
     ),
     normalRunning =
-      task.execution.state === "running" &&
+      // Submission reports a healthy turn start as starting, with the same writer and capacity.
+      (task.execution.state === "running" ||
+        task.execution.state === "starting") &&
       !task.execution.holds.stop &&
       !task.execution.holds.uncertainty,
     // Capacity is normal queueing, never operator attention; the strip and Execution name it.
@@ -277,16 +279,23 @@ export function taskAttentionProjection(
       ).values(),
     ],
     cardWaits = waits.filter((wait) => wait.code !== "approval"),
-    // Beside a request every notice is listed; otherwise card waits name their own holds and
-    // only the admission notices no wait renders remain.
-    cardNotices = notices.filter(
-      (notice) =>
-        !(notice.id === "source-held" && task.source?.hold?.active) &&
-        (requests.length > 0 ||
-          cardWaits.length === 0 ||
-          notice.id === "task-unready" ||
-          notice.id === "task-not-open"),
-    ),
+    // Beside a request every notice is listed. Otherwise card waits name their own holds with
+    // their Fix, and the inspector rows list only those, so the two agree and the card stays
+    // compact; the strip's state badge still says when the task itself is not startable.
+    shownNotices =
+      requests.length > 0 || cardWaits.length === 0
+        ? notices
+        : notices.filter(
+            (notice) =>
+              notice.id !== "task-unready" && notice.id !== "task-not-open",
+          ),
+    cardNotices =
+      requests.length > 0 || cardWaits.length === 0
+        ? notices.filter(
+            (notice) =>
+              !(notice.id === "source-held" && task.source?.hold?.active),
+          )
+        : [],
     executionHolds = holdLines(task.execution.holds, task.taskHold)
       .filter(
         (hold) =>
@@ -378,7 +387,7 @@ export function taskAttentionProjection(
           title: `${request.kind === "approval" ? "Approval" : "Question"} pending`,
           kind: "request" as const,
         })),
-        ...notices.map((notice) => ({
+        ...shownNotices.map((notice) => ({
           id: `hold:${notice.id}`,
           title: notice.title,
           kind: "hold" as const,

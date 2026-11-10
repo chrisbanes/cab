@@ -699,6 +699,64 @@ test("A question opened on the task page names its requester", async (_t, j) => 
   assert.deepEqual(await visiblePanels(page), ["task-panel-overview"]);
 });
 
+test("An unknown Resume project outcome keeps the card and its check after the wait clears", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  // Once resumed, the read carries nothing else that pins the card.
+  let cleared = false;
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (cleared) {
+        json.data.waits = [];
+        json.data.attention.codes = [];
+        json.data.attention.count = 0;
+        for (const hold of Object.keys(json.data.execution.holds))
+          json.data.execution.holds[hold] = false;
+        json.data.taskHold = null;
+        json.data.admission = { eligible: true, reasons: [] };
+        json.data.questions = [];
+        json.data.approvals = [];
+        json.data.completionRequests = [];
+        json.data.unresolvedResults = [];
+      }
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  const card = page.locator("section#decisions");
+  // The command reaches the server, but its response is lost.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await card.getByRole("button", { name: "Fix: Resume project" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
+  const check = card.getByRole("button", {
+    name: "Check whether it saved",
+    exact: true,
+  });
+  await check.waitFor();
+  cleared = true;
+  const reread = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
+  );
+  await page
+    .getByRole("button", { name: "Refresh task", exact: true })
+    .dispatchEvent("click");
+  await reread;
+  await card.getByText("Waiting · Project paused", { exact: true }).waitFor({
+    state: "detached",
+  });
+  await check.waitFor();
+});
+
 test("A rejected completion is a decision the strip and decision card both name", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seed(fixture.f);
@@ -873,6 +931,20 @@ for (const [label, viewport] of [
       .waitFor();
     await decisions.getByText("Uncertainty", { exact: true }).waitFor();
     await captureBrowserEvidence(page, `task-attention-${label}`);
+    // Uncertainty alone keeps the phone banner, and the collapse it toggles always reopens.
+    if (label === "phone") {
+      const banner = decisions.getByRole("button", {
+        name: "Waiting on you",
+        exact: true,
+      });
+      await banner.click();
+      assert.equal(await banner.getAttribute("aria-expanded"), "false");
+      await decisions
+        .getByText("Uncertainty", { exact: true })
+        .waitFor({ state: "hidden" });
+      await banner.click();
+      await decisions.getByText("Uncertainty", { exact: true }).waitFor();
+    }
 
     unreadyAndRejected = true;
     await page.reload();

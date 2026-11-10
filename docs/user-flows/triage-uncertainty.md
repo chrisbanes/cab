@@ -21,7 +21,8 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 - Home "Needs you" card (execution uncertainty first).
 - Inbox intervention row.
 - Task detail's pinned Decisions and holds card and compact status strip. Ordinary
-  writer or capacity waits during a running turn remain in Execution.
+  writer or capacity holds while a turn starts or runs remain in Execution, and
+  waiting for capacity is named by the strip, never pinned.
 - Settings → Runtime → Task recovery destinations.
 - Operator CLI `recovery` reads.
 

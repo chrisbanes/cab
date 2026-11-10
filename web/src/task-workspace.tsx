@@ -1578,10 +1578,6 @@ export function TaskWorkspace({
       (q) => q.status === "open",
     ),
     nextActor = taskNextActor(data),
-    attentionCollapsed =
-      (openRequests.length > 0 || nextActor.operator) &&
-      state.attentionCollapsed &&
-      !requestId,
     inView = openRequests.find(
       (q) => q.interactionId === (state.inlineAnswer ?? requestId),
     ),
@@ -1606,9 +1602,18 @@ export function TaskWorkspace({
         (state.inlineAnswer &&
           !openRequests.some((q) => q.interactionId === state.inlineAnswer)) ||
         startedAgain === taskId ||
-        resumedSource?.taskId === taskId,
+        resumedSource?.taskId === taskId ||
+        // A Resume project outcome (an unknown save above all) outlives the wait it cleared.
+        drafts.phase(`project.resume-fix:${data.task.projectId}`) !== "editing",
     ),
-    attentionPinned = attention.pinned || retainedAttention;
+    attentionPinned = attention.pinned || retainedAttention,
+    // One rule for the banner and the collapse it toggles, so a collapsed card can always reopen.
+    attentionBanner =
+      attention.requests.length > 0 ||
+      attention.actions.length > 0 ||
+      nextActor.operator,
+    attentionCollapsed =
+      attentionBanner && state.attentionCollapsed && !requestId;
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -2274,7 +2279,7 @@ export function TaskWorkspace({
         aria-label="Pending requests and holds"
       >
         <h3 className="sr-only">Decisions and holds</h3>
-        {(attention.requests.length > 0 || attention.actions.length > 0) && (
+        {attentionBanner && (
           <button
             type="button"
             className="attention-banner"

@@ -271,6 +271,19 @@ test("task attention projection filters normal running capacity and writer holds
   assert.deepEqual(ordinary.executionHolds, []);
   assert.deepEqual(ordinary.rows, []);
 
+  // Submission reports a healthy turn start as starting, holding the same writer and capacity.
+  const starting = taskAttentionProjection(
+    {
+      ...running,
+      execution: { ...running.execution, state: "starting" },
+    } as TaskRead["data"],
+    "answer",
+    null,
+  );
+  assert.equal(starting.pinned, false);
+  assert.deepEqual(starting.executionHolds, []);
+  assert.deepEqual(starting.rows, []);
+
   const withQuestion = taskAttentionProjection(
     {
       ...running,
@@ -325,7 +338,7 @@ test("task attention projection pins a wait the operator can act on, never an id
   assert.equal(queued.pinned, false);
   assert.deepEqual(queued.rows, []);
 
-  // A wait names its own hold; an admission hold no wait renders stays a card notice.
+  // Beside a wait the card shows the wait with its Fix and no notices; the inspector agrees.
   const unready = taskAttentionProjection(
     attentionTask({
       admission: { eligible: false, reasons: ["task-unready"] } as never,
@@ -340,13 +353,10 @@ test("task attention projection pins a wait the operator can act on, never an id
     "answer",
     null,
   );
-  assert.deepEqual(
-    unready.cardNotices.map((notice) => notice.id),
-    ["task-unready"],
-  );
+  assert.deepEqual(unready.cardNotices, []);
   assert.deepEqual(
     unready.rows.map((row) => row.id),
-    ["hold:paused", "hold:task-unready"],
+    ["hold:paused"],
   );
 });
 

@@ -15,11 +15,12 @@ why meant reassembling it across tabs, so the task view was hard to read.
 
 - The task Overview is the task's conversation. A compact Decisions and holds card
   stays pinned for open questions and approvals, execution uncertainty or Stop,
-  active source holds, interventions, wait reasons and operator-action recovery. Ordinary writer
-  and capacity waits during a running turn stay on Execution. The task strip shows its
-  state badge and at most one distinct reason, without repeating the next actor or
-  readiness wording. The lead's conversation
-  runs oldest to newest beneath it, and the reply composer is docked at the bottom.
+  active source holds, interventions, wait reasons and operator-action recovery.
+  Ordinary writer and capacity holds while a turn starts or runs stay on Execution,
+  and waiting for capacity is named by the strip, never pinned. The task strip shows
+  its state badge and at most one distinct reason, without repeating the next actor
+  or readiness wording. The lead's conversation runs oldest to newest beneath it, and
+  the reply composer is docked at the bottom.
   The brief, evidence and assignments move to the inspector. The History tab is
   removed; links that opened it (`#history`, `?section=context`, `?assignment=`)
   open the Overview at the matching place in the conversation.
