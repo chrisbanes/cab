@@ -129,6 +129,8 @@ export function scriptedDeliveryProvider() {
       },
       /** A 409 that names this pending request instead. */
       conflict: undefined as string | undefined,
+      /** Refuses the next write as a stale merge, naming no request, after moving the head to `head`. */
+      refuse: undefined as undefined | { status: 405 | 409; head?: string },
       polls: [] as Array<{ status: string; message?: string } | "expired">,
     },
     sourceBody: "Deliver O",
@@ -211,7 +213,15 @@ export function scriptedDeliveryProvider() {
       });
       state.mergeBodies.push(body);
       state.writes++;
-      const { put, conflict } = state.mergeAsync;
+      const { put, conflict, refuse } = state.mergeAsync;
+      if (refuse) {
+        state.mergeAsync.refuse = undefined;
+        if (refuse.head) state.head = refuse.head;
+        return Response.json(
+          { message: "Head branch was modified" },
+          { status: refuse.status },
+        );
+      }
       if (conflict)
         return Response.json(
           { message: "Merge in progress", details: { uuid: conflict } },

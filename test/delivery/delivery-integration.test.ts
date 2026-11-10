@@ -2189,6 +2189,58 @@ test("a pull request that moved off the merge target never confirms it, but its 
   }
 });
 
+test("a merge refused because the head moved is retryable, leaves no standing blocker, and the new head governs", async () => {
+  const moved = await asyncMerge({});
+  try {
+    moved.f.scripted.state.mergeAsync.refuse = {
+      status: 409,
+      head: "3".repeat(40),
+    };
+    assert.equal((await moved.merge()).success, false);
+    const record = moved.f.service.delivery().action(moved.operationId);
+    assert.equal(record.state, "confirmed-failure");
+    assert.equal(record.observation?.reason, "merge-target-moved");
+    assert.equal(record.observation?.retryable, true);
+    assert.deepEqual(
+      moved.f.service.delivery().actionBlockers(moved.f.taskId),
+      [],
+    );
+    // The re-attempt re-reads the gate: the head it named moved, so nothing is sent again.
+    await refreshDelivery(moved.f);
+    const again = moved.f.service.delivery().action(moved.operationId);
+    assert.equal(again.state, "confirmed-failure");
+    assert.equal(again.observation?.reason, "provider-preflight-held");
+    assert.notEqual(again.observation?.retryable, true);
+    assert.equal(moved.f.scripted.state.writes, 1);
+    assert.equal(
+      moved.f.service.delivery().delivery(moved.f.taskId)?.observation.headSha,
+      "3".repeat(40),
+    );
+    assert.deepEqual(
+      moved.f.service.delivery().actionBlockers(moved.f.taskId),
+      [],
+    );
+  } finally {
+    await moved.f.close();
+  }
+  // Only the base moved: the gate still passes, so the same head is merged.
+  const base = await asyncMerge({});
+  try {
+    base.f.scripted.state.mergeAsync.refuse = { status: 405 };
+    assert.equal((await base.merge()).success, false);
+    assert.equal(base.action().reason, "merge-target-moved");
+    await refreshDelivery(base.f);
+    assert.equal(base.action().state, "confirmed-success");
+    assert.equal(base.f.scripted.state.writes, 2);
+    assert.deepEqual(base.f.scripted.state.mergeBodies, [
+      merge.body,
+      merge.body,
+    ]);
+  } finally {
+    await base.f.close();
+  }
+});
+
 test("delivery tool failures name the invalid field, the refusal category and cab's reason", async () => {
   const { f, reply, resolve } = await threadWorld(null);
   const responses: string[] = [];

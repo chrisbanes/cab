@@ -2324,6 +2324,18 @@ export class GitHubHttpDeliveryProvider
       // The write response never establishes success.
       return await this.inspectAction(readback);
     } catch (error) {
+      // GitHub refuses a merge whose head or base moved; the re-attempt re-reads the gate first.
+      if (
+        a.kind === "pr.merge" &&
+        error instanceof ProviderFailure &&
+        (error.status === 405 || error.status === 409)
+      )
+        return {
+          state: "confirmed-failure",
+          reason: "merge-target-moved",
+          receipt: null,
+          retryable: true,
+        };
       // Only a single-request rejection is definitive. Label removal is multi-effect.
       if (
         error instanceof ProviderFailure &&

@@ -281,11 +281,13 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
         app: { id: 17 },
       },
     ];
+  let write = (): Response =>
+    Response.json({ status: "merged", details: { uuid: "u-1" } });
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
-    if (init?.method === "PUT") {
+    if (init?.method && init.method !== "GET" && url.pathname !== "/graphql") {
       writes++;
-      return Response.json({ status: "merged", details: { uuid: "u-1" } });
+      return write();
     }
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
@@ -372,6 +374,10 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     },
     setChecks: (v: unknown[]) => {
       checks = v;
+    },
+    /** How the code host answers every REST write. */
+    setWrite: (v: () => Response) => {
+      write = v;
     },
   };
 }
@@ -693,6 +699,34 @@ test("a base that advanced blocks only under an up-to-date rule, and a missing b
   );
   for (const f of [clean, classic, ruleset, conflicting, missing])
     assert.equal(f.getWrites(), 0);
+});
+test("a merge GitHub refuses because its head or base moved is a retryable confirmed failure", async () => {
+  const f = prProviderFixture();
+  const refused = (status: number) =>
+    f.setWrite(() =>
+      Response.json({ message: "Head branch was modified" }, { status }),
+    );
+  for (const status of [405, 409]) {
+    refused(status);
+    const record = commentRecord();
+    record.request = {
+      operationId: record.operationId,
+      action: mergeAction("squash"),
+    };
+    assert.deepEqual(await f.provider.performAction(record), {
+      state: "confirmed-failure",
+      reason: "merge-target-moved",
+      receipt: null,
+      retryable: true,
+    });
+  }
+  // Only the merge reads a refusal as a moved target.
+  refused(409);
+  assert.deepEqual(await f.provider.performAction(commentRecord()), {
+    state: "confirmed-failure",
+    reason: "provider-http-409",
+    receipt: null,
+  });
 });
 test("a merge whose method is not the repository's configured method is held before any write", async () => {
   const f = prProviderFixture();
