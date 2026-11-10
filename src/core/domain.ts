@@ -120,7 +120,6 @@ const label = z.string().trim().min(1).max(512);
 const prose = z.string().max(16000);
 const summary = z.string().trim().max(120);
 const actor = z.enum(["operator", "agent"]);
-const defaultProjectLimit = 2 as const;
 const commandBase = { key: id, actor };
 
 const commandSchema = z.discriminatedUnion("type", [
@@ -429,21 +428,33 @@ const commandSchema = z.discriminatedUnion("type", [
       ...commandBase,
       type: z.literal("capacity.configure"),
       globalLimit: z.number().int().positive(),
+      minimumLeadSlots: z.number().int().nonnegative(),
       projectOverrides: z
+        .record(id, z.number().int().positive().nullable())
+        .default({}),
+      agentOverrides: z
         .record(id, z.number().int().positive().nullable())
         .default({}),
       // Optional compare-and-swap: omitted, the command hashes and behaves as before.
       expectedCurrent: z
         .object({
           globalLimit: z.number().int().positive(),
+          minimumLeadSlots: z.number().int().nonnegative(),
           projectOverrides: z
+            .record(id, z.number().int().positive().nullable())
+            .default({}),
+          agentOverrides: z
             .record(id, z.number().int().positive().nullable())
             .default({}),
         })
         .strict()
         .optional(),
     })
-    .strict(),
+    .strict()
+    .refine((command) => command.minimumLeadSlots < command.globalLimit, {
+      path: ["minimumLeadSlots"],
+      message: "Minimum lead slots must be below the global active-turn cap",
+    }),
   z
     .object({
       ...commandBase,
@@ -519,10 +530,39 @@ export type CapacityConfigureCommand = Extract<
 >;
 export interface CapacityLimits {
   globalLimit: number;
-  defaultProjectLimit: 2;
+  minimumLeadSlots: number;
   projectOverrides: Record<string, number>;
-  currentUsage: { global: number; projects: Record<string, number> };
-  effectiveProjectLimits: Record<string, number>;
+  agentOverrides: Record<string, number>;
+  /** Projects count only non-lead turns; agents count every turn they run. */
+  currentUsage: {
+    global: number;
+    lead: number;
+    projects: Record<string, number>;
+    agents: Record<string, number>;
+  };
+}
+
+/**
+ * Adds lead slots and agent caps to capacity configuration. A store from before lead
+ * slots keeps its global cap and gets one lead slot, or none when its cap is one.
+ */
+export function migrateCapacityLimits(db: Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS scheduler_agent_capacity_limits (
+    profileId TEXT PRIMARY KEY, agentLimit INTEGER NOT NULL CHECK(agentLimit > 0)
+  )`);
+  const columns = db
+    .prepare("PRAGMA table_info(scheduler_capacity_limits)")
+    .all() as Array<{ name: string }>;
+  if (
+    columns.length > 0 &&
+    !columns.some(({ name }) => name === "minimumLeadSlots")
+  ) {
+    db.exec(`ALTER TABLE scheduler_capacity_limits ADD COLUMN minimumLeadSlots
+      INTEGER NOT NULL DEFAULT 1 CHECK(minimumLeadSlots >= 0)`);
+    db.exec(
+      "UPDATE scheduler_capacity_limits SET minimumLeadSlots = MIN(1, globalLimit - 1)",
+    );
+  }
 }
 type ParsedCommand = z.output<typeof commandSchema>;
 type Row = Record<string, string | number | null>;
@@ -760,7 +800,8 @@ export class DomainStore {
         );
         CREATE TABLE IF NOT EXISTS scheduler_capacity_limits (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-          globalLimit INTEGER NOT NULL CHECK(globalLimit > 0)
+          globalLimit INTEGER NOT NULL CHECK(globalLimit > 0),
+          minimumLeadSlots INTEGER NOT NULL DEFAULT 1 CHECK(minimumLeadSlots >= 0)
         );
         CREATE TABLE IF NOT EXISTS installation_discovery (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -945,9 +986,10 @@ export class DomainStore {
       );
       this.db
         .prepare(
-          "INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit) VALUES (1, 4)",
+          "INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit) VALUES (1, 6)",
         )
         .run();
+      migrateCapacityLimits(this.db);
       this.db
         .prepare(
           "INSERT OR IGNORE INTO installation_discovery (singleton, credentialRef) VALUES (1, NULL)",
@@ -1668,29 +1710,23 @@ export class DomainStore {
     ).map((row) => String(row.selectionId));
   }
 
-  capacityLimits(projectIds: string[] = []): CapacityLimits {
+  capacityLimits(): CapacityLimits {
     const config = this.required(
-      "SELECT globalLimit FROM scheduler_capacity_limits WHERE singleton = 1",
+      "SELECT globalLimit, minimumLeadSlots FROM scheduler_capacity_limits WHERE singleton = 1",
     );
-    const projectOverrides: Record<string, number> = Object.fromEntries(
-      (
-        this.db
-          .prepare(
-            "SELECT projectId, projectLimit FROM scheduler_project_capacity_limits ORDER BY projectId",
-          )
-          .all() as Row[]
-      ).map((row) => [String(row.projectId), Number(row.projectLimit)]),
-    );
-    const effectiveProjectLimits: Record<string, number> = {};
-    for (const projectId of new Set(
-      projectIds.map((value) => id.parse(value)),
-    )) {
-      this.project(projectId);
-      effectiveProjectLimits[projectId] =
-        projectOverrides[projectId] ?? defaultProjectLimit;
-    }
-
-    const currentUsage = { global: 0, projects: {} as Record<string, number> };
+    const overrides = (sql: string) =>
+      Object.fromEntries(
+        (this.db.prepare(sql).all() as Row[]).map((row) => [
+          String(row.id),
+          Number(row.limit),
+        ]),
+      ) as Record<string, number>;
+    const currentUsage: CapacityLimits["currentUsage"] = {
+      global: 0,
+      lead: 0,
+      projects: {},
+      agents: {},
+    };
     if (
       this.one(
         "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'execution_capacity_reservations'",
@@ -1698,22 +1734,35 @@ export class DomainStore {
     ) {
       const reservations = this.db
         .prepare(
-          "SELECT projectId, COUNT(*) AS count FROM execution_capacity_reservations GROUP BY projectId",
+          "SELECT projectId, agentId, lead, COUNT(*) AS count FROM execution_capacity_reservations GROUP BY projectId, agentId, lead",
         )
         .all() as Row[];
       for (const row of reservations) {
         const count = Number(row.count);
         currentUsage.global += count;
-        if (row.projectId !== null)
-          currentUsage.projects[String(row.projectId)] = count;
+        if (Number(row.lead) === 1) currentUsage.lead += count;
+        else if (row.projectId !== null) {
+          const project = String(row.projectId);
+          currentUsage.projects[project] =
+            (currentUsage.projects[project] ?? 0) + count;
+        }
+        if (row.agentId !== null) {
+          const agent = String(row.agentId);
+          currentUsage.agents[agent] =
+            (currentUsage.agents[agent] ?? 0) + count;
+        }
       }
     }
     return {
       globalLimit: Number(config.globalLimit),
-      defaultProjectLimit,
-      projectOverrides,
+      minimumLeadSlots: Number(config.minimumLeadSlots),
+      projectOverrides: overrides(
+        'SELECT projectId AS id, projectLimit AS "limit" FROM scheduler_project_capacity_limits ORDER BY projectId',
+      ),
+      agentOverrides: overrides(
+        'SELECT profileId AS id, agentLimit AS "limit" FROM scheduler_agent_capacity_limits ORDER BY profileId',
+      ),
       currentUsage,
-      effectiveProjectLimits,
     };
   }
 
@@ -4085,41 +4134,58 @@ export class DomainStore {
       }
       case "capacity.configure": {
         this.operator(command);
+        const current = this.capacityLimits();
         if (command.expectedCurrent) {
-          const current = this.capacityLimits();
           const expected = command.expectedCurrent;
+          const differs = (
+            stored: Record<string, number>,
+            wanted: Record<string, number | null>,
+          ) =>
+            Object.entries(wanted).some(
+              ([key, limit]) => (stored[key] ?? null) !== limit,
+            );
           if (
             current.globalLimit !== expected.globalLimit ||
-            Object.entries(expected.projectOverrides).some(
-              ([projectId, limit]) =>
-                (current.projectOverrides[projectId] ?? null) !== limit,
-            )
+            current.minimumLeadSlots !== expected.minimumLeadSlots ||
+            differs(current.projectOverrides, expected.projectOverrides) ||
+            differs(current.agentOverrides, expected.agentOverrides)
           )
             throw new DomainConflictError("Capacity limits changed");
         }
         this.db
           .prepare(
-            "UPDATE scheduler_capacity_limits SET globalLimit = ? WHERE singleton = 1",
+            "UPDATE scheduler_capacity_limits SET globalLimit = ?, minimumLeadSlots = ? WHERE singleton = 1",
           )
-          .run(command.globalLimit);
-        for (const [projectId, projectLimit] of Object.entries(
-          command.projectOverrides,
-        )) {
-          this.project(projectId);
-          if (projectLimit === null)
-            this.db
-              .prepare(
-                "DELETE FROM scheduler_project_capacity_limits WHERE projectId = ?",
-              )
-              .run(projectId);
-          else
-            this.db
-              .prepare(`INSERT INTO scheduler_project_capacity_limits
-                (projectId, projectLimit) VALUES (?, ?)
-                ON CONFLICT(projectId) DO UPDATE SET projectLimit = excluded.projectLimit`)
-              .run(projectId, projectLimit);
-        }
-        return this.capacityLimits(Object.keys(command.projectOverrides));
+          .run(command.globalLimit, command.minimumLeadSlots);
+        for (const [table, column, value, limits, check] of [
+          [
+            "scheduler_project_capacity_limits",
+            "projectId",
+            "projectLimit",
+            command.projectOverrides,
+            (key: string) => this.project(key),
+          ],
+          [
+            "scheduler_agent_capacity_limits",
+            "profileId",
+            "agentLimit",
+            command.agentOverrides,
+            (key: string) => this.profile(key),
+          ],
+        ] as const)
+          for (const [key, limit] of Object.entries(limits)) {
+            check(key);
+            if (limit === null)
+              this.db
+                .prepare(`DELETE FROM ${table} WHERE ${column} = ?`)
+                .run(key);
+            else
+              this.db
+                .prepare(`INSERT INTO ${table} (${column}, ${value}) VALUES (?, ?)
+                  ON CONFLICT(${column}) DO UPDATE SET ${value} = excluded.${value}`)
+                .run(key, limit);
+          }
+        return this.capacityLimits();
       }
     }
   }

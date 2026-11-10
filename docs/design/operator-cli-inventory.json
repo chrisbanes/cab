@@ -504,7 +504,7 @@
         "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
-      "effect": "Writes a capacity change document (global and per-project limits, default clears an override) recording expectedCurrent; sends no write.",
+      "effect": "Writes a capacity change document (global limit, minimum lead slots, per-agent and per-project limits, none clears an override) recording expectedCurrent; sends no write.",
       "denial": "n/a: prepare sends no write and works with a read-only credential.",
       "revision": "expectedCurrent is recorded so apply can detect a limit changed in the browser.",
       "retry": "n/a: prepare is local.",

@@ -2985,10 +2985,7 @@ test("Stop persists bound execution identity before interrupt and keeps ownershi
       f.service.list().find((item) => item.workId === "stoppable")?.state,
       "held",
     );
-    assert.equal(
-      f.service.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(f.service.capacityLimits().currentUsage.global, 1);
     assert.equal(
       f.service.recordTaskResult("stoppable", "too early"),
       false,
@@ -3004,20 +3001,14 @@ test("Stop persists bound execution identity before interrupt and keeps ownershi
     );
     await recovered.start();
     assert.equal(recovered.taskHold(f.taskId), "Task stopped");
-    assert.equal(
-      recovered.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     recovered.resumeTask(f.taskId);
     assert.equal(recovered.taskHold(f.taskId), undefined);
     assert.equal(
       recovered.list().find((item) => item.workId === "stoppable")?.state,
       "held",
     );
-    assert.equal(
-      recovered.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     await recovered.stop();
   } finally {
     gate.resolve();

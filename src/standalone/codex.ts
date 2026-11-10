@@ -71,7 +71,10 @@ const configuration = z.object({
 const thread = z.object({
   thread: z.object({ id: z.string() }),
   approvalPolicy: z.literal("never"),
-  sandbox: z.object({ type: z.literal("workspaceWrite") }),
+  // A turn's sandbox policy persists on the thread, so a resume reports the last turn's policy.
+  sandbox: z.object({
+    type: z.enum(["workspaceWrite", "dangerFullAccess", "readOnly"]),
+  }),
 });
 const turn = z.object({ turn: z.object({ id: z.string() }) });
 /** App Server `model/list`: the runtime's own catalogue of models and their reasoning efforts. */

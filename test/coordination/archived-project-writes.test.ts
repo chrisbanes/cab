@@ -19,6 +19,7 @@ function commands(
       actor: "operator",
       key: randomUUID(),
       type: "capacity.configure",
+      minimumLeadSlots: 0,
       globalLimit: 2,
       projectOverrides: { [projectId]: 1 },
     },

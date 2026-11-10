@@ -333,7 +333,7 @@ test("Profile edit, capacity and discovery saves each leave one message", async 
   await savedOutcome(page);
 
   await go("/settings/runtime");
-  await page.getByLabel("Global active-turn cap", { exact: true }).fill("1");
+  await page.getByLabel("Global active-turn cap", { exact: true }).fill("2");
   await page.getByRole("button", { name: "Save capacity" }).click();
   await savedOutcome(page);
 

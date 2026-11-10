@@ -342,6 +342,7 @@ export async function setupJourney(
   await service.configureCapacity({
     key: randomUUID(),
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   });
   const binding = await service.provisionTask(taskId, [
