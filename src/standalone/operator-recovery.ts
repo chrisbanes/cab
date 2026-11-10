@@ -15,6 +15,7 @@ import {
 import {
   archivedResumeMessage,
   boundTurnRecoveryCommandSchema,
+  rejectedRequestHoldReason,
 } from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import type { StandaloneService } from "./service.js";
@@ -119,12 +120,10 @@ export async function recoveryOptions(
       const reconciled = r.receiptRecorded || r.intentState === "reconciled";
       // The only reason a historical pre-turn adoption accepts: the exact archived rejection.
       const archivedReason = exactPredecessor
-        ? `Runtime submission or observation uncertain: Error: ${JSON.stringify(
-            {
-              code: -32600,
-              message: archivedResumeMessage(exactPredecessor.threadId),
-            },
-          )}`
+        ? rejectedRequestHoldReason({
+            code: -32600,
+            message: archivedResumeMessage(exactPredecessor.threadId),
+          })
         : null;
       const blockers = (path: RecoveryPath): Blocker[] => {
         if (path === "bound-turn-recover") return boundBlocked;

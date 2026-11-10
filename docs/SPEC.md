@@ -1255,8 +1255,9 @@ repository and grants nothing by itself. An assignment whose operator-reconciled
 recovery has no recorded continuation has no Fix and links to its recovery; opening
 it releases nothing. A request refused before it ran, because the captured task or assignment
 revisions changed or because its submission failed before any turn was sent, is shown as **Not started** (`not-started`, reason
-`refused-before-start`), not as a wait or as uncertain execution: Start again, a
-recovery or a fresh operator message clears it. A Fix never clears
+`refused-before-start`), not as a wait or as uncertain execution. Start again, a recovery
+or a fresh operator message clears a revision refusal; a pre-turn refusal is cleared by
+Start again or Reset task. A Fix never clears
 holds or grants access by implication. These controls must preserve existing
 readiness and admission rules.
 

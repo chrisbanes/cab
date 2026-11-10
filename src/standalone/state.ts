@@ -20,6 +20,7 @@ import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
   historicalNoTurnAdoptionSchema,
+  rejectedRequestHoldReason,
   replaceConversationCommandSchema,
   type ArchivedResumeRejection,
   type HistoricalPreTurnAdoption,
@@ -2452,8 +2453,10 @@ export class ExecutionState {
     )
       return false;
     const row = this.refusedBeforeStartRow(workId);
-    // A pre-turn refusal was admitted: it ran up to the runtime, so it is never "never admitted".
-    if (!row || row.preTurn) return false;
+    if (!row) return false;
+    // A pre-turn refusal sent no turn: a draft turn's message was never delivered, so it is
+    // given back like an admission refusal. Other work was admitted and is not withdrawn.
+    if (row.preTurn) return row.draftTurn === 1;
     const id = row.id;
     const initial = id === `assignment:${row.assignmentId}:initial`;
     const refusal = row.refusalReason;
@@ -3597,6 +3600,7 @@ export class ExecutionState {
     workId: string;
   } {
     return transaction(this.db, () => {
+      assertOwnedWorkWritable(this.db, value.workId);
       const context = this.preTurnContext(value.workId);
       const intent = this.db
         .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
@@ -3748,10 +3752,7 @@ export class ExecutionState {
           canonicalMaterial(context),
           canonicalMaterial(value),
         );
-      this.hold(
-        intent.id,
-        `Runtime submission or observation uncertain: Error: ${JSON.stringify(value.error)}`,
-      );
+      this.hold(intent.id, rejectedRequestHoldReason(value.error));
       return true;
     });
   }
@@ -3780,8 +3781,7 @@ export class ExecutionState {
         request?.state !== "held" ||
         intent.reason !== value.retainedReason ||
         request.reason !== value.retainedReason ||
-        value.retainedReason !==
-          `Runtime submission or observation uncertain: Error: ${JSON.stringify(value.rpcError)}` ||
+        value.retainedReason !== rejectedRequestHoldReason(value.rpcError) ||
         context.workRevision !== value.workRevision ||
         context.requestSequence !== value.requestSequence ||
         context.predecessorWorkId !== value.predecessorWorkId ||

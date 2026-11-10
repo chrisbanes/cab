@@ -126,6 +126,17 @@ test("a held no-turn generation exposes its exact identity, eligibility and bloc
     "witness-present",
   ]);
   assert.equal(path(after, "no-turn-recover")?.eligible, true);
+  w.verifier.set("conflict");
+  after = (await options(w, w.read)).records.find((r) => r.workId === g.workId);
+  assert.ok(after);
+  assert.deepEqual(path(after, "no-turn-recover")?.blockedBy, [
+    "termination-conflict",
+  ]);
+  await assert.rejects(
+    s.f.service.recoverNoTurnExecution(g.recovery() as never),
+    RecoveryRejectedError,
+  );
+  w.verifier.set("verified");
   assert.deepEqual(path(after, "pre-turn-recover")?.blockedBy, [
     "context-unavailable",
     "witness-missing",
@@ -182,6 +193,15 @@ test("historical and runtime-captured pre-turn generations expose predecessor id
     "no-turn-recover": "context-unavailable,witness-missing",
     "bound-turn-recover": "bound-identity-missing",
   });
+  // Both eligible adoptions are accepted; the no-turn one refuses it for Start again.
+  historical.s.f.service.adoptHistoricalNoTurnSubmission(
+    historical.g.resumeAdoption(),
+  );
+  assert.equal(
+    historical.s.f.service.startAgainAvailability(historical.g.taskId)
+      .available,
+    true,
+  );
 
   const runtime = await world(t, "pre-turn-runtime");
   data = await options(runtime, runtime.read);

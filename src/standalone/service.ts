@@ -280,6 +280,7 @@ import {
 import {
   type PreTurnStage,
   preTurnFailureClass,
+  preTurnHoldReason,
   preTurnRefusalReason,
 } from "./pre-turn-failure.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
@@ -3417,7 +3418,11 @@ export class StandaloneService {
     );
   }
   adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
-    return this.started().state.adoptHistoricalNoTurnSubmission(command);
+    const result =
+      this.started().state.adoptHistoricalNoTurnSubmission(command);
+    // Adopting a held resume refuses it and frees its capacity for queued work.
+    this.wakeAfterCommit();
+    return result;
   }
   recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
     const value = noTurnRecoveryCommandSchema.parse(command);
@@ -7152,10 +7157,6 @@ export class StandaloneService {
   }
 
   /**
-   * The turn ended. Capacity is released only on an observed terminal status
-   * with nothing unfinished; the copy is then deleted and the run settled.
-   */
-  /**
    * A submission that failed before `startTurn` was called sent no turn, so nothing ran.
    * An assignment request is refused for Start again; a drafting run fails. False when
    * anything else holds the execution (Stop, task hold, callback, known survivor), which
@@ -7203,6 +7204,10 @@ export class StandaloneService {
     }
   }
 
+  /**
+   * The turn ended. Capacity is released only on an observed terminal status
+   * with nothing unfinished; the copy is then deleted and the run settled.
+   */
   private async endDraftingTurn(input: {
     request: TurnRequest;
     intent: ExecutionIntent;
@@ -9441,7 +9446,13 @@ export class StandaloneService {
           intent.id,
           error instanceof PreviousHarnessHomeError
             ? error.message
-            : `Runtime submission or observation uncertain: ${String(error)}`,
+            : submissionStage !== "turn"
+              ? preTurnHoldReason(
+                  submissionStage,
+                  preTurnFailureClass(error),
+                  error,
+                )
+              : `Runtime submission or observation uncertain: ${String(error)}`,
         );
       // The run stays held, with its capacity, until the next start verifies the runtime ended.
       if (

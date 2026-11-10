@@ -19,6 +19,13 @@ export { processIdentitySchema };
 export function archivedResumeMessage(threadId: string): string {
   return `session ${threadId} is archived. Run \`codex unarchive ${threadId}\` to unarchive it first.`;
 }
+/** How a pre-turn RPC rejection was held, which historical pre-turn adoption restates. */
+export function rejectedRequestHoldReason(error: {
+  code: number;
+  message: string;
+}): string {
+  return `Runtime submission or observation uncertain: Error: ${JSON.stringify({ code: error.code, message: error.message })}`;
+}
 export const archivedResumeRejectionSchema = z
   .object({
     method: z.literal("thread/resume"),
