@@ -381,6 +381,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
       "gone.txt": "This file will be removed after its first preview.\n",
       "docs/child.txt": "Arrow key folder child.\n",
       "example.ts": 'export const answer = 42;\nconsole.log("source only");\n',
+      "large.txt": "x".repeat(1536),
       "unsafe.svg":
         "<svg><script>window.filePreviewInjected = true</script></svg>\n",
       [longName]: "long filename fixture\n",
@@ -519,6 +520,46 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .evaluateAll((entries) =>
       entries.map((entry) => entry.getAttribute("aria-label")),
     );
+  const entryNames = await page.locator(".file-entry-name").allTextContents();
+  const directoryCount = explorerLabels.filter((label) =>
+    label?.includes(", directory,"),
+  ).length;
+  assert.ok(directoryCount > 0);
+  assert.ok(
+    explorerLabels
+      .slice(0, directoryCount)
+      .every((label) => label?.includes(", directory,")),
+  );
+  assert.ok(
+    explorerLabels
+      .slice(directoryCount)
+      .every((label) => Boolean(label && !label.includes(", directory,"))),
+  );
+  const sortedNames = (names: string[]) =>
+    [...names].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  assert.deepEqual(
+    entryNames
+      .slice(0, directoryCount)
+      .map((name) => name.trim().replace(/^▸\s*/, "")),
+    sortedNames(
+      entryNames
+        .slice(0, directoryCount)
+        .map((name) => name.trim().replace(/^▸\s*/, "")),
+    ),
+  );
+  assert.deepEqual(
+    entryNames.slice(directoryCount).map((name) => name.trim()),
+    sortedNames(entryNames.slice(directoryCount).map((name) => name.trim())),
+  );
+  const largeEntry = page.getByRole("button", { name: /large\.txt/ });
+  await largeEntry.waitFor();
+  assert.match(
+    await largeEntry.locator(".file-entry-metadata").innerText(),
+    /1\.5 KB/,
+  );
+  assert.match((await largeEntry.getAttribute("title")) ?? "", /1,536 bytes$/);
   const guideIndex = explorerLabels.findIndex((label) =>
     label?.includes("guide.md"),
   );
@@ -565,7 +606,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   const longEntry = page.getByRole("button", { name: new RegExp(longName) });
   assert.equal(
     await longEntry.getAttribute("title"),
-    `Repository alpha/${longName}`,
+    `Repository alpha/${longName} · 22 bytes`,
   );
   const longNameStyle = await longEntry
     .locator(".file-entry-name")
