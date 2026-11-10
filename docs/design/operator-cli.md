@@ -663,12 +663,13 @@ and uncertainty holds are this assignment's, Stop and task holds task-wide) with
 exact identity each command binds and advisory per-path
 eligibility with closed blockers (`not-held`, `ownership-released`,
 `context-unavailable`, `thread-bound`, `turn-bound`, `independent-hold`, `callback-pending`,
-`known-survivor`, `witness-missing`, `witness-present`, `other-witness`,
+`known-survivor`, `project-archived`, `witness-missing`, `witness-present`, `other-witness`,
 `already-reconciled`, `identity-withheld`, `task-held`, `unresolved-execution`, plus the
 termination blockers `termination-live`, `termination-conflict`, `termination-unknown` and
 `identity-changed` that the recover paths share with bound-turn recovery). A path is eligible
 only when the checks its command runs can pass: `release` needs a held generation that still
-holds capacity, has no saved thread or turn, no witness and no independent hold; the recover
+holds capacity, has no saved thread or turn, no witness, no independent hold (a Stop target,
+even after Resume, a task hold or a pending effect) and a writable project; the recover
 paths need the stored process proven ended. It discloses the held process identity to both
 credential scopes as permitted diagnostic content; a string redaction would change reads
 `null` and blocks the paths that would send it.

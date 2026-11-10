@@ -885,7 +885,8 @@ whose saved thread and turn are both null never sent a turn, on any build. cab r
 such a generation, whatever its hold reason, when it still holds capacity and nothing
 else holds it: no pre-turn or no-turn witness, Stop, task hold, unfinished callback,
 known survivor or pending effect other than its result. A release records the same
-refusal a new pre-turn failure records, with its own reason, in one transaction that
+refusal a new pre-turn failure records, with its own reason followed by the original
+hold reason as evidence, in one transaction that
 frees writer and capacity, so Start again is offered with no operator evidence; cab
 never starts it again automatically. An idle thread may exist that cab never saw. At
 startup, before admission, cab releases every eligible generation and logs each one; a

@@ -19,6 +19,8 @@ import {
   historicalPreTurnAdoptionSchema,
   replaceConversationCommandSchema,
   recoveryReceiptSchema,
+  releaseCommandSchema,
+  releaseResultSchema,
 } from "./pre-turn-recovery.js";
 import { projectDeletionStatements } from "./project-deletion-sql.js";
 import { assertProjectDeletionInventory } from "./project-deletion-inventory.js";
@@ -254,6 +256,20 @@ function readReceipts(db: Database, owner: OwnershipParameters) {
           .get(result.witnessId, result.workId)
       )
         throw new Error("Adoption witness is unavailable");
+      workId = result.workId;
+    } else if (scope === "release") {
+      const material = releaseCommandSchema.parse(json(row.payloadMaterial));
+      const result = releaseResultSchema.parse(json(row.result));
+      if (material.key !== key || result.workId !== material.workId)
+        throw new Error("Release receipt identity mismatch");
+      if (
+        !db
+          .prepare(
+            "SELECT 1 FROM execution_pre_turn_refusals WHERE id=? AND workId=?",
+          )
+          .get(result.id, result.workId)
+      )
+        throw new Error("Release refusal is unavailable");
       workId = result.workId;
     } else if (scope === "replace-conversation") {
       const material = replaceConversationCommandSchema.parse(

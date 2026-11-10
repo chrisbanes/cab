@@ -3894,6 +3894,7 @@ export const recoveryBlockerSchema = z.enum([
   "thread-bound",
   "turn-bound",
   "independent-hold",
+  "project-archived",
   "task-held",
   "unresolved-execution",
 ]);

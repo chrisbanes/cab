@@ -64,7 +64,7 @@ import {
   type PreTurnFailureClass,
   type PreTurnStage,
   preTurnRefusalPrefix,
-  releasedPreTurnRefusalReason,
+  releasedRefusalReason,
 } from "./pre-turn-failure.js";
 import type { TurnPlugin } from "./runtime-retention.js";
 import { nativeHarnessHome } from "./runtime-retention.js";
@@ -4836,6 +4836,7 @@ export class ExecutionState {
       .all(workId) as { effectKey: string }[];
     if (
       record.holds.stop ||
+      this.stopTarget(workId) !== undefined ||
       this.taskHold(binding.taskId) !== undefined ||
       effects.some((e) => e.effectKey !== knownSurvivorEffect)
     )
@@ -4845,6 +4846,7 @@ export class ExecutionState {
       record.observations.some((o) => o.kind === "known-survivor")
     )
       blocked.push("known-survivor");
+    if (!this.projectWorkWritable(workId)) blocked.push("project-archived");
     return blocked;
   }
 
@@ -4897,15 +4899,19 @@ export class ExecutionState {
           );
       }
       const result = { id: randomUUID(), workId, state: "refused" as const };
+      const held = this.db
+        .prepare("SELECT reason FROM execution_intents WHERE workId = ?")
+        .get(workId) as { reason: string | null };
+      const reason = releasedRefusalReason(held.reason);
       this.db
         .prepare(
           "UPDATE execution_intents SET reason = ? WHERE workId = ? AND state = 'held'",
         )
-        .run(releasedPreTurnRefusalReason, workId);
+        .run(reason, workId);
       // The table admits only a runtime-staged origin or this stage-less one; the reason names a release.
       this.recordPreTurnRefusalWithin(
         workId,
-        releasedPreTurnRefusalReason,
+        reason,
         {
           origin: "operator-adopted",
           stage: null,

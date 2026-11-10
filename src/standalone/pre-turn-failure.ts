@@ -64,3 +64,10 @@ export function preTurnHoldReason(
 
 /** A held generation released because cab saved no thread binding, so `startTurn` was never called. */
 export const releasedPreTurnRefusalReason = `${preTurnRefusalPrefix}: cab recorded no thread binding before startTurn`;
+
+/** The release's reason, keeping the original hold reason as evidence. */
+export function releasedRefusalReason(heldReason: string | null): string {
+  return heldReason
+    ? `${releasedPreTurnRefusalReason}. Held as: ${bounded(heldReason)}`
+    : releasedPreTurnRefusalReason;
+}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { releasedPreTurnRefusalReason } from "../../src/standalone/pre-turn-failure.js";
+import { releasedRefusalReason } from "../../src/standalone/pre-turn-failure.js";
 import {
   type GenerationMode,
   type PreTurnRuntime,
@@ -85,17 +85,14 @@ for (const [mode, reason] of [
     const lines = await restart(w);
 
     const after = holdRows(w);
-    assert.deepEqual(after.intent, {
-      ...before.intent,
-      reason: releasedPreTurnRefusalReason,
-    });
-    assert.deepEqual(after.request, {
-      state: "held",
-      reason: releasedPreTurnRefusalReason,
-    });
+    // The original hold reason stays in the refusal as evidence.
+    const released = releasedRefusalReason(before.intent.reason);
+    assert.ok(released.endsWith(before.intent.reason));
+    assert.deepEqual(after.intent, { ...before.intent, reason: released });
+    assert.deepEqual(after.request, { state: "held", reason: released });
     assert.equal(after.capacity, null);
     assert.equal(after.writer, null);
-    assert.equal(after.refusal?.reason, releasedPreTurnRefusalReason);
+    assert.equal(after.refusal?.reason, released);
     assert.deepEqual(after.preTurnRefusal, {
       origin: "operator-adopted",
       stage: null,
@@ -201,4 +198,16 @@ test("startup leaves a hold with a runtime witness or an operator Stop unchanged
   before = holdRows(stopped);
   assert.deepEqual(await restart(stopped), []);
   assert.deepEqual(holdRows(stopped), before);
+});
+
+test("a Stop that Resume cleared still blocks release in the read and at startup", async (t) => {
+  const w = await servedGeneration(t, "pre-turn-defect");
+  const service = w.s.f.service;
+  for (const type of ["task.stop", "task.resume"] as const)
+    await service.controlTask({ type, key: randomUUID(), taskId: w.g.taskId });
+  // Resume removes the writer hold but keeps the generation's Stop target.
+  assert.ok(service.releaseBlockers(w.g.workId).includes("independent-hold"));
+  const before = holdRows(w);
+  assert.deepEqual(await restart(w), []);
+  assert.deepEqual(holdRows(w), before);
 });

@@ -77,6 +77,7 @@ export const releaseBlockers = [
   "independent-hold",
   "callback-pending",
   "known-survivor",
+  "project-archived",
 ] as const;
 export type ReleaseBlocker = (typeof releaseBlockers)[number];
 /** Binds a release to the generation the operator read. */
