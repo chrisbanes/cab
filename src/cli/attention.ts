@@ -6,6 +6,7 @@ import {
   validateQuestionAnswers,
 } from "../core/question-forms.js";
 import {
+  type InboxItem,
   inboxReadSchema,
   questionReadSchema,
   taskSchema,
@@ -87,7 +88,7 @@ function formLines(form: QuestionForm): string[] {
 
 const inboxList: BrowseCommand = {
   usage:
-    "inbox list [--kind question|approval|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
+    "inbox list [--status actionable|resolved|dismissed] [--kind question|approval|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
   positionals: 0,
   capabilities: ["cli.identity", "attention.read"],
   async run(ctx) {
@@ -96,12 +97,18 @@ const inboxList: BrowseCommand = {
       ["question", "approval", "intervention", "runtime"],
       "--kind",
     );
+    const status = enumArg(
+      ctx.values.status,
+      ["actionable", "resolved", "dismissed"],
+      "--status",
+    );
     const project = optionalUuid(ctx.values.project, "--project");
     const limit = pageLimit(ctx.values, { serverMax: 100 });
-    const q = cursorQuery({ kind, project });
+    const q = cursorQuery({ kind, project, status });
     const cursor = decodeCursor(ctx.values.cursor, "inbox list", q);
     const client = await ctx.connect();
     const params = new URLSearchParams({ limit: String(limit.limit) });
+    if (status) params.set("status", status);
     if (kind) params.set("kind", kind);
     if (project) params.set("project", project);
     if (cursor) params.set("cursor", cursor.c);
@@ -122,25 +129,55 @@ const inboxList: BrowseCommand = {
       },
       human: items.length
         ? table(
-            ["Kind", "Task", "Interaction", "Rev", "Requester", "Reason"],
+            [
+              "Item",
+              "Status",
+              "Inbox rev",
+              "Changed",
+              "Note",
+              "Kind",
+              "Task",
+              "Interaction",
+              "Rev",
+              "Requester",
+              "Reason",
+            ],
             items.map((i) =>
               i.kind === "runtime"
                 ? // The Task column names the runtime; its detail is `runtime list`.
                   [
+                    i.id,
+                    i.lifecycle?.status ?? "actionable",
+                    String(i.lifecycle?.revision ?? 1),
+                    i.lifecycle?.resolvedAt || i.lifecycle?.dismissedAt
+                      ? new Date(
+                          (i.lifecycle.resolvedAt ?? i.lifecycle.dismissedAt)!,
+                        ).toISOString()
+                      : "-",
+                    oneLine(i.lifecycle?.note, 60),
                     i.kind,
                     i.harness,
                     "(cab runtime list)",
                     "-",
                     "-",
-                    oneLine(i.reason, 60),
+                    oneLine(i.lifecycle?.resolution ?? i.reason, 60),
                   ]
                 : [
+                    i.id,
+                    i.lifecycle?.status ?? "actionable",
+                    String(i.lifecycle?.revision ?? 1),
+                    i.lifecycle?.resolvedAt || i.lifecycle?.dismissedAt
+                      ? new Date(
+                          (i.lifecycle.resolvedAt ?? i.lifecycle.dismissedAt)!,
+                        ).toISOString()
+                      : "-",
+                    oneLine(i.lifecycle?.note, 60),
                     i.kind,
                     i.taskId,
                     i.interactionId ?? `(cab task get ${i.taskId})`,
                     i.revision === null ? "-" : String(i.revision),
                     oneLine(i.requesterName, 30),
-                    oneLine(i.reason, 60),
+                    oneLine(i.lifecycle?.resolution ?? i.reason, 60),
                   ],
             ),
           ) +
@@ -151,7 +188,9 @@ const inboxList: BrowseCommand = {
           )
             ? "\nAn undelivered result's 'cab task get TASK_ID' names its 'cab result deliver' command."
             : "")
-        : "Nothing needs attention.",
+        : status && status !== "actionable"
+          ? "No Inbox history in this view."
+          : "Nothing needs attention.",
     });
   },
 };
@@ -298,7 +337,88 @@ async function readAnswers(path: string | undefined, form: QuestionForm) {
   }
 }
 
+function inboxVisibilityCommand(action: "dismiss" | "restore"): WriteCommand {
+  return {
+    usage: `inbox ${action} ITEM_ID --expected-revision N${action === "dismiss" ? " [--note TEXT]" : ""} [--request-id UUID]`,
+    positionals: 1,
+    flags: [
+      "expected-revision",
+      "request-id",
+      ...(action === "dismiss" ? ["note"] : []),
+    ],
+    async run(ctx) {
+      const itemId = ctx.positionals[2] ?? "",
+        rev = expectedRevision(ctx.values["expected-revision"]);
+      if (!itemId || itemId.length > 128)
+        throw new CliError("usage", "A valid ITEM_ID is required.");
+      const session = await connectWrite(ctx, ATTENTION_WRITE);
+      let item: InboxItem | undefined;
+      for (const status of ["actionable", "dismissed", "resolved"]) {
+        let cursor: string | null = null;
+        do {
+          const params = new URLSearchParams({ status });
+          if (cursor) params.set("cursor", cursor);
+          const page = await session.client.get(
+            `/api/operator/inbox?${params}`,
+            inboxReadSchema,
+          );
+          item = page.data.items.find((i) => i.id === itemId);
+          cursor = page.data.nextCursor;
+        } while (!item && cursor);
+        if (item) break;
+      }
+      if (!item)
+        throw new CliError(
+          "not-found",
+          "No visible Inbox item has that identity.",
+        );
+      const scope =
+        item.kind === "runtime"
+          ? `system:runtime:${item.harness}`
+          : `task:${item.taskId}`;
+      const command = {
+        type: `inbox.${action}` as "inbox.dismiss" | "inbox.restore",
+        itemId,
+        expectedRevision: rev,
+        ...(ctx.values.note !== undefined ? { note: ctx.values.note } : {}),
+      };
+      const { key, digest, reused } = await chooseKey(
+        ctx,
+        session,
+        { scope, type: command.type },
+        command,
+      );
+      const { receipt, request } = await sendCommand(ctx, session, {
+        scope,
+        type: command.type,
+        key,
+        digest,
+        resource: itemId,
+        command: exactCommand(command, key),
+        freezeBody: true,
+        match: (r) => r.kind === "inbox" && r.itemId === itemId,
+      });
+      return writeOutput({
+        request,
+        receipt,
+        reused,
+        effect: "saved",
+        summary:
+          action === "dismiss" ? "Inbox item dismissed" : "Inbox item restored",
+        lines: [["Item", itemId]],
+        notes: [
+          item.kind === "question" || item.kind === "approval"
+            ? "Inbox visibility and the request completion requirement changed; no answer, approval, agent input or ownership release was sent."
+            : "Only Inbox visibility changed; the underlying condition is unchanged.",
+        ],
+      });
+    },
+  };
+}
+
 export const attentionWriteCommands = new Map<string, WriteCommand>([
+  ["inbox dismiss", inboxVisibilityCommand("dismiss")],
+  ["inbox restore", inboxVisibilityCommand("restore")],
   [
     "question answer",
     {

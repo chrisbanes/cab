@@ -1,6 +1,16 @@
 /** Fixed child-first whole-row statements. No inferred/recursive deletion at runtime. */
 export const projectDeletionStatements = [
   {
+    table: "inbox_lifecycle_receipts",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM inbox_lifecycle_receipts WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
+    table: "inbox_lifecycle",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM inbox_lifecycle WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
     table: "assignment_conversations",
     where: "assignmentId IN (SELECT value FROM json_each(:assignments))",
     sql: "DELETE FROM assignment_conversations WHERE assignmentId IN (SELECT value FROM json_each(:assignments))",

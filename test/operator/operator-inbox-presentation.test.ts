@@ -1231,3 +1231,26 @@ test("task context reads the source, lead and the task's next actor", () => {
   // A recorded or resolved request is no longer the operator's next action.
   assert.equal(taskContext(imported, item("question", "p"), false).next, null);
 });
+
+test("history actions name visibility rather than offering an obsolete response", () => {
+  const lifecycle = {
+    status: "resolved" as const,
+    revision: 2,
+    createdAt: 1,
+    resolvedAt: 2,
+    resolution: "Task is Done",
+    dismissedAt: null,
+    note: null,
+  };
+  assert.equal(
+    requestActionLabel({ kind: "question", attentionCode: null, lifecycle }),
+    "View resolved item",
+  );
+  assert.equal(
+    requestActionLabel({
+      kind: "runtime",
+      lifecycle: { ...lifecycle, status: "dismissed" },
+    }),
+    "View dismissed item",
+  );
+});

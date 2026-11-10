@@ -2148,3 +2148,128 @@ test("an Inbox holding only an exhausted runtime counts it without naming projec
     "1 unresolved",
   );
 });
+
+test("Inbox dismissal keeps the question draft and history restoration starts no work", async (_t, j) => {
+  const { page, f, seeded } = await openInbox(j, 1, {
+    width: 1366,
+    height: 1000,
+  });
+  await page.getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+  const turns = f.runtime.turns;
+  await page
+    .getByRole("textbox", { name: "Your answer: Optional", exact: true })
+    .fill("Keep this draft");
+  await page
+    .getByLabel("Dismissal note (optional)")
+    .fill("Waiting for context");
+  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await page
+    .getByText(
+      "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
+      { exact: true },
+    )
+    .waitFor();
+  const historyRead = page.waitForResponse((r) =>
+    r.url().includes("/api/operator/inbox?status=dismissed"),
+  );
+  await page
+    .getByLabel("Inbox status", { exact: true })
+    .selectOption("dismissed");
+  const history = await historyRead;
+  assert.equal(history.status(), 200);
+  try {
+    await page.getByRole("button", { name: "Restore", exact: true }).waitFor();
+  } catch (error) {
+    _t.diagnostic(
+      JSON.stringify({
+        history: await history.json(),
+        body: await page.locator("body").innerText(),
+      }),
+    );
+    await captureBrowserEvidence(page, "inbox-history-selection-failure");
+    throw error;
+  }
+  await page.getByText("Waiting for context", { exact: true }).waitFor();
+  assert.equal(f.runtime.turns, turns);
+  assert.equal(
+    f.service.coordinationView().readTask(seeded[0]!.taskId).questions[0]
+      ?.status,
+    "open",
+  );
+  await page.getByRole("button", { name: "Restore", exact: true }).click();
+  await page
+    .getByText(
+      "Restored. No work was started. A pending request is required for completion again.",
+      { exact: true },
+    )
+    .waitFor();
+  await page
+    .getByLabel("Inbox status", { exact: true })
+    .selectOption("actionable");
+  await page.getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("textbox", { name: "Your answer: Optional", exact: true })
+      .inputValue(),
+    "Keep this draft",
+  );
+  assert.equal(f.runtime.turns, turns);
+});
+
+test("a completion rejection links to dismissal of its exact withheld request without exposing its form", async (_t, j) => {
+  const { seedInteractionRejection } = await import("../fixtures/questions.js");
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnQuestion(f);
+  seedInteractionRejection(f, a);
+  const web = await j.start("fixture.web", () =>
+    f.startWeb([f.directory, "Explain"]),
+  );
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 1000 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?section=decisions`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const action = page.getByRole("link", {
+    name: "Review or dismiss request",
+    exact: true,
+  });
+  await action.waitFor();
+  assert.equal(
+    (await page.locator("body").innerText()).includes("Explain"),
+    false,
+  );
+  await action.click();
+  await page.getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+  assert.match(page.url(), new RegExp(a.interactionId));
+  assert.equal(
+    await page
+      .getByRole("textbox", { name: "Your answer: Explain", exact: true })
+      .count(),
+    0,
+  );
+  const turns = f.runtime.turns;
+  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await page
+    .getByText(
+      "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
+      { exact: true },
+    )
+    .waitFor();
+  await page.goto(`${web.origin}/tasks/${a.taskId}?section=decisions`);
+  await page
+    .getByText(/Dismissed; no longer required for completion/)
+    .waitFor();
+  assert.equal(f.runtime.turns, turns);
+});

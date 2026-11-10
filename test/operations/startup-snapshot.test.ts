@@ -764,6 +764,8 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Inbox lifecycle and visibility command receipts.
+  22: "f8022ce1a707c4dd37e207d07790a7fb986098d36099d6fb9d26f3557f5d5936",
   // Pre-turn refusals record their stage and failure class.
   21: "fa0d59290d2982c50fb1b80fc81f6bf5c30015fa4b57131e34678192f30c0f1e",
   // Reasoning summaries add the project setting and per-turn opt-in tables.
@@ -877,7 +879,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         )
         .run(intentId);
       before.exec(
-        "DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals",
+        "DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals",
       );
     } finally {
       before.close();
@@ -986,7 +988,9 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     await run(dirs.data, 20);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    before.exec("DROP TABLE execution_pre_turn_refusals");
+    before.exec(
+      "DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE execution_pre_turn_refusals",
+    );
     before.close();
     assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[20]);
     await run(dirs.data);
@@ -995,7 +999,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     const snapshot = join(dirs.snapshots, snapshots[0]!);
     await verifySnapshot(snapshot);
     assert.equal(schemaDigest(snapshot), SCHEMA_PINS[20]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[21]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
     const current = new DatabaseSync(database, { readOnly: true });
     try {
       assert.equal(
@@ -1204,6 +1208,39 @@ test("Unstack journal migration snapshots level 13 before creating task-owned ro
     assert.equal(readStartupState(dirs.data)?.snapshot?.from, 13);
     assert.equal(readStartupState(dirs.data)?.snapshot?.to, MIGRATION_LEVEL);
     assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("Inbox lifecycle migration snapshots level 21 and initializes both tables without ownership changes", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 21);
+    const database = join(dirs.data, "standalone.sqlite"),
+      before = new DatabaseSync(database);
+    before.exec(
+      "DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle",
+    );
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[21]);
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[21]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const current = new DatabaseSync(database, { readOnly: true });
+    try {
+      for (const table of ["inbox_lifecycle", "inbox_lifecycle_receipts"])
+        assert.equal(
+          current.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n,
+          0,
+        );
+    } finally {
+      current.close();
+    }
   } finally {
     dirs.cleanup();
   }

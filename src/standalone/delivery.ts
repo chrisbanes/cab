@@ -125,6 +125,7 @@ export interface DeliveryCoordinatorOptions {
     run: (current: () => boolean) => Promise<T>,
   ) => Promise<T>;
   leadAssignmentId?: (taskId: string) => string;
+  observedPr?: (taskId: string, observation: PrDeliveryObservation) => void;
   feedback?: (taskId: string, reason: string, identity: string) => void;
   /** Offline check of a push's commit in the task worktree; null when it cannot be verified. */
   verifyPush?: (input: {
@@ -1447,6 +1448,7 @@ export class DeliveryCoordinator {
         observation,
         this.codeHost(current.projectId, observation.repositoryId).ref,
       );
+      this.options.observedPr?.(taskId, observation);
       // One event: an outside head is the more specific notice for a changed PR.
       if (result.outsideHead)
         this.outsidePush(taskId, observation.repositoryId, observation.headSha);

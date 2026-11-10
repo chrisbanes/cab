@@ -198,11 +198,7 @@ import type {
   PublicationReview,
 } from "../core/task-publication.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
-import {
-  type AttentionCode,
-  attentionNext,
-  interventionCode,
-} from "../operator/attention.js";
+import { type AttentionCode, attentionNext } from "../operator/attention.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -2476,7 +2472,11 @@ export class OperatorApi {
     else {
       const view = this.coordination().readTask(String(task.id));
       if (
-        [...view.questions, ...view.approvals].some((i) => i.status === "open")
+        [...view.questions, ...view.approvals].some(
+          (i) =>
+            i.status === "open" &&
+            this.service.inboxLifecycle().required(i.interactionId),
+        )
       )
         state = "waiting";
     }
@@ -3049,7 +3049,11 @@ export class OperatorApi {
       nativeBlockers: source?.openBlockers ?? [],
       sourceUrl: source?.url ?? null,
       approvals: approvals
-        .filter((a) => a.status === "open")
+        .filter(
+          (a) =>
+            a.status === "open" &&
+            this.service.inboxLifecycle().required(a.interactionId),
+        )
         .map((a) => ({
           id: a.interactionId,
           label: "Review material & decide",
@@ -3320,7 +3324,14 @@ export class OperatorApi {
         count += n;
       }
     };
-    add("question", view.questions.filter((i) => i.status === "open").length);
+    add(
+      "question",
+      view.questions.filter(
+        (i) =>
+          i.status === "open" &&
+          this.service.inboxLifecycle().required(i.interactionId),
+      ).length,
+    );
     // An answer recorded for a native question that cab has not yet confirmed delivering.
     add(
       "question-delivery",
@@ -3334,7 +3345,14 @@ export class OperatorApi {
           ),
       ).length,
     );
-    add("approval", view.approvals.filter((i) => i.status === "open").length);
+    add(
+      "approval",
+      view.approvals.filter(
+        (i) =>
+          i.status === "open" &&
+          this.service.inboxLifecycle().required(i.interactionId),
+      ).length,
+    );
     add("unresolved-result", view.unresolvedResults.length);
     add(
       "completion-rejected",
@@ -3758,17 +3776,20 @@ export class OperatorApi {
     const unavailable =
       (own?.requestState !== undefined && own.requestState !== "available") ||
       native?.requestState === "unavailable";
-    const status = !intact
-      ? "unavailable"
-      : interaction.status === "answered"
-        ? "recorded"
-        : unavailable
-          ? own?.requestState === "cancelled"
-            ? "cancelled"
-            : "unsupported"
-          : !native && !view.ownQuestionEligibility(interactionId)
-            ? "stale"
-            : "pending";
+    const status =
+      interaction.status === "resolved" || interaction.status === "superseded"
+        ? "stale"
+        : !intact
+          ? "unavailable"
+          : interaction.status === "answered"
+            ? "recorded"
+            : unavailable
+              ? own?.requestState === "cancelled"
+                ? "cancelled"
+                : "unsupported"
+              : !native && !view.ownQuestionEligibility(interactionId)
+                ? "stale"
+                : "pending";
     if (
       visibility !== this.visibilityToken() ||
       workspaceVisibility !== this.service.taskWorkspaceVisibility(taskId) ||
@@ -3829,32 +3850,38 @@ export class OperatorApi {
       return null;
     }
   }
-  private runtimeInboxItems(): InboxItem[] {
-    return this.service.harnessStatuses().flatMap((status) =>
-      status.state === "unavailable" && status.restart?.state === "exhausted"
-        ? [
-            {
-              id: `runtime:${status.harness}`,
-              kind: "runtime" as const,
-              urgency: 0 as const,
-              createdAt: status.restart.since,
-              harness: status.harness,
-              since: status.restart.since,
-              headline: runtimeInboxHeadline(status.harness),
-              reason: runtimeInboxReason,
-              lastFailure: status.restart.lastFailure,
-              attempts: status.restart.attempts,
-              destination: runtimeSettingsPath,
-            },
-          ]
-        : [],
-    );
+  private runtimeInboxItems(
+    excluded: readonly string[] | undefined,
+  ): InboxItem[] {
+    return this.service
+      .inboxLifecycle()
+      .rows()
+      .filter((r) => r.kind === "runtime")
+      .map((row) => {
+        const data = JSON.parse(row.dataJson);
+        return {
+          id: row.id,
+          kind: "runtime" as const,
+          urgency: 0 as const,
+          createdAt: row.createdAt,
+          harness: data.harness,
+          since: data.since,
+          headline: runtimeInboxHeadline(data.harness),
+          reason: runtimeInboxReason,
+          lastFailure: data.lastFailure,
+          attempts: data.attempts,
+          destination: runtimeSettingsPath,
+          lifecycle: this.inboxLifecycleView(row.id, excluded),
+          dismissible: row.status === "actionable",
+        };
+      });
   }
   async readInbox(params = new URLSearchParams()) {
+    this.service.reconcileInbox();
     return this.readWithExclusionFence(() => this.readInboxOnce(params));
   }
   private async readInboxOnce(params: URLSearchParams) {
-    const allowed = ["cursor", "limit", "kind", "project"];
+    const allowed = ["cursor", "limit", "kind", "project", "status"];
     if (
       [...params.keys()].some((k) => !allowed.includes(k)) ||
       allowed.some((k) => params.getAll(k).length > 1)
@@ -3871,15 +3898,19 @@ export class OperatorApi {
         kind: z
           .enum(["question", "approval", "intervention", "runtime"])
           .optional(),
+        status: z
+          .enum(["actionable", "resolved", "dismissed"])
+          .default("actionable"),
         project: uuid.optional(),
       })
       .safeParse({
+        status: params.get("status") ?? undefined,
         limit: params.get("limit") ?? undefined,
         kind: params.get("kind") ?? undefined,
         project: params.get("project") ?? undefined,
       });
     if (!filter.success) throw new OperatorApiError(400, "invalid-input");
-    const { limit = 100, kind, project } = filter.data;
+    const { limit = 100, kind, project, status } = filter.data;
     const visibility = this.visibilityToken(),
       items: TaskInboxItem[] = [];
     const catalog = this.catalog().filter((t) =>
@@ -3911,33 +3942,41 @@ export class OperatorApi {
           taskTitle: summary.title,
           evidence: `/tasks/${taskId}#conversation`,
         };
-        const attentionCode = interventionCode(summary.attention.codes);
-        if (attentionCode)
+        const episodes = this.service.inboxLifecycle().rows(taskId);
+        const conditions = this.service.inboxConditions(taskId);
+        for (const row of episodes.filter((r) => r.kind === "intervention")) {
+          const code = JSON.parse(row.dataJson).code as AttentionCode;
+          const lifecycle = this.inboxLifecycleView(row.id, excluded);
           items.push({
             ...base,
-            id: `intervention:${taskId}`,
+            id: row.id,
             kind: "intervention",
             urgency: 0,
-            createdAt: null,
+            createdAt: row.createdAt,
             requestingAssignmentId: null,
             requesterName: null,
             interactionId: null,
             revision: null,
-            reason: attentionNext[attentionCode].reason,
-            attentionCode,
+            reason: this.safe(
+              conditions.find((c) => c.key === row.sourceKey)?.reason ??
+                attentionNext[code].reason,
+              excluded,
+            ),
+            attentionCode: code,
             destination: `/tasks/${taskId}?section=decisions`,
             conversation: null,
             headline: null,
+            lifecycle,
+            dismissible:
+              lifecycle?.status === "actionable" &&
+              code !== "execution-uncertain" &&
+              !conditions.some((c) => c.code === "execution-uncertain"),
           });
+        }
         for (const q of [...view.questions, ...view.approvals]) {
           const native = view.runtimeQuestions?.find(
             (n) => n.interactionId === q.interactionId,
           );
-          if (
-            q.status !== "open" &&
-            (!native || native.deliveryState === "confirmed")
-          )
-            continue;
           // A recorded answer whose native delivery is unresolved stays listed, as cab's.
           const delivering = q.status === "answered";
           const requester = this.domain()
@@ -3952,6 +3991,10 @@ export class OperatorApi {
           items.push({
             ...base,
             id: q.interactionId,
+            lifecycle: this.inboxLifecycleView(q.interactionId, excluded),
+            dismissible:
+              this.service.inboxLifecycle().get(q.interactionId)?.status ===
+              "actionable",
             headline: this.requestHeadline(q, native, excluded),
             kind: q.kind,
             urgency: 1,
@@ -3993,10 +4036,11 @@ export class OperatorApi {
     // Derived on every read from in-memory restart state; no row stores it. They belong to
     // no project, so a project filter excludes them.
     const filtered: InboxItem[] = [
-      ...this.runtimeInboxItems(),
+      ...this.runtimeInboxItems(await this.exclusions()),
       ...items,
     ].filter(
       (item) =>
+        (item.lifecycle?.status ?? "actionable") === status &&
         (!kind || item.kind === kind) &&
         (!project || (item.kind !== "runtime" && item.projectId === project)),
     );
@@ -4008,7 +4052,7 @@ export class OperatorApi {
         a.id.localeCompare(b.id),
     );
     // Filters join the fingerprint, so a cursor never continues another view.
-    const filters = { limit, kind, project };
+    const filters = { limit, kind, project, status };
     const fingerprint = createHash("sha256")
       .update(
         JSON.stringify(
@@ -4047,6 +4091,22 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
+  private inboxLifecycleView(
+    id: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const row = this.service.inboxLifecycle().get(id);
+    if (!row) return undefined;
+    return {
+      status: row.status,
+      revision: row.revision,
+      createdAt: row.createdAt,
+      resolvedAt: row.resolvedAt,
+      resolution: this.safe(row.resolution, excluded),
+      dismissedAt: row.dismissedAt,
+      note: this.safe(row.note, excluded),
+    };
+  }
   private interaction(
     i: CoordinationInteraction,
     excluded: readonly string[] | undefined,
@@ -4080,6 +4140,14 @@ export class OperatorApi {
       requestingWorkRevision: i.requestingWorkRevision,
       requestingAssignmentVersion: i.requestingAssignmentVersion,
       conversationRevision: i.conversationRevision,
+      obsolescence: this.safe(
+        this.service.inboxLifecycle().obsolete(i.interactionId)
+          ? (this.service.inboxLifecycle().get(i.interactionId)?.resolution ??
+              null)
+          : null,
+        excluded,
+      ),
+      lifecycle: this.inboxLifecycleView(i.interactionId, excluded),
       kind: i.kind,
       status: i.status,
       prompt: this.safe(i.prompt, excluded),
@@ -4089,6 +4157,7 @@ export class OperatorApi {
       material,
       approvable:
         i.kind === "approval" &&
+        !this.service.inboxLifecycle().obsolete(i.interactionId) &&
         !materialUnavailable &&
         this.disclosable(i.action, excluded) &&
         this.disclosable(i.target, excluded),
@@ -4150,7 +4219,41 @@ export class OperatorApi {
       ? { compareUrl: url, compareCodeHost }
       : null;
   }
-  private completion(c: TaskCompletionRequest) {
+  private completion(c: TaskCompletionRequest, view: CoordinationTaskView) {
+    const interactions = [...view.questions, ...view.approvals];
+    const ids =
+      c.blockingInteractionIds ??
+      (c.rejectionReasons.includes("open-interaction")
+        ? interactions
+            .filter(
+              (i) =>
+                i.status === "open" &&
+                this.service.inboxLifecycle().required(i.interactionId),
+            )
+            .map((i) => i.interactionId)
+        : []);
+    const blockingInteractions = ids.map((id) => {
+      const interaction = interactions.find(
+        (i) => i.interactionId === id && i.taskId === c.taskId,
+      );
+      if (!interaction) throw new OperatorApiError(503, "unavailable");
+      const lifecycle = this.service.inboxLifecycle().get(id);
+      const state =
+        lifecycle?.status === "dismissed"
+          ? ("dismissed" as const)
+          : interaction.status === "open" &&
+              this.service.inboxLifecycle().required(id)
+            ? ("required" as const)
+            : ("resolved" as const);
+      const status = state === "required" ? "actionable" : state;
+      return {
+        interactionId: id,
+        kind: interaction.kind,
+        state,
+        revision: lifecycle?.revision ?? null,
+        destination: `/inbox?task=${c.taskId}&request=${id}&status=${status}`,
+      };
+    });
     return {
       requestId: c.requestId,
       taskId: c.taskId,
@@ -4161,6 +4264,9 @@ export class OperatorApi {
       reviewedResultIds: c.reviewedResultIds,
       status: c.status,
       rejectionReasons: c.rejectionReasons.map(() => "completion-rejected"),
+      blockingInteractionsBasis:
+        c.blockingInteractionIds === undefined ? "current" : "recorded",
+      blockingInteractions,
       revision: c.revision,
       createdAt: c.createdAt,
       finalizedAt: c.finalizedAt,
@@ -4410,13 +4516,15 @@ export class OperatorApi {
       questions: view.questions.map((i) => this.interaction(i, excluded)),
       approvals: view.approvals.map((i) => this.interaction(i, excluded)),
       completionRequests: view.completionRequests.map((c) =>
-        this.completion(c),
+        this.completion(c, view),
       ),
       attention: {
         interactions: view.attention.interactions.map((a) => ({
           attentionId: a.attentionId,
           interactionId: a.interactionId,
-          status: a.status,
+          status: this.service.inboxLifecycle().required(a.interactionId)
+            ? a.status
+            : "resolved",
           revision: a.revision,
           createdAt: a.createdAt,
           resolvedAt: a.resolvedAt,
@@ -6873,6 +6981,36 @@ export class OperatorApi {
     if (!scope.success || !type.success || !key.success)
       throw new OperatorApiError(400, "invalid-input");
     const [kind, id = ""] = scope.data.split(":");
+    if (type.data === "inbox.dismiss" || type.data === "inbox.restore") {
+      const store = this.service.inboxLifecycle(),
+        raw = store.receipt(key.data);
+      if (kind === "task") this.requireTask(id);
+      else if (!scope.data.startsWith("system:runtime:"))
+        throw new OperatorApiError(400, "invalid-input");
+      if (raw) {
+        const receipt = commandReceiptSchema.parse(raw);
+        if (receipt.kind !== "inbox")
+          throw new OperatorApiError(409, "conflict");
+        const row = store.get(receipt.itemId);
+        if (
+          !row ||
+          (row.taskId
+            ? scope.data !== `task:${row.taskId}`
+            : scope.data !==
+              `system:runtime:${JSON.parse(row.dataJson).harness}`) ||
+          (receipt.status === "dismissed") !== (type.data === "inbox.dismiss")
+        )
+          throw new OperatorApiError(404, "not-found");
+        return operationReadSchema.parse({
+          data: { state: "recorded", receipt },
+          observedAt: Date.now(),
+        });
+      }
+      return operationReadSchema.parse({
+        data: { state: "not-recorded" },
+        observedAt: Date.now(),
+      });
+    }
     if (type.data === "task.unstack") {
       if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
       return this.readWithExclusionFence(async () => {
@@ -9730,6 +9868,34 @@ export class OperatorApi {
         inputCommand.type === "repositories.configure"
           ? await this.normalizeConfigurationRows(inputCommand)
           : inputCommand;
+      if (c.type === "inbox.dismiss" || c.type === "inbox.restore") {
+        this.service.reconcileInbox();
+        const store = this.service.inboxLifecycle();
+        const row = store.get(c.itemId);
+        if (!row) throw new OperatorApiError(404, "not-found");
+        if (row.taskId) this.requireTask(row.taskId);
+        return commandReceiptSchema.parse(
+          store.command(c, () => {
+            this.service.reconcileInbox();
+            const current = store.get(c.itemId)!;
+            if (current.status === "resolved")
+              throw new DomainConflictError(
+                "Resolved Inbox items cannot be dismissed or restored",
+              );
+            if (
+              c.type === "inbox.dismiss" &&
+              current.kind === "intervention" &&
+              current.taskId &&
+              this.service
+                .inboxConditions(current.taskId)
+                .some((x) => x.code === "execution-uncertain")
+            )
+              throw new DomainConflictError(
+                "Execution ownership needs recovery; this item cannot be dismissed",
+              );
+          }),
+        );
+      }
       if (c.type === "project.delete")
         return commandReceipt(
           parseDomainCommandOutcome(

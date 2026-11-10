@@ -1,3 +1,4 @@
+import { selectAssignmentExecution } from "./operator-runtime.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
@@ -1448,6 +1449,11 @@ export class StandaloneService {
               domain.leadBindings().find((b) => b.taskId === taskId)
                 ?.assignmentId ?? "",
             ),
+          observedPr: (taskId, observation) =>
+            coordination.supersedePrApprovalsWithinTransaction(
+              taskId,
+              observation,
+            ),
           feedback: (taskId, reason, identity) =>
             coordination.ensureDeliveryEventWithinTransaction(
               taskId,
@@ -2294,6 +2300,7 @@ export class StandaloneService {
     const delay = runtimeRestartDelaysMs[state.attempts];
     if (delay === undefined) {
       state.exhaustedAt = this.wallNow();
+      if (this.current) this.reconcileInbox();
       return;
     }
     const token = {};
@@ -4874,6 +4881,157 @@ export class StandaloneService {
     };
   }
 
+  inboxLifecycle() {
+    return this.started().coordination.inboxLifecycle();
+  }
+
+  /** Reconcile recorded facts without changing execution or response state. */
+  reconcileInbox(): void {
+    const { domain, coordination } = this.started();
+    coordination.reconcileInboxInteractions();
+    const lifecycle = coordination.inboxLifecycle();
+    for (const project of domain.projects())
+      for (const task of domain.tasks(String(project.id))) {
+        const taskId = String(task.id),
+          active = new Set<string>();
+        const conditions = this.inboxConditions(taskId);
+        for (const condition of conditions) {
+          const row = lifecycle.observe({
+            id: `intervention:${taskId}:${randomUUID()}`,
+            taskId,
+            kind: "intervention",
+            sourceKey: condition.key,
+            data: { code: condition.code },
+          });
+          active.add(row.id);
+        }
+        for (const row of lifecycle.rows(taskId))
+          if (
+            row.kind === "intervention" &&
+            row.status !== "resolved" &&
+            (task.state !== "open" || !active.has(row.id))
+          )
+            lifecycle.resolve(
+              row.id,
+              task.state !== "open"
+                ? task.state === "done"
+                  ? "Task is Done"
+                  : "Task is Cancelled"
+                : "The intervention condition cleared",
+            );
+      }
+    const activeRuntimes = new Set<string>();
+    for (const status of this.harnessStatuses()) {
+      if (
+        status.state === "unavailable" &&
+        status.restart?.state === "exhausted"
+      ) {
+        const row = lifecycle.observe({
+          id: `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`,
+          taskId: null,
+          kind: "runtime",
+          sourceKey: `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`,
+          data: { harness: status.harness, ...status.restart },
+          createdAt: status.restart.since,
+        });
+        activeRuntimes.add(row.id);
+      }
+      // Availability or explicit disabling is positive evidence; an incomplete restart is not.
+      if (
+        status.state === "available" ||
+        (status.state === "not-configured" && status.reason === "disabled")
+      )
+        for (const row of lifecycle.rows())
+          if (
+            row.kind === "runtime" &&
+            row.status !== "resolved" &&
+            JSON.parse(row.dataJson).harness === status.harness &&
+            !activeRuntimes.has(row.id)
+          )
+            lifecycle.resolve(
+              row.id,
+              "Runtime is available or was disabled by the operator",
+            );
+    }
+  }
+
+  inboxConditions(taskId: string) {
+    const { domain, coordination, schedulerStore } = this.started(),
+      task = domain.task(taskId);
+    const conditions: Array<{
+      code:
+        | "execution-uncertain"
+        | "not-started"
+        | "unresolved-result"
+        | "completion-rejected";
+      key: string;
+      reason: string;
+    }> = [];
+    const held: string[] = [];
+    for (const a of domain.assignments(taskId)) {
+      const s = selectAssignmentExecution(a, this);
+      const request = s.request ?? schedulerStore.latest(String(a.id));
+      const notStarted =
+        request?.state === "held" && this.notStartedWork(request.workId);
+      const confirmed =
+        s.request?.state === "active" &&
+        ["running", "submitting"].includes(s.intent?.state ?? "");
+      if (
+        (s.request?.state === "held" && !notStarted) ||
+        (s.request?.state === "active" && !confirmed) ||
+        Boolean(
+          (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
+        )
+      )
+        held.push(
+          `${domain.profile(String(a.profileId)).name} · ${a.id} (${s.request?.workId ?? s.record?.workId ?? "ownership"})`,
+        );
+      if (task.state === "open" && notStarted && request)
+        conditions.push({
+          code: "not-started",
+          key: `refused:${request.workId}`,
+          reason: "Refused before it started; nothing ran",
+        });
+    }
+    if (this.hasNonStopTaskHold(taskId))
+      held.push(`task hold: ${this.nonStopTaskHoldReason(taskId)}`);
+    if (
+      this.recoveryForTask(taskId).some((r) => r.holds.uncertainty) &&
+      !held.length
+    )
+      held.push("unresolved execution recovery");
+    if (held.length) {
+      // Keep a combined ownership episode while any hold remains; it cannot be dismissed.
+      const existing = this.inboxLifecycle()
+        .rows(taskId)
+        .find(
+          (r) =>
+            r.kind === "intervention" &&
+            r.status !== "resolved" &&
+            JSON.parse(r.dataJson).code === "execution-uncertain",
+        );
+      conditions.push({
+        code: "execution-uncertain",
+        key: existing?.sourceKey ?? `hold:${taskId}:${randomUUID()}`,
+        reason: `Still waiting on ${held.join("; ")}`,
+      });
+    }
+    for (const r of coordination.unresolvedResultDestinations(taskId))
+      conditions.push({
+        code: "unresolved-result",
+        key: `result:${r.resultId}:${r.revision}`,
+        reason: "Result destination needs attention",
+      });
+    for (const c of coordination.completionRequests(taskId))
+      if (c.status === "rejected" && c.taskVersion === Number(task.version))
+        conditions.push({
+          code: "completion-rejected",
+          key: `completion:${c.requestId}:${c.revision}`,
+          reason: "Completion requires review",
+        });
+    return conditions;
+  }
+
   coordinationView(): CoordinationView {
     const { domain, coordination, state, routingAttempts } = this.started();
     return new CoordinationView(
@@ -7414,6 +7572,7 @@ export class StandaloneService {
     } = this.current;
     if (this.current.taskUnstack.hasPending())
       await this.current.taskUnstack.reconcileAll();
+    this.reconcileInbox();
     this.flushRuntimeAnswers();
     // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
     // fails is reported and retried on the next wake; the others and the wake go on.

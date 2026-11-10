@@ -722,10 +722,21 @@ name, version and preview digest. The service rechecks every confirmation atomic
      assignment version), which resumes the lead of an open task subject to
      admission, pause, Stop, dependency and capacity holds. A done task is never
      reopened.
-   - `inbox list [--kind question|approval|intervention|runtime] [--project ID] [--limit N]
+   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|intervention|runtime] [--project ID] [--limit N]
      [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`. A
      `runtime` row (an execution runtime whose automatic restarts are exhausted) names the
      runtime and `runtime list`; it has no task, so `--project` excludes it.
+   - `inbox dismiss ITEM_ID --expected-revision N [--note TEXT] [--request-id UUID]`
+     hides an eligible item without answering or notifying an agent. Dismissing a question or
+     approval also waives its completion requirement, without granting approval. Restore
+     reinstates that requirement only while the request remains actionable. Withheld questions
+     are dismissible by item ID without disclosing their forms. `inbox restore ITEM_ID
+     --expected-revision N [--request-id UUID]` shows it again if it remains actionable.
+     Use the item ID and Inbox revision from `inbox list`; this revision is separate from
+     the interaction revision used for answers. Ownership-blocking interventions refuse
+     dismissal. Resolved/superseded items refuse restoration. The journal and `operation get`
+     reconcile lost replies for both commands. History retains dismissal time/note and
+     resolution reason/time; `--status` defaults to `actionable`.
    - `question get TASK_ID INTERACTION_ID` prints the form, marks recommended and
      preselected options as information only and shows the answers-file shape:
      `{"QUESTION_ID": {"optionIds": [...], "text": "..."}}`. `question answer TASK_ID

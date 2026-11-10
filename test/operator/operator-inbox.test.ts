@@ -789,7 +789,7 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
   try {
     const a = await seedOwnQuestion(f),
       b = await seedOwnQuestion(f, choiceForm, "Second task"),
-      intervention = await seedOwnIntervention(f);
+      _intervention = await seedOwnIntervention(f);
     const api = new OperatorApi(f.service, [f.directory]);
     assert.equal(
       (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
@@ -802,7 +802,7 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
     const read = await api.readInbox();
     const [first, ...rest] = read.data.items;
     assert.ok(first?.kind === "runtime");
-    assert.equal(first.id, "runtime:codex");
+    assert.equal(first.lifecycle?.status, "actionable");
     assert.equal(first.urgency, 0);
     assert.equal(first.harness, "codex");
     assert.equal(first.createdAt, first.since);
@@ -817,7 +817,7 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
     );
     assert.equal(rest.filter((i) => i.kind === "runtime").length, 0);
     assert.equal(rest.length, 3);
-    assert.equal(rest[0]?.id, `intervention:${intervention.taskId}`);
+    assert.equal(rest[0]?.kind, "intervention");
     assert.equal(
       JSON.stringify(read).includes("will not start"),
       false,
@@ -825,7 +825,7 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
     );
     assert.equal(inboxReadSchema.parse(read).data.items.length, 4);
 
-    // Derived on every read: identical twice, and nothing was written for it.
+    // The durable episode is stable across reads.
     assert.deepEqual((await api.readInbox()).data.items, read.data.items);
     assert.equal(databaseDigest(f), digest, "reading it writes nothing");
     const stored: string[] = [];
@@ -842,22 +842,19 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
         )
           stored.push(name);
     });
-    assert.deepEqual(stored, []);
+    assert.deepEqual(stored, ["inbox_lifecycle"]);
 
     // One item per page, and the cursor continues past it into the task items.
     const page1 = await api.readInbox(new URLSearchParams("limit=1"));
     assert.deepEqual(
       page1.data.items.map((i) => i.id),
-      ["runtime:codex"],
+      [first.id],
     );
     assert.ok(page1.data.nextCursor);
     const page2 = await api.readInbox(
       new URLSearchParams({ limit: "1", cursor: page1.data.nextCursor }),
     );
-    assert.equal(
-      page2.data.items[0]?.id,
-      `intervention:${intervention.taskId}`,
-    );
+    assert.equal(page2.data.items[0]?.id, rest[0]?.id);
 
     // The kind is exact; a project filter excludes it.
     const kinds = async (query: string) =>
@@ -895,6 +892,443 @@ test("an exhausted runtime is one derived Inbox item, first, all-projects only, 
     );
     assert.equal(again.length, 1);
     assert.ok(again[0]?.kind === "runtime" && again[0].since > first.since);
+  } finally {
+    await f.close();
+  }
+});
+
+test("dismiss and restore preserve unanswered requests, survive restart and cannot resurrect terminal requests", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const a = await seedOwnQuestion(f),
+      api = new OperatorApi(f.service, [f.directory]);
+    const item = (await api.readInbox()).data.items.find(
+      (i) => i.id === a.interactionId,
+    )!;
+    assert.equal(item.lifecycle?.status, "actionable");
+    const before = f.runtime.turns;
+    const command = {
+      type: "inbox.dismiss" as const,
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision,
+      note: "Waiting for context",
+    };
+    const receipt = await api.execute(command);
+    assert.equal((await api.readInbox()).data.items.length, 0);
+    assert.equal(
+      f.service.coordinationView().readTask(a.taskId).questions[0]!.status,
+      "open",
+    );
+    assert.equal(f.runtime.turns, before);
+    assert.equal(
+      (await api.readInbox(new URLSearchParams({ status: "dismissed" }))).data
+        .items[0]?.lifecycle?.note,
+      command.note,
+    );
+    await f.reopen();
+    const reopened = new OperatorApi(f.service, [f.directory]);
+    assert.deepEqual(await reopened.execute(command), receipt);
+    let hidden = (
+      await reopened.readInbox(new URLSearchParams({ status: "dismissed" }))
+    ).data.items[0]!;
+    await reopened.execute({
+      type: "inbox.restore",
+      key: randomUUID(),
+      itemId: hidden.id,
+      expectedRevision: hidden.lifecycle!.revision,
+    });
+    const restored = (await reopened.readInbox()).data.items[0]!;
+    await reopened.execute({
+      ...command,
+      key: randomUUID(),
+      expectedRevision: restored.lifecycle!.revision,
+    });
+    const d = f.service.domain();
+    d.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: a.projectId,
+      taskId: a.taskId,
+      expectedVersion: Number(d.task(a.taskId).version),
+      state: "done",
+    });
+    assert.equal((await reopened.readInbox()).data.items.length, 0);
+    assert.equal(
+      (await reopened.readInbox(new URLSearchParams({ status: "dismissed" })))
+        .data.items.length,
+      0,
+    );
+    hidden = (
+      await reopened.readInbox(new URLSearchParams({ status: "resolved" }))
+    ).data.items.find((i) => i.id === item.id)!;
+    assert.equal(hidden.lifecycle?.resolution, "Task is Done");
+    await assert.rejects(
+      reopened.execute({
+        type: "inbox.restore",
+        key: randomUUID(),
+        itemId: hidden.id,
+        expectedRevision: hidden.lifecycle!.revision,
+      }),
+      /conflict/,
+    );
+    await assert.rejects(
+      reopened.execute({
+        type: "question.form.answer",
+        key: randomUUID(),
+        taskId: a.taskId,
+        interactionId: a.interactionId,
+        expectedRevision: 1,
+        answers: mixedAnswers,
+      }),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("ownership intervention cannot be dismissed and terminal visibility never releases its execution hold", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const a = await seedOwnIntervention(f),
+      api = new OperatorApi(f.service, [f.directory]);
+    const item = (await api.readInbox()).data.items.find(
+      (i) => i.kind === "intervention",
+    )!;
+    assert.equal(item.dismissible, false);
+    assert.match(item.reason ?? "", new RegExp(a.assignmentId));
+    await assert.rejects(
+      api.execute({
+        type: "inbox.dismiss",
+        key: randomUUID(),
+        itemId: item.id,
+        expectedRevision: item.lifecycle!.revision,
+      }),
+      /conflict/,
+    );
+    const before = f.service.recoveryForTask(a.taskId);
+    const d = f.service.domain();
+    d.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: a.projectId,
+      taskId: a.taskId,
+      expectedVersion: Number(d.task(a.taskId).version),
+      state: "cancelled",
+    });
+    assert.equal((await api.readInbox()).data.items.length, 0);
+    assert.deepEqual(f.service.recoveryForTask(a.taskId), before);
+    assert.equal(
+      (
+        await api.readInbox(new URLSearchParams({ status: "resolved" }))
+      ).data.items.find((i) => i.id === item.id)?.lifecycle?.resolution,
+      "Task is Cancelled",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("a new ownership hold refuses a stale dismissal of a previously eligible intervention", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const { refusedTask } = await import("../fixtures/refused-task.js");
+    const a = await refusedTask(f),
+      api = new OperatorApi(f.service, [f.directory]);
+    const item = (await api.readInbox()).data.items.find(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === a.taskId &&
+        i.attentionCode === "not-started",
+    )!;
+    assert.equal(item.dismissible, true);
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "INSERT INTO task_writer_holds (taskId,reason,holdKind) VALUES (?,?,NULL)",
+        )
+        .run(a.taskId, "Lead ownership still unsettled"),
+    );
+    await assert.rejects(
+      api.execute({
+        type: "inbox.dismiss",
+        key: randomUUID(),
+        itemId: item.id,
+        expectedRevision: item.lifecycle!.revision,
+      }),
+      /conflict/,
+    );
+    const held = (await api.readInbox()).data.items.find(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === a.taskId &&
+        i.attentionCode === "execution-uncertain",
+    );
+    assert.match(held?.reason ?? "", /Lead ownership still unsettled/);
+    assert.equal(f.service.inboxLifecycle().get(item.id)?.status, "actionable");
+    f.seedPersistedState((db) =>
+      db.prepare("DELETE FROM task_writer_holds WHERE taskId=?").run(a.taskId),
+    );
+    await api.readInbox();
+    assert.equal(f.service.inboxLifecycle().get(held!.id)?.status, "resolved");
+  } finally {
+    await f.close();
+  }
+});
+
+test("clearing one refused request preserves another request's dismissed episode", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const { refusedTask } = await import("../fixtures/refused-task.js");
+    const a = await refusedTask(f),
+      d = f.service.domain(),
+      api = new OperatorApi(f.service, [f.directory]),
+      delegateId = randomUUID();
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
+    d.execute({
+      type: "assignment.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: a.projectId,
+      taskId: a.taskId,
+      assignmentId: delegateId,
+      profileId: a.profileId,
+      brief: "A separate refused request",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
+    d.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: a.projectId,
+      taskId: a.taskId,
+      expectedVersion: Number(d.task(a.taskId).version),
+      outcome: "Changed after the delegate queued",
+    });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 2,
+    });
+    const items = (await api.readInbox()).data.items.filter(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === a.taskId &&
+        i.attentionCode === "not-started",
+    );
+    assert.equal(items.length, 2);
+    for (const item of items)
+      await api.execute({
+        type: "inbox.dismiss",
+        key: randomUUID(),
+        itemId: item.id,
+        expectedRevision: item.lifecycle!.revision,
+      });
+    f.seedPersistedState((db) =>
+      db
+        .prepare("UPDATE turn_requests SET state='completed' WHERE workId=?")
+        .run(a.workId),
+    );
+    assert.equal(
+      (await api.readInbox()).data.items.filter(
+        (i) =>
+          i.kind === "intervention" &&
+          i.taskId === a.taskId &&
+          i.attentionCode === "not-started",
+      ).length,
+      0,
+    );
+    const history = (
+      await api.readInbox(new URLSearchParams({ status: "dismissed" }))
+    ).data.items;
+    assert.equal(
+      history.filter((i) => items.some((old) => old.id === i.id)).length,
+      1,
+    );
+    const resolved = (
+      await api.readInbox(new URLSearchParams({ status: "resolved" }))
+    ).data.items;
+    assert.equal(
+      resolved.filter((i) => items.some((old) => old.id === i.id)).length,
+      1,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("runtime dismissal belongs to one exhaustion episode even when the wall clock repeats", async () => {
+  const exhaustion = exhaustibleRuntime();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    exhaustion.factory,
+    exhaustion.serviceOptions,
+  );
+  try {
+    const api = new OperatorApi(f.service, [f.directory]);
+    await exhaustion.exhaust(f.runtime);
+    const first = (await api.readInbox()).data.items.find(
+      (i) => i.kind === "runtime",
+    )!;
+    await api.execute({
+      type: "inbox.dismiss",
+      key: randomUUID(),
+      itemId: first.id,
+      expectedRevision: first.lifecycle!.revision,
+      note: "Old episode",
+    });
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
+      false,
+    );
+    await f.service.configureRuntime({
+      key: randomUUID(),
+      harness: "codex",
+      enabled: false,
+    });
+    exhaustion.gate.failStarts = false;
+    await f.service.configureRuntime({
+      key: randomUUID(),
+      harness: "codex",
+      enabled: true,
+    });
+    exhaustion.clock.wall = first.createdAt! - 750_000;
+    await exhaustion.exhaust(f.runtime);
+    const next = (await api.readInbox()).data.items.find(
+      (i) => i.kind === "runtime",
+    )!;
+    assert.equal(next.createdAt, first.createdAt);
+    assert.notEqual(next.id, first.id);
+    assert.equal(next.lifecycle?.status, "actionable");
+    assert.equal(f.service.inboxLifecycle().get(first.id)?.status, "resolved");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a withheld unanswered question is dismissible by identity and stops being a required task interaction", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const a = await seedOwnQuestion(f),
+      api = new OperatorApi(f.service, [f.directory, "Explain"]);
+    assert.equal(
+      (await api.readQuestion(a.taskId, a.interactionId)).data.form,
+      null,
+    );
+    await assert.rejects(
+      api.execute({
+        type: "question.form.answer",
+        key: randomUUID(),
+        taskId: a.taskId,
+        interactionId: a.interactionId,
+        expectedRevision: 1,
+        answers: mixedAnswers,
+      }),
+    );
+    const item = (await api.readInbox()).data.items.find(
+      (i) => i.id === a.interactionId,
+    )!;
+    const before = f.service.coordinationView().readTask(a.taskId)
+        .messages.length,
+      turns = f.runtime.turns;
+    await api.execute({
+      type: "inbox.dismiss",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision,
+    });
+    const task = (await api.readTask(a.taskId)).data;
+    assert.equal(task.attention.codes.includes("question"), false);
+    assert.equal(task.questions[0]?.status, "open");
+    assert.equal(task.questions[0]?.lifecycle?.status, "dismissed");
+    assert.equal(
+      f.service.coordinationView().readTask(a.taskId).messages.length,
+      before,
+    );
+    assert.equal(f.runtime.turns, turns);
+  } finally {
+    await f.close();
+  }
+});
+
+test("completion diagnostics retain the exact interaction, label legacy current blockers, and never disclose a withheld form", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const { seedInteractionRejection } = await import(
+      "../fixtures/questions.js"
+    );
+    const a = await seedOwnQuestion(f),
+      requestId = seedInteractionRejection(f, a),
+      api = new OperatorApi(f.service, [f.directory, "Explain"]);
+    let task = (await api.readTask(a.taskId)).data;
+    let rejection = task.completionRequests.find(
+      (c) => c.requestId === requestId,
+    )!;
+    assert.equal(rejection.blockingInteractionsBasis, "recorded");
+    assert.equal(
+      rejection.blockingInteractions?.[0]?.interactionId,
+      a.interactionId,
+    );
+    assert.equal(rejection.blockingInteractions?.[0]?.state, "required");
+    assert.equal(JSON.stringify(rejection).includes("Explain"), false);
+    assert.match(
+      rejection.blockingInteractions?.[0]?.destination ?? "",
+      /status=actionable/,
+    );
+    await api.execute({
+      type: "inbox.dismiss",
+      key: randomUUID(),
+      itemId: a.interactionId,
+      expectedRevision: rejection.blockingInteractions![0]!.revision!,
+    });
+    task = (await api.readTask(a.taskId)).data;
+    rejection = task.completionRequests.find((c) => c.requestId === requestId)!;
+    assert.equal(rejection.blockingInteractions?.[0]?.state, "dismissed");
+    assert.equal(task.attention.codes.includes("question"), false);
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "UPDATE coordination_completion_requests SET rejectionReasons=? WHERE requestId=?",
+        )
+        .run(JSON.stringify(["open-interaction"]), requestId),
+    );
+    const hidden = f.service.inboxLifecycle().get(a.interactionId)!;
+    await api.execute({
+      type: "inbox.restore",
+      key: randomUUID(),
+      itemId: hidden.id,
+      expectedRevision: hidden.revision,
+    });
+    rejection = (await api.readTask(a.taskId)).data.completionRequests.find(
+      (c) => c.requestId === requestId,
+    )!;
+    assert.equal(rejection.blockingInteractionsBasis, "current");
+    assert.equal(rejection.blockingInteractions?.[0]?.state, "required");
+    const foreign = await seedOwnQuestion(f, undefined, "Other task");
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "UPDATE coordination_completion_requests SET rejectionReasons=? WHERE requestId=?",
+        )
+        .run(
+          JSON.stringify({
+            reasons: ["open-interaction"],
+            blockingInteractionIds: [foreign.interactionId],
+          }),
+          requestId,
+        ),
+    );
+    await assert.rejects(api.readTask(a.taskId), /unavailable/);
   } finally {
     await f.close();
   }

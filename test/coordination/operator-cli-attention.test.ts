@@ -714,3 +714,92 @@ test("approval get and decide bind the exact action, revision and material", asy
   assert.equal(r.code, 0, r.out);
   assert.ok(d.task(legacy.taskId));
 });
+
+test("CLI Inbox visibility commands journal replay, render history and restore without answering", async (t) => {
+  const { cli, s } = await startCliOperator(t);
+  const q = await seedOwnQuestion(s.f);
+  let r = await cli("rw", ["inbox", "list"]);
+  const item = r
+    .json()
+    .data.items.find((i: { id: string }) => i.id === q.interactionId);
+  const key = randomUUID();
+  const dismiss = [
+    "inbox",
+    "dismiss",
+    item.id,
+    "--expected-revision",
+    String(item.lifecycle.revision),
+    "--note",
+    "Waiting",
+    "--request-id",
+    key,
+  ];
+  r = await cli("rw", dismiss);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.receipt.status, "dismissed");
+  r = await cli("rw", dismiss);
+  assert.equal(r.code, 0, r.err + r.out);
+  r = await cli("ro", ["inbox", "list", "--status", "dismissed"]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const hidden = r
+    .json()
+    .data.items.find((i: { id: string }) => i.id === item.id);
+  assert.equal(hidden.lifecycle.note, "Waiting");
+  r = await cli("rw", [
+    "operation",
+    "get",
+    key,
+    "--scope",
+    `task:${q.taskId}`,
+    "--type",
+    "inbox.dismiss",
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.state, "recorded");
+  r = await cli("rw", [
+    "inbox",
+    "restore",
+    item.id,
+    "--expected-revision",
+    String(hidden.lifecycle.revision),
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.receipt.status, "actionable");
+  assert.equal(
+    s.f.service.coordinationView().readTask(q.taskId).questions[0]?.status,
+    "open",
+  );
+  r = await cli("rw", ["inbox", "dismiss", item.id]);
+  assert.equal(r.code, 2);
+  r = await cli("ro", ["inbox", "list", "--status", "invented"]);
+  assert.equal(r.code, 2);
+});
+
+test("task get names the rejected completion's exact request and its identity-bound Dismiss remedy", async (t) => {
+  const { seedInteractionRejection } = await import("../fixtures/questions.js");
+  const o = await startCliOperator(t),
+    q = await seedOwnQuestion(o.s.f);
+  seedInteractionRejection(o.s.f, q);
+  let r = await o.h.run(["task", "get", q.taskId, "--connection", "rw"]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(
+    r.out,
+    new RegExp(`Completion recorded request: question ${q.interactionId}`),
+  );
+  assert.ok(
+    r.out.includes(
+      `cab inbox dismiss ${q.interactionId} --expected-revision 1`,
+    ),
+  );
+  r = await o.cli("rw", [
+    "inbox",
+    "dismiss",
+    q.interactionId,
+    "--expected-revision",
+    "1",
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  r = await o.h.run(["task", "get", q.taskId, "--connection", "rw"]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /dismissed; no longer required for completion/);
+});

@@ -265,13 +265,23 @@ export interface RequestPlaces {
   answerInCard: (interactionId: string) => void;
   form: (interactionId: string) => ReactNode;
 }
-type TimelineStatus = "open" | "answered" | "approved" | "denied";
+type TimelineStatus =
+  | "open"
+  | "answered"
+  | "approved"
+  | "denied"
+  | "resolved"
+  | "superseded"
+  | "dismissed";
 
 const statusText: Record<TimelineStatus, string> = {
   open: "Waiting on you",
   answered: "Answered",
   approved: "Approved",
   denied: "Denied",
+  resolved: "Resolved",
+  superseded: "Superseded",
+  dismissed: "Dismissed · unanswered, not required for completion",
 };
 
 export function TaskConversation({
@@ -741,7 +751,10 @@ function RequestEntry({
           tone={
             status === "open"
               ? "warning"
-              : status === "denied"
+              : status === "denied" ||
+                  status === "dismissed" ||
+                  status === "resolved" ||
+                  status === "superseded"
                 ? "idle"
                 : "success"
           }
@@ -749,6 +762,16 @@ function RequestEntry({
           {statusText[status]}
         </StatusBadge>
       </header>
+      {status === "dismissed" && (
+        <p>
+          <ActionLink
+            variant="secondary"
+            href={`/inbox?task=${ctx.taskId}&request=${id}&status=dismissed`}
+          >
+            View or restore in Inbox
+          </ActionLink>
+        </p>
+      )}
       {inlineForm ?? (
         <>
           <p className="conv-text">{entry.prompt}</p>

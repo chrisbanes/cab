@@ -2048,6 +2048,13 @@ export class DeliveryStore {
           operationId: string | null;
         }
       | undefined;
+    if (
+      row &&
+      this.db
+        .prepare("SELECT 1 FROM inbox_lifecycle WHERE id=? AND obsolete=1")
+        .get(interactionId)
+    )
+      return false;
     return Boolean(
       row &&
         row.taskId === caller.taskId &&
