@@ -2,7 +2,7 @@ import { projectSchema } from "../../src/operator/contracts.js";
 import { ProjectLifecyclePanel, DeletedProject } from "./project-lifecycle.js";
 import { sourceCredentialSummary } from "./settings-view.js";
 import { Circle, CircleCheck, CirclePause } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   projectConfigurationSchema,
   projectPrivateValuesSchema,
@@ -22,9 +22,30 @@ import {
   localListeningLimit,
   projectLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
-import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
+import {
+  skipSandboxAppliesNote,
+  skipSandboxGrantLines,
+  skipSandboxRisk,
+  skipSandboxSupersededLine,
+  projectSkipSandboxLine,
+} from "../../src/operator/skip-sandbox-copy.js";
+import {
+  ActionLink,
+  Button,
+  ResourceStatus,
+  StatusBadge,
+} from "./components.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
+import { PermittedAgentsTab } from "./permitted-agents-config.js";
 import {
   privateField,
   projectChanges,
@@ -53,11 +74,13 @@ import {
   PrivateTextField,
   reloadDraft,
   revealedText,
+  sendDraft,
   submitDraft,
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
   editable,
+  locked,
   textHold,
   usePrivateValues,
   type SettingsProps,
@@ -199,6 +222,13 @@ export function ProjectConfiguration(
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
+          ) : tab === "permitted-agents" ? (
+            <PermittedAgentsTab
+              {...tabProps}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
           ) : tab === "repositories" ? (
             <RepositoryTab
               {...tabProps}
@@ -298,6 +328,11 @@ function statusLine(
         : admission,
       saved("routing.configure", data.routing.version),
     );
+  if (tab === "permitted-agents")
+    return withSaved(
+      admission,
+      saved("permitted-agents", data.routing.version),
+    );
   if (tab === "repositories")
     return withSaved(
       "Repository links are the checkouts workspaces and delivery use.",
@@ -379,9 +414,15 @@ function GeneralTab(p: TabProps) {
     ...(data.localListening === undefined
       ? {}
       : { localListening: data.localListening }),
+    ...(data.dangerouslySkipSandbox === undefined
+      ? {}
+      : { dangerouslySkipSandbox: data.dangerouslySkipSandbox }),
     ...(data.diagnosticCapture === undefined
       ? {}
       : { diagnosticCapture: data.diagnosticCapture }),
+    ...(data.reasoningSummaries === undefined
+      ? {}
+      : { reasoningSummaries: data.reasoningSummaries }),
     expectedVersion: String(data.project.version),
   };
   useLoadedDraft(d, initial, p.loadedAt);
@@ -430,18 +471,39 @@ function GeneralTab(p: TabProps) {
     Boolean(v.localListening) !== data.localListening
       ? { localListening: Boolean(v.localListening) }
       : {}),
+    ...(data.dangerouslySkipSandbox !== undefined &&
+    Boolean(v.dangerouslySkipSandbox) !== data.dangerouslySkipSandbox
+      ? { dangerouslySkipSandbox: Boolean(v.dangerouslySkipSandbox) }
+      : {}),
     ...(data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== data.diagnosticCapture
       ? { diagnosticCapture: v.diagnosticCapture }
       : {}),
+    ...(data.reasoningSummaries !== undefined &&
+    v.diagnosticCapture !== "baseline" &&
+    Boolean(v.reasoningSummaries) !== data.reasoningSummaries
+      ? { reasoningSummaries: Boolean(v.reasoningSummaries) }
+      : {}),
     ...privateField("instructions", v.instructions, revealed),
   });
+  const [confirmSkip, setConfirmSkip] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const skipping = data.dangerouslySkipSandbox === true;
+  const turnsOnSkip =
+    data.dangerouslySkipSandbox === false && Boolean(v.dangerouslySkipSandbox);
   return (
     <div className="settings-split">
       <div className="settings-column">
         <Panel title="General" description="Each section saves on its own.">
           <form
-            onSubmit={(e) =>
+            ref={form}
+            onSubmit={(e) => {
+              // Turning the sandbox off for the project needs an explicit confirmation first.
+              if (turnsOnSkip && !holdSave && !d.readOnly) {
+                e.preventDefault();
+                setConfirmSkip(true);
+                return;
+              }
               void submitDraft(
                 e,
                 d,
@@ -451,8 +513,8 @@ function GeneralTab(p: TabProps) {
                 p.refreshConfiguration,
                 {},
                 holdSave,
-              )
-            }
+              );
+            }}
           >
             <div className="settings-fields">
               <DraftField draft={d} field="name" label="Project name" />
@@ -487,6 +549,7 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectCommandNetworkLine(data.commandNetworkAccess)}{" "}
                   {commandNetworkAppliesNote} {commandNetworkDisclosure}
+                  {skipping && ` ${skipSandboxSupersededLine}`}
                 </p>
               </>
             )}
@@ -501,6 +564,22 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectLocalListeningLine(data.localListening)}{" "}
                   {localListeningAppliesNote} {localListeningLimit}
+                  {skipping && ` ${skipSandboxSupersededLine}`}
+                </p>
+              </>
+            )}
+            {data.dangerouslySkipSandbox !== undefined && (
+              <>
+                <DraftCheck
+                  draft={d}
+                  field="dangerouslySkipSandbox"
+                  label="Skip sandbox (dangerous)"
+                  toggle
+                />
+                <p className="metadata muted">
+                  {projectSkipSandboxLine(data.dangerouslySkipSandbox)}{" "}
+                  {skipSandboxAppliesNote} {skipSandboxGrantLines.join(" ")}{" "}
+                  {skipSandboxRisk}
                 </p>
               </>
             )}
@@ -526,6 +605,28 @@ function GeneralTab(p: TabProps) {
               {diagnosticCaptureLine(data.diagnosticCapture)}
               {data.diagnosticCapture && ` ${diagnosticCaptureAppliesNote}`}
             </p>
+            {data.reasoningSummaries !== undefined && (
+              <>
+                <DraftCheck
+                  draft={d}
+                  field="reasoningSummaries"
+                  label="Reasoning summaries"
+                  toggle
+                  checked={
+                    v.diagnosticCapture === "baseline"
+                      ? false
+                      : Boolean(v.reasoningSummaries)
+                  }
+                  disabled={v.diagnosticCapture !== "enhanced"}
+                />
+                <p className="metadata muted">
+                  {v.diagnosticCapture !== "enhanced" &&
+                    "Requires enhanced diagnostic capture. Saving Baseline turns this setting off. "}
+                  Applies to later admitted turns. Runtime reasoning capture is
+                  not implemented; no reasoning is collected.
+                </p>
+              </>
+            )}
             <PrivateTextField
               draft={d}
               field="instructions"
@@ -554,6 +655,40 @@ function GeneralTab(p: TabProps) {
               review={() => d.adoptLatest(data.project.version, initial)}
             />
           </form>
+          {data.reasoningSummaries !== undefined && <DeleteReasoning {...p} />}
+          <Dialog open={confirmSkip} onOpenChange={setConfirmSkip}>
+            <DialogContent role="alertdialog" className="stop-dialog">
+              <DialogTitle>Skip the sandbox for this project?</DialogTitle>
+              <DialogDescription className="body">
+                {skipSandboxRisk} {skipSandboxAppliesNote}
+              </DialogDescription>
+              <div className="stop-dialog-actions">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    setConfirmSkip(false);
+                    if (form.current)
+                      void sendDraft(
+                        form.current,
+                        d,
+                        p.client,
+                        p.session,
+                        command(),
+                        p.refreshConfiguration,
+                      );
+                  }}
+                >
+                  Skip sandbox
+                </Button>
+                <DialogClose asChild>
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
+                </DialogClose>
+              </div>
+            </DialogContent>
+          </Dialog>
         </Panel>
         <CredentialReferences projectId={projectId} data={data} />
       </div>
@@ -576,6 +711,73 @@ function GeneralTab(p: TabProps) {
         />
       </div>
     </div>
+  );
+}
+
+function DeleteReasoning(p: TabProps) {
+  const [open, setOpen] = useState(false);
+  const d = useDraft(
+    p.drafts,
+    `project.reasoning.delete:${p.projectId}`,
+    p.readOnly,
+  );
+  const initial = { expectedVersion: String(p.data.project.version) };
+  useLoadedDraft(d, initial, p.loadedAt);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next && !locked(d)) reloadDraft(d, initial);
+        setOpen(next);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button type="button" variant="secondary" disabled={p.readOnly}>
+          Delete collected reasoning…
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete collected reasoning?</DialogTitle>
+        <DialogDescription>
+          Deletes this project's collected reasoning summaries. This cannot be
+          undone. The setting stays unchanged. No reasoning is collected yet, so
+          there is currently nothing to erase.
+        </DialogDescription>
+        <form
+          onSubmit={(e) =>
+            void submitDraft(
+              e,
+              d,
+              p.client,
+              p.session,
+              {
+                type: "project.reasoning.delete",
+                key: d.values.key,
+                projectId: p.projectId,
+                expectedVersion: Number(d.values.expectedVersion),
+                confirmed: true,
+              },
+              p.refreshConfiguration,
+            )
+          }
+        >
+          <DraftOutcome
+            draft={d}
+            client={p.client}
+            session={p.session}
+            label="Delete collected reasoning"
+            success="Collected reasoning cleared."
+            refresh={p.refreshConfiguration}
+            review={() => d.adoptLatest(p.data.project.version, initial)}
+          />
+        </form>
+        <DialogClose asChild>
+          <Button type="button" variant="secondary">
+            Close
+          </Button>
+        </DialogClose>
+      </DialogContent>
+    </Dialog>
   );
 }
 

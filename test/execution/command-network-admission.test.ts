@@ -44,6 +44,16 @@ function admissionFixture() {
       localListening: enabled,
     });
   };
+  const setSkipSandbox = (enabled: boolean) => {
+    f.domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: crypto.randomUUID(),
+      projectId,
+      expectedVersion: Number(f.domain.project(projectId).version),
+      dangerouslySkipSandbox: enabled,
+    });
+  };
   let sequence = 0;
   /** A ready intent bound to a fresh assignment on a harness. */
   const ready = (taskId: string, harness: ExecutionHarness = "codex") => {
@@ -79,8 +89,84 @@ function admissionFixture() {
   };
   const admit = (intent: { id: string }) =>
     f.state.begin(intent.id, { projectId });
-  return { f, setNetwork, setListening, ready, admit };
+  return { f, setNetwork, setListening, setSkipSandbox, ready, admit };
 }
+
+test("reasoning opt-in is snapshotted at admission for either task harness and survives restart", () => {
+  const { f, ready, admit } = admissionFixture();
+  try {
+    f.db.exec(
+      "UPDATE scheduler_capacity_limits SET globalLimit = 20 WHERE singleton = 1",
+    );
+    const configure = (fields: object) =>
+      f.domain.execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: Number(f.domain.project(projectId).version),
+        ...fields,
+      });
+    const earlier = ready(taskA);
+    const queued = ready(taskB, "claude");
+    assert.equal(f.state.reasoningSummaries(queued.id), null);
+    assert.equal(admit(earlier), true);
+    configure({ reasoningSummaries: true });
+    assert.equal(admit(queued), true);
+    assert.equal(f.state.reasoningSummaries(earlier.id), false);
+    assert.equal(f.state.reasoningSummaries(queued.id), true);
+    const codex = ready(taskA);
+    assert.equal(admit(codex), true);
+    assert.equal(f.state.reasoningSummaries(codex.id), true);
+    configure({ diagnosticCapture: "baseline" });
+    const later = ready(taskB, "claude");
+    assert.equal(admit(later), true);
+    assert.equal(f.state.reasoningSummaries(later.id), false);
+    configure({ diagnosticCapture: "enhanced", reasoningSummaries: true });
+    const draft = f.state.create(
+      "drafting:reasoning",
+      "draft",
+      "/tmp/reasoning-draft",
+    );
+    assert.equal(admit(draft), true);
+    assert.equal(f.state.reasoningSummaries(draft.id), false);
+    configure({ reasoningSummaries: false });
+    f.reopen();
+    assert.equal(f.state.reasoningSummaries(queued.id), true);
+    assert.equal(f.domain.reasoningSummaries(projectId), false);
+  } finally {
+    f.close();
+  }
+});
+
+test("reasoning table migration preserves projects and historical turns and is repeatable", () => {
+  const { f } = admissionFixture();
+  try {
+    const project = f.domain.project(projectId);
+    const historical = f.state.byWorkId("work-child-a");
+    f.db.exec(
+      "DROP TABLE execution_intent_reasoning_summaries; DROP TABLE project_reasoning_summaries",
+    );
+    f.reopen();
+    assert.deepEqual(f.domain.project(projectId), project);
+    assert.deepEqual(f.state.byWorkId("work-child-a"), historical);
+    assert.equal(f.domain.reasoningSummaries(projectId), false);
+    assert.equal(f.state.reasoningSummaries(String(historical?.id)), null);
+    f.domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(f.domain.project(projectId).version),
+      reasoningSummaries: true,
+    });
+    f.reopen();
+    assert.equal(f.domain.reasoningSummaries(projectId), true);
+    assert.deepEqual(f.db.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    f.close();
+  }
+});
 
 test("a turn records the project's command network setting at its own admission", () => {
   const { f, setNetwork, ready, admit } = admissionFixture();
@@ -219,6 +305,73 @@ test("only Claude task turns can be admitted with local listening", () => {
   }
 });
 
+test("a task turn of either harness records the project's skip-sandbox setting at its own admission", () => {
+  const { f, setSkipSandbox, ready, admit } = admissionFixture();
+  try {
+    const before = ready(taskA, "claude");
+    const earlier = ready(taskB, "codex");
+    assert.equal(f.state.dangerouslySkipSandbox(before.id), null);
+
+    assert.equal(admit(earlier), true);
+    setSkipSandbox(true);
+    assert.equal(admit(before), true);
+    assert.equal(f.state.dangerouslySkipSandbox(earlier.id), false);
+    assert.equal(f.state.dangerouslySkipSandbox(before.id), true);
+    assert.equal(f.state.localListening(before.id), false);
+    assert.equal(f.state.commandNetworkAccess(before.id), false);
+
+    // A running turn keeps its value; the next admission gets the new one.
+    setSkipSandbox(false);
+    const after = ready(taskA, "codex");
+    assert.equal(admit(after), true);
+    assert.equal(f.state.dangerouslySkipSandbox(after.id), false);
+    assert.equal(f.state.dangerouslySkipSandbox(before.id), true);
+    setSkipSandbox(true);
+    const codex = ready(taskB, "codex");
+    assert.equal(admit(codex), true);
+    assert.equal(f.state.dangerouslySkipSandbox(codex.id), true);
+    assert.equal(f.state.dangerouslySkipSandbox(after.id), false);
+  } finally {
+    f.close();
+  }
+});
+
+test("a drafting run, a draft turn and an unadmitted turn never record skip-sandbox", () => {
+  const { f, setSkipSandbox, ready, admit } = admissionFixture();
+  try {
+    setSkipSandbox(true);
+    const drafting = f.state.create(
+      "drafting:run-1",
+      "draft",
+      "/tmp/net-draft",
+    );
+    assert.equal(f.state.begin(drafting.id, { projectId }), true);
+    assert.equal(f.state.dangerouslySkipSandbox(drafting.id), false);
+    assert.equal(f.state.skipSandboxApplies(drafting.id, projectId), false);
+
+    const waiting = ready(taskB, "claude");
+    assert.equal(f.state.dangerouslySkipSandbox(waiting.id), null);
+    assert.equal(f.state.skipSandboxApplies(waiting.id, projectId), true);
+
+    new SchedulerStore(f.db);
+    const state = new ExecutionState(f.db);
+    const draft = ready(taskB, "claude");
+    f.db
+      .prepare(
+        "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
+      )
+      .run(randomUUID(), draft.workId);
+    assert.equal(state.skipSandboxApplies(draft.id, projectId), false);
+    assert.equal(state.begin(draft.id, { projectId }), true);
+    assert.equal(state.dangerouslySkipSandbox(draft.id), false);
+    setSkipSandbox(false);
+    assert.equal(f.state.skipSandboxApplies(waiting.id, projectId), false);
+    assert.equal(admit(waiting), true);
+  } finally {
+    f.close();
+  }
+});
+
 test("the live network run refuses to start without --live --one-attempt", () => {
   const run = spawnSync(
     process.execPath,
@@ -257,6 +410,7 @@ class RecordingRuntime implements Runtime {
     arity: number;
     policy: RuntimeTurnPolicy | undefined;
   }[] = [];
+  preflights: { workspace: string; skipSandbox?: boolean }[] = [];
   gate: Promise<void> | undefined;
   entered: (() => void) | undefined;
   private ids = 0;
@@ -268,6 +422,10 @@ class RecordingRuntime implements Runtime {
     return `thread-${++this.ids}`;
   }
   async resumeThread() {}
+  async preflightTurn(input: { workspace: string; skipSandbox?: boolean }) {
+    this.preflights.push(input);
+    return undefined;
+  }
   async startTurn(...call: unknown[]) {
     this.turns.push({
       workspace: call[1],
@@ -463,4 +621,77 @@ test("each harness receives the expected sandbox policy for every combination of
         );
       }
   }
+});
+
+test("a task turn of either harness runs with skipSandbox only when the setting was on at admission", async (t) => {
+  const { service, project, configure, start, turnOf, finished } =
+    await recordingService(t);
+  for (const harness of ["codex", "claude"] as const) {
+    const projectId = project(harness);
+    for (const on of [false, true]) {
+      configure(projectId, { dangerouslySkipSandbox: on });
+      await start(projectId, `${harness} ${on}`);
+      const intent = await finished();
+      assert.deepEqual(
+        turnOf(intent)?.policy,
+        on ? { networkAccess: false, skipSandbox: true } : undefined,
+        `${harness} skip=${on}`,
+      );
+      assert.equal(service.dangerouslySkipSandboxFor(intent.workId), on);
+    }
+  }
+  assert.equal(service.dangerouslySkipSandboxFor("unknown-work"), null);
+});
+
+test("the service hints skipSandbox to preflight only for a task turn of a project with the setting on", async (t) => {
+  const { service, runtime, project, configure, start, finished } =
+    await recordingService(t);
+  const projectId = project("claude");
+  const hinted = (intent: { workspace: string }) =>
+    runtime.preflights.filter((input) => input.workspace === intent.workspace);
+  for (const on of [false, true]) {
+    configure(projectId, { dangerouslySkipSandbox: on });
+    await start(projectId, `task ${on}`);
+    const intent = await finished();
+    const inputs = hinted(intent);
+    assert.ok(inputs.length > 0);
+    for (const input of inputs)
+      assert.deepEqual(
+        "skipSandbox" in input ? input.skipSandbox : "absent",
+        on ? true : "absent",
+      );
+  }
+
+  // A draft turn in the same project, setting still on, gets no hint.
+  const taskId = randomUUID();
+  const d = service.domain();
+  d.execute({
+    key: randomUUID(),
+    actor: "operator",
+    type: "task.create",
+    projectId,
+    taskId,
+    title: "draft",
+    outcome: "Probe",
+    ready: false,
+  } as never);
+  await service.startDraftTurn({
+    key: randomUUID(),
+    taskId,
+    expectedVersion: Number(d.task(taskId).version),
+    message: "Refine this",
+  });
+  const draftPreflights = () => {
+    const draft = service.list().find((i) => i.workId.includes(":draft:"));
+    return runtime.preflights.filter(
+      (input) => draft && input.workspace === draft.workspace,
+    );
+  };
+  const deadline = Date.now() + 15_000;
+  while (draftPreflights().length === 0) {
+    assert.ok(Date.now() < deadline, "the draft turn was preflighted");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  for (const input of draftPreflights())
+    assert.equal("skipSandbox" in input, false);
 });

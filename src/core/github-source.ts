@@ -517,7 +517,7 @@ export class GitHubSourceStore {
       .get(...this.key(nodeId)) as Row | undefined;
   }
 
-  /** Set only while a Done task was completed by GitHub closure under a Done-mode source. */
+  /** Set only while a Done task was completed by provider closure. */
   providerCompletion(taskId: string): Row | undefined {
     return this.db
       .prepare(
@@ -527,8 +527,9 @@ export class GitHubSourceStore {
   }
 
   /**
-   * Completes a closure-held task under a Done-mode source. Every condition is
-   * rechecked here, and `settled` runs inside the same transaction.
+   * Completes a closure-held task under every closed-issue setting once its execution and
+   * delivery have settled. Every condition is rechecked here, and `settled` runs inside the
+   * same transaction.
    */
   completeFromProviderClosure(taskId: string, settled: () => boolean): boolean {
     return transaction(this.db, () => {
@@ -536,9 +537,7 @@ export class GitHubSourceStore {
       const task = this.db
         .prepare(`SELECT e.externalId AS nodeId, e.provider, e.instance, t.projectId FROM external_items e
         JOIN domain_tasks t ON t.id = e.taskId
-        JOIN project_task_sources c ON c.projectId = t.projectId
         WHERE e.taskId = ? AND t.state = 'open' AND e.observedState = 'closed'
-          AND c.closedIssues = 'done'
           AND EXISTS (SELECT 1 FROM source_holds h
             WHERE ${sameItem("h", "e")} AND h.active = 1 AND h.reason = 'closed')
           AND NOT ${effectiveOwnClosure(itemColumns("e"))}`)
@@ -568,6 +567,7 @@ export class GitHubSourceStore {
       if (
         memberships.length === 0 ||
         memberships.some((row) => Number(row.complete) !== 1) ||
+        new DeliveryStore(this.db).closureCompletionWait(taskId) ||
         !settled()
       )
         return false;
@@ -1097,7 +1097,7 @@ export class GitHubSourceStore {
         // An issue cab is publishing is not new: its task is converted when the create resolves.
         if (!existing && this.publishingIssue(issue)) continue;
         if (!existing) {
-          // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
+          // A closed issue is imported, as Done, only by an Import as Done source on a complete read.
           const importClosed =
             config.closedIssues === "done" && snapshot.complete;
           if (issue.state === "closed" && !importClosed) {
@@ -1303,14 +1303,40 @@ export class GitHubSourceStore {
    * for `source.review`, and a partial read never calls this.
    */
   private releaseSourceHold(taskId: string): void {
-    const released = this.db
+    const releasable = this.db
       .prepare(
-        `UPDATE source_holds SET active = 0 WHERE active = 1 AND reason IN ('withdrawn', 'readiness-lost')
-          AND (provider, instance, externalId) = (SELECT e.provider, e.instance, e.externalId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId
-            WHERE e.taskId = ? AND t.ready = 1)`,
+        `SELECT hold.provider, hold.instance, hold.externalId, hold.generation, hold.reason
+          FROM source_holds hold JOIN external_items item ON item.provider = hold.provider
+            AND item.instance = hold.instance AND item.externalId = hold.externalId
+          JOIN domain_tasks task ON task.id = item.taskId
+          WHERE item.taskId = ? AND task.ready = 1 AND hold.active = 1
+            AND hold.reason IN ('withdrawn', 'readiness-lost')`,
       )
-      .run(taskId) as { changes: number | bigint };
-    if (Number(released.changes) > 0)
+      .all(taskId) as Row[];
+    for (const hold of releasable) {
+      this.db
+        .prepare(`INSERT INTO source_hold_release_records
+          (provider, instance, externalId, generation, reason, taskId) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(provider, instance, externalId, generation) DO NOTHING`)
+        .run(
+          String(hold.provider),
+          String(hold.instance),
+          String(hold.externalId),
+          Number(hold.generation),
+          String(hold.reason),
+          taskId,
+        );
+      this.db
+        .prepare(`UPDATE source_holds SET active = 0 WHERE provider = ? AND instance = ?
+          AND externalId = ? AND generation = ? AND active = 1`)
+        .run(
+          String(hold.provider),
+          String(hold.instance),
+          String(hold.externalId),
+          Number(hold.generation),
+        );
+    }
+    if (releasable.length > 0)
       this.db
         .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
         .run(taskId);
@@ -1631,17 +1657,12 @@ export class GitHubSourceStore {
       )
       .get(taskId) as Row;
     const config = this.db
-      .prepare(
-        "SELECT closedIssues, readiness FROM project_task_sources WHERE projectId = ?",
-      )
+      .prepare("SELECT readiness FROM project_task_sources WHERE projectId = ?")
       .get(String(external.projectId)) as Row;
     const nodeId = String(external.nodeId);
     const closed = external.observedState === "closed";
-    // Reopening, or a switch to Skip, reverses a provider completion; holds are untouched.
-    if (
-      (!closed || config.closedIssues !== "done") &&
-      this.providerCompletion(taskId)
-    ) {
+    // Reopening reverses a provider completion; holds are untouched.
+    if (!closed && this.providerCompletion(taskId)) {
       this.db
         .prepare("DELETE FROM source_completions WHERE taskId = ?")
         .run(taskId);

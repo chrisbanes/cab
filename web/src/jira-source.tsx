@@ -27,6 +27,7 @@ import { clockLabel } from "./presentation.js";
 import { parseRule, ruleLines, savedRule } from "./jira-readiness.js";
 import {
   closedIssueLabels,
+  closureCompletionNote,
   jiraRowsFrom,
   jiraSelections,
   adoptJiraRows,
@@ -507,7 +508,7 @@ export function JiraSourceTab(
             <DraftField
               draft={d}
               field="closedIssues"
-              label="Closed Jira issues"
+              label="Closed issues at import"
             >
               {Object.entries(closedIssueLabels).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -515,12 +516,7 @@ export function JiraSourceTab(
                 </option>
               ))}
             </DraftField>
-            <p className="metadata muted">
-              When an issue closes in Jira, Treat closure as Done completes its
-              cab task once execution settles and source checks allow
-              completion. Task history is kept. Switching to Skip reopens tasks
-              completed by Jira closure.
-            </p>
+            <p className="metadata muted">{closureCompletionNote}</p>
             <div className="settings-actions">
               <Button
                 type="button"

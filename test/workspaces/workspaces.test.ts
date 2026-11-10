@@ -43,6 +43,7 @@ import {
   type WorkspaceManagerOptions,
   taskGitWritableRoots,
 } from "../../src/standalone/workspaces.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 function fixture(options: WorkspaceManagerOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), "cab-workspaces-"));
@@ -142,7 +143,9 @@ async function stopOwnedTestChild(child: ChildProcess): Promise<void> {
     );
 }
 
-test("controlled Git cleanup does not signal an unrelated process from a stale identity", async () => {
+test("controlled Git cleanup does not signal an unrelated process from a stale identity", {
+  skip: processIdentityDenied(),
+}, async () => {
   const controlled = controlledGit();
   const unrelated = spawn(
     process.execPath,
@@ -266,7 +269,9 @@ test("repository-free and multiple-repository tasks get durable independent root
   }
 });
 
-test("repository identity batching handles nested paths, linked worktrees, and ambiguous newline paths", async () => {
+test("repository identity batching handles nested paths, linked worktrees, and ambiguous newline paths", {
+  skip: processIdentityDenied(),
+}, async () => {
   const controlled = controlledGit();
   const f = fixture({ gitExecutable: controlled.executable });
   try {
@@ -526,7 +531,9 @@ test("workspace Git runs with the hardened environment", async (t) => {
     assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
 });
 
-test("a completed worktree add followed by a bounded stall is retained without retry after reopen", async (t) => {
+test("a completed worktree add followed by a bounded stall is retained without retry after reopen", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const controlled = controlledGit();
   const failureObservations: Parameters<
     NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
@@ -667,7 +674,9 @@ test("a completed worktree add followed by a bounded stall is retained without r
   }
 });
 
-test("validation, archive status, and removal uncertainty preserve the binding", async (t) => {
+test("validation, archive status, and removal uncertainty preserve the binding", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const scenarios = [
     {
       name: "ready validation",
@@ -816,7 +825,9 @@ test("validation, archive status, and removal uncertainty preserve the binding",
   }
 });
 
-test("output overflow and sticky cancellation settle safely and retain uncertainty", async (t) => {
+test("output overflow and sticky cancellation settle safely and retain uncertainty", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   await t.test("output overflow", async () => {
     const controlled = controlledGit();
     const failureObservations: Parameters<
@@ -1144,7 +1155,9 @@ function exists(path: string): boolean {
   return existsSync(path);
 }
 
-test("repeated readiness checks reuse an unchanged worktree identity only briefly", async () => {
+test("repeated readiness checks reuse an unchanged worktree identity only briefly", {
+  skip: processIdentityDenied(),
+}, async () => {
   const controlled = controlledGit();
   const f = fixture({ gitExecutable: controlled.executable });
   try {

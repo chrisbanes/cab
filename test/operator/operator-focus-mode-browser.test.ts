@@ -7,6 +7,7 @@ import {
 import { seedChangedTask } from "../fixtures/changed-task.js";
 import { setFixtureGitIdentity } from "../fixtures/git-environment.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { changedFile } from "../fixtures/diff-view.js";
 import {
   desktop,
   noPageOverflow,
@@ -236,13 +237,10 @@ test("the Changes pane hides with focus mode and returns with its selection", as
     .getByRole("link", { name: "Changes · 2 files", exact: true })
     .click();
   await pane(page).waitFor();
-  const guide = pane(page)
-    .locator(".changes-entry[aria-current='true']")
-    .filter({ hasText: /guide\.md/ });
-  await pane(page)
-    .locator(".changes-entry", { hasText: /guide\.md/ })
-    .first()
-    .click();
+  const guide = changedFile(pane(page), "guide.md").and(
+    pane(page).locator('[aria-selected="true"]'),
+  );
+  await changedFile(pane(page), "guide.md").click();
   await guide.waitFor();
   await toggle(page).click();
   await pane(page).waitFor({ state: "detached" });

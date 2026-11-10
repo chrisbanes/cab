@@ -172,8 +172,8 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     /Accountable lead · Task lead/,
   );
   assert.ok(
-    ((await strip.locator("[data-task-readiness]").textContent()) ?? "")
-      .length > 0,
+    ((await strip.locator("[data-task-reason]").textContent()) ?? "").length >
+      0,
   );
   // Exactly four header actions (Execution, Edit task, Reset task, Stop), and the direct-load Back names the project.
   assert.deepEqual(
@@ -699,6 +699,64 @@ test("A question opened on the task page names its requester", async (_t, j) => 
   assert.deepEqual(await visiblePanels(page), ["task-panel-overview"]);
 });
 
+test("An unknown Resume project outcome keeps the card and its check after the wait clears", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  // Once resumed, the read carries nothing else that pins the card.
+  let cleared = false;
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (cleared) {
+        json.data.waits = [];
+        json.data.attention.codes = [];
+        json.data.attention.count = 0;
+        for (const hold of Object.keys(json.data.execution.holds))
+          json.data.execution.holds[hold] = false;
+        json.data.taskHold = null;
+        json.data.admission = { eligible: true, reasons: [] };
+        json.data.questions = [];
+        json.data.approvals = [];
+        json.data.completionRequests = [];
+        json.data.unresolvedResults = [];
+      }
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  const card = page.locator("section#decisions");
+  // The command reaches the server, but its response is lost.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await card.getByRole("button", { name: "Fix: Resume project" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
+  const check = card.getByRole("button", {
+    name: "Check whether it saved",
+    exact: true,
+  });
+  await check.waitFor();
+  cleared = true;
+  const reread = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
+  );
+  await page
+    .getByRole("button", { name: "Refresh task", exact: true })
+    .dispatchEvent("click");
+  await reread;
+  await card.getByText("Waiting · Project paused", { exact: true }).waitFor({
+    state: "detached",
+  });
+  await check.waitFor();
+});
+
 test("A rejected completion is a decision the strip and decision card both name", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seed(fixture.f);
@@ -735,10 +793,9 @@ test("A rejected completion is a decision the strip and decision card both name"
     web.password,
     `/tasks/${a.taskId}?section=files`,
   );
-  const next = page
-    .locator("[data-task-strip]")
-    .getByRole("button", { name: "Next: you · review rejected completion" });
-  await next.click();
+  assert.equal(await page.locator("[data-task-strip] .task-next").count(), 0);
+  // The strip no longer switches tabs; the pinned card is on Overview.
+  await openTaskTab(page, "Overview");
   const card = page.locator("section#decisions");
   await card.getByText(/completion request was rejected/).waitFor();
   assert.equal(
@@ -748,7 +805,6 @@ test("A rejected completion is a decision the strip and decision card both name"
     `/tasks/${a.taskId}?section=reply`,
   );
   assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
-  assert.equal(await card.getByText("No operator decision needed.").count(), 0);
 });
 
 test("The strip and decision card follow the server's attention codes, not a client derivation", async (_t, j) => {
@@ -771,9 +827,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
   );
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
-  await strip
-    .getByRole("button", { name: "Next: you · inspect execution" })
-    .click();
+  assert.equal(await strip.locator(".task-next").count(), 0);
   const card = page.locator("section#decisions");
   assert.equal(
     await card
@@ -784,15 +838,9 @@ test("The strip and decision card follow the server's attention codes, not a cli
   // cab records a routing fallback itself: plain text, never an operator button.
   codes = ["lead-review"];
   await page.reload();
-  await strip
-    .getByText("Next: cab · recording routing fallback", { exact: true })
-    .waitFor();
-  assert.equal(
-    await strip
-      .getByRole("button", { name: /recording routing fallback/ })
-      .count(),
-    0,
-  );
+  await strip.waitFor();
+  await strip.locator("[data-task-reason]").waitFor();
+  assert.equal(await strip.getByText(/routing fallback/).count(), 0);
   // The decision card offers the operator nothing to do for it.
   assert.equal(
     await card
@@ -801,6 +849,174 @@ test("The strip and decision card follow the server's attention codes, not a cli
     0,
   );
 });
+
+for (const [label, viewport] of [
+  ["desktop", { width: 1366, height: 900 }],
+  ["phone", { width: 390, height: 844 }],
+] as const)
+  test(`normal live writer/capacity stays on Execution while uncertainty pins Decisions and holds (${label})`, async (_t, j) => {
+    const fixture = await openFixture(j);
+    const a = await seed(fixture.f);
+    const { web, page } = await fixture.launch(viewport);
+    let uncertain = false,
+      unreadyAndRejected = false;
+    await page.route(
+      (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+      async (route) => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.data.task.ready = !unreadyAndRejected;
+        json.data.admission = unreadyAndRejected
+          ? { eligible: false, reasons: ["task-unready"] }
+          : { eligible: true, reasons: [] };
+        if (json.data.project) json.data.project.paused = false;
+        json.data.execution.state = uncertain ? "uncertain" : "running";
+        json.data.execution.holds.writer = !uncertain;
+        json.data.execution.holds.capacity = !uncertain;
+        json.data.execution.holds.uncertainty = uncertain;
+        json.data.waits = uncertain
+          ? []
+          : [{ code: "capacity", fix: null, links: [] }];
+        json.data.attention.codes = uncertain
+          ? [
+              "execution-uncertain",
+              ...(unreadyAndRejected ? ["completion-rejected"] : []),
+            ]
+          : [];
+        json.data.attention.count = json.data.attention.codes.length;
+        json.data.executionRecovery = {
+          holds: {
+            stop: false,
+            writer: !uncertain,
+            capacity: !uncertain,
+            uncertainty: uncertain,
+            task: false,
+          },
+          evidenceAvailable: true,
+          omittedCount: 0,
+          records: [],
+        };
+        await route.fulfill({ response, json });
+      },
+    );
+    await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+    // The inspector renders with the task read, so the card's absence is settled.
+    await page
+      .getByText("Holds · 0", { exact: true })
+      .waitFor({ state: "attached" });
+    assert.equal(await page.locator("#decisions[data-pinned]").count(), 0);
+    assert.equal(await page.locator("#decisions").isHidden(), true);
+    await taskTab(page, "Execution").click();
+    await page
+      .locator("#execution")
+      .getByText("Writer ownership", { exact: true })
+      .waitFor();
+    await page
+      .locator("#execution")
+      .getByText("Capacity", { exact: true })
+      .waitFor();
+    uncertain = true;
+    await page.reload();
+    await openTaskTab(page, "Overview");
+    const decisions = page.locator("#decisions[data-pinned]");
+    await decisions.waitFor();
+    const inspectorFold = page.locator(".task-inspector .inspector-fold");
+    if ((await inspectorFold.getAttribute("open")) === null)
+      await inspectorFold.locator(":scope > summary").click();
+    await page.getByText("Holds · 1", { exact: true }).waitFor();
+    await page
+      .locator('aside[aria-label="Task context"]')
+      .getByText("Uncertainty", { exact: true })
+      .waitFor();
+    await decisions.getByText("Uncertainty", { exact: true }).waitFor();
+    await captureBrowserEvidence(page, `task-attention-${label}`);
+    // Uncertainty alone keeps the phone banner, and the collapse it toggles always reopens.
+    if (label === "phone") {
+      const banner = decisions.getByRole("button", {
+        name: "Waiting on you",
+        exact: true,
+      });
+      await banner.click();
+      assert.equal(await banner.getAttribute("aria-expanded"), "false");
+      await decisions
+        .getByText("Uncertainty", { exact: true })
+        .waitFor({ state: "hidden" });
+      await banner.click();
+      await decisions.getByText("Uncertainty", { exact: true }).waitFor();
+    }
+
+    unreadyAndRejected = true;
+    await page.reload();
+    await page.locator("#decisions[data-pinned]").waitFor();
+    if ((await inspectorFold.getAttribute("open")) === null)
+      await inspectorFold.locator(":scope > summary").click();
+    await page
+      .locator('aside[aria-label="Task context"]')
+      .getByText("Holds · 3", { exact: true })
+      .waitFor();
+    const inspector = page.locator('aside[aria-label="Task context"]');
+    await inspector
+      .getByText("Execution held (task not ready)", { exact: true })
+      .waitFor();
+    await inspector
+      .getByText("Completion requires review", { exact: true })
+      .waitFor();
+    await decisions
+      .getByText("Execution held (task not ready)", { exact: true })
+      .waitFor();
+    await decisions.getByRole("link", { name: "Message the lead" }).waitFor();
+  });
+
+for (const [label, viewport] of [
+  ["desktop", { width: 1366, height: 900 }],
+  ["phone", { width: 390, height: 844 }],
+] as const)
+  test(`an open question pins the card without repeating normal live capacity/writer holds (${label})`, async (_t, j) => {
+    const fixture = await openFixture(j);
+    const a = await seedOwnQuestion(fixture.f);
+    const { web, page } = await fixture.launch(viewport);
+    await page.route(
+      (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+      async (route) => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.data.task.ready = true;
+        json.data.admission = { eligible: true, reasons: [] };
+        if (json.data.project) json.data.project.paused = false;
+        json.data.execution.state = "running";
+        json.data.execution.holds.writer = true;
+        json.data.execution.holds.capacity = true;
+        json.data.waits = [{ code: "capacity", fix: null, links: [] }];
+        json.data.executionRecovery = {
+          holds: {
+            stop: false,
+            writer: true,
+            capacity: true,
+            uncertainty: false,
+            task: false,
+          },
+          evidenceAvailable: true,
+          omittedCount: 0,
+          records: [],
+        };
+        await route.fulfill({ response, json });
+      },
+    );
+    await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+    const decisions = page.locator("#decisions[data-pinned]");
+    await decisions.waitFor();
+    assert.equal(
+      await decisions.getByText(/Writer ownership|Capacity/).count(),
+      0,
+    );
+    const inspector = page.locator('aside[aria-label="Task context"]');
+    const inspectorFold = inspector.locator(".inspector-fold");
+    if ((await inspectorFold.getAttribute("open")) === null)
+      await inspectorFold.locator(":scope > summary").click();
+    await inspector.getByText("Holds · 1", { exact: true }).waitFor();
+    await inspector.getByText("Question pending", { exact: false }).waitFor();
+    await captureBrowserEvidence(page, `task-question-running-${label}`);
+  });
 
 for (const engine of [
   { name: "chromium", type: chromium },
@@ -914,8 +1130,8 @@ for (const engine of [
         () => document.activeElement?.textContent === "Resume…",
       );
       assert.match(
-        (await page.locator("[data-task-readiness]").textContent()) ?? "",
-        /^Stopping; effects may continue/,
+        (await page.locator("[data-task-reason]").textContent()) ?? "",
+        /^effects may continue/,
       );
 
       // Resume confirms on its safe choice, clears only the Stop and offers Stop… again.
@@ -1971,7 +2187,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   assert.deepEqual(commands, []);
 });
 
-test("An open approval leads Overview and stays reachable from every tab through the strip", async (_t, j) => {
+test("An open approval leads Overview and stays reachable from every tab in Decisions and holds", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedOwnApproval(fixture.f);
   const { web, page, commands } = await fixture.launch();
@@ -1998,7 +2214,7 @@ test("An open approval leads Overview and stays reachable from every tab through
   await page.clock.install();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
-  await strip.getByText("No operator decision", { exact: true }).waitFor();
+  await strip.waitFor();
   await openTaskTab(page, "Files");
   const files = taskTab(page, "Files");
   await files.focus();
@@ -2008,22 +2224,17 @@ test("An open approval leads Overview and stays reachable from every tab through
   );
   await page.clock.runFor(15000);
   await polled;
-  const next = strip.getByRole("button", {
-    name: "Next: you · review material & decide",
-  });
-  await next.waitFor();
-  assert.equal(await next.getAttribute("data-operator"), "true");
+  await page
+    .locator("#decisions[data-attention]")
+    .waitFor({ state: "attached" });
   // The arriving request moves neither the tab nor the focus.
   assert.equal(await selectedTab(page), "Files");
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
     "Files",
   );
-  // The strip's button opens Overview at the decision card.
-  await next.click();
-  await page.waitForFunction(
-    () => document.activeElement?.closest("#decisions") !== null,
-  );
+  // The compact strip has no second next-actor control; Overview holds the request.
+  await openTaskTab(page, "Overview");
   assert.equal(await selectedTab(page), "Overview");
 
   // The decision card leads with the approval and decides nothing itself.
@@ -2245,7 +2456,7 @@ test("An imported task separates read-only GitHub source from cab execution", as
     "cab execution",
   );
   assert.match(
-    await strip.locator("[data-task-readiness]").innerText(),
+    await strip.locator("[data-task-reason]").innerText(),
     /waiting on outside\/repo#7/,
   );
   await captureBrowserEvidence(page, "1366-task-detail-imported", {
@@ -2399,7 +2610,7 @@ async function serveApprovals(page: Page, taskId: string, ids: string[]) {
 
 const approvalHold = "Execution held (approval needs a decision)";
 
-test("The decision card and inspector list only the other open approvals as holds", async (_t, j) => {
+test("The decision card and inspector do not repeat open approvals as merged holds", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedOwnApproval(fixture.f);
   const { web, page } = await fixture.launch();
@@ -2413,32 +2624,30 @@ test("The decision card and inspector list only the other open approvals as hold
   );
   const holds = page.locator("section#decisions .question-holds"),
     aside = page.getByRole("complementary", { name: "Task context" }),
-    card = page.locator("section#decisions"),
-    // The merged approval wait, which the card's rows and hold line already cover.
-    waitLabel = /Approval needs a decision/;
-  // Two open approvals, one in view: the other is the hold, once on each surface.
-  await holds.getByText(approvalHold, { exact: true }).waitFor();
-  assert.equal(await holds.getByText(approvalHold).count(), 1);
-  // Two request rows, the paused project and the other approval.
-  await aside.getByText("Holds · 4", { exact: true }).waitFor();
-  assert.equal(await aside.getByText(approvalHold).count(), 1);
-  assert.equal(await card.getByText(approvalHold).count(), 1);
-  assert.equal(await card.getByText(waitLabel).count(), 0);
+    card = page.locator("section#decisions");
+  await holds.getByText("Project paused", { exact: true }).waitFor();
+  assert.equal(
+    await card.getByText("Project paused", { exact: true }).count(),
+    1,
+  );
+  assert.equal(await holds.getByText(approvalHold).count(), 0);
+  // Both approval rows and the pause each appear once in the inspector projection.
+  await aside.getByText("Holds · 3", { exact: true }).waitFor();
+  assert.equal(await aside.getByText("Approval pending").count(), 2);
+  assert.equal(await card.getByText(approvalHold).count(), 0);
 
   // Only the approval in view: it is not a hold on itself.
   await serveApprovals(page, a.taskId, [a.interactionId]);
   await page.reload();
   await aside.getByText("Holds · 2", { exact: true }).waitFor();
-  assert.equal(await page.getByText(approvalHold).count(), 0);
-  assert.equal(await card.getByText(waitLabel).count(), 0);
+  assert.equal(await card.getByText(approvalHold).count(), 0);
 
-  // Nothing selected: both approvals are rows already, so neither surface repeats them as a hold.
+  // Nothing selected: both approvals remain their own rows.
   await serveApprovals(page, a.taskId, [a.interactionId, other]);
   await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await aside.getByText("Holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
-  assert.equal(await page.getByText(approvalHold).count(), 0);
-  assert.equal(await card.getByText(waitLabel).count(), 0);
+  assert.equal(await card.getByText(approvalHold).count(), 0);
 });
 
 const refreshTask = async (page: Page, taskId: string) => {
@@ -4416,10 +4625,7 @@ for (const engine of ["chromium", "webkit"] as const)
       polled = taskRead();
       await page.clock.runFor(15000);
       await polled;
-      await page
-        .locator("[data-task-strip]")
-        .getByRole("button", { name: "Next: you · review material & decide" })
-        .waitFor();
+      await page.locator("#decisions").waitFor();
       await unchanged("arriving approval");
 
       // Leave for another view and press Back: same cards, same reading position. The

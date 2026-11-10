@@ -6,24 +6,35 @@ import {
   taskAcceptsWrites,
   workAcceptsWrites,
 } from "../core/project-lifecycle.js";
-import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
+import type {
+  BoundTurnRecoveryBlocker,
+  ReleaseBlocker,
+} from "../core/recovery-contracts.js";
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
-import { DomainConflictError, TaskNotOpenError } from "../core/domain.js";
+import {
+  DomainConflictError,
+  migrateCapacityLimits,
+  TaskNotOpenError,
+} from "../core/domain.js";
 import { executionIntentStateSchema } from "../core/execution-runtime.js";
 import type { CommandReceipt } from "../operator/contracts.js";
 import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
   historicalNoTurnAdoptionSchema,
+  rejectedRequestHoldReason,
   replaceConversationCommandSchema,
   type ArchivedResumeRejection,
   type HistoricalPreTurnAdoption,
-  type HistoricalNoTurnAdoption,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
 import { createDraftingTable } from "./drafting.js";
-import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
+import {
+  recoveryReceiptSchema,
+  releaseCommandSchema,
+  releaseResultSchema,
+} from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -49,6 +60,12 @@ import type {
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
 import { previousHarnessHomeMessage } from "./runtime-retention.js";
+import {
+  type PreTurnFailureClass,
+  type PreTurnStage,
+  preTurnRefusalPrefix,
+  releasedRefusalReason,
+} from "./pre-turn-failure.js";
 import type { TurnPlugin } from "./runtime-retention.js";
 import { nativeHarnessHome } from "./runtime-retention.js";
 
@@ -573,6 +590,15 @@ export class ExecutionState {
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       reason TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS execution_pre_turn_refusals (
+      workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      id TEXT NOT NULL UNIQUE,
+      origin TEXT NOT NULL CHECK(origin IN ('runtime','operator-adopted')),
+      stage TEXT CHECK(stage IN ('thread','resume','bound')),
+      failureClass TEXT CHECK(failureClass IN ('response-rejected','request-rejected','outcome-unknown')),
+      threadId TEXT,
+      CHECK((origin = 'runtime') = (stage IS NOT NULL AND failureClass IS NOT NULL))
+    );
     CREATE TABLE IF NOT EXISTS turn_request_restarts (
       refusedWorkId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       workId TEXT NOT NULL UNIQUE,
@@ -582,14 +608,20 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS execution_capacity_reservations (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       projectId TEXT,
-      admittedAt INTEGER NOT NULL DEFAULT (unixepoch())
+      admittedAt INTEGER NOT NULL DEFAULT (unixepoch()),
+      lead INTEGER NOT NULL DEFAULT 0 CHECK(lead IN (0,1)),
+      agentId TEXT
     );
     CREATE TABLE IF NOT EXISTS scheduler_capacity_limits (
       singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-      globalLimit INTEGER NOT NULL CHECK(globalLimit > 0)
+      globalLimit INTEGER NOT NULL CHECK(globalLimit > 0),
+      minimumLeadSlots INTEGER NOT NULL DEFAULT 1 CHECK(minimumLeadSlots >= 0)
     );
     CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
       projectId TEXT PRIMARY KEY, projectLimit INTEGER NOT NULL CHECK(projectLimit > 0)
+    );
+    CREATE TABLE IF NOT EXISTS scheduler_agent_capacity_limits (
+      profileId TEXT PRIMARY KEY, agentLimit INTEGER NOT NULL CHECK(agentLimit > 0)
     );
     CREATE TABLE IF NOT EXISTS project_command_network_access (
       projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
@@ -602,6 +634,20 @@ export class ExecutionState {
       projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
     CREATE TABLE IF NOT EXISTS execution_intent_local_listening (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS project_reasoning_summaries (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_reasoning_summaries (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS project_dangerously_skip_sandbox (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_dangerously_skip_sandbox (
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
@@ -747,7 +793,7 @@ export class ExecutionState {
     );
     INSERT OR IGNORE INTO execution_power_supervision (singleton) VALUES (1);
     INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit)
-      VALUES (1, 4)`);
+      VALUES (1, 6)`);
     const recoveryIdentityColumns = this.db
       .prepare("PRAGMA table_info(execution_recovery_identities)")
       .all() as Array<{ name: string }>;
@@ -789,6 +835,7 @@ export class ExecutionState {
       this.db.exec(
         "ALTER TABLE runtime_thread_qualification ADD COLUMN codexHome TEXT",
       );
+    this.migrateCapacityClassification();
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
@@ -892,12 +939,13 @@ export class ExecutionState {
         JOIN execution_request_predecessors p ON p.workId = b.workId
         WHERE p.predecessorKnown = 0
       )`);
-    this.db.exec(`INSERT OR IGNORE INTO execution_capacity_reservations (workId, projectId)
+    this.db.exec(`INSERT OR IGNORE INTO execution_capacity_reservations
+        (workId, projectId, lead, agentId)
       SELECT e.workId, (
         SELECT a.projectId FROM task_execution_bindings b
         JOIN domain_assignments a ON a.id = b.assignmentId
         WHERE b.workId = e.workId
-      )
+      ), ${this.capacityLeadSql("e.workId")}, ${this.capacityAgentSql("e.workId")}
       FROM execution_intents e
       JOIN task_writer_admissions admitted ON admitted.workId = e.workId
       WHERE e.state IN ('held','submitting','running')`);
@@ -1877,6 +1925,53 @@ export class ExecutionState {
     return row ? row.enabled === 1 : null;
   }
 
+  /** The turn's admitted opt-in; null for historical or not yet admitted turns. */
+  reasoningSummaries(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_reasoning_summaries WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
+  }
+
+  /** Skip-sandbox the turn was admitted with; null when no admission recorded it. */
+  dangerouslySkipSandbox(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_dangerously_skip_sandbox WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
+  }
+
+  /**
+   * Whether admitting this intent now would record skip-sandbox on: the project setting is on,
+   * the work has a task binding and it is not a draft turn. Admission uses the same condition.
+   */
+  skipSandboxApplies(intentId: string, projectId: string): boolean {
+    const work = this.db
+      .prepare("SELECT workId FROM execution_intents WHERE id = ?")
+      .get(intentId) as { workId: string } | undefined;
+    if (!work) return false;
+    return (
+      (
+        this.db
+          .prepare(`SELECT EXISTS (
+            SELECT 1 FROM project_dangerously_skip_sandbox p
+            JOIN task_execution_bindings b ON b.workId = ?
+            WHERE p.projectId = ? AND p.enabled = 1
+            ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}
+          ) AS applies`)
+          .get(
+            work.workId,
+            projectId,
+            ...(this.hasTurnRequests ? [work.workId] : []),
+          ) as { applies: number }
+      ).applies === 1
+    );
+  }
+
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
   workHarness(workId: string): ExecutionHarness {
     const bound = this.taskBinding(workId)?.harness;
@@ -2220,11 +2315,12 @@ export class ExecutionState {
   }
 
   /**
-   * Witness-only proof that an assignment request was refused at admission before it ran:
-   * the exact held request and intent still match their immutable revision refusal, and
-   * nothing records a thread, turn, writer admission, capacity reservation, recovery
-   * identity, pending effect or stop target. It does not look at the refusal's reasons
-   * or the work identity; admission applies again when the work is requeued.
+   * Witness-only proof that an assignment request was refused before it ran: the exact held
+   * request and intent still match their immutable refusal, and nothing records a turn,
+   * writer admission, capacity reservation, pending effect or stop target. A refusal at
+   * admission also records no thread or recovery identity; a pre-turn refusal may keep the
+   * idle thread it bound and its turn-less recovery identity. It does not look at the
+   * refusal's reasons or the work identity; admission applies again when the work is requeued.
    */
   refusedBeforeStart(workId: string): boolean {
     return this.refusedBeforeStartRow(workId) !== undefined;
@@ -2246,12 +2342,17 @@ export class ExecutionState {
         binding.instructionsRevision AS bindingInstructionsRevision,
         binding.profileRevision AS bindingProfileRevision,
         refusal.reason AS refusalReason,
+        preTurn.workId IS NOT NULL AS preTurnRefused,
+        preTurn.threadId AS preTurnThreadId,
         EXISTS (SELECT 1 FROM task_writer_admissions admission
           WHERE admission.workId = intent.workId) AS hasWriterAdmission,
         EXISTS (SELECT 1 FROM execution_capacity_reservations capacity
           WHERE capacity.workId = intent.workId) AS hasCapacityReservation,
+        -- A pre-turn refusal keeps the identity it was admitted with: no turn, its own thread.
         EXISTS (SELECT 1 FROM execution_recovery_identities recovery
-          WHERE recovery.workId = intent.workId) AS hasRecoveryIdentity,
+          WHERE recovery.workId = intent.workId AND (preTurn.workId IS NULL
+            OR recovery.turnId IS NOT NULL
+            OR recovery.threadId IS NOT preTurn.threadId)) AS hasRecoveryIdentity,
         EXISTS (SELECT 1 FROM execution_pending_effects effect
           WHERE effect.workId = intent.workId AND effect.state = 'pending')
           AS hasPendingEffect,
@@ -2261,6 +2362,7 @@ export class ExecutionState {
         JOIN execution_intents intent ON intent.workId = request.workId
         JOIN task_execution_bindings binding ON binding.workId = intent.workId
         JOIN execution_request_refusals refusal ON refusal.workId = intent.workId
+        LEFT JOIN execution_pre_turn_refusals preTurn ON preTurn.workId = intent.workId
         JOIN domain_tasks task ON task.id = request.taskId
           AND task.projectId = request.projectId
         JOIN domain_assignments assignment ON assignment.id = request.assignmentId
@@ -2290,6 +2392,8 @@ export class ExecutionState {
           bindingInstructionsRevision: number;
           bindingProfileRevision: number;
           refusalReason: string;
+          preTurnRefused: number;
+          preTurnThreadId: string | null;
           hasWriterAdmission: number;
           hasCapacityReservation: number;
           hasRecoveryIdentity: number;
@@ -2316,19 +2420,22 @@ export class ExecutionState {
       row.bindingAssignmentVersion !== row.assignmentVersion ||
       row.bindingInstructionsRevision !== row.instructionsRevision ||
       row.bindingProfileRevision !== row.profileRevision ||
-      row.threadId !== null ||
+      row.threadId !== (row.preTurnRefused ? row.preTurnThreadId : null) ||
       row.turnId !== null ||
       row.hasWriterAdmission !== 0 ||
       row.hasCapacityReservation !== 0 ||
       row.hasRecoveryIdentity !== 0 ||
       row.hasPendingEffect !== 0 ||
       row.hasStopTarget !== 0 ||
-      !row.refusalReason.startsWith(refusedRevisionPrefix) ||
-      !row.refusalReason.endsWith(")")
+      (row.preTurnRefused
+        ? !row.refusalReason.startsWith(preTurnRefusalPrefix)
+        : !row.refusalReason.startsWith(refusedRevisionPrefix) ||
+          !row.refusalReason.endsWith(")"))
     )
       return undefined;
     return {
       id,
+      preTurn: row.preTurnRefused !== 0,
       draftTurn: row.draftTurn,
       taskId: row.taskId,
       assignmentId: row.assignmentId,
@@ -2340,8 +2447,9 @@ export class ExecutionState {
   /**
    * A revision refusal is ignorable only when it is `refusedBeforeStart`, its reasons are
    * the safe revision changes, and it identifies canonical initial work or a durable inbox
-   * event. Current assignment eligibility is checked by admission/delivery withdrawal,
-   * not here, so this historical proof remains stable after later completion.
+   * event. A draft turn refused before any turn was sent also qualifies: its message was
+   * never delivered. Current assignment eligibility is checked by admission/delivery
+   * withdrawal, not here, so this historical proof remains stable after later completion.
    */
   isNeverAdmittedRefusedAssignmentWork(workId: string): boolean {
     if (
@@ -2353,6 +2461,9 @@ export class ExecutionState {
       return false;
     const row = this.refusedBeforeStartRow(workId);
     if (!row) return false;
+    // A pre-turn refusal sent no turn: a draft turn's message was never delivered, so it is
+    // given back like an admission refusal. Other work was admitted and is not withdrawn.
+    if (row.preTurn) return row.draftTurn === 1;
     const id = row.id;
     const initial = id === `assignment:${row.assignmentId}:initial`;
     const refusal = row.refusalReason;
@@ -3415,74 +3526,6 @@ export class ExecutionState {
       return undefined;
     }
   }
-  adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption): {
-    witnessId: string;
-    workId: string;
-  } {
-    const value = historicalNoTurnAdoptionSchema.parse(command);
-    const replay = this.preTurnCommandReplay("adopt-no-turn", value);
-    if (replay)
-      return z
-        .object({ witnessId: z.string().uuid(), workId: z.string().min(1) })
-        .strict()
-        .parse(replay);
-    return transaction(this.db, () => {
-      const context = this.noTurnContext(value.workId);
-      const intent = this.db
-        .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      const request = this.db
-        .prepare("SELECT state,reason FROM turn_requests WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      if (
-        !context ||
-        intent?.state !== "held" ||
-        request?.state !== "held" ||
-        intent.reason !== value.retainedReason ||
-        request.reason !== value.retainedReason ||
-        context.workRevision !== value.workRevision ||
-        context.requestSequence !== value.requestSequence ||
-        context.conversationRevision !== value.conversationRevision ||
-        context.writerSequence !== value.writerSequence ||
-        context.processId !== value.processIdentity.processId ||
-        context.processStartedAt !== value.processIdentity.processStartedAt ||
-        context.bootId !== value.processIdentity.bootId ||
-        !this.db
-          .prepare(
-            "SELECT 1 FROM execution_capacity_reservations WHERE workId=?",
-          )
-          .get(value.workId) ||
-        this.db
-          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical no-turn adoption does not match the exact held generation",
-        );
-      if (
-        this.db
-          .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical no-turn submission is already recorded for this generation",
-        );
-      const result = { witnessId: randomUUID(), workId: value.workId };
-      this.db
-        .prepare(
-          "INSERT INTO execution_no_turn_submissions (id,workId,contextMaterial,evidenceMaterial) VALUES (?,?,?,?)",
-        )
-        .run(
-          result.witnessId,
-          value.workId,
-          canonicalMaterial(context),
-          canonicalMaterial(value),
-        );
-      this.recordPreTurnCommand("adopt-no-turn", value, result);
-      return result;
-    });
-  }
-
   private witnessForWork(workId: string):
     | {
         id: string;
@@ -3567,77 +3610,8 @@ export class ExecutionState {
           canonicalMaterial(context),
           canonicalMaterial(value),
         );
-      this.hold(
-        intent.id,
-        `Runtime submission or observation uncertain: Error: ${JSON.stringify(value.error)}`,
-      );
+      this.hold(intent.id, rejectedRequestHoldReason(value.error));
       return true;
-    });
-  }
-  adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption): {
-    witnessId: string;
-    workId: string;
-  } {
-    const value = historicalPreTurnAdoptionSchema.parse(command);
-    const replay = this.preTurnCommandReplay("adopt", value);
-    if (replay)
-      return z
-        .object({ witnessId: z.string().uuid(), workId: z.string().min(1) })
-        .strict()
-        .parse(replay);
-    return transaction(this.db, () => {
-      const context = this.preTurnContext(value.workId);
-      const intent = this.db
-        .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      const request = this.db
-        .prepare("SELECT state,reason FROM turn_requests WHERE workId=?")
-        .get(value.workId) as { state: string; reason: string } | undefined;
-      if (
-        !context ||
-        intent?.state !== "held" ||
-        request?.state !== "held" ||
-        intent.reason !== value.retainedReason ||
-        request.reason !== value.retainedReason ||
-        value.retainedReason !==
-          `Runtime submission or observation uncertain: Error: ${JSON.stringify(value.rpcError)}` ||
-        context.workRevision !== value.workRevision ||
-        context.requestSequence !== value.requestSequence ||
-        context.predecessorWorkId !== value.predecessorWorkId ||
-        context.predecessorThreadId !== value.predecessorThreadId ||
-        context.processId !== value.processIdentity.processId ||
-        context.processStartedAt !== value.processIdentity.processStartedAt ||
-        context.bootId !== value.processIdentity.bootId ||
-        !this.db
-          .prepare(
-            "SELECT 1 FROM execution_capacity_reservations WHERE workId=?",
-          )
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Historical pre-turn adoption does not match the exact held generation",
-        );
-      if (
-        this.db
-          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Pre-turn rejection witness is already recorded for this generation",
-        );
-      const result = { witnessId: randomUUID(), workId: value.workId };
-      this.db
-        .prepare(
-          "INSERT INTO execution_pre_turn_rejections (id,workId,source,contextMaterial,evidenceMaterial) VALUES (?,?,'operator-adopted',?,?)",
-        )
-        .run(
-          result.witnessId,
-          value.workId,
-          canonicalMaterial(context),
-          canonicalMaterial(value),
-        );
-      this.recordPreTurnCommand("adopt", value, result);
-      return result;
     });
   }
   replaceConversationCommand(command: ReplaceConversationCommand): {
@@ -4817,6 +4791,155 @@ export class ExecutionState {
     });
   }
 
+  /**
+   * The durable checks a release reruns in its transaction: a held assignment generation
+   * whose saved thread and turn are null. cab saves the thread binding before it calls
+   * `startTurn`, so such a generation never sent a turn, whatever its hold reason says.
+   */
+  releaseBlockers(workId: string): ReleaseBlocker[] {
+    if (!this.hasTurnRequests) return ["context-unavailable"];
+    const binding = this.taskBinding(workId);
+    const record =
+      binding &&
+      this.recoveryFor(
+        binding.assignmentId,
+        binding.assignmentVersion,
+        workId,
+      )[0];
+    const request = this.db
+      .prepare("SELECT kind FROM turn_requests WHERE workId=?")
+      .get(workId) as { kind: string } | undefined;
+    // The release command binds the work revision, so a generation without one can't be released.
+    if (
+      !binding ||
+      !record ||
+      request?.kind !== "assignment" ||
+      record.generation.workRevision === null
+    )
+      return ["context-unavailable"];
+    const identity = this.db
+      .prepare(
+        "SELECT threadId, turnId FROM execution_recovery_identities WHERE workId=?",
+      )
+      .get(workId) as { threadId: string | null; turnId: string | null };
+    const held = this.heldGenerationFacts(record);
+    const blocked: ReleaseBlocker[] = [];
+    if (held.reconciled) blocked.push("already-reconciled");
+    else if (held.notHeld) blocked.push("not-held");
+    if (!record.holds.capacity) blocked.push("ownership-released");
+    if (record.intent.threadId !== null || identity.threadId !== null)
+      blocked.push("thread-bound");
+    if (record.intent.turnId !== null || identity.turnId !== null)
+      blocked.push("turn-bound");
+    if (held.witness) blocked.push("witness-present");
+    if (
+      record.holds.stop ||
+      this.stopTarget(workId) !== undefined ||
+      this.taskHold(binding.taskId) !== undefined ||
+      held.pendingEffects
+    )
+      blocked.push("independent-hold");
+    if (held.knownSurvivor) blocked.push("known-survivor");
+    if (!this.projectWorkWritable(workId)) blocked.push("project-archived");
+    return blocked;
+  }
+
+  /**
+   * Releases a held generation that never sent a turn: the same refusal a pre-turn
+   * failure records, so Start again applies with no operator evidence. Reruns
+   * `releaseBlockers` and `extra` inside the transaction and refuses unless the result
+   * passes the proof Start again reads. With a command, it is bound to the generation the
+   * operator read and replays by key.
+   */
+  releaseUnboundHold(
+    workId: string,
+    extra: readonly ReleaseBlocker[],
+    command?: z.infer<typeof releaseCommandSchema>,
+  ): { id: string; workId: string; state: "refused" } {
+    const value = command && releaseCommandSchema.parse(command);
+    if (value) {
+      const replay = this.preTurnCommandReplay("release", value);
+      if (replay) return releaseResultSchema.parse(replay);
+    }
+    return transaction(this.db, () => {
+      assertOwnedWorkWritable(this.db, workId);
+      const blocked = [...new Set([...this.releaseBlockers(workId), ...extra])];
+      if (blocked.length)
+        throw new RecoveryRejectedError(
+          `Release blocked: ${blocked.join(", ")}`,
+        );
+      if (value) {
+        const current = this.db
+          .prepare(`SELECT revision.workRevision, request.sequence, binding.assignmentId
+            FROM turn_requests request
+            JOIN task_execution_bindings binding ON binding.workId=request.workId
+            LEFT JOIN task_work_revisions revision ON revision.workId=request.workId
+            WHERE request.workId=?`)
+          .get(workId) as
+          | {
+              workRevision: number | null;
+              sequence: number;
+              assignmentId: string;
+            }
+          | undefined;
+        if (
+          value.workId !== workId ||
+          current?.assignmentId !== value.assignmentId ||
+          current.workRevision !== value.workRevision ||
+          current.sequence !== value.requestSequence
+        )
+          throw new RecoveryRejectedError(
+            "Release does not match the held generation read",
+          );
+      }
+      const result = { id: randomUUID(), workId, state: "refused" as const };
+      const held = this.db
+        .prepare("SELECT reason FROM execution_intents WHERE workId = ?")
+        .get(workId) as { reason: string | null };
+      const reason = releasedRefusalReason(held.reason);
+      this.db
+        .prepare(
+          "UPDATE execution_intents SET reason = ? WHERE workId = ? AND state = 'held'",
+        )
+        .run(reason, workId);
+      // The table admits only a runtime-staged origin or this stage-less one; the reason names a release.
+      this.recordPreTurnRefusalWithin(
+        workId,
+        reason,
+        {
+          origin: "operator-adopted",
+          stage: null,
+          failureClass: null,
+          threadId: null,
+        },
+        result.id,
+      );
+      if (!this.refusedBeforeStart(workId))
+        throw new RecoveryRejectedError(
+          "Release cannot refuse this generation before it ran",
+        );
+      if (value) this.recordPreTurnCommand("release", value, result);
+      return result;
+    });
+  }
+
+  /** Held generations with no saved thread or turn: the candidates startup tries to release. */
+  unboundHeldWorkIds(): string[] {
+    if (!this.hasTurnRequests) return [];
+    return (
+      this.db
+        .prepare(`SELECT intent.workId FROM execution_intents intent
+          JOIN turn_requests request ON request.workId = intent.workId
+          WHERE intent.state = 'held' AND request.kind = 'assignment'
+            AND intent.threadId IS NULL AND intent.turnId IS NULL
+            -- Refused generations stay held for history but no longer hold capacity.
+            AND EXISTS (SELECT 1 FROM execution_capacity_reservations capacity
+              WHERE capacity.workId = intent.workId)
+          ORDER BY intent.rowid`)
+        .all() as { workId: string }[]
+    ).map((r) => r.workId);
+  }
+
   /** Read-only ownership/effect checks shared by bound recovery eligibility and its transaction. */
   boundTurnRecoveryBlockers(
     workId: string,
@@ -4854,10 +4977,9 @@ export class ExecutionState {
       current?.turnId !== current?.actualTurnId
     )
       blocked.push("identity-changed");
-    if (record.receipt || record.intent.state === "reconciled")
-      blocked.push("already-reconciled");
-    else if (record.intent.state !== "held" || record.request?.state !== "held")
-      blocked.push("not-held");
+    const held = this.heldGenerationFacts(record);
+    if (held.reconciled) blocked.push("already-reconciled");
+    else if (held.notHeld) blocked.push("not-held");
     if (!record.holds.writer || !record.holds.capacity)
       blocked.push("ownership-released");
     if (
@@ -4867,21 +4989,34 @@ export class ExecutionState {
       record.generation.workRevision === null
     )
       blocked.push("bound-identity-missing");
-    if (record.preTurnRejection || record.noTurnSubmission)
-      blocked.push("other-witness");
+    if (held.witness) blocked.push("other-witness");
+    if (held.pendingEffects) blocked.push("pending-effects");
+    if (held.knownSurvivor) blocked.push("known-survivor");
+    return [...new Set(blocked)];
+  }
+
+  /**
+   * The held-generation facts release and bound-turn recovery both check, so a new hold
+   * or effect kind changes both: settled, still held, witnessed, pending effects other
+   * than its result, and a known survivor.
+   */
+  private heldGenerationFacts(record: RecoveryRecord) {
     const effects = this.db
       .prepare(
         "SELECT effectKey FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
       )
-      .all(workId) as { effectKey: string }[];
-    if (effects.some((e) => e.effectKey !== knownSurvivorEffect))
-      blocked.push("pending-effects");
-    if (
-      effects.some((e) => e.effectKey === knownSurvivorEffect) ||
-      record.observations.some((o) => o.kind === "known-survivor")
-    )
-      blocked.push("known-survivor");
-    return [...new Set(blocked)];
+      .all(record.workId) as { effectKey: string }[];
+    return {
+      reconciled:
+        Boolean(record.receipt) || record.intent.state === "reconciled",
+      notHeld:
+        record.intent.state !== "held" || record.request?.state !== "held",
+      witness: Boolean(record.preTurnRejection || record.noTurnSubmission),
+      pendingEffects: effects.some((e) => e.effectKey !== knownSurvivorEffect),
+      knownSurvivor:
+        effects.some((e) => e.effectKey === knownSurvivorEffect) ||
+        record.observations.some((o) => o.kind === "known-survivor"),
+    };
   }
 
   resolveHeldExecution(
@@ -5191,6 +5326,124 @@ export class ExecutionState {
       AND NOT EXISTS (SELECT 1 FROM task_execution_bindings b JOIN domain_tasks t ON t.id=b.taskId JOIN domain_projects p ON p.id=t.projectId WHERE b.workId=${column} AND p.archived=1)`;
   }
 
+  /** 1 for a lead turn (a task's lead assignment, draft turns included, or a drafting run). */
+  private capacityLeadSql(workId: string): string {
+    const lead =
+      this.hasTable("task_lead_bindings") &&
+      this.hasTable("task_execution_bindings")
+        ? `EXISTS (SELECT 1 FROM task_execution_bindings b
+            JOIN task_lead_bindings l ON l.taskId = b.taskId AND l.assignmentId = b.assignmentId
+            WHERE b.workId = ${workId})`
+        : "0";
+    const drafting = this.hasTable("turn_requests")
+      ? `EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ${workId} AND r.kind = 'drafting')`
+      : "0";
+    return `(${lead} OR ${drafting})`;
+  }
+
+  /** The agent (profile) a turn runs as; null for direct work. */
+  private capacityAgentSql(workId: string): string {
+    const assignment = this.hasTable("domain_assignments")
+      ? `(SELECT a.profileId FROM task_execution_bindings b
+          JOIN domain_assignments a ON a.id = b.assignmentId WHERE b.workId = ${workId})`
+      : "NULL";
+    const drafting = this.hasTable("drafting_runs")
+      ? `(SELECT d.profileId FROM drafting_runs d WHERE 'drafting:' || d.runId = ${workId})`
+      : "NULL";
+    return `COALESCE(${assignment}, ${drafting})`;
+  }
+
+  /** Stores from before lead slots: classify held reservations once. */
+  private migrateCapacityClassification(): void {
+    const columns = (
+      this.db
+        .prepare("PRAGMA table_info(execution_capacity_reservations)")
+        .all() as Array<{ name: string }>
+    ).map(({ name }) => name);
+    // One transaction, so an interrupted upgrade never leaves one column or unclassified rows.
+    if (!columns.includes("lead"))
+      transaction(this.db, () => {
+        this.db.exec(`ALTER TABLE execution_capacity_reservations
+          ADD COLUMN lead INTEGER NOT NULL DEFAULT 0 CHECK(lead IN (0,1))`);
+        this.db.exec(
+          "ALTER TABLE execution_capacity_reservations ADD COLUMN agentId TEXT",
+        );
+        this.db.exec(`UPDATE execution_capacity_reservations
+          SET lead = ${this.capacityLeadSql("execution_capacity_reservations.workId")},
+            agentId = ${this.capacityAgentSql("execution_capacity_reservations.workId")}`);
+      });
+    migrateCapacityLimits(this.db);
+  }
+
+  /**
+   * Why capacity holds this work, or undefined when it may start. Lead turns may use any
+   * free slot; other turns leave the unused lead slots free and count against a project
+   * override. An agent override covers every turn of that agent.
+   */
+  private capacityWaitReason(
+    workId: string,
+    projectId: string | null,
+  ): string | undefined {
+    const turn = this.db
+      .prepare(
+        `WITH turn(workId) AS (SELECT ?) SELECT ${this.capacityLeadSql("turn.workId")} AS lead,
+          ${this.capacityAgentSql("turn.workId")} AS agentId FROM turn`,
+      )
+      .get(workId) as {
+      lead: number;
+      agentId: string | null;
+    };
+    // The singleton row is seeded with the store and never deleted.
+    const { globalLimit, minimumLeadSlots } = this.db
+      .prepare(
+        "SELECT globalLimit, minimumLeadSlots FROM scheduler_capacity_limits WHERE singleton = 1",
+      )
+      .get() as { globalLimit: number; minimumLeadSlots: number };
+    const usage = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total, COALESCE(SUM(lead), 0) AS lead,
+          COALESCE(SUM(agentId = ?), 0) AS agent,
+          COALESCE(SUM(projectId = ? AND lead = 0), 0) AS project
+        FROM execution_capacity_reservations`,
+      )
+      .get(turn.agentId, projectId) as {
+      total: number;
+      lead: number;
+      agent: number;
+      project: number;
+    };
+    if (usage.total >= globalLimit)
+      return `Capacity waiting: global active-turn limit (${globalLimit})`;
+    const held = Math.max(0, minimumLeadSlots - usage.lead);
+    if (turn.lead !== 1 && usage.total >= globalLimit - held)
+      return `Capacity waiting: held for lead turns (${minimumLeadSlots})`;
+    const agentLimit =
+      turn.agentId === null
+        ? undefined
+        : (
+            this.db
+              .prepare(
+                "SELECT agentLimit FROM scheduler_agent_capacity_limits WHERE profileId = ?",
+              )
+              .get(turn.agentId) as { agentLimit: number } | undefined
+          )?.agentLimit;
+    if (agentLimit !== undefined && usage.agent >= agentLimit)
+      return `Capacity waiting: agent active-turn limit (${agentLimit})`;
+    const projectLimit =
+      turn.lead === 1 || projectId === null
+        ? undefined
+        : (
+            this.db
+              .prepare(
+                "SELECT projectLimit FROM scheduler_project_capacity_limits WHERE projectId = ?",
+              )
+              .get(projectId) as { projectLimit: number } | undefined
+          )?.projectLimit;
+    if (projectLimit !== undefined && usage.project >= projectLimit)
+      return `Capacity waiting: project active-turn limit (${projectLimit})`;
+    return undefined;
+  }
+
   holdUnfinishedOnOpen(): void {
     // An unresolved shutdown target must leave exactly today's restart hold.
     this.db.exec(
@@ -5293,43 +5546,10 @@ export class ExecutionState {
             .run(reason, pending.workId);
         return false;
       }
-      const configuredGlobalLimit = this.db
-        .prepare(
-          "SELECT globalLimit FROM scheduler_capacity_limits WHERE singleton = 1",
-        )
-        .get() as { globalLimit: number } | undefined;
-      const globalLimit = configuredGlobalLimit?.globalLimit ?? 4;
-      const globalUsage = (
-        this.db
-          .prepare(
-            "SELECT COUNT(*) AS count FROM execution_capacity_reservations",
-          )
-          .get() as { count: number }
-      ).count;
-      const projectLimit = options.projectId
-        ? ((
-            this.db
-              .prepare(
-                "SELECT projectLimit FROM scheduler_project_capacity_limits WHERE projectId = ?",
-              )
-              .get(options.projectId) as { projectLimit: number } | undefined
-          )?.projectLimit ?? 2)
-        : undefined;
-      const projectUsage = options.projectId
-        ? (
-            this.db
-              .prepare(
-                "SELECT COUNT(*) AS count FROM execution_capacity_reservations WHERE projectId = ?",
-              )
-              .get(options.projectId) as { count: number }
-          ).count
-        : 0;
-      const capacityReason =
-        globalUsage >= globalLimit
-          ? `Capacity waiting: global active-turn limit (${globalLimit})`
-          : projectLimit !== undefined && projectUsage >= projectLimit
-            ? `Capacity waiting: project active-turn limit (${projectLimit})`
-            : undefined;
+      const capacityReason = this.capacityWaitReason(
+        pending.workId,
+        options.projectId,
+      );
       if (capacityReason) {
         this.db
           .prepare(
@@ -5380,10 +5600,11 @@ export class ExecutionState {
             .prepare("SELECT workId FROM execution_intents WHERE id = ?")
             .get(id) as { workId: string }
         ).workId;
-        // Only a Codex task turn can run with command network access, and only a
-        // Claude task turn with local listening: drafting runs have no binding and
-        // stay off, as does the other harness. Writes execution_intent_network_access
-        // and execution_intent_local_listening.
+        // Only a Codex task turn can run with command network access, only a Claude
+        // task turn with local listening, and a task turn of either harness with
+        // skip-sandbox: drafting runs have no binding and stay off, as does the other
+        // harness. Writes execution_intent_network_access,
+        // execution_intent_local_listening and execution_intent_dangerously_skip_sandbox.
         for (const [intentTable, projectTable, harness] of [
           [
             "execution_intent_network_access",
@@ -5395,15 +5616,20 @@ export class ExecutionState {
             "project_local_listening",
             "claude",
           ],
+          [
+            "execution_intent_dangerously_skip_sandbox",
+            "project_dangerously_skip_sandbox",
+            "any",
+          ],
         ] as const)
           this.db
             .prepare(`INSERT OR REPLACE INTO ${intentTable} (intentId, enabled)
           SELECT ?, EXISTS (
             SELECT 1 FROM ${projectTable} p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = '${harness}')
+            WHERE p.projectId = ? AND p.enabled = 1 ${harness === "any" ? "" : `AND b.harness = '${harness}'`})
             ${
-              // A draft turn never gets either expansion.
+              // A draft turn never gets any of the expansions.
               this.hasTurnRequests
                 ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)"
                 : ""
@@ -5414,6 +5640,19 @@ export class ExecutionState {
               options.projectId,
               ...(this.hasTurnRequests ? [workId] : []),
             );
+        this.db
+          .prepare(`INSERT OR REPLACE INTO execution_intent_reasoning_summaries (intentId, enabled)
+          SELECT ?, EXISTS (
+            SELECT 1 FROM project_reasoning_summaries p
+            JOIN task_execution_bindings b ON b.workId = ?
+            WHERE p.projectId = ? AND p.enabled = 1)
+          ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}`)
+          .run(
+            id,
+            workId,
+            options.projectId,
+            ...(this.hasTurnRequests ? [workId] : []),
+          );
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations
           WHERE workId = ?`)
@@ -5434,8 +5673,10 @@ export class ExecutionState {
           SELECT workId, workspace FROM execution_intents WHERE id = ?`)
           .run(id);
         this.db
-          .prepare(`INSERT INTO execution_capacity_reservations (workId, projectId)
-          VALUES (?, ?)`)
+          .prepare(`WITH turn(workId) AS (SELECT ?)
+          INSERT INTO execution_capacity_reservations (workId, projectId, lead, agentId)
+          SELECT turn.workId, ?, ${this.capacityLeadSql("turn.workId")},
+            ${this.capacityAgentSql("turn.workId")} FROM turn`)
           .run(workId, options.projectId);
         const taskBinding = this.taskBinding(workId);
         if (taskBinding) {
@@ -5742,6 +5983,116 @@ export class ExecutionState {
         )
         .run(reason, held.workId);
     return held !== undefined;
+  }
+
+  /**
+   * Records an assignment request that failed before `startTurn` was called as refused
+   * before it ran, releasing its writer and capacity so Start again can queue it afresh.
+   * cab is the only sender of a turn, so nothing ran; a created or resumed thread may stay
+   * idle. Returns false, changing nothing, when anything else holds the execution: it is
+   * no longer submitting, a turn or other thread is bound, a Stop or task hold applies, or
+   * an effect other than its result is pending. The caller then holds it as before.
+   */
+  refusePreTurn(
+    id: string,
+    refusal: {
+      stage: PreTurnStage;
+      failureClass: PreTurnFailureClass;
+      reason: string;
+      threadId: string | null;
+    },
+  ): boolean {
+    const workId = this.get(id).workId;
+    assertOwnedWorkWritable(this.db, workId);
+    if (!this.hasTurnRequests) return false;
+    const reason = z.string().min(1).max(4000).parse(refusal.reason);
+    try {
+      return transaction(this.db, () => {
+        const intent = this.db
+          .prepare(
+            "SELECT state, threadId, turnId FROM execution_intents WHERE id = ?",
+          )
+          .get(id) as
+          | { state: string; threadId: string | null; turnId: string | null }
+          | undefined;
+        const binding = this.taskBinding(workId);
+        if (
+          intent?.state !== "submitting" ||
+          intent.turnId !== null ||
+          intent.threadId !== refusal.threadId ||
+          !binding ||
+          this.stopTarget(workId) ||
+          this.taskHold(binding.taskId) !== undefined ||
+          this.db
+            .prepare(`SELECT 1 FROM execution_pending_effects
+              WHERE workId = ? AND state = 'pending' AND effectKey != 'assignment-result'`)
+            .get(workId)
+        )
+          return false;
+        this.db
+          .prepare(
+            "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ?",
+          )
+          .run(reason, id);
+        this.recordPreTurnRefusalWithin(workId, reason, {
+          origin: "runtime",
+          ...refusal,
+        });
+        // Checked with the same proof Start again reads; anything else rolls back to a hold.
+        if (!this.refusedBeforeStart(workId))
+          throw new PreTurnRefusalUnprovenError();
+        return true;
+      });
+    } catch (error) {
+      if (error instanceof PreTurnRefusalUnprovenError) return false;
+      throw error;
+    }
+  }
+
+  /** Inside the caller's transaction, with the intent already held under `reason`. */
+  private recordPreTurnRefusalWithin(
+    workId: string,
+    reason: string,
+    refusal: {
+      origin: "runtime" | "operator-adopted";
+      stage: PreTurnStage | null;
+      failureClass: PreTurnFailureClass | null;
+      threadId: string | null;
+    },
+    id: string = randomUUID(),
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO execution_request_refusals (workId, reason) VALUES (?, ?)",
+      )
+      .run(workId, reason);
+    this.db
+      .prepare(`INSERT INTO execution_pre_turn_refusals
+        (workId, id, origin, stage, failureClass, threadId) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(
+        workId,
+        id,
+        refusal.origin,
+        refusal.stage,
+        refusal.failureClass,
+        refusal.threadId,
+      );
+    this.db
+      .prepare(
+        "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = ?",
+      )
+      .run(reason, workId);
+    this.db
+      .prepare(`UPDATE execution_pending_effects SET state = 'settled',
+        reason = 'Request refused before it ran'
+        WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'pending'`)
+      .run(workId);
+    this.db
+      .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
+      .run(workId);
+    this.db
+      .prepare("DELETE FROM task_writer_admissions WHERE workId = ?")
+      .run(workId);
   }
 
   wait(id: string, reason: string): void {
@@ -6581,6 +6932,9 @@ export class ExecutionState {
     });
   }
 }
+
+/** Rolls back a pre-turn refusal that would not read as refused before it ran. */
+class PreTurnRefusalUnprovenError extends Error {}
 
 const stopTargetSchema = z.object({
   taskId: z.string().uuid(),

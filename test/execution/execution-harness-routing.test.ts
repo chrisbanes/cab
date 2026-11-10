@@ -373,7 +373,11 @@ test("a mixed task routes each assignment, Stop and anomaly to its own harness",
   const describe = diagnostics(service, runtimes);
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
     const projectId = project(service, lead, [worker]);
@@ -462,7 +466,11 @@ test("a Claude unexpected request holds only its work with neutral text", async 
   const describe = diagnostics(service, runtimes);
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
     const projectId = project(service, lead, [worker]);
@@ -653,6 +661,7 @@ test("a first turn still waiting for capacity moves to the runtime of a re-captu
     execute(service, {
       type: "capacity.configure",
       globalLimit: 4,
+      minimumLeadSlots: 0,
       projectOverrides: { [projectId]: 1 },
     });
     runtimes.codex.holdTurns = true;
@@ -704,7 +713,11 @@ test("an unconfigured or failed harness holds its work visibly without fallback"
   let describe = diagnostics(service, runtimes);
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
     const projectId = project(service, lead, [worker, lead]);
@@ -792,7 +805,11 @@ test("a runtime that cannot run on this host is not enabled, not failed, and hol
   let describe = diagnostics(service, runtimes);
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     // Not enabled, exactly like a harness outside the configured list: no unavailable state.
     assert.deepEqual(
       service.harnessStatuses().map(({ harness, state }) => [harness, state]),
@@ -1133,7 +1150,11 @@ test("overlapping turns on the same thread ID keep separate per-harness captures
   const describe = diagnostics(service, runtimes);
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
     const projectId = project(service, lead, [lead, worker]);
@@ -1329,7 +1350,11 @@ test("an unexpected request naming another harness's turn holds only the emitter
   const describe = diagnostics(service, runtimes);
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
     const projectId = project(service, lead, [lead, worker]);
@@ -1668,7 +1693,11 @@ test("disabling Claude lets its running turn finish, then stops it; new Claude w
   });
   try {
     await service.start();
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
     const projectId = project(service, lead, [lead, worker]);

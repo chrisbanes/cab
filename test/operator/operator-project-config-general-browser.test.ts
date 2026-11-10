@@ -39,6 +39,91 @@ import {
 
 const test = browserSuite("operator-project-config-general-browser");
 
+test("reasoning setting sits beside capture, baseline disables it and deletion works by keyboard", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:atlas/settings?tab=general",
+  );
+  const d = f.service.domain();
+  const capture = page.getByRole("combobox", {
+    name: "Diagnostic capture",
+    exact: true,
+  });
+  const reasoning = page.getByRole("switch", {
+    name: "Reasoning summaries",
+    exact: true,
+  });
+  await reasoning.waitFor();
+  assert.equal(await reasoning.isChecked(), false);
+  assert.equal(await reasoning.isDisabled(), false);
+  assert.equal(
+    await capture.evaluate((select) => {
+      const label = select.closest("label");
+      return label?.nextElementSibling?.nextElementSibling?.textContent?.trim();
+    }),
+    "Reasoning summaries",
+  );
+  await reasoning.focus();
+  await page.keyboard.press("Space");
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  const sent = commandBody(page);
+  await save.click();
+  assert.equal((await sent).reasoningSummaries, true);
+  await savedOutcome(page);
+  assert.equal(d.reasoningSummaries(ids.atlas), true);
+  await capture.selectOption("baseline");
+  assert.equal(await reasoning.isDisabled(), true);
+  assert.equal(await reasoning.isChecked(), false);
+  await page.getByText(/Requires enhanced diagnostic capture/).waitFor();
+  await changes(page)
+    .getByText("Reasoning summaries disabled", { exact: true })
+    .waitFor();
+  await save.click();
+  await savedOutcome(page);
+  assert.equal(d.reasoningSummaries(ids.atlas), false);
+  await capture.selectOption("enhanced");
+  assert.equal(await reasoning.isDisabled(), false);
+  assert.equal(await reasoning.isChecked(), false);
+  await save.click();
+  await savedOutcome(page);
+  const trigger = page.getByRole("button", {
+    name: "Delete collected reasoning…",
+    exact: true,
+  });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", {
+    name: "Delete collected reasoning?",
+  });
+  await dialog.waitFor();
+  await dialog.getByText(/This cannot be undone/).waitFor();
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(
+    await trigger.evaluate((e) => e === document.activeElement),
+    true,
+  );
+  await page.keyboard.press("Enter");
+  const confirm = dialog.getByRole("button", {
+    name: "Delete collected reasoning",
+    exact: true,
+  });
+  const version = Number(d.project(ids.atlas).version);
+  await confirm.focus();
+  const deletion = commandBody(page);
+  await page.keyboard.press("Enter");
+  const command = await deletion;
+  assert.equal(command.type, "project.reasoning.delete");
+  assert.equal(command.confirmed, true);
+  assert.equal(command.expectedVersion, version);
+  await savedOutcome(dialog, /^Collected reasoning cleared\./);
+  assert.equal(Number(d.project(ids.atlas).version), version + 1);
+  assert.equal(d.reasoningSummaries(ids.atlas), false);
+  await dialog.getByRole("button", { name: "Close", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await dialog.waitFor({ state: "hidden" });
+});
+
 test("General tab edits in place with Kept · Reveal instructions, a change list, a saved line and tabs that keep drafts", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
@@ -57,7 +142,7 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
   });
-  assert.equal(await tabs.getByRole("link").count(), 6);
+  assert.equal(await tabs.getByRole("link").count(), 7);
   assert.equal(
     await tabs
       .getByRole("link", { name: "General" })
@@ -613,8 +698,8 @@ test("readiness matching with no condition is no edit, and the adopted note goes
   await matching.selectOption({ label: "Any condition" });
   await assertClean(page, "Save changes");
   // After Review changes, typing the adopted value back clears the note that it was loaded.
-  const closed = page.getByLabel("Closed GitHub issues", { exact: true });
-  await closed.selectOption({ label: "Treat closure as Done" });
+  const closed = page.getByLabel("Closed issues at import", { exact: true });
+  await closed.selectOption({ label: "Import as Done" });
   await api.execute({
     type: "github.configure",
     key: randomUUID(),
@@ -636,7 +721,7 @@ test("readiness matching with no condition is no edit, and the adopted note goes
   await page
     .getByText("Loaded the latest version.", { exact: false })
     .waitFor();
-  await closed.selectOption({ label: "Skip closed issues" });
+  await closed.selectOption({ label: "Skip" });
   await page.waitForFunction(
     () => !document.body.innerText.includes("Loaded the latest version."),
   );
@@ -1357,10 +1442,10 @@ test("routing and profile saves wait for the comparison read after Review change
   await assertOffHold(page, "Save agent");
 });
 
-test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
+test("a reverted permitted-agents edit leaves the form clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
-    "/projects/:relay/settings?tab=routing",
+    "/projects/:relay/settings?tab=permitted-agents",
   );
   const d = f.service.domain();
   const candidate = (n: string) =>
@@ -1384,21 +1469,6 @@ test("a reverted routing edit leaves the form clean and picks up a later read", 
       0,
     );
   }
-  // Hidden input behind a choice that is switched off is not an edit either.
-  const mode = page.getByLabel("Credential reference change", { exact: true });
-  await mode.selectOption({ label: "Set new environment reference" });
-  await page
-    .getByLabel("New environment reference", { exact: true })
-    .fill("env:HIDDEN_REFERENCE");
-  await mode.selectOption({ label: "Preserve current reference" });
-  await revealButton(page, "routing guidance").click();
-  const field = page.getByRole("textbox", {
-    name: "Routing guidance",
-    exact: true,
-  });
-  await field.fill("CHANGED");
-  await field.fill("PRIVATE ROUTING GUIDANCE");
-  await assertClean(page, "Save routing");
   d.execute({
     type: "routing.configure",
     actor: "operator",
@@ -1409,15 +1479,9 @@ test("a reverted routing edit leaves the form clean and picks up a later read", 
     candidateProfileIds: [ids.profiles.Mira as string],
   });
   await refresh(page);
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll("input[type=checkbox]")].some(
-      (e) =>
-        (e as HTMLInputElement).checked &&
-        e.closest("label")?.textContent?.startsWith("Mira"),
-    ),
-  );
+  assert.equal(await candidate("Mira").isChecked(), true);
   assert.equal(await candidate("Eli").isChecked(), false);
-  await assertClean(page, "Save routing");
+  await assertClean(page, "Save permitted agents");
 });
 
 test("a reverted source edit leaves the form clean and picks up a later read", async (_t, journey) => {
@@ -2157,6 +2221,64 @@ test("local listening is a switch with its disclosure that saves as a versioned 
   assert.equal((await back).localListening, false);
   await savedOutcome(page);
   assert.equal(d.localListening(ids.atlas), false);
+});
+
+test("skip sandbox asks for confirmation when turned on and saves off without one", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const skip = page.getByRole("switch", { name: "Skip sandbox (dangerous)" });
+  await skip.waitFor();
+  assert.equal(await skip.isChecked(), false);
+  await page.getByText("Skip sandbox is disabled for this project.").waitFor();
+  await page
+    .getByText(/dangerFullAccess/)
+    .first()
+    .waitFor();
+  await page
+    .getByText(/Claude Code's sandbox disabled/)
+    .first()
+    .waitFor();
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  const dialog = page.getByRole("alertdialog");
+
+  // Cancel keeps the draft and sends nothing.
+  await skip.click();
+  await changes(page).getByText("Skip sandbox enabled").waitFor();
+  await save.click();
+  await dialog
+    .getByText(/full filesystem, process, network and credential access/)
+    .waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(d.dangerouslySkipSandbox(ids.atlas), false);
+  assert.equal(await skip.isChecked(), true);
+
+  // Confirm saves it on.
+  await save.click();
+  const sent = commandBody(page);
+  await dialog.getByRole("button", { name: "Skip sandbox" }).click();
+  const body = await sent;
+  assert.equal(body.type, "project.configure");
+  assert.equal(body.dangerouslySkipSandbox, true);
+  await savedOutcome(page);
+  assert.equal(d.dangerouslySkipSandbox(ids.atlas), true);
+  await page.getByText("Skip sandbox is enabled for this project").waitFor();
+  await page
+    .getByText(/Superseded while skipping the sandbox/)
+    .first()
+    .waitFor();
+
+  // Turning it off saves at once.
+  await skip.click();
+  const back = commandBody(page);
+  await save.click();
+  assert.equal((await back).dangerouslySkipSandbox, false);
+  assert.equal(await dialog.count(), 0);
+  await savedOutcome(page);
+  assert.equal(d.dangerouslySkipSandbox(ids.atlas), false);
 });
 
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {

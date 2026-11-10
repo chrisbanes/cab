@@ -2210,6 +2210,16 @@ const style = (page: Page, selector: string, property: string) =>
 
 test("board cards follow the frame's anatomy", async (_t, journey) => {
   const { f, ids, page, commands } = await start(journey, "/tasks?view=board");
+  // The board states a full global limit; the five running lead turns fill a cap of five.
+  f.service.domain().execute({
+    type: "capacity.configure",
+    key: randomUUID(),
+    actor: "operator",
+    minimumLeadSlots: 0,
+    globalLimit: 5,
+    projectOverrides: {},
+  });
+  await page.reload();
   const card = (id: string) => `[data-task-id="${id}"]`;
   const questionFacts = await page.evaluate(async (taskId) => {
     const response = await fetch("/api/operator/task-list");

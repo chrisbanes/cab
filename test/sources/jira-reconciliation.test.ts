@@ -383,7 +383,7 @@ test("Jira policy defaults to Skip, preserves omissions and fences stale edits",
 });
 
 for (const remove of [false, true])
-  test(`Jira Done to Skip immediately reverses provider completion with selections removed=${remove}`, () => {
+  test(`Jira Done to Skip keeps a provider completion with selections removed=${remove}`, () => {
     const w = setup();
     policy(w, "done");
     for (const selection of ["S-1", "S-2"])
@@ -407,9 +407,8 @@ for (const remove of [false, true])
     );
     assert.ok(w.sources.providerCompletion(taskId));
     policy(w, "skip", remove ? [] : undefined);
-    assert.equal(w.domain.task(taskId).state, "open");
-    assert.equal(w.sources.providerCompletion(taskId), undefined);
-    assert.ok(w.sources.hold("10001")?.active);
+    assert.equal(w.domain.task(taskId).state, "done");
+    assert.ok(w.sources.providerCompletion(taskId));
   });
 
 test("Jira Done imports first-seen closed issues only from complete reads", () => {

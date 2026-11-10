@@ -19,6 +19,7 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { changedFile, diffLineNumber } from "../fixtures/diff-view.js";
 import { rememberAnyReadiness } from "../fixtures/operator-work.js";
 import {
   leadAwaitingRecoveryNotice,
@@ -246,15 +247,9 @@ test("production local review composes exact multi-origin anchors and sends one 
   await openTaskTab(page, "Changes");
   const changes = page.locator("#changes");
   await changes.getByLabel("Comparison target").selectOption("uncommitted");
-  await changes.getByRole("button", { name: /modified diff\.txt/ }).click();
-  await changes
-    .getByRole("button", { name: /^Before line 2, diff\.txt;/ })
-    .first()
-    .click();
-  await changes
-    .getByRole("button", { name: /^Before line 3, diff\.txt;/ })
-    .first()
-    .click({ modifiers: ["Shift"] });
+  await changedFile(changes, "diff.txt").click();
+  await diffLineNumber(changes, "Before", 2).click();
+  await diffLineNumber(changes, "Before", 3).click({ modifiers: ["Shift"] });
   await changes.getByText(/Selected Before lines 2–3 · diff\.txt/).waitFor();
   await changes
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -499,7 +494,11 @@ async function openFile(page: Page, name: RegExp) {
     const file = files
       .locator(".file-entry")
       .and(files.getByRole("button", { name }));
-    const title = await file.getAttribute("title");
+    // The explorer title appends the exact size; the open tab's title is the bare path.
+    const title = (await file.getAttribute("title"))?.replace(
+      / · [\d,]+ bytes$/,
+      "",
+    );
     assert.ok(title, "the requested explorer file has a scoped path");
     await file.click();
     const ready = files

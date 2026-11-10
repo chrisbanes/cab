@@ -100,6 +100,8 @@ only a browser shows: drafts kept, focus, keyboard, sign-in and navigation. Test
 wording produced by a pure `web/src` function in its presentation test.
 
 Use Node.js from `.nvmrc` and the package manager pinned in `package.json`.
+In a cab-managed task workspace, first set the environment in
+[Running the check in a cab-managed workspace](docs/development.md#running-the-check-in-a-cab-managed-workspace).
 Run `npm ci`, then `npm run typecheck`, `npm run lint` and `npm run format:check`.
 Locally, run only the suites that cover the change after `npm run build`, for example
 `npm run test:built -- --suite=workspaces`, adding `--profile=service` when no UI

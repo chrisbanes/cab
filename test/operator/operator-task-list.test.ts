@@ -651,12 +651,13 @@ test("catalog and composer options project effective overrides above and below d
     taskId = createTask(f, ids.projectId),
     d = f.service.domain(),
     api = new OperatorApi(f.service, [f.directory]);
-  assert.equal(d.capacityLimits([ids.projectId]).defaultProjectLimit, 2);
+  assert.deepEqual(d.capacityLimits().projectOverrides, {});
   for (const limit of [10, 1]) {
     d.execute({
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 20,
       projectOverrides: { [ids.projectId]: limit },
     });

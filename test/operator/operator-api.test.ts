@@ -66,6 +66,7 @@ import {
   type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
 import { until } from "../fixtures/until.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
@@ -2236,7 +2237,9 @@ test("project task summaries share task workspace and repository exclusions", as
   assert.doesNotMatch(String(project), /synthetic/);
 });
 
-test("polled task list, project and Inbox reads redact stored workspace paths without launching Git", async (t) => {
+test("polled task list, project and Inbox reads redact stored workspace paths without launching Git", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-polled-redaction-")),
     source = join(root, "source");
   mkdirSync(source);
@@ -3643,6 +3646,7 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
     type: "capacity.configure",
     actor: "operator",
     key: randomUUID(),
+    minimumLeadSlots: 0,
     globalLimit: 4,
     projectOverrides: { [enabled.projectId]: 1 },
   });
@@ -3666,6 +3670,50 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
     ),
     ["capacity"],
   );
+  // The held lead slot: a waiting task's delegated work waits; a new task (lead first) does not.
+  d.execute({
+    type: "capacity.configure",
+    actor: "operator",
+    key: randomUUID(),
+    minimumLeadSlots: 1,
+    globalLimit: 2,
+    projectOverrides: { [enabled.projectId]: null },
+  });
+  assert.deepEqual((await api.readTask(task(enabled.projectId))).data.waits, [
+    {
+      code: "capacity",
+      fix: null,
+      links: [
+        {
+          kind: "tasks-running",
+          label: "1 of 2 turns running, 1 held for lead turns",
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    (await api.readComposerOptions(enabled.projectId)).data.waits,
+    [],
+  );
+  // A waiting turn's recorded reason names its limit exactly, over the usage estimate.
+  const agentHeld = task(enabled.projectId);
+  await until(() =>
+    f.service.turnRequestsForTask(agentHeld).some((r) => r.state === "queued"),
+  );
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE turn_requests SET reason = 'Capacity waiting: agent active-turn limit (1)' WHERE taskId = ? AND state = 'queued'",
+      )
+      .run(agentHeld),
+  );
+  assert.deepEqual((await api.readTask(agentHeld)).data.waits, [
+    {
+      code: "capacity",
+      fix: null,
+      links: [{ kind: "tasks-running", label: "Agent active-turn limit (1)" }],
+    },
+  ]);
   // Without power supervision no read derives a power wait.
   assert.equal(f.service.powerStatus(), null);
 });

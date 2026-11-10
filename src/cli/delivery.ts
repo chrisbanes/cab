@@ -159,8 +159,11 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
         "Pull request",
         b
           ? `${b.repositoryName}#${b.number} ${b.state} head ${b.headSha.slice(0, 12)}, observed ${b.observedAt}${b.readError ? `, last read failed: ${b.readError}` : ""}`
-          : "none registered",
+          : (d?.unregisteredPr ?? "none registered"),
       ],
+      ...(b && d?.unregisteredPr
+        ? [["Unregistered pull request", d.unregisteredPr] as [string, string]]
+        : []),
       ...(d && b && d.mode === "reviewable-pr"
         ? [["Handback", handbackLine(d, b)] as [string, string]]
         : []),

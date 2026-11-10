@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   workspaceComparisonReadSchema,
   workspaceDirectoryReadSchema,
@@ -15,12 +23,14 @@ import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
 import { changeLineCounts } from "./file-change-markers.js";
 import { failureCause } from "./outcome-copy.js";
-import { codeSentence, shortId } from "./presentation.js";
+import { codeSentence, shortId, workspaceStateText } from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
-import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
+import { ChangesWorkbench, FilesPanelToggle } from "./changes-pane.js";
+import { treePaths } from "./diff-model.js";
+import { FileDiffView, useNarrowViewport, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
-import { useOperatorResource } from "./resource.js";
+import { readConflicted, useOperatorResource } from "./resource.js";
 import { comparisonSideAnchor } from "./review-anchor.js";
 import type {
   TaskChangeSelection,
@@ -28,6 +38,9 @@ import type {
 } from "./task-workspace-state.js";
 import { dateLabel, FinishedTurn, PendingTurn } from "./turn-identity.js";
 import { NativeSelect } from "./ui/native-select.js";
+
+// Loaded on first use so the tree stays out of the initial bundle.
+const ChangesTree = lazy(() => import("./changes-tree.js"));
 
 type ComparisonData = WorkspaceComparisonRead["data"];
 type Snapshot = Extract<ComparisonData, { state: "available" }>["comparison"];
@@ -232,6 +245,8 @@ function useTaskRepositories(
   return useOperatorResource(
     `${session.csrfToken}:${taskId}:changes-repositories`,
     loader,
+    true,
+    readConflicted,
   );
 }
 
@@ -251,6 +266,7 @@ export function TaskWorkspaceChanges({
   changed: () => void;
 }) {
   const repositoryName = useRepositoryLabel();
+  const phone = useNarrowViewport();
   const repositoriesResource = useTaskRepositories(client, session, taskId);
   const directory = repositoriesResource.state.data?.data;
   const repositories = useMemo(
@@ -494,6 +510,8 @@ export function TaskWorkspaceChanges({
       : -1;
   const selected =
     selectedIndex >= 0 ? snapshot?.entries[selectedIndex] : undefined;
+  // Repository labels can change while the tree is open; new paths remount it.
+  const paths = snapshot ? treePaths(snapshot.entries, repositoryName) : [];
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the snapshot or the request changes.
   useEffect(() => {
     const path = state.pendingPath;
@@ -713,7 +731,11 @@ export function TaskWorkspaceChanges({
           {directory?.state === "ready" && repositories.length === 0
             ? "No repository is bound to this task. Branch and Uncommitted are unavailable; Last turn remains available."
             : directory?.state
-              ? `Repository listing is ${directory.state}; repository identity is unavailable.`
+              ? workspaceStateText(
+                  "Repository listing",
+                  directory.state,
+                  "repository identity is unavailable",
+                )
               : "Loading this task's bound repositories…"}
         </p>
       )}
@@ -807,173 +829,166 @@ export function TaskWorkspaceChanges({
           </p>
         )}
       {snapshot && (
-        <div className="changes-workbench" data-mobile-view={state.mobileView}>
-          <aside
-            className="changes-rail"
-            data-mobile-hidden={state.mobileView === "preview"}
-            aria-label="Changed files"
-          >
-            <h5>
-              {(() => {
-                const counts = changeLineCounts(snapshot);
-                return (
-                  <>
-                    Changes · {counts.files}
-                    {counts.added !== undefined && (
-                      <>
-                        {" "}
-                        <span>+{counts.added}</span>{" "}
-                        <span>−{counts.removed}</span>
-                      </>
-                    )}
-                  </>
-                );
-              })()}
-            </h5>
-            <ul
-              className="changes-entry-list"
-              aria-label="Workspace comparison files"
+        <ChangesWorkbench
+          mobileView={state.mobileView}
+          files={
+            <aside
+              className="changes-rail"
+              data-mobile-hidden={state.mobileView === "preview"}
+              aria-label="Changed files"
             >
-              {snapshot.entries.map((entry, index) => {
-                const selectedEntryKey = entryKey(entry, index);
-                const label =
-                  entry.change === "renamed" && entry.previousPath
-                    ? `${entry.previousPath} → ${entry.path}`
-                    : entry.path;
-                const isSelected = state.selectedEntryKey === selectedEntryKey;
-                return (
-                  <li key={selectedEntryKey}>
-                    <button
-                      type="button"
-                      className="changes-entry"
-                      aria-label={`${entry.change} ${label}, ${entry.state}`}
-                      aria-current={isSelected ? "true" : undefined}
-                      title={`${entry.repositoryId ? repositoryName(entry.repositoryId) : "Task workspace"}/${label}`}
-                      onClick={() => selectEntry(entry, index)}
-                    >
-                      <StatusBadge>{entry.change.toUpperCase()}</StatusBadge>
-                      <span className="changes-entry-path">{label}</span>
-                      {entry.changeSet && (
-                        <span className="changes-entry-set">
-                          {entry.changeSet}
-                        </span>
+              <h5>
+                {(() => {
+                  const counts = changeLineCounts(snapshot);
+                  return (
+                    <>
+                      Changes · {counts.files}
+                      {counts.added !== undefined && (
+                        <>
+                          {" "}
+                          <span>+{counts.added}</span>{" "}
+                          <span>−{counts.removed}</span>
+                        </>
                       )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            {snapshot.entries.length === 0 && (
-              <p>No changed files in this comparison.</p>
-            )}
-          </aside>
-          <div
-            className="changes-reading-area"
-            data-mobile-hidden={state.mobileView === "list"}
-          >
-            <Button
-              className="changes-back"
-              variant="secondary"
-              onClick={() => {
-                state.mobileView = "list";
-                changed();
-              }}
+                    </>
+                  );
+                })()}
+              </h5>
+              <Suspense fallback={<p role="status">Loading files…</p>}>
+                <ChangesTree
+                  key={`${snapshot.comparisonId}:${phone}:${paths.join("\u0000")}`}
+                  entries={snapshot.entries}
+                  paths={paths}
+                  phone={phone}
+                  selectedIndex={selectedIndex}
+                  listView={state.mobileView === "list"}
+                  onSelect={selectEntry}
+                />
+              </Suspense>
+              {snapshot.entries.length === 0 && (
+                <p>No changed files in this comparison.</p>
+              )}
+            </aside>
+          }
+          diff={
+            <div
+              className="changes-reading-area"
+              data-mobile-hidden={state.mobileView === "list"}
             >
-              Back to changed files
-            </Button>
-            {selected ? (
-              <>
-                <div className="changes-file-heading">
-                  <h5>{selected.path}</h5>
-                  {selected.previousPath && (
-                    <p>Before path: {selected.previousPath}</p>
-                  )}
-                  <p>
-                    {selected.change.toUpperCase()} · {selected.state}
-                    {selected.changeSet ? ` · ${selected.changeSet}` : ""}
-                    {selected.reason && (
-                      <>
-                        {" · "}
-                        <span className="identifier">{selected.reason}</span>
-                      </>
-                    )}
-                  </p>
-                </div>
-                {selected.state === "binary" ||
-                selected.state === "unsupported" ||
-                selected.state === "gap" ? (
-                  <p role="status">Text diff is unavailable for this file.</p>
-                ) : (
-                  <>
-                    <DiffLayoutControls
+              <Button
+                className="changes-back"
+                variant="secondary"
+                onClick={() => {
+                  state.mobileView = "list";
+                  changed();
+                }}
+              >
+                Back to changed files
+              </Button>
+              {selected ? (
+                <>
+                  {selected.state === "binary" ||
+                  selected.state === "unsupported" ||
+                  selected.state === "gap" ? (
+                    <div className="changes-file-heading">
+                      <h5>{selected.path}</h5>
+                      {selected.previousPath && (
+                        <p>Before path: {selected.previousPath}</p>
+                      )}
+                      <p>
+                        {selected.change.toUpperCase()} · {selected.state}
+                        {selected.changeSet ? ` · ${selected.changeSet}` : ""}
+                        {selected.reason && (
+                          <>
+                            {" · "}
+                            <span className="identifier">
+                              {selected.reason}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                      <p role="status">
+                        Text diff is unavailable for this file.
+                      </p>
+                    </div>
+                  ) : (
+                    <FileDiffView
+                      key={`${snapshot.comparisonId}:${selectedIndex}`}
+                      path={selected.path}
+                      previousPath={selected.previousPath}
+                      hunks={selected.hunks}
                       layout={state.layout}
-                      onChange={(layout) => {
+                      onLayout={(layout) => {
                         state.layout = layout;
                         changed();
                       }}
+                      headerPrefix={<FilesPanelToggle />}
+                      headerMetadata={
+                        selected.changeSet && (
+                          <span className="changes-entry-set">
+                            {selected.changeSet}
+                          </span>
+                        )
+                      }
+                      select={{
+                        comparisonId: snapshot.comparisonId,
+                        selection: state.selection,
+                        originKey,
+                        onSelect: selectLine,
+                        onClear: () => {
+                          state.selection = null;
+                          changed();
+                        },
+                      }}
                     />
-                    {selected.hunks.map((hunk, index) => (
-                      <DiffHunk
-                        // biome-ignore lint/suspicious/noArrayIndexKey: rows of an immutable observed diff are identified by position.
-                        key={`${snapshot.comparisonId}:${index}`}
-                        hunk={hunk}
-                        hunkIndex={index}
-                        layout={state.layout}
-                        select={{
-                          comparisonId: snapshot.comparisonId,
-                          selection: state.selection,
-                          originKey,
-                          onSelect: selectLine,
-                        }}
-                      />
-                    ))}
-                  </>
-                )}
-                <p className="changes-provenance">
-                  {snapshot.target === "turn"
-                    ? `Last turn · work ${snapshot.workId} · assignment ${snapshot.assignmentId} · agent ${snapshot.profileId}`
-                    : `Current workspace · repository ${snapshot.repositoryId ? repositoryName(snapshot.repositoryId) : snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline ? shortId(snapshot.baseline.commit) : ""}`}
-                </p>
-                {state.selection && (
-                  <p role="status" className="changes-selection">
-                    Selected{" "}
-                    {state.selection.side === "left" ? "Before" : "After"} lines{" "}
-                    {state.selection.startLine}–{state.selection.endLine} ·{" "}
-                    {state.selection.path} ·{" "}
-                    <span className="identifier">
-                      {state.selection.contentSha256} · comparison{" "}
-                      {state.selection.comparisonId}
-                    </span>
+                  )}
+                  <p className="changes-provenance">
+                    {snapshot.target === "turn"
+                      ? `Last turn · work ${snapshot.workId} · assignment ${snapshot.assignmentId} · agent ${snapshot.profileId}`
+                      : `Current workspace · repository ${snapshot.repositoryId ? repositoryName(snapshot.repositoryId) : snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline ? shortId(snapshot.baseline.commit) : ""}`}
                   </p>
-                )}
-                <RangeControls
-                  line={state.selection?.currentLine ?? null}
-                  anchor={state.selection?.rangeAnchorLine ?? null}
-                  pin={state.selection?.pin ?? null}
-                  onSet={setRangeEdge}
-                />
-                <CommentAction
-                  originKey={originKey}
-                  label={
-                    snapshot.target === "turn"
-                      ? "Last turn comparison"
-                      : `${snapshot.target} comparison`
-                  }
-                  anchor={
-                    state.selection
-                      ? comparisonSideAnchor(taskId, state.selection)
-                      : null
-                  }
-                />
-                <ReviewComposer originKey={originKey} />
-              </>
-            ) : (
-              <p className="changes-empty-selection">
-                Select a changed file to inspect its exact Before and After.
-              </p>
-            )}
-          </div>
-        </div>
+                  {state.selection && (
+                    <p role="status" className="changes-selection">
+                      Selected{" "}
+                      {state.selection.side === "left" ? "Before" : "After"}{" "}
+                      lines {state.selection.startLine}–
+                      {state.selection.endLine} · {state.selection.path} ·{" "}
+                      <span className="identifier">
+                        {state.selection.contentSha256} · comparison{" "}
+                        {state.selection.comparisonId}
+                      </span>
+                    </p>
+                  )}
+                  <RangeControls
+                    line={state.selection?.currentLine ?? null}
+                    anchor={state.selection?.rangeAnchorLine ?? null}
+                    pin={state.selection?.pin ?? null}
+                    onSet={setRangeEdge}
+                  />
+                  <CommentAction
+                    originKey={originKey}
+                    label={
+                      snapshot.target === "turn"
+                        ? "Last turn comparison"
+                        : `${snapshot.target} comparison`
+                    }
+                    anchor={
+                      state.selection
+                        ? comparisonSideAnchor(taskId, state.selection)
+                        : null
+                    }
+                  />
+                  <ReviewComposer originKey={originKey} />
+                </>
+              ) : (
+                <p className="changes-empty-selection">
+                  <FilesPanelToggle />
+                  Select a changed file to inspect its exact Before and After.
+                </p>
+              )}
+            </div>
+          }
+        />
       )}
       <p>
         Current workspace snapshots stay fixed until Refresh. Last turn is a

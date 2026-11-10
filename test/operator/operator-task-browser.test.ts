@@ -359,11 +359,11 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
       .count(),
     1,
   );
-  // The strip's readiness renders once the task read loads, so wait for it by text.
+  // The strip's distinct reason renders once the task read loads.
   const statusLine = async (taskId: string, text: RegExp) => {
     await page.goto(`${web.origin}/tasks/${taskId}`);
     const line = page
-      .locator("[data-task-strip] [data-task-readiness]")
+      .locator("[data-task-strip] [data-task-reason]")
       .filter({ hasText: text });
     await line.waitFor();
     return line.innerText();
@@ -373,8 +373,8 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
     "Held · closed on GitHub",
   );
   assert.equal(
-    await statusLine(paused.taskId, /^Draft · project paused/),
-    "Draft · project paused",
+    await statusLine(paused.taskId, /^project paused/),
+    "project paused",
   );
   assert.equal(await page.getByText("closed on GitHub").count(), 0);
 });
@@ -1332,6 +1332,15 @@ for (const viewport of [
     await screenshot(page, `${viewport.width}-no-projects`);
     await page.unroute("**/api/operator/readiness");
     const ids = await seedCatalog(f);
+    // The view states a full global limit; the five running lead turns fill a cap of five.
+    f.service.domain().execute({
+      type: "capacity.configure",
+      key: randomUUID(),
+      actor: "operator",
+      minimumLeadSlots: 0,
+      globalLimit: 5,
+      projectOverrides: {},
+    });
     const emptyProject = randomUUID();
     f.service.domain().execute({
       type: "project.create",
@@ -1402,11 +1411,11 @@ for (const viewport of [
         .count(),
       1,
     );
-    // The occupied project limit is stated once for the whole view, on no card or row.
+    // The occupied global limit is stated once for the whole view, on no card or row.
     assert.match(
       await work.locator(".work-capacity").innerText(),
-      /^Capacity is full for .+; it rechecks as turns finish\.$/,
-      "occupied project limit preserves eligible Ready work in its real capacity queue",
+      /^Capacity is full; it rechecks as turns finish\.$/,
+      "occupied global limit preserves eligible Ready work in its real capacity queue",
     );
     assert.equal(await page.getByText(/Capacity is full/).count(), 1);
     await screenshot(page, `${viewport.width}-overview-attention-work`);
@@ -1513,8 +1522,10 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
-      globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 1 },
+      minimumLeadSlots: 0,
+      // The five running lead turns fill a global cap of five.
+      globalLimit: 5,
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1536,8 +1547,9 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 10 },
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1548,8 +1560,10 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
-      globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 1 },
+      minimumLeadSlots: 0,
+      // The five running lead turns fill a global cap of five.
+      globalLimit: 5,
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1560,8 +1574,9 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
-      projectOverrides: { [ids.projectId]: 10 },
+      projectOverrides: {},
     });
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
@@ -1723,6 +1738,7 @@ for (const viewport of [
       type: "capacity.configure",
       key: randomUUID(),
       actor: "operator",
+      minimumLeadSlots: 0,
       globalLimit: 10,
       projectOverrides: { [ids.projectId]: 1 },
     });

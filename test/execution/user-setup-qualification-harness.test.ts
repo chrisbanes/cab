@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "../fixtures/temp.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 test("the approved Claude recovery adds only three turns and a separate finite window, preserving all history", async (t) => {
   const {
@@ -365,7 +366,7 @@ test("consolidated native allowance preserves history and starts final validatio
 });
 
 test("the lifecycle driver completes four bounded offline native turns, retains crash ownership and resumes only explicitly", {
-  skip: process.platform !== "darwin",
+  skip: process.platform !== "darwin" || processIdentityDenied(),
   timeout: 60_000,
 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-user-setup-lifecycle-offline-"));

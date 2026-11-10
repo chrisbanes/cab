@@ -18,6 +18,7 @@ import {
 import { controlledGit } from "../fixtures/controlled-git.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 function sourceRepository(root: string, name: string) {
   const path = join(root, name);
@@ -596,7 +597,9 @@ test("authenticated HTTP reads discard entries when the task binding changes dur
   f.service.taskWorkspace = original;
 });
 
-test("polled reads keep the stored workspace binding and explicit inspection detects a missing worktree", async (t) => {
+test("polled reads keep the stored workspace binding and explicit inspection detects a missing worktree", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-passive-workspace-"));
   const controlled = controlledGit();
   const f = await createOperatorFixture(

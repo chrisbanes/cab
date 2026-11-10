@@ -4,7 +4,7 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick, ShortId } from "./components.js";
 import { clockLabel } from "./presentation.js";
 import { commentAvailability } from "../../src/operator/github-reasons.js";
-import { holdNoticesBesideRequests } from "./inbox-presentation.js";
+import { taskAttentionProjection } from "./inbox-presentation.js";
 import {
   pullRequestReference,
   pullRequestRepository,
@@ -63,10 +63,7 @@ export function TaskInspector({
   const source = data.source,
     comment = commentAvailability(data.commentPolicy),
     facts = executionFacts(data),
-    requests = [...data.approvals, ...data.questions].filter(
-      (q) => q.status === "open",
-    ),
-    holds = holdNoticesBesideRequests(data, "approve", deciding);
+    attention = taskAttentionProjection(data, "approve", deciding);
   const show = (resultId: string) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (!isPlainClick(event)) return;
     event.preventDefault();
@@ -110,7 +107,11 @@ export function TaskInspector({
                     </p>
                     {source.hold?.active && (
                       <p>
-                        Source hold · {sourceHoldReasonText(source.hold.reason)}
+                        Source hold ·{" "}
+                        {sourceHoldReasonText(
+                          source.hold.reason,
+                          source.closureWait,
+                        )}
                       </p>
                     )}
                     {source.review && (
@@ -180,27 +181,20 @@ export function TaskInspector({
             <p className="inspector-divider">cab execution</p>
           </>
         )}
-        <Group label={`Holds · ${requests.length + holds.length}`}>
-          {requests.length + holds.length ? (
+        <Group label={`Holds · ${attention.rows.length}`}>
+          {attention.rows.length ? (
             <ul className="inspector-rows">
-              {requests.map((q) => (
-                <li key={q.interactionId}>
-                  <Diamond aria-hidden="true" data-tone="attn" />
+              {attention.rows.map((row) => (
+                <li key={row.id}>
+                  {row.kind === "request" ? (
+                    <Diamond aria-hidden="true" data-tone="attn" />
+                  ) : (
+                    <Clock aria-hidden="true" />
+                  )}
                   <span>
-                    {q.kind === "approval"
-                      ? "Approval pending"
-                      : "Question pending"}
-                    <span className="muted"> · Next: you</span>
-                  </span>
-                </li>
-              ))}
-              {holds.map((h) => (
-                <li key={h.id}>
-                  <Clock aria-hidden="true" />
-                  <span>
-                    {h.title}
-                    {h.items.length > 0 && (
-                      <span className="muted"> · {h.items.join(", ")}</span>
+                    {row.title}
+                    {row.kind === "request" && (
+                      <span className="muted"> · Next: you</span>
                     )}
                   </span>
                 </li>
@@ -251,7 +245,9 @@ export function TaskInspector({
           </dl>
         </Group>
         <Group label="Results & artifacts">
-          {data.results.length || data.delivery?.binding ? (
+          {data.results.length ||
+          data.delivery?.binding ||
+          data.delivery?.unregisteredPr ? (
             <ul className="inspector-rows">
               {data.results
                 .map((r, i) => ({ r, i }))
@@ -267,6 +263,9 @@ export function TaskInspector({
                     </a>
                   </li>
                 ))}
+              {data.delivery?.unregisteredPr && (
+                <li>{data.delivery.unregisteredPr}</li>
+              )}
               {data.delivery?.binding && (
                 <li>
                   {pullRequestRepository(data.delivery.binding)

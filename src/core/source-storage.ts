@@ -106,6 +106,12 @@ export function migrateSourceStorage(db: Database): void {
       PRIMARY KEY(provider, instance, externalId),
       FOREIGN KEY(provider, instance, externalId) REFERENCES external_items(provider, instance, externalId)
     );
+    CREATE TABLE IF NOT EXISTS source_hold_release_records (
+      provider TEXT NOT NULL, instance TEXT NOT NULL, externalId TEXT NOT NULL,
+      generation INTEGER NOT NULL, reason TEXT NOT NULL, taskId TEXT NOT NULL,
+      PRIMARY KEY(provider, instance, externalId, generation),
+      FOREIGN KEY(provider, instance, externalId) REFERENCES external_items(provider, instance, externalId)
+    );
     CREATE TABLE IF NOT EXISTS imported_tasks (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id),
       provider TEXT NOT NULL, instance TEXT NOT NULL, externalId TEXT NOT NULL,

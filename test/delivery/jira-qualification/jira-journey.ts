@@ -772,6 +772,10 @@ export async function runJiraQualification(
       gitlabWrites,
       "a closing keyword makes no write",
     );
+    // A person moves A before creation automatically registers the PR and maps handback.
+    assert.equal((await moveTo(a, status.todo)).status, 204);
+    assert.equal((await jiraIssue(a.id)).fields.status.id, status.todo);
+    const searches = jiraGuard.counts["POST /search/jql"] ?? 0;
     const created = await act(mr);
     assert.equal(created.success, true, clean(created.text));
     const iid = [...gitlabGuard.requests.keys()].at(-1);
@@ -781,10 +785,6 @@ export async function runJiraQualification(
     evidence.mergeRequest = { iid };
     pass("push and merge request keyed to the issue", `${branch} !${iid}`);
 
-    // The changed skip: a person moves A before the handback is written, and no source read intervenes.
-    assert.equal((await moveTo(a, status.todo)).status, 204);
-    assert.equal((await jiraIssue(a.id)).fields.status.id, status.todo);
-    const searches = jiraGuard.counts["POST /search/jql"] ?? 0;
     const registered = await f.call("cab_register_pr", {
       repositoryId,
       prNumber: iid,

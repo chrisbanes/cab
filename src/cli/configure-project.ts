@@ -12,6 +12,12 @@ import {
   localListeningLimit,
 } from "../operator/local-listening-copy.js";
 import {
+  skipSandboxAppliesNote,
+  skipSandboxGrantLines,
+  skipSandboxRisk,
+  skipSandboxSupersededLine,
+} from "../operator/skip-sandbox-copy.js";
+import {
   stackingAppliesNote,
   stackingDisclosure,
 } from "../operator/stacking-copy.js";
@@ -56,7 +62,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--local-listening true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--reasoning-summaries true|false] [--command-network-access true|false] [--local-listening true|false] [--dangerously-skip-sandbox true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
@@ -67,8 +73,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "paused",
         "lead-profile",
         "diagnostic-capture",
+        "reasoning-summaries",
         "command-network-access",
         "local-listening",
+        "dangerously-skip-sandbox",
         "stacking",
         "instructions",
         "instructions-file",
@@ -84,6 +92,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         const paused = boolFlag(ctx.values.paused, "paused");
         const lead = uuidOrNone(ctx.values["lead-profile"], "lead-profile");
         const capture = ctx.values["diagnostic-capture"];
+        const reasoning = boolFlag(
+          ctx.values["reasoning-summaries"],
+          "reasoning-summaries",
+        );
         if (
           capture !== undefined &&
           capture !== "enhanced" &&
@@ -100,6 +112,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         const listening = boolFlag(
           ctx.values["local-listening"],
           "local-listening",
+        );
+        const skipSandbox = boolFlag(
+          ctx.values["dangerously-skip-sandbox"],
+          "dangerously-skip-sandbox",
         );
         const stacking = boolFlag(ctx.values.stacking, "stacking");
         // Read once before connecting: standard input cannot be read again on a retried read.
@@ -167,6 +183,29 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           });
         }
         const currentCapture = config.data.diagnosticCapture;
+        if (reasoning === true && (capture ?? currentCapture) !== "enhanced")
+          throw new CliError(
+            "invalid-input",
+            "Reasoning summaries require enhanced diagnostic capture.",
+          );
+        const currentReasoning = config.data.reasoningSummaries;
+        const nextReasoning =
+          capture === "baseline" && currentReasoning !== undefined
+            ? false
+            : reasoning;
+        if (nextReasoning !== undefined && nextReasoning !== currentReasoning) {
+          if (currentReasoning === undefined) gaps.push("content-unavailable");
+          command.reasoningSummaries = nextReasoning;
+          changes.push({
+            field: "reasoningSummaries",
+            from:
+              currentReasoning === undefined ? null : String(currentReasoning),
+            to: String(nextReasoning),
+          });
+          notes.push(
+            "The setting applies to later admitted turns. Runtime reasoning capture is not implemented; no reasoning is collected.",
+          );
+        }
         if (capture !== undefined && capture !== currentCapture) {
           if (currentCapture === undefined) gaps.push("content-unavailable");
           command.diagnosticCapture = capture;
@@ -201,6 +240,23 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             to: String(listening),
           });
           notes.push(localListeningAppliesNote, localListeningLimit);
+        }
+        const currentSkipSandbox = config.data.dangerouslySkipSandbox;
+        if (skipSandbox !== undefined && skipSandbox !== currentSkipSandbox) {
+          if (currentSkipSandbox === undefined)
+            gaps.push("content-unavailable");
+          command.dangerouslySkipSandbox = skipSandbox;
+          changes.push({
+            field: "dangerouslySkipSandbox",
+            from:
+              currentSkipSandbox === undefined
+                ? null
+                : String(currentSkipSandbox),
+            to: String(skipSandbox),
+          });
+          notes.push(skipSandboxAppliesNote, ...skipSandboxGrantLines);
+          if (skipSandbox) notes.push(skipSandboxSupersededLine);
+          notes.push(skipSandboxRisk);
         }
         const currentStacking = config.data.stacking;
         if (stacking !== undefined && stacking !== currentStacking) {

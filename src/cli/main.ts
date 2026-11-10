@@ -197,8 +197,11 @@ Sources and delivery: delivery send-comment posts a public GitHub comment that
 The CLI cannot edit or retract, and a confirm-comment decision is final (deny
 is the counterpart of approve). Removing a source selection discards its saved
 definition. preview-source has no deactivate command; saving any source change
-deactivates every selection. place-task is final once the task has an
-assignment. delivery refresh is installation-wide. send-comment --review-id
+deactivates every selection. closedIssues (Closed issues at import: Skip or Import
+as Done) decides only whether an issue first observed closed is imported. An
+imported task completes when its issue closes, once its work and delivery have
+settled. place-task is final once the task has an assignment. delivery refresh
+is installation-wide. send-comment --review-id
 first replays that review to check it is approved; an ID that is not an existing
 review records a new pending review instead, and nothing is posted.
 delivery publish-send creates a public GitHub issue and turns the local task into
@@ -213,10 +216,12 @@ permits (a lead or requester); it cannot be redirected or undone, and by itself
 does not complete the task.`;
 const RECOVERY_NOTE = `Recovery: recovery prepare writes an owner-only document from the observed
 generation identity plus your --evidence-file; nothing is inferred, defaulted or
-confirmed by a flag. recovery submit sends it once. Adoption, recovery and
-conversation replacement cannot be undone, and none of them resumes the task or
-dispatches work; continue with a new task message after replacement. Adoption
-here records evidence and is unrelated to assignment apply-current.`;
+confirmed by a flag. recovery submit sends it once. recovery release reads whether
+a held generation with no saved thread or turn (so no turn was sent) can be
+released; with --yes it releases it, freeing writer and capacity so Start again
+applies. Release, recovery and conversation replacement cannot be undone, and
+none of them resumes the task or dispatches work; continue with a new task
+message after replacement.`;
 
 /** The prose notes that name an area's commands. */
 const LOCAL_ACCESS_NOTE = `Local access uses this OS account with read/write CLI authority, without a token
@@ -367,8 +372,10 @@ export const OPTIONS = {
   paused: { type: "string" },
   "lead-profile": { type: "string" },
   "diagnostic-capture": { type: "string" },
+  "reasoning-summaries": { type: "string" },
   "command-network-access": { type: "string" },
   "local-listening": { type: "string" },
+  "dangerously-skip-sandbox": { type: "string" },
   stacking: { type: "string" },
   id: { type: "string" },
   enabled: { type: "string" },
@@ -382,8 +389,11 @@ export const OPTIONS = {
   "branch-prefix": { type: "string" },
   "branch-prefix-default": { type: "boolean" },
   candidates: { type: "string" },
+  "permitted-agents": { type: "string" },
   "global-limit": { type: "string" },
   "project-limit": { type: "string", multiple: true },
+  "min-lead-slots": { type: "string" },
+  "agent-limit": { type: "string", multiple: true },
   scope: { type: "string" },
   task: { type: "string" },
   assignment: { type: "string" },
@@ -897,7 +907,7 @@ async function run(
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
-        `State:   ${column}${closureSuffix(read.data.source?.closure)}`,
+        `State:   ${column}${closureSuffix(read.data.source?.closure, read.data.source?.closureWait)}`,
         ...(task.issueChangedSinceHandback
           ? ["Issue:   changed since handback; nothing reopened"]
           : []),

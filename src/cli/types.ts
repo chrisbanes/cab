@@ -90,8 +90,10 @@ export type Values = {
   paused?: string | undefined;
   "lead-profile"?: string | undefined;
   "diagnostic-capture"?: string | undefined;
+  "reasoning-summaries"?: string | undefined;
   "command-network-access"?: string | undefined;
   "local-listening"?: string | undefined;
+  "dangerously-skip-sandbox"?: string | undefined;
   stacking?: string | undefined;
   id?: string | undefined;
   enabled?: string | undefined;
@@ -107,6 +109,8 @@ export type Values = {
   candidates?: string | undefined;
   "global-limit"?: string | undefined;
   "project-limit"?: string[] | undefined;
+  "min-lead-slots"?: string | undefined;
+  "agent-limit"?: string[] | undefined;
   scope?: string | undefined;
   output?: string | undefined;
   task?: string | undefined;

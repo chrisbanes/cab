@@ -796,6 +796,7 @@ async function run() {
   await service.configureCapacity({
     key: randomUUID(),
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   });
 

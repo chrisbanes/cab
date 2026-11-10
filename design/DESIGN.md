@@ -6,6 +6,12 @@ defined by the web app (`web/src/`) and its browser journey tests; this document
 holds the rules that apply across them. Explore new screens in any tool; those
 artboards are throwaway and are not maintained once a screen ships.
 
+The [Settings section-page proposal](settings-pages/proposal.md) explores persistent
+route-based section navigation and an inline Sections disclosure on phones. This
+is a proposed navigation foundation for review, not shipped behaviour; its artboard
+keeps the existing tokens, typography and shell. User flows and SPEC continue to
+describe the current application until the design is implemented.
+
 [SPEC.md](../docs/SPEC.md#operator-interface-and-human-requests) owns product
 behaviour, [acceptance.md](../docs/acceptance.md#operator-ui-scenarios) owns required
 evidence, and GitHub issues own delivery scope. Resolve conflicts in favour of those
@@ -97,10 +103,14 @@ badge with a symbol and a word.
 Project identity uses a small square dot per project, coloured from `--accent-text`,
 `--fg-2` and `--fg-3`; it is never a state colour.
 
-Code, diff and evidence views take their colours from the tokens in both themes:
-added lines mix `--primary`, removed lines mix `--destructive`, and hunk headers,
-excerpts and line numbers use `--muted` and `--fg-3`, so they follow the active
-theme. Diff colour always pairs with `+`/`−` markers and Before/After labels.
+Code and evidence views take their colours from the tokens in both themes. Diffs
+render with `@pierre/diffs` in Geist Mono 12/20: syntax colouring for the common
+languages in `web/src/shiki-langs.ts` (others render as plain text), word-level
+emphasis inside changed lines, wrapped long lines and the library's light or dark
+palette chosen by the active theme. Diff colour always pairs with `+`/`−` markers;
+split view puts Before on the left and After on the right, and the file header names
+the path with its removed and added line counts. A selected review range is
+highlighted on its own side only.
 
 ### Typography, spacing and shape
 
@@ -157,6 +167,17 @@ fixed application dimensions.
   Home and End resize, and keeps its width per browser in `localStorage`. Opening
   moves focus into the pane; Close returns it to the opener. It is page state, not a
   route, and below 1024px the same actions select the Changes tab.
+- **Changes workbench:** the changed files (an `@pierre/trees` file tree with folders,
+  change letters and per-file `+N −M` counts) and the open diff share one card,
+  separated by a 1px `--line` hairline with an 8px hit target. The tree opens at 260px,
+  resizes between 160px and half the card, and collapses by dragging below 160px or
+  with the sidebar button at the start of the diff header (`Hide changed files` /
+  `Show changed files`); its width and collapsed state are kept per browser in
+  `localStorage`. A card narrower than 720px, such as the Changes pane beside the
+  conversation, stacks the tree above the diff. Phones show the tree or the diff one at
+  a time with 44px tree rows, and the diff is always unified. The diff is one tab stop:
+  Up and Down move the selected line, Shift extends the range, Left and Right switch
+  side and Escape clears; clicking a line number selects and Shift-click extends.
 - **Focus mode:** from 1024px a `Focus mode` button in the task tools row, and the `\`
   key, hide the inspector and the Changes pane so the conversation takes the whole row.
   The button is a pressed toggle (`aria-pressed`, `--primary` fill when on). The key is
