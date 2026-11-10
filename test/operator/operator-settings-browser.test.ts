@@ -651,7 +651,9 @@ test("source replacement verifies repositories without diagnostic echo and obser
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   assert.equal((await bad).status(), 400);
   await page
-    .getByText("Repository 1: the path is not an absolute directory path.", { exact: true })
+    .getByText("Repository 1: the path is not an absolute directory path.", {
+      exact: true,
+    })
     .waitFor();
   assert.equal(
     await page
