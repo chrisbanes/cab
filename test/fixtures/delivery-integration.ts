@@ -104,6 +104,10 @@ export function scriptedDeliveryProvider() {
     failReadsAfterWrite: false,
     /** The bound PR's base branch, and the pull request that used to be its base (null: none exists). */
     baseRef: "main",
+    /** The base branch's current tip (undefined: `base`; null: the branch is missing), and GitHub's mergeability. */
+    baseTip: undefined as string | null | undefined,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
     lower: null as null | {
       merged: boolean;
       open: boolean;
@@ -377,8 +381,8 @@ export function scriptedDeliveryProvider() {
               state: state.merged ? "MERGED" : state.closed ? "CLOSED" : "OPEN",
               isDraft: state.draft,
               merged: state.merged,
-              mergeable: "MERGEABLE",
-              mergeStateStatus: "CLEAN",
+              mergeable: state.mergeable,
+              mergeStateStatus: state.mergeStateStatus,
               reviewDecision: "APPROVED",
               isMergeQueueEnabled: false,
               closingIssuesReferences: {
@@ -391,10 +395,13 @@ export function scriptedDeliveryProvider() {
                 ],
                 pageInfo: { hasNextPage: false, endCursor: null },
               },
-              baseRef: {
-                target: { oid: state.base },
-                branchProtectionRule: null,
-              },
+              baseRef:
+                state.baseTip === null
+                  ? null
+                  : {
+                      target: { oid: state.baseTip ?? state.base },
+                      branchProtectionRule: null,
+                    },
               reviewThreads: {
                 nodes: state.thread
                   ? [

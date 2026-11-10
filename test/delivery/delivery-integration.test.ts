@@ -623,6 +623,25 @@ test("lost merge response becomes confirmed only after fresh readback and never 
   }
 });
 
+test("a pull request whose base advanced, with no up-to-date rule, merges", async () => {
+  const f = await createReleaseDeliveryFixture("through-merge");
+  try {
+    await f.register();
+    f.scripted.state.baseTip = "3".repeat(40);
+    f.scripted.state.mergeStateStatus = "BEHIND";
+    await f.service.coordinationView().refreshDelivery(f.taskId);
+    assert.deepEqual(
+      f.service.delivery().delivery(f.taskId)?.observation.mergeBlockers,
+      [],
+    );
+    const merged = await f.merge();
+    assert.equal(merged.success, true, merged.text);
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
 test("assembled active child and successful worker terminal cannot independently complete the parent", async () => {
   const f = await createReleaseDeliveryFixture();
   try {

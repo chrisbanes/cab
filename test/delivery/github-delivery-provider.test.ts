@@ -624,6 +624,76 @@ test("a classic protection rule GitHub reports but cab cannot read holds the mer
   );
   assert.equal(f.getWrites(), 0);
 });
+test("a base that advanced blocks only under an up-to-date rule, and a missing base ref blocks", async () => {
+  const advanced = {
+    mergeStateStatus: "BEHIND",
+    baseRef: { target: { oid: "3".repeat(40) }, branchProtectionRule: null },
+  };
+  const clean = prProviderFixture(advanced);
+  assert.deepEqual(
+    (await clean.provider.inspectPr(clean.identity, clean.policy))
+      .mergeBlockers,
+    [],
+  );
+  await clean.provider.preflight(mergeAction("squash"), clean.policy);
+  const classic = prProviderFixture({
+    ...advanced,
+    baseRef: {
+      target: { oid: "3".repeat(40) },
+      branchProtectionRule: {
+        requiresDeployments: false,
+        requiredDeploymentEnvironments: [],
+        requiresStrictStatusChecks: true,
+      },
+    },
+  });
+  classic.setProtection({
+    required_status_checks: { strict: true, checks: [] },
+  });
+  const ruleset = prProviderFixture(advanced);
+  ruleset.setRules([
+    {
+      type: "required_status_checks",
+      parameters: {
+        strict_required_status_checks_policy: true,
+        required_status_checks: [],
+      },
+    },
+  ]);
+  for (const f of [classic, ruleset]) {
+    assert.ok(
+      (await f.provider.inspectPr(f.identity, f.policy)).mergeBlockers.includes(
+        "strict-head-behind",
+      ),
+    );
+    await assert.rejects(
+      f.provider.preflight(mergeAction("squash"), f.policy),
+      /gates-held/,
+    );
+  }
+  const conflicting = prProviderFixture({
+    ...advanced,
+    mergeable: "CONFLICTING",
+    mergeStateStatus: "DIRTY",
+  });
+  assert.deepEqual(
+    (await conflicting.provider.inspectPr(conflicting.identity, conflicting.policy))
+      .mergeBlockers,
+    ["mergeability-unproved"],
+  );
+  const missing = prProviderFixture({ baseRef: null });
+  assert.ok(
+    (
+      await missing.provider.inspectPr(missing.identity, missing.policy)
+    ).mergeBlockers.includes("base-ref-missing"),
+  );
+  await assert.rejects(
+    missing.provider.preflight(mergeAction("squash"), missing.policy),
+    /gates-held/,
+  );
+  for (const f of [clean, classic, ruleset, conflicting, missing])
+    assert.equal(f.getWrites(), 0);
+});
 test("a merge whose method is not the repository's configured method is held before any write", async () => {
   const f = prProviderFixture();
   for (const repositories of [

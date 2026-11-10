@@ -1842,9 +1842,8 @@ export class GitHubHttpDeliveryProvider
     );
     const { hostChecks, requireThreads, allowedMethods } = branch;
     const unsupportedRules = [
-      ...(!graph.baseRef || graph.baseRef.target.oid !== raw.base.sha
-        ? ["base-ref-current-unproved"]
-        : []),
+      // A base that advanced is not itself a blocker; strict rules gate currency.
+      ...(!graph.baseRef ? ["base-ref-missing"] : []),
       ...branch.unsupportedRules,
     ];
     const strict =
