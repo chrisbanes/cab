@@ -1194,6 +1194,19 @@ then questions and approvals oldest first. Show project and task context on each
 task item, or the runtime for a runtime problem. Unresolved questions, pending approvals and failures remain visible even
 when related history is collapsed.
 
+Failed stacked blockers and unresolved external actions with unknown outcomes use
+the existing intervention kind, derived from current state without a recorded
+refusal. Their operator-owned attention codes rank after Not started, before
+approvals and questions. A failed blocker says "Stacked blocker failed; Unstack or
+Cancel this task", with next action "Unstack or Cancel this task". An unknown
+action outcome says "Refresh delivery or check the action". Independent
+status-mapping writes do not raise this intervention. Each intervention clears
+with its condition; clearing wakes an open task's retained lead once with what
+changed, including the existing Unstack restack notice. Cancellation removes the
+intervention without a wake. Delivery tools refused by either typed hold name
+the cause, say the operator was notified in the Inbox, and tell the agent to stop
+and not raise a question. Other refusal guidance is unchanged.
+
 Each attention item explains the decision or intervention needed, its requester
 when known, why the operator is needed, and the available response. Keep relevant
 evidence beside the response or directly accessible within the task context.

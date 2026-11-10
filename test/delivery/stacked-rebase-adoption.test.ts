@@ -257,8 +257,29 @@ for (const cause of ["closed", "cancelled"] as const)
     assert.ok(
       d.admission(f.dependent).reasons.includes("stacked-blocker-failed"),
     );
-    assert.equal((await f.push(f.dependent, f.oldHead)).success, false);
+    const refused = await f.push(f.dependent, f.oldHead);
+    assert.equal(refused.success, false);
+    assert.match(
+      refused.text,
+      /Stacked blocker failed; Unstack or Cancel this task/,
+    );
+    assert.match(
+      refused.text,
+      /operator was notified in the Inbox\. Stop and do not raise a question/,
+    );
     const api = new OperatorApi(f.currentService(), [f.root]);
+    const item = (await api.readInbox()).data.items.find(
+      (i) =>
+        i.kind === "intervention" &&
+        i.taskId === f.dependent &&
+        i.attentionCode === "stacked-blocker-failed",
+    );
+    assert.ok(item && item.kind === "intervention");
+    assert.equal(item.attentionCode, "stacked-blocker-failed");
+    assert.equal(
+      item.reason,
+      "Stacked blocker failed; Unstack or Cancel this task",
+    );
     assert.equal(
       (await api.readTask(f.dependent)).data.stackDelivery?.failedBlocker,
       true,
@@ -272,6 +293,27 @@ for (const cause of ["closed", "cancelled"] as const)
     const receipt = await api.execute(command);
     assert.equal(receipt.kind, "task-cancel");
     assert.equal(d.task(f.dependent).state, "cancelled");
+    assert.ok(
+      !(await api.readInbox()).data.items.some(
+        (i) =>
+          i.kind === "intervention" &&
+          i.taskId === f.dependent &&
+          i.attentionCode === "stacked-blocker-failed",
+      ),
+    );
+    f.prs.set(f.lowerPr.nodeId, f.lowerPr);
+    await f.currentService().refreshGitHub();
+    assert.equal(
+      f.readDb(
+        (db) =>
+          db
+            .prepare(
+              "SELECT count(*) AS n FROM coordination_external_delivery_notices WHERE taskId=? AND identity LIKE 'stacked-blocker-cleared:%'",
+            )
+            .get(f.dependent)!.n,
+      ),
+      0,
+    );
     assert.equal(
       f.readDb(
         (db) =>
@@ -298,6 +340,94 @@ for (const cause of ["closed", "cancelled"] as const)
       await new OperatorApi(f.currentService(), [f.root]).execute(command),
       receipt,
     );
+  });
+
+for (const recovery of ["refresh", "registration", "task-state"] as const)
+  test(`a failed stacked blocker cleared by ${recovery} wakes its lead once across refresh and restart`, async (t) => {
+    const f = await prepared(t);
+    if (recovery === "task-state")
+      f.run({
+        type: "task.configure",
+        projectId: f.projectId,
+        taskId: f.lower,
+        expectedVersion: Number(
+          f.currentService().domain().task(f.lower).version,
+        ),
+        state: "cancelled",
+      });
+    else
+      f.prs.set(f.lowerPr.nodeId, {
+        ...f.lowerPr,
+        state: "CLOSED",
+        merged: false,
+      });
+    await f.currentService().refreshGitHub();
+    const api = new OperatorApi(f.currentService(), [f.root]);
+    const detail = (await api.readTask(f.dependent)).data;
+    const row = (await api.readTaskListPage()).data.tasks.find(
+      (r) => r.id === f.dependent,
+    )!;
+    assert.ok(detail.attention.codes.includes("stacked-blocker-failed"));
+    assert.deepEqual(row.attention.codes, detail.attention.codes);
+    assert.equal(row.attention.count, detail.attention.count);
+    f.prs.set(f.lowerPr.nodeId, f.lowerPr);
+    if (recovery === "registration") {
+      const result = await f.call(f.lower, "cab_register_pr", {
+        repositoryId,
+        prNumber: f.lowerPr.number,
+        expectedPrNodeId: f.lowerPr.nodeId,
+        expectedHeadSha: f.lowerHead,
+      });
+      assert.equal(result.success, true, result.text);
+    } else if (recovery === "task-state")
+      f.run({
+        type: "task.configure",
+        projectId: f.projectId,
+        taskId: f.lower,
+        expectedVersion: Number(
+          f.currentService().domain().task(f.lower).version,
+        ),
+        state: "open",
+      });
+    else await f.currentService().refreshGitHub();
+    assert.ok(
+      !(await api.readTask(f.dependent)).data.attention.codes.includes(
+        "stacked-blocker-failed",
+      ),
+    );
+    assert.ok(
+      !(await api.readInbox()).data.items.some(
+        (i) =>
+          i.kind === "intervention" &&
+          i.taskId === f.dependent &&
+          i.attentionCode === "stacked-blocker-failed",
+      ),
+    );
+    await f.currentService().refreshGitHub();
+    await f.restart();
+    await f.currentService().refreshGitHub();
+    f.readDb((db) => {
+      const events = db
+        .prepare(
+          "SELECT e.recipientAssignmentId,e.payload FROM coordination_inbox_events e JOIN coordination_external_delivery_notices n ON n.eventId=e.eventId WHERE n.taskId=? AND n.identity LIKE 'stacked-blocker-cleared:%'",
+        )
+        .all(f.dependent);
+      assert.equal(events.length, 1);
+      assert.equal(
+        events[0]!.recipientAssignmentId,
+        f
+          .currentService()
+          .domain()
+          .leadBindings()
+          .find((b) => b.taskId === f.dependent)!.assignmentId,
+      );
+      assert.match(
+        String(events[0]!.payload),
+        recovery === "task-state"
+          ? /task state changed/
+          : /current state: OPEN/,
+      );
+    });
   });
 
 test("an approval opened during proof prevents automatic adoption", async (t) => {
@@ -575,4 +705,20 @@ test("a stale closed-unmerged observation followed by a read failure is unknown 
     f.currentService().domain().stackFacts(f.dependent)?.reason,
     "blocker-unknown",
   );
+  const api = new OperatorApi(f.currentService(), [f.root]);
+  assert.ok(
+    !(await api.readTask(f.dependent)).data.attention.codes.includes(
+      "stacked-blocker-failed",
+    ),
+  );
+  await f.currentService().refreshGitHub();
+  const notices = f.readDb((db) =>
+    db
+      .prepare(
+        "SELECT e.payload FROM coordination_external_delivery_notices n JOIN coordination_inbox_events e ON e.eventId=n.eventId WHERE n.taskId=? AND n.identity LIKE 'stacked-blocker-cleared:%'",
+      )
+      .all(f.dependent),
+  );
+  assert.equal(notices.length, 1);
+  assert.match(String(notices[0]!.payload), /current state: unknown/);
 });

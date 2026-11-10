@@ -54,6 +54,16 @@ beside it, from task detail, the Inbox and Home, and **Reset task** in the task 
 
 ## Recovery
 
+Inbox interventions also show failed stacked blockers (**Unstack or Cancel this
+task**) and unresolved external actions whose outcome is unknown (**Refresh
+delivery or check the action**). List, Overview, task detail and the operator CLI
+use the same cause and next action. These items come from current state, including
+before an agent encounters a refusal. When the condition clears, the item leaves
+the Inbox and the open task's lead receives one notice explaining the change.
+Unstack uses its existing rebase notice. Cancelling the task removes the item
+without waking its lead. Independent status-mapping writes remain outside these
+holds.
+
 - A Fix never clears holds or grants access by implication.
 - Holds a Fix leaves in place are listed beneath it with what clears each and a
   link to each assignment's recovery page (the task's Execution view when it has

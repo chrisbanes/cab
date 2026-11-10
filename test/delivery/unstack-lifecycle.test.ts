@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
 import { materialDigest } from "../../src/core/delivery.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { UnstackStore, type UnstackIdentity } from "../../src/core/unstack.js";
 import type {
   UnstackMaterial,
@@ -179,6 +180,17 @@ for (const failed of [false, true]) {
       command = f.command(i);
     const result = await f.current().unstackTask(command);
     assert.equal(result.phase, "confirmed");
+    const api = new OperatorApi(f.current(), [f.root]);
+    assert.ok(
+      !(await api.readTask(f.dependent)).data.attention.codes.includes(
+        "stacked-blocker-failed",
+      ),
+    );
+    assert.ok(
+      !(await api.readInbox()).data.items.some(
+        (i) => i.kind === "intervention" && i.taskId === f.dependent,
+      ),
+    );
     assert.equal(
       f.current().delivery().delivery(f.dependent)?.acceptedBaseRef,
       "main",

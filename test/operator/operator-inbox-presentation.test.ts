@@ -73,6 +73,8 @@ test("kind and action labels cover every request kind", () => {
   }
   for (const [code, action] of [
     ["execution-uncertain", "Inspect execution"],
+    ["stacked-blocker-failed", "Unstack or Cancel"],
+    ["external-action-uncertain", "Refresh delivery or check the action"],
     ["unresolved-result", "Inspect execution"],
     ["completion-rejected", "Inspect execution"],
   ] as const)
