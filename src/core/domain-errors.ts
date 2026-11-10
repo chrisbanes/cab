@@ -64,6 +64,14 @@ export class DeliveryApprovalRequiredError extends DomainPolicyError {
   }
 }
 
+/** A completion action held by cab's action gates; each reason is recorded on the operation. */
+export class DeliveryActionHeldError extends DomainPolicyError {
+  constructor(readonly reasons: readonly string[]) {
+    super("forbidden", `Completion action held: ${reasons.join(", ")}`);
+    this.name = "DeliveryActionHeldError";
+  }
+}
+
 /** Another project already has this name, ignoring case (SPEC "Guided setup"). */
 export class ProjectNameTakenError extends DomainPolicyError {
   constructor(readonly existingName: string) {

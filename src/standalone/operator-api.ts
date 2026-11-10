@@ -6530,16 +6530,22 @@ export class OperatorApi {
             })),
           }
         : null,
-      actions: v.actions.slice(-128).map((a) => ({
-        operationId: a.operationId,
-        kind: a.kind,
-        caller: a.caller,
-        event: a.event,
-        state: a.state,
-        reason: this.safe(a.reason, excluded),
-        createdAt: a.createdAt,
-        updatedAt: a.updatedAt,
-      })),
+      actions: v.actions.slice(-128).map((a) => {
+        const refusalReasons = (a.refusalReasons ?? []).flatMap(
+          (r) => this.safe(r, excluded) ?? [],
+        );
+        return {
+          operationId: a.operationId,
+          kind: a.kind,
+          caller: a.caller,
+          event: a.event,
+          state: a.state,
+          reason: this.safe(a.reason, excluded),
+          ...(refusalReasons.length ? { refusalReasons } : {}),
+          createdAt: a.createdAt,
+          updatedAt: a.updatedAt,
+        };
+      }),
     });
   }
   async readReview(

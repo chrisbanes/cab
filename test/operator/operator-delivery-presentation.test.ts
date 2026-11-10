@@ -563,6 +563,17 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
     deliveryActionLine({ ...base, reason: "provider-http-404" }),
     /provider-http-404/,
   );
+  // Each gate that held a refused completion action follows its reason.
+  assert.equal(
+    deliveryActionLine({
+      ...base,
+      kind: "pr.merge",
+      state: "confirmed-failure",
+      reason: "delivery-authority-stale-or-held",
+      refusalReasons: ["open-interaction", "merge-target-not-current-delivery"],
+    }),
+    "Merge pull requests: confirmed-failure · delivery-authority-stale-or-held (open-interaction, merge-target-not-current-delivery) · operation op-1",
+  );
 });
 
 test("each Jira status skip reads as its own sentence on a status-mapping write, and an agent's raw reason stays", () => {

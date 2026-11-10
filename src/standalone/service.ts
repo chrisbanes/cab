@@ -183,7 +183,10 @@ import {
   assertDeliveryArguments,
   unresolvedThreadSummary,
 } from "./delivery.js";
-import { DeliveryHoldError } from "../core/domain-errors.js";
+import {
+  DeliveryActionHeldError,
+  DeliveryHoldError,
+} from "../core/domain-errors.js";
 import { StatusMappingStore } from "../core/status-mapping.js";
 import { StatusMappingWriter, statusMappingEvent } from "./status-mapping.js";
 import { type PushWorkspace, verifyTaskPush } from "./push-verification.js";
@@ -1433,10 +1436,6 @@ export class StandaloneService {
                   binding.acceptedBaseRef !== target.baseRef
                 )
                   reasons.push("merge-target-not-current-delivery");
-                if (
-                  !String(domain.project(caller.projectId).instructions).trim()
-                )
-                  reasons.push("merge-instructions-unconfigured");
               } else {
                 const imported = domain.importedTask(caller.taskId);
                 if (
@@ -1448,9 +1447,8 @@ export class StandaloneService {
               }
               if (reasons.length)
                 // Mostly the request's own reviewed results or target, which the agent can correct.
-                throw new DomainPolicyError(
-                  "forbidden",
-                  `Completion action held: ${reasons.join(", ")}`,
+                throw new DeliveryActionHeldError(
+                  [...new Set(reasons)].slice(0, 32),
                 );
             }
           },

@@ -22,6 +22,7 @@ import type {
 } from "../../src/standalone/code-host.js";
 import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
 import type {
+  DeliveryPolicy,
   ExternalAction,
   PrDeliveryObservation,
   ProviderActionObservation,
@@ -52,6 +53,11 @@ export async function deliveryFixture(
    * whatever its state and carries no Project fields, while the Project selection lists open issues only.
    */
   alsoRepository = false,
+  /** The project instructions and code-host grants configured before the lead's first turn. */
+  setup: {
+    instructions?: string;
+    codeHostGrants?: DeliveryPolicy["grants"];
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-delivery-bound-"))),
     projectId = randomUUID(),
@@ -345,7 +351,9 @@ export async function deliveryFixture(
     key: randomUUID(),
     projectId,
     expectedVersion: 1,
-    instructions: "Deliver the scoped task and satisfy provider gates.",
+    instructions:
+      setup.instructions ??
+      "Deliver the scoped task and satisfy provider gates.",
   });
   if (imported) {
     domain.execute({
@@ -456,7 +464,9 @@ export async function deliveryFixture(
       { action: "issue.comment", repositoryId: "R1", mode: "allow" },
       { action: "issue.edit", repositoryId: "R1", mode: "allow" },
       { action: "issue.close", repositoryId: "R1", mode: "allow" },
-      { action: "pr.merge", repositoryId: "R1", mode: "allow" },
+      ...(setup.codeHostGrants ?? [
+        { action: "pr.merge", repositoryId: "R1", mode: "allow" },
+      ]),
     ],
     requiredChecks: [],
   });

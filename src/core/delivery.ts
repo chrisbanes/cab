@@ -675,6 +675,8 @@ export const actionObservationSchema = z
     hostReason: z.string().max(500).optional(),
     /** Explicit null is a proved plain chain; absence means membership is unknown. */
     stack: observedStackSchema.nullable().optional(),
+    /** Each gate that held a refused completion action; absent in older records. */
+    refusalReasons: z.array(identity).min(1).max(32).optional(),
     /** A definitive stack POST validation rejection, persisted before readback. */
     stackLinkRefused: z.boolean().optional(),
   })
@@ -3346,6 +3348,7 @@ export class DeliveryStore {
         state: a.state,
         attempts: a.attempts,
         reason: a.observation?.reason ?? null,
+        refusalReasons: a.observation?.refusalReasons,
         receipt: a.observation?.receipt ?? null,
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,

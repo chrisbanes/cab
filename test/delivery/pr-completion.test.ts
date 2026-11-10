@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
+  canonicalMaterial,
   DeliveryStore,
   type DeliveryCaller,
   type PrDeliveryObservation,
 } from "../../src/core/delivery.js";
+import { repositoryLevelGrants } from "../../src/core/delivery-levels.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
@@ -420,6 +422,187 @@ test("running retained lead performs explicit through-merge only after all exist
       true,
     );
     assert.equal(f.domain.task(f.taskId).state, "open");
+  } finally {
+    await f.close();
+  }
+});
+/** A through-merge fixture with blank project instructions, its PR 7 registered, optionally at a repository level. */
+async function emptyInstructionsMerge(
+  level?: "merge-when-ready" | "merge-with-approval",
+) {
+  const f = await deliveryFixture(
+    "through-merge",
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    {
+      instructions: "",
+      ...(level ? { codeHostGrants: repositoryLevelGrants("R1", level) } : {}),
+    },
+  );
+  assert.equal(f.domain.project(f.projectId).instructions, "");
+  const p = f.getPr();
+  const registered = await f.call("cab_register_pr", {
+    repositoryId: "R1",
+    prNumber: 7,
+    expectedPrNodeId: "P7",
+    expectedHeadSha: p.headSha,
+  });
+  assert.equal(registered.success, true, registered.text);
+  const action = {
+    kind: "pr.merge",
+    target: {
+      repositoryId: "R1",
+      number: 7,
+      nodeId: "P7",
+      baseRef: "main",
+      headRef: "cb/change",
+      expectedHeadSha: p.headSha,
+    },
+    method: "squash",
+    reviewedResultIds: [],
+  };
+  return { f, action };
+}
+for (const level of [undefined, "merge-when-ready"] as const)
+  test(`empty project instructions add no merge condition (${level ?? "custom grants"})`, async () => {
+    const { f, action } = await emptyInstructionsMerge(level);
+    try {
+      const result = await f.call("cab_external_action", {
+        operationId: randomUUID(),
+        action,
+      });
+      assert.equal(result.success, true, result.text);
+      assert.equal(f.effects.length, 1);
+      assert.equal(
+        f.service.delivery().delivery(f.taskId)?.observation.merged,
+        true,
+      );
+    } finally {
+      await f.close();
+    }
+  });
+test("empty project instructions merge with my approval once the operator approves", async () => {
+  const { f, action } = await emptyInstructionsMerge("merge-with-approval");
+  try {
+    assert.equal(
+      (
+        await f.call("cab_external_action", {
+          operationId: randomUUID(),
+          action,
+        })
+      ).success,
+      false,
+    );
+    assert.equal(f.effects.length, 0);
+    const approval = await f.call("cab_request_approval", {
+      action: action.kind,
+      target: canonicalMaterial(action.target),
+      material: action,
+    });
+    assert.equal(approval.success, true, approval.text);
+    const interaction = f.service.coordinationView().readTask(f.taskId)
+      .approvals[0];
+    assert.ok(interaction);
+    f.turns[0]?.release();
+    const deadline = Date.now() + 3000;
+    while (!f.service.list().some((i) => i.state === "completed")) {
+      if (Date.now() > deadline) throw new Error("terminal timeout");
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    await f.service.coordinationView().decideApproval({
+      taskId: f.taskId,
+      key: randomUUID(),
+      interactionId: interaction.interactionId,
+      expectedRevision: 1,
+      decision: "approved",
+      action: action.kind,
+      target: canonicalMaterial(action.target),
+      material: action,
+    });
+    await f.waitTurn(1);
+    const result = await f.call(
+      "cab_external_action",
+      {
+        operationId: randomUUID(),
+        action,
+        approval: {
+          interactionId: interaction.interactionId,
+          expectedRevision: 2,
+        },
+      },
+      1,
+    );
+    assert.equal(result.success, true, result.text);
+    assert.equal(f.effects.length, 1);
+    assert.equal(
+      f.service.delivery().delivery(f.taskId)?.observation.merged,
+      true,
+    );
+  } finally {
+    await f.close();
+  }
+});
+test("a merge held by several gates records each reason on its operation", async () => {
+  const f = await deliveryFixture("through-merge");
+  try {
+    const p = f.getPr();
+    assert.equal(
+      (
+        await f.call("cab_register_pr", {
+          repositoryId: "R1",
+          prNumber: 7,
+          expectedPrNodeId: "P7",
+          expectedHeadSha: p.headSha,
+        })
+      ).success,
+      true,
+    );
+    const comment = {
+      kind: "issue.comment",
+      target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+      body: "Proceed?",
+    };
+    const question = await f.call("cab_request_approval", {
+      action: comment.kind,
+      target: canonicalMaterial(comment.target),
+      material: comment,
+    });
+    assert.equal(question.success, true, question.text);
+    const operationId = randomUUID();
+    const result = await f.call("cab_external_action", {
+      operationId,
+      action: {
+        kind: "pr.merge",
+        target: {
+          repositoryId: "R1",
+          number: 7,
+          nodeId: "P7",
+          baseRef: "main",
+          headRef: "cb/change",
+          expectedHeadSha: "f".repeat(40),
+        },
+        method: "squash",
+        reviewedResultIds: [],
+      },
+    });
+    assert.equal(result.success, false);
+    assert.equal(f.effects.length, 0);
+    const refused = f.service
+      .delivery()
+      .actions(f.taskId)
+      .find((a) => a.operationId === operationId);
+    assert.equal(refused?.state, "confirmed-failure");
+    assert.equal(
+      refused.observation?.reason,
+      "delivery-authority-stale-or-held",
+    );
+    assert.deepEqual(
+      new Set(refused.observation?.refusalReasons),
+      new Set(["open-interaction", "merge-target-not-current-delivery"]),
+    );
   } finally {
     await f.close();
   }

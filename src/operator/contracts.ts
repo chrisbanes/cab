@@ -1775,6 +1775,8 @@ export const deliveryReadSchema = z
             event: z.enum(statusMappingEvents).nullable(),
             state: text,
             reason: safeText,
+            /** Each gate that held a refused completion action; absent from older servers and records. */
+            refusalReasons: z.array(text).max(32).optional(),
             createdAt: time,
             updatedAt: time,
           })

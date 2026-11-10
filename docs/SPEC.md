@@ -2830,9 +2830,12 @@ scoped to its container, a GitHub repository today; they need no repository link
 and branch actions go to the code host of the target's repository link.
 
 Each project chooses reviewable PR (default) or through-merge delivery. Reviewable-PR handback waits for settlement; feedback/CI failures wake the
-task-scoped project lead, while merge remains operator-owned. Through-merge requires granted authority,
-project instructions and actual GitHub requirements. No universal review count is
-imposed. Non-code tasks record the requested outcome and evidence; no universal
+task-scoped project lead, while merge remains operator-owned. Through-merge requires granted authority (with
+operator approval where the grant requires it) and the code host's actual
+requirements. Project instructions may add the operator's merge conditions; empty
+instructions add none. A refused completion action records each reason that held
+it on its operation, shown by `cab delivery get` and the task's Changes tab. No
+universal review count is imposed. Non-code tasks record the requested outcome and evidence; no universal
 human acceptance is required beyond configured instructions and permissions.
 Assignment completion alone cannot merge, close an issue, complete its task or
 remove a workspace.
