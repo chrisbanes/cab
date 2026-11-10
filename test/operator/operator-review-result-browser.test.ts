@@ -127,11 +127,6 @@ const markDone = (s: { f: Fixture; taskId: string }) =>
 /** Opens Evidence by its summary and shows its records in the viewport. */
 async function openEvidence(page: Page) {
   let interactions = 0;
-  const fold = page.locator("details.inspector-fold");
-  if ((await fold.getAttribute("open")) === null) {
-    await fold.locator("> summary").click();
-    interactions++;
-  }
   const card = overviewCard(page, "evidence");
   if ((await card.getAttribute("open")) === null) {
     await card.locator("> summary").click();
@@ -155,7 +150,7 @@ for (const [label, viewport] of [
   ["1366 x 900", desktop],
   ["390 x 844", phone],
 ] as const) {
-  test(`review a result budget: ${viewport === phone ? "two interactions" : "one interaction"} from task detail (${label})`, async (_t, journey) => {
+  test(`review a result budget: one interaction from task detail (${label})`, async (_t, journey) => {
     const s = await start(
       journey,
       viewport,
@@ -231,11 +226,25 @@ for (const [label, viewport] of [
       0,
     );
     const interactions = await openEvidence(s.page);
-    assert.equal(interactions, viewport === phone ? 2 : 1);
+    assert.equal(interactions, 1);
+    const fold = s.page.locator("details.inspector-fold");
+    assert.equal(
+      (await fold.getAttribute("open")) !== null,
+      viewport !== phone,
+      "opening Evidence does not change Task details",
+    );
+    assert.equal(await metadata.isVisible(), viewport !== phone);
+    // Inspecting provenance is separate from the Evidence interaction budget.
+    let provenanceInteractions = 0;
+    if (viewport === phone) {
+      await fold.locator("> summary").click();
+      provenanceInteractions++;
+    }
+    assert.equal(provenanceInteractions, viewport === phone ? 1 : 0);
     assert.equal(await metadata.isVisible(), true);
   });
 
-  test(`review a result budget: ${viewport === phone ? "three interactions" : "two interactions"} from Home Completed work (${label})`, async (_t, journey) => {
+  test(`review a result budget: two interactions from Home Completed work (${label})`, async (_t, journey) => {
     const s = await start(journey, viewport, seedFourCriteria, () => "/");
     markDone(s);
     await s.page.reload();
@@ -257,7 +266,12 @@ for (const [label, viewport] of [
       s.page.getByRole("heading", { name: "Reply", exact: true }),
     );
     interactions += await openEvidence(s.page);
-    assert.equal(interactions, viewport === phone ? 3 : 2);
+    assert.equal(interactions, 2);
+    assert.equal(
+      (await s.page.locator("details.inspector-fold").getAttribute("open")) !==
+        null,
+      viewport !== phone,
+    );
   });
 
   test(`an explicit evidence link needs no extra disclosure click (${label})`, async (_t, journey) => {
@@ -270,12 +284,18 @@ for (const [label, viewport] of [
     assert.equal(await openEvidence(s.page), 0);
     assert.equal(
       await s.page.locator("#result-details p.metadata").isVisible(),
-      true,
+      viewport !== phone,
     );
     assert.equal(
       await openEvidence(s.page),
       0,
       "already-open disclosures stay open",
+    );
+    assert.equal(
+      (await s.page.locator("details.inspector-fold").getAttribute("open")) !==
+        null,
+      viewport !== phone,
+      "the Evidence link and helper leave phone Task details closed",
     );
   });
 
