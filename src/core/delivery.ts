@@ -2768,9 +2768,11 @@ export class DeliveryStore {
     assertOwnedTaskWritable(this.db, caller.taskId);
     const current = this.delivery(caller.taskId),
       policy = this.configuration(caller.projectId);
-    this.db
-      .prepare("INSERT OR IGNORE INTO delivery_waiting_work VALUES (?,?,?)")
-      .run(caller.workId, caller.taskId, leadAssignmentId);
+    // A delegate's work must not wait on the lead's delivery, or the delegate never completes.
+    if (caller.assignmentId === leadAssignmentId)
+      this.db
+        .prepare("INSERT OR IGNORE INTO delivery_waiting_work VALUES (?,?,?)")
+        .run(caller.workId, caller.taskId, leadAssignmentId);
     if (current) {
       if (
         current.observation.nodeId !== observation.nodeId ||
@@ -3211,7 +3213,11 @@ export class DeliveryStore {
     if (!created) return null;
     const receipt = created.observation!.receipt!;
     const target = created.request.action.target;
-    return `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${receipt.headSha ? `, head ${receipt.headSha}` : "expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""}); register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
+    const createdText = `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${receipt.headSha ? `, head ${receipt.headSha}` : "expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""})`;
+    // Registration refuses a second PR while a binding exists, so only report the mismatch.
+    return bound
+      ? `${createdText} is not this task's delivery; the task is bound to PR #${bound.number}.`
+      : `${createdText}; register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
   }
   publicTask(taskId: string) {
     const task = this.db

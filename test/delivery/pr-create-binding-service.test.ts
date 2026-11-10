@@ -313,13 +313,13 @@ test("service keeps the exact confirmed created PR visible when another PR is al
     assert.equal(created.success, true, created.text);
     assert.match(
       created.text,
-      /Created PR #7.*node P7, head c{40}.*register PR #7/,
+      /Created PR #7.*node P7, head c{40}.*bound to PR #9\./,
     );
     const delivery = f.service.coordinationView().readTask(f.taskId).delivery;
     assert.equal(delivery?.binding?.observation.number, 9);
     assert.match(
       delivery?.unregisteredPr ?? "",
-      /Created PR #7.*node P7, head c{40}.*register PR #7/,
+      /Created PR #7.*node P7, head c{40}.*bound to PR #9\./,
     );
   } finally {
     await f.close();

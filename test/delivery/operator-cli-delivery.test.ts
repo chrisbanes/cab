@@ -158,7 +158,7 @@ test("delivery get retains the exact created PR and registration step without a 
   assert.equal(withBound.data.delivery.binding.number, 7);
   assert.match(
     withBound.data.delivery.unregisteredPr,
-    /Created PR #8.*node P8, head b{40}.*register PR #8/,
+    /Created PR #8.*node P8, head b{40}.*bound to PR #7\./,
   );
   const both = await w.h.run([
     "delivery",
@@ -170,7 +170,7 @@ test("delivery get retains the exact created PR and registration step without a 
   assert.match(both.out, /Pull request: +org\/repo#7 OPEN/);
   assert.match(
     both.out,
-    /Unregistered pull request: +Created PR #8.*register PR #8/,
+    /Unregistered pull request: +Created PR #8.*bound to PR #7/,
   );
 });
 

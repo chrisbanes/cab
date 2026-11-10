@@ -185,6 +185,11 @@ for (const host of ["github", "gitlab"] as const) {
       assert.equal(first.state, "confirmed-success");
       assert.equal(f.store.delivery(f.taskId)?.leadAssignmentId, f.lead);
       assert.equal(f.store.unregisteredPr(f.taskId), null);
+      assert.equal(
+        f.store.hasWaitingPr(f.caller.workId),
+        false,
+        "the delegate's work does not wait on the lead's delivery",
+      );
       const second = await f.coordinator.submit(f.request(), f.caller);
       assert.equal(second.state, "confirmed-success");
       assert.equal(
@@ -366,7 +371,7 @@ test("a closed PR at an earlier head does not prevent a new create on the advanc
     assert.equal(f.writes(), 2);
     assert.match(
       f.store.unregisteredPr(f.taskId)!,
-      /Created PR #8.*node P8.*register PR #8/,
+      /Created PR #8.*node P8.*not this task.s delivery; the task is bound to PR #7/,
     );
   } finally {
     await f.close();
