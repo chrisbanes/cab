@@ -381,7 +381,14 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   await page
     .getByRole("heading", { name: "Release delivery", exact: true })
     .waitFor();
+  const optionsUrl = `${web.origin}/api/operator/projects/${f.projectId}/composer-options`;
+  const initialOptions = page.waitForResponse(optionsUrl);
   await page.goto(`${web.origin}/tasks/new?project=${f.projectId}`);
+  assert.equal((await initialOptions).status(), 200);
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    f.projectId,
+  );
   await page
     .getByLabel("Task title", { exact: true })
     .fill("Retain the exact composer input");
@@ -390,9 +397,10 @@ test("uncertain effect and independent Stop remain visible after restart; expire
     .fill("Retain the supplied outcome");
   const tasksBefore = f.service.domain().tasks(f.projectId).length;
   f.advanceClock(61_000);
-  // Choosing the project again reads its composer options, which finds the expired session.
+  // Clearing the sole default reselects it and rereads its options.
+  const expiredOptions = page.waitForResponse(optionsUrl);
   await page.getByLabel("Project", { exact: true }).selectOption("");
-  await page.getByLabel("Project", { exact: true }).selectOption(f.projectId);
+  assert.equal((await expiredOptions).status(), 401);
   await page.getByLabel("Password").waitFor();
   assert.equal(f.scripted.state.writes, 0);
   assert.equal(f.service.domain().tasks(f.projectId).length, tasksBefore);

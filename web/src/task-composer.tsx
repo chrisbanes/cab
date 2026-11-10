@@ -84,6 +84,15 @@ export function TaskComposer({
     state.activate(() => render((n) => n + 1));
     return () => state.dispose();
   }, [state]);
+  const recovered = state.recovered,
+    projectId = state.input.projectId;
+  useEffect(() => {
+    if (!workspace || recovered || projectId) return;
+    const projects = visibleProjects(workspace.data.projects);
+    if (projects.length !== 1) return;
+    state.input = { ...state.input, projectId: projects[0]!.id };
+    render((n) => n + 1);
+  }, [workspace, state, recovered, projectId]);
   const [resumed, setResumed] = useState(
       !state.recovered || state.phase === "unknown",
     ),
