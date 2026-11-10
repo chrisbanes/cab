@@ -115,7 +115,10 @@ export function scriptedDeliveryProvider() {
     /** Each commit's parents, read back after a branch update; `commitsUnavailable` fails those reads. */
     parents: {} as Record<string, string[]>,
     commitsUnavailable: false,
-    /** `PUT .../update-branch` calls, the head the host's update makes, and whether its response is lost. */
+    /**
+     * `PUT .../update-branch` calls and the head the host's update makes. GitHub answers 202 and updates
+     * later, as `applyUpdate()` does; a lost response is sent after the update applied.
+     */
     updateBranch: {
       writes: 0,
       head: "5".repeat(40),
@@ -206,6 +209,14 @@ export function scriptedDeliveryProvider() {
       : status === "merged"
         ? { message: message ?? "Pull request merged", sha: "9".repeat(40) }
         : { message: message ?? `Merge ${status}` };
+  /** The host's update lands: GitHub merges the base into the branch. */
+  const applyUpdate = () => {
+    const { head } = state.updateBranch;
+    state.parents[head] = [state.head, state.baseTip ?? state.base];
+    state.head = head;
+    state.refs[state.headRef] = head;
+    state.mergeStateStatus = "CLEAN";
+  };
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -256,14 +267,10 @@ export function scriptedDeliveryProvider() {
         expected_head_sha: state.head,
       });
       state.updateBranch.writes++;
-      // The host merges the base into the branch: a new head on top of the old one.
-      const { head } = state.updateBranch;
-      state.parents[head] = [state.head, state.baseTip ?? state.base];
-      state.head = head;
-      state.refs[state.headRef] = head;
-      state.mergeStateStatus = "CLEAN";
-      if (state.updateBranch.lostResponse)
+      if (state.updateBranch.lostResponse) {
+        applyUpdate();
         throw Error("scripted lost update response");
+      }
       return Response.json(
         { message: "Updating pull request branch." },
         { status: 202 },
@@ -278,6 +285,17 @@ export function scriptedDeliveryProvider() {
         parents: (state.parents[commit[1]!] ?? []).map((sha) => ({ sha })),
       });
     }
+    // Only the base branch's tip is on it.
+    const compare =
+      /^GET \/repos\/org\/repo\/compare\/([0-9a-f]{40})\.\.\.(.+)$/.exec(route);
+    if (compare)
+      return Response.json({
+        status:
+          compare[1] === (state.baseTip ?? state.base) &&
+          decodeURIComponent(compare[2]!) === state.baseRef
+            ? "identical"
+            : "diverged",
+      });
     if (route.startsWith("GET /repos/org/repo/pulls/7/merge-async/")) {
       const uuid = route.slice(route.lastIndexOf("/") + 1);
       const { polls } = state.mergeAsync;
@@ -576,6 +594,7 @@ export function scriptedDeliveryProvider() {
   };
   return {
     state,
+    applyUpdate,
     provider: new GitHubHttpDeliveryProvider(
       "synthetic-release-marker",
       fetcher,

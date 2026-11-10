@@ -48,7 +48,7 @@ export function leadDeliveryGuidance(
               policy.grants.some(
                 (g) => g.action === "pr.update-branch" && g.repositoryId === id,
               )
-                ? " If the PR is behind a base whose rules require an up-to-date branch, request pr.update-branch, then fetch the task branch before further commits."
+                ? " If the PR is behind a base whose rules require an up-to-date branch, request pr.update-branch; once cab confirms it, fetch the task branch before further commits."
                 : ""
             }`,
         )),

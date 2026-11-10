@@ -69,9 +69,14 @@ function baseSummary(binding: PrDeliveryBinding): string {
     : "";
 }
 /** Each merge blocker about the PR's base branch, in the words the CLI and Delivery tab use. */
-function mergeBaseSummary(observation: PrDeliveryObservation): string {
+function mergeBaseSummary(
+  observation: PrDeliveryObservation,
+  codeHost: CodeHost,
+): string {
   return observation.mergeBlockers
-    .map((code) => mergeBlockerSentence(code, { baseRef: observation.baseRef }))
+    .map((code) =>
+      mergeBlockerSentence(code, { codeHost, baseRef: observation.baseRef }),
+    )
     .filter((sentence) => sentence !== undefined)
     .map((sentence) => `\n${sentence}`)
     .join("");
@@ -1526,7 +1531,7 @@ export class DeliveryCoordinator {
             .map((f) => `${f.kind} ${f.nodeId} (${f.state}): ${f.body}`)
             .join(
               "\n",
-            )}\n${unresolvedThreadSummary(observation)}${baseSummary(result.binding)}${mergeBaseSummary(observation)}`.trimEnd(),
+            )}\n${unresolvedThreadSummary(observation)}${baseSummary(result.binding)}${mergeBaseSummary(observation, this.codeHost(current.projectId, observation.repositoryId).codeHost)}`.trimEnd(),
           `${result.binding.revision}:${result.binding.observationDigest}`,
         );
       return result.binding;

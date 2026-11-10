@@ -285,6 +285,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     Response.json({ status: "merged", details: { uuid: "u-1" } });
   const sent: string[] = [];
   let parents: string[] = [];
+  let compareStatus = "ahead";
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (init?.method && init.method !== "GET" && url.pathname !== "/graphql") {
@@ -294,6 +295,8 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     }
     if (/^\/repos\/org\/repo\/commits\/[0-9a-f]{40}$/.test(url.pathname))
       return Response.json({ parents: parents.map((sha) => ({ sha })) });
+    if (url.pathname.startsWith("/repos/org/repo/compare/"))
+      return Response.json({ status: compareStatus });
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
       if (body.query.includes("CabDeliveryPr")) {
@@ -389,6 +392,10 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     /** The parents of every commit read. */
     setParents: (v: string[]) => {
       parents = v;
+    },
+    /** How the base branch compares with any commit. */
+    setCompareStatus: (v: string) => {
+      compareStatus = v;
     },
   };
 }
@@ -733,6 +740,7 @@ test("a merge GitHub refuses because its head or base moved is a retryable confi
       reason: "merge-target-moved",
       receipt: null,
       retryable: true,
+      hostReason: "Head branch was modified",
     });
   }
   // Only the merge reads a refusal as a moved target.
@@ -798,12 +806,26 @@ test("pr.update-branch is sent only for a conflict-free PR an up-to-date rule ho
   ]);
   const updated = "4".repeat(40);
   f.raw.head.sha = updated;
-  f.setParents(["2".repeat(40)]);
-  assert.deepEqual(await f.provider.inspectAction(record), {
-    state: "uncertain",
-    reason: "provider-effect-unproved",
+  // A plain commit on the old head, a merge of something off the base, or parents out of order is not the update.
+  const superseded = {
+    state: "confirmed-failure",
+    reason: "provider-update-branch-superseded",
     receipt: null,
-  });
+  };
+  for (const [parents, status] of [
+    [["1".repeat(40)], "ahead"],
+    [["2".repeat(40), "1".repeat(40)], "ahead"],
+    [["1".repeat(40), "2".repeat(40)], "diverged"],
+  ] as const) {
+    f.setParents([...parents]);
+    f.setCompareStatus(status);
+    assert.deepEqual(
+      await f.provider.inspectAction(record),
+      superseded,
+      JSON.stringify(parents),
+    );
+  }
+  f.setCompareStatus("ahead");
   f.setParents(["1".repeat(40), "2".repeat(40)]);
   assert.deepEqual(await f.provider.inspectAction(record), {
     state: "confirmed-success",

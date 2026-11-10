@@ -2267,8 +2267,17 @@ test("pr.update-branch needs a grant, then moves the binding and the task branch
     assert.equal(w.state.updateBranch.writes, 0);
     w.grantUpdate();
     const operationId = randomUUID();
-    const updated = await w.update(operationId);
-    assert.equal(updated.success, true, updated.text);
+    // GitHub accepts the request and updates the branch later.
+    assert.equal((await w.update(operationId)).success, false);
+    const pending = w.f.service.delivery().action(operationId);
+    assert.equal(pending.state, "uncertain");
+    assert.equal(pending.observation?.reason, "provider-update-branch-pending");
+    w.f.scripted.applyUpdate();
+    await refreshDelivery(w.f);
+    assert.equal(
+      w.f.service.delivery().action(operationId).state,
+      "confirmed-success",
+    );
     assert.equal(w.state.updateBranch.writes, 1);
     const head = w.state.updateBranch.head;
     assert.equal(
@@ -2310,6 +2319,34 @@ test("pr.update-branch needs a grant, then moves the binding and the task branch
     // Not behind any more: a second update is refused before any write.
     assert.equal((await w.update()).success, false);
     assert.equal(w.state.updateBranch.writes, 1);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a head that is not GitHub's update ends a pending pr.update-branch and is recorded as an outside change", async () => {
+  const w = await behindTaskPr();
+  try {
+    w.grantUpdate();
+    const operationId = randomUUID();
+    await w.update(operationId);
+    assert.equal(w.f.service.delivery().action(operationId).state, "uncertain");
+    // Someone pushes on top of the old head before GitHub's update runs.
+    const outside = "6".repeat(40);
+    w.state.parents[outside] = [w.sha];
+    w.state.head = outside;
+    w.state.refs[w.branch] = outside;
+    await refreshDelivery(w.f);
+    const record = w.f.service.delivery().action(operationId);
+    assert.equal(record.state, "confirmed-failure");
+    assert.equal(
+      record.observation?.reason,
+      "provider-update-branch-superseded",
+    );
+    await refreshDelivery(w.f);
+    const branch = w.f.service.delivery().taskBranch(w.f.taskId, "R1");
+    assert.equal(branch?.lastPushedSha, w.sha);
+    assert.equal(branch?.outsideHeadSha, outside);
   } finally {
     await w.f.close();
   }

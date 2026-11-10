@@ -94,7 +94,7 @@ test("every preset level tells the lead to update a behind PR, then fetch", () =
         },
         ["R1"],
       ),
-      /R1: .*request pr\.update-branch, then fetch the task branch before further commits\./,
+      /R1: .*request pr\.update-branch; once cab confirms it, fetch the task branch before further commits\./,
     );
   assert.doesNotMatch(
     leadDeliveryGuidance(

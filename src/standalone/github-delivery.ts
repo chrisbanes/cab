@@ -196,7 +196,7 @@ class ProviderFailure extends Error {
     readonly status: number,
     /** Set when GitHub rate-limited the request: the epoch-ms time to resume. */
     readonly resumeAt?: number,
-    /** A 409's parsed JSON body (a merge-async conflict names the pending request); undefined otherwise. */
+    /** A 405, 409 or 422's parsed JSON body (a merge-async conflict names the pending request); undefined otherwise. */
     readonly body?: unknown,
   ) {
     super(`provider-http-${status}`);
@@ -462,7 +462,9 @@ export class GitHubHttpDeliveryProvider
       throw new ProviderFailure(
         response.status,
         await githubRateLimitResumeAt(response),
-        response.status === 409 || response.status === 422
+        response.status === 405 ||
+          response.status === 409 ||
+          response.status === 422
           ? await response.json().catch(() => undefined)
           : undefined,
       );
@@ -2343,13 +2345,18 @@ export class GitHubHttpDeliveryProvider
         a.kind === "pr.merge" &&
         error instanceof ProviderFailure &&
         (error.status === 405 || error.status === 409)
-      )
+      ) {
+        const hostReason = z
+          .object({ message: z.string().min(1) })
+          .safeParse(error.body).data?.message;
         return {
           state: "confirmed-failure",
           reason: "merge-target-moved",
           receipt: null,
           retryable: true,
+          ...(hostReason ? { hostReason: hostReason.slice(0, 500) } : {}),
         };
+      }
       // Only a single-request rejection is definitive. Label removal is multi-effect.
       if (
         error instanceof ProviderFailure &&
@@ -2728,7 +2735,7 @@ export class GitHubHttpDeliveryProvider
           p.base.repo.node_id !== a.target.repositoryId
         )
           throw new Error("provider-pr-mismatch");
-        // GitHub updates the branch later: only a new head on top of the old one proves the update.
+        // GitHub updates the branch later, by merging its base: only that merge commit proves the update.
         if (a.kind === "pr.update-branch") {
           if (p.head.sha === a.target.expectedHeadSha)
             return {
@@ -2736,25 +2743,42 @@ export class GitHubHttpDeliveryProvider
               reason: "provider-update-branch-pending",
               receipt: null,
             };
-          const commit = z
+          const [own, merged, ...rest] = z
             .object({ parents: z.array(z.object({ sha })) })
             .parse(
               (await this.request(`${repo.path}/commits/${p.head.sha}`)).json,
+            ).parents;
+          const fromBase =
+            own?.sha === a.target.expectedHeadSha &&
+            merged !== undefined &&
+            !rest.length &&
+            ["ahead", "identical"].includes(
+              z
+                .object({ status: name })
+                .parse(
+                  (
+                    await this.request(
+                      `${repo.path}/compare/${merged.sha}...${encodeURIComponent(p.base.ref)}`,
+                    )
+                  ).json,
+                ).status,
             );
-          if (
-            p.head.ref === a.target.headRef &&
-            commit.parents.some((c) => c.sha === a.target.expectedHeadSha)
-          )
-            receipt = {
-              nodeId: p.node_id,
-              number: p.number,
-              headSha: p.head.sha,
-            };
-          return actionObservationSchema.parse({
-            state: receipt ? "confirmed-success" : "uncertain",
-            reason: receipt ? null : "provider-effect-unproved",
-            receipt,
-          });
+          // Any other head settles the action, so the next observation records it as an outside change.
+          return p.head.ref === a.target.headRef && fromBase
+            ? {
+                state: "confirmed-success",
+                reason: null,
+                receipt: {
+                  nodeId: p.node_id,
+                  number: p.number,
+                  headSha: p.head.sha,
+                },
+              }
+            : {
+                state: "confirmed-failure",
+                reason: "provider-update-branch-superseded",
+                receipt: null,
+              };
         }
         const moved =
           p.head.sha !== a.target.expectedHeadSha ||
