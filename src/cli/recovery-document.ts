@@ -92,16 +92,6 @@ const receiptAssertions = z
       .strict(),
   })
   .strict();
-/** What the operator must supply per path; nothing here is ever defaulted or inferred. */
-const evidenceFileSchemas: Record<
-  Exclude<PreparedPath, "conversation-replace">,
-  z.ZodType
-> = {
-  "pre-turn-recover": receiptAssertions,
-  "no-turn-recover": receiptAssertions,
-  "bound-turn-recover": receiptAssertions,
-};
-
 /** Reads and strictly validates an operator evidence file for one path. */
 export async function readEvidenceFile(
   path: string,
@@ -138,7 +128,8 @@ export async function readEvidenceFile(
       "invalid-input",
       `--evidence-file must declare "schema": "${EVIDENCE_SCHEMA}".`,
     );
-  const parsed = evidenceFileSchemas[recoveryPath].safeParse(rest);
+  // Every prepared generation path needs the same receipt assertions; nothing is defaulted or inferred.
+  const parsed = receiptAssertions.safeParse(rest);
   if (!parsed.success)
     throw new CliError(
       "invalid-input",

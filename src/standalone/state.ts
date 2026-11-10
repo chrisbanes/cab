@@ -4797,20 +4797,21 @@ export class ExecutionState {
    * `startTurn`, so such a generation never sent a turn, whatever its hold reason says.
    */
   releaseBlockers(workId: string): ReleaseBlocker[] {
-    const binding = this.hasTurnRequests ? this.taskBinding(workId) : undefined;
-    const record = binding
-      ? this.recoveryFor(
-          binding.assignmentId,
-          binding.assignmentVersion,
-          workId,
-        )[0]
-      : undefined;
-    const request = this.hasTurnRequests
-      ? (this.db
-          .prepare("SELECT kind FROM turn_requests WHERE workId=?")
-          .get(workId) as { kind: string } | undefined)
-      : undefined;
-    if (!binding || !record || request?.kind !== "assignment")
+    if (!this.hasTurnRequests) return ["context-unavailable"];
+    const binding = this.taskBinding(workId);
+    const record =
+      binding &&
+      this.recoveryFor(binding.assignmentId, binding.assignmentVersion, workId)[0];
+    const request = this.db
+      .prepare("SELECT kind FROM turn_requests WHERE workId=?")
+      .get(workId) as { kind: string } | undefined;
+    // The release command binds the work revision, so a generation without one can't be released.
+    if (
+      !binding ||
+      !record ||
+      request?.kind !== "assignment" ||
+      record.generation.workRevision === null
+    )
       return ["context-unavailable"];
     const identity = this.db
       .prepare(
@@ -4938,6 +4939,9 @@ export class ExecutionState {
           JOIN turn_requests request ON request.workId = intent.workId
           WHERE intent.state = 'held' AND request.kind = 'assignment'
             AND intent.threadId IS NULL AND intent.turnId IS NULL
+            -- Refused generations stay held for history but no longer hold capacity.
+            AND EXISTS (SELECT 1 FROM execution_capacity_reservations capacity
+              WHERE capacity.workId = intent.workId)
           ORDER BY intent.rowid`)
         .all() as { workId: string }[]
     ).map((r) => r.workId);

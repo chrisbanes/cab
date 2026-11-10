@@ -583,15 +583,15 @@ async function release(ctx: Parameters<WriteCommand["run"]>[0]) {
     "It frees the writer and capacity holds; the task then offers Start again. An unseen idle thread may exist.",
     `Held reason (evidence only): ${record.retainedReason ?? "(withheld or unavailable)"}`,
   ];
-  if (!ctx.values.yes || workRevision === null) {
-    if (ctx.values.yes)
-      throw new CliError(
-        "conflict",
-        "release is not eligible now: blocked by context-unavailable. Nothing was written.",
-        {
-          fix: `Run 'cab recovery get ${assignmentId}' to see what blocks it.`,
-        },
-      );
+  // A generation without a work revision can't be bound; the read names the blocker.
+  if (ctx.values.yes && workRevision === null)
+    throw new CliError(
+      "conflict",
+      `release is not eligible now: blocked by ${blockedBy.join(", ") || "context-unavailable"}. Nothing was written.`,
+      { fix: `Run 'cab recovery get ${assignmentId}' to see what blocks it.` },
+    );
+  // Otherwise --yes lets the service decide, so a recorded key still replays after the release.
+  if (!ctx.values.yes || workRevision === null)
     return {
       data: {
         assignmentId,
@@ -611,7 +611,6 @@ async function release(ctx: Parameters<WriteCommand["run"]>[0]) {
         NOTHING_INFERRED,
       ].join("\n"),
     };
-  }
   const session = readSession as Session;
   const command = {
     type: recoveryCommandTypes.release,

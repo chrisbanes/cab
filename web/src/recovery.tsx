@@ -676,13 +676,8 @@ const releasedMessage =
   "Released. Writer and capacity are free and the task offers Start again. No work was started.";
 
 /** Held generations cab can prove never sent a turn: release them for Start again. */
-function ReleaseRecovery(
-  p: SettingsProps & {
-    assignmentId: string;
-    projectId: string;
-    taskId: string;
-  },
-) {
+/** One recovery-options read shared by the Release and bound-turn panels. */
+function useRecoveryOptions(p: SettingsProps & { assignmentId: string }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
       p.client.read(
@@ -693,10 +688,38 @@ function ReleaseRecovery(
     [p.client, p.assignmentId],
   );
   const resource = useOperatorResource(
-    `${p.session.csrfToken}:${p.assignmentId}:release`,
+    `${p.session.csrfToken}:${p.assignmentId}`,
     loader,
   );
   useHeaderRefresh(p.refreshNonce, resource.refresh);
+  return resource;
+}
+type RecoveryOptionsResource = ReturnType<typeof useRecoveryOptions>;
+
+/** The release and bound-turn panels over one recovery-options read. */
+function RecoveryActions(
+  p: SettingsProps & {
+    assignmentId: string;
+    projectId: string;
+    taskId: string;
+  },
+) {
+  const resource = useRecoveryOptions(p);
+  return (
+    <>
+      <ReleaseRecovery {...p} resource={resource} />
+      <BoundTurnRecovery {...p} resource={resource} />
+    </>
+  );
+}
+
+function ReleaseRecovery(
+  p: SettingsProps & {
+    assignmentId: string;
+    resource: RecoveryOptionsResource;
+  },
+) {
+  const { resource } = p;
   // Keep the generations first shown, so an outcome stays visible after a reload.
   const shown = useRef<RecoveryOptions["records"] | null>(null);
   if (shown.current === null && resource.state.data)
@@ -956,22 +979,10 @@ function BoundTurnRecovery(
     assignmentId: string;
     projectId: string;
     taskId: string;
+    resource: RecoveryOptionsResource;
   },
 ) {
-  const loader = useCallback(
-    (signal: AbortSignal) =>
-      p.client.read(
-        `/api/operator/assignments/${p.assignmentId}/recovery-options`,
-        recoveryOptionsSchema,
-        signal,
-      ),
-    [p.client, p.assignmentId],
-  );
-  const resource = useOperatorResource(
-    `${p.session.csrfToken}:${p.assignmentId}`,
-    loader,
-  );
-  useHeaderRefresh(p.refreshNonce, resource.refresh);
+  const { resource } = p;
   // Keep the original bounded identities, including an unknown command whose record later disappears.
   const shown = useRef<RecoveryOptions["records"] | null>(null);
   if (shown.current === null && resource.state.data)
@@ -1522,16 +1533,7 @@ export function AssignmentRecovery(
               </Panel>
             </div>
             <div className="settings-column">
-              <ReleaseRecovery
-                key={`${p.session.csrfToken}:${p.assignmentId}:${data.project.id}:release`}
-                {...p}
-                readOnly={
-                  data.project.archived || data.assignment.readOnly === true
-                }
-                projectId={data.project.id}
-                taskId={data.taskId}
-              />
-              <BoundTurnRecovery
+              <RecoveryActions
                 key={`${p.session.csrfToken}:${p.assignmentId}:${data.project.id}`}
                 {...p}
                 readOnly={
