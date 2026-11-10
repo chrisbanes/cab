@@ -1138,11 +1138,8 @@ export class DomainStore {
               ),
             );
           } catch (error) {
-            // GitLab rows name the failing row and reason; GitHub keeps its generic refusal.
-            if (
-              link.codeHost === "gitlab" &&
-              error instanceof RepositoryVerificationError
-            )
+            // The refusal names the row and reason without exposing checkout details.
+            if (error instanceof RepositoryVerificationError)
               throw new RepositoryVerificationRefusedError(error.reason, index);
             throw error;
           }

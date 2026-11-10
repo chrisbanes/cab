@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
+import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createFakeGlab } from "../fixtures/fake-glab.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
+import { createSetupHome } from "../fixtures/setup-home.js";
 import {
   captureSettingsEvidence as captureBrowserEvidence,
   createCheckout,
@@ -461,14 +463,20 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
     .locator("#repository-error")
-    .getByText("Check linked repository IDs, paths and refs.")
+    .getByText("Repository 2: the path is not an absolute directory path.", {
+      exact: true,
+    })
     .waitFor();
-  assert.equal(
+  const badPath = page.getByLabel("New local repository path", { exact: true });
+  assert.equal(await badPath.getAttribute("aria-invalid"), "true");
+  assert.notEqual(
     await page
-      .getByLabel("New local repository path", { exact: true })
-      .inputValue(),
-    "relative/PRIVATE-PATH",
+      .getByLabel("Linked repository ID", { exact: true })
+      .last()
+      .getAttribute("aria-invalid"),
+    "true",
   );
+  assert.equal(await badPath.inputValue(), "relative/PRIVATE-PATH");
   assert.equal(
     (await page.locator(".settings-page [role=alert]").allInnerTexts())
       .join(" ")
@@ -497,8 +505,12 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
   assert.equal(f.service.domain().repositoryLinks(ids.atlas).links.length, 2);
 });
 
-test("a new GitHub repository link is chosen from discovered repositories and a picked folder", async (_t, journey) => {
-  const { f, ids, page } = await startDiscovery(journey, {}, "repositories");
+test("a new GitHub repository link is chosen from discovery and saved from the home-relative folder picker", async (_t, journey) => {
+  const home = await createSetupHome();
+  journey.cleanup(() => home.close(), "picker-home.close");
+  const { f, ids, page } = await startDiscovery(journey, {}, "repositories", {
+    home: home.home,
+  });
   await page.getByRole("button", { name: "Add repository" }).click();
   const choice = page.getByLabel("Repository", { exact: true });
   await choice.selectOption({ label: "acme/relay" });
@@ -513,17 +525,22 @@ test("a new GitHub repository link is chosen from discovered repositories and a 
     .waitFor({ state: "attached" });
   assert.equal(await ref.inputValue(), "main");
   // The folder picker fills the new row's path.
-  const checkout = await createCheckout(f.directory, "relay-checkout");
   await page.getByRole("button", { name: "Choose folder…" }).click();
   const dialog = page.getByRole("dialog", { name: "Choose repository folder" });
-  await dialog.getByLabel("Or enter a path").fill(checkout);
+  await dialog.getByRole("button", { name: /^src/ }).click();
+  await dialog.getByRole("button", { name: /relay/ }).click();
+  await dialog.getByLabel("Or enter a path").waitFor();
+  assert.equal(
+    await dialog.getByLabel("Or enter a path").inputValue(),
+    "~/src/relay",
+  );
   await dialog.getByRole("button", { name: "Use this folder" }).click();
   await dialog.waitFor({ state: "detached" });
   assert.equal(
     await page
       .getByLabel("New local repository path", { exact: true })
       .inputValue(),
-    checkout,
+    "~/src/relay",
   );
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
@@ -532,6 +549,7 @@ test("a new GitHub repository link is chosen from discovered repositories and a 
     .repositoryLinks(ids.atlas)
     .links.find((l) => l.repositoryId === "R_relay");
   assert.equal(relay?.ref, "main");
+  assert.equal(relay?.path, join(home.home, "src", "relay"));
 });
 
 test("a new GitLab repository link is chosen from configured hosts and their projects", async (_t, journey) => {
