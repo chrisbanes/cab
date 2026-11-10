@@ -416,6 +416,7 @@ export async function stackedDeliveryFixture(
   run({
     type: "capacity.configure",
     globalLimit: 8,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 8 },
   });
   const tasks: string[] = [];

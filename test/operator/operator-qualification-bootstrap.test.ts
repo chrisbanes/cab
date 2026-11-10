@@ -115,6 +115,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         type: "capacity.configure",
         key: randomUUID(),
         globalLimit: 3,
+        minimumLeadSlots: 0,
         projectOverrides: {},
       });
       assert.equal(f.service.capacityLimits().globalLimit, 3);

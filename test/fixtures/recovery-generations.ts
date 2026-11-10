@@ -279,7 +279,11 @@ export async function holdGeneration(
       expectedVersion: 1,
       title: "Current",
     });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   const known = new Set(service.turnRequests().map((r) => r.workId));
   if (noTurn) {
     assignmentId = String(required(service.domain().assignments(taskId)[0]).id);

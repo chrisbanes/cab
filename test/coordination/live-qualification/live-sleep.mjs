@@ -1178,6 +1178,7 @@ async function runLiveJourney(approval) {
     command({
       type: "capacity.configure",
       globalLimit: 1,
+      minimumLeadSlots: 0,
       projectOverrides: { [projectId]: 1 },
     });
     command({

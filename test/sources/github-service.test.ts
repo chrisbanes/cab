@@ -2159,8 +2159,10 @@ test("a first turn waiting for capacity takes revisions changed by a profile edi
   try {
     await f.service.configureCapacity({
       key: randomUUID(),
-      globalLimit: 4,
-      projectOverrides: { [f.projectId]: 1 },
+      minimumLeadSlots: 0,
+      // First turns are lead turns, which only the global cap holds.
+      globalLimit: 1,
+      projectOverrides: {},
     });
     f.resume();
     await f.service.refreshGitHub();

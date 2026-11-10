@@ -666,7 +666,7 @@ export const projectDeletionInventory = {
       "taskId in D (binding key is run identity; capture before delete)",
   },
   execution_capacity_reservations: {
-    columns: ["workId", "projectId", "admittedAt"],
+    columns: ["workId", "projectId", "admittedAt", "lead", "agentId"],
     ownership: "projectId=P",
   },
   execution_intent_dangerously_skip_sandbox: {
@@ -1293,8 +1293,12 @@ export const projectDeletionInventory = {
     ],
     ownership: "threadId in H; preserve unrelated qualification",
   },
+  scheduler_agent_capacity_limits: {
+    columns: ["profileId", "agentLimit"],
+    ownership: "KEEP",
+  },
   scheduler_capacity_limits: {
-    columns: ["singleton", "globalLimit"],
+    columns: ["singleton", "globalLimit", "minimumLeadSlots"],
     ownership: "KEEP",
   },
   scheduler_project_capacity_limits: {

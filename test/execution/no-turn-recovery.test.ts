@@ -161,7 +161,11 @@ async function fixture() {
     expectedVersion: Number(service.domain().task(taskId).version),
     title: "Current",
   });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   const initial = required(
     service.turnRequests().find((r) => r.workId.endsWith(":initial")),
   );

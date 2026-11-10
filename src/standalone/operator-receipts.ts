@@ -194,8 +194,13 @@ export function commandReceipt(
             commandType: outcome.type,
             resourceId: "system:capacity" as const,
             globalLimit: outcome.result.globalLimit,
-            defaultProjectLimit: outcome.result.defaultProjectLimit,
             projectOverrides: outcome.result.projectOverrides,
+            ...("minimumLeadSlots" in outcome.result
+              ? {
+                  minimumLeadSlots: outcome.result.minimumLeadSlots,
+                  agentOverrides: outcome.result.agentOverrides,
+                }
+              : {}),
           },
         };
       case "getting-started.configure":

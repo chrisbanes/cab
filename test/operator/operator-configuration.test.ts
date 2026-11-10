@@ -521,6 +521,7 @@ test("capacity receipts replay original limits and recovery exposes bounded inde
     type: "capacity.configure",
     key: randomUUID(),
     globalLimit: 3,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   };
   const receipt = await api.execute(command);
@@ -528,12 +529,41 @@ test("capacity receipts replay original limits and recovery exposes bounded inde
     type: "capacity.configure",
     key: randomUUID(),
     globalLimit: 4,
+    minimumLeadSlots: 2,
     projectOverrides: { [projectId]: null },
+    agentOverrides: { [profileId]: 3 },
   });
   assert.deepEqual(await api.execute(command), receipt);
   const settings = await api.readRuntimeSettings();
   assert.equal(settings.data.globalLimit, 4);
-  assert.equal(settings.data.projects[0]?.limit, 2);
+  assert.equal(settings.data.minimumLeadSlots, 2);
+  assert.equal(settings.data.leadUsage, 0);
+  assert.equal(settings.data.projects[0]?.limit, null);
+  assert.deepEqual(settings.data.agents, [
+    { agent: { id: profileId, name: "Lead" }, limit: 3, usage: 0 },
+  ]);
+  // Lead slots at or above the global cap, an unknown agent and a non-positive cap are refused.
+  // Schema refusals reach HTTP as 400 field errors; an unknown agent is 404.
+  for (const [refused, missing] of [
+    [{ minimumLeadSlots: 4 }, false],
+    [{ agentOverrides: { [randomUUID()]: 1 } }, true],
+    [{ agentOverrides: { [profileId]: 0 } }, false],
+  ] as const)
+    await assert.rejects(
+      api.execute({
+        type: "capacity.configure",
+        key: randomUUID(),
+        globalLimit: 4,
+        minimumLeadSlots: 1,
+        projectOverrides: {},
+        ...refused,
+      }),
+      (error: unknown) =>
+        missing
+          ? error instanceof OperatorApiError && error.status === 404
+          : error instanceof Error && error.name === "ZodError",
+    );
+  assert.equal((await api.readRuntimeSettings()).data.minimumLeadSlots, 2);
   const recovery = await api.readAssignmentRecovery(assignmentId);
   assert.equal(recovery.data.assignment.assignmentId, assignmentId);
   assert.equal(recovery.data.evidenceAvailable, false);

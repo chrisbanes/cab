@@ -913,6 +913,7 @@ test("restored public state reconciles exact execution evidence before one eligi
     });
     await sourceService.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 5,
     });
     domainCommand(sourceService, {
