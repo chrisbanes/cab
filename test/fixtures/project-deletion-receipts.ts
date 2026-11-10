@@ -15,6 +15,7 @@ export const deletionOperatorReceiptScopes = [
 export const deletionPreTurnScopes = [
   "adopt",
   "adopt-no-turn",
+  "release",
   "replace-conversation",
   "recover",
   "recover-bound-turn",
@@ -244,47 +245,61 @@ export function seedDeletionReceiptVariants(
                 idleThreadMayExist: true,
               },
             }
-          : scope === "replace-conversation"
+          : scope === "release"
             ? {
                 key,
                 assignmentId: i.assignmentId,
-                expectedAssignmentVersion: 1,
-                expectedConversationRevision: 1,
+                workId: i.workId,
+                workRevision: generation.workRevision,
+                requestSequence: generation.requestSequence,
               }
-            : {
-                key,
-                ...(scope === "recover-bound-turn"
-                  ? { assignmentId: i.assignmentId }
-                  : {}),
-                receipt: {
-                  ...receipt,
-                  kind:
-                    scope === "recover-bound-turn"
-                      ? "bound-turn"
-                      : scope === "recover-no-turn"
-                        ? "no-turn-submission"
-                        : "pre-turn-rejection",
+            : scope === "replace-conversation"
+              ? {
+                  key,
+                  assignmentId: i.assignmentId,
+                  expectedAssignmentVersion: 1,
+                  expectedConversationRevision: 1,
+                }
+              : {
+                  key,
                   ...(scope === "recover-bound-turn"
-                    ? {}
-                    : {
-                        threadId: null,
-                        turnId: null,
-                        witnessId:
-                          scope === "recover-no-turn"
-                            ? i.noTurnWitnessId
-                            : i.witnessId,
-                      }),
-                },
-              };
+                    ? { assignmentId: i.assignmentId }
+                    : {}),
+                  receipt: {
+                    ...receipt,
+                    kind:
+                      scope === "recover-bound-turn"
+                        ? "bound-turn"
+                        : scope === "recover-no-turn"
+                          ? "no-turn-submission"
+                          : "pre-turn-rejection",
+                    ...(scope === "recover-bound-turn"
+                      ? {}
+                      : {
+                          threadId: null,
+                          turnId: null,
+                          witnessId:
+                            scope === "recover-no-turn"
+                              ? i.noTurnWitnessId
+                              : i.witnessId,
+                        }),
+                  },
+                };
     const result =
       scope === "adopt" || scope === "adopt-no-turn"
         ? {
             witnessId: scope === "adopt" ? i.witnessId : i.noTurnWitnessId,
             workId: i.workId,
           }
-        : scope === "replace-conversation"
-          ? { revision: 2 }
-          : { id: i.receiptId, workId: i.workId, state: "reconciled" };
+        : scope === "release"
+          ? {
+              id: i.uuid("pre-turn-refusal"),
+              workId: i.workId,
+              state: "refused",
+            }
+          : scope === "replace-conversation"
+            ? { revision: 2 }
+            : { id: i.receiptId, workId: i.workId, state: "reconciled" };
     db.prepare(
       "INSERT INTO execution_pre_turn_commands (commandKey,scope,payloadMaterial,result) VALUES (?,?,?,?)",
     ).run(key, scope, JSON.stringify(material), JSON.stringify(result));

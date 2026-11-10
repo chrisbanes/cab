@@ -1,9 +1,8 @@
 import { z } from "zod";
 
 /**
- * Key-less, structural bodies of the evidence-bearing recovery commands. The standalone
- * schemas add the request key (and the runtime-specific rejection check); the operator
- * command contract adds its type and assignment. Attestations are operator assertions.
+ * Key-less, structural bodies of the recovery commands. The standalone schemas add the
+ * request key; the operator command contract adds its type and assignment.
  */
 export const processIdentitySchema = z
   .object({
@@ -19,64 +18,6 @@ export const recoveryGenerationSchema = z.object({
   requestSequence: z.number().int().positive().safe(),
   processIdentity: processIdentitySchema,
 });
-const digest = z.string().regex(/^[a-f0-9]{64}$/);
-export const recoveryEvidenceSchema = z
-  .object({
-    frozenSourceRevision: z.string().regex(/^[a-f0-9]{40}$/),
-    frozenHarnessSha256: digest,
-    evidenceSha256: digest,
-    approvedDecisionSha256: digest,
-    reviewReference: z.url().max(2048).startsWith("https://"),
-    approvalReference: z.url().max(2048).startsWith("https://"),
-  })
-  .strict();
-export const noTurnEvidenceSchema = recoveryEvidenceSchema
-  .extend({ invocationLedgerSha256: digest })
-  .strict();
-/** The persisted runtime error a pre-turn adoption asserts. */
-export const recoveryRpcErrorSchema = z
-  .object({ code: z.literal(-32600), message: z.string().max(2000) })
-  .strict();
-export const preTurnAttestationSchema = z
-  .object({
-    beforeTurnRejected: z.literal(true),
-    noTurnSubmitted: z.literal(true),
-    independentlyReviewed: z.literal(true),
-  })
-  .strict();
-export const noTurnAttestationSchema = z
-  .object({
-    completeSynchronousWriteAheadLedger: z.literal(true),
-    noStartTurnInvocation: z.literal(true),
-    independentlyReviewed: z.literal(true),
-    idleThreadMayExist: z.literal(true),
-  })
-  .strict();
-
-export const historicalPreTurnAdoptionBodySchema = recoveryGenerationSchema
-  .extend({
-    predecessorWorkId: z.string().min(1).max(512),
-    predecessorThreadId: z.string().min(1).max(512),
-    retainedReason: z.string().min(1).max(4000),
-    rpcError: recoveryRpcErrorSchema,
-    evidence: recoveryEvidenceSchema,
-    attestation: preTurnAttestationSchema,
-  })
-  .strict();
-export const historicalNoTurnAdoptionBodySchema = recoveryGenerationSchema
-  .extend({
-    kind: z.literal("historical-no-turn-submission"),
-    /** Both present for a resume of a known completed predecessor; both absent otherwise. */
-    predecessorWorkId: z.string().min(1).max(512).optional(),
-    predecessorThreadId: z.string().min(1).max(512).optional(),
-    conversationRevision: z.number().int().positive(),
-    writerSequence: z.number().int().positive().safe(),
-    retainedReason: z.string().min(1).max(4000),
-    evidence: noTurnEvidenceSchema,
-    attestation: noTurnAttestationSchema,
-  })
-  .strict();
-
 export const recoveryReceiptBaseSchema = z.object({
   workId: z.string().min(1),
   workRevision: z.number().int().positive().nullable(),
@@ -120,6 +61,35 @@ export type BoundTurnRecoveryBlocker =
   | "other-witness"
   | "already-reconciled";
 
+/**
+ * Why a held generation cannot be released as never having sent a turn. cab saves the
+ * thread binding before it calls `startTurn`, so a null saved thread and turn prove no turn
+ * was sent; anything else keeps the hold.
+ */
+export const releaseBlockers = [
+  "already-reconciled",
+  "not-held",
+  "ownership-released",
+  "context-unavailable",
+  "thread-bound",
+  "turn-bound",
+  "witness-present",
+  "independent-hold",
+  "callback-pending",
+  "known-survivor",
+  "project-archived",
+] as const;
+export type ReleaseBlocker = (typeof releaseBlockers)[number];
+/** Binds a release to the generation the operator read. */
+export const releaseBodySchema = z
+  .object({
+    assignmentId: z.string().uuid(),
+    workId: z.string().min(1).max(512),
+    workRevision: z.number().int().positive().safe(),
+    requestSequence: z.number().int().positive().safe(),
+  })
+  .strict();
+
 export const preTurnRecoveryReceiptSchema = recoveryReceiptBaseSchema
   .extend({
     kind: z.literal("pre-turn-rejection"),
@@ -148,9 +118,8 @@ export const replaceConversationBodySchema = z
 
 /** The operator recovery paths, in the order an operator meets them. */
 export const recoveryPaths = [
-  "pre-turn-adopt",
+  "release",
   "pre-turn-recover",
-  "no-turn-adopt",
   "no-turn-recover",
   "bound-turn-recover",
   "conversation-replace",
@@ -158,9 +127,8 @@ export const recoveryPaths = [
 export type RecoveryPath = (typeof recoveryPaths)[number];
 /** Operator command type of each path. */
 export const recoveryCommandTypes = {
-  "pre-turn-adopt": "recovery.pre-turn.adopt",
+  release: "recovery.release",
   "pre-turn-recover": "recovery.pre-turn.recover",
-  "no-turn-adopt": "recovery.no-turn.adopt",
   "no-turn-recover": "recovery.no-turn.recover",
   "bound-turn-recover": "recovery.bound-turn.recover",
   "conversation-replace": "recovery.conversation.replace",
@@ -168,32 +136,17 @@ export const recoveryCommandTypes = {
 
 /**
  * What each path needs beyond the identity the service observes: the operator evidence
- * file's fields and its attestations. Derived from the schemas so help, output and
- * validation cannot drift.
+ * file's fields and its attestations.
  */
 export const recoveryRequirements: Record<
   RecoveryPath,
   { evidence: string[]; attestations: string[]; receipt: string[] }
 > = {
-  "pre-turn-adopt": {
-    evidence: [
-      "rpcError",
-      ...Object.keys(recoveryEvidenceSchema.shape).map((k) => `evidence.${k}`),
-    ],
-    attestations: Object.keys(preTurnAttestationSchema.shape),
-    receipt: [],
-  },
+  release: { evidence: [], attestations: [], receipt: [] },
   "pre-turn-recover": {
     evidence: [],
     attestations: [],
     receipt: ["termination", "effects", "workspace"],
-  },
-  "no-turn-adopt": {
-    evidence: Object.keys(noTurnEvidenceSchema.shape).map(
-      (k) => `evidence.${k}`,
-    ),
-    attestations: Object.keys(noTurnAttestationSchema.shape),
-    receipt: [],
   },
   "no-turn-recover": {
     evidence: [],

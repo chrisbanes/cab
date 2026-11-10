@@ -1260,6 +1260,23 @@
       "gap": "Held generations are seeded recovery facts and the copied no-turn and pre-turn test runtimes, never a real stuck process. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
+      "id": "recovery release",
+      "kind": "command",
+      "area": "recovery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/execution/operator-cli-recovery-write.test.ts",
+        "test/execution/operator-cli-recovery-journey.test.ts"
+      ],
+      "effect": "Without --yes prints whether a held generation with no saved thread or turn can be released, or each blocker, and writes nothing; with --yes sends recovery.release bound to that read, freeing writer and capacity so Start again applies (completed). It dispatches no work and is irreversible.",
+      "denial": "A read-only credential exits 3 before anything is sent; a blocked, released or changed generation exits 4 naming its blockers; an unknown --work exits 2.",
+      "revision": "The command binds the work revision and request sequence read; the service reruns every check and refuses a generation changed after the read.",
+      "retry": "An identical rerun or the same --request-id replays one receipt; a lost reply exits 6 and a rerun reads it recorded; two concurrent releases apply once.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Held generations come from the copied no-turn and pre-turn test runtimes, never a real stuck process. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
       "id": "recovery prepare",
       "kind": "command",
       "area": "recovery",
@@ -1269,13 +1286,13 @@
         "test/execution/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-899-cli6-2026-10-12.md"
       ],
-      "effect": "Writes a 0600 ensemble.cli.recovery/v1 document for one of the five paths (no-turn or pre-turn adopt and recover, conversation-replace) from the recovery read plus a strict evidence file; sends nothing.",
-      "denial": "n/a: prepare sends no write and works with a read-only credential; absent or false attestations, missing evidence, --yes, --confirm, --force and --attest exit 2 or are unknown options.",
+      "effect": "Writes a 0600 ensemble.cli.recovery/v1 document for a recover path (no-turn, pre-turn or bound-turn) or conversation-replace from the recovery read plus a strict evidence file; sends nothing. Release and the retired adopt paths are not prepared.",
+      "denial": "n/a: prepare sends no write and works with a read-only credential; missing or malformed evidence, --yes, --confirm, --force and --attest exit 2 or are unknown options.",
       "revision": "A replacement requires both expected values; an ineligible path exits 4 naming its blockers.",
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Attestations and hashes are operator assertions the service cannot verify. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+      "gap": "Receipt assertions are operator assertions the service cannot verify. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "recovery submit",
@@ -1287,8 +1304,8 @@
         "test/execution/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-899-cli6-2026-10-12.md"
       ],
-      "effect": "Submits a prepared document as a receipted recovery.* command (saved or completed); it resumes nothing and dispatches no work, and adoption, recovery and replacement are irreversible.",
-      "denial": "A read-only credential exits 3 with the digest unchanged (and the five command types are 403 as direct posts); tampered, group-readable, oversized, symlinked or foreign-installation documents exit 2 with nothing sent; unverified termination exits 4.",
+      "effect": "Submits a prepared document as a receipted recovery.* command (completed or saved); it resumes nothing and dispatches no work, and recovery and replacement are irreversible.",
+      "denial": "A read-only credential exits 3 with the digest unchanged (and the recovery command types are 403 as direct posts); tampered, group-readable, oversized, symlinked or foreign-installation documents exit 2 with nothing sent; unverified termination exits 4.",
       "revision": "A replacement prepared before another entry point acted exits 4; a document prepared before the retained session form acted exits 4 with nothing applied.",
       "retry": "An identical rerun replays one receipt; a lost reply exits 6 and operation get reads it recorded; two concurrent submissions reconcile once.",
       "observation": "synthetic",

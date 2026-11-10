@@ -269,14 +269,15 @@ import {
 import {
   type BoundTurnRecoveryCommand,
   boundTurnRecoveryCommandSchema,
-  type HistoricalNoTurnAdoption,
-  type HistoricalPreTurnAdoption,
   type NoTurnRecoveryCommand,
   noTurnRecoveryCommandSchema,
   type PreTurnRecoveryCommand,
   preTurnRecoveryCommandSchema,
+  type ReleaseCommand,
+  releaseCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import type { ReleaseBlocker } from "../core/recovery-contracts.js";
 import {
   type PreTurnStage,
   preTurnFailureClass,
@@ -1786,6 +1787,7 @@ export class StandaloneService {
           harness !== defaultExecutionHarness,
         );
       await supervisor.reconcileOnStart();
+      this.releaseUnboundHoldsOnStart(state, supervisor);
       await this.resolveDraftingOnStart({
         drafting,
         draftingBindings,
@@ -3393,8 +3395,64 @@ export class StandaloneService {
     });
     return result;
   }
-  adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption) {
-    return this.started().state.adoptHistoricalPreTurnRejection(command);
+  /** Every check a release runs, read without changing anything. */
+  releaseBlockers(workId: string): ReleaseBlocker[] {
+    const { state, supervisor } = this.started();
+    return [
+      ...new Set([
+        ...state.releaseBlockers(workId),
+        ...this.releaseInProcessBlockers(workId, supervisor),
+      ]),
+    ];
+  }
+  private releaseInProcessBlockers(
+    workId: string,
+    supervisor: ExecutionSupervisor,
+  ): ReleaseBlocker[] {
+    return [
+      ...supervisor.releaseBlockers(workId),
+      // Still being submitted in this process: its outcome is not settled yet.
+      ...(this.activeByWorkId.has(workId)
+        ? (["independent-hold"] as const)
+        : []),
+    ];
+  }
+  /** Releases one held generation that never sent a turn, bound to the generation read. */
+  releaseUnboundHold(command: ReleaseCommand) {
+    const value = releaseCommandSchema.parse(command);
+    const { state, supervisor } = this.started();
+    const result = state.releaseUnboundHold(
+      value.workId,
+      this.releaseInProcessBlockers(value.workId, supervisor),
+      value,
+    );
+    // A release frees capacity for queued work.
+    this.wakeAfterCommit();
+    return result;
+  }
+  /**
+   * Before admission: releases every held generation whose saved thread and turn are
+   * null and that nothing else holds. Any other generation is left exactly as it was.
+   */
+  private releaseUnboundHoldsOnStart(
+    state: ExecutionState,
+    supervisor: ExecutionSupervisor,
+  ): void {
+    for (const workId of state.unboundHeldWorkIds()) {
+      if (!state.projectWorkWritable(workId)) continue;
+      try {
+        state.releaseUnboundHold(
+          workId,
+          this.releaseInProcessBlockers(workId, supervisor),
+        );
+      } catch (error) {
+        if (error instanceof RecoveryRejectedError) continue;
+        throw error;
+      }
+      process.stderr.write(
+        `${JSON.stringify({ event: "held-generation-released", workId, reason: "no thread binding was saved, so no turn was sent" })}\n`,
+      );
+    }
   }
   recoverPreTurnExecution(command: PreTurnRecoveryCommand) {
     const value = preTurnRecoveryCommandSchema.parse(command);
@@ -3416,13 +3474,6 @@ export class StandaloneService {
       () =>
         this.started().supervisor.resolveHeldExecution(value.receipt, value),
     );
-  }
-  adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
-    const result =
-      this.started().state.adoptHistoricalNoTurnSubmission(command);
-    // Adopting a held resume refuses it and frees its capacity for queued work.
-    this.wakeAfterCommit();
-    return result;
   }
   recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
     const value = noTurnRecoveryCommandSchema.parse(command);

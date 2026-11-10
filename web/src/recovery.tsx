@@ -670,14 +670,14 @@ type BoundCommand = Extract<
 >;
 type RecoveryOptions = ReturnType<typeof recoveryOptionsSchema.parse>["data"];
 
-/** One original command stays frozen until its receipt has been checked. */
-function BoundTurnRecovery(
-  p: SettingsProps & {
-    assignmentId: string;
-    projectId: string;
-    taskId: string;
-  },
-) {
+type ReleaseCommand = Extract<OperatorCommand, { type: "recovery.release" }>;
+
+const releasedMessage =
+  "Released. Writer and capacity are free and the task offers Start again. No work was started.";
+
+/** Held generations cab can prove never sent a turn: release them for Start again. */
+/** One recovery-options read shared by the Release and bound-turn panels. */
+function useRecoveryOptions(p: SettingsProps & { assignmentId: string }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
       p.client.read(
@@ -692,6 +692,297 @@ function BoundTurnRecovery(
     loader,
   );
   useHeaderRefresh(p.refreshNonce, resource.refresh);
+  return resource;
+}
+type RecoveryOptionsResource = ReturnType<typeof useRecoveryOptions>;
+
+/** The release and bound-turn panels over one recovery-options read. */
+function RecoveryActions(
+  p: SettingsProps & {
+    assignmentId: string;
+    projectId: string;
+    taskId: string;
+  },
+) {
+  const resource = useRecoveryOptions(p);
+  return (
+    <>
+      <ReleaseRecovery {...p} resource={resource} />
+      <BoundTurnRecovery {...p} resource={resource} />
+    </>
+  );
+}
+
+function ReleaseRecovery(
+  p: SettingsProps & {
+    assignmentId: string;
+    resource: RecoveryOptionsResource;
+  },
+) {
+  const { resource } = p;
+  // Keep the generations first shown, so an outcome stays visible after a reload.
+  const shown = useRef<RecoveryOptions["records"] | null>(null);
+  if (shown.current === null && resource.state.data)
+    shown.current = resource.state.data.data.records.filter(
+      (r) => r.intentState === "held",
+    );
+  if (shown.current?.length === 0) return null;
+  return (
+    <Panel
+      title="Release a generation that never sent a turn"
+      description="cab saves a thread before it starts a turn. A held generation with no saved thread or turn never sent one, so it can be released: writer and capacity are freed and the task offers Start again. Release cannot be undone and starts nothing."
+    >
+      <ResourceStatus
+        label="Release eligibility"
+        state={resource.state}
+        retry={resource.refresh}
+      />
+      {resource.state.data &&
+        shown.current?.map((record) => (
+          <ReleaseForm
+            key={`${record.workId}:${record.generation.requestSequence}`}
+            {...p}
+            options={resource.state.data!.data}
+            record={record}
+            fresh={resource.state.status === "fresh"}
+            reload={resource.refresh}
+          />
+        ))}
+    </Panel>
+  );
+}
+
+function ReleaseForm(
+  p: SettingsProps & {
+    assignmentId: string;
+    options: RecoveryOptions;
+    record: RecoveryOptions["records"][number];
+    fresh: boolean;
+    reload: () => void;
+  },
+) {
+  const [review, setReview] = useState<ReleaseCommand | null>(null),
+    [lifecycle] = useState(() => new CommandLifecycle<ReleaseCommand>()),
+    [pending, setPending] = useState(false),
+    [message, setMessage] = useState(""),
+    [receipt, setReceipt] = useState<CommandReceipt | null>(null),
+    [retry, setRetry] = useState(false),
+    trigger = useRef<HTMLButtonElement>(null),
+    current = useRef(true);
+  useEffect(
+    () => () => {
+      current.current = false;
+    },
+    [],
+  );
+  const frozen = lifecycle.frozen;
+  const latest = p.options.records.find(
+    (r) =>
+      r.workId === p.record.workId &&
+      r.generation.requestSequence === p.record.generation.requestSequence,
+  );
+  const path = latest?.paths.find((r) => r.path === "release");
+  const changed =
+    !latest ||
+    latest.generation.workRevision !== p.record.generation.workRevision;
+  const allowed =
+    !p.readOnly &&
+    p.fresh &&
+    !changed &&
+    p.options.assignmentId === p.assignmentId &&
+    Boolean(path?.eligible);
+  const matches = (r: CommandReceipt, c: ReleaseCommand) =>
+    r.kind === "recovery-release" &&
+    r.assignmentId === c.assignmentId &&
+    r.key === c.key &&
+    r.workId === c.workId;
+  const recorded = (r: CommandReceipt) => {
+    setReceipt(r);
+    setMessage(releasedMessage);
+    p.reload();
+    p.refresh();
+  };
+  const send = async (c: ReleaseCommand) => {
+    if (p.readOnly) return;
+    if (!lifecycle.frozen) lifecycle.restoreUnknown(c);
+    const original = lifecycle.begin();
+    if (!original) return;
+    setReview(null);
+    setPending(true);
+    setRetry(false);
+    const authenticated = p.client.captureAuthenticationScope();
+    const result = await p.client.command(original, p.session.csrfToken);
+    if (!current.current || !authenticated()) return;
+    const disposition = lifecycle.settle(result, (command, receipt) =>
+      matches(receipt, command),
+    );
+    if (disposition === "recorded" && result.state === "recorded")
+      recorded(result.receipt);
+    else if (result.state === "unknown" || result.state === "recorded")
+      setMessage(
+        "Outcome unknown. Check the original receipt before retrying; the original request key is kept.",
+      );
+    else {
+      setMessage(
+        `Release refused (${result.code}). Nothing changed. Current blockers are shown below.`,
+      );
+      p.reload();
+    }
+    setPending(false);
+  };
+  const check = async () => {
+    if (!frozen) return;
+    setPending(true);
+    setRetry(false);
+    const authenticated = p.client.captureAuthenticationScope();
+    try {
+      const result = await p.client.operation({
+        scope: `assignment:${frozen.assignmentId}`,
+        type: frozen.type,
+        key: frozen.key,
+      });
+      if (!current.current || !authenticated()) return;
+      if (
+        result.data.state === "recorded" &&
+        matches(result.data.receipt, frozen)
+      ) {
+        lifecycle.settle(
+          { state: "recorded", receipt: result.data.receipt },
+          (command, receipt) => matches(receipt, command),
+        );
+        recorded(result.data.receipt);
+      } else if (result.data.state === "not-recorded") {
+        setMessage(
+          "No receipt is recorded. You may retry only the original request; the service will recheck it.",
+        );
+        setRetry(true);
+      } else
+        setMessage(
+          "The receipt does not match this release. Inspect the operation before retrying.",
+        );
+    } catch {
+      if (current.current && authenticated())
+        setMessage("Receipt readback unavailable. Retry remains blocked.");
+    }
+    if (current.current && authenticated()) setPending(false);
+  };
+  const prepare = () => {
+    const r = p.record;
+    if (!allowed) return;
+    const parsed = operatorCommandSchema.safeParse({
+      type: "recovery.release",
+      key: randomUUID(),
+      assignmentId: p.assignmentId,
+      workId: r.workId,
+      workRevision: r.generation.workRevision,
+      requestSequence: r.generation.requestSequence,
+    });
+    if (parsed.success && parsed.data.type === "recovery.release")
+      setReview(parsed.data);
+  };
+  const blockers = path?.blockedBy.join(", ") || "eligibility unavailable";
+  return (
+    <section
+      className="settings-row"
+      aria-label={`Release generation ${p.record.generation.requestSequence}`}
+    >
+      <p className="body">
+        Work{" "}
+        <span className="identifier">{p.record.workId ?? "Unavailable"}</span> ·
+        revision {p.record.generation.workRevision ?? "Unavailable"} · request{" "}
+        {p.record.generation.requestSequence}
+      </p>
+      <p className="body">
+        {receipt
+          ? "Released."
+          : allowed
+            ? "Eligible: no thread or turn was saved for this generation. Submission checks again."
+            : `Release blocked: ${changed ? "the generation changed; reload the page" : blockers}.`}
+      </p>
+      {!frozen && !receipt && (
+        <Button
+          ref={trigger}
+          type="button"
+          disabled={!allowed || pending}
+          onClick={prepare}
+        >
+          Release
+        </Button>
+      )}
+      {message && (
+        <p role="status" className="body">
+          {message}
+        </p>
+      )}
+      {frozen && !receipt && (
+        <div className="settings-actions">
+          <Button type="button" disabled={pending} onClick={() => void check()}>
+            Check original receipt
+          </Button>
+          {retry && (
+            <Button
+              type="button"
+              disabled={pending || p.readOnly}
+              onClick={() => void send(frozen)}
+            >
+              Retry original release
+            </Button>
+          )}
+        </div>
+      )}
+      <Dialog
+        open={review !== null}
+        onOpenChange={(open) => !open && setReview(null)}
+      >
+        <DialogContent
+          role="alertdialog"
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement)
+              .querySelector<HTMLElement>("[data-cancel]")
+              ?.focus();
+          }}
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            trigger.current?.focus();
+          }}
+        >
+          <DialogTitle>Release this generation permanently?</DialogTitle>
+          <DialogDescription>
+            It is refused as never having sent a turn. Writer and capacity are
+            freed and the task offers Start again. An idle thread may exist that
+            cab never saw. This can't be undone and starts nothing.
+          </DialogDescription>
+          <div className="stop-dialog-actions">
+            <DialogClose asChild>
+              <Button type="button" variant="secondary" data-cancel>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              disabled={!allowed}
+              onClick={() => review && void send(review)}
+            >
+              Confirm release
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+/** One original command stays frozen until its receipt has been checked. */
+function BoundTurnRecovery(
+  p: SettingsProps & {
+    assignmentId: string;
+    projectId: string;
+    taskId: string;
+    resource: RecoveryOptionsResource;
+  },
+) {
+  const { resource } = p;
   // Keep the original bounded identities, including an unknown command whose record later disappears.
   const shown = useRef<RecoveryOptions["records"] | null>(null);
   if (shown.current === null && resource.state.data)
@@ -1120,8 +1411,9 @@ export function AssignmentRecovery(
             <section className="settings-aside" aria-label="Next step">
               <h2 className="small-heading">Next step</h2>
               <p className="body">
-                Inspect the execution, then review the exact bound turn and
-                independent evidence below. Reconciliation never resumes work.
+                Inspect the execution. Release a generation that never sent a
+                turn, or review the exact bound turn and independent evidence
+                below. Neither resumes work.
               </p>
             </section>
           </div>
@@ -1241,7 +1533,7 @@ export function AssignmentRecovery(
               </Panel>
             </div>
             <div className="settings-column">
-              <BoundTurnRecovery
+              <RecoveryActions
                 key={`${p.session.csrfToken}:${p.assignmentId}:${data.project.id}`}
                 {...p}
                 readOnly={

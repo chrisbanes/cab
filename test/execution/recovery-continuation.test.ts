@@ -4,7 +4,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
-import { bindLegacyHold, failing } from "../fixtures/recovery-generations.js";
+import {
+  adoptAsBefore,
+  bindLegacyHold,
+  failing,
+} from "../fixtures/recovery-generations.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type {
@@ -1351,7 +1355,7 @@ function preTurnRecovery(
   };
 }
 
-test("historical pre-turn proof requires explicit exact operator adoption and immutable command replay", async () => {
+test("a pre-turn witness adopted by an earlier build recovers with immutable command replay", async () => {
   const f = await heldFixture("historical");
   let service = f.service;
   try {
@@ -1361,43 +1365,7 @@ test("historical pre-turn proof requires explicit exact operator adoption and im
       undefined,
     );
     const input = adoption(f);
-    for (const changed of [
-      { ...input, workRevision: input.workRevision + 1 },
-      { ...input, requestSequence: input.requestSequence + 1 },
-      { ...input, predecessorWorkId: "wrong-predecessor" },
-      { ...input, predecessorThreadId: "wrong-thread" },
-      {
-        ...input,
-        processIdentity: {
-          ...input.processIdentity,
-          processId: "different-process",
-        },
-      },
-      { ...input, retainedReason: "different-reason" },
-      {
-        ...input,
-        evidence: { ...input.evidence, frozenSourceRevision: "missing" },
-      },
-      {
-        ...input,
-        attestation: { ...input.attestation, noTurnSubmitted: false },
-      },
-    ])
-      assert.throws(() =>
-        service.adoptHistoricalPreTurnRejection(
-          changed as HistoricalPreTurnAdoption,
-        ),
-      );
-    const adopted = service.adoptHistoricalPreTurnRejection(input);
-    assert.deepEqual(service.adoptHistoricalPreTurnRejection(input), adopted);
-    assert.throws(
-      () =>
-        service.adoptHistoricalPreTurnRejection({
-          ...input,
-          evidence: { ...input.evidence, evidenceSha256: "5".repeat(64) },
-        }),
-      /key was reused/,
-    );
+    const adopted = { witnessId: adoptAsBefore(service, input) };
     assert.equal(f.runtime.turns, 1);
     f.pause(true);
     const recovery = preTurnRecovery(f, adopted.witnessId);
@@ -1486,7 +1454,6 @@ test("historical pre-turn proof requires explicit exact operator adoption and im
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(service.adoptHistoricalPreTurnRejection(input), adopted);
     assert.deepEqual(await service.recoverPreTurnExecution(recovery), resolved);
     assert.deepEqual(service.replaceConversationCommand(replace), {
       revision: 2,

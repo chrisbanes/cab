@@ -882,14 +882,15 @@ name, version and preview digest. The service rechecks every confirmation atomic
    `--expected-*` values, because a recorded settlement moves the binding revision and
    a recorded delivery leaves the unresolved list; `operation get` does not read them.
 
-9. Evidence-bearing recovery. `recovery get ASSIGNMENT_ID` and `recovery prepare`
-   work with either scope; `recovery submit` needs a read/write credential (a
-   read-only one exits 3 before anything is sent):
+9. Recovery. `recovery get ASSIGNMENT_ID`, `recovery prepare` and `recovery
+   release` without `--yes` work with either scope; `recovery release --yes` and
+   `recovery submit` need a read/write credential (a read-only one exits 3 before
+   anything is sent):
    - `recovery get ASSIGNMENT_ID` shows the assignment version, conversation
      revision, holds and up to the 20 newest recovery generations: work ID,
      generation, intent and request state, process identity, held reason,
      predecessor, witnesses, observations and receipt, and for each path
-     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`, `bound-turn-recover`,
+     (`release`, `pre-turn-recover`, `no-turn-recover`, `bound-turn-recover`,
      plus `conversation-replace` for the assignment) whether it is eligible, what
      blocks it and the inputs it requires. Eligibility is advisory; the service
      re-checks everything. A string that redaction would change is withheld (gap
@@ -897,49 +898,54 @@ name, version and preview digest. The service rechecks every confirmation atomic
      send it; older generations are gap `item-omitted`, none at all
      `evidence-unavailable`. `assignment get` prints a `Recovery:` pointer while the
      assignment is held.
+   - `recovery release ASSIGNMENT_ID [--work WORK_ID] [--yes] [--request-id UUID]`
+     handles a held generation for which cab saved no thread or turn: cab saves the
+     thread before it starts a turn, so such a generation never sent one. Without
+     `--yes` it prints the generation, its held reason as evidence, and whether it
+     can be released or each blocker (`thread-bound`, `turn-bound`,
+     `witness-present`, `independent-hold`, `callback-pending`, `known-survivor`,
+     `ownership-released`, …), and writes nothing. With `--yes` it sends a release
+     bound to that read: the generation is refused as never having run, writer and
+     capacity are freed (`completed`), and the task offers `task start-again`. A
+     generation that changed or fails a check is refused with exit 4 and the
+     current blockers. `--work` names the generation when several are held. The
+     service also releases every such generation itself at startup, so this is for
+     one it could not release then.
    - `recovery prepare PATH ASSIGNMENT_ID --out FILE --work WORK_ID
      --evidence-file FILE` (or, for `conversation-replace`, `--expected-version N
      --expected-conversation-revision N` and no evidence file) writes an owner-only
      `cab.cli.recovery/v1` document with the exact command, the observed
      versions and a digest, and sends nothing. The identity comes from the read; the
-     evidence file supplies everything the service cannot observe. It is strict
-     JSON of at most 64 KiB with `"schema": "cab.cli.recovery-evidence/v1"`
-     and, per path, exactly: `pre-turn-adopt` — `rpcError` (the persisted
-     `{code, message}`), `evidence` (`frozenSourceRevision`,
-     `frozenHarnessSha256`, `evidenceSha256`, `approvedDecisionSha256`,
-     `reviewReference`, `approvalReference`) and `attestation`
-     (`beforeTurnRejected`, `noTurnSubmitted`, `independentlyReviewed`, each
-     `true`); `no-turn-adopt` — `evidence` (the same plus `invocationLedgerSha256`)
-     and `attestation` (`completeSynchronousWriteAheadLedger`,
-     `noStartTurnInvocation`, `independentlyReviewed`, `idleThreadMayExist`);
-     each recovery — `receipt` (`termination: {"kind":"process-exit"}`,
-     `effects: "settled"`, `workspace: "preserved"|"reconciled"`). A missing,
-     `false`, extra or malformed item exits 2 before any request; there is no
-     `--yes`, `--confirm`, `--force` or attestation flag. An ineligible path exits 4
-     naming its blockers; an unlisted work exits 2.
+     evidence file supplies what the service cannot observe. It is strict JSON of
+     at most 64 KiB with `"schema": "cab.cli.recovery-evidence/v1"` and exactly
+     `receipt` (`termination: {"kind":"process-exit"}`, `effects: "settled"`,
+     `workspace: "preserved"|"reconciled"`). A missing, extra or malformed item
+     exits 2 before any request; there is no `--yes`, `--confirm`, `--force` or
+     attestation flag. `release` is not prepared. An ineligible path exits 4 naming
+     its blockers; an unlisted work exits 2.
    - `recovery submit --file FILE [--request-id UUID]` revalidates the document
-     (owner-only, digest, same installation) and sends it once. Adoption records an
-     immutable witness (`saved`); recovery verifies termination of the stored
-     process and reconciles ownership (`completed`); conversation replacement
-     increments the revision (`saved`). None resumes the task or dispatches work:
-     after replacement, continue with a new `task message`. The exception is
-     `no-turn-adopt` of a held resume, whose document carries the predecessor from
-     the read: it refuses the generation before it ran, releasing its ownership,
-     and the task then offers `task start-again`. A refusal (stale
-     identity, unverified termination, an existing witness, a stale revision or a
-     task hold) exits 4 with the current blockers and observations; missing,
-     expired or stale evidence is never a successful recovery, and that key is not
-     reused. An identical rerun replays the recorded receipt; a lost reply exits 6
-     and is settled with `operation get KEY --scope assignment:ID --type TYPE` or
-     the same command.
+     (owner-only, digest, same installation) and sends it once. Recovery verifies
+     termination of the stored process and reconciles ownership (`completed`);
+     conversation replacement increments the revision (`saved`). Neither resumes
+     the task or dispatches work: after replacement, continue with a new
+     `task message`. A refusal (stale identity, unverified termination, a missing
+     witness, a stale revision or a task hold) exits 4 with the current blockers
+     and observations; missing, expired or stale evidence is never a successful
+     recovery, and that key is not reused.
 
-   Adoption, recovery and replacement cannot be undone, and adoption here records
-   evidence: it is unrelated to `assignment apply-current`. Bound-turn recovery
-   uses `recovery prepare bound-turn-recover` and the corresponding operator
-   recovery controls. Browser assertions and pending request state are local to
-   the page visit: navigation, sign-out or full reload discards them. Preserve the
-   original command/key before leaving an uncertain outcome; recorded server
-   receipts remain durable and can be read back through the operation endpoint.
+   For `release --yes` and `submit`, an identical rerun replays the recorded
+   receipt; a lost reply exits 6 and is settled with `operation get KEY --scope
+   assignment:ID --type TYPE` or the same command. A key recorded by the retired
+   `recovery.pre-turn.adopt` or `recovery.no-turn.adopt` commands still reads back
+   with `operation get`.
+
+   Release, recovery and replacement cannot be undone. Bound-turn recovery uses
+   `recovery prepare bound-turn-recover` and the corresponding operator recovery
+   controls; the recovery page also offers Release with a confirmation. Browser
+   assertions and pending request state are local to the page visit: navigation,
+   sign-out or full reload discards them. Preserve the original command/key before
+   leaving an uncertain outcome; recorded server receipts remain durable and can be
+   read back through the operation endpoint.
 
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. For a configured LAN

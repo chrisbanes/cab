@@ -21,6 +21,7 @@ export function receiptLines(receipt: CommandReceipt): [string, string][] {
     ];
   if (
     receipt.kind === "recovery-adoption" ||
+    receipt.kind === "recovery-release" ||
     receipt.kind === "recovery-resolution" ||
     receipt.kind === "conversation-replacement"
   )

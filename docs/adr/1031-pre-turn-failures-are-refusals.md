@@ -34,12 +34,19 @@ qualify on both harnesses.
 - **Independent holds win.** A Stop, a task hold, an unfinished callback, a known survivor or
   another pending effect keeps the execution held. A failure after `startTurn` was called keeps
   the uncertain hold and its recovery unchanged.
-- **Old holds.** Holds recorded earlier have no persisted stage, so this rule cannot recognise
-  them. The operator-only historical no-turn adoption accepts a resume of a known completed
-  predecessor. Its evidence is the reviewed source at that build showing that the failure
-  happened before `startTurn`. Adoption produces the same refusal, so Start again becomes
-  available. Existing pre-turn witnesses and receipts keep recovering through their routes. New
-  archived-resume rejections no longer capture a witness: they are ordinary refusals.
+- **Old holds.** Holds recorded earlier have no persisted stage, but cab has another record of
+  its own. It saves the thread binding before it calls `startTurn`, and a failed save stops the
+  submission before `startTurn`. Neither harness sends input before `startTurn`. So a held
+  generation whose saved thread and turn are both null never sent a turn, on any build. cab
+  releases such a generation, whatever its hold reason, when nothing else holds it: no pre-turn
+  or no-turn witness, Stop, task hold, unfinished callback, known survivor or other pending
+  effect. The release records the same refusal, with its own reason, so Start again becomes
+  available. It runs at startup for every eligible generation and through
+  `cab recovery release` (or the recovery page's Release action) after one confirmation, with
+  no operator evidence. A generation with a saved thread or turn keeps its hold and its
+  recovery. Existing pre-turn and no-turn witnesses and receipts keep recovering through their
+  routes, and receipts of the retired adoption commands still read back. New archived-resume
+  rejections no longer capture a witness: they are ordinary refusals.
 
 ## Considered options
 
@@ -47,8 +54,11 @@ qualify on both harnesses.
   consumed until an operator acts, and it repeats the fault that left these holds stranded: a
   proof keyed to an exact error string fails for every error it did not anticipate.
 - **A migration that recognises persisted reason strings.** Rejected. A reason string is
-  diagnostic text, not proof that `startTurn` was not called. Old holds need the operator's
-  reviewed evidence.
+  diagnostic text, not proof that `startTurn` was not called. The saved thread binding is that
+  proof, and it needs no migration: the release reads it as it stands.
+- **Operator-adopted evidence for old holds.** Rejected. It asked one local operator for
+  hashes, review references and an independent-review attestation about facts cab already
+  records, so the attestation could only be invented.
 
 ## Consequences
 

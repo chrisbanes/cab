@@ -62,4 +62,12 @@ export function preTurnHoldReason(
   return `Runtime submission or observation uncertain before any turn was sent (${stage}): ${phrases[failureClass]}: ${bounded(error)}`;
 }
 
-export const adoptedPreTurnRefusalReason = `${preTurnRefusalPrefix}: operator-adopted reviewed evidence shows startTurn was not called`;
+/** A held generation released because cab saved no thread binding, so `startTurn` was never called. */
+export const releasedPreTurnRefusalReason = `${preTurnRefusalPrefix}: cab recorded no thread binding before startTurn`;
+
+/** The release's reason, keeping the original hold reason as evidence. */
+export function releasedRefusalReason(heldReason: string | null): string {
+  return heldReason
+    ? `${releasedPreTurnRefusalReason}. Held as: ${bounded(heldReason)}`
+    : releasedPreTurnRefusalReason;
+}

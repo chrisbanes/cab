@@ -23,6 +23,8 @@ import { exactCommand, positiveIntFlag, requireOut } from "./configure.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
 import {
+  type PreparedPath,
+  preparedPaths,
   readEvidenceFile,
   readRecoveryDocument,
   RECOVERY_SCHEMA,
@@ -42,7 +44,7 @@ type Options = z.infer<typeof recoveryOptionsSchema>["data"];
 type RecordView = Options["records"][number];
 const READ = ["cli.identity", "assignment.read", "recovery.read"] as const;
 const IRREVERSIBLE =
-  "Adoption, recovery and conversation replacement cannot be undone, and none of them resumes the task or dispatches work.";
+  "Release, recovery and conversation replacement cannot be undone, and none of them resumes the task or dispatches work.";
 const NOTHING_INFERRED =
   "Eligibility is advisory; the service re-checks identity, termination and replay. The CLI never infers review, termination, settled effects or workspace state, and there is no force unlock.";
 
@@ -63,6 +65,7 @@ function requirementText(path: RecoveryPath) {
   const r = recoveryRequirements[path];
   if (path === "conversation-replace")
     return "--expected-version, --expected-conversation-revision";
+  if (path === "release") return "confirmation (--yes)";
   return [
     ...(r.evidence.length ? [`evidence: ${r.evidence.join(", ")}`] : []),
     ...(r.attestations.length
@@ -172,7 +175,8 @@ const recoveryGet: BrowseCommand = {
         ...(d.omittedCount ? [`(${d.omittedCount} older omitted)`] : []),
         "",
         IRREVERSIBLE,
-        "Prepare with: cab recovery prepare PATH ASSIGNMENT_ID --work WORK_ID --evidence-file FILE --out FILE",
+        "Release with: cab recovery release ASSIGNMENT_ID [--work WORK_ID] --yes",
+        "Prepare other paths with: cab recovery prepare PATH ASSIGNMENT_ID --work WORK_ID --evidence-file FILE --out FILE",
       ].join("\n"),
     });
   },
@@ -182,7 +186,7 @@ export const recoveryBrowseCommands = new Map<string, BrowseCommand>([
   ["recovery get", recoveryGet],
 ]);
 
-type GenerationPath = Exclude<RecoveryPath, "conversation-replace">;
+type GenerationPath = Exclude<PreparedPath, "conversation-replace">;
 
 /** The exact command for one generation path: observed identity plus the operator's evidence. */
 function buildCommand(
@@ -198,34 +202,6 @@ function buildCommand(
     requestSequence: record.generation.requestSequence,
     processIdentity: record.process,
   };
-  if (path === "pre-turn-adopt")
-    return {
-      type,
-      assignmentId,
-      ...generation,
-      predecessorWorkId: record.predecessor?.workId,
-      predecessorThreadId: record.predecessor?.threadId,
-      retainedReason: record.retainedReason,
-      ...evidence,
-    };
-  if (path === "no-turn-adopt")
-    return {
-      type,
-      assignmentId,
-      kind: "historical-no-turn-submission",
-      ...generation,
-      // A held resume names its predecessor; a first turn has none.
-      ...(record.predecessor
-        ? {
-            predecessorWorkId: record.predecessor.workId,
-            predecessorThreadId: record.predecessor.threadId,
-          }
-        : {}),
-      conversationRevision: record.conversationRevision,
-      writerSequence: record.writerSequence,
-      retainedReason: record.retainedReason,
-      ...evidence,
-    };
   if (path === "bound-turn-recover")
     return {
       type,
@@ -258,17 +234,11 @@ function buildCommand(
   };
 }
 
-function assertionLines(path: RecoveryPath, command: Record<string, unknown>) {
+function assertionLines(path: PreparedPath, command: Record<string, unknown>) {
   const c = command as Record<string, Record<string, unknown>>;
   if (path === "conversation-replace")
     return [
       `Replaces the conversation of ${c.assignmentId} at assignment version ${c.expectedAssignmentVersion}, conversation revision ${c.expectedConversationRevision}.`,
-    ];
-  if (path.endsWith("adopt"))
-    return [
-      `Records an operator-adopted witness for ${c.workId} (process ${JSON.stringify(c.processIdentity)}).`,
-      `You assert: ${Object.keys(c.attestation ?? {}).join(", ")}.`,
-      `Evidence: ${JSON.stringify(c.evidence)}`,
     ];
   const r = c.receipt ?? {};
   return [
@@ -278,11 +248,16 @@ function assertionLines(path: RecoveryPath, command: Record<string, unknown>) {
 }
 
 async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
+  if (ctx.positionals[2] === "release")
+    throw new CliError(
+      "usage",
+      "release is not prepared: run 'cab recovery release ASSIGNMENT_ID'.",
+    );
   const path = enumArg(
     ctx.positionals[2],
-    recoveryPaths,
+    preparedPaths,
     "PATH",
-  ) as RecoveryPath;
+  ) as PreparedPath;
   const assignmentId = uuidArg(ctx.positionals[3] ?? "", "ASSIGNMENT_ID");
   const out = requireOut(ctx);
   let evidence: Record<string, unknown> = {};
@@ -421,10 +396,8 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
 
 /** What remains after each path; replacement is done once, then only a new message is needed. */
 const NEXT_STEP: Record<RecoveryPath, string> = {
-  "pre-turn-adopt":
-    "Not resumed; nothing was dispatched. Next: recover the generation with 'cab recovery prepare pre-turn-recover'.",
-  "no-turn-adopt":
-    "Not resumed; nothing was dispatched. Next: recover the generation with 'cab recovery prepare no-turn-recover'.",
+  release:
+    "Not resumed; nothing was dispatched. Writer and capacity are released; continue with Start again ('cab task start-again').",
   "pre-turn-recover":
     "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
   "no-turn-recover":
@@ -436,8 +409,7 @@ const NEXT_STEP: Record<RecoveryPath, string> = {
 };
 
 const EFFECT: Record<RecoveryPath, Effect> = {
-  "pre-turn-adopt": "saved",
-  "no-turn-adopt": "saved",
+  release: "completed",
   "pre-turn-recover": "completed",
   "no-turn-recover": "completed",
   "bound-turn-recover": "completed",
@@ -455,7 +427,7 @@ function matches(
       path === "conversation-replace" && receipt.assignmentId === assignmentId
     );
   return (
-    (receipt.kind === "recovery-adoption" ||
+    (receipt.kind === "recovery-release" ||
       receipt.kind === "recovery-resolution") &&
     receipt.path === path &&
     receipt.assignmentId === assignmentId &&
@@ -575,6 +547,128 @@ async function submit(ctx: Parameters<WriteCommand["run"]>[0]) {
   });
 }
 
+/**
+ * Reads the held generation's release eligibility and, with --yes, releases it bound to
+ * that read. The service reruns every check and refuses when anything changed.
+ */
+async function release(ctx: Parameters<WriteCommand["run"]>[0]) {
+  const assignmentId = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
+  const readSession = ctx.values.yes
+    ? await connectWrite(ctx, [...READ, "recovery.write"])
+    : await ctx.connect(READ);
+  const read = await readOptions(readSession.client, assignmentId);
+  const d = read.data;
+  const held = d.records.filter(
+    (r) => r.workId !== null && r.intentState === "held",
+  );
+  const record =
+    ctx.values.work === undefined
+      ? held.length === 1
+        ? held[0]
+        : undefined
+      : d.records.find((r) => r.workId === ctx.values.work);
+  if (!record?.workId)
+    throw new CliError(
+      ctx.values.work === undefined ? "usage" : "invalid-input",
+      ctx.values.work === undefined
+        ? `${assignmentId} has ${held.length} held generations; name one with --work WORK_ID (see 'cab recovery get ${assignmentId}'). Nothing was written.`
+        : `Work ${ctx.values.work} is not a listed recovery generation of ${assignmentId}. Nothing was written.`,
+    );
+  const blockedBy = record.paths.find((p) => p.path === "release")
+    ?.blockedBy ?? ["context-unavailable"];
+  const workRevision = record.generation.workRevision;
+  const target = `generation ${record.workId} (work revision ${workRevision ?? "none"}, request ${record.generation.requestSequence})`;
+  const explanation = [
+    `Release refuses ${target} as never having sent a turn: no thread or turn was saved for it, and the thread is saved before a turn starts.`,
+    "It frees the writer and capacity holds; the task then offers Start again. An unseen idle thread may exist.",
+    `Held reason (evidence only): ${record.retainedReason ?? "(withheld or unavailable)"}`,
+  ];
+  // A generation without a work revision can't be bound; the read names the blocker.
+  if (ctx.values.yes && workRevision === null)
+    throw new CliError(
+      "conflict",
+      `release is not eligible now: blocked by ${blockedBy.join(", ") || "context-unavailable"}. Nothing was written.`,
+      { fix: `Run 'cab recovery get ${assignmentId}' to see what blocks it.` },
+    );
+  // Otherwise --yes lets the service decide, so a recorded key still replays after the release.
+  if (!ctx.values.yes || workRevision === null)
+    return {
+      data: {
+        assignmentId,
+        workId: record.workId,
+        eligible: !blockedBy.length,
+        blockedBy,
+        observedAt: read.observedAt,
+      },
+      coverage: coverage(ctx.deps.now(), optionGaps(d)),
+      human: [
+        ...explanation,
+        "",
+        blockedBy.length
+          ? `Not eligible: blocked by ${blockedBy.join(", ")}.`
+          : `Eligible. Release with: cab recovery release ${assignmentId} --work ${record.workId} --yes`,
+        "Nothing was written.",
+        NOTHING_INFERRED,
+      ].join("\n"),
+    };
+  const session = readSession as Session;
+  const command = {
+    type: recoveryCommandTypes.release,
+    assignmentId,
+    workId: record.workId,
+    workRevision,
+    requestSequence: record.generation.requestSequence,
+  };
+  const identity = { scope: `assignment:${assignmentId}`, type: command.type };
+  const { key, digest, state, reached } = await requestKey(
+    ctx,
+    session,
+    identity,
+    [command],
+  );
+  const workId = record.workId;
+  let sent: Awaited<ReturnType<typeof sendCommand>>;
+  try {
+    sent = await sendCommand(ctx, session, {
+      ...identity,
+      key,
+      digest,
+      resource: assignmentId,
+      command: exactCommand(command, key),
+      match: (r) => matches(r, "release", assignmentId, workId),
+    });
+  } catch (error) {
+    if (error instanceof CliError && error.code === "conflict")
+      throw new CliError(
+        "conflict",
+        [
+          `The service refused release; nothing was applied and request ${key} will not be reused.`,
+          ...(await afterLines(session, assignmentId, workId)),
+        ].join("\n"),
+        {
+          ...error.extra,
+          fix: `Run 'cab recovery get ${assignmentId}', then release again once it is eligible.`,
+        },
+      );
+    throw error;
+  }
+  return writeOutput({
+    request: sent.request,
+    receipt: sent.receipt,
+    reused: reached && state?.state !== "recorded",
+    effect: EFFECT.release,
+    summary: `Released ${target} of assignment ${assignmentId}`,
+    lines: receiptLines(sent.receipt),
+    notes: [
+      ...explanation,
+      NEXT_STEP.release,
+      ...(await afterLines(session, assignmentId, workId)),
+      IRREVERSIBLE,
+    ],
+    data: { workId },
+  });
+}
+
 export const recoveryWriteCommands = new Map<string, WriteCommand>([
   [
     "recovery prepare",
@@ -592,6 +686,16 @@ export const recoveryWriteCommands = new Map<string, WriteCommand>([
         "expected-conversation-revision",
       ],
       run: prepare,
+    },
+  ],
+  [
+    "recovery release",
+    {
+      usage:
+        "recovery release ASSIGNMENT_ID [--work WORK_ID] [--yes] [--request-id UUID]",
+      positionals: 1,
+      flags: ["work", "yes", "request-id"],
+      run: release,
     },
   ],
   [
