@@ -1547,6 +1547,10 @@ test("an identity-read hold names the Git failure and is released once the workt
             "ready",
           );
         } else if (route === "admission") {
+          // A read never rechecks a held binding or launches Git for it.
+          const starts = controlled.events().length;
+          assert.equal((await manager.get("identity-task"))?.state, "held");
+          assert.equal(controlled.events().length, starts);
           assert.equal(
             (await manager.forExecution("identity-task")).state,
             "ready",

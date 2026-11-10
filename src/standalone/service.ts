@@ -5686,7 +5686,9 @@ export class StandaloneService {
         "This task has no workspace to recheck.",
       );
     const { outcome, binding } = await workspaces.recheck(command.taskId);
-    const reason = binding.reason ?? `the workspace is ${binding.state}`;
+    const reason =
+      binding.reason?.replace(/^Task workspace unavailable: /, "") ??
+      `the workspace is ${binding.state}`;
     if (outcome === "still-held")
       throw new WorkspaceRecheckRefusedError(
         `Task workspace is still unavailable: ${reason}`,

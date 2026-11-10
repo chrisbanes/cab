@@ -572,7 +572,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
-        `UPDATE ${this.table} SET state = 'held', reason = ?, gitUncertain = 0, holdReleasable = 1, updatedAt = ? WHERE taskId = ?`,
+        `UPDATE ${this.table} SET state = 'held', reason = ?, holdReleasable = 1, updatedAt = ? WHERE taskId = ?`,
       )
       .run(reason, new Date().toISOString(), taskId);
     return this.get(taskId) ?? this.invalidRow();
@@ -1953,15 +1953,12 @@ async function lstatIfExists(path: string) {
   }
 }
 
-/** `text` cut to at most `maxBytes` UTF-8 bytes. */
+/** `text` cut to at most `maxBytes` UTF-8 bytes, at a word boundary. */
 function capBytes(text: string, maxBytes: number): string {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= maxBytes) return text;
-  // A cut inside a character decodes to U+FFFD, so drop any trailing replacement.
-  return bytes
-    .subarray(0, maxBytes)
-    .toString("utf8")
-    .replace(/\uFFFD+$/, "");
+  // Drop the cut word too: a partial path would no longer match its redaction.
+  return bytes.subarray(0, maxBytes).toString("utf8").replace(/\S*$/, "");
 }
 
 function messageOf(error: unknown): string {
