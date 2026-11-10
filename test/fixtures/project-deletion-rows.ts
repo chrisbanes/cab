@@ -1639,6 +1639,11 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "assignment_request_refusals",
+      values: { workId: i.workId, reason: "fixture-reason" },
+    },
+    {
+      shared: false,
       table: "execution_request_refusals",
       values: { workId: i.workId, reason: "fixture-reason" },
     },

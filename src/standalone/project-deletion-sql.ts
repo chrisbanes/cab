@@ -335,6 +335,11 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM execution_pre_turn_refusals WHERE workId IN (SELECT value FROM json_each(:work))",
   },
   {
+    table: "assignment_request_refusals",
+    where: "workId IN (SELECT value FROM json_each(:work))",
+    sql: "DELETE FROM assignment_request_refusals WHERE workId IN (SELECT value FROM json_each(:work))",
+  },
+  {
     table: "execution_request_refusals",
     where: "workId IN (SELECT value FROM json_each(:work))",
     sql: "DELETE FROM execution_request_refusals WHERE workId IN (SELECT value FROM json_each(:work))",

@@ -314,6 +314,7 @@ import {
 import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
   SchedulerStore,
+  CapturedRevisionCollision,
   type TurnRequest,
   TurnScheduler,
 } from "./scheduler.js";
@@ -331,6 +332,7 @@ import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
   ExecutionState,
+  refusedRevisionPrefix,
   harnessRetrySupported,
   type DraftTurnReceipt,
   type StartAgainReceipt,
@@ -705,6 +707,7 @@ interface Started {
   workspaceComparisons: SqliteWorkspaceComparisonStore;
   operatorCredentials: OperatorCredentialStore;
   operatorPush: OperatorPushStore;
+  reobservedTaskVersions: Map<string, number>;
   schedulerStore: SchedulerStore;
   wakeQueries: SchedulerWakeQueries;
   inboxStartup: InboxStartupReconciliation;
@@ -712,7 +715,6 @@ interface Started {
    * Imported tasks' versions just before startup's provider invalidation. A shutdown
    * requeue captured at that version may take the re-observed one once, when admissible.
    */
-  reobservedTaskVersions: Map<string, number>;
   supervisor: ExecutionSupervisor;
   scheduler: TurnScheduler;
   /** Absent when power supervision is disabled. */
@@ -1794,6 +1796,28 @@ export class StandaloneService {
         );
       await supervisor.reconcileOnStart();
       this.releaseUnboundHoldsOnStart(state, supervisor);
+      // Old obsolete requests have no execution generation for recovery release to find.
+      let refusedAfter = 0;
+      for (;;) {
+        const page = db
+          .prepare(`SELECT sequence,workId FROM turn_requests
+          WHERE sequence>? AND state='held' AND kind='assignment' AND draftTurn=0
+          ORDER BY sequence LIMIT 100`)
+          .all(refusedAfter) as Array<{ sequence: number; workId: string }>;
+        if (!page.length) break;
+        for (const request of page) {
+          refusedAfter = request.sequence;
+          if (
+            !supervisor.hasKnownRisk(request.workId) &&
+            !this.callbacks.get(request.workId)?.size
+          )
+            this.refuseStaleRequest(
+              schedulerStore.byWorkId(request.workId),
+              state,
+              domain,
+            );
+        }
+      }
       await this.resolveDraftingOnStart({
         drafting,
         draftingBindings,
@@ -1916,9 +1940,9 @@ export class StandaloneService {
         operatorCredentials,
         operatorPush,
         schedulerStore,
+        reobservedTaskVersions,
         wakeQueries,
         inboxStartup,
-        reobservedTaskVersions,
         supervisor,
         scheduler,
         power,
@@ -5691,8 +5715,25 @@ export class StandaloneService {
       request !== undefined &&
       request.kind === "assignment" &&
       !request.draftTurn &&
+      !this.callbacks.get(workId)?.size &&
+      !this.started().supervisor.hasKnownRisk(workId) &&
       this.started().state.refusedBeforeStart(workId)
     );
+  }
+
+  requestRefusalForAssignment(assignmentId: string) {
+    const request = this.started().schedulerStore.latest(assignmentId);
+    if (!request || !this.notStartedWork(request.workId)) return undefined;
+    const uncaptured = this.started().state.requestOnlyRefusal(request.workId);
+    if (uncaptured) return uncaptured;
+    if (!request.reason?.startsWith(refusedRevisionPrefix)) return undefined;
+    return {
+      id: request.workId,
+      taskId: String(request.taskId),
+      assignmentId,
+      refusalReason:
+        "This request was prepared against older task, assignment or agent revisions and never ran. Use Start again when independent holds allow it.",
+    };
   }
 
   /** Whether the assignment's newest request was refused before it ran. */
@@ -7980,6 +8021,21 @@ export class StandaloneService {
             : undefined,
         );
       } catch (error) {
+        if (error instanceof CapturedRevisionCollision) {
+          const workId = error.request.workId;
+          if (state.requestOnlyRefusal(workId)) continue;
+          if (
+            !this.started().supervisor.hasKnownRisk(workId) &&
+            !this.callbacks.get(workId)?.size &&
+            state.refuseUncapturedRevision(workId)
+          )
+            continue;
+          store.hold(
+            workId,
+            `Assignment request became obsolete: ${String(error)}`,
+          );
+          continue;
+        }
         const existing = queries.oldestAssignmentWorkId(assignmentId);
         if (existing)
           store.hold(
@@ -8695,6 +8751,38 @@ export class StandaloneService {
     return runtime?.startedUnderPreviousHome?.(threadId) ?? false;
   }
 
+  private refuseStaleRequest(
+    request: TurnRequest,
+    state: ExecutionState,
+    domain: DomainStore,
+  ): boolean {
+    if (
+      request.kind !== "assignment" ||
+      request.draftTurn ||
+      !request.assignmentId ||
+      request.taskVersion === null ||
+      request.assignmentVersion === null ||
+      request.instructionsRevision === null ||
+      request.profileRevision === null ||
+      this.callbacks.get(request.workId)?.size
+    )
+      return false;
+    const reasons = domain.assignmentAdmission(request.assignmentId, {
+      taskVersion: request.taskVersion,
+      assignmentVersion: request.assignmentVersion,
+      instructionsRevision: request.instructionsRevision,
+      profileRevision: request.profileRevision,
+    }).reasons;
+    // Queued work keeps waits and revision mismatches that normal first-turn admission can refresh.
+    if (
+      request.state === "queued" &&
+      (reasons.some((reason) => !immutableRevisionMismatches.has(reason)) ||
+        reasons.every((reason) => this.firstTurnResolves(request, reason)))
+    )
+      return false;
+    return state.refuseStaleRevision(request.workId, reasons);
+  }
+
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
@@ -8837,6 +8925,12 @@ export class StandaloneService {
         throw new Error("Workspace must be an existing real directory");
       store.setWorkspace(request.workId, workspaceKey);
     } catch (error) {
+      if (
+        !this.started().supervisor.hasKnownRisk(request.workId) &&
+        !this.reobservedAllowance(request) &&
+        this.refuseStaleRequest(request, state, this.domain())
+      )
+        return;
       const reason = `Workspace admission waiting: ${String(error)}`;
       store.wait(request.workId, reason);
       const queuedIntent = state.byWorkId(request.workId);

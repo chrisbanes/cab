@@ -1980,7 +1980,19 @@ submitting and held work stays with the `recovery` commands.
   it ran: the request and intent are held with their matching refusal and an exact
   binding, and no turn, writer admission, capacity reservation, pending effect or stop
   target is recorded. A refusal at admission also records no thread or recovery
-  identity; a [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
+  identity. A captured-revision collision that never acquired an execution intent or
+  binding has a request-only refusal instead: cab verifies that it has no capture,
+  admission, capacity, recovery, stop or pending-effect evidence. This refusal preserves
+  the old request and offers Start again, without creating an execution generation.
+  Startup repairs eligible stale requests on the same evidence, including old task,
+  assignment, agent and instructions captures and obsolete key collisions; it never
+  retries them. A stale request with an existing intent and exact binding is refused
+  only when its saved thread and turn are null and the admission proof passes. A saved
+  thread or turn, ownership, recovery evidence, Stop or pending external effect keeps
+  its existing recovery authority. Readiness waits and normal pre-admission source
+  revalidation keep their existing behavior.
+  Task and recovery reads name the refusal and Start again or its independent blocker.
+  A [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
   and its turn-less recovery identity. It does not
   read the refusal's reasons; every current admission check applies again to the new
   request. The refused request and its refusal stay in the history, linked to the new

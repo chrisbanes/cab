@@ -73,3 +73,16 @@ export const resetUnavailableText = (reason: ResetReason) =>
 /** What Reset does; the web dialog and the CLI say it before sending. */
 export const resetIrreversibleText =
   "Reset replaces the conversation of every assignment and starts the lead fresh in the same workspace. The old conversations and the workspace stay readable, but this cannot be undone.";
+
+/** One explanation for task and recovery entry points, including independent blockers. */
+export function requestRefusalText(
+  refusal: import("./contracts.js").RequestRefusal,
+): string {
+  return `${refusal.reason ?? "This request was refused before it ran."} ${
+    refusal.startAgain.available
+      ? "Start again is available on the task."
+      : startAgainUnavailableText(
+          refusal.startAgain.reason ?? "nothing-refused",
+        )
+  }`;
+}

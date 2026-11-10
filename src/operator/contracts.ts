@@ -1324,9 +1324,23 @@ const generation = z
       .nullable(),
   })
   .strict();
+export const requestRefusalSchema = z
+  .object({
+    workId: z.string().min(1).max(512),
+    reason: safeText,
+    startAgain: z
+      .object({
+        available: z.boolean(),
+        reason: startAgainReasonSchema.optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export type RequestRefusal = z.infer<typeof requestRefusalSchema>;
 export const assignmentSchema = z
   .object({
     assignmentId: uuid,
+    requestRefusal: requestRefusalSchema.nullable().optional(),
     readOnly: z.boolean().optional(),
     profileId: uuid,
     name: safeText,
@@ -3955,6 +3969,7 @@ export const recoveryOptionsSchema = envelope(
   z
     .object({
       assignmentId: uuid,
+      requestRefusal: requestRefusalSchema.nullable().optional(),
       taskId: uuid,
       projectId: uuid,
       assignmentVersion: revision,
