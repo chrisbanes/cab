@@ -19,6 +19,7 @@ import {
   stopConsequences,
   taskIdentity,
   taskReadiness,
+  taskStripReason,
 } from "../../web/src/task-overview.js";
 
 type Data = TaskRead["data"];
@@ -302,6 +303,49 @@ test("taskReadiness states recorded state and wait", () => {
       execution: { state: "uncertain", holds },
     }),
     "Execution uncertain",
+  );
+});
+
+test("task strip shows one distinct reason", () => {
+  const base = {
+    task: { state: "open", ready: true },
+    execution: { state: "idle", holds },
+    admission: { eligible: true, reasons: [] },
+    waits: [],
+    source: null,
+    attention: { codes: [], count: 0 },
+    questions: [],
+    approvals: [],
+  };
+  assert.equal(taskStripReason(base as unknown as Data), null);
+  assert.equal(
+    taskStripReason({
+      ...base,
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    "waiting for capacity",
+  );
+  assert.equal(
+    taskStripReason({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, writer: true, capacity: true },
+      },
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    null,
+  );
+  assert.equal(
+    taskStripReason({
+      ...base,
+      execution: {
+        state: "running",
+        holds: { ...holds, stop: true, writer: true, capacity: true },
+      },
+      waits: [{ code: "capacity" }],
+    } as unknown as Data),
+    "effects may continue",
   );
 });
 

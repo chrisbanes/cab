@@ -826,6 +826,10 @@ export class ConfigurationDrafts {
   saved(key: string) {
     return this.savedRecords.get(key);
   }
+  /** The phase of the draft under `key` without creating it; "editing" when there is none. */
+  phase(key: string) {
+    return this.drafts.get(key)?.phase ?? "editing";
+  }
   unsettledPlacements(projectId: string) {
     return [...this.drafts.values()].flatMap((draft) =>
       draft.frozen?.type === "github.place" &&
