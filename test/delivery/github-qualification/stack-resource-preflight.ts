@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { gitEnvironment } from "../../../src/core/child-environment.js";
 import { DeliveryStore } from "../../../src/core/delivery.js";
 import { DomainStore } from "../../../src/core/domain.js";
 import { UnstackStore } from "../../../src/core/unstack.js";
@@ -279,7 +280,7 @@ export async function captureSourceReferencePaths(
 
 /**
  * Exact commit identity from Git's own reads, in every ref storage format: `symbolic` is
- * `git rev-parse --symbolic-full-name HEAD` and `head` is `git rev-parse --verify HEAD^{commit}`.
+ * `git rev-parse --symbolic-full-name HEAD` and `head` is `git rev-parse --verify HEAD`.
  */
 export function sourceReferenceMatches(
   branch: string,
@@ -293,13 +294,18 @@ export function sourceReferenceMatches(
   );
 }
 
-/** Read the source's HEAD through Git, in the form `sourceReferenceMatches` compares. */
+/** Read the source's HEAD through Git, as `verifySourceIdentity` does, for `sourceReferenceMatches`. */
 export async function readSourceReference(gitExecutable: string, root: string) {
   const git = async (...args: string[]) =>
-    (await execFileAsync(gitExecutable, ["-C", root, ...args])).stdout;
+    (
+      await execFileAsync(gitExecutable, ["-C", root, ...args], {
+        env: gitEnvironment(),
+        timeout: 3000,
+      })
+    ).stdout;
   return {
     symbolic: await git("rev-parse", "--symbolic-full-name", "HEAD"),
-    head: await git("rev-parse", "--verify", "HEAD^{commit}"),
+    head: await git("rev-parse", "--verify", "HEAD"),
   };
 }
 

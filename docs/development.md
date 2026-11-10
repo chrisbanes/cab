@@ -40,8 +40,8 @@ native input so the expensive workloads can run on different service shards.
 A separate `reftable` job runs the delivery and workspaces suites with the service
 profile in the checkout shape cab gives a task: a detached worktree of a bare
 reftable repository that borrows the checkout's objects, configured as
-`src/standalone/workspaces.ts` creates one. A test that reads `refs/` or `packed-refs`
-directly instead of asking Git fails there.
+`src/standalone/workspaces.ts` creates one. A test that reads the checkout's own `refs/`
+or `packed-refs` instead of asking Git fails there.
 
 Shards use separate `all`, `chromium` and `service` weights in
 `scripts/test-timings.json`. Weights measure complete file durations, including
@@ -165,9 +165,13 @@ path as the runner does.
 
 ### Running the check in a cab-managed workspace
 
-Agents run the full check in their cab-managed task workspaces, as anywhere else. A
-task's checkout there is a detached worktree of a bare reftable repository, and its
-commands run in the harness sandbox, so the workspace needs this environment:
+Agents run the full check in their cab-managed task workspaces. A task's checkout
+there is a detached worktree of a bare reftable repository, and its commands run in
+the harness sandbox. Browser engines do not start in these sandboxes,
+so the check there runs with the service profile:
+`npm ci && npm run build && npm run test:built -- --profile=service`, after
+`npm run typecheck`, `npm run lint` and `npm run format:check`. The workspace needs
+this environment:
 
 - **Codex:** the sandbox writes only the task workspace and the managed repository's
   Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Set `TMPDIR`
@@ -185,10 +189,12 @@ skip with the reason (`# SKIP process identity is unavailable here: ...` or
 with `ps`, and creating the Claude runtime's `/tmp/ens-*` temporary base directly
 under `/tmp`. Everywhere the access works, including CI, those tests run in full. The
 probes are in `test/fixtures/host-access.ts`; mark a new test that needs such access
-with `{ skip: processIdentityDenied() }` or `{ skip: slashTmpDenied() }`.
+with `{ skip: processIdentityDenied() }` or `{ skip: slashTmpDenied() }`. With `CI` set,
+a probe that finds its access denied fails the test run instead of skipping.
 
-To reproduce the Codex sandbox from a workspace's `repo-1` without a model, run the
-check through `codex sandbox` with the policy cab gives a task turn:
+To reproduce the Codex sandbox from a workspace's `repo-1` without a model, run each
+step (`npm ci`, `npm run build`, then the tests) through `codex sandbox` with the
+policy cab gives a task turn; the last step is:
 
 ```sh
 W="$(cd .. && pwd)" M="$(git rev-parse --path-format=absolute --git-common-dir)"

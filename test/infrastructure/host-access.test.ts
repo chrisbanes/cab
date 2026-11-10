@@ -67,8 +67,18 @@ test("a denied /tmp directory gives a skip reason; an allowed one is removed and
 
 test("a probe runs once and every later call returns its first answer", () => {
   let calls = 0;
-  const probe = once(() => (++calls === 1 ? "denied" : false));
+  const probe = once(() => (++calls === 1 ? "denied" : false), false);
   assert.equal(probe(), "denied");
   assert.equal(probe(), "denied");
   assert.equal(calls, 1);
+});
+
+test("in CI a denial fails instead of skipping, and allowed access still runs the tests", () => {
+  const denied = once(() => "ps failed to run (EPERM)", true);
+  assert.throws(
+    denied,
+    /^Error: CI must allow this access: ps failed to run \(EPERM\)$/,
+  );
+  assert.throws(denied, /CI must allow this access/);
+  assert.equal(once(() => false, true)(), false);
 });

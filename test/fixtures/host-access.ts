@@ -50,10 +50,20 @@ export function slashTmpProbe(
   return false;
 }
 
-/** Runs a probe on first use only; later calls return its first answer. */
-export function once(probe: () => string | false): () => string | false {
+/**
+ * Runs a probe on first use only; later calls return its first answer. With `CI` set,
+ * a denial throws instead, so CI never skips these tests.
+ */
+export function once(
+  probe: () => string | false,
+  ci: boolean = !!process.env.CI,
+): () => string | false {
   let answer: string | false | undefined;
-  return () => (answer ??= probe());
+  return () => {
+    answer ??= probe();
+    if (answer && ci) throw new Error(`CI must allow this access: ${answer}`);
+    return answer;
+  };
 }
 
 export const processIdentityDenied = once(() => processIdentityProbe());
