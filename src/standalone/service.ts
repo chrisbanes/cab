@@ -4993,8 +4993,7 @@ export class StandaloneService {
   }
 
   inboxConditions(taskId: string) {
-    const { domain, coordination, schedulerStore, state, supervisor } =
-        this.started(),
+    const { domain, coordination, schedulerStore, state } = this.started(),
       task = domain.task(taskId);
     const conditions: Array<{
       code:
@@ -5017,10 +5016,7 @@ export class StandaloneService {
       const notStarted =
         request?.state === "held" && this.notStartedWork(request.workId);
       const settledDraft =
-        refused &&
-        request?.draftTurn &&
-        !this.callbacks.get(request.workId)?.size &&
-        !supervisor.hasKnownRisk(request.workId);
+        request?.draftTurn && this.settledDraftRefusal(request.workId);
       const confirmed =
         s.request?.state === "active" &&
         ["running", "submitting"].includes(s.intent?.state ?? "");
@@ -5636,9 +5632,11 @@ export class StandaloneService {
       // A draft request that a completed retry or shutdown requeue replaced stays held as history.
       draftTurnActive:
         this.started()
-          .schedulerStore.unfinishedDraftTurns(taskId)
+          .schedulerStore.draftTurnCandidates(taskId)
           .some(
             (request) =>
+              (this.callbacks.get(request.workId)?.size ?? 0) > 0 ||
+              this.started().supervisor.hasKnownRisk(request.workId) ||
               !this.started().coordination.isHistoricalWorkResolved(
                 request.workId,
               ),
@@ -5734,6 +5732,20 @@ export class StandaloneService {
     );
   }
 
+  /** A refused draft is history only after its callbacks and known execution risks settle. */
+  settledDraftRefusal(workId: string): boolean {
+    const { schedulerStore, state, supervisor } = this.started();
+    const request = schedulerStore.find(workId);
+    return (
+      request?.kind === "assignment" &&
+      request.draftTurn &&
+      request.state === "held" &&
+      !this.callbacks.get(workId)?.size &&
+      !supervisor.hasKnownRisk(workId) &&
+      state.refusedBeforeStart(workId)
+    );
+  }
+
   requestRefusalForAssignment(assignmentId: string) {
     const request = this.started().schedulerStore.latest(assignmentId);
     if (!request || !this.notStartedWork(request.workId)) return undefined;
@@ -5760,8 +5772,7 @@ export class StandaloneService {
     if (request.state !== "held") return "settled";
     const { state } = this.started();
     if (this.notStartedWork(request.workId)) return "refused";
-    if (request.draftTurn && state.refusedBeforeStart(request.workId))
-      return "settled";
+    if (this.settledDraftRefusal(request.workId)) return "settled";
     const intent = state.byWorkId(request.workId);
     return intent?.state === "submitting" ||
       (intent &&

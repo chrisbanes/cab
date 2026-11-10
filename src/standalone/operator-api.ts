@@ -2440,7 +2440,10 @@ export class OperatorApi {
       holds.uncertainty ||
       holds.task ||
       selections.some(
-        (s) => s.request?.state === "held" && !this.notStarted(s),
+        (s) =>
+          s.request?.state === "held" &&
+          !this.notStarted(s) &&
+          !this.service.settledDraftRefusal(s.request.workId),
       ) ||
       selections.some(
         (s) =>
@@ -3389,7 +3392,9 @@ export class OperatorApi {
           s.request?.state === "active" &&
           ["running", "submitting"].includes(s.intent?.state ?? "");
         return (
-          (s.request?.state === "held" && !this.notStarted(s)) ||
+          (s.request?.state === "held" &&
+            !this.notStarted(s) &&
+            !this.service.settledDraftRefusal(s.request.workId)) ||
           (s.request?.state === "active" && !confirmed) ||
           Boolean(
             (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
