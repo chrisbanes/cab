@@ -30,6 +30,7 @@ import {
   shortId,
   sortFileEntries,
   updatedLabel,
+  workspaceStateText,
 } from "../../web/src/presentation.js";
 
 test("clock label is two-digit local hours and minutes", () => {
@@ -51,6 +52,43 @@ test("the updated label shows one time unless the reads show different clock lab
   assert.equal(
     updatedLabel(at(23, 59, 30), at(0, 0, 10, 17)),
     "Updated 23:59–00:00",
+  );
+});
+
+test("a workspace read that stayed in conflict is worded plainly; other states keep their name", () => {
+  assert.equal(
+    workspaceStateText(
+      "Repository listing",
+      "conflict",
+      "repository identity is unavailable",
+    ),
+    "Repository listing could not be read because the workspace kept changing; repository identity is unavailable. Refresh to try again.",
+  );
+  assert.equal(
+    workspaceStateText(
+      "Preview",
+      "conflict",
+      "file bytes are unavailable",
+      "too-large",
+    ),
+    "Preview could not be read because the workspace kept changing; file bytes are unavailable. Refresh to try again.",
+  );
+  assert.equal(
+    workspaceStateText(
+      "This location",
+      "missing",
+      "file bytes are not available",
+    ),
+    "This location is missing; file bytes are not available.",
+  );
+  assert.equal(
+    workspaceStateText(
+      "Preview",
+      "metadata-only",
+      "file bytes are unavailable",
+      "unsupported-format",
+    ),
+    "Preview is metadata-only (unsupported-format); file bytes are unavailable.",
   );
 });
 
