@@ -4926,11 +4926,22 @@ export class StandaloneService {
         status.state === "unavailable" &&
         status.restart?.state === "exhausted"
       ) {
+        const existing = lifecycle
+          .rows()
+          .find(
+            (row) =>
+              row.kind === "runtime" &&
+              row.status !== "resolved" &&
+              JSON.parse(row.dataJson).harness === status.harness,
+          );
+        const sourceKey =
+          existing?.sourceKey ??
+          `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`;
         const row = lifecycle.observe({
-          id: `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`,
+          id: existing?.id ?? sourceKey,
           taskId: null,
           kind: "runtime",
-          sourceKey: `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`,
+          sourceKey,
           data: { harness: status.harness, ...status.restart },
           createdAt: status.restart.since,
         });
@@ -4967,6 +4978,7 @@ export class StandaloneService {
       key: string;
       reason: string;
     }> = [];
+    if (task.state !== "open") return conditions;
     const held: string[] = [];
     for (const a of domain.assignments(taskId)) {
       const s = selectAssignmentExecution(a, this);

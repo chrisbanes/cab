@@ -4102,9 +4102,9 @@ export class OperatorApi {
       revision: row.revision,
       createdAt: row.createdAt,
       resolvedAt: row.resolvedAt,
-      resolution: this.safe(row.resolution, excluded),
+      resolution: this.safe(row.resolution, excluded, 4096),
       dismissedAt: row.dismissedAt,
-      note: this.safe(row.note, excluded),
+      note: this.safe(row.note, excluded, 4096),
     };
   }
   private interaction(

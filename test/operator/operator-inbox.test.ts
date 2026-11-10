@@ -1026,6 +1026,17 @@ test("ownership intervention cannot be dismissed and terminal visibility never r
       ).data.items.find((i) => i.id === item.id)?.lifecycle?.resolution,
       "Task is Cancelled",
     );
+    for (let read = 0; read < 3; read++) await api.readInbox();
+    const history = (
+      await api.readInbox(new URLSearchParams({ status: "resolved" }))
+    ).data.items.filter(
+      (i) => i.kind === "intervention" && i.taskId === a.taskId,
+    );
+    assert.deepEqual(
+      history.map((i) => i.id),
+      [item.id],
+    );
+    assert.deepEqual(f.service.recoveryForTask(a.taskId), before);
   } finally {
     await f.close();
   }
@@ -1164,7 +1175,7 @@ test("clearing one refused request preserves another request's dismissed episode
   }
 });
 
-test("runtime dismissal belongs to one exhaustion episode even when the wall clock repeats", async () => {
+test("runtime dismissal survives failed service restart and a fresh episode alerts even when the wall clock repeats", async () => {
   const exhaustion = exhaustibleRuntime();
   const f = await createOperatorFixture(
     null,
@@ -1175,7 +1186,7 @@ test("runtime dismissal belongs to one exhaustion episode even when the wall clo
     exhaustion.serviceOptions,
   );
   try {
-    const api = new OperatorApi(f.service, [f.directory]);
+    let api = new OperatorApi(f.service, [f.directory]);
     await exhaustion.exhaust(f.runtime);
     const first = (await api.readInbox()).data.items.find(
       (i) => i.kind === "runtime",
@@ -1190,6 +1201,22 @@ test("runtime dismissal belongs to one exhaustion episode even when the wall clo
     assert.equal(
       (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
       false,
+    );
+    await f.reopen();
+    await exhaustion.exhaust(f.runtime);
+    api = new OperatorApi(f.service, [f.directory]);
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
+      false,
+      "a still-failing runtime is the same dismissed outage",
+    );
+    assert.deepEqual(
+      f.service
+        .inboxLifecycle()
+        .rows()
+        .filter((r) => r.kind === "runtime")
+        .map((r) => ({ id: r.id, status: r.status })),
+      [{ id: first.id, status: "dismissed" }],
     );
     await f.service.configureRuntime({
       key: randomUUID(),
@@ -1211,6 +1238,42 @@ test("runtime dismissal belongs to one exhaustion episode even when the wall clo
     assert.notEqual(next.id, first.id);
     assert.equal(next.lifecycle?.status, "actionable");
     assert.equal(f.service.inboxLifecycle().get(first.id)?.status, "resolved");
+  } finally {
+    await f.close();
+  }
+});
+
+test("redaction expansion of a maximum-length Inbox note keeps history and task reads available", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const a = await seedOwnQuestion(f),
+      api = new OperatorApi(f.service, [f.directory, "secret"]),
+      note = `secret${"n".repeat(4090)}`,
+      item = (await api.readInbox()).data.items.find(
+        (i) => i.id === a.interactionId,
+      )!;
+    assert.equal(note.length, 4096);
+    await api.execute({
+      type: "inbox.dismiss",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision,
+      note,
+    });
+    const history = await api.readInbox(
+      new URLSearchParams({ status: "dismissed" }),
+    );
+    assert.equal(
+      history.data.items.find((i) => i.id === item.id)?.lifecycle?.note,
+      null,
+    );
+    const task = await api.readTask(a.taskId);
+    assert.equal(
+      task.data.questions.find((q) => q.interactionId === item.id)?.lifecycle
+        ?.note,
+      null,
+    );
+    assert.equal(JSON.stringify({ history, task }).includes("secret"), false);
   } finally {
     await f.close();
   }
