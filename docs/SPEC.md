@@ -2697,9 +2697,13 @@ remove a workspace.
 
 Confirmed `pr.create` automatically binds the created PR when the task has no bound
 PR, using the same fresh identity and outside-head checks as manual registration.
-The binding retains the task lead for feedback regardless of the creator. Binding
+The binding retains the task lead for feedback regardless of the creator; only the
+lead's work waits on the bound PR, so a delegate creator can still complete. Binding
 failure preserves the confirmed creation and receipt; task delivery summaries show
-the exact created PR and a `register PR #N` next step. The task lead or the same-task
+the exact created PR and a `register PR #N` next step. When the task is already
+bound to another PR, the summary instead says the created PR is not this task's
+delivery and names the bound PR, because registration refuses a second PR. The
+task lead or the same-task
 assignment whose confirmed creation produced that exact repository, number and node
 identity may call `cab_register_pr`. Subsequent creates reuse a freshly verified open
 bound or earlier task-created PR on the same head ref, returning its receipt without
