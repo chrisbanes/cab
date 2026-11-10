@@ -23,8 +23,12 @@ export function comparisonReasonSentence(
         return "The workspace became unavailable during this comparison. Available changes remain visible; unavailable files stay marked as gaps. Refresh to retry.";
       return "Not read yet: workspace was unavailable. Refresh to read it again.";
     case "time-limit":
+      if (target === "last-turn")
+        return "The Last turn capture reached a time limit. Missing historical observations remain gaps. Refresh checks available capture state; it does not rerun the capture.";
       return "A time limit stopped the comparison. The overall observation budget is 5 seconds; reduce the comparison scope, then refresh.";
     case "output-limit":
+      if (target === "last-turn")
+        return "The Last turn capture reached a bounded output limit. The recorded reason does not identify which limit; it may include the 2,048-lines-per-side or 1 MiB rendered-diff bound. Missing historical observations remain gaps. Refresh checks available capture state; it does not rerun the capture.";
       return "The comparison stopped at a bounded output limit. The recorded reason does not identify which limit; it may include the 2,048-lines-per-side or 1 MiB rendered-diff bound. Reduce the comparison scope or inspect files locally.";
     case "base-branch-required":
       return "The configured ref is not a local branch. Select a local branch; none is inferred or checked out.";
@@ -33,6 +37,8 @@ export function comparisonReasonSentence(
     case "no-merge-base":
       return "The selected local branch has no usable merge base.";
     case "workspace-changed":
+      if (target === "last-turn")
+        return "The workspace changed during the Last turn capture. Missing historical observations remain gaps. Refresh checks available capture state; it does not rerun the capture.";
       return "The workspace changed while this comparison was read. Refresh to read it again.";
     default:
       return reason ? "The comparison could not be read completely." : "";
@@ -72,8 +78,8 @@ export function comparisonEntryLimitSentence(
       return (content?.size ?? 0) > 1024 * 1024;
     });
     return oversizedSides.length
-      ? `${entry.path} exceeds the 1 MiB file limit on the ${oversizedSides.join(" and ")} side${oversizedSides.length === 1 ? "" : "s"}. Inspect it locally or reduce the comparison scope.`
-      : `${entry.path} exceeded a comparison content limit. Inspect it locally or reduce the comparison scope.`;
+      ? `${entry.path} exceeds the 1 MiB file limit on the ${oversizedSides.join(" and ")} side${oversizedSides.length === 1 ? "" : "s"}. Inspect it locally.`
+      : `${entry.path} exceeded a comparison content limit. Inspect it locally.`;
   }
   if (entry.reason !== "output-limit") return null;
 
@@ -82,7 +88,7 @@ export function comparisonEntryLimitSentence(
     return (content?.lineCount ?? 0) > 2048;
   });
   if (oversizedSides.length)
-    return `${entry.path} exceeds 2,048 lines on the ${oversizedSides.join(" and ")} side${oversizedSides.length === 1 ? "" : "s"}. Inspect it locally or reduce the comparison scope.`;
+    return `${entry.path} exceeds 2,048 lines on the ${oversizedSides.join(" and ")} side${oversizedSides.length === 1 ? "" : "s"}. Inspect it locally.`;
 
-  return `${entry.path} exceeded a comparison bound. The available reason cannot distinguish the 1 MiB rendered-diff limit from another bounded diff limit. Inspect it locally or reduce the comparison scope.`;
+  return `${entry.path} exceeded a comparison bound. The available reason cannot distinguish the 1 MiB rendered-diff limit from another bounded diff limit. Inspect it locally.`;
 }

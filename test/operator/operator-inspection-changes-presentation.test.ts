@@ -60,10 +60,32 @@ test("comparison reasons say what happened and offer a useful next step", () => 
     comparisonReasonSentence("time-limit"),
     /overall observation budget is 5 seconds/,
   );
+  assert.match(
+    comparisonReasonSentence("time-limit", "branch"),
+    /reduce the comparison scope, then refresh/,
+  );
   const output = comparisonReasonSentence("output-limit");
   assert.match(output, /2,048-lines-per-side/);
   assert.match(output, /1 MiB rendered-diff/);
   assert.match(output, /does not identify/);
+  assert.match(
+    comparisonReasonSentence("output-limit", "uncommitted"),
+    /Reduce the comparison scope or inspect files locally/,
+  );
+  for (const reason of ["time-limit", "output-limit", "workspace-changed"]) {
+    const historical = comparisonReasonSentence(reason, "last-turn");
+    assert.match(historical, /Missing historical observations remain gaps/);
+    assert.match(historical, /Refresh checks available capture state/);
+    assert.match(historical, /does not rerun the capture/);
+    assert.doesNotMatch(historical, /reduce the comparison scope/i);
+    assert.doesNotMatch(historical, /Refresh to read it again/);
+  }
+  const historicalOutput = comparisonReasonSentence(
+    "output-limit",
+    "last-turn",
+  );
+  assert.match(historicalOutput, /2,048-lines-per-side/);
+  assert.match(historicalOutput, /1 MiB rendered-diff/);
   assert.equal(comparisonReasonSentence(undefined), "");
 });
 
@@ -78,6 +100,7 @@ test("a file names exceeded limits only when its observation proves them", () =>
   assert.match(lineLimited ?? "", /large\.txt/);
   assert.match(lineLimited ?? "", /2,048 lines on the Before side/);
   assert.match(lineLimited ?? "", /Inspect it locally/);
+  assert.doesNotMatch(lineLimited ?? "", /reduce the comparison scope/i);
 
   const byteLimited = comparisonEntryLimitSentence(
     entry({ reason: "too-large", left: { size: 1_048_577, lineCount: null } }),
@@ -93,6 +116,7 @@ test("a file names exceeded limits only when its observation proves them", () =>
   );
   assert.match(ambiguous ?? "", /cannot distinguish/);
   assert.match(ambiguous ?? "", /Inspect it locally/);
+  assert.doesNotMatch(ambiguous ?? "", /reduce the comparison scope/i);
 
   const aggregateContentLimit = comparisonEntryLimitSentence(
     entry({ reason: "too-large", left: { size: 500_000, lineCount: null } }),
