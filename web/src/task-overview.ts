@@ -241,7 +241,13 @@ const deliveryModes = {
  */
 export const deliveryApplies = (
   data: Pick<Data, "source" | "repositoryLinked" | "delivery">,
-) => Boolean(data.source || data.repositoryLinked || data.delivery?.binding);
+) =>
+  Boolean(
+    data.source ||
+      data.repositoryLinked ||
+      data.delivery?.binding ||
+      data.delivery?.unregisteredPr,
+  );
 
 /** The inspector's execution facts: running assignments, lead runtime and delivery. */
 export function executionFacts(
@@ -258,8 +264,9 @@ export function executionFacts(
     delivery: !delivery
       ? "Delivery not recorded"
       : binding
-        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}`
-        : `${deliveryModes[delivery.mode]} · no PR yet`,
+        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}${delivery.unregisteredPr ? ` · ${delivery.unregisteredPr}` : ""}`
+        : (delivery.unregisteredPr ??
+          `${deliveryModes[delivery.mode]} · no PR yet`),
   };
 }
 

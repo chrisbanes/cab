@@ -30,7 +30,7 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
     type: "function",
     name: "cab_register_pr",
     description:
-      "Bind an existing identity-verified PR or merge request (its IID as prNumber and the pr.create receipt's nodeId as expectedPrNodeId) to this task and retain its lead for delivery feedback.",
+      "Confirmed pr.create automatically binds when this task has no bound PR; a binding failure preserves the confirmed create and its receipt. Manually bind an existing identity-verified PR or merge request (its IID as prNumber and the pr.create receipt's nodeId as expectedPrNodeId) to this task and retain its task lead for delivery feedback. Only the task lead or the same-task assignment whose confirmed pr.create produced the exact repository/number/node identity may register.",
     inputSchema: object(
       {
         repositoryId: text,

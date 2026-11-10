@@ -2768,9 +2768,11 @@ export class DeliveryStore {
     assertOwnedTaskWritable(this.db, caller.taskId);
     const current = this.delivery(caller.taskId),
       policy = this.configuration(caller.projectId);
-    this.db
-      .prepare("INSERT OR IGNORE INTO delivery_waiting_work VALUES (?,?,?)")
-      .run(caller.workId, caller.taskId, leadAssignmentId);
+    // A delegate's work must not wait on the lead's delivery, or the delegate never completes.
+    if (caller.assignmentId === leadAssignmentId)
+      this.db
+        .prepare("INSERT OR IGNORE INTO delivery_waiting_work VALUES (?,?,?)")
+        .run(caller.workId, caller.taskId, leadAssignmentId);
     if (current) {
       if (
         current.observation.nodeId !== observation.nodeId ||
@@ -3193,6 +3195,30 @@ export class DeliveryStore {
         }
       : binding;
   }
+  unregisteredPr(taskId: string): string | null {
+    const bound = this.delivery(taskId)?.observation;
+    const created = this.actions(taskId)
+      .reverse()
+      .find(
+        (a) =>
+          a.state === "confirmed-success" &&
+          a.request.action.kind === "pr.create" &&
+          a.observation?.receipt?.number &&
+          !(
+            a.request.action.target.repositoryId === bound?.repositoryId &&
+            a.observation.receipt.number === bound.number &&
+            a.observation.receipt.nodeId === bound.nodeId
+          ),
+      );
+    if (!created) return null;
+    const receipt = created.observation!.receipt!;
+    const target = created.request.action.target;
+    const createdText = `Created PR #${receipt.number} in repository ${target.repositoryId} (node ${receipt.nodeId}${receipt.headSha ? `, head ${receipt.headSha}` : "expectedHeadSha" in target ? `, head ${target.expectedHeadSha}` : ""})`;
+    // Registration refuses a second PR while a binding exists, so only report the mismatch.
+    return bound
+      ? `${createdText} is not this task's delivery; the task is bound to PR #${bound.number}.`
+      : `${createdText}; register PR #${receipt.number} with cab_register_pr. The task lead or the assignment whose confirmed pr.create produced it may register.`;
+  }
   publicTask(taskId: string) {
     const task = this.db
       .prepare("SELECT projectId,version FROM domain_tasks WHERE id=?")
@@ -3251,6 +3277,7 @@ export class DeliveryStore {
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.withBaseHold(this.delivery(taskId)),
+      unregisteredPr: this.unregisteredPr(taskId),
       branches: this.taskBranches(taskId),
       blockers: this.completionBlockers(taskId, task.version),
       actions: this.actions(taskId).map((a) => ({

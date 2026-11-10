@@ -103,7 +103,7 @@ export async function opened(w: GitLabWorld, draft = true, base = "main") {
       kind: "pr.create",
       target: {
         repositoryId,
-        baseRef: "main",
+        baseRef: base,
         headRef: String(branchOf(w)?.branch),
         expectedHeadSha: sha,
       },
@@ -115,8 +115,6 @@ export async function opened(w: GitLabWorld, draft = true, base = "main") {
   assert.equal(created.success, true, created.text);
   const mr = w.remote.state.mergeRequests[0];
   assert.ok(mr);
-  // A merge request stacked on another branch is registered against that base.
-  mr.target_branch = base;
   mr.head_pipeline = {
     id: 54,
     sha,

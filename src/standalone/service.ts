@@ -6135,7 +6135,7 @@ export class StandaloneService {
             call as CoordinationCall,
             caller,
             {
-              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}`,
+              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}${result.request.action.kind === "pr.create" && result.state === "confirmed-success" ? `\n${this.delivery().unregisteredPr(caller.taskId) ?? ""}` : ""}`,
               success: result.state === "confirmed-success",
             },
           );

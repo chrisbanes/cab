@@ -6320,6 +6320,7 @@ export class OperatorApi {
       blockers: v.blockers.slice(0, 128),
       omittedBlockerCount: Math.max(0, v.blockers.length - 128),
       omittedActionCount: Math.max(0, v.actions.length - 128),
+      unregisteredPr: this.safe(v.unregisteredPr, excluded),
       ...this.authorityField(
         String(this.requireTask(taskId).projectId),
         excluded,

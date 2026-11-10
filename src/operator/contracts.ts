@@ -1631,6 +1631,7 @@ export const deliveryReadSchema = z
     blockers: z.array(text).max(128),
     omittedBlockerCount: z.number().int().nonnegative(),
     omittedActionCount: z.number().int().nonnegative(),
+    unregisteredPr: safeText.optional(),
     /** Absent from older servers, and when the exclusions withhold the mapping. */
     statusMappingAuthority: statusMappingAuthoritySchema.optional(),
     /** The task's assigned branches; a name the exclusions withhold reads as null. */
