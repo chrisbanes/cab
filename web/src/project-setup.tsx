@@ -692,46 +692,44 @@ export function ProjectSetup(
                 </DraftField>
               )}
             </div>
-            <fieldset className="settings-candidates" disabled={disabled}>
-              <legend className="small-heading">Permitted agents</legend>
-              <p className="metadata muted">
-                The lead may delegate to these agents whether routing is on or
-                off.
-              </p>
-              {profiles.map((r) => {
-                const candidates = values.candidateProfileIds ?? [];
-                return (
-                  <label
-                    key={r.id}
-                    className="check-field body"
-                    htmlFor={`setup-permitted-${r.id}`}
-                  >
-                    <Input
-                      id={`setup-permitted-${r.id}`}
-                      type="checkbox"
-                      className="native-check size-5 shrink-0 p-0 accent-foreground"
-                      checked={candidates.includes(r.id)}
-                      onChange={(e) =>
-                        d.set(
-                          "candidateProfileIds",
-                          e.target.checked
-                            ? [...candidates, r.id]
-                            : candidates.filter((id) => id !== r.id),
-                        )
-                      }
-                    />
-                    {[r.name ?? "Name unavailable", r.summary]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </label>
-                );
-              })}
-              {profiles.length === 0 && (
+            {/* Shown once agents exist, so the inline lead form keeps its first-screen place. */}
+            {profiles.length > 0 && (
+              <fieldset className="settings-candidates" disabled={disabled}>
+                <legend className="small-heading">Permitted agents</legend>
                 <p className="metadata muted">
-                  No agents available to permit yet.
+                  The lead may delegate to these agents whether routing is on or
+                  off.
                 </p>
-              )}
-            </fieldset>
+                {profiles.map((r) => {
+                  const candidates = values.candidateProfileIds ?? [];
+                  return (
+                    <label
+                      key={r.id}
+                      className="check-field body"
+                      htmlFor={`setup-permitted-${r.id}`}
+                    >
+                      <Input
+                        id={`setup-permitted-${r.id}`}
+                        type="checkbox"
+                        className="native-check size-5 shrink-0 p-0 accent-foreground"
+                        checked={candidates.includes(r.id)}
+                        onChange={(e) =>
+                          d.set(
+                            "candidateProfileIds",
+                            e.target.checked
+                              ? [...candidates, r.id]
+                              : candidates.filter((id) => id !== r.id),
+                          )
+                        }
+                      />
+                      {[r.name ?? "Name unavailable", r.summary]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </label>
+                  );
+                })}
+              </fieldset>
+            )}
             {values.candidateProfileIds?.some(
               (id) =>
                 p.workspace &&

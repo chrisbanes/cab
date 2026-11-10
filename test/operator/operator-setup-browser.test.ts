@@ -1769,7 +1769,7 @@ test("Setup exposes Permitted agents when profiles already exist", async (_t, jo
     .fill("Permitted setup");
   await page
     .getByLabel("Lead agent", { exact: true })
-    .selectOption({ label: "Jonas" });
+    .selectOption({ label: "Nora" });
   const sent = sentCommands(page);
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
