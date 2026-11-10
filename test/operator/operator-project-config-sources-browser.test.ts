@@ -219,7 +219,7 @@ test("GitHub source explains a Project field rule without its matching selection
     .getByText("Inactive", { exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: /Remove GitHub Project \(S-\d+\)/ })
+    .getByRole("button", { name: /Remove Atlas roadmap \(S-\d+\)/ })
     .last()
     .click();
   await page.getByText(/This Project field condition never applies/).waitFor();
