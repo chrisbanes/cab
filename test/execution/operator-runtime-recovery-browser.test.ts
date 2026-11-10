@@ -738,3 +738,56 @@ test("bound recovery blocks redacted, missing and refreshed identities without t
   assert.equal(posts, 0);
   assert.equal(f.runtime.turns, 0);
 });
+
+test("request-only refusal explains its next step and links back to the task", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/assignments/:assignment/recovery",
+  );
+  const assignment = f.service.domain().assignment(ids.assignmentId);
+  const reason =
+    "Request refused: prepared against older task or assignment revisions and never ran. Start again when independent holds allow it.";
+  f.seedPersistedState((db) => {
+    db.prepare(`INSERT INTO turn_requests (requestKey,workId,kind,taskId,projectId,assignmentId,taskVersion,
+      assignmentVersion,instructionsRevision,profileRevision,prompt,state,reason)
+      VALUES ('uncaptured-refusal','uncaptured-refusal','assignment',?,?,?,1,?,?,?,'p','held',?)`).run(
+      ids.taskId,
+      ids.relay,
+      ids.assignmentId,
+      Number(assignment.version),
+      Number(assignment.instructionsRevision),
+      Number(assignment.profileRevision),
+      reason,
+    );
+    db.prepare(
+      "INSERT INTO assignment_request_refusals VALUES ('uncaptured-refusal',?)",
+    ).run(reason);
+  });
+  const { OperatorApi } = await import("../../src/standalone/operator-api.js");
+  assert.ok(
+    (
+      await new OperatorApi(f.service, [f.directory]).readAssignmentRecovery(
+        ids.assignmentId,
+      )
+    ).data.assignment.requestRefusal,
+  );
+  await page.reload();
+  await captureBrowserEvidence(page, "request-only-refusal");
+  const panel = page.locator("section", {
+    has: page.getByRole("heading", {
+      name: "Execution and assignment",
+      exact: true,
+    }),
+  });
+  await panel.getByText(/prepared against older.*never ran/).waitFor();
+  await page.setViewportSize(phone);
+  const next = page.getByRole("region", { name: "Next step", exact: true });
+  await next.getByText(/prepared against older.*never ran/).waitFor();
+  const link = next.getByRole("link", {
+    name: "Review Start again on task",
+    exact: true,
+  });
+  assert.equal(await link.getAttribute("href"), `/tasks/${ids.taskId}`);
+  await link.click();
+  assert.equal(new URL(page.url()).pathname, `/tasks/${ids.taskId}`);
+});

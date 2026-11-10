@@ -2615,3 +2615,67 @@ test("a rate limit hit by issue brief reads never costs a selection its blocker 
     db.close();
   }
 });
+
+test("a completed source refresh during first workspace verification retries at current revisions without Start again", {
+  timeout: 15_000,
+}, async () => {
+  const f = await importedWorkspaceService({ paused: true, holdTurns: true });
+  const entered = gate();
+  const release = gate();
+  const target = f.service as unknown as {
+    provisionTaskWorkspace: StandaloneService["provisionTaskWorkspace"];
+  };
+  const original = target.provisionTaskWorkspace.bind(f.service);
+  let interrupted = false;
+  target.provisionTaskWorkspace = async (taskId, repositories) => {
+    if (!interrupted && taskId === f.taskId("I_1")) {
+      interrupted = true;
+      entered.resolve();
+      await release.promise;
+      throw new Error(
+        "Imported task repository grant changed during verification",
+      );
+    }
+    return original(taskId, repositories);
+  };
+  try {
+    f.resume();
+    await entered.promise;
+    const waiting = f.request("I_1");
+    assert.ok(waiting?.assignmentId);
+    const { startedOf } = await import("../fixtures/service-internals.js");
+    const synchronizer = startedOf(f.service).githubSynchronizer;
+    f.failBlockers(true);
+    await synchronizer.refresh();
+    f.failBlockers(false);
+    await synchronizer.refresh();
+    assert.ok(
+      Number(f.domain.task(f.taskId("I_1")).version) > waiting.taskVersion!,
+    );
+    assert.deepEqual(
+      f.domain.assignmentAdmission(waiting.assignmentId, {
+        taskVersion: waiting.taskVersion!,
+        assignmentVersion: waiting.assignmentVersion!,
+        instructionsRevision: waiting.instructionsRevision!,
+        profileRevision: waiting.profileRevision!,
+      }).reasons,
+      ["task-revision-changed"],
+    );
+    release.resolve();
+    await f.service.refreshGitHub();
+    await f.settle(() => f.startedWorkspaces.length === 1);
+    assert.equal(f.startedWorkspaces.length, 1);
+    assert.equal(f.request("I_1")?.state, "active");
+    assert.equal(
+      f.request("I_1")?.taskVersion,
+      Number(f.domain.task(f.taskId("I_1")).version),
+    );
+    assert.equal(
+      f.service.startAgainAvailability(f.taskId("I_1")).available,
+      false,
+    );
+  } finally {
+    release.resolve();
+    await f.close();
+  }
+});

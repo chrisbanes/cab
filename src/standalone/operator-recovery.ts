@@ -188,6 +188,7 @@ export async function recoveryOptions(
   return recoveryOptionsSchema.parse({
     data: {
       assignmentId,
+      requestRefusal: assignment.requestRefusal ?? null,
       taskId,
       projectId,
       assignmentVersion: assignment.version,
