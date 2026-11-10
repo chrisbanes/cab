@@ -168,10 +168,10 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   );
   const strip = page.locator("[data-task-strip]");
   assert.doesNotMatch((await strip.textContent()) ?? "", /Lead · Task lead/);
-  assert.ok(
-    ((await strip.locator("[data-task-reason]").textContent()) ?? "").length >
-      0,
-  );
+  assert.deepEqual(await strip.locator(".task-state").allTextContents(), [
+    "Draft",
+  ]);
+  assert.equal(await strip.locator("[data-task-reason]").count(), 0);
   // Unavailable Reset is omitted; the pending work still offers Stop and Back names the project.
   assert.deepEqual(
     await header
@@ -4096,6 +4096,7 @@ const overviewOrder = [
   "section#reply",
   "section#review",
   "section#result-evidence",
+  "section#result-details",
   "section#brief",
   "section#assignments",
   "section#context",
@@ -4223,6 +4224,7 @@ for (const engine of ["chromium", "webkit"] as const)
         "result-evidence",
         // The inspector fold's own summary, ahead of the brief and the cards beneath it.
         "outside",
+        "result-details",
         "brief",
         "assignments",
       ];
