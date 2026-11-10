@@ -168,10 +168,10 @@ path as the runner does.
 Agents run the full check in their cab-managed task workspaces. A task's checkout
 there is a detached worktree of a bare reftable repository, and its commands run in
 the harness sandbox. Browser engines do not start in these sandboxes,
-so the check there runs with the service profile:
-`npm ci && npm run build && npm run test:built -- --profile=service`, after
-`npm run typecheck`, `npm run lint` and `npm run format:check`. The workspace needs
-this environment:
+so the check there runs with the service profile: `npm ci`, then
+`npm run typecheck`, `npm run lint` and `npm run format:check`, then
+`npm run build && npm run test:built -- --profile=service`. The workspace needs this
+environment:
 
 - **Codex:** the sandbox writes only the task workspace and the managed repository's
   Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Set `TMPDIR`
