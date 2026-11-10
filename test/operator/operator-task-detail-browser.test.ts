@@ -169,9 +169,12 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   const strip = page.locator("[data-task-strip]");
   assert.doesNotMatch((await strip.textContent()) ?? "", /Lead · Task lead/);
   assert.deepEqual(await strip.locator(".task-state").allTextContents(), [
-    "Draft",
+    "Paused",
   ]);
-  assert.equal(await strip.locator("[data-task-reason]").count(), 0);
+  assert.deepEqual(
+    await strip.locator("[data-task-reason]").allTextContents(),
+    ["project paused"],
+  );
   // Unavailable Reset is omitted; the pending work still offers Stop and Back names the project.
   assert.deepEqual(
     await header
@@ -229,11 +232,16 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     assert.ok(b, selector);
     return b;
   };
-  const card = await box('section[aria-label="Pending requests and holds"]'),
-    conversation = await box("section#conversation"),
+  const conversation = await box("section#conversation"),
     review = await box("section#review"),
     brief = await box("section#brief");
-  assert.ok(card.y + card.height <= conversation.y);
+  assert.equal(
+    await page
+      .locator("#decisions")
+      .evaluate((e) => getComputedStyle(e).position),
+    "sticky",
+    "attention stays pinned while the conversation opens at its newest entry",
+  );
   // The reply card is docked at the bottom of the view, so its place is the document order.
   assert.equal(
     await page.evaluate(() => {
