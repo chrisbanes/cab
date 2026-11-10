@@ -197,7 +197,7 @@ test("toolbar puts the filters, switch and count on one row with Active tasks as
     );
   assert.equal(
     await page.locator(".work-count").innerText(),
-    `${(await taskIds(page, ".task-list")).length} tasks`,
+    "9 Ready of 11 eligible tasks · 2 drafts hidden",
   );
   await shot(page, "1366-tasks-toolbar");
 
@@ -237,7 +237,7 @@ test("toolbar puts the filters, switch and count on one row with Active tasks as
   await page.waitForURL((u) => u.searchParams.get("q") === "Normal Stop");
   assert.deepEqual(await taskIds(page), [ids.normal.id]);
   await page.getByLabel("Filter tasks").fill("");
-  // The imported task is a Draft, which the Ready default hides.
+  // Include both readiness states while checking the source filter.
   await page.getByLabel("Readiness").selectOption("any");
   await page.getByLabel("Source").selectOption("github");
   await page.waitForURL((u) => u.searchParams.get("source") === "github");
@@ -274,6 +274,140 @@ const stored = (page: Page) =>
   page.evaluate((key) => localStorage.getItem(key), filtersKey);
 const tasksLink = (page: Page) =>
   page.getByRole("link", { name: "Tasks", exact: true });
+
+test("default readiness discloses hidden drafts in List and Board and Show preserves other filters", async (_t, journey) => {
+  const { ids, web, page } = await startDefaults(
+    journey,
+    "/tasks?source=local&view=list",
+  );
+  await page.locator(`.task-list [data-task-id="${ids.ready}"]`).waitFor();
+  assert.equal(
+    await page.locator(".work-count").innerText(),
+    "8 Ready of 10 eligible tasks · 2 drafts hidden",
+  );
+  await page
+    .getByRole("button", { name: "Show 2 hidden tasks", exact: true })
+    .click();
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("ready") === "any" &&
+      url.searchParams.get("state") === null &&
+      url.searchParams.get("source") === "local" &&
+      url.searchParams.get("view") === null,
+  );
+  await page
+    .getByText(
+      "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(
+    await page
+      .locator(".task-list .task-reason")
+      .filter({ hasText: "Draft: not Ready" })
+      .count(),
+    0,
+  );
+  await openMoreFilters(page);
+  await page.getByLabel("Readiness", { exact: true }).selectOption("yes");
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("ready") === null &&
+      url.searchParams.get("view") === null,
+  );
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.locator("#column-Draft").waitFor();
+  assert.equal(
+    await page.locator(".work-count").innerText(),
+    "8 Ready of 10 eligible tasks · 2 drafts hidden",
+  );
+  assert.equal(
+    await page.locator("#column-Draft .board-column-count").innerText(),
+    "0",
+  );
+  await page.getByText("2 hidden by Ready filter", { exact: true }).waitFor();
+  await page
+    .getByRole("button", { name: "Show 2 hidden tasks", exact: true })
+    .click();
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("ready") === "any" &&
+      url.searchParams.get("state") === null &&
+      url.searchParams.get("source") === "local" &&
+      url.searchParams.get("view") === "board",
+  );
+  assert.equal(await page.locator("#column-Draft .task-card").count(), 2);
+  await page
+    .getByText(
+      "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+      { exact: true },
+    )
+    .waitFor();
+  for (const route of [
+    `/?state=all&source=local&ready=any&view=board`,
+    `/projects/${ids.projectId}?state=all&source=local&ready=any&view=board`,
+  ]) {
+    await page.goto(`${web.origin}${route}`);
+    await page
+      .getByText(
+        "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+        { exact: true },
+      )
+      .waitFor();
+  }
+});
+
+test("mixed dependency holds stay attributed in List, Board, Overview and project views", async (_t, journey) => {
+  const { ids, web, page } = await startDefaults(journey);
+  const heldIds = [ids.ready, ids.waiting, ids.importedId, ids.draft];
+  await page.route("**/api/operator/task-list*", async (route) => {
+    const response = await route.fetch(),
+      json = await response.json();
+    json.data.tasks = json.data.tasks.filter((task: { id: string }) =>
+      heldIds.includes(task.id),
+    );
+    for (const task of json.data.tasks) {
+      task.ready = true;
+      task.execution.state = "idle";
+      task.admission = {
+        eligible: false,
+        reasons: [
+          heldIds.indexOf(task.id) < 2
+            ? "imported-blockers-unknown"
+            : "stacked-blocker-unknown",
+        ],
+      };
+    }
+    await route.fulfill({ response, json });
+  });
+  for (const path of [
+    "/tasks?ready=any",
+    "/tasks?ready=any&view=board",
+    "/?ready=any",
+    `/projects/${ids.projectId}?ready=any&view=board`,
+  ]) {
+    await page.goto(web.origin + path);
+    for (const [index, id] of heldIds.entries()) {
+      const reason = page.locator(`[data-task-id="${id}"] .task-reason`);
+      await reason.waitFor();
+      assert.equal(
+        await reason.innerText(),
+        index < 2
+          ? "GitHub dependencies unavailable"
+          : "Blocker's change request unconfirmed",
+        path,
+      );
+    }
+    assert.equal(
+      await page
+        .getByText(/tasks share this readiness\/dependency reason/)
+        .count(),
+      0,
+    );
+  }
+});
 
 test("task filters are remembered across navigation and reload, and the URL wins", async (_t, journey) => {
   const { ids, web, page } = await startDefaults(journey, "/tasks");
@@ -398,12 +532,19 @@ test("active filters are counted, reset in one step and undone by Back", async (
     ready: false,
   });
   await page.goto(`${web.origin}/projects/${emptyProject}`);
-  await page
-    .getByText("No tasks match these filters", { exact: true })
-    .waitFor();
+  const showHidden = page.getByRole("button", {
+    name: "Show 1 hidden tasks",
+    exact: true,
+  });
+  await showHidden.waitFor();
+  assert.equal(
+    await page.locator(".work-count").innerText(),
+    "No tasks match these filters · 1 other not-Ready tasks hidden",
+  );
   assert.equal(await reset.count(), 0);
-  await showAll.click();
-  await page.waitForURL((u) => u.search === "?state=all&ready=any");
+  assert.equal(await showAll.count(), 0);
+  await showHidden.click();
+  await page.waitForURL((u) => u.search === "?ready=any");
   await page.getByRole("link", { name: "Draft only", exact: true }).waitFor();
   assert.equal(await showAll.count(), 0);
   await page.goto(`${web.origin}/projects/${ids.pausedProject}?state=Done`);
@@ -475,15 +616,22 @@ test("headers carry the new subtitles, one New task action and the page-owned re
   );
   await page.goto(`${web.origin}/tasks`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
-  assert.match(
-    await page.locator(".page-header-title p").innerText(),
-    /^\d+ active tasks? · \d+ projects?$/,
+  let header = await page.locator(".page-header-title p").innerText();
+  assert.match(header, /^\d+ tasks? shown · \d+ projects?$/);
+  assert.equal(
+    Number(header.match(/^\d+/)?.[0]),
+    await page.locator(".task-list [data-task-id]").count(),
   );
   await page.goto(`${web.origin}/projects/${ids.projectId}`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
+  header = await page.locator(".page-header-title p").innerText();
   assert.match(
-    await page.locator(".page-header-title p").innerText(),
-    /^\d+ active tasks? · accountable lead Accountable lead$/,
+    header,
+    /^\d+ tasks? shown · accountable lead Accountable lead$/,
+  );
+  assert.equal(
+    Number(header.match(/^\d+/)?.[0]),
+    await page.locator(".task-list [data-task-id]").count(),
   );
   await page
     .getByRole("link", { name: "Project settings", exact: true })
@@ -968,20 +1116,55 @@ test("a routing fallback row names cab as the next actor without the operator to
   );
 });
 
+async function setCatalogLead(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  leadProfileId: string | null,
+) {
+  const d = f.service.domain();
+  const project = d.projects().find((p) => p.name === "Service integration");
+  assert.ok(project);
+  d.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: String(project.id),
+    expectedVersion: Number(project.version),
+    leadProfileId,
+  });
+}
+
 test("task rows show state, next actor and lead from recorded facts without raw identifiers", async (_t, journey) => {
-  const { ids, web, page } = await start(journey, "/tasks?state=all");
+  const { ids, web, page } = await start(
+    journey,
+    "/tasks?state=all",
+    undefined,
+    (f) => setCatalogLead(f, null),
+  );
   const row = (id: string) => page.locator(`.task-list [data-task-id="${id}"]`);
   await row(ids.importedId).waitFor();
+  const leadFacts = async (id: string) =>
+    page.evaluate(async (taskId) => {
+      const response = await fetch("/api/operator/task-list");
+      const body = await response.json();
+      return body.data.tasks.find((task: { id: string }) => task.id === taskId);
+    }, id);
+  const importedFacts = await leadFacts(ids.importedId);
+  assert.ok(importedFacts);
+  assert.equal(
+    importedFacts.lead,
+    null,
+    "the unbound imported task has no lead",
+  );
+  assert.equal(
+    await row(ids.importedId).locator(".task-lead").innerText(),
+    "No lead configured",
+  );
   const imported = await row(ids.importedId)
     .locator(".task-project-metadata")
     .innerText();
   assert.match(imported, /Service integration/);
   assert.match(imported, /fixture\/source#42/);
   assert.doesNotMatch(imported, /GitHub fixture/);
-  assert.equal(
-    await row(ids.importedId).locator(".task-lead").innerText(),
-    "Accountable lead · lead",
-  );
   assert.equal(
     await row(ids.importedId).locator(".task-source-state").count(),
     0,
@@ -994,6 +1177,12 @@ test("task rows show state, next actor and lead from recorded facts without raw 
   await question
     .getByText("Next: you · answer question", { exact: true })
     .waitFor();
+  const questionFacts = await leadFacts(ids.question.id);
+  assert.ok(questionFacts);
+  const questionLead = question.locator(".task-lead");
+  assert.equal(questionFacts.lead?.profileId, ids.profileId);
+  assert.equal(questionFacts.project.leadProfileId, null);
+  assert.equal(await questionLead.innerText(), "Accountable lead");
   // Nobody must act on these: no Next line at all, not a "none" fallback.
   for (const id of [ids.running.id, ids.done, ids.cancelled]) {
     assert.equal(await row(id).locator(".task-next").count(), 0, id);
@@ -2032,6 +2221,14 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
   });
   await page.reload();
   const card = (id: string) => `[data-task-id="${id}"]`;
+  const questionFacts = await page.evaluate(async (taskId) => {
+    const response = await fetch("/api/operator/task-list");
+    const body = await response.json();
+    return body.data.tasks.find((task: { id: string }) => task.id === taskId);
+  }, ids.question.id);
+  assert.ok(questionFacts);
+  assert.equal(questionFacts.lead?.profileId, ids.profileId);
+  assert.equal(questionFacts.project.leadProfileId, ids.profileId);
   await page.locator(card(ids.question.id)).waitFor();
   await page
     .locator(card(ids.question.id))
@@ -2046,7 +2243,6 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     "Service integration · Local task",
     "Question needs an answer",
     "Next: you · answer question",
-    "Accountable lead · accountable lead",
     "Answer question →",
   ]);
   // Capacity is stated once for the board; a card nobody must act on has no Next line.
@@ -2056,17 +2252,35 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     await page.locator(`${card(ids.running.id)} .task-next`).count(),
     0,
   );
-  const [lead, response] = await Promise.all(
-    [".task-card-footer .task-lead", ".task-card-footer .task-request"].map(
-      (s) => page.locator(`${card(ids.question.id)} ${s}`).boundingBox(),
-    ),
+  const footerLead = page.locator(
+    `${card(ids.question.id)} .task-card-footer .task-lead`,
   );
-  // The lead leads the footer; a narrow card wraps the response below it.
+  const footerResponse = page.locator(
+    `${card(ids.question.id)} .task-card-footer .task-request`,
+  );
+  assert.equal(await footerLead.count(), 0);
+  assert.ok(await footerResponse.boundingBox());
+
+  // Captured leads remain visible after the project default is removed.
+  await setCatalogLead(f, null);
+  await page.reload();
+  await footerLead.waitFor();
+  assert.equal(
+    await footerLead.innerText(),
+    "Accountable lead · accountable lead",
+  );
+  const [lead, response] = await Promise.all([
+    footerLead.boundingBox(),
+    footerResponse.boundingBox(),
+  ]);
+  assert.ok(lead && response);
   assert.ok(
-    lead &&
-      response &&
-      (lead.x + lead.width <= response.x || lead.y + lead.height <= response.y),
+    lead.x + lead.width <= response.x || lead.y + lead.height <= response.y,
   );
+  await setCatalogLead(f, ids.profileId);
+  await page.reload();
+  await footerResponse.waitFor();
+  assert.equal(await footerLead.count(), 0);
   assert.match(
     (await page
       .locator(`${card(ids.question.id)} .task-request`)

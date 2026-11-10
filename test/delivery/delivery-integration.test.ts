@@ -26,6 +26,7 @@ import {
   deliveryToolFailureText,
 } from "../../src/standalone/delivery.js";
 import { coordinationTools } from "../../src/standalone/coordination-tools.js";
+import { DeliveryHoldError } from "../../src/core/domain-errors.js";
 import { z } from "zod";
 import {
   gitlabWorld,
@@ -476,6 +477,12 @@ test("an unproved status-mapping write does not stop startup from superseding pa
       );
       assert.ok(queued);
       await f.reopen();
+      assert.equal(
+        (
+          await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+        ).data.attention.codes.includes("external-action-uncertain"),
+        actor === "agent",
+      );
       assert.equal(
         f.readDb(
           (db) =>
@@ -1008,6 +1015,97 @@ for (const kind of ["reply", "resolve"] as const)
           .map((s) => s[1]),
         ["confirmed-success"],
       );
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const cancelled of [false, true])
+  test(`unknown action intervention clears with ${cancelled ? "no cancelled-task wake" : "one durable lead wake"}`, async () => {
+    const { f, resolve } = await threadWorld();
+    try {
+      f.scripted.state.lostThreadResolve = true;
+      const operationId = randomUUID();
+      assert.equal(
+        (await f.threadAction(resolve("C1"), operationId)).success,
+        false,
+      );
+      const api = new OperatorApi(f.service, [f.directory]);
+      const detail = (await api.readTask(f.taskId)).data;
+      const row = (await api.readTaskListPage()).data.tasks.find(
+        (r) => r.id === f.taskId,
+      )!;
+      assert.ok(detail.attention.codes.includes("external-action-uncertain"));
+      assert.deepEqual(detail.attention.codes, row.attention.codes);
+      assert.equal(detail.attention.count, row.attention.count);
+      const item = (await api.readInbox()).data.items.find(
+        (i) =>
+          i.kind === "intervention" &&
+          i.taskId === f.taskId &&
+          i.attentionCode === "external-action-uncertain",
+      );
+      assert.ok(item && item.kind === "intervention");
+      assert.equal(item.attentionCode, "external-action-uncertain");
+      assert.equal(item.reason, "External action outcome is unknown");
+      if (cancelled)
+        f.service.domain().execute({
+          type: "task.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId: f.projectId,
+          taskId: f.taskId,
+          expectedVersion: Number(f.service.domain().task(f.taskId).version),
+          state: "cancelled",
+        });
+      await f.service.coordinationView().refreshDelivery(f.taskId);
+      assert.equal(
+        f.service.delivery().action(operationId).state,
+        "confirmed-success",
+      );
+      assert.ok(
+        !(await api.readTask(f.taskId)).data.attention.codes.includes(
+          "external-action-uncertain",
+        ),
+      );
+      assert.ok(
+        !(await api.readInbox()).data.items.some(
+          (i) =>
+            i.kind === "intervention" &&
+            i.taskId === f.taskId &&
+            i.attentionCode === "external-action-uncertain",
+        ),
+      );
+      await f.service.coordinationView().refreshDelivery(f.taskId);
+      if (cancelled) await f.terminal(1);
+      else await f.service.stopTask(f.taskId);
+      await until(
+        () => !f.service.list().some((i) => i.state === "running"),
+        "settled work before restart",
+      );
+      await f.reopen();
+      await f.service.coordinationView().refreshDelivery(f.taskId);
+      f.readDb((db) => {
+        const events = db
+          .prepare(
+            "SELECT e.recipientAssignmentId,e.payload FROM coordination_inbox_events e JOIN coordination_external_delivery_notices n ON n.eventId=e.eventId WHERE n.taskId=? AND n.identity=?",
+          )
+          .all(f.taskId, `external-action-resolved:${operationId}:1`);
+        assert.equal(events.length, cancelled ? 0 : 1);
+        if (!cancelled) {
+          assert.equal(
+            events[0]!.recipientAssignmentId,
+            f.service
+              .domain()
+              .leadBindings()
+              .find((b) => b.taskId === f.taskId)!.assignmentId,
+          );
+          assert.match(
+            String(events[0]!.payload),
+            /pr.thread.resolve.*confirmed-success/,
+          );
+        }
+      });
+      assert.equal(f.scripted.state.threadResolves, 1);
     } finally {
       await f.close();
     }
@@ -2159,7 +2257,7 @@ test("delivery tool failures name the invalid field, the refusal category and ca
     const held = await failed(await f.threadAction(resolve("C1")));
     assert.match(
       held,
-      /Held: Task (admission is held|has unresolved external action)\. Once it clears, send the action again with a new operationId/,
+      /Held: External action outcome is unknown; Refresh delivery or check the action\. The operator was notified in the Inbox\. Stop and do not raise a question\./,
     );
     assert.doesNotMatch(held, /Refused by policy/);
 
@@ -2175,6 +2273,18 @@ test("delivery tool failures name the invalid field, the refusal category and ca
 });
 
 test("delivery failure text caps validation and never echoes values or untyped messages", () => {
+  assert.equal(
+    deliveryToolFailureText(new DeliveryHoldError("Task is held")),
+    "Held: Task is held. Once it clears, send the action again with a new operationId; the operator resolves a task hold.",
+  );
+  assert.equal(
+    deliveryToolFailureText(
+      new DeliveryHoldError(
+        "Stacked blocker failed; Unstack or Cancel the dependent",
+      ),
+    ),
+    "Held: Stacked blocker failed; Unstack or Cancel the dependent. Once it clears, send the action again with a new operationId; the operator resolves a task hold.",
+  );
   const parsed = z
     .object({ a: z.string(), b: z.string(), c: z.string(), d: z.string() })
     .strict()

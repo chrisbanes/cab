@@ -8,6 +8,7 @@ import {
 const test = browserSuite("operator-task-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { taskListPageSchema } from "../../src/operator/contracts.js";
 import {
   openMoreFilters,
   seedCatalog,
@@ -33,6 +34,190 @@ async function signIn(
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
 }
+test("hidden-draft controls preserve provider identities and source facts in List and Board", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const ids = await seedCatalog(f);
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  let jira = true;
+  await page.route("**/api/operator/task-list", async (route) => {
+    const response = await route.fetch();
+    const body = taskListPageSchema.parse(await response.json());
+    const task = body.data.tasks.find((task) => task.id === ids.importedId)!;
+    assert.ok(task.source);
+    task.ready = false;
+    task.admission.reasons = ["task-unready"];
+    task.execution.state = "idle";
+    task.lead = { profileId: ids.profileId, name: "Accountable lead" };
+    task.source.state = null;
+    if (jira) {
+      task.source.identity.tracker = "jira";
+      task.source.identity.provider = "fixture.atlassian.net";
+      task.source.key = "ABC-42";
+      task.source.url = "https://fixture.atlassian.net/browse/ABC-42";
+    }
+    await route.fulfill({ response, json: taskListPageSchema.parse(body) });
+  });
+  await signIn(page, web.origin, web.password, "/tasks?view=list");
+  for (const isJira of [true, false]) {
+    jira = isJira;
+    if (!isJira) await page.goto(`${web.origin}/tasks?view=list`);
+    const name = isJira ? "Jira" : "GitHub";
+    const identity = isJira ? "ABC-42" : "fixture/source#42";
+    await page
+      .getByRole("button", { name: "Show 3 hidden tasks", exact: true })
+      .click();
+    for (const surface of [".task-list", ".board-columns"]) {
+      if (surface === ".board-columns")
+        await page.getByRole("button", { name: "Board", exact: true }).click();
+      const card = page.locator(
+        `${surface} [data-task-id="${ids.importedId}"]`,
+      );
+      await card
+        .getByText(`${name} source: state unavailable`, { exact: true })
+        .waitFor();
+      assert.ok(
+        (await card.locator(".task-project-metadata").innerText()).includes(
+          identity,
+        ),
+      );
+      assert.equal(await card.locator(".task-lead").count(), 0);
+      assert.equal(
+        await card
+          .locator(".task-reason")
+          .filter({ hasText: "Draft: not Ready" })
+          .count(),
+        0,
+      );
+      await page
+        .getByText(
+          "3 tasks share this readiness/dependency reason: Draft: not Ready.",
+          { exact: true },
+        )
+        .waitFor();
+      if (surface === ".board-columns") {
+        assert.equal(
+          await card
+            .getByRole("link", {
+              name: `${identity} (opens ${name})`,
+              exact: true,
+            })
+            .getAttribute("href"),
+          isJira
+            ? "https://fixture.atlassian.net/browse/ABC-42"
+            : "https://github.com/fixture/source/issues/42",
+        );
+      }
+    }
+  }
+});
+
+test("composer preselects its sole visible project", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Only visible project",
+    leadProfileId: null,
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  await signIn(page, web.origin, web.password, "/tasks/new");
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
+    null,
+  );
+  await page.reload();
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Resume unfinished input" }).count(),
+    0,
+  );
+  await page
+    .getByLabel("Task title", { exact: true })
+    .fill("Recovered then discarded");
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel("Task title", { exact: true }).inputValue(),
+    "Recovered then discarded",
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Discard unfinished input", exact: true })
+    .click();
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('[aria-label="Project"]')
+        ?.value === id,
+    projectId,
+  );
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
+    null,
+  );
+  const explicitProject = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: explicitProject,
+    name: "Explicit project",
+    leadProfileId: null,
+  });
+  await page.goto(`${web.origin}/tasks/new?project=${explicitProject}`);
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    explicitProject,
+  );
+});
 test("List and Board preserve identical filtered task IDs and never submit commands", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
@@ -925,6 +1110,19 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
   journey.observe(page);
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password);
+  const taskFacts = await page.evaluate(async () => {
+    const response = await fetch("/api/operator/task-list");
+    return (await response.json()).data.tasks;
+  });
+  const facts = (id: string) =>
+    taskFacts.find((task: { id: string }) => task.id === id);
+  const leadIsProjectDefault = (id: string) => {
+    const task = facts(id);
+    return Boolean(
+      task?.lead?.profileId &&
+        task.project.leadProfileId === task.lead.profileId,
+    );
+  };
   let commandPosts = 0;
   page.on("request", (request) => {
     if (
@@ -981,10 +1179,13 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
       .innerText();
     assert.match(importedMetadata, /Service integration/);
     assert.match(importedMetadata, /fixture\/source#42/);
-    assert.equal(
-      await importedRow.locator(".task-lead").innerText(),
-      "Accountable lead · lead",
-    );
+    if (leadIsProjectDefault(ids.importedId))
+      assert.equal(await importedRow.locator(".task-lead").count(), 0);
+    else
+      assert.equal(
+        await importedRow.locator(".task-lead").innerText(),
+        facts(ids.importedId).lead.name,
+      );
     assert.equal(await importedRow.locator(".task-source-state").count(), 0);
     const questionRow = page.locator(
       `.task-list [data-task-id="${ids.question.id}"]`,
@@ -996,9 +1197,13 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
     await questionRow
       .getByText("Question needs an answer", { exact: true })
       .waitFor({ state: "visible" });
-    await questionRow
-      .getByText("Accountable lead · lead", { exact: true })
-      .waitFor({ state: "visible" });
+    if (leadIsProjectDefault(ids.question.id))
+      assert.equal(await questionRow.locator(".task-lead").count(), 0);
+    else
+      assert.equal(
+        await questionRow.locator(".task-lead").innerText(),
+        facts(ids.question.id).lead.name,
+      );
     const rowOverflow = await page
       .locator(".task-list .task-row")
       .evaluateAll((rows) =>
@@ -1959,10 +2164,14 @@ test("replacement composer owns recovery before a detached committed receipt or 
     } else {
       f.advanceClock(61_000);
       // The composer is locked while it saves, so leaving it finds the expired session.
+      const expired = page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname ===
+            `/api/operator/projects/${projectId}/configuration` &&
+          r.status() === 401,
+      );
       await page.getByRole("link", { name: /^Back to /, exact: false }).click();
-      await page
-        .getByRole("button", { name: "Refresh tasks", exact: true })
-        .click();
+      await expired;
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.getByRole("link", { name: "New task", exact: true }).click();
@@ -2081,10 +2290,19 @@ test("List and Board name an imported Draft task's unmet readiness condition", a
       await card.getByText("Draft: not Ready", { exact: true }).count(),
       0,
     );
-    // Local Draft tasks keep the generic reason.
     await page
-      .locator(`${surface} [data-task-id="${ids.draft}"]`)
-      .getByText("Draft: not Ready", { exact: true })
+      .getByText(
+        "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+        { exact: true },
+      )
       .waitFor();
+    for (const localDraft of [ids.blocker, ids.draft])
+      assert.equal(
+        await page
+          .locator(`${surface} [data-task-id="${localDraft}"] .task-reason`)
+          .filter({ hasText: "Draft: not Ready" })
+          .count(),
+        0,
+      );
   }
 });

@@ -191,11 +191,12 @@ for (const viewport of viewports)
 for (const viewport of viewports)
   test(`expired session returns to sign-in at the same address ${viewport.name}`, async (_t, journey) => {
     const { f, web, page } = await launch(journey, viewport);
+    const projectId = randomUUID();
     f.service.domain().execute({
       type: "project.create",
       actor: "operator",
       key: randomUUID(),
-      projectId: randomUUID(),
+      projectId,
       name: "Expiry project",
       leadProfileId: null,
     });
@@ -207,14 +208,21 @@ for (const viewport of viewports)
     await page
       .getByRole("heading", { name: "All tasks", exact: true })
       .waitFor();
+    const optionsUrl = `${web.origin}/api/operator/projects/${projectId}/composer-options`;
+    const initialOptions = page.waitForResponse(optionsUrl);
     await page.goto(`${web.origin}/tasks/new`);
+    assert.equal((await initialOptions).status(), 200);
+    assert.equal(
+      await page.getByLabel("Project", { exact: true }).inputValue(),
+      projectId,
+    );
     const title = page.getByLabel("Task title");
     await title.fill("Private draft title that must not survive expiry");
     f.advanceClock(61_000);
-    // Choosing the project reads its composer options, which finds the expired session.
-    await page
-      .getByLabel("Project", { exact: true })
-      .selectOption({ label: "Expiry project" });
+    // Clearing the sole default reselects it and rereads its options.
+    const expiredOptions = page.waitForResponse(optionsUrl);
+    await page.getByLabel("Project", { exact: true }).selectOption("");
+    assert.equal((await expiredOptions).status(), 401);
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     const notice = page.getByRole("status");
     await notice
@@ -232,6 +240,7 @@ for (const viewport of viewports)
       )
       .waitFor();
     assert.equal(new URL(page.url()).pathname, "/tasks/new");
+    assert.equal(f.service.domain().tasks(projectId).length, 0);
     assert.doesNotMatch(await page.content(), /Private draft title/);
     await captureBrowserEvidence(page, `${viewport.name}-signin-expired`);
     await submitPassword(page, web.password);

@@ -762,8 +762,31 @@ function schemaDigest(data: string): string {
   }
 }
 
+/** Reconstruct the previous schema without changing its retained rows. */
+function restoreRequestSchema21(db: DatabaseSync) {
+  db.exec(`DROP TABLE assignment_request_refusals;
+    CREATE TABLE turn_request_restarts_old (
+      refusedWorkId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      workId TEXT NOT NULL UNIQUE,
+      taskId TEXT NOT NULL,
+      key TEXT NOT NULL
+    );
+    INSERT INTO turn_request_restarts_old SELECT * FROM turn_request_restarts;
+    DROP TABLE turn_request_restarts;`);
+  // Preserve the prior schema's exact SQL spelling for its pinned digest.
+  db.exec(`CREATE TABLE turn_request_restarts (
+      refusedWorkId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      workId TEXT NOT NULL UNIQUE,
+      taskId TEXT NOT NULL,
+      key TEXT NOT NULL
+    );
+    INSERT INTO turn_request_restarts SELECT * FROM turn_request_restarts_old;
+    DROP TABLE turn_request_restarts_old;`);
+}
+
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  22: "eb44198cc5d906ff18e6de43cc4c77c217ffb8a135fffc08f35610e8fe668e2a",
   // Pre-turn refusals record their stage and failure class.
   21: "fa0d59290d2982c50fb1b80fc81f6bf5c30015fa4b57131e34678192f30c0f1e",
   // Reasoning summaries add the project setting and per-turn opt-in tables.
@@ -876,6 +899,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
           "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
         )
         .run(intentId);
+      restoreRequestSchema21(before);
       before.exec(
         "DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals",
       );
@@ -986,6 +1010,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     await run(dirs.data, 20);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
+    restoreRequestSchema21(before);
     before.exec("DROP TABLE execution_pre_turn_refusals");
     before.close();
     assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[20]);
@@ -995,7 +1020,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     const snapshot = join(dirs.snapshots, snapshots[0]!);
     await verifySnapshot(snapshot);
     assert.equal(schemaDigest(snapshot), SCHEMA_PINS[20]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[21]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[22]);
     const current = new DatabaseSync(database, { readOnly: true });
     try {
       assert.equal(
@@ -1204,6 +1229,49 @@ test("Unstack journal migration snapshots level 13 before creating task-owned ro
     assert.equal(readStartupState(dirs.data)?.snapshot?.from, 13);
     assert.equal(readStartupState(dirs.data)?.snapshot?.to, MIGRATION_LEVEL);
     assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("request-only refusal migration snapshots level 21 and preserves restart lineage", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 21);
+    const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    restoreRequestSchema21(db);
+    db.exec(`INSERT INTO execution_intents (id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+      VALUES ('00000000-0000-4000-8000-000000000001','legacy-refused','p','/legacy','completed',NULL,NULL,'chatgpt','workspaceWrite','never');
+      INSERT INTO turn_requests (requestKey,workId,kind,prompt,state) VALUES ('legacy-key','legacy-refused','direct','p','completed');
+      INSERT INTO turn_request_restarts VALUES ('legacy-refused','legacy-successor','legacy-task','legacy-command');`);
+    const lineage = db.prepare("SELECT * FROM turn_request_restarts").all();
+    db.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[21]);
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[21]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[22]);
+    const current = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    assert.equal(
+      current
+        .prepare("SELECT COUNT(*) AS n FROM assignment_request_refusals")
+        .get()?.n,
+      0,
+    );
+    assert.equal(
+      current.prepare("PRAGMA foreign_key_list(turn_request_restarts)").get()
+        ?.table,
+      "turn_requests",
+    );
+    assert.deepEqual(
+      current.prepare("SELECT * FROM turn_request_restarts").all(),
+      lineage,
+    );
+    current.close();
+    await assert.rejects(run(dirs.data, 21), refusal("startup-schema-newer"));
   } finally {
     dirs.cleanup();
   }

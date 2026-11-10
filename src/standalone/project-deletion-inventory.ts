@@ -783,6 +783,10 @@ export const projectDeletionInventory = {
     columns: ["workId", "id", "origin", "stage", "failureClass", "threadId"],
     ownership: "workId in W",
   },
+  assignment_request_refusals: {
+    columns: ["workId", "reason"],
+    ownership: "workId in W",
+  },
   execution_request_refusals: {
     columns: ["workId", "reason"],
     ownership: "workId in W",

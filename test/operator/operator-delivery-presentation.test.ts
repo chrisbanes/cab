@@ -9,6 +9,9 @@ import {
 } from "../../src/operator/delivery-action-copy.js";
 import {
   checkStatusWord,
+  repositoryCredentialState,
+  repositoryDeliveryNeeds,
+  repositoryAuthorityGroups,
   codeHostActionLabel,
   codeHostChecksSummary,
   codeHostMergeMethods,
@@ -24,6 +27,385 @@ import {
   pullRequestStateLabel,
   safePullRequestUrl,
 } from "../../web/src/delivery-presentation.js";
+import type {
+  DeliveryPolicyValues,
+  RepositoryDeliveryRead,
+} from "../../web/src/delivery-policy-draft.js";
+
+const deliveryRead: RepositoryDeliveryRead = {
+  repositoryId: "R",
+  mergeMethod: "squash",
+  additionalChecks: [],
+  suggestions: [],
+  noRequiredChecks: false,
+  codeHost: {
+    status: "live",
+    checks: [{ name: "check" }],
+    allowedMethods: ["squash"],
+  },
+};
+const levelPolicy = (
+  level: "open-prs" | "merge-with-approval" | "merge-when-ready",
+): DeliveryPolicyValues => ({
+  mode: level === "open-prs" ? "reviewable-pr" : "through-merge",
+  grants: repositoryLevelGrants("R", level),
+  requiredChecks: [],
+  repositories: [deliveryRead],
+});
+
+test("each preset summarises approval and merge authority, with met needs and no grants on other repositories", () => {
+  for (const level of [
+    "open-prs",
+    "merge-with-approval",
+    "merge-when-ready",
+  ] as const) {
+    const policy = levelPolicy(level);
+    const groups = repositoryAuthorityGroups(policy.grants, "R", "usable");
+    assert.deepEqual(
+      groups.map((g) => g.group),
+      ["Branch", "PR", "Merge", "Project/status"],
+    );
+    assert.match(groups[0]!.lines.join(), /Require approval: force-push/);
+    assert.match(
+      groups[2]!.lines.join(),
+      level === "open-prs"
+        ? /No grants/
+        : level === "merge-with-approval"
+          ? /Require approval: merge/
+          : /Allow: merge/,
+    );
+    assert.equal(
+      repositoryDeliveryNeeds(
+        policy,
+        "R",
+        "github",
+        "usable",
+        deliveryRead,
+      ).every((n) => n.met),
+      true,
+    );
+    assert.equal(
+      repositoryDeliveryNeeds(
+        policy,
+        "other",
+        "github",
+        "usable",
+        deliveryRead,
+      ).filter((n) => !n.met).length,
+      2,
+    );
+  }
+});
+
+test("delivery needs explain missing credentials, host reads, grants, checks, method and mode without assuming unknown facts", () => {
+  const policy = levelPolicy("merge-when-ready");
+  policy.mode = "reviewable-pr";
+  policy.repositories = [{ ...deliveryRead, mergeMethod: "rebase" }];
+  const read = {
+    ...deliveryRead,
+    codeHost: {
+      status: "live" as const,
+      checks: [],
+      allowedMethods: ["squash" as const],
+    },
+  };
+  const text = repositoryDeliveryNeeds(policy, "R", "github", "unusable", read)
+    .filter((n) => !n.met)
+    .map((n) => n.text)
+    .join(" ");
+  assert.match(text, /Set a usable credential/);
+  assert.match(text, /Change Completion mode/);
+  assert.match(text, /Choose an allowed method/);
+  assert.match(text, /Add an additional required check/);
+  policy.repositories[0]!.additionalChecks = [{ name: "build" }];
+  assert.ok(
+    repositoryDeliveryNeeds(policy, "R", "github", "unknown", undefined).some(
+      (n) => n.met && /Required checks/.test(n.text),
+    ),
+  );
+  for (const reason of [
+    "credential-missing",
+    "provider-error",
+    "timeout",
+    "unsupported",
+  ] as const) {
+    const unavailable = {
+      ...deliveryRead,
+      codeHost: { status: "unavailable" as const, reason },
+    };
+    assert.match(
+      repositoryDeliveryNeeds(policy, "R", "gitlab", "unknown", unavailable)
+        .map((n) => n.text)
+        .join(),
+      /Check the credential, repository link and host access, then Refresh/,
+    );
+  }
+});
+
+test("preserved opaque required checks satisfy repository and legacy readiness without naming them", () => {
+  const opaque = {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: {
+      projectId: "project",
+      section: "delivery-checks",
+      version: 1,
+      index: 0,
+    },
+  } satisfies DeliveryPolicyValues["requiredChecks"][number];
+  const read: RepositoryDeliveryRead = {
+    ...deliveryRead,
+    codeHost: { status: "live", checks: [], allowedMethods: ["squash"] },
+  };
+  for (const repository of [true, false]) {
+    const policy = levelPolicy("merge-when-ready");
+    if (repository) policy.repositories = [{ ...read, additionalChecks: [] }];
+    else delete policy.repositories;
+    const settings = repository
+      ? policy.repositories![0]!.additionalChecks
+      : policy.requiredChecks;
+    settings.push(opaque);
+    const needs = () =>
+      repositoryDeliveryNeeds(policy, "R", "github", "usable", read);
+    assert.ok(
+      needs().some(
+        (n) =>
+          n.met &&
+          n.text ===
+            "Required checks are configured; each merge must pass its actual gate.",
+      ),
+    );
+    assert.doesNotMatch(
+      needs()
+        .map((n) => n.text)
+        .join(" "),
+      /No required checks/,
+    );
+    if (repository) assert.ok(needs().every((n) => n.met));
+    settings.pop();
+    assert.ok(needs().some((n) => !n.met && /No required checks/.test(n.text)));
+  }
+});
+
+test("credential draft intents cannot claim usability, and GitLab uses its own host read", () => {
+  const saved = { credentialConfigured: true, credential: { usable: true } };
+  assert.equal(
+    repositoryCredentialState(saved, "github", deliveryRead),
+    "usable",
+  );
+  assert.equal(
+    repositoryCredentialState(saved, "github", deliveryRead, "set"),
+    "unknown",
+  );
+  assert.equal(
+    repositoryCredentialState(saved, "github", deliveryRead, "clear"),
+    "unusable",
+  );
+  assert.equal(
+    repositoryCredentialState(
+      { credentialConfigured: true },
+      "github",
+      deliveryRead,
+    ),
+    "unknown",
+  );
+  assert.equal(
+    repositoryCredentialState(
+      { credentialConfigured: false },
+      "gitlab",
+      deliveryRead,
+    ),
+    "usable",
+  );
+});
+
+test("custom authority retains Project scopes, first matching action and credential limitations", () => {
+  const grants: DeliveryPolicyValues["grants"] = [
+    { action: "branch.push", repositoryId: "R", mode: "approval" },
+    { action: "branch.push", repositoryId: "R", mode: "allow" },
+    {
+      action: "project.field",
+      repositoryId: "R",
+      mode: "approval",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: ["ready"],
+    },
+  ];
+  const groups = repositoryAuthorityGroups(grants, "R", "unknown");
+  assert.equal(groups[0]!.lines.length, 1);
+  assert.match(
+    groups[0]!.lines[0]!,
+    /Credential unconfirmed.*Require approval/,
+  );
+  assert.match(groups[3]!.lines[0]!, /ready.*Project P/);
+  assert.match(
+    repositoryAuthorityGroups(grants, "R", "unusable")[0]!.lines[0]!,
+    /Unavailable until credential is fixed/,
+  );
+});
+
+test("custom allow grants show mandatory PR-edit and recovery approval without losing names", () => {
+  const grants = [
+    { action: "pr.edit", repositoryId: "R", mode: "allow" },
+    { action: "branch.adopt", repositoryId: "R", mode: "allow" },
+    { action: "branch.force-push", repositoryId: "R", mode: "allow" },
+  ] satisfies DeliveryPolicyValues["grants"];
+  const sentences = grants.map((g) =>
+    grantSentence(g, { repository: "acme/atlas" }),
+  );
+  for (const credential of ["usable", "unknown", "unusable"] as const) {
+    const groups = repositoryAuthorityGroups(
+      grants,
+      "R",
+      credential,
+      sentences,
+    );
+    assert.match(
+      groups[1]!.lines[0]!,
+      /Require approval: edit pull requests in acme\/atlas \(always requires approval\)/,
+    );
+    assert.match(
+      groups[0]!.lines[0]!,
+      /Require approval: adopt existing branches to acme\/atlas \(always requires approval\)/,
+    );
+    assert.match(
+      groups[0]!.lines[1]!,
+      /Allow: force-push branches to acme\/atlas \(recovery from an outside change always requires approval\)/,
+    );
+    for (const line of [...groups[0]!.lines, ...groups[1]!.lines]) {
+      if (credential === "unknown")
+        assert.match(line, /^Credential unconfirmed/);
+      if (credential === "unusable")
+        assert.match(line, /^Unavailable until credential is fixed/);
+    }
+  }
+});
+
+test("unmet delivery needs point to existing repair controls", () => {
+  const policy = levelPolicy("merge-when-ready");
+  policy.mode = "reviewable-pr";
+  policy.grants = policy.grants.filter(
+    (g) => !("action" in g) || g.action !== "branch.push",
+  );
+  policy.repositories = [{ ...deliveryRead, mergeMethod: null }];
+  const read = {
+    ...deliveryRead,
+    codeHost: {
+      status: "live" as const,
+      allowedMethods: ["squash" as const],
+      checks: [],
+    },
+  };
+  assert.deepEqual(
+    repositoryDeliveryNeeds(policy, "R", "github", "unusable", read)
+      .filter((n) => !n.met)
+      .map((n) => n.fix),
+    ["credential", "grants", "mode", "method", "checks"],
+  );
+  const unavailable = {
+    ...deliveryRead,
+    codeHost: {
+      status: "unavailable" as const,
+      reason: "credential-missing" as const,
+    },
+  };
+  assert.deepEqual(
+    repositoryDeliveryNeeds(policy, "R", "gitlab", "unusable", unavailable)
+      .slice(0, 2)
+      .map((n) => n.fix),
+    ["settings", "refresh"],
+  );
+  assert.doesNotMatch(
+    repositoryDeliveryNeeds(policy, "R", "github", "unusable", read)[0]!.text,
+    /Delivery credentials/,
+  );
+});
+
+test("opaque grants cannot let later visible Project or branch grants claim effective authority", () => {
+  const opaque = {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: {
+      projectId: "project",
+      section: "delivery-grants",
+      version: 1,
+      index: 0,
+    },
+  } satisfies DeliveryPolicyValues["grants"][number];
+  // An earlier approval grant can be withheld for one excluded option or supplemental scope.
+  for (const visible of [
+    {
+      action: "project.field",
+      repositoryId: "R",
+      mode: "allow",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: ["ready"],
+    },
+    { action: "branch.push", repositoryId: "R", mode: "allow" },
+  ] satisfies DeliveryPolicyValues["grants"]) {
+    assert.match(
+      repositoryAuthorityGroups([visible], "R", "usable")
+        .flatMap((g) => g.lines)
+        .join(" "),
+      /Allow:/,
+    );
+    for (const credential of ["usable", "unknown", "unusable"] as const) {
+      const groups = repositoryAuthorityGroups(
+        [opaque, visible],
+        "R",
+        credential,
+      );
+      assert.equal(groups.length, 4);
+      assert.doesNotMatch(groups.flatMap((g) => g.lines).join(" "), /Allow:/);
+      for (const { lines } of groups) {
+        assert.match(
+          lines.join(" "),
+          /Effective authority is unconfirmed.*Refresh/,
+        );
+        assert.doesNotMatch(
+          lines.join(" "),
+          /Allow:|No grants|No Project grants/,
+        );
+      }
+    }
+  }
+});
+
+test("later overlapping Project options and supplemental branch scopes cannot overstate effective authority", () => {
+  const grants: DeliveryPolicyValues["grants"] = [
+    {
+      action: "branch.push",
+      repositoryId: "R",
+      mode: "approval",
+      projectNodeId: "ignored",
+    },
+    { action: "branch.push", repositoryId: "R", mode: "allow" },
+    {
+      action: "project.field",
+      repositoryId: "R",
+      mode: "approval",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: ["ready"],
+    },
+    {
+      action: "project.field",
+      repositoryId: "R",
+      mode: "allow",
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      optionNodeIds: ["ready", "done"],
+    },
+  ];
+  const groups = repositoryAuthorityGroups(grants, "R", "usable");
+  assert.equal(groups[0]!.lines.length, 1);
+  assert.match(groups[0]!.lines[0]!, /^Require approval/);
+  assert.match(groups[3]!.lines[0]!, /^Require approval.*ready/);
+  assert.match(groups[3]!.lines[1]!, /^Allow.*done/);
+  assert.doesNotMatch(groups[3]!.lines[1]!, /ready/);
+});
 
 const fallback =
   "Delivery is waiting on a condition this version can't describe.";

@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { attentionNext } from "../operator/attention.js";
 import { z } from "zod";
 import {
   nativeQuestionAnswers,
@@ -122,7 +123,15 @@ const inboxList: BrowseCommand = {
       },
       human: items.length
         ? table(
-            ["Kind", "Task", "Interaction", "Rev", "Requester", "Reason"],
+            [
+              "Kind",
+              "Task",
+              "Interaction",
+              "Rev",
+              "Requester",
+              "Reason",
+              "Next",
+            ],
             items.map((i) =>
               i.kind === "runtime"
                 ? // The Task column names the runtime; its detail is `runtime list`.
@@ -133,6 +142,7 @@ const inboxList: BrowseCommand = {
                     "-",
                     "-",
                     oneLine(i.reason, 60),
+                    "Open runtime settings",
                   ]
                 : [
                     i.kind,
@@ -141,6 +151,12 @@ const inboxList: BrowseCommand = {
                     i.revision === null ? "-" : String(i.revision),
                     oneLine(i.requesterName, 30),
                     oneLine(i.reason, 60),
+                    attentionNext[
+                      i.attentionCode ??
+                        (i.kind === "intervention"
+                          ? "execution-uncertain"
+                          : i.kind)
+                    ].inboxAction,
                   ],
             ),
           ) +

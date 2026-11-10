@@ -45,7 +45,12 @@ export class DomainPolicyError extends Error {
 
 /** A delivery action waits on a hold only the operator or an outcome clears; the message is cab's reason. */
 export class DeliveryHoldError extends DomainConflictError {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly attentionCode?:
+      | "stacked-blocker-failed"
+      | "external-action-uncertain",
+  ) {
     super(message);
     this.name = "DeliveryHoldError";
   }

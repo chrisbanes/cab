@@ -2378,6 +2378,25 @@ export class OperatorApi {
           : null,
     };
   }
+  private requestRefusal(
+    assignmentId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const refusal = this.service.requestRefusalForAssignment(assignmentId);
+    if (!refusal || this.exact(refusal.id, excluded) === null) return null;
+    const availability = this.service.startAgainAvailability(refusal.taskId);
+    const startAgain = availability.available
+      ? availability.assignmentId === assignmentId
+        ? { available: true }
+        : { available: false, reason: "nothing-refused" as const }
+      : availability;
+    return {
+      workId: refusal.id,
+      reason: this.safe(refusal.refusalReason, excluded),
+      startAgain,
+    };
+  }
+
   private selection(a: Row) {
     return {
       ...selectAssignmentExecution(a, this.service),
@@ -3320,6 +3339,19 @@ export class OperatorApi {
         count += n;
       }
     };
+    add(
+      "stacked-blocker-failed",
+      task.state === "open" && this.domain().failedStackedBlocker(taskId)
+        ? 1
+        : 0,
+    );
+    add(
+      "external-action-uncertain",
+      task.state === "open" &&
+        this.service.delivery().hasUncertainAction(taskId)
+        ? 1
+        : 0,
+    );
     add("question", view.questions.filter((i) => i.status === "open").length);
     // An answer recorded for a native question that cab has not yet confirmed delivering.
     add(
@@ -4296,6 +4328,7 @@ export class OperatorApi {
           request = s.request;
         return {
           assignmentId: String(a.id),
+          requestRefusal: this.requestRefusal(String(a.id), excluded),
           profileId: String(a.profileId),
           name: this.safe(d.profile(String(a.profileId)).name, excluded),
           brief: this.safe(a.brief, excluded),
@@ -4312,6 +4345,8 @@ export class OperatorApi {
           ),
           waitReason: this.safe(
             s.intent?.reason ??
+              this.service.requestRefusalForAssignment(String(a.id))
+                ?.refusalReason ??
               (d.assignmentAdmission(String(a.id)).reasons.join("; ") || null),
             excluded,
           ),

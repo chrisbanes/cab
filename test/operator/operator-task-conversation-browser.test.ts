@@ -565,13 +565,28 @@ for (const [label, viewport] of [
     });
     await page.evaluate(() => scrollTo(0, 0));
     await anchor.scrollIntoViewIfNeeded();
-    const y = () => anchor.evaluate((el) => el.getBoundingClientRect().top);
-    const before = await y();
+    const position = () =>
+      anchor.evaluate((el) => ({
+        y: el.getBoundingClientRect().top,
+        scrollY,
+        height: document.documentElement.scrollHeight,
+        conversationEnd: document
+          .getElementById("conversation-end")
+          ?.getBoundingClientRect().bottom,
+        focused: document.activeElement?.outerHTML.slice(0, 300),
+      }));
+    const before = await position();
     appendEntry(f, s, "Fresh while reading");
     await refresh(page);
     const jump = page.getByRole("button", { name: /jump to latest/i });
     await jump.waitFor();
-    assert.ok(Math.abs((await y()) - before) <= 2, "reading position held");
+    const after = await position();
+    const positionHeld = Math.abs(after.y - before.y) <= 2;
+    if (!positionHeld) await j.capture(page, "reading-position-moved", false);
+    assert.ok(
+      positionHeld,
+      `reading position held: ${JSON.stringify({ before, after })}`,
+    );
     assert.equal(await anchor.getAttribute("aria-expanded"), "true");
     assert.equal(await reply.inputValue(), "An unfinished reply");
     await jump.click();

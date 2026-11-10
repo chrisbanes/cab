@@ -383,6 +383,9 @@ test("a complete task aggregate rejects changing membership and repeated page cu
   );
   const shown = { ...defaultTaskFilters, source: "github", q: "x" } as const;
   assert.equal(activeFilterCount(shown), 2);
+  assert.equal(activeFilterCount({ ...defaultTaskFilters, ready: "no" }), 1);
+  assert.equal(activeFilterCount({ ...defaultTaskFilters, ready: "any" }), 1);
+  assert.equal(activeFilterCount(defaultTaskFilters), 0);
   assert.equal(
     activeFilterCount({ ...defaultTaskFilters, project: randomUUID() }),
     1,

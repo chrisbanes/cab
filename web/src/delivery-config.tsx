@@ -49,6 +49,9 @@ import { Alert } from "./ui/alert.js";
 import { ghLoginCopy } from "./discovery-credential.js";
 import {
   codeHostChecksSummary,
+  repositoryDeliveryNeeds,
+  repositoryCredentialState,
+  repositoryAuthorityGroups,
   deliveryCredentialLimit,
   deliveryCredentialSummary,
   deliveryLevelLabels,
@@ -603,6 +606,24 @@ function DeliveryPolicyForm(p: TabProps) {
                   draft.grants,
                   link.repositoryId,
                 );
+                const read = requirements.find(
+                  (r) => r.repositoryId === link.repositoryId,
+                );
+                const credential = repositoryCredentialState(
+                  saved,
+                  link.codeHost,
+                  read,
+                  draft.credentialIntent,
+                );
+                const needs = link.repositoryId
+                  ? repositoryDeliveryNeeds(
+                      draft,
+                      link.repositoryId,
+                      link.codeHost,
+                      credential,
+                      read,
+                    )
+                  : [];
                 return (
                   <section
                     key={link.repositoryId ?? i}
@@ -613,6 +634,95 @@ function DeliveryPolicyForm(p: TabProps) {
                       {label(link.repositoryId) ?? "Unavailable repository"}
                     </h3>
                     <p>{deliveryLevelLabels[level]}</p>
+                    {link.repositoryId && (
+                      <section
+                        aria-label={`Effective authority for ${label(link.repositoryId)}`}
+                      >
+                        <h4 className="small-heading">Effective authority</h4>
+                        <p>
+                          Grants describe configured authority. Credentials,
+                          completion mode and runtime gates can hold an action.
+                        </p>
+                        {repositoryAuthorityGroups(
+                          draft.grants,
+                          link.repositoryId,
+                          credential,
+                          sentences,
+                        ).map(({ group, lines }) => (
+                          <div key={group}>
+                            <h5>{group}</h5>
+                            <ul>
+                              {lines.map((line) => (
+                                <li key={line}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </section>
+                    )}
+                    <ul
+                      aria-label={`Delivery needs for ${label(link.repositoryId)}`}
+                    >
+                      {needs.map((need) => (
+                        <li key={need.text}>
+                          {need.met ? "Met" : "Needs attention"}: {need.text}{" "}
+                          {!need.met &&
+                            (need.fix === "settings" ? (
+                              <a href="/settings#gitlab-credentials">
+                                Open GitLab Settings
+                              </a>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => {
+                                  if (need.fix === "refresh") {
+                                    void p.refreshConfiguration();
+                                    return;
+                                  }
+                                  if (
+                                    need.fix === "credential" ||
+                                    need.fix === "mode"
+                                  ) {
+                                    const name =
+                                      need.fix === "credential"
+                                        ? "Credential reference change"
+                                        : "Completion mode";
+                                    form.current
+                                      ?.querySelector<HTMLElement>(
+                                        `[aria-label="${name}"]`,
+                                      )
+                                      ?.focus();
+                                    return;
+                                  }
+                                  const r = repositoryRows.findIndex(
+                                    (row) =>
+                                      row.repositoryId === link.repositoryId,
+                                  );
+                                  focus(
+                                    need.fix === "grants"
+                                      ? `shepherd-level-${i}`
+                                      : need.fix === "method"
+                                        ? `merge-method-${r}`
+                                        : `add-check-${r}`,
+                                  );
+                                }}
+                              >
+                                {
+                                  {
+                                    credential: "Set credential",
+                                    refresh: "Refresh host access",
+                                    grants: "Choose delivery level",
+                                    mode: "Change completion mode",
+                                    method: "Choose merge method",
+                                    checks: "Configure required checks",
+                                  }[need.fix]
+                                }
+                              </Button>
+                            ))}
+                        </li>
+                      ))}
+                    </ul>
                     {level === "merge-when-ready" &&
                       draft.mode !== "through-merge" && (
                         <p>
