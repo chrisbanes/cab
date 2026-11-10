@@ -31,11 +31,21 @@ import {
   type TaskFilesState,
 } from "./task-workspace-state.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
-import { clockLabel, fileSizeLabel, sortFileEntries } from "./presentation.js";
+import {
+  clockLabel,
+  fileSizeLabel,
+  sortFileEntries,
+  workspaceStateText,
+} from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
 import { RangeControls } from "./range-controls.js";
-import { useOperatorResource } from "./resource.js";
+import { readConflicted, useOperatorResource } from "./resource.js";
 import { workspaceFileAnchor } from "./review-anchor.js";
+
+const locationStateText = (state: string) =>
+  workspaceStateText("This location", state, "file bytes are not available");
+const previewConflicted = (read: { response: { data: { state: string } } }) =>
+  readConflicted(read.response);
 
 function requestUrl(
   taskId: string,
@@ -941,6 +951,8 @@ export function TaskFiles({
   const directoryResource = useOperatorResource(
     `${session.csrfToken}:${taskId}:files:${directoryKey}`,
     directoryLoader,
+    true,
+    readConflicted,
   );
   useEffect(() => {
     if (!directoryResource.state.data) return;
@@ -1035,6 +1047,7 @@ export function TaskFiles({
       : null,
     previewLoader,
     Boolean(activeTab && activeTab.previewKey !== previewKey),
+    previewConflicted,
   );
   useEffect(() => {
     const response = previewResource.state.data;
@@ -1213,9 +1226,7 @@ export function TaskFiles({
         </p>
       )}
       {directory && directory.state !== "ready" && (
-        <p role="status">
-          This location is {directory.state}; file bytes are not available.
-        </p>
+        <p role="status">{locationStateText(directory.state)}</p>
       )}
       {directory?.truncated && (
         <p role="status">
@@ -1442,7 +1453,7 @@ export function TaskFiles({
           ) : (
             <p role="status">
               {directory?.state
-                ? `This location is ${directory.state}; file bytes are not available.`
+                ? locationStateText(directory.state)
                 : "Loading this location…"}
             </p>
           )}
@@ -1625,11 +1636,12 @@ export function TaskFiles({
                 )}
                 {preview && preview.state !== "ready" && (
                   <p role="status">
-                    Preview is {preview.state}
-                    {preview.metadata?.reason
-                      ? ` (${preview.metadata.reason})`
-                      : ""}
-                    . File bytes are unavailable.
+                    {workspaceStateText(
+                      "Preview",
+                      preview.state,
+                      "file bytes are unavailable",
+                      preview.metadata?.reason,
+                    )}
                   </p>
                 )}
                 {preview?.state === "ready" && preview.preview && (

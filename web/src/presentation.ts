@@ -19,6 +19,21 @@ export const midSentence = (label: string) =>
     ? label
     : label.charAt(0).toLowerCase() + label.slice(1);
 
+/**
+ * Why a workspace listing or preview shows no content. A `conflict` reaches the page only once
+ * its automatic rereads ran out, so it is said plainly rather than by its state name.
+ */
+export function workspaceStateText(
+  subject: string,
+  state: string,
+  unavailable: string,
+  detail?: string,
+) {
+  return state === "conflict"
+    ? `${subject} could not be read consistently, usually because the workspace changed while it was read; ${unavailable}. Refresh to try again.`
+    : `${subject} is ${state}${detail ? ` (${detail})` : ""}; ${unavailable}.`;
+}
+
 /** Links or task-read entries that may carry a repository's verified `owner/name`. */
 export type RepositoryNames = readonly {
   repositoryId: string | null;

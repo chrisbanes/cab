@@ -6,6 +6,13 @@ export interface ResourceState<T> {
   fetchedAt: number | null;
   pending: boolean;
 }
+/** Waits before each automatic reread of a read that overlapped a workspace change. */
+const conflictRetryDelaysMs = [200, 400, 800];
+
+/** A workspace listing or preview that overlapped a task or workspace change. */
+export const readConflicted = (read: { data: { state: string } }) =>
+  read.data.state === "conflict";
+
 export class ResourceController<T> {
   state: ResourceState<T> = {
     status: "empty",
@@ -21,8 +28,13 @@ export class ResourceController<T> {
   private rerun:
     | { loader: (signal: AbortSignal) => Promise<T>; beforeApply?: () => void }
     | undefined;
+  /**
+   * `retry` marks a result as transient: it is read again after a short backoff, up to a limit,
+   * and only the last attempt is published, so the page keeps showing what it had meanwhile.
+   */
   constructor(
     private readonly changed: (state: ResourceState<T>) => void = () => {},
+    private readonly retry?: (data: T) => boolean,
   ) {}
   private publish(value: ResourceState<T>) {
     this.state = value;
@@ -80,7 +92,22 @@ export class ResourceController<T> {
         pending: true,
       });
     try {
-      const data = await loader(abort.signal);
+      let data = await loader(abort.signal);
+      for (const wait of conflictRetryDelaysMs) {
+        if (generation !== this.generation || abort.signal.aborted) return;
+        if (!this.retry?.(data)) break;
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            abort.signal.removeEventListener("abort", done);
+            resolve();
+          };
+          const timer = setTimeout(done, wait);
+          abort.signal.addEventListener("abort", done, { once: true });
+        });
+        if (generation !== this.generation || abort.signal.aborted) return;
+        data = await loader(abort.signal);
+      }
       if (generation !== this.generation || abort.signal.aborted) return;
       this.polling = false;
       beforeApply?.();
@@ -126,6 +153,7 @@ export function useOperatorResource<T>(
   scope: string | null,
   loader: (signal: AbortSignal) => Promise<T>,
   autoLoad = true,
+  retry?: (data: T) => boolean,
 ) {
   const [snapshot, setSnapshot] = useState<{
     scope: string | null;
@@ -141,8 +169,12 @@ export function useOperatorResource<T>(
     },
   });
   const resource = useMemo(
-    () => new ResourceController<T>((state) => setSnapshot({ scope, state })),
-    [scope],
+    () =>
+      new ResourceController<T>(
+        (state) => setSnapshot({ scope, state }),
+        retry,
+      ),
+    [scope, retry],
   );
   useEffect(() => {
     if (scope && autoLoad) void resource.load(loader);
