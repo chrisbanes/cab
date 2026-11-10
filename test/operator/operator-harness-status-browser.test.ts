@@ -122,7 +122,7 @@ for (const [name, viewport] of [
       .waitFor();
     // Additional Claude policy lines sit in the closed limits disclosure.
     await runtimeRow(page, "Claude")
-      .getByText("Limits and untested surfaces · 26")
+      .getByText("Limits and untested surfaces · 29")
       .click();
     await runtimes
       .getByText("confined to the same roots by cab's hook", {
@@ -271,6 +271,7 @@ test("an override that was switched off again leaves the capacity form clean, an
     type: "capacity.configure",
     actor: "operator",
     key: randomUUID(),
+    minimumLeadSlots: 0,
     globalLimit: Number(saved) + 5,
     projectOverrides: {},
   });
@@ -727,8 +728,8 @@ for (const [name, viewport] of [
       claudeEnabled,
     );
     for (const [runtime, count] of [
-      ["Codex", 13],
-      ["Claude", 26],
+      ["Codex", 16],
+      ["Claude", 29],
     ] as const) {
       const row = runtimeRow(page, runtime),
         details = runtimeLimits(page, runtime),

@@ -43,6 +43,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         type: "capacity.configure",
         actor: "operator",
         key: randomUUID(),
+        minimumLeadSlots: 0,
         globalLimit: d.capacityLimits().globalLimit,
         projectOverrides: { [ids.fieldnotes]: 7 },
       });
@@ -216,7 +217,8 @@ for (const engine of ["chromium", "webkit"] as const) {
                       commandType: "capacity.configure",
                       resourceId: "system:capacity",
                       globalLimit: original.globalLimit,
-                      defaultProjectLimit: 2,
+                      minimumLeadSlots: original.minimumLeadSlots,
+                      agentOverrides: {},
                       projectOverrides: Object.fromEntries(
                         Object.entries(original.projectOverrides).filter(
                           ([, limit]) => limit !== null,

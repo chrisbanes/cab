@@ -9,7 +9,11 @@ import {
 import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
-import { DomainConflictError, TaskNotOpenError } from "../core/domain.js";
+import {
+  DomainConflictError,
+  migrateCapacityLimits,
+  TaskNotOpenError,
+} from "../core/domain.js";
 import { executionIntentStateSchema } from "../core/execution-runtime.js";
 import type { CommandReceipt } from "../operator/contracts.js";
 import {
@@ -582,14 +586,20 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS execution_capacity_reservations (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       projectId TEXT,
-      admittedAt INTEGER NOT NULL DEFAULT (unixepoch())
+      admittedAt INTEGER NOT NULL DEFAULT (unixepoch()),
+      lead INTEGER NOT NULL DEFAULT 0 CHECK(lead IN (0,1)),
+      agentId TEXT
     );
     CREATE TABLE IF NOT EXISTS scheduler_capacity_limits (
       singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-      globalLimit INTEGER NOT NULL CHECK(globalLimit > 0)
+      globalLimit INTEGER NOT NULL CHECK(globalLimit > 0),
+      minimumLeadSlots INTEGER NOT NULL DEFAULT 1 CHECK(minimumLeadSlots >= 0)
     );
     CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
       projectId TEXT PRIMARY KEY, projectLimit INTEGER NOT NULL CHECK(projectLimit > 0)
+    );
+    CREATE TABLE IF NOT EXISTS scheduler_agent_capacity_limits (
+      profileId TEXT PRIMARY KEY, agentLimit INTEGER NOT NULL CHECK(agentLimit > 0)
     );
     CREATE TABLE IF NOT EXISTS project_command_network_access (
       projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
@@ -602,6 +612,13 @@ export class ExecutionState {
       projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
     CREATE TABLE IF NOT EXISTS execution_intent_local_listening (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS project_dangerously_skip_sandbox (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_dangerously_skip_sandbox (
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
@@ -747,7 +764,7 @@ export class ExecutionState {
     );
     INSERT OR IGNORE INTO execution_power_supervision (singleton) VALUES (1);
     INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit)
-      VALUES (1, 4)`);
+      VALUES (1, 6)`);
     const recoveryIdentityColumns = this.db
       .prepare("PRAGMA table_info(execution_recovery_identities)")
       .all() as Array<{ name: string }>;
@@ -789,6 +806,7 @@ export class ExecutionState {
       this.db.exec(
         "ALTER TABLE runtime_thread_qualification ADD COLUMN codexHome TEXT",
       );
+    this.migrateCapacityClassification();
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
@@ -892,12 +910,13 @@ export class ExecutionState {
         JOIN execution_request_predecessors p ON p.workId = b.workId
         WHERE p.predecessorKnown = 0
       )`);
-    this.db.exec(`INSERT OR IGNORE INTO execution_capacity_reservations (workId, projectId)
+    this.db.exec(`INSERT OR IGNORE INTO execution_capacity_reservations
+        (workId, projectId, lead, agentId)
       SELECT e.workId, (
         SELECT a.projectId FROM task_execution_bindings b
         JOIN domain_assignments a ON a.id = b.assignmentId
         WHERE b.workId = e.workId
-      )
+      ), ${this.capacityLeadSql("e.workId")}, ${this.capacityAgentSql("e.workId")}
       FROM execution_intents e
       JOIN task_writer_admissions admitted ON admitted.workId = e.workId
       WHERE e.state IN ('held','submitting','running')`);
@@ -1875,6 +1894,43 @@ export class ExecutionState {
       )
       .get(intentId) as { enabled: number } | undefined;
     return row ? row.enabled === 1 : null;
+  }
+
+  /** Skip-sandbox the turn was admitted with; null when no admission recorded it. */
+  dangerouslySkipSandbox(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_dangerously_skip_sandbox WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
+  }
+
+  /**
+   * Whether admitting this intent now would record skip-sandbox on: the project setting is on,
+   * the work has a task binding and it is not a draft turn. Admission uses the same condition.
+   */
+  skipSandboxApplies(intentId: string, projectId: string): boolean {
+    const work = this.db
+      .prepare("SELECT workId FROM execution_intents WHERE id = ?")
+      .get(intentId) as { workId: string } | undefined;
+    if (!work) return false;
+    return (
+      (
+        this.db
+          .prepare(`SELECT EXISTS (
+            SELECT 1 FROM project_dangerously_skip_sandbox p
+            JOIN task_execution_bindings b ON b.workId = ?
+            WHERE p.projectId = ? AND p.enabled = 1
+            ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}
+          ) AS applies`)
+          .get(
+            work.workId,
+            projectId,
+            ...(this.hasTurnRequests ? [work.workId] : []),
+          ) as { applies: number }
+      ).applies === 1
+    );
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
@@ -5191,6 +5247,124 @@ export class ExecutionState {
       AND NOT EXISTS (SELECT 1 FROM task_execution_bindings b JOIN domain_tasks t ON t.id=b.taskId JOIN domain_projects p ON p.id=t.projectId WHERE b.workId=${column} AND p.archived=1)`;
   }
 
+  /** 1 for a lead turn (a task's lead assignment, draft turns included, or a drafting run). */
+  private capacityLeadSql(workId: string): string {
+    const lead =
+      this.hasTable("task_lead_bindings") &&
+      this.hasTable("task_execution_bindings")
+        ? `EXISTS (SELECT 1 FROM task_execution_bindings b
+            JOIN task_lead_bindings l ON l.taskId = b.taskId AND l.assignmentId = b.assignmentId
+            WHERE b.workId = ${workId})`
+        : "0";
+    const drafting = this.hasTable("turn_requests")
+      ? `EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ${workId} AND r.kind = 'drafting')`
+      : "0";
+    return `(${lead} OR ${drafting})`;
+  }
+
+  /** The agent (profile) a turn runs as; null for direct work. */
+  private capacityAgentSql(workId: string): string {
+    const assignment = this.hasTable("domain_assignments")
+      ? `(SELECT a.profileId FROM task_execution_bindings b
+          JOIN domain_assignments a ON a.id = b.assignmentId WHERE b.workId = ${workId})`
+      : "NULL";
+    const drafting = this.hasTable("drafting_runs")
+      ? `(SELECT d.profileId FROM drafting_runs d WHERE 'drafting:' || d.runId = ${workId})`
+      : "NULL";
+    return `COALESCE(${assignment}, ${drafting})`;
+  }
+
+  /** Stores from before lead slots: classify held reservations once. */
+  private migrateCapacityClassification(): void {
+    const columns = (
+      this.db
+        .prepare("PRAGMA table_info(execution_capacity_reservations)")
+        .all() as Array<{ name: string }>
+    ).map(({ name }) => name);
+    // One transaction, so an interrupted upgrade never leaves one column or unclassified rows.
+    if (!columns.includes("lead"))
+      transaction(this.db, () => {
+        this.db.exec(`ALTER TABLE execution_capacity_reservations
+          ADD COLUMN lead INTEGER NOT NULL DEFAULT 0 CHECK(lead IN (0,1))`);
+        this.db.exec(
+          "ALTER TABLE execution_capacity_reservations ADD COLUMN agentId TEXT",
+        );
+        this.db.exec(`UPDATE execution_capacity_reservations
+          SET lead = ${this.capacityLeadSql("execution_capacity_reservations.workId")},
+            agentId = ${this.capacityAgentSql("execution_capacity_reservations.workId")}`);
+      });
+    migrateCapacityLimits(this.db);
+  }
+
+  /**
+   * Why capacity holds this work, or undefined when it may start. Lead turns may use any
+   * free slot; other turns leave the unused lead slots free and count against a project
+   * override. An agent override covers every turn of that agent.
+   */
+  private capacityWaitReason(
+    workId: string,
+    projectId: string | null,
+  ): string | undefined {
+    const turn = this.db
+      .prepare(
+        `WITH turn(workId) AS (SELECT ?) SELECT ${this.capacityLeadSql("turn.workId")} AS lead,
+          ${this.capacityAgentSql("turn.workId")} AS agentId FROM turn`,
+      )
+      .get(workId) as {
+      lead: number;
+      agentId: string | null;
+    };
+    // The singleton row is seeded with the store and never deleted.
+    const { globalLimit, minimumLeadSlots } = this.db
+      .prepare(
+        "SELECT globalLimit, minimumLeadSlots FROM scheduler_capacity_limits WHERE singleton = 1",
+      )
+      .get() as { globalLimit: number; minimumLeadSlots: number };
+    const usage = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total, COALESCE(SUM(lead), 0) AS lead,
+          COALESCE(SUM(agentId = ?), 0) AS agent,
+          COALESCE(SUM(projectId = ? AND lead = 0), 0) AS project
+        FROM execution_capacity_reservations`,
+      )
+      .get(turn.agentId, projectId) as {
+      total: number;
+      lead: number;
+      agent: number;
+      project: number;
+    };
+    if (usage.total >= globalLimit)
+      return `Capacity waiting: global active-turn limit (${globalLimit})`;
+    const held = Math.max(0, minimumLeadSlots - usage.lead);
+    if (turn.lead !== 1 && usage.total >= globalLimit - held)
+      return `Capacity waiting: held for lead turns (${minimumLeadSlots})`;
+    const agentLimit =
+      turn.agentId === null
+        ? undefined
+        : (
+            this.db
+              .prepare(
+                "SELECT agentLimit FROM scheduler_agent_capacity_limits WHERE profileId = ?",
+              )
+              .get(turn.agentId) as { agentLimit: number } | undefined
+          )?.agentLimit;
+    if (agentLimit !== undefined && usage.agent >= agentLimit)
+      return `Capacity waiting: agent active-turn limit (${agentLimit})`;
+    const projectLimit =
+      turn.lead === 1 || projectId === null
+        ? undefined
+        : (
+            this.db
+              .prepare(
+                "SELECT projectLimit FROM scheduler_project_capacity_limits WHERE projectId = ?",
+              )
+              .get(projectId) as { projectLimit: number } | undefined
+          )?.projectLimit;
+    if (projectLimit !== undefined && usage.project >= projectLimit)
+      return `Capacity waiting: project active-turn limit (${projectLimit})`;
+    return undefined;
+  }
+
   holdUnfinishedOnOpen(): void {
     // An unresolved shutdown target must leave exactly today's restart hold.
     this.db.exec(
@@ -5293,43 +5467,10 @@ export class ExecutionState {
             .run(reason, pending.workId);
         return false;
       }
-      const configuredGlobalLimit = this.db
-        .prepare(
-          "SELECT globalLimit FROM scheduler_capacity_limits WHERE singleton = 1",
-        )
-        .get() as { globalLimit: number } | undefined;
-      const globalLimit = configuredGlobalLimit?.globalLimit ?? 4;
-      const globalUsage = (
-        this.db
-          .prepare(
-            "SELECT COUNT(*) AS count FROM execution_capacity_reservations",
-          )
-          .get() as { count: number }
-      ).count;
-      const projectLimit = options.projectId
-        ? ((
-            this.db
-              .prepare(
-                "SELECT projectLimit FROM scheduler_project_capacity_limits WHERE projectId = ?",
-              )
-              .get(options.projectId) as { projectLimit: number } | undefined
-          )?.projectLimit ?? 2)
-        : undefined;
-      const projectUsage = options.projectId
-        ? (
-            this.db
-              .prepare(
-                "SELECT COUNT(*) AS count FROM execution_capacity_reservations WHERE projectId = ?",
-              )
-              .get(options.projectId) as { count: number }
-          ).count
-        : 0;
-      const capacityReason =
-        globalUsage >= globalLimit
-          ? `Capacity waiting: global active-turn limit (${globalLimit})`
-          : projectLimit !== undefined && projectUsage >= projectLimit
-            ? `Capacity waiting: project active-turn limit (${projectLimit})`
-            : undefined;
+      const capacityReason = this.capacityWaitReason(
+        pending.workId,
+        options.projectId,
+      );
       if (capacityReason) {
         this.db
           .prepare(
@@ -5380,10 +5521,11 @@ export class ExecutionState {
             .prepare("SELECT workId FROM execution_intents WHERE id = ?")
             .get(id) as { workId: string }
         ).workId;
-        // Only a Codex task turn can run with command network access, and only a
-        // Claude task turn with local listening: drafting runs have no binding and
-        // stay off, as does the other harness. Writes execution_intent_network_access
-        // and execution_intent_local_listening.
+        // Only a Codex task turn can run with command network access, only a Claude
+        // task turn with local listening, and a task turn of either harness with
+        // skip-sandbox: drafting runs have no binding and stay off, as does the other
+        // harness. Writes execution_intent_network_access,
+        // execution_intent_local_listening and execution_intent_dangerously_skip_sandbox.
         for (const [intentTable, projectTable, harness] of [
           [
             "execution_intent_network_access",
@@ -5395,15 +5537,20 @@ export class ExecutionState {
             "project_local_listening",
             "claude",
           ],
+          [
+            "execution_intent_dangerously_skip_sandbox",
+            "project_dangerously_skip_sandbox",
+            "any",
+          ],
         ] as const)
           this.db
             .prepare(`INSERT OR REPLACE INTO ${intentTable} (intentId, enabled)
           SELECT ?, EXISTS (
             SELECT 1 FROM ${projectTable} p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = '${harness}')
+            WHERE p.projectId = ? AND p.enabled = 1 ${harness === "any" ? "" : `AND b.harness = '${harness}'`})
             ${
-              // A draft turn never gets either expansion.
+              // A draft turn never gets any of the expansions.
               this.hasTurnRequests
                 ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)"
                 : ""
@@ -5434,8 +5581,10 @@ export class ExecutionState {
           SELECT workId, workspace FROM execution_intents WHERE id = ?`)
           .run(id);
         this.db
-          .prepare(`INSERT INTO execution_capacity_reservations (workId, projectId)
-          VALUES (?, ?)`)
+          .prepare(`WITH turn(workId) AS (SELECT ?)
+          INSERT INTO execution_capacity_reservations (workId, projectId, lead, agentId)
+          SELECT turn.workId, ?, ${this.capacityLeadSql("turn.workId")},
+            ${this.capacityAgentSql("turn.workId")} FROM turn`)
           .run(workId, options.projectId);
         const taskBinding = this.taskBinding(workId);
         if (taskBinding) {

@@ -448,7 +448,8 @@ name, version and preview digest. The service rechecks every confirmation atomic
    - `--restore-revision N` proposes revision N's exact instructions as a new
      revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
      `--enabled`, `--candidates`, `--credential-ref env:NAME|none` and
-     `--project-limit PROJECT_ID=N|default` are the reverse paths. Creation is not
+     `--project-limit PROJECT_ID=N|none` and `--agent-limit AGENT_ID=N|none` are the
+     reverse paths. Creation is not
      reversible: revoke an agent or pause a project instead. Routing guidance is
      replace-only. Runtime, model, repository and GitHub settings are not offered.
    - `assignment apply-current ASSIGNMENT_ID --expected-version N` rebinds the
@@ -456,7 +457,12 @@ name, version and preview digest. The service rechecks every confirmation atomic
      active turn is not rewritten. Adoption is one-way: restore older text as a new
      revision and adopt again. A completed lead stays resumable: a later
      `task follow-up` resumes it under the adopted revisions.
-   - `capacity get` shows global and per-project limits and usage.
+   - `capacity get` shows the global limit, minimum lead slots and lead usage, and
+     each agent's and project's limit (`none` without one) and usage.
+     `capacity prepare` takes `--global-limit N`, `--min-lead-slots N`,
+     `--agent-limit AGENT_ID=N|none` and `--project-limit PROJECT_ID=N|none`; a
+     document prepared before minimum lead slots existed is refused and must be
+     prepared again.
    - `operation get REQUEST_ID --scope project:ID|profile:ID|system:capacity --type
      TYPE` reads a recorded receipt; the same UUID in another scope or type never
      selects it.
@@ -617,6 +623,11 @@ name, version and preview digest. The service rechecks every confirmation atomic
    `project prepare PROJECT_ID --local-listening true|false` changes the project's
    local listening the same way. It applies to Claude Code task turns admitted
    afterwards; running turns keep their policy.
+
+   `project prepare PROJECT_ID --dangerously-skip-sandbox true|false` changes the
+   project's skip-sandbox setting the same way. It applies to task turns of both
+   harnesses admitted afterwards; running turns keep their policy. The flag is explicit and
+   asks no confirmation; Settings confirms when it is turned on.
 
    Retention: items older than `CAB_DIAGNOSTIC_RETENTION_DAYS` (1–365,
    default 30) are deleted hourly; beyond `CAB_DIAGNOSTIC_STORAGE_MIB`

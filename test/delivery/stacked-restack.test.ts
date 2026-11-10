@@ -207,10 +207,10 @@ test("a push whose parent head moves between its proof and the push is refused, 
   const work = await f.commit(D, "work");
   const before = pushedHeads();
   f.onNextPreflight(() => setParent("1".repeat(40), "pending"));
-  assert.deepEqual(outcome(await f.push(D, work)), [
-    "confirmed-failure",
-    "push-base-moved",
-  ]);
+  const moved = await f.push(D, work);
+  assert.deepEqual(outcome(moved), ["confirmed-failure", "push-base-moved"]);
+  // Retryable: the agent is given no refusal to act on.
+  assert.match(moved.text, /\(push-base-moved\)$/);
   assert.deepEqual(pushedHeads(), before, "nothing pushed");
   // Back on `first`, the refused push is retried, proved again and sent.
   setParent(first, "current");
@@ -247,4 +247,41 @@ test("a push whose parent head moves between its proof and the push is refused, 
   assert.deepEqual(pushedHeads(), sentBefore, "nothing pushed");
   assert.equal(f.branchOf(D)?.lastPushedSha, work);
   assert.equal(f.service.domain().stackFacts(D)?.restack, "pending");
+});
+
+test("a push refused after preflight explains a typed refusal and leaves a race as its recorded reason", async (t) => {
+  const f = await stackedDeliveryFixture(t);
+  const [B, D] = f.tasks as [string, string];
+  await f.waitTurn(B);
+  await start(f, B, D);
+
+  // An untyped race: the branch moved under the push, which a retry may clear.
+  const work = await f.commit(D, "work");
+  f.onNextPreflight(() =>
+    f.readDb((db) =>
+      db
+        .prepare(
+          "UPDATE delivery_task_branches SET lastPushedSha = ? WHERE taskId = ?",
+        )
+        .run("3".repeat(40), D),
+    ),
+  );
+  const raced = await f.push(D, work);
+  assert.match(
+    raced.text,
+    /: confirmed-failure \(delivery-authority-stale-or-held\)$/,
+  );
+
+  // A typed refusal at send time carries its category and cab's reason.
+  const more = await f.commit(D, "more");
+  f.onNextPreflight(() =>
+    f.readDb((db) =>
+      db.prepare("UPDATE delivery_policies SET version = version + 1").run(),
+    ),
+  );
+  const refused = await f.push(D, more);
+  assert.match(
+    refused.text,
+    /: confirmed-failure \(delivery-authority-stale-or-held\)\. Refused by policy: Delivery policy changed$/,
+  );
 });

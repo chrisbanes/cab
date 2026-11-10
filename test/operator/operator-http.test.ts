@@ -105,11 +105,13 @@ test("old command and capacity form payloads replay original receipts through JS
     type: "capacity.configure" as const,
     key: randomUUID(),
     globalLimit: 3,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   };
   await s.f.service.configureCapacity({
     key: capacity.key,
     globalLimit: capacity.globalLimit,
+    minimumLeadSlots: capacity.minimumLeadSlots,
     projectOverrides: capacity.projectOverrides,
   });
   for (const command of [create, capacity]) {

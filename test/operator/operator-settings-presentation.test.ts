@@ -15,6 +15,12 @@ import {
   turnLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  projectSkipSandboxLine,
+  skipSandboxAppliesNote,
+  skipSandboxSupersededLine,
+  turnSkipSandboxLine,
+} from "../../src/operator/skip-sandbox-copy.js";
+import {
   diagnosticCaptureAppliesNote,
   diagnosticCaptureLine,
   sourceCredentialCopy,
@@ -27,6 +33,7 @@ import {
   adoptRepositoryRows,
   adoptSourceRows,
   capacityChanges,
+  capacityUsage,
   nextSelectionId,
   parseRows,
   profileChanges,
@@ -186,6 +193,18 @@ test("project and profile change lists name each change without private values",
   assert.deepEqual(listening(true, false), ["Local listening disabled"]);
   assert.deepEqual(listening(true, true), []);
   assert.deepEqual(listening(undefined, true), []);
+  const skip = (saved: boolean | undefined, next: boolean) =>
+    projectChanges(
+      {
+        ...c,
+        ...(saved === undefined ? {} : { dangerouslySkipSandbox: saved }),
+      },
+      { name: "Atlas", leadProfileId: mira, dangerouslySkipSandbox: next },
+    );
+  assert.deepEqual(skip(false, true), ["Skip sandbox enabled"]);
+  assert.deepEqual(skip(true, false), ["Skip sandbox disabled"]);
+  assert.deepEqual(skip(true, true), []);
+  assert.deepEqual(skip(undefined, true), []);
   // Diagnostic capture lists the change in both directions, and nothing for a mode the service did not report.
   const capture = (saved: "enhanced" | "baseline" | undefined, next: string) =>
     projectChanges(
@@ -870,12 +889,15 @@ test("no readiness rule loads no condition, saves null and never clears an unava
   );
 });
 
-test("capacity changes name global and override edits", () => {
+test("capacity changes name global, lead-slot and override edits", () => {
   const p = id();
+  const a = id();
   const data = {
     globalLimit: 4,
-    defaultProjectLimit: 2,
     globalUsage: 1,
+    minimumLeadSlots: 1,
+    leadUsage: 0,
+    agents: [{ agent: { id: a, name: "Builder" }, limit: 2, usage: 1 }],
     projects: [
       {
         project: {
@@ -885,29 +907,47 @@ test("capacity changes name global and override edits", () => {
           paused: true,
           leadProfileId: null,
         },
-        limit: 2,
+        limit: null,
         usage: 1,
         override: null,
         tasks: [],
       },
     ],
   } as unknown as RuntimeSettingsData;
+  const unchanged = {
+    globalLimit: "4",
+    minimumLeadSlots: "1",
+    [`agent-override-${a}`]: true,
+    [`agent-limit-${a}`]: "2",
+    [`override-${p}`]: false,
+    [`limit-${p}`]: "2",
+  };
+  assert.deepEqual(capacityChanges(data, unchanged), []);
   assert.deepEqual(
     capacityChanges(data, {
-      globalLimit: "4",
-      [`override-${p}`]: false,
-      [`limit-${p}`]: "2",
-    }),
-    [],
-  );
-  assert.deepEqual(
-    capacityChanges(data, {
+      ...unchanged,
       globalLimit: "1",
+      minimumLeadSlots: "0",
       [`override-${p}`]: true,
       [`limit-${p}`]: "3",
     }),
-    ["Global active-turn cap: 4 → 1", "Relay: override set to 3"],
+    [
+      "Global active-turn cap: 4 → 1",
+      "Minimum lead slots: 1 → 0",
+      "Relay: override set to 3",
+    ],
   );
+  assert.deepEqual(
+    capacityChanges(data, { ...unchanged, [`agent-limit-${a}`]: "3" }),
+    ["Builder override: 2 → 3"],
+  );
+  assert.deepEqual(
+    capacityChanges(data, { ...unchanged, [`agent-override-${a}`]: false }),
+    ["Builder: override cleared"],
+  );
+  assert.equal(capacityUsage(1, null, "project"), "Usage 1 · No project limit");
+  assert.equal(capacityUsage(0, null, "agent"), "Usage 0 · No agent limit");
+  assert.equal(capacityUsage(2, 3, "agent"), "Usage 2 / limit 3");
 });
 
 test("settings headers, saved lines, state cards and hold pills", () => {
@@ -1572,6 +1612,25 @@ test("local listening reads the saved setting, what applies and each turn's admi
     turnLocalListeningLine(null),
     "No local listening admission recorded; the project's setting at admission applies.",
   );
+});
+
+test("skip sandbox reads the saved setting, what applies and each turn's admission", () => {
+  assert.equal(
+    projectSkipSandboxLine(false),
+    "Skip sandbox is disabled for this project.",
+  );
+  assert.match(projectSkipSandboxLine(true), /enabled.*both harnesses/);
+  assert.match(skipSandboxAppliesNote, /admitted after the change/);
+  assert.match(
+    skipSandboxSupersededLine,
+    /^Superseded while skipping the sandbox/,
+  );
+  assert.equal(turnSkipSandboxLine(true), "Admitted with the sandbox skipped.");
+  assert.equal(
+    turnSkipSandboxLine(false),
+    "Admitted with the sandbox in force.",
+  );
+  assert.match(turnSkipSandboxLine(null), /No skip-sandbox admission recorded/);
 });
 
 test("diagnostic capture reads the saved mode, when a change applies and that stored diagnostics stay", () => {
