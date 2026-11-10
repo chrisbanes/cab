@@ -141,6 +141,51 @@ test("delivery needs explain missing credentials, host reads, grants, checks, me
   }
 });
 
+test("preserved opaque required checks satisfy repository and legacy readiness without naming them", () => {
+  const opaque = {
+    kind: "unavailable",
+    label: "Unavailable saved row",
+    savedRow: {
+      projectId: "project",
+      section: "delivery-checks",
+      version: 1,
+      index: 0,
+    },
+  } satisfies DeliveryPolicyValues["requiredChecks"][number];
+  const read: RepositoryDeliveryRead = {
+    ...deliveryRead,
+    codeHost: { status: "live", checks: [], allowedMethods: ["squash"] },
+  };
+  for (const repository of [true, false]) {
+    const policy = levelPolicy("merge-when-ready");
+    if (repository) policy.repositories = [{ ...read, additionalChecks: [] }];
+    else delete policy.repositories;
+    const settings = repository
+      ? policy.repositories![0]!.additionalChecks
+      : policy.requiredChecks;
+    settings.push(opaque);
+    const needs = () =>
+      repositoryDeliveryNeeds(policy, "R", "github", "usable", read);
+    assert.ok(
+      needs().some(
+        (n) =>
+          n.met &&
+          n.text ===
+            "Required checks are configured; each merge must pass its actual gate.",
+      ),
+    );
+    assert.doesNotMatch(
+      needs()
+        .map((n) => n.text)
+        .join(" "),
+      /No required checks/,
+    );
+    if (repository) assert.ok(needs().every((n) => n.met));
+    settings.pop();
+    assert.ok(needs().some((n) => !n.met && /No required checks/.test(n.text)));
+  }
+});
+
 test("credential draft intents cannot claim usability, and GitLab uses its own host read", () => {
   const saved = { credentialConfigured: true, credential: { usable: true } };
   assert.equal(

@@ -387,11 +387,11 @@ export function repositoryDeliveryNeeds(
             : "The selected merge method is allowed on the default branch; other branches follow their own rules.",
     });
     const checks = row?.additionalChecks ?? policy.requiredChecks;
-    const knownCheck = checks.some(
-      (c) => "name" in c && Boolean(c.name.trim()),
+    const configuredCheck = checks.some(
+      (c) => "savedRow" in c || ("name" in c && Boolean(c.name.trim())),
     );
     const checksMet =
-      knownCheck ||
+      configuredCheck ||
       Boolean(read?.codeHost.status === "live" && read.codeHost.checks.length);
     needs.push({
       met: checksMet,
