@@ -276,12 +276,20 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       .isVisible(),
   );
   assert.ok(await noHorizontalScroll(page));
-  assert.ok(
+  // The pinned decision card and Reply dock are height-capped and scroll within themselves by design.
+  assert.deepEqual(
     await page
-      .locator(".task-columns, .task-columns > section")
+      .locator(
+        ".task-columns, .task-columns > section:not(#decisions):not(#reply)",
+      )
       .evaluateAll((els) =>
-        els.every((e) => e.scrollHeight <= e.clientHeight + 1),
+        els
+          .filter((e) => e.scrollHeight > e.clientHeight + 1)
+          .map(
+            (e) => `${e.tagName}#${e.id} ${e.scrollHeight}/${e.clientHeight}`,
+          ),
       ),
+    [],
   );
 
   // The brief starts closed; its summary carries the label and the supplied-criteria count.
@@ -4061,9 +4069,9 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
           i === 0 ||
           Boolean(
             e &&
-              previous &&
-              previous.compareDocumentPosition(e) &
-                Node.DOCUMENT_POSITION_FOLLOWING,
+            previous &&
+            previous.compareDocumentPosition(e) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
           ),
         top: box?.top ?? Number.NaN,
         bottom: box?.bottom ?? Number.NaN,
