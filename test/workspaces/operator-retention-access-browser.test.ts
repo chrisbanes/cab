@@ -8,6 +8,7 @@ import {
   captureBrowserEvidence,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { withoutChangeStream } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedRetainedReviewWindow } from "../fixtures/task-review.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
@@ -187,6 +188,8 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     const stream = readingStream(response.url());
     if (stream) trace({ event: "response", stream, status: response.status() });
   });
+  // Drives the 15-second polling fallback with the page clock; a change notice would race it.
+  await withoutChangeStream(page);
   if (counterpart) {
     const clockStart = new Date("2026-10-04T00:00:00Z");
     await page.clock.install({ time: clockStart });
