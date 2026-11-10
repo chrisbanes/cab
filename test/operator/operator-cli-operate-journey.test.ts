@@ -253,9 +253,8 @@ test("read-only bearer tokens are refused for every task and execution command t
     { type: "task.stop", taskId: s.taskId },
     { type: "task.resume", taskId: s.taskId },
     // CLI6 recovery types are refused by scope before any validation.
-    { type: "recovery.pre-turn.adopt", assignmentId: id },
+    { type: "recovery.release", assignmentId: id },
     { type: "recovery.pre-turn.recover", assignmentId: id },
-    { type: "recovery.no-turn.adopt", assignmentId: id },
     { type: "recovery.no-turn.recover", assignmentId: id },
     {
       type: "recovery.conversation.replace",

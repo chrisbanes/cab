@@ -153,7 +153,11 @@ export async function refusedInitial(initialBatch = false) {
     title: "CURRENT_TITLE",
     outcome: "CURRENT_OUTCOME",
   });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   const old = service.turnRequests().find((r) => r.workId === workId);
   assert.ok(old);
   assert.equal(old.state, "held");

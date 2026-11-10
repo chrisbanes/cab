@@ -17,6 +17,10 @@ import { LeadTextStore } from "../../src/core/lead-text.js";
 import { Store } from "../../src/core/store.js";
 import { TaskReviewStore } from "../../src/core/task-review.js";
 import {
+  seedDeliveryAction,
+  seedPrBinding,
+} from "../fixtures/closure-delivery.js";
+import {
   previousSchemaDatabase,
   seedPreviousIssue,
 } from "../fixtures/previous-source-schema.js";
@@ -598,6 +602,16 @@ function closedIssueWorld(
     completion: (taskId: unknown) =>
       sources.providerCompletion(String(taskId)) !== undefined,
     hold: () => sources.hold("I_1"),
+    seedPr: (
+      taskId: string,
+      state: "OPEN" | "CLOSED" | "MERGED",
+      readError: string | null = null,
+    ) => seedPrBinding(db, { taskId, projectId, state, readError }),
+    seedAction: (
+      taskId: string,
+      state: "uncertain" | "confirmed-success",
+      operationId?: string,
+    ) => seedDeliveryAction(db, { taskId, projectId, state, operationId }),
     close: () => {
       db.close();
       rmSync(root, { recursive: true, force: true });
@@ -793,17 +807,18 @@ test("a provider closure after an edit that followed a lead's handback keeps the
   }
 });
 
-test("switching done to skip reopens a provider-completed task under a closure hold", () => {
+test("switching done to skip leaves a provider-completed task Done", () => {
   const w = closedIssueWorld("done");
   try {
-    const task = w.observe({ state: "closed" });
-    assert.equal(task?.state, "done");
+    const taskId = String(w.observe({})?.id);
+    w.observe({ state: "closed" });
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      true,
+    );
     w.configure("skip");
-    const reverted = w.observe({ state: "closed" });
-    assert.equal(reverted?.id, task?.id);
-    assert.equal(reverted?.state, "open");
-    assert.equal(w.completion(task?.id), false);
-    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    assert.equal(w.observe({ state: "closed" })?.state, "done");
+    assert.equal(w.completion(taskId), true);
     assert.equal(w.domain.tasks(w.projectId).length, 1);
   } finally {
     w.close();
@@ -811,16 +826,14 @@ test("switching done to skip reopens a provider-completed task under a closure h
 });
 
 for (const keepSelection of [true, false])
-  test(`switching done to skip reopens provider-completed tasks at once with ${keepSelection ? "retained" : "removed"} selections`, () => {
+  test(`switching done to skip keeps imported Done tasks Done with ${keepSelection ? "retained" : "removed"} selections`, () => {
     const w = closedIssueWorld("done");
     try {
       const task = w.observe({ state: "closed" });
       assert.equal(task?.state, "done");
       w.configure("skip", { activate: false, keepSelection });
-      const reverted = w.domain.task(String(task?.id));
-      assert.equal(reverted.state, "open");
-      assert.equal(w.completion(task?.id), false);
-      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+      assert.equal(w.domain.task(String(task?.id)).state, "done");
+      assert.equal(w.completion(task?.id), true);
       assert.equal(w.domain.tasks(w.projectId).length, 1);
       assert.ok(w.sources.issue("I_1"));
     } finally {
@@ -828,21 +841,20 @@ for (const keepSelection of [true, false])
     }
   });
 
-test("switching skip to done completes nothing before a settled complete refresh", () => {
+test("a closure hold recorded under skip completes once membership evidence is complete", () => {
   const w = closedIssueWorld("skip");
   try {
     const taskId = String(w.observe({})?.id);
     w.observe({ state: "closed" });
     assert.equal(w.hold()?.reason, "closed");
+    // Saving any configuration marks observations incomplete until the next complete read.
     w.configure("done", { activate: false });
-    assert.equal(w.domain.task(taskId).state, "open");
     assert.equal(
       w.sources.completeFromProviderClosure(taskId, () => true),
       false,
     );
-    w.configure("done");
+    w.configure("skip");
     w.observe({ state: "closed" });
-    assert.equal(w.domain.task(taskId).state, "open");
     assert.equal(
       w.sources.completeFromProviderClosure(taskId, () => false),
       false,
@@ -852,67 +864,134 @@ test("switching skip to done completes nothing before a settled complete refresh
       true,
     );
     assert.equal(w.domain.task(taskId).state, "done");
+    assert.equal(w.completion(taskId), true);
   } finally {
     w.close();
   }
 });
 
-test("provider-closure completion requires done mode, complete membership, settlement and no own closure", () => {
-  const w = closedIssueWorld("done");
-  try {
-    const taskId = String(w.observe({})?.id);
-    w.observe({ state: "closed" });
-    assert.equal(w.hold()?.reason, "closed");
-    assert.equal(
-      w.sources.completeFromProviderClosure(taskId, () => false),
-      false,
-    );
-    assert.equal(w.domain.task(taskId).state, "open");
-    // An incomplete read leaves membership evidence incomplete.
-    w.observe({ state: "closed" }, false);
-    let calls = 0;
-    assert.equal(
-      w.sources.completeFromProviderClosure(taskId, () => ++calls > 0),
-      false,
-    );
-    assert.equal(calls, 0);
-    w.observe({ state: "closed" });
-    w.db
-      .prepare(
-        "INSERT INTO source_closures (provider, instance, externalId, operationId, closerChangeRequestId, snapshotJson) VALUES ('github', 'github.com', 'I_1', 'op', NULL, '{}')",
-      )
-      .run();
-    assert.equal(
-      w.sources.completeFromProviderClosure(taskId, () => true),
-      false,
-    );
-    w.db.prepare("DELETE FROM source_closures").run();
-    w.configure("skip");
-    w.observe({ state: "closed" });
-    assert.equal(
-      w.sources.completeFromProviderClosure(taskId, () => true),
-      false,
-    );
-    w.configure("done");
-    w.observe({ state: "closed" });
-    const version = Number(w.domain.task(taskId).version);
-    assert.equal(
-      w.sources.completeFromProviderClosure(taskId, () => true),
-      true,
-    );
-    const done = w.domain.task(taskId);
-    assert.equal(done.state, "done");
-    assert.equal(Number(done.version), version + 1);
-    assert.equal(w.completion(taskId), true);
-    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
-    // A provider completion after import reopens with its closure hold retained.
-    assert.equal(w.observe({ state: "open" })?.state, "open");
-    assert.equal(w.completion(taskId), false);
-    assert.equal(w.hold()?.reason, "closed");
-  } finally {
-    w.close();
-  }
-});
+for (const mode of ["skip", "done"] as const)
+  test(`${mode} mode provider-closure completion requires complete membership, settlement, settled delivery and no own closure`, () => {
+    const w = closedIssueWorld(mode);
+    try {
+      const taskId = String(w.observe({})?.id);
+      w.observe({ state: "closed" });
+      assert.equal(w.hold()?.reason, "closed");
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => false),
+        false,
+      );
+      assert.equal(w.domain.task(taskId).state, "open");
+      // An incomplete read leaves membership evidence incomplete.
+      w.observe({ state: "closed" }, false);
+      let calls = 0;
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => ++calls > 0),
+        false,
+      );
+      assert.equal(calls, 0);
+      w.observe({ state: "closed" });
+      w.db
+        .prepare(
+          "INSERT INTO source_closures (provider, instance, externalId, operationId, closerChangeRequestId, snapshotJson) VALUES ('github', 'github.com', 'I_1', 'op', NULL, '{}')",
+        )
+        .run();
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        false,
+      );
+      w.db.prepare("DELETE FROM source_closures").run();
+      // Open or uncertain delivery waits; a closed PR and a confirmed action do not.
+      const delivery = new DeliveryStore(w.db);
+      w.seedPr(taskId, "OPEN");
+      assert.deepEqual(delivery.closureCompletionWait(taskId), {
+        kind: "change-request",
+        number: 7,
+      });
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        false,
+      );
+      // A failed read leaves the last CLOSED observation possibly stale: the PR may have reopened.
+      w.seedPr(taskId, "CLOSED", "provider-read-unavailable");
+      assert.deepEqual(delivery.closureCompletionWait(taskId), {
+        kind: "change-request",
+        number: 7,
+      });
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        false,
+      );
+      w.seedPr(taskId, "CLOSED");
+      const operationId = w.seedAction(taskId, "uncertain");
+      assert.deepEqual(delivery.closureCompletionWait(taskId), {
+        kind: "delivery-action",
+        action: "issue.status",
+      });
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        false,
+      );
+      w.seedAction(taskId, "confirmed-success", operationId);
+      assert.equal(delivery.closureCompletionWait(taskId), null);
+      const version = Number(w.domain.task(taskId).version);
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        true,
+      );
+      const done = w.domain.task(taskId);
+      assert.equal(done.state, "done");
+      assert.equal(Number(done.version), version + 1);
+      assert.equal(w.completion(taskId), true);
+      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+      // A provider completion after import reopens with its closure hold retained.
+      assert.equal(w.observe({ state: "open" })?.state, "open");
+      assert.equal(w.completion(taskId), false);
+      assert.equal(w.hold()?.reason, "closed");
+      // Closed again, it completes again once settled.
+      w.observe({ state: "closed" });
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        true,
+      );
+    } finally {
+      w.close();
+    }
+  });
+
+for (const mode of ["skip", "done"] as const)
+  test(`${mode} mode completes a task the operator reopens while its issue stays closed once settled`, () => {
+    const w = closedIssueWorld(mode);
+    try {
+      const taskId = String(w.observe({})?.id);
+      w.observe({ state: "closed" });
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        true,
+      );
+      w.domain.execute({
+        type: "task.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: w.projectId,
+        taskId,
+        expectedVersion: Number(w.domain.task(taskId).version),
+        state: "open",
+      });
+      assert.equal(w.completion(taskId), false);
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => false),
+        false,
+      );
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        true,
+      );
+      assert.equal(w.domain.task(taskId).state, "done");
+    } finally {
+      w.close();
+    }
+  });
 
 test("manual state changes never carry a provider-completion record", () => {
   const w = closedIssueWorld("done");
@@ -2132,13 +2211,10 @@ for (const mode of ["done", "skip"] as const)
       assert.equal(w.domain.providerClosure(taskId), "held");
       assert.equal(
         w.sources.completeFromProviderClosure(taskId, () => true),
-        mode === "done",
+        true,
       );
-      assert.equal(w.completion(taskId), mode === "done");
-      assert.equal(
-        w.domain.task(taskId).state,
-        mode === "done" ? "done" : "open",
-      );
+      assert.equal(w.completion(taskId), true);
+      assert.equal(w.domain.task(taskId).state, "done");
       // Supersession is audit history: the closure row and the supersession both remain.
       assert.equal(w.sources.deliveryClosure("I_1")?.operationId, operationId);
       assert.equal(

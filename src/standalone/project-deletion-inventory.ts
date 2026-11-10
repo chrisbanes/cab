@@ -392,6 +392,10 @@ export const projectDeletionInventory = {
     columns: ["nodeId", "generation", "recipientAssignmentId", "eventId"],
     ownership: "eventId in E or recipientAssignmentId in A",
   },
+  coordination_source_hold_releases: {
+    columns: ["nodeId", "generation", "recipientAssignmentId", "eventId"],
+    ownership: "eventId in E or recipientAssignmentId in A",
+  },
   coordination_task_comment_deliveries: {
     columns: [
       "commentId",
@@ -662,7 +666,7 @@ export const projectDeletionInventory = {
       "taskId in D (binding key is run identity; capture before delete)",
   },
   execution_capacity_reservations: {
-    columns: ["workId", "projectId", "admittedAt"],
+    columns: ["workId", "projectId", "admittedAt", "lead", "agentId"],
     ownership: "projectId=P",
   },
   execution_intent_dangerously_skip_sandbox: {
@@ -670,6 +674,10 @@ export const projectDeletionInventory = {
     ownership: "intentId in I",
   },
   execution_intent_local_listening: {
+    columns: ["intentId", "enabled"],
+    ownership: "intentId in I",
+  },
+  execution_intent_reasoning_summaries: {
     columns: ["intentId", "enabled"],
     ownership: "intentId in I",
   },
@@ -770,6 +778,10 @@ export const projectDeletionInventory = {
   execution_request_predecessors: {
     columns: ["workId", "previousWorkId", "predecessorKnown"],
     ownership: "workId or previousWorkId in W",
+  },
+  execution_pre_turn_refusals: {
+    columns: ["workId", "id", "origin", "stage", "failureClass", "threadId"],
+    ownership: "workId in W",
   },
   execution_request_refusals: {
     columns: ["workId", "reason"],
@@ -1043,6 +1055,10 @@ export const projectDeletionInventory = {
     columns: ["projectId", "enabled"],
     ownership: "projectId=P",
   },
+  project_reasoning_summaries: {
+    columns: ["projectId", "enabled"],
+    ownership: "projectId=P",
+  },
   project_repository_links: {
     columns: ["projectId", "version", "links"],
     ownership: "projectId=P",
@@ -1289,8 +1305,12 @@ export const projectDeletionInventory = {
     ],
     ownership: "threadId in H; preserve unrelated qualification",
   },
+  scheduler_agent_capacity_limits: {
+    columns: ["profileId", "agentLimit"],
+    ownership: "KEEP",
+  },
   scheduler_capacity_limits: {
-    columns: ["singleton", "globalLimit"],
+    columns: ["singleton", "globalLimit", "minimumLeadSlots"],
     ownership: "KEEP",
   },
   scheduler_project_capacity_limits: {
@@ -1350,6 +1370,17 @@ export const projectDeletionInventory = {
       "active",
       "reason",
       "generation",
+    ],
+    ownership: "triple in X",
+  },
+  source_hold_release_records: {
+    columns: [
+      "provider",
+      "instance",
+      "externalId",
+      "generation",
+      "reason",
+      "taskId",
     ],
     ownership: "triple in X",
   },

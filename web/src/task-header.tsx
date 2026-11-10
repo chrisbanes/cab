@@ -24,8 +24,7 @@ import {
   stopConsequences,
   taskColumnOf,
   taskIdentity,
-  taskNextActor,
-  taskReadiness,
+  taskStripReason,
 } from "./task-overview.js";
 import { type TaskTab, taskTabs } from "./task-tabs.js";
 import { useMediaQuery } from "./use-media-query.js";
@@ -246,22 +245,19 @@ export function TaskHeaderActions({
 
 /**
  * The identity and status strip under the shell header: ID and source chip, state,
- * readiness, who acts next and the lead, then the page's persistent tools.
+ * one distinct reason, the lead, then the page's persistent tools.
  */
 export function TaskStrip({
   data,
-  onNext,
   children,
 }: {
   data: TaskRead["data"];
-  /** Shows the open request: selects Overview and focuses the decision card. */
-  onNext: () => void;
   children: ReactNode;
 }) {
   const identity = taskIdentity(data),
     column = taskColumnOf(data),
     Icon = stateIcons[column],
-    next = taskNextActor(data),
+    reason = taskStripReason(data),
     outcome = outcomeLine(data.task.outcome);
   return (
     <div className="task-strip" data-task-strip>
@@ -281,19 +277,7 @@ export function TaskStrip({
           <Icon aria-hidden="true" />
           {column}
         </span>
-        <span data-task-readiness>{taskReadiness(data)}</span>
-        {next.operator ? (
-          <button
-            type="button"
-            className="task-next"
-            data-operator="true"
-            onClick={onNext}
-          >
-            {next.text}
-          </button>
-        ) : (
-          <span className="task-next">{next.text}</span>
-        )}
+        {reason && <span data-task-reason>{reason}</span>}
         <span>Accountable lead · {data.lead?.name ?? "Unconfigured"}</span>
       </div>
       {/* On a phone the header subtitle is the identity, so a one-line outcome is read here too. */}

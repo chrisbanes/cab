@@ -47,17 +47,18 @@ async function world(
 
 /** The operator command for one path, from the fixture's exact service command. */
 function commands(g: HeldGeneration) {
-  const adoptType =
-    g.mode === "no-turn" ? "recovery.no-turn.adopt" : "recovery.pre-turn.adopt";
   const recoverType =
     g.mode === "no-turn"
       ? "recovery.no-turn.recover"
       : "recovery.pre-turn.recover";
   return {
-    adopt: (key: string = randomUUID()) => ({
-      type: adoptType,
+    release: (key: string = randomUUID()) => ({
+      type: "recovery.release",
+      key,
       assignmentId: g.assignmentId,
-      ...g.adoption(key),
+      workId: g.workId,
+      workRevision: g.workRevision,
+      requestSequence: g.requestSequence,
     }),
     recover: (witnessId?: string, key: string = randomUUID()) => ({
       type: recoverType,
@@ -74,29 +75,44 @@ function commands(g: HeldGeneration) {
   };
 }
 
+type World = Awaited<ReturnType<typeof world>>;
+const readOperation = async (w: World, type: string, key: string) => {
+  const r = await w.s.bearer(
+    w.ro,
+    `/api/operator/operations?${new URLSearchParams({ scope: `assignment:${w.g.assignmentId}`, type, key })}`,
+  );
+  assert.equal(r.status, 200, await r.clone().text());
+  return ((await r.json()) as { data: Json }).data;
+};
+
 for (const mode of ["no-turn", "pre-turn-historical"] as const)
-  test(`${mode}: adopt, recover and replace over the receipted command route, replaying exactly`, async (t) => {
+  test(`${mode}: an earlier adoption reads back, then recover and replace over the receipted command route, replaying exactly`, async (t) => {
     const w = await world(t, mode);
     const c = commands(w.g);
     const turns = w.turns();
-    const adopt = c.adopt();
-    const adopted = await w.ok(adopt);
-    assert.deepEqual(adopted, {
-      kind: "recovery-adoption",
-      key: adopt.key,
-      recorded: true,
-      path: mode === "no-turn" ? "no-turn-adopt" : "pre-turn-adopt",
-      assignmentId: w.g.assignmentId,
-      workId: w.g.workId,
-      witnessId: w.g.witnessId(),
+    const adoptKey = randomUUID();
+    const witnessId = w.g.adoptAsBefore(adoptKey);
+    const adoptType =
+      mode === "no-turn" ? "recovery.no-turn.adopt" : "recovery.pre-turn.adopt";
+    assert.deepEqual(await readOperation(w, adoptType, adoptKey), {
+      state: "recorded",
+      receipt: {
+        kind: "recovery-adoption",
+        key: adoptKey,
+        recorded: true,
+        path: mode === "no-turn" ? "no-turn-adopt" : "pre-turn-adopt",
+        assignmentId: w.g.assignmentId,
+        workId: w.g.workId,
+        witnessId,
+      },
     });
-    const before = databaseDigest(w.s.f);
-    assert.deepEqual(
-      await w.ok(adopt),
-      adopted,
-      "same key and content replays",
-    );
-    assert.equal(databaseDigest(w.s.f), before);
+    // The retired command itself is no longer accepted.
+    const retired = await w.post({
+      type: adoptType,
+      assignmentId: w.g.assignmentId,
+      ...w.g.adoption(),
+    });
+    assert.equal(retired.status, 400);
 
     const recover = c.recover();
     const [first, second] = await Promise.all([w.ok(recover), w.ok(recover)]);
@@ -122,6 +138,45 @@ for (const mode of ["no-turn", "pre-turn-historical"] as const)
     assert.equal(w.requestState(), "held");
   });
 
+for (const mode of ["no-turn", "pre-turn-defect"] as const)
+  test(`${mode}: release over the receipted command route replays exactly and reads back`, async (t) => {
+    const w = await world(t, mode);
+    const c = commands(w.g);
+    const turns = w.turns();
+    const release = c.release();
+    const [released, again] = await Promise.all([w.ok(release), w.ok(release)]);
+    assert.deepEqual(released, again);
+    assert.deepEqual(released, {
+      kind: "recovery-release",
+      key: release.key,
+      recorded: true,
+      path: "release",
+      assignmentId: w.g.assignmentId,
+      workId: w.g.workId,
+      refusalId: released.refusalId,
+    });
+    const after = databaseDigest(w.s.f, observations);
+    assert.equal(w.turns(), turns, "release dispatches nothing");
+    assert.equal(w.requestState(), "held", "the refused request stays held");
+    assert.equal(
+      w.s.f.service.startAgainAvailability(w.g.taskId).available,
+      true,
+    );
+    // Altered material under the same key is refused; a new key finds it released.
+    assert.equal(
+      (await w.post({ ...release, workRevision: w.g.workRevision + 1 })).status,
+      409,
+    );
+    assert.equal((await w.post(c.release())).status, 409);
+    await w.s.restart();
+    assert.deepEqual(await w.ok(release), released, "replays after restart");
+    assert.deepEqual(await readOperation(w, "recovery.release", release.key), {
+      state: "recorded",
+      receipt: released,
+    });
+    assert.equal(databaseDigest(w.s.f, observations), after);
+  });
+
 test("a runtime-captured pre-turn generation recovers without adoption", async (t) => {
   const w = await world(t, "pre-turn-runtime");
   const r = await w.ok(commands(w.g).recover());
@@ -130,17 +185,19 @@ test("a runtime-captured pre-turn generation recovers without adoption", async (
 });
 
 test("old form payloads replay their original recovery receipts through JSON without another effect", async (t) => {
+  const released = await world(t, "pre-turn-defect");
+  const release = commands(released.g).release();
+  const { type: _releaseType, ...releaseInner } = release;
+  const original = released.s.f.service.releaseUnboundHold(
+    JSON.parse(JSON.stringify(releaseInner)),
+  );
+  const afterRelease = databaseDigest(released.s.f);
+  assert.equal((await released.ok(release)).refusalId, original.id);
+  assert.equal(databaseDigest(released.s.f), afterRelease);
+
   const w = await world(t, "no-turn");
   const c = commands(w.g);
-  const adopt = c.adopt();
-  const { type: _type, assignmentId: _assignment, ...inner } = adopt;
-  const originalAdoption = w.s.f.service.adoptHistoricalNoTurnSubmission(
-    JSON.parse(JSON.stringify(inner)),
-  );
-  const adopted = databaseDigest(w.s.f);
-  const receipt = await w.ok(adopt);
-  assert.equal(receipt.witnessId, originalAdoption.witnessId);
-  assert.equal(databaseDigest(w.s.f), adopted);
+  w.g.adoptAsBefore();
   const recover = c.recover();
   const {
     type: _recoverType,
@@ -168,7 +225,7 @@ test("read-only, cross-origin and malformed recovery commands change nothing", a
   const c = commands(w.g);
   const witness = randomUUID();
   const before = databaseDigest(w.s.f);
-  for (const body of [c.adopt(), c.recover(witness), c.replace()]) {
+  for (const body of [c.release(), c.recover(witness), c.replace()]) {
     const r = await w.post(body, w.ro);
     assert.equal(r.status, 403);
     assert.equal((r.body.error as Json).code, "insufficient-scope");
@@ -180,30 +237,16 @@ test("read-only, cross-origin and malformed recovery commands change nothing", a
       origin: w.s.authOrigin,
       "content-type": "application/json",
     },
-    body: JSON.stringify(c.adopt()),
+    body: JSON.stringify(c.release()),
   });
   assert.equal(noCsrf.status, 403);
-  const adopt = c.adopt() as Json & {
-    evidence: Json;
-    attestation: Json;
-  };
+  const release = c.release() as Json;
   const recover = c.recover(witness) as Json & { receipt: Json };
   const invalid: Json[] = [
-    {
-      ...adopt,
-      attestation: { ...adopt.attestation, independentlyReviewed: false },
-    },
-    { ...adopt, attestation: { independentlyReviewed: true } },
-    { ...adopt, evidence: { ...adopt.evidence, evidenceSha256: "abc" } },
-    {
-      ...adopt,
-      evidence: { ...adopt.evidence, frozenSourceRevision: "a".repeat(39) },
-    },
-    {
-      ...adopt,
-      evidence: { ...adopt.evidence, reviewReference: "http://example.test/r" },
-    },
-    { ...adopt, extra: true },
+    { ...release, extra: true },
+    { ...release, workRevision: undefined },
+    { ...release, requestSequence: 0 },
+    { ...release, evidence: {} },
     { ...recover, receipt: { ...recover.receipt, effects: "unknown" } },
     { ...recover, receipt: { ...recover.receipt, effects: undefined } },
     { ...recover, receipt: { ...recover.receipt, workspace: undefined } },
@@ -234,37 +277,25 @@ test("definite recovery refusals are conflicts that keep holds, never uncertain 
     );
     assert.equal(databaseDigest(w.s.f, skip), before);
   };
-  const adopt = c.adopt() as Json & { processIdentity: Json };
-  await unchanged({ ...c.adopt(), assignmentId: randomUUID() }, 404);
-  await unchanged({
-    ...adopt,
-    workRevision: (adopt.workRevision as number) + 1,
-  });
-  await unchanged({
-    ...adopt,
-    requestSequence: (adopt.requestSequence as number) + 1,
-  });
-  await unchanged({
-    ...adopt,
-    processIdentity: { ...adopt.processIdentity, processId: "x" },
-  });
-  await unchanged({ ...adopt, retainedReason: "another reason" });
-  await unchanged({ ...adopt, workId: "assignment:unknown:work" });
+  const release = c.release();
+  await unchanged({ ...release, assignmentId: randomUUID() }, 404);
+  await unchanged({ ...release, workRevision: w.g.workRevision + 1 });
+  await unchanged({ ...release, requestSequence: w.g.requestSequence + 1 });
+  await unchanged({ ...release, workId: "assignment:unknown:work" });
   // Replacement while the generation is unresolved is a definite refusal.
   await unchanged(c.replace());
-  // Recovery without the adopted witness: the verifier ran, nothing else changed.
+  // Recovery without a witness: the verifier ran, nothing else changed.
   await unchanged(c.recover(randomUUID()));
-  const adopted = await w.ok(adopt);
-  await unchanged({ ...c.adopt(), key: randomUUID() }, 409);
-  await unchanged({ ...adopt, retainedReason: "reuse" }, 409);
-  await unchanged({ ...c.replace(adopt.key as string) }, 409);
+  const witnessId = w.g.adoptAsBefore();
+  // A witnessed generation is not released.
+  await unchanged(c.release());
   await unchanged(c.recover(randomUUID()));
   for (const [mode, kind] of [
     ["unknown", "termination-unknown"],
     ["conflict", "termination-conflict"],
   ] as const) {
     w.verifier.set(mode);
-    await unchanged(c.recover(adopted.witnessId as string));
+    await unchanged(c.recover(witnessId));
     const record = w.s.f.service
       .recoveryForTask(w.g.taskId)
       .find((r) => r.workId === w.g.workId);
@@ -272,8 +303,9 @@ test("definite recovery refusals are conflicts that keep holds, never uncertain 
     assert.ok(record?.holds.writer && record.holds.capacity);
   }
   w.verifier.set("verified");
-  const recovered = await w.ok(c.recover(adopted.witnessId as string));
-  await unchanged(c.recover(adopted.witnessId as string), 409);
+  const recovered = await w.ok(c.recover(witnessId));
+  await unchanged(c.recover(witnessId), 409);
+  await unchanged(c.release());
   await unchanged(c.replace(randomUUID(), 1, 2));
   await unchanged(c.replace(randomUUID(), 2, 1));
   const stop = await w.ok({

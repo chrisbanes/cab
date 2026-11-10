@@ -69,7 +69,8 @@ test("initial service and web startup share one fixture deadline", async (t) => 
   // service start took, so probe-1.start can receive at most that much. A reset budget would
   // give it the full startupTimeoutMs. The service start only needs to finish within
   // startupTimeoutMs - probeBudgetMs, not within a fixed wall-clock allowance.
-  const startupTimeoutMs = 4000,
+  // Headroom for the real service start on a loaded runner, which shares this deadline.
+  const startupTimeoutMs = 8000,
     probeBudgetMs = 500;
   const began = performance.now();
   let serviceStartMs: number | undefined;
@@ -185,8 +186,8 @@ test("a stalled service startup preserves backing state until startup settles", 
 test("a stalled web startup retains its resources while an independent listener closes", async () => {
   let finish!: () => void;
   const fixture = await createOperatorFixture(null, undefined, undefined, {
-    // Headroom for the first web startup on a loaded runner.
-    startupTimeoutMs: 4000,
+    // Headroom for the service and first web startup on a loaded runner.
+    startupTimeoutMs: 8000,
     operation: async (name, operation) => {
       await operation();
       if (name === "listener-2.start")

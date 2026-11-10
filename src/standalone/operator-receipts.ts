@@ -39,6 +39,7 @@ export function commandReceipt(
         };
       case "project.create":
       case "project.configure":
+      case "project.reasoning.delete":
         return {
           kind: "configuration" as const,
           key,
@@ -194,8 +195,13 @@ export function commandReceipt(
             commandType: outcome.type,
             resourceId: "system:capacity" as const,
             globalLimit: outcome.result.globalLimit,
-            defaultProjectLimit: outcome.result.defaultProjectLimit,
             projectOverrides: outcome.result.projectOverrides,
+            ...("minimumLeadSlots" in outcome.result
+              ? {
+                  minimumLeadSlots: outcome.result.minimumLeadSlots,
+                  agentOverrides: outcome.result.agentOverrides,
+                }
+              : {}),
           },
         };
       case "getting-started.configure":
@@ -305,6 +311,7 @@ export function commandReceipt(
       if (outcome.result.version !== 1) throw new ReceiptShapeError();
       break;
     case "project.configure":
+    case "project.reasoning.delete":
     case "profile.configure":
     case "assignment.apply":
       if (outcome.result.version === 1) throw new ReceiptShapeError();

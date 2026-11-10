@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir } from "./temp.js";
 import { join } from "node:path";
 
 export type ControlledGitRule = {

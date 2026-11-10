@@ -7,15 +7,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
 import {
-  historicalNoTurnAdoptionBodySchema,
-  historicalPreTurnAdoptionBodySchema,
   noTurnRecoveryBodySchema,
+  releaseBodySchema,
   replaceConversationBodySchema,
 } from "../../src/core/recovery-contracts.js";
 import {
-  historicalNoTurnAdoptionSchema,
-  historicalPreTurnAdoptionSchema,
   noTurnRecoveryCommandSchema,
+  releaseCommandSchema,
   replaceConversationCommandSchema,
 } from "../../src/standalone/pre-turn-recovery.js";
 import { RecoveryRejectedError } from "../../src/standalone/recovery-types.js";
@@ -87,57 +85,41 @@ async function rejected(action: () => unknown, message: string | RegExp) {
   );
 }
 
-const mismatchNoTurn =
-  "Historical no-turn adoption does not match the exact held generation";
-const mismatchPreTurn =
-  "Historical pre-turn adoption does not match the exact held generation";
+const mismatchRelease = "Release does not match the held generation read";
 
-test("no-turn adoption, recovery and replacement refusals are typed with their existing messages", async (t) => {
+test("no-turn release, recovery and replacement refusals are typed with their existing messages", async (t) => {
   const { service, g, verifier, replace, stop } = await world(t, "no-turn");
-  const adoption = g.adoption() as Parameters<
-    typeof service.adoptHistoricalNoTurnSubmission
-  >[0];
+  const release = {
+    key: randomUUID(),
+    assignmentId: g.assignmentId,
+    workId: g.workId,
+    workRevision: g.workRevision,
+    requestSequence: g.requestSequence,
+  };
   for (const changed of [
-    { workRevision: adoption.workRevision + 1 },
-    { requestSequence: adoption.requestSequence + 1 },
-    { conversationRevision: adoption.conversationRevision + 1 },
-    { writerSequence: adoption.writerSequence + 1 },
-    {
-      processIdentity: { ...adoption.processIdentity, processId: "other" },
-    },
-    { retainedReason: "a different reason" },
+    { workRevision: g.workRevision + 1 },
+    { requestSequence: g.requestSequence + 1 },
+    { assignmentId: randomUUID() },
   ])
     await rejected(
       () =>
-        service.adoptHistoricalNoTurnSubmission({
-          ...adoption,
+        service.releaseUnboundHold({
+          ...release,
           ...changed,
           key: randomUUID(),
         }),
-      mismatchNoTurn,
+      mismatchRelease,
     );
-  // Recovery before adoption has no witness.
+  // Recovery without a witness.
   await rejected(
     () => service.recoverNoTurnExecution(g.recovery(randomUUID()) as never),
     "No-turn recovery requires its exact persisted witness and keyed command",
   );
   await rejected(() => replace(), "Assignment has unresolved execution");
-  const adopted = service.adoptHistoricalNoTurnSubmission(adoption);
+  const adopted = { witnessId: g.adoptAsBefore() };
   await rejected(
-    () =>
-      service.adoptHistoricalNoTurnSubmission({
-        ...adoption,
-        key: randomUUID(),
-      }),
-    "Historical no-turn submission is already recorded for this generation",
-  );
-  await rejected(
-    () =>
-      service.adoptHistoricalNoTurnSubmission({
-        ...adoption,
-        retainedReason: "reuse",
-      }),
-    "Pre-turn command key was reused with different material",
+    () => service.releaseUnboundHold(release),
+    "Release blocked: witness-present",
   );
   const recovery = g.recovery(adopted.witnessId) as never as Parameters<
     typeof service.recoverNoTurnExecution
@@ -228,61 +210,34 @@ test("no-turn adoption, recovery and replacement refusals are typed with their e
   // Malformed input stays a validation error; infrastructure failure stays untyped.
   assert.throws(
     () =>
-      service.adoptHistoricalNoTurnSubmission({
-        ...adoption,
-        attestation: { ...adoption.attestation, independentlyReviewed: false },
+      service.releaseUnboundHold({
+        ...release,
+        workRevision: 0,
       } as never),
     z.ZodError,
   );
   await stop();
   assert.throws(
-    () => service.adoptHistoricalNoTurnSubmission(g.adoption() as never),
+    () => service.releaseUnboundHold({ ...release, key: randomUUID() }),
     (error: unknown) =>
       error instanceof Error && !(error instanceof RecoveryRejectedError),
   );
 });
 
-test("historical and runtime pre-turn refusals are typed, including duplicate adoption", async (t) => {
+test("witnessed pre-turn generations refuse release, and an earlier adoption key keeps its scope", async (t) => {
   const { service, g } = await world(t, "pre-turn-historical");
-  const adoption = g.adoption() as Parameters<
-    typeof service.adoptHistoricalPreTurnRejection
-  >[0];
-  for (const changed of [
-    { workRevision: adoption.workRevision + 1 },
-    { requestSequence: adoption.requestSequence + 1 },
-    { predecessorWorkId: "other-work" },
-    {
-      processIdentity: { ...adoption.processIdentity, bootId: "other" },
-    },
-    { retainedReason: "Runtime submission or observation uncertain: other" },
-  ])
-    await rejected(
-      () =>
-        service.adoptHistoricalPreTurnRejection({
-          ...adoption,
-          ...changed,
-          key: randomUUID(),
-        }),
-      mismatchPreTurn,
-    );
-  // A different predecessor thread fails the archived-message check first.
-  assert.throws(
-    () =>
-      service.adoptHistoricalPreTurnRejection({
-        ...adoption,
-        key: randomUUID(),
-        predecessorThreadId: "thread-2",
-      }),
-    z.ZodError,
-  );
-  const adopted = service.adoptHistoricalPreTurnRejection(adoption);
+  const adoption = g.adoption();
+  const adopted = { witnessId: g.adoptAsBefore(adoption.key) };
+  const release = {
+    key: randomUUID(),
+    assignmentId: g.assignmentId,
+    workId: g.workId,
+    workRevision: g.workRevision,
+    requestSequence: g.requestSequence,
+  };
   await rejected(
-    () =>
-      service.adoptHistoricalPreTurnRejection({
-        ...adoption,
-        key: randomUUID(),
-      }),
-    "Pre-turn rejection witness is already recorded for this generation",
+    () => service.releaseUnboundHold(release),
+    "Release blocked: witness-present",
   );
   await rejected(
     () =>
@@ -298,10 +253,14 @@ test("historical and runtime pre-turn refusals are typed, including duplicate ad
   const runtime = await world(t, "pre-turn-runtime");
   await rejected(
     () =>
-      runtime.service.adoptHistoricalPreTurnRejection(
-        runtime.g.adoption() as never,
-      ),
-    "Pre-turn rejection witness is already recorded for this generation",
+      runtime.service.releaseUnboundHold({
+        ...release,
+        workId: runtime.g.workId,
+        assignmentId: runtime.g.assignmentId,
+        workRevision: runtime.g.workRevision,
+        requestSequence: runtime.g.requestSequence,
+      }),
+    "Release blocked: witness-present",
   );
   await rejected(
     () => runtime.replace(),
@@ -309,49 +268,14 @@ test("historical and runtime pre-turn refusals are typed, including duplicate ad
   );
 });
 
-test("core recovery bodies accept and reject exactly what the standalone schemas do, apart from the archived-message check", () => {
+test("core recovery bodies accept and reject exactly what the standalone schemas do", () => {
   const key = randomUUID();
   const identity = { processId: "p", processStartedAt: "s", bootId: "b" };
-  const evidence = {
-    frozenSourceRevision: "a".repeat(40),
-    frozenHarnessSha256: "b".repeat(64),
-    evidenceSha256: "c".repeat(64),
-    approvedDecisionSha256: "d".repeat(64),
-    reviewReference: "https://example.test/r",
-    approvalReference: "https://example.test/a",
-  };
-  const preTurn = {
+  const release = {
+    assignmentId: randomUUID(),
     workId: "w",
     workRevision: 1,
     requestSequence: 2,
-    processIdentity: identity,
-    predecessorWorkId: "p",
-    predecessorThreadId: "thread-1",
-    retainedReason: "r",
-    rpcError: { code: -32600, message: "anything" },
-    evidence,
-    attestation: {
-      beforeTurnRejected: true,
-      noTurnSubmitted: true,
-      independentlyReviewed: true,
-    },
-  };
-  const noTurn = {
-    kind: "historical-no-turn-submission",
-    workId: "w",
-    workRevision: 1,
-    requestSequence: 2,
-    conversationRevision: 1,
-    writerSequence: 3,
-    processIdentity: identity,
-    retainedReason: "r",
-    evidence: { ...evidence, invocationLedgerSha256: "e".repeat(64) },
-    attestation: {
-      completeSynchronousWriteAheadLedger: true,
-      noStartTurnInvocation: true,
-      independentlyReviewed: true,
-      idleThreadMayExist: true,
-    },
   };
   const recover = {
     receipt: {
@@ -375,74 +299,18 @@ test("core recovery bodies accept and reject exactly what the standalone schemas
   };
   const cases: Array<[string, z.ZodType, z.ZodType, Record<string, unknown>]> =
     [
+      ["release", releaseBodySchema, releaseCommandSchema, release],
       [
-        "no-turn adoption",
-        historicalNoTurnAdoptionBodySchema,
-        historicalNoTurnAdoptionSchema,
-        noTurn,
+        "release: zero revision",
+        releaseBodySchema,
+        releaseCommandSchema,
+        { ...release, workRevision: 0 },
       ],
       [
-        "no-turn adoption: attestation false",
-        historicalNoTurnAdoptionBodySchema,
-        historicalNoTurnAdoptionSchema,
-        {
-          ...noTurn,
-          attestation: { ...noTurn.attestation, idleThreadMayExist: false },
-        },
-      ],
-      [
-        "no-turn adoption: attestation missing",
-        historicalNoTurnAdoptionBodySchema,
-        historicalNoTurnAdoptionSchema,
-        { ...noTurn, attestation: { independentlyReviewed: true } },
-      ],
-      [
-        "no-turn adoption: ledger missing",
-        historicalNoTurnAdoptionBodySchema,
-        historicalNoTurnAdoptionSchema,
-        { ...noTurn, evidence },
-      ],
-      [
-        "no-turn adoption: extra field",
-        historicalNoTurnAdoptionBodySchema,
-        historicalNoTurnAdoptionSchema,
-        { ...noTurn, extra: 1 },
-      ],
-      [
-        "no-turn adoption: short hash",
-        historicalNoTurnAdoptionBodySchema,
-        historicalNoTurnAdoptionSchema,
-        { ...noTurn, evidence: { ...noTurn.evidence, evidenceSha256: "c" } },
-      ],
-      [
-        "pre-turn adoption: 39-char revision",
-        historicalPreTurnAdoptionBodySchema,
-        historicalPreTurnAdoptionSchema,
-        {
-          ...preTurn,
-          evidence: { ...evidence, frozenSourceRevision: "a".repeat(39) },
-        },
-      ],
-      [
-        "pre-turn adoption: http reference",
-        historicalPreTurnAdoptionBodySchema,
-        historicalPreTurnAdoptionSchema,
-        {
-          ...preTurn,
-          evidence: { ...evidence, reviewReference: "http://x.test/" },
-        },
-      ],
-      [
-        "pre-turn adoption: other rpc code",
-        historicalPreTurnAdoptionBodySchema,
-        historicalPreTurnAdoptionSchema,
-        { ...preTurn, rpcError: { code: -1, message: "x" } },
-      ],
-      [
-        "pre-turn adoption: missing rpc error",
-        historicalPreTurnAdoptionBodySchema,
-        historicalPreTurnAdoptionSchema,
-        { ...preTurn, rpcError: undefined },
+        "release: extra field",
+        releaseBodySchema,
+        releaseCommandSchema,
+        { ...release, retainedReason: "r" },
       ],
       [
         "recovery",
@@ -493,18 +361,9 @@ test("core recovery bodies accept and reject exactly what the standalone schemas
       standalone.safeParse({ ...input, key }).success,
       name,
     );
-  assert.ok(cases.length >= 12);
-  // Only the standalone schema knows the runtime's archived-resume message.
-  assert.equal(
-    historicalPreTurnAdoptionBodySchema.safeParse(preTurn).success,
-    true,
-  );
-  assert.equal(
-    historicalPreTurnAdoptionSchema.safeParse({ ...preTurn, key }).success,
-    false,
-  );
-  // Neither accepts a missing key in the standalone form.
-  assert.equal(historicalNoTurnAdoptionSchema.safeParse(noTurn).success, false);
+  assert.ok(cases.length >= 10);
+  // The standalone form requires its key.
+  assert.equal(releaseCommandSchema.safeParse(release).success, false);
 });
 
 for (const harness of ["codex", "claude"] as const)

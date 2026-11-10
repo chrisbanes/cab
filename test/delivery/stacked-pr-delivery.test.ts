@@ -257,7 +257,8 @@ function stackWorld(stacked = true) {
   return {
     ...f,
     scripted,
-    submit: () => coordinator.submit(f.request, f.caller),
+    submit: (operationId = f.request.operationId) =>
+      coordinator.submit({ ...f.request, operationId }, f.caller),
     async restart() {
       await coordinator.stop();
       coordinator = new DeliveryCoordinator(new DeliveryStore(f.db), options);
@@ -276,6 +277,39 @@ function stackWorld(stacked = true) {
     },
   };
 }
+
+test("a subsequent stacked create reuses the existing open PR without another create or stack write", async () => {
+  const w = stackWorld();
+  try {
+    assert.equal((await w.submit()).state, "confirmed-success");
+    // This fixture's HTTP surface stops at creation/linking; supply the fresh registration read.
+    w.scripted.provider.inspectPr = async () => ({
+      repositoryId: "R1",
+      nodeId: "P2",
+      number: 2,
+      baseRef: w.request.action.target.baseRef,
+      headRef: w.request.action.target.headRef,
+      headSha: w.headSha,
+      baseSha: "b".repeat(40),
+      state: "OPEN",
+      draft: true,
+      merged: false,
+      reviewDecision: null,
+      checks: [],
+      closedIssueNodeIds: [],
+      mergeBlockers: [],
+      allowedMethods: ["squash"],
+    });
+    const reused = await w.submit(randomUUID());
+    assert.equal(reused.state, "confirmed-success");
+    assert.equal(reused.observation?.receipt?.nodeId, "P2");
+    assert.equal(w.scripted.state.prWrites, 1);
+    assert.equal(w.scripted.state.stackWrites, 1);
+    assert.equal(reused.stackCreate, undefined);
+  } finally {
+    await w.close();
+  }
+});
 
 for (const existing of [false, true]) {
   test(`stacked create ${existing ? "appends only to the verified top" : "creates an ordered stack"} in one journal`, async () => {
@@ -317,9 +351,7 @@ test("ordinary creates preserve their receipt and never read or write a stack", 
     assert.equal((await w.submit()).state, "confirmed-success");
     assert.equal(w.scripted.state.stackWrites, 0);
     assert.equal(
-      w.scripted.state.requests.some(
-        (r) => r.route.includes("/stacks") || /\/pulls\/\d+$/.test(r.route),
-      ),
+      w.scripted.state.requests.some((r) => r.route.includes("/stacks")),
       false,
     );
     assert.equal(w.store.action(w.request.operationId).stackCreate, undefined);
@@ -1054,7 +1086,7 @@ test("GitLab stacked dependents retain plain chained MR creation and offline bas
     assert.equal(created.state, "confirmed-success");
     assert.equal(created.stackCreate, undefined);
     assert.equal(created.stackLink, undefined);
-    assert.equal(selected, 1);
+    assert.equal(selected, 2); // Creation and automatic registration each select the provider.
     assert.equal(creates, 1);
   } finally {
     await coordinator.stop();
@@ -1202,7 +1234,7 @@ for (const phase of ["prepared", "retry-due"] as const) {
           "confirmed-success",
         );
         assert.deepEqual(sends, [other.operationId]);
-        assert.equal(selections.length, 1);
+        assert.equal(selections.length, 2); // The independent confirmed create also attempts binding.
         await coordinator.refresh();
         assert.deepEqual(
           sends,

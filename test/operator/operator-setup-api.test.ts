@@ -54,6 +54,99 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { createSetupHome, fakeDiscovery, git } from "../fixtures/setup-home.js";
 import { tmpdir } from "../fixtures/temp.js";
 
+test("repositories.configure expands home-relative GitHub paths and keeps the verified absolute path", async (t) => {
+  const f = await createOperatorFixture();
+  const home = await createSetupHome();
+  t.after(async () => {
+    await f.close();
+    await home.close();
+  });
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Home-relative repositories",
+    leadProfileId: null,
+  });
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    home: home.home,
+  });
+  const homeRelative = {
+    type: "repositories.configure" as const,
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github" as const,
+        host: "github.com",
+        repositoryId: "R_atlas",
+        path: "~/src/atlas",
+        ref: "main",
+      },
+    ],
+  };
+  const result = await api.execute(homeRelative);
+  assert.equal(result.kind, "configuration");
+  // A same-key retry of the typed `~` command replays its receipt.
+  assert.deepEqual(await api.execute(homeRelative), result);
+  assert.equal(
+    f.service.domain().repositoryLinks(projectId).links[0]?.path,
+    await realpath(join(home.home, "src", "atlas")),
+  );
+  const kept = await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R_atlas",
+        ref: "main",
+      },
+    ],
+  });
+  assert.equal(kept.kind, "configuration");
+  assert.equal(
+    f.service.domain().repositoryLinks(projectId).links[0]?.path,
+    await realpath(join(home.home, "src", "atlas")),
+  );
+  await assert.rejects(
+    api.execute({
+      type: "repositories.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 3,
+      repositories: [
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "R_atlas",
+          ref: "main",
+        },
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "R_bad",
+          path: "relative/private-checkout",
+          ref: "main",
+        },
+      ],
+    }),
+    (error) =>
+      error instanceof OperatorApiError &&
+      error.fieldPaths?.[0] === "repositories.1.path" &&
+      error.publicMessage ===
+        "Repository 2: the path is not an absolute directory path." &&
+      !error.publicMessage.includes("relative/private-checkout") &&
+      !error.publicMessage.includes("acme/atlas"),
+  );
+});
+
 const configure = (credentialRef: string | null) => ({
   type: "discovery.configure",
   key: randomUUID(),

@@ -19,6 +19,8 @@ import { Store } from "../../src/core/store.js";
 import { GitHubSynchronizer } from "../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { until } from "../fixtures/until.js";
+import { prObservation, seedPrBinding } from "../fixtures/closure-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -585,6 +587,21 @@ test("a held canonical lead receives one source-hold notice without changing ass
       await service.refreshGitHub();
       assert.equal(count(), 1);
       assert.equal(domain.assignment(leadId).state, "held");
+      labels = issue.labels;
+      await service.refreshGitHub();
+      const releaseCount = () =>
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold-released'",
+              )
+              .get(leadId) as { count: number }
+          ).count,
+        );
+      assert.equal(releaseCount(), 1);
+      await service.refreshGitHub();
+      assert.equal(releaseCount(), 1);
     } finally {
       db.close();
     }
@@ -1594,6 +1611,8 @@ async function closedIssueService(closedIssues: "skip" | "done") {
   const projectId = randomUUID();
   const profileId = randomUUID();
   const reader = { state: "open" as "open" | "closed", interrupted: 0 };
+  /** What the code host reports for a bound PR #7. */
+  const pr = { state: "OPEN" as "OPEN" | "CLOSED" | "MERGED" };
   let release!: () => void;
   const heldTurn = new Promise<void>((resolve) => {
     release = resolve;
@@ -1644,6 +1663,14 @@ async function closedIssueService(closedIssues: "skip" | "done") {
         intervalMs: 60_000,
       },
       power: { enabled: false },
+      delivery: {
+        providerFactories: {
+          github: () =>
+            ({
+              inspectPr: async () => prObservation(pr.state),
+            }) as unknown as CodeHostDeliveryProvider,
+        },
+      },
     },
   );
   await service.start();
@@ -1738,8 +1765,10 @@ async function closedIssueService(closedIssues: "skip" | "done") {
   return {
     service,
     domain,
+    projectId,
     taskId,
     reader,
+    pr,
     db,
     turns: () => turns,
     notices: () =>
@@ -1770,26 +1799,27 @@ async function closedIssueService(closedIssues: "skip" | "done") {
   };
 }
 
-test("done mode completes a closed imported task only after its running turn settles", async () => {
-  const w = await closedIssueService("done");
-  try {
-    w.reader.state = "closed";
-    await w.service.refreshGitHub();
-    assert.equal(w.domain.task(w.taskId).state, "open");
-    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
-    assert.ok(w.notices() > 0, "the lead is told to stop safely");
-    assert.equal(w.reader.interrupted, 0);
-    assert.equal(w.completion(), false);
-    await w.finishTurn();
-    await w.service.refreshGitHub();
-    assert.equal(w.domain.task(w.taskId).state, "done");
-    assert.equal(w.completion(), true);
-    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
-    assert.equal(w.turns(), 1);
-  } finally {
-    await w.close();
-  }
-});
+for (const mode of ["skip", "done"] as const)
+  test(`${mode} mode completes a closed imported task only after its running turn settles`, async () => {
+    const w = await closedIssueService(mode);
+    try {
+      w.reader.state = "closed";
+      await w.service.refreshGitHub();
+      assert.equal(w.domain.task(w.taskId).state, "open");
+      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+      assert.ok(w.notices() > 0, "the lead is told to stop safely");
+      assert.equal(w.reader.interrupted, 0);
+      assert.equal(w.completion(), false);
+      await w.finishTurn();
+      await w.service.refreshGitHub();
+      assert.equal(w.domain.task(w.taskId).state, "done");
+      assert.equal(w.completion(), true);
+      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+      assert.equal(w.turns(), 1);
+    } finally {
+      await w.close();
+    }
+  });
 
 test("done mode leaves a stopped closed task open with its holds", async () => {
   const w = await closedIssueService("done");
@@ -1807,16 +1837,25 @@ test("done mode leaves a stopped closed task open with its holds", async () => {
   }
 });
 
-test("skip mode never completes a closed imported task", async () => {
+test("a settled closed task with an open bound PR keeps its closure hold until the PR closes", async () => {
   const w = await closedIssueService("skip");
   try {
     w.reader.state = "closed";
     await w.service.refreshGitHub();
     await w.finishTurn();
+    seedPrBinding(w.db, {
+      taskId: w.taskId,
+      projectId: w.projectId,
+      state: "OPEN",
+    });
     await w.service.refreshGitHub();
     assert.equal(w.domain.task(w.taskId).state, "open");
     assert.equal(w.completion(), false);
     assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    w.pr.state = "CLOSED";
+    await w.service.refreshGitHub();
+    assert.equal(w.domain.task(w.taskId).state, "done");
+    assert.equal(w.completion(), true);
   } finally {
     await w.close();
   }
@@ -2144,8 +2183,10 @@ test("a first turn waiting for capacity takes revisions changed by a profile edi
   try {
     await f.service.configureCapacity({
       key: randomUUID(),
-      globalLimit: 4,
-      projectOverrides: { [f.projectId]: 1 },
+      minimumLeadSlots: 0,
+      // First turns are lead turns, which only the global cap holds.
+      globalLimit: 1,
+      projectOverrides: {},
     });
     f.resume();
     await f.service.refreshGitHub();

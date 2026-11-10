@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { Page } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import { fakeDiscovery } from "./setup-home.js";
 import { startSettings } from "./operator-settings.js";
 
@@ -161,13 +162,14 @@ export async function startDiscovery(
   journey: Parameters<typeof startSettings>[0],
   state: { failure?: Error; calls?: string[]; truncated?: boolean },
   tab = "github",
+  setup: OperatorSetupSeams = {},
 ) {
   const started = await startSettings(
     journey,
     `/projects/:atlas/settings?tab=${tab}`,
     undefined,
     undefined,
-    { setup: { discovery: fakeDiscovery(state) } },
+    { setup: { ...setup, discovery: fakeDiscovery(state) } },
   );
   await new OperatorApi(started.f.service, [started.f.directory]).execute({
     type: "discovery.configure",

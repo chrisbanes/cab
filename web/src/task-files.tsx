@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -30,11 +31,21 @@ import {
   type TaskFilesState,
 } from "./task-workspace-state.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
-import { clockLabel } from "./presentation.js";
+import {
+  clockLabel,
+  fileSizeLabel,
+  sortFileEntries,
+  workspaceStateText,
+} from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
 import { RangeControls } from "./range-controls.js";
-import { useOperatorResource } from "./resource.js";
+import { readConflicted, useOperatorResource } from "./resource.js";
 import { workspaceFileAnchor } from "./review-anchor.js";
+
+const locationStateText = (state: string) =>
+  workspaceStateText("This location", state, "file bytes are not available");
+const previewConflicted = (read: { response: { data: { state: string } } }) =>
+  readConflicted(read.response);
 
 function requestUrl(
   taskId: string,
@@ -942,6 +953,8 @@ export function TaskFiles({
   const directoryResource = useOperatorResource(
     `${session.csrfToken}:${taskId}:files:${directoryKey}`,
     directoryLoader,
+    true,
+    readConflicted,
   );
   useEffect(() => {
     if (!directoryResource.state.data) return;
@@ -962,17 +975,22 @@ export function TaskFiles({
   const directory =
     directoryResource.state.data?.data ??
     (state.directoryKey === directoryKey ? state.directory : null);
+  const repositoryName = useRepositoryLabel();
+  const entryRows = useMemo(
+    () => sortFileEntries(directory?.entries ?? [], repositoryName),
+    [directory?.entries, repositoryName],
+  );
   useEffect(() => {
     if (!directory) return;
     const desiredKey =
       state.focusAfterDirectoryKey === directoryKey
         ? state.focusEntryAfterNavigation
         : state.explorerFocusKey;
-    let index = directory.entries.findIndex(
+    let index = entryRows.findIndex(
       (entry) => fileEntryKey(entry) === desiredKey,
     );
-    if (index < 0) index = directory.entries.length ? 0 : -1;
-    const entry = index >= 0 ? directory.entries[index] : null;
+    if (index < 0) index = entryRows.length ? 0 : -1;
+    const entry = index >= 0 ? entryRows[index] : null;
     const key = entry ? fileEntryKey(entry) : null;
     const shouldFocus = state.focusAfterDirectoryKey === directoryKey;
     state.focusAfterDirectoryKey = null;
@@ -985,7 +1003,7 @@ export function TaskFiles({
       window.requestAnimationFrame(() =>
         explorerEntries.current[index]?.focus(),
       );
-  }, [directory, directoryKey, state, changed]);
+  }, [directory, directoryKey, entryRows, state, changed]);
   // Open at a repository root once, when nothing else has chosen a location: a link, an open
   // tab or any navigation wins, and the jump never moves focus.
   useEffect(() => {
@@ -1042,6 +1060,7 @@ export function TaskFiles({
       : null,
     previewLoader,
     Boolean(activeTab && activeTab.previewKey !== previewKey),
+    previewConflicted,
   );
   useEffect(() => {
     const response = previewResource.state.data;
@@ -1143,7 +1162,7 @@ export function TaskFiles({
     state.mobileView = "list";
     changed();
     const index =
-      directory?.entries.findIndex(
+      entryRows.findIndex(
         (entry) => fileEntryKey(entry) === state.returnFocusEntryKey,
       ) ?? -1;
     if (index >= 0)
@@ -1184,7 +1203,6 @@ export function TaskFiles({
   const refreshing =
     directoryResource.state.pending ||
     Boolean(activeTab && previewResource.state.pending);
-  const repositoryName = useRepositoryLabel();
   const currentPath = pathLabel(state.scope, state.path, repositoryName);
   const locationCrumbs = crumbsFor(state.scope, state.path, repositoryName);
   const selectedLabel = activeTab
@@ -1228,9 +1246,7 @@ export function TaskFiles({
         </p>
       )}
       {directory && directory.state !== "ready" && (
-        <p role="status">
-          This location is {directory.state}; file bytes are not available.
-        </p>
+        <p role="status">{locationStateText(directory.state)}</p>
       )}
       {directory?.truncated && (
         <p role="status">
@@ -1272,7 +1288,7 @@ export function TaskFiles({
               className="file-entry-list"
               aria-label={`Files in ${currentPath}`}
             >
-              {directory.entries.map((entry, index) => {
+              {entryRows.map((entry, index) => {
                 const name =
                   entry.kind === "repository" ? entry.repositoryId : entry.name;
                 const shown =
@@ -1292,8 +1308,16 @@ export function TaskFiles({
                   entry.kind === "repository"
                     ? "repository"
                     : entry.size === null
-                      ? entry.kind
-                      : `${entry.kind} · ${entry.size.toLocaleString()} bytes`;
+                      ? entry.kind === "directory"
+                        ? ""
+                        : entry.kind
+                      : fileSizeLabel(entry.size);
+                const exactSize =
+                  entry.kind !== "repository" && entry.size !== null
+                    ? `${entry.size.toLocaleString()} bytes`
+                    : null;
+                const accessibleSize =
+                  entry.kind === "directory" ? "directory" : size;
                 const change =
                   entry.kind === "repository"
                     ? undefined
@@ -1311,8 +1335,10 @@ export function TaskFiles({
                     <button
                       type="button"
                       className="file-entry"
-                      title={fullPath}
-                      aria-label={`${shown}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}${changeNote}`}
+                      title={
+                        exactSize ? `${fullPath} · ${exactSize}` : fullPath
+                      }
+                      aria-label={`${shown}, ${accessibleSize}${exactSize ? `, ${exactSize}` : ""}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}${changeNote}`}
                       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Space"
                       tabIndex={
                         state.explorerFocusKey === entryKey ||
@@ -1352,11 +1378,11 @@ export function TaskFiles({
                           const nextIndex = Math.max(
                             0,
                             Math.min(
-                              directory.entries.length - 1,
+                              entryRows.length - 1,
                               index + (event.key === "ArrowDown" ? 1 : -1),
                             ),
                           );
-                          const next = directory.entries[nextIndex];
+                          const next = entryRows[nextIndex];
                           if (next) {
                             state.explorerFocusKey = fileEntryKey(next);
                             changed();
@@ -1447,7 +1473,7 @@ export function TaskFiles({
           ) : (
             <p role="status">
               {directory?.state
-                ? `This location is ${directory.state}; file bytes are not available.`
+                ? locationStateText(directory.state)
                 : "Loading this location…"}
             </p>
           )}
@@ -1630,11 +1656,12 @@ export function TaskFiles({
                 )}
                 {preview && preview.state !== "ready" && (
                   <p role="status">
-                    Preview is {preview.state}
-                    {preview.metadata?.reason
-                      ? ` (${preview.metadata.reason})`
-                      : ""}
-                    . File bytes are unavailable.
+                    {workspaceStateText(
+                      "Preview",
+                      preview.state,
+                      "file bytes are unavailable",
+                      preview.metadata?.reason,
+                    )}
                   </p>
                 )}
                 {preview?.state === "ready" && preview.preview && (

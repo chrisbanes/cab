@@ -37,11 +37,17 @@ export async function reportUnresolvedResult(
   const leadTurns = f.runtime.turns;
   f.runtime.complete(leadTurns);
   await until(() => f.runtime.turns >= leadTurns + 1);
-  await until(() =>
+  const workerActive = () =>
     f.service
       .turnRequests()
-      .some((r) => r.assignmentId === workerId && r.state === "active"),
-  );
+      .some((r) => r.assignmentId === workerId && r.state === "active");
+  // A lead continuation is resumed work, so it takes the task's writer before the
+  // worker that has not started; let it finish first.
+  if (!workerActive()) {
+    f.runtime.complete(leadTurns + 1);
+    await until(() => f.runtime.turns >= leadTurns + 2);
+  }
+  await until(workerActive);
   const request = f.service
     .turnRequests()
     .find((r) => r.assignmentId === workerId && r.state === "active");

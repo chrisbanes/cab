@@ -24,6 +24,7 @@ import type {
 } from "../../src/standalone/codex.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
 import { QUIET_WINDOW_MS } from "../fixtures/until.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 class GatedRuntime implements Runtime {
   starts = 0;
@@ -211,31 +212,58 @@ async function configureCapacity(
   service: StandaloneService,
   globalLimit: number,
   projectOverrides: Record<string, number | null> = {},
+  minimumLeadSlots = 0,
+  agentOverrides: Record<string, number | null> = {},
 ) {
   return service.configureCapacity({
     key: randomUUID(),
     globalLimit,
+    minimumLeadSlots,
     projectOverrides,
+    agentOverrides,
   });
 }
 
-interface CapacityRead {
-  globalLimit: number;
-  defaultProjectLimit: number;
-  projectOverrides: Record<string, number>;
-  currentUsage: { global: number; projects: Record<string, number> };
-  effectiveProjectLimits: Record<string, number>;
+function capacityLimits(service: StandaloneService) {
+  return service.capacityLimits();
 }
 
-function capacityLimits(
+/** A Ready task with no explicit assignment, so its lead takes the first turn. */
+async function addReadyLeadTask(
   service: StandaloneService,
-  projectIds: string[],
-): CapacityRead {
-  return (
-    service.domain() as unknown as {
-      capacityLimits(ids: string[]): CapacityRead;
-    }
-  ).capacityLimits(projectIds);
+  projectId: string,
+  title: string,
+) {
+  const taskId = randomUUID();
+  execute(service, {
+    type: "task.create",
+    actor: "operator",
+    projectId,
+    taskId,
+    title,
+    outcome: title,
+    ready: false,
+  });
+  await service.provisionTask(taskId);
+  execute(service, {
+    type: "task.configure",
+    actor: "operator",
+    projectId,
+    taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  return taskId;
+}
+
+function leadWork(service: StandaloneService, taskId: string) {
+  return service.turnRequests().find((request) => request.taskId === taskId)
+    ?.workId;
+}
+
+function stateOf(service: StandaloneService, workId: string | undefined) {
+  const intent = service.list().find((item) => item.workId === workId);
+  return { state: intent?.state, reason: intent?.reason };
 }
 
 function countRows(
@@ -389,7 +417,9 @@ test("eligible pending assignments dispatch once and retain request identity aft
   }
 });
 
-test("service stop cancels ready-workspace Git before scheduler settlement and preserves uncertainty", async (t) => {
+test("service stop cancels ready-workspace Git before scheduler settlement and preserves uncertainty", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-scheduler-git-drain-"));
   const controlled = controlledGit();
   const source = repository(root, "source");
@@ -959,7 +989,7 @@ test("failed writer admission rolls back the entire reservation transition", asy
   }
 });
 
-test("default capacity limits count direct and managed turns together", async () => {
+test("default capacity counts direct and managed turns, holds one of six slots for leads and has no project default", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-capacity-defaults-"));
   const dataDir = join(root, "data");
   const directOne = join(root, "direct-one");
@@ -996,7 +1026,7 @@ test("default capacity limits count direct and managed turns together", async ()
       "B one",
     );
     assert.equal(
-      await waitUntil(() => entered >= 4),
+      await waitUntil(() => entered >= 5),
       true,
       JSON.stringify({
         entered,
@@ -1006,71 +1036,42 @@ test("default capacity limits count direct and managed turns together", async ()
       }),
     );
     assert.equal(
-      await waitUntil(() =>
-        [...managedA, managedB].every((assignment) =>
-          service.list().some((item) => item.workId === assignment.workId),
-        ),
+      await waitUntil(
+        () => stateOf(service, managedB.workId).state === "capacity-waiting",
       ),
       true,
+      JSON.stringify(service.list()),
     );
-
-    assert.equal(runtime.turns, 4);
-    const db = (
-      service as unknown as {
-        db: {
-          prepare(sql: string): {
-            all(...args: unknown[]): unknown[];
-          };
-        };
-      }
-    ).db;
-    const reservations = db
-      .prepare(
-        "SELECT workId, projectId FROM execution_capacity_reservations ORDER BY workId",
-      )
-      .all() as { workId: string; projectId: string | null }[];
-    assert.equal(reservations.length, 4);
+    assert.equal(runtime.turns, 5);
+    // No implicit project limit: all three of project A's turns run.
+    for (const assignment of managedA)
+      assert.equal(stateOf(service, assignment.workId).state, "running");
+    assert.deepEqual(stateOf(service, managedB.workId), {
+      state: "capacity-waiting",
+      reason: "Capacity waiting: held for lead turns (1)",
+    });
     assert.equal(
-      reservations.filter((row) => row.projectId === null).length,
-      2,
-    );
-    assert.equal(
-      reservations.filter((row) => row.projectId === projectA).length,
-      2,
-    );
-    assert.equal(
-      reservations.filter((row) => row.projectId === projectB).length,
+      countRows(
+        service,
+        "SELECT COUNT(*) AS count FROM task_writer_admissions WHERE workId = ?",
+        managedB.workId,
+      ),
       0,
     );
-    const admittedManaged = managedA.filter((assignment) =>
-      reservations.some((row) => row.workId === assignment.workId),
-    );
-    const waitingManaged = managedA.filter(
-      (assignment) =>
-        !reservations.some((row) => row.workId === assignment.workId),
-    );
-    assert.equal(admittedManaged.length, 2);
-    assert.equal(waitingManaged.length, 1);
-    const waitingManagedWorkId = waitingManaged[0]?.workId;
-    assert.ok(waitingManagedWorkId);
+    const usage = capacityLimits(service).currentUsage;
+    assert.equal(usage.global, 5);
+    assert.equal(usage.lead, 0);
+    assert.equal(usage.projects[projectA], 3);
+
+    // The held slot admits a lead turn while every general slot is in use.
+    const leadTask = await addReadyLeadTask(service, projectB, "Lead turn");
+    assert.equal(await waitUntil(() => entered >= 6), true);
     assert.equal(
-      reservations.some((row) => row.workId === managedB.workId),
-      false,
+      stateOf(service, leadWork(service, leadTask)).state,
+      "running",
     );
-    for (const workId of [waitingManagedWorkId, managedB.workId]) {
-      assert.equal(
-        service.list().find((item) => item.workId === workId)?.state,
-        "capacity-waiting",
-      );
-      assert.equal(
-        countRows(
-          service,
-          "SELECT COUNT(*) AS count FROM task_writer_admissions WHERE workId = ?",
-          workId,
-        ),
-        0,
-      );
-    }
+    assert.equal(capacityLimits(service).currentUsage.lead, 1);
+    assert.equal(stateOf(service, managedB.workId).state, "capacity-waiting");
   } finally {
     active.resolve();
     await Promise.all(direct);
@@ -1100,16 +1101,17 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
     );
     assert.equal(await waitUntil(() => entered === 3, 30000), true);
 
-    await configureCapacity(service, 2, { [projectId]: 1 });
+    await configureCapacity(service, 2, { [projectId]: 1 }, 1, {
+      [profileId]: 1,
+    });
     assert.equal(runtime.turns, 3);
     for (const item of existing)
       assert.equal(
         service.list().find((intent) => intent.workId === item.workId)?.state,
         "running",
       );
-    const atLowering = capacityLimits(service, [projectId]);
+    const atLowering = capacityLimits(service);
     assert.equal(atLowering.globalLimit, 2);
-    assert.equal(atLowering.defaultProjectLimit, 2);
     assert.equal(atLowering.projectOverrides[projectId], 1);
     assert.equal(atLowering.currentUsage.global, 3);
     assert.equal(atLowering.currentUsage.projects[projectId], 3);
@@ -1134,7 +1136,7 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
     );
     assert.equal(runtime.turns, 3);
     assert.equal(
-      capacityLimits(service, [projectId]).currentUsage.global,
+      capacityLimits(service).currentUsage.global,
       3,
       "lowering must not release reservations for admitted work",
     );
@@ -1155,13 +1157,380 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
     const restartedRuntime = new GatedRuntime();
     service = new StandaloneService(dataDir, () => restartedRuntime);
     await service.start();
-    const restored = capacityLimits(service, [projectId]);
+    const restored = capacityLimits(service);
     assert.equal(restored.globalLimit, 2);
+    assert.equal(restored.minimumLeadSlots, 1);
+    assert.deepEqual(restored.agentOverrides, { [profileId]: 1 });
     assert.equal(restored.projectOverrides[projectId], 1);
     assert.equal(restored.currentUsage.global, 0);
     assert.equal(restartedRuntime.turns, 0);
   } finally {
     active.resolve();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** A started service whose turns all block until `release` resolves. */
+async function capacityWorld(prefix: string) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  const runtime = new GatedRuntime();
+  const service = new StandaloneService(join(root, "data"), () => runtime);
+  const active = deferred();
+  let entered = 0;
+  runtime.entered = () => entered++;
+  runtime.release = active.promise;
+  await service.start();
+  return {
+    root,
+    runtime,
+    service,
+    entered: () => entered,
+    async close() {
+      active.resolve();
+      await service.stop();
+      rmSync(root, { recursive: true, force: true });
+    },
+    release: () => active.resolve(),
+  };
+}
+
+async function waitForState(
+  service: StandaloneService,
+  workId: string | undefined,
+  state: string,
+  reason?: string,
+) {
+  assert.equal(
+    await waitUntil(() => {
+      const current = stateOf(service, workId);
+      return (
+        current.state === state &&
+        (reason === undefined || current.reason === reason)
+      );
+    }, 30000),
+    true,
+    JSON.stringify({ workId, intents: service.list() }),
+  );
+}
+
+test("held lead slots admit leads, are never lent to workers, and lead turns also use free general slots", async () => {
+  const w = await capacityWorld("cab-capacity-lead-slots-");
+  try {
+    const profileId = await addProfile(w.service);
+    const projectId = await addProject(w.service, profileId);
+    await configureCapacity(w.service, 3, {}, 1);
+    const workers = [];
+    for (const brief of ["Worker one", "Worker two", "Worker three"])
+      workers.push(
+        await addReadyAssignment(w.service, projectId, profileId, brief),
+      );
+    await waitForState(
+      w.service,
+      workers[2]?.workId,
+      "capacity-waiting",
+      "Capacity waiting: held for lead turns (1)",
+    );
+    assert.equal(await waitUntil(() => w.runtime.turns === 2), true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(w.runtime.turns, 2, "the free held slot is not lent");
+
+    const first = await addReadyLeadTask(w.service, projectId, "Lead one");
+    await waitForState(w.service, leadWork(w.service, first), "running");
+    assert.equal(await waitUntil(() => w.runtime.turns === 3), true);
+    assert.equal(
+      stateOf(w.service, workers[2]?.workId).state,
+      "capacity-waiting",
+    );
+    const second = await addReadyLeadTask(w.service, projectId, "Lead two");
+    await waitForState(
+      w.service,
+      leadWork(w.service, second),
+      "capacity-waiting",
+      "Capacity waiting: global active-turn limit (3)",
+    );
+  } finally {
+    await w.close();
+  }
+});
+
+test("a lead turn takes a free general slot once the held slots are used", async () => {
+  const w = await capacityWorld("cab-capacity-lead-general-");
+  try {
+    const profileId = await addProfile(w.service);
+    const projectId = await addProject(w.service, profileId);
+    await configureCapacity(w.service, 3, {}, 1);
+    const leads = [];
+    for (const title of ["Lead one", "Lead two"])
+      leads.push(await addReadyLeadTask(w.service, projectId, title));
+    for (const task of leads)
+      await waitForState(w.service, leadWork(w.service, task), "running");
+    const worker = await addReadyAssignment(
+      w.service,
+      projectId,
+      profileId,
+      "Worker",
+    );
+    await waitForState(w.service, worker.workId, "running");
+    assert.equal(w.service.capacityLimits().currentUsage.lead, 2);
+    assert.equal(w.service.capacityLimits().currentUsage.global, 3);
+  } finally {
+    await w.close();
+  }
+});
+
+test("zero minimum lead slots is a single shared pool", async () => {
+  const w = await capacityWorld("cab-capacity-shared-pool-");
+  try {
+    const profileId = await addProfile(w.service);
+    const projectId = await addProject(w.service, profileId);
+    await configureCapacity(w.service, 3, {}, 0);
+    const workers = [];
+    for (const brief of ["One", "Two", "Three", "Four"])
+      workers.push(
+        await addReadyAssignment(w.service, projectId, profileId, brief),
+      );
+    for (const worker of workers.slice(0, 3))
+      await waitForState(w.service, worker.workId, "running");
+    await waitForState(
+      w.service,
+      workers[3]?.workId,
+      "capacity-waiting",
+      "Capacity waiting: global active-turn limit (3)",
+    );
+  } finally {
+    await w.close();
+  }
+});
+
+test("an agent cap holds only that agent's turns, across projects, without blocking later work", async () => {
+  const w = await capacityWorld("cab-capacity-agent-cap-");
+  try {
+    const capped = await addProfile(w.service);
+    const other = await addProfile(w.service);
+    const projectA = await addProject(w.service, capped);
+    const projectB = await addProject(w.service, capped);
+    const projectC = await addProject(w.service, other);
+    await configureCapacity(w.service, 6, {}, 0, { [capped]: 1 });
+    const first = await addReadyAssignment(w.service, projectA, capped, "A");
+    await waitForState(w.service, first.workId, "running");
+    const held = await addReadyAssignment(w.service, projectB, capped, "B");
+    const later = await addReadyAssignment(w.service, projectC, other, "C");
+    await waitForState(w.service, later.workId, "running");
+    await waitForState(
+      w.service,
+      held.workId,
+      "capacity-waiting",
+      "Capacity waiting: agent active-turn limit (1)",
+    );
+    // The capped agent's lead turns count too.
+    const lead = await addReadyLeadTask(w.service, projectA, "Lead");
+    await waitForState(
+      w.service,
+      leadWork(w.service, lead),
+      "capacity-waiting",
+      "Capacity waiting: agent active-turn limit (1)",
+    );
+    assert.equal(w.service.capacityLimits().currentUsage.agents[capped], 1);
+  } finally {
+    await w.close();
+  }
+});
+
+test("a project cap counts only non-lead turns, so workers never block the project's lead", async () => {
+  const w = await capacityWorld("cab-capacity-project-cap-");
+  try {
+    const profileId = await addProfile(w.service);
+    const projectId = await addProject(w.service, profileId);
+    await configureCapacity(w.service, 6, { [projectId]: 1 }, 0);
+    const first = await addReadyAssignment(
+      w.service,
+      projectId,
+      profileId,
+      "One",
+    );
+    await waitForState(w.service, first.workId, "running");
+    const second = await addReadyAssignment(
+      w.service,
+      projectId,
+      profileId,
+      "Two",
+    );
+    await waitForState(
+      w.service,
+      second.workId,
+      "capacity-waiting",
+      "Capacity waiting: project active-turn limit (1)",
+    );
+    const lead = await addReadyLeadTask(w.service, projectId, "Lead");
+    await waitForState(w.service, leadWork(w.service, lead), "running");
+    const usage = w.service.capacityLimits().currentUsage;
+    assert.equal(usage.projects[projectId], 1);
+    assert.equal(usage.lead, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+test("an upgraded store keeps its global cap and overrides, classifies held reservations and drops the project default", async () => {
+  const w = await capacityWorld("cab-capacity-upgrade-");
+  const dataDir = join(w.root, "data");
+  let service = w.service;
+  try {
+    const profileId = await addProfile(service);
+    const projectId = await addProject(service, profileId);
+    const other = await addProject(service, profileId);
+    await configureCapacity(service, 4, { [projectId]: 3 }, 0);
+    const lead = await addReadyLeadTask(service, projectId, "Lead");
+    const leadWorkId = leadWork(service, lead);
+    await waitForState(service, leadWorkId, "running");
+    w.release();
+    await waitForState(service, leadWorkId, "completed");
+    await service.stop();
+    // Rebuild the capacity tables as they were before lead slots and agent caps.
+    const db = new DatabaseSync(join(dataDir, "standalone.sqlite"));
+    db.exec(`
+      CREATE TABLE legacy_limits (singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        globalLimit INTEGER NOT NULL CHECK(globalLimit > 0));
+      INSERT INTO legacy_limits SELECT singleton, globalLimit FROM scheduler_capacity_limits;
+      DROP TABLE scheduler_capacity_limits;
+      ALTER TABLE legacy_limits RENAME TO scheduler_capacity_limits;
+      CREATE TABLE legacy_reservations (workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+        projectId TEXT, admittedAt INTEGER NOT NULL DEFAULT (unixepoch()));
+      INSERT INTO legacy_reservations SELECT workId, projectId, admittedAt FROM execution_capacity_reservations;
+      -- A lead turn still holding capacity when the store was upgraded.
+      INSERT INTO legacy_reservations (workId, projectId) VALUES ('${leadWorkId}', '${projectId}');
+      DROP TABLE execution_capacity_reservations;
+      ALTER TABLE legacy_reservations RENAME TO execution_capacity_reservations;
+      DROP TABLE scheduler_agent_capacity_limits;`);
+    db.close();
+    const runtime = new GatedRuntime();
+    service = new StandaloneService(dataDir, () => runtime);
+    await service.start();
+    const upgraded = service.capacityLimits();
+    assert.equal(upgraded.globalLimit, 4);
+    assert.equal(upgraded.minimumLeadSlots, 1);
+    assert.deepEqual(upgraded.projectOverrides, { [projectId]: 3 });
+    assert.deepEqual(upgraded.agentOverrides, {});
+    assert.equal(
+      upgraded.currentUsage.lead,
+      1,
+      "the held lead turn stays a lead turn",
+    );
+    assert.equal(upgraded.currentUsage.agents[profileId], 1);
+    assert.equal(upgraded.currentUsage.projects[projectId] ?? 0, 0);
+    assert.equal(other in upgraded.projectOverrides, false);
+  } finally {
+    await service.stop();
+    rmSync(w.root, { recursive: true, force: true });
+  }
+});
+
+test("resumed work is admitted before unstarted work, oldest first within each group", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-admission-order-"));
+  const runtime = new GatedRuntime();
+  const service = new StandaloneService(join(root, "data"), () => runtime);
+  const gates: Array<() => void> = [];
+  // Each turn blocks on its own gate, so turns finish one at a time.
+  runtime.entered = () => {
+    const gate = deferred();
+    gates.push(gate.resolve);
+    runtime.release = gate.promise;
+  };
+  const workspaces = ["earlier", "blocker", "new-one", "new-two"].map(
+    (name) => {
+      const path = join(root, name);
+      mkdirSync(path);
+      return path;
+    },
+  );
+  const [earlierSpace, blockerSpace, newOne, newTwo] = workspaces as [
+    string,
+    string,
+    string,
+    string,
+  ];
+  const finishLatest = async (count: number) => {
+    assert.equal(await waitUntil(() => gates.length === count, 30000), true);
+    gates[count - 1]?.();
+  };
+  const pending: Promise<unknown>[] = [];
+  try {
+    await service.start();
+    const profileId = await addProfile(service);
+    const projectId = await addProject(service, profileId);
+    await configureCapacity(service, 1, {}, 0);
+    const started = await addReadyAssignment(
+      service,
+      projectId,
+      profileId,
+      "Started assignment",
+    );
+    await finishLatest(1);
+    await waitForState(service, started.workId, "completed");
+    pending.push(service.submit("earlier", "Earlier direct", earlierSpace));
+    await finishLatest(2);
+    await waitForState(service, "earlier", "completed");
+
+    pending.push(service.submit("blocker", "Blocker direct", blockerSpace));
+    assert.equal(await waitUntil(() => gates.length === 3, 30000), true);
+    const unstarted = await addReadyAssignment(
+      service,
+      projectId,
+      profileId,
+      "Unstarted assignment",
+    );
+    pending.push(service.submit("new-one", "New direct one", newOne));
+    pending.push(service.submit("new-two", "New direct two", newTwo));
+    await waitForState(service, unstarted.workId, "capacity-waiting");
+    await service.submitTask(
+      "assignment-resume",
+      started.assignmentId,
+      "Resumed assignment",
+      started.workId,
+    );
+    // A worker newly delegated on a task underway is resumed work too.
+    execute(service, {
+      type: "assignment.create",
+      actor: "agent",
+      projectId,
+      taskId: started.taskId,
+      assignmentId: randomUUID(),
+      profileId,
+      brief: "Delegated assignment",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
+    pending.push(
+      service.submit(
+        "direct-resume",
+        "Resumed direct",
+        earlierSpace,
+        "earlier",
+      ),
+    );
+    await waitForState(service, "direct-resume", "capacity-waiting");
+
+    for (let turn = 3; turn <= 8; turn++) await finishLatest(turn);
+    await finishLatest(9);
+    const order = [
+      "Resumed assignment",
+      "Delegated assignment",
+      "Resumed direct",
+      "Unstarted assignment",
+      "New direct one",
+      "New direct two",
+    ].map((marker) =>
+      runtime.prompts.findIndex((prompt) => prompt.startsWith(marker)),
+    );
+    assert.deepEqual(
+      order,
+      [3, 4, 5, 6, 7, 8],
+      JSON.stringify(runtime.prompts),
+    );
+  } finally {
+    for (const release of gates) release();
+    await Promise.allSettled(pending);
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }

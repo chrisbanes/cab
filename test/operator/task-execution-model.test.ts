@@ -6,6 +6,7 @@ import {
   evidenceNotice,
   executionHoldLines,
   executionStatus,
+  partitionRecoveryRecords,
   recoveryAssignmentFacts,
   recoveryTaskFacts,
   recordLine,
@@ -145,6 +146,26 @@ test("evidence notices distinguish unavailable, none and omitted records", () =>
     recordLine(record),
     "Intent held · request not recorded · holds: writer · no receipt · 1 pending effect",
   );
+});
+
+test("only terminal, effect-free, unheld recovery records collapse as settled", () => {
+  const done = {
+    ...record,
+    intentState: "completed" as const,
+    requestState: "completed" as const,
+    holds: { ...none },
+    pendingEffectCount: 0,
+  };
+  const reconciled = { ...done, intentState: "reconciled" as const };
+  const held = { ...done, holds: { ...none, writer: true } };
+  const pending = { ...done, pendingEffectCount: 1 };
+  const unknown = { ...done, intentState: "unknown" as const };
+  const unfinished = { ...done, requestState: "active" as const };
+  const records = [held, done, pending, unknown, reconciled, unfinished];
+  assert.deepEqual(partitionRecoveryRecords(records), {
+    active: [held, pending, unknown, unfinished],
+    settled: [done, reconciled],
+  });
 });
 
 test("admission and revision staleness wording", () => {

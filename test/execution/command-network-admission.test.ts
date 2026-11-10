@@ -92,6 +92,82 @@ function admissionFixture() {
   return { f, setNetwork, setListening, setSkipSandbox, ready, admit };
 }
 
+test("reasoning opt-in is snapshotted at admission for either task harness and survives restart", () => {
+  const { f, ready, admit } = admissionFixture();
+  try {
+    f.db.exec(
+      "UPDATE scheduler_capacity_limits SET globalLimit = 20 WHERE singleton = 1",
+    );
+    const configure = (fields: object) =>
+      f.domain.execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: Number(f.domain.project(projectId).version),
+        ...fields,
+      });
+    const earlier = ready(taskA);
+    const queued = ready(taskB, "claude");
+    assert.equal(f.state.reasoningSummaries(queued.id), null);
+    assert.equal(admit(earlier), true);
+    configure({ reasoningSummaries: true });
+    assert.equal(admit(queued), true);
+    assert.equal(f.state.reasoningSummaries(earlier.id), false);
+    assert.equal(f.state.reasoningSummaries(queued.id), true);
+    const codex = ready(taskA);
+    assert.equal(admit(codex), true);
+    assert.equal(f.state.reasoningSummaries(codex.id), true);
+    configure({ diagnosticCapture: "baseline" });
+    const later = ready(taskB, "claude");
+    assert.equal(admit(later), true);
+    assert.equal(f.state.reasoningSummaries(later.id), false);
+    configure({ diagnosticCapture: "enhanced", reasoningSummaries: true });
+    const draft = f.state.create(
+      "drafting:reasoning",
+      "draft",
+      "/tmp/reasoning-draft",
+    );
+    assert.equal(admit(draft), true);
+    assert.equal(f.state.reasoningSummaries(draft.id), false);
+    configure({ reasoningSummaries: false });
+    f.reopen();
+    assert.equal(f.state.reasoningSummaries(queued.id), true);
+    assert.equal(f.domain.reasoningSummaries(projectId), false);
+  } finally {
+    f.close();
+  }
+});
+
+test("reasoning table migration preserves projects and historical turns and is repeatable", () => {
+  const { f } = admissionFixture();
+  try {
+    const project = f.domain.project(projectId);
+    const historical = f.state.byWorkId("work-child-a");
+    f.db.exec(
+      "DROP TABLE execution_intent_reasoning_summaries; DROP TABLE project_reasoning_summaries",
+    );
+    f.reopen();
+    assert.deepEqual(f.domain.project(projectId), project);
+    assert.deepEqual(f.state.byWorkId("work-child-a"), historical);
+    assert.equal(f.domain.reasoningSummaries(projectId), false);
+    assert.equal(f.state.reasoningSummaries(String(historical?.id)), null);
+    f.domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(f.domain.project(projectId).version),
+      reasoningSummaries: true,
+    });
+    f.reopen();
+    assert.equal(f.domain.reasoningSummaries(projectId), true);
+    assert.deepEqual(f.db.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    f.close();
+  }
+});
+
 test("a turn records the project's command network setting at its own admission", () => {
   const { f, setNetwork, ready, admit } = admissionFixture();
   try {

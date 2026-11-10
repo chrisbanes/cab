@@ -1,5 +1,9 @@
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
-import { noRuleText } from "../../src/operator/readiness-text.js";
+import {
+  missingProjectSelectionWarning,
+  noRuleText,
+  projectFieldSelectionGap,
+} from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { CircleCheck } from "lucide-react";
 import { Button, StatusBadge } from "./components.js";
@@ -7,6 +11,7 @@ import type { TabProps } from "./project-config.js";
 import {
   adoptSourceRows,
   closedIssueLabels,
+  closureCompletionNote,
   duplicateSourceIds,
   nextSelectionId,
   parseRows,
@@ -211,6 +216,22 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     observed?.selections.find((o) => o.selectionId === id);
   const projectSources = data.source.selections.filter(
     (s) => s.kind === "project" && s.descriptor,
+  );
+  const missingProjectFieldSelection = projectFieldSelectionGap(
+    conditions.map((condition) => ({
+      kind: String(condition.kind),
+      projectNodeId: condition.projectNodeId,
+    })),
+    selections.map((r) => ({
+      kind: String(r.kind),
+      descriptor: r.keep
+        ? String(r.descriptor ?? "")
+        : String(r.projectNodeId ?? ""),
+      removed: Boolean(r.removed),
+      unknown: Boolean(
+        r.kind === "project" && (r.unavailable || (r.keep && !r.descriptor)),
+      ),
+    })),
   );
   /** The Remove and Undo names carry the S-n id, so two rows with one name stay distinct. */
   const rowName = (n: SourceNaming, id: unknown) =>
@@ -551,6 +572,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                   projectId={projectId}
                   rule={observed.readiness}
                   counts={s.counts}
+                  projectSelections={data.source.selections}
                   sameTab
                 />
               );
@@ -583,6 +605,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 "readiness",
                 "source-conditions-error",
                 "Check readiness mode and complete conditions.",
+              )}
+              {missingProjectFieldSelection && (
+                <Alert variant="warning" role="status">
+                  {missingProjectSelectionWarning(
+                    v.mode === "any" ? "any" : "all",
+                  )}
+                </Alert>
               )}
               {data.source.readiness.kind === "unavailable" ? (
                 <p className="metadata muted">
@@ -733,7 +762,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
             <DraftField
               draft={d}
               field="closedIssues"
-              label="Closed GitHub issues"
+              label="Closed issues at import"
             >
               {Object.entries(closedIssueLabels).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -741,10 +770,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 </option>
               ))}
             </DraftField>
-            <p className="metadata muted">
-              Treat closure as Done marks the task closed on GitHub, not
-              delivered by cab, once its work has stopped.
-            </p>
+            <p className="metadata muted">{closureCompletionNote}</p>
           </Panel>
         </div>
         <div className="settings-column">

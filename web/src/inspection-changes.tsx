@@ -29,14 +29,14 @@ import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
 import { changeLineCounts } from "./file-change-markers.js";
 import { failureCause } from "./outcome-copy.js";
-import { shortId } from "./presentation.js";
+import { shortId, workspaceStateText } from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
 import { ChangesWorkbench, FilesPanelToggle } from "./changes-pane.js";
 import { treePaths } from "./diff-model.js";
 import { FileDiffView, useNarrowViewport, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
-import { useOperatorResource } from "./resource.js";
+import { readConflicted, useOperatorResource } from "./resource.js";
 import { comparisonSideAnchor } from "./review-anchor.js";
 import type {
   TaskChangeSelection,
@@ -251,6 +251,8 @@ function useTaskRepositories(
   return useOperatorResource(
     `${session.csrfToken}:${taskId}:changes-repositories`,
     loader,
+    true,
+    readConflicted,
   );
 }
 
@@ -743,7 +745,11 @@ export function TaskWorkspaceChanges({
           {directory?.state === "ready" && repositories.length === 0
             ? "No repository is bound to this task. Branch and Uncommitted are unavailable; Last turn remains available."
             : directory?.state
-              ? `Repository listing is ${directory.state}; repository identity is unavailable.`
+              ? workspaceStateText(
+                  "Repository listing",
+                  directory.state,
+                  "repository identity is unavailable",
+                )
               : "Loading this task's bound repositories…"}
         </p>
       )}

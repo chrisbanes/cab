@@ -7,7 +7,6 @@ import {
   type Values,
 } from "./settings-changes.js";
 import { Alert } from "./ui/alert.js";
-import { Input } from "./ui/input.js";
 import type { TabProps } from "./project-config.js";
 import { joinNames } from "./settings-view.js";
 import {
@@ -18,7 +17,6 @@ import {
   Panel,
   PrivateTextField,
   ReferenceInput,
-  locked,
   reloadDraft,
   revealedText,
   submitDraft,
@@ -28,9 +26,6 @@ import {
   textHold,
   usePrivateValues,
 } from "./settings.js";
-
-const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
-  [r.name ?? "Name unavailable", r.summary].filter(Boolean).join(" · ");
 
 /** TypeSafe availability in words; disabled is the only state with routing off. */
 const availabilityLabel = {
@@ -113,9 +108,6 @@ export function RoutingTab(p: TabProps) {
   const lines = routingChanges(data, d.values, revealed);
   const holdSave =
     typeof d.values.guidance === "string" && revealed === undefined;
-  const candidates = Array.isArray(d.values.candidateProfileIds)
-    ? d.values.candidateProfileIds
-    : [];
   const names = (ids: string[]) =>
     ids.map(
       (id) =>
@@ -165,34 +157,11 @@ export function RoutingTab(p: TabProps) {
                 not.
               </p>
             </PrivateTextField>
-            <fieldset className="settings-candidates" disabled={locked(d)}>
-              <legend className="small-heading">Candidate agents</legend>
-              {data.profiles.map((r) => (
-                <label
-                  key={r.id}
-                  className="check-field body"
-                  htmlFor={`candidate-${r.id}`}
-                >
-                  <Input
-                    id={`candidate-${r.id}`}
-                    type="checkbox"
-                    className="native-check size-5 shrink-0 p-0 accent-foreground"
-                    checked={!r.revoked && candidates.includes(r.id)}
-                    disabled={r.revoked}
-                    onChange={(e) =>
-                      d.set(
-                        "candidateProfileIds",
-                        e.target.checked
-                          ? [...candidates, r.id]
-                          : candidates.filter((id) => id !== r.id),
-                      )
-                    }
-                  />
-                  {profileLabel(r)}
-                  {r.revoked ? " (revoked)" : ""}
-                </label>
-              ))}
-            </fieldset>
+            <p className="body muted">
+              Routing chooses only from Permitted agents. This list also
+              controls who the lead may delegate to when routing is off. Edit it
+              in the Permitted agents section.
+            </p>
             <ReferenceInput draft={d} />
             <ChangeList lines={lines} />
             <DraftOutcome

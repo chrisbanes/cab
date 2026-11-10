@@ -12,6 +12,7 @@ import {
   DomainPolicyError,
   DomainStaleDispositionError,
   DomainStore,
+  migrateCapacityLimits,
 } from "../../src/core/domain.js";
 import { materialDigest } from "../../src/core/delivery.js";
 import { Store } from "../../src/core/store.js";
@@ -112,6 +113,29 @@ test("nested assignments stay on the requester's task", () => {
         outcome: "Ship",
         ready: true,
       });
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: "20000000-0000-4000-8000-000000000002",
+      name: "Unpermitted",
+      instructions: "Work",
+      capabilities: "code",
+    });
+    assert.throws(
+      () =>
+        run(f.domain, {
+          type: "assignment.create",
+          actor: "agent",
+          projectId: p,
+          taskId: a,
+          assignmentId: allocated,
+          profileId: "20000000-0000-4000-8000-000000000002",
+          brief: "Try to delegate",
+          resultDestination: "requester:A",
+          requesterAssignmentId: assignment,
+        }),
+      /Permitted agents in project Settings/,
+    );
     run(f.domain, {
       type: "assignment.create",
       actor: "agent",
@@ -1544,106 +1568,118 @@ test("dependency authority, cycle and unknown imported-blocker holds survive res
 test("capacity limits default, configure sparsely, replay and persist", () => {
   const f = fixture();
   const otherProject = "10000000-0000-4000-8000-000000000003";
-  const limits = (projectIds: string[] = []) =>
-    (
-      f.domain as unknown as {
-        capacityLimits(ids: string[]): {
-          globalLimit: number;
-          defaultProjectLimit: number;
-          projectOverrides: Record<string, number>;
-          currentUsage: { global: number; projects: Record<string, number> };
-          effectiveProjectLimits: Record<string, number>;
-        };
-      }
-    ).capacityLimits(projectIds);
+  const limits = () => f.domain.capacityLimits();
   try {
     run(f.domain, {
-      type: "project.create",
+      type: "profile.create",
       actor: "operator",
-      projectId: p,
-      name: "Project",
-      leadProfileId: null,
+      profileId: profile,
+      name: "Lead",
+      instructions: "i",
+      capabilities: "c",
     });
-    run(f.domain, {
-      type: "project.create",
-      actor: "operator",
-      projectId: q,
-      name: "Other project",
-      leadProfileId: null,
+    for (const [projectId, name] of [
+      [p, "Project"],
+      [q, "Other project"],
+    ] as const)
+      run(f.domain, {
+        type: "project.create",
+        actor: "operator",
+        projectId,
+        name,
+        leadProfileId: null,
+      });
+    // New installations: six slots, one held for lead turns, no project or agent limits.
+    assert.deepEqual(limits(), {
+      globalLimit: 6,
+      minimumLeadSlots: 1,
+      projectOverrides: {},
+      agentOverrides: {},
+      currentUsage: { global: 0, lead: 0, projects: {}, agents: {} },
     });
-    assert.equal(limits([p, q]).globalLimit, 4);
-    assert.equal(limits([p, q]).defaultProjectLimit, 2);
-    assert.deepEqual(limits([p, q]).effectiveProjectLimits, { [p]: 2, [q]: 2 });
 
     const initial = {
       type: "capacity.configure" as const,
       actor: "operator" as const,
-      globalLimit: 6,
+      globalLimit: 8,
+      minimumLeadSlots: 2,
       projectOverrides: { [p]: 3, [q]: 1 },
+      agentOverrides: { [profile]: 2 },
       key: key(),
     };
-    const first = f.domain.execute(initial as never);
-    assert.deepEqual(f.domain.execute(initial as never), first);
-    const configured = limits([p, q]);
-    assert.equal(configured.globalLimit, 6);
+    const first = f.domain.execute(initial);
+    assert.deepEqual(f.domain.execute(initial), first);
+    const configured = limits();
+    assert.equal(configured.globalLimit, 8);
+    assert.equal(configured.minimumLeadSlots, 2);
     assert.deepEqual(configured.projectOverrides, { [p]: 3, [q]: 1 });
-    assert.deepEqual(configured.effectiveProjectLimits, { [p]: 3, [q]: 1 });
-    assert.deepEqual(configured.currentUsage, { global: 0, projects: {} });
+    assert.deepEqual(configured.agentOverrides, { [profile]: 2 });
 
     assert.throws(
-      () =>
-        f.domain.execute({
-          ...initial,
-          globalLimit: 5,
-        } as never),
+      () => f.domain.execute({ ...initial, globalLimit: 5 }),
       /Command key already used with different payload/,
     );
-    assert.throws(
-      () =>
-        run(f.domain, {
-          type: "capacity.configure",
-          actor: "agent",
-          globalLimit: 5,
-          projectOverrides: {},
-        } as never),
-      /Operator authority required/,
-    );
-    assert.throws(
-      () =>
-        run(f.domain, {
-          type: "capacity.configure",
-          actor: "operator",
-          globalLimit: 0,
-          projectOverrides: {},
-        } as never),
-      /expected number to be >0/,
-    );
-    assert.throws(
-      () =>
-        run(f.domain, {
-          type: "capacity.configure",
-          actor: "operator",
-          globalLimit: 5,
-          projectOverrides: { [otherProject]: 1 },
-        } as never),
+    const refused = (command: Record<string, unknown>, expected: RegExp) =>
+      assert.throws(
+        () =>
+          run(f.domain, {
+            type: "capacity.configure",
+            actor: "operator",
+            globalLimit: 5,
+            minimumLeadSlots: 1,
+            projectOverrides: {},
+            ...command,
+          } as never),
+        expected,
+      );
+    refused({ actor: "agent" }, /Operator authority required/);
+    refused({ globalLimit: 0 }, /expected number to be >0/);
+    refused({ minimumLeadSlots: 5 }, /below the global active-turn cap/);
+    refused({ minimumLeadSlots: -1 }, /expected number to be >=0/);
+    refused(
+      { projectOverrides: { [otherProject]: 1 } },
       /Unknown domain record/,
     );
-    assert.equal(limits([p, q]).globalLimit, 6, "invalid changes roll back");
+    refused({ agentOverrides: { [otherProject]: 1 } }, /Unknown domain record/);
+    refused({ agentOverrides: { [profile]: 0 } }, /expected number to be >0/);
+    assert.deepEqual(limits(), configured, "invalid changes roll back");
 
     run(f.domain, {
       type: "capacity.configure",
       actor: "operator",
       globalLimit: 5,
+      minimumLeadSlots: 0,
       projectOverrides: { [p]: null },
-    } as never);
-    assert.deepEqual(limits([p, q]).projectOverrides, { [q]: 1 });
-    assert.deepEqual(limits([p, q]).effectiveProjectLimits, { [p]: 2, [q]: 1 });
+      agentOverrides: { [profile]: null },
+    });
+    assert.deepEqual(limits().projectOverrides, { [q]: 1 });
+    assert.deepEqual(limits().agentOverrides, {});
     f.reopen();
-    assert.equal(limits([p, q]).globalLimit, 5);
-    assert.deepEqual(limits([p, q]).projectOverrides, { [q]: 1 });
-    assert.deepEqual(limits([p, q]).effectiveProjectLimits, { [p]: 2, [q]: 1 });
+    assert.equal(limits().globalLimit, 5);
+    assert.equal(limits().minimumLeadSlots, 0);
+    assert.deepEqual(limits().projectOverrides, { [q]: 1 });
   } finally {
     f.close();
+  }
+});
+
+test("an upgraded global cap of one keeps a single shared slot", () => {
+  for (const [stored, lead] of [
+    [1, 0],
+    [4, 1],
+  ] as const) {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`CREATE TABLE scheduler_capacity_limits (
+      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+      globalLimit INTEGER NOT NULL CHECK(globalLimit > 0));
+      INSERT INTO scheduler_capacity_limits VALUES (1, ${stored})`);
+    migrateCapacityLimits(db);
+    migrateCapacityLimits(db);
+    assert.deepEqual(
+      { ...db.prepare("SELECT * FROM scheduler_capacity_limits").get() },
+      { singleton: 1, globalLimit: stored, minimumLeadSlots: lead },
+    );
+    db.close();
   }
 });
 
@@ -2036,6 +2072,7 @@ test("configuration command hashes stay byte-identical", () => {
         ...base,
         key: k(6),
         type: "capacity.configure",
+        minimumLeadSlots: 0,
         globalLimit: 4,
         projectOverrides: { [p]: 3 },
       },
@@ -2058,7 +2095,7 @@ test("configuration command hashes stay byte-identical", () => {
         "5f3ea4462901b3bb3e0f06158bd9f94c3fae30fbce8faf170dd64b32eb600339",
         "d6fc29a1518156974b95dc694ff381d9667b3cbd09f2569d14f716c5f078a5a4",
         "ee35f40a45a5fbf94c74a9e6647ffb27226bbcf277bc7a8fc0c29bf962d3acff",
-        "9a4def4ed9c1e0cdff521924954021e08fb823d0a8c4fb5e5b76bb50fb1503a5",
+        "bb4b399b6d0e24ea914de574b2e2ce1343957bdab77bc497b83a138136a50969",
       ],
     );
   } finally {
@@ -2333,8 +2370,13 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
       actor: "operator" as const,
       key: key(),
       globalLimit: 5,
+      minimumLeadSlots: 1,
       projectOverrides: { [p]: 3 },
-      expectedCurrent: { globalLimit: 4, projectOverrides: { [p]: null } },
+      expectedCurrent: {
+        globalLimit: 6,
+        minimumLeadSlots: 1,
+        projectOverrides: { [p]: null },
+      },
     };
     const applied = f.domain.execute(guarded);
     assert.deepEqual(limits().projectOverrides, { [p]: 3 });
@@ -2347,6 +2389,7 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
       type: "capacity.configure",
       actor: "operator",
       key: key(),
+      minimumLeadSlots: 0,
       globalLimit: 7,
     });
     assert.deepEqual(f.domain.execute(guarded), applied);
@@ -2358,9 +2401,10 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
       ).n;
     const before = receipts();
     for (const expectedCurrent of [
-      { globalLimit: 5, projectOverrides: {} },
-      { globalLimit: 7, projectOverrides: { [p]: null } },
-      { globalLimit: 7, projectOverrides: { [p]: 2 } },
+      { minimumLeadSlots: 0, globalLimit: 5, projectOverrides: {} },
+      { minimumLeadSlots: 0, globalLimit: 7, projectOverrides: { [p]: null } },
+      { minimumLeadSlots: 0, globalLimit: 7, projectOverrides: { [p]: 2 } },
+      { minimumLeadSlots: 1, globalLimit: 7, projectOverrides: { [p]: 3 } },
     ])
       assert.throws(
         () =>
@@ -2369,6 +2413,7 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
             actor: "operator",
             key: key(),
             globalLimit: 1,
+            minimumLeadSlots: 0,
             projectOverrides: { [p]: 1 },
             expectedCurrent,
           }),
@@ -2382,15 +2427,24 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
       type: "capacity.configure",
       actor: "operator",
       key: key(),
+      minimumLeadSlots: 0,
       globalLimit: 7,
       projectOverrides: { [q]: 1 },
-      expectedCurrent: { globalLimit: 7, projectOverrides: { [q]: null } },
+      expectedCurrent: {
+        minimumLeadSlots: 0,
+        globalLimit: 7,
+        projectOverrides: { [q]: null },
+      },
     });
     assert.throws(
       () =>
         f.domain.execute({
           ...guarded,
-          expectedCurrent: { globalLimit: 5, projectOverrides: {} },
+          expectedCurrent: {
+            minimumLeadSlots: 0,
+            globalLimit: 5,
+            projectOverrides: {},
+          },
         }),
       DomainConflictError,
     );

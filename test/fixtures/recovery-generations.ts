@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -19,9 +20,53 @@ import type {
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
+import { canonicalMaterial } from "../../src/core/delivery.js";
 import { databaseDigest } from "./database-digest.js";
+import { activeWorkIdsOf, startedOf } from "./service-internals.js";
 import { loginCli, startCliService } from "./operator-cli.js";
 import { until } from "./until.js";
+
+/** Runs the runtime's pre-failure hook, then returns the error to throw. */
+export function failing(
+  beforeFailure: ((error: Error) => void) | undefined,
+  error: Error,
+): Error {
+  beforeFailure?.(error);
+  return error;
+}
+
+/**
+ * Holds the one submitting execution exactly as a pre-turn failure was held before such
+ * failures became refusals: an archived resume rejection captures its runtime witness,
+ * anything else is held as an uncertain submission. Called by a fake runtime just before
+ * it throws, so the service keeps that hold and the generation matches a record created
+ * by an earlier build.
+ */
+export function holdAsBeforeRefusals(
+  service: StandaloneService,
+  error: Error,
+): void {
+  const { state } = startedOf(service);
+  const intent = required(state.list().find((i) => i.state === "submitting"));
+  if (
+    error instanceof ArchivedResumeRejectedError &&
+    state.capturePreTurnRejection(intent.workId, error.rejection)
+  )
+    return;
+  state.hold(
+    intent.id,
+    `Runtime submission or observation uncertain: ${String(error)}`,
+  );
+}
+
+/** Makes `runtime` hold each pre-turn failure of `service` as an earlier build did. */
+export function bindLegacyHold(
+  runtime: { beforeFailure: ((error: Error) => void) | undefined },
+  service: StandaloneService,
+): StandaloneService {
+  runtime.beforeFailure = (error) => holdAsBeforeRefusals(service, error);
+  return service;
+}
 
 /** Copied from no-turn-recovery.test.ts: thread start fails before any turn invocation. */
 export class NoTurnRuntime implements Runtime {
@@ -40,9 +85,11 @@ export class NoTurnRuntime implements Runtime {
   processIdentity() {
     return this.identity;
   }
+  beforeFailure: ((error: Error) => void) | undefined;
   async startThread() {
     const id = `possibly-created-idle-thread-${++this.threads}`;
-    if (this.rejectStart) throw new Error("Runtime stopped");
+    if (this.rejectStart)
+      throw failing(this.beforeFailure, new Error("Runtime stopped"));
     return id;
   }
   async resumeThread() {
@@ -80,6 +127,7 @@ export class PreTurnRuntime implements Runtime {
   completionResults: RuntimeToolResult[] = [];
   rejectResume = false;
   resumeError: Error | undefined;
+  beforeFailure: ((error: Error) => void) | undefined;
   private listener:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
     | undefined;
@@ -97,15 +145,18 @@ export class PreTurnRuntime implements Runtime {
     return `thread-${++this.threads}`;
   }
   async resumeThread(threadId: string) {
-    if (this.resumeError) throw this.resumeError;
+    if (this.resumeError) throw failing(this.beforeFailure, this.resumeError);
     if (this.rejectResume)
-      throw new ArchivedResumeRejectedError({
-        method: "thread/resume",
-        requestId: 4,
-        threadId,
-        processIdentity: this.identity,
-        error: { code: -32600, message: archivedResumeMessage(threadId) },
-      });
+      throw failing(
+        this.beforeFailure,
+        new ArchivedResumeRejectedError({
+          method: "thread/resume",
+          requestId: 4,
+          threadId,
+          processIdentity: this.identity,
+          error: { code: -32600, message: archivedResumeMessage(threadId) },
+        }),
+      );
   }
   async startTurn(_thread: string, _workspace: string, prompt: string) {
     this.prompts.push(prompt);
@@ -145,7 +196,9 @@ export class PreTurnRuntime implements Runtime {
 export type GenerationMode =
   | "no-turn"
   | "pre-turn-runtime"
-  | "pre-turn-historical";
+  | "pre-turn-historical"
+  /** A resume held because cab's own schema rejected the runtime's response. */
+  | "pre-turn-defect";
 export type VerifierMode =
   | "verified"
   | "unknown"
@@ -188,7 +241,13 @@ export function generationRuntime(mode: GenerationMode) {
   if (mode === "no-turn") return new NoTurnRuntime();
   const runtime = new PreTurnRuntime();
   if (mode === "pre-turn-runtime") runtime.rejectResume = true;
-  else
+  else if (mode === "pre-turn-defect") {
+    const parsed = z
+      .object({ sandbox: z.object({ type: z.literal("workspaceWrite") }) })
+      .safeParse({ sandbox: { type: "dangerFullAccess" } });
+    assert.equal(parsed.success, false);
+    runtime.resumeError = parsed.error;
+  } else
     runtime.resumeError = new Error(
       JSON.stringify({
         code: -32600,
@@ -234,6 +293,7 @@ export async function holdGeneration(
     projectId = randomUUID(),
     taskId = randomUUID();
   const noTurn = mode === "no-turn";
+  runtime.beforeFailure = (error) => holdAsBeforeRefusals(service, error);
   command(service, {
     type: "profile.create",
     profileId,
@@ -279,7 +339,11 @@ export async function holdGeneration(
       expectedVersion: 1,
       title: "Current",
     });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   const known = new Set(service.turnRequests().map((r) => r.workId));
   if (noTurn) {
     assignmentId = String(required(service.domain().assignments(taskId)[0]).id);
@@ -335,6 +399,11 @@ export async function holdGeneration(
   await until(() => held() !== undefined, `held ${mode} generation`);
   const old = required(held());
   const workId = old.workId;
+  // The failed submission finishes settling before the generation is used.
+  await until(
+    () => !activeWorkIdsOf(service).includes(workId),
+    `settled ${mode} submission`,
+  );
   const record = required(
     service.recoveryForTask(taskId).find((r) => r.workId === workId),
   );
@@ -359,6 +428,51 @@ export async function holdGeneration(
   };
   const row = (sql: string) =>
     required(db(service).prepare(sql).get(workId) as Record<string, number>);
+  /** The exact adoption material (historical pre-turn or no-turn) an earlier build stored. */
+  const adoption = (
+    key: string = randomUUID(),
+  ): HistoricalNoTurnAdoption | HistoricalPreTurnAdoption => {
+    if (noTurn)
+      return {
+        key,
+        kind: "historical-no-turn-submission",
+        workId,
+        workRevision,
+        requestSequence: record.generation.requestSequence,
+        conversationRevision: row(
+          "SELECT conversationRevision AS v FROM task_execution_bindings WHERE workId=?",
+        ).v as number,
+        writerSequence: row(
+          "SELECT sequence AS v FROM task_writer_admissions WHERE workId=?",
+        ).v as number,
+        processIdentity,
+        retainedReason: required(old.reason),
+        evidence: noTurnEvidence(),
+        attestation: {
+          completeSynchronousWriteAheadLedger: true,
+          noStartTurnInvocation: true,
+          independentlyReviewed: true,
+          idleThreadMayExist: true,
+        },
+      };
+    return {
+      key,
+      workId,
+      workRevision,
+      requestSequence: record.generation.requestSequence,
+      predecessorWorkId: required(old.previousWorkId),
+      predecessorThreadId: "thread-1",
+      processIdentity,
+      retainedReason: `Runtime submission or observation uncertain: Error: ${JSON.stringify(rpcError)}`,
+      rpcError,
+      evidence: fixtureEvidence,
+      attestation: {
+        beforeTurnRejected: true,
+        noTurnSubmitted: true,
+        independentlyReviewed: true,
+      },
+    };
+  };
   return {
     mode,
     profileId,
@@ -393,50 +507,40 @@ export async function holdGeneration(
               independentlyReviewed: true,
             },
           },
-    /** The exact service adoption command (historical pre-turn or no-turn). */
-    adoption(
-      key: string = randomUUID(),
-    ): HistoricalNoTurnAdoption | HistoricalPreTurnAdoption {
-      if (noTurn)
-        return {
-          key,
-          kind: "historical-no-turn-submission",
-          workId,
-          workRevision,
-          requestSequence: record.generation.requestSequence,
-          conversationRevision: row(
-            "SELECT conversationRevision AS v FROM task_execution_bindings WHERE workId=?",
-          ).v as number,
-          writerSequence: row(
-            "SELECT sequence AS v FROM task_writer_admissions WHERE workId=?",
-          ).v as number,
-          processIdentity,
-          retainedReason: required(old.reason),
-          evidence: noTurnEvidence(),
-          attestation: {
-            completeSynchronousWriteAheadLedger: true,
-            noStartTurnInvocation: true,
-            independentlyReviewed: true,
-            idleThreadMayExist: true,
-          },
-        };
+    adoption,
+    /** The no-turn adoption of a held resume, naming its known predecessor. */
+    resumeAdoption(key: string = randomUUID()): HistoricalNoTurnAdoption {
       return {
         key,
+        kind: "historical-no-turn-submission",
         workId,
         workRevision,
         requestSequence: record.generation.requestSequence,
         predecessorWorkId: required(old.previousWorkId),
         predecessorThreadId: "thread-1",
+        conversationRevision: row(
+          "SELECT conversationRevision AS v FROM task_execution_bindings WHERE workId=?",
+        ).v as number,
+        writerSequence: row(
+          "SELECT sequence AS v FROM task_writer_admissions WHERE workId=?",
+        ).v as number,
         processIdentity,
-        retainedReason: `Runtime submission or observation uncertain: Error: ${JSON.stringify(rpcError)}`,
-        rpcError,
-        evidence: fixtureEvidence,
+        retainedReason: required(old.reason),
+        evidence: {
+          ...fixtureEvidence,
+          invocationLedgerSha256: "e".repeat(64),
+        },
         attestation: {
-          beforeTurnRejected: true,
-          noTurnSubmitted: true,
+          completeSynchronousWriteAheadLedger: true,
+          noStartTurnInvocation: true,
           independentlyReviewed: true,
+          idleThreadMayExist: true,
         },
       };
+    },
+    /** Records this generation's adoption as an earlier build stored it; see `adoptAsBefore`. */
+    adoptAsBefore(key: string = randomUUID()): string {
+      return adoptAsBefore(service, adoption(key));
     },
     witnessId,
     /** The exact service recovery command for the current witness. */
@@ -463,6 +567,47 @@ export async function holdGeneration(
   };
 }
 export type HeldGeneration = Awaited<ReturnType<typeof holdGeneration>>;
+
+/**
+ * Records the operator-adopted witness and command record the retired adoption routes
+ * wrote, exactly as data from an earlier build holds them. Returns the witness id.
+ */
+export function adoptAsBefore(
+  service: StandaloneService,
+  value: HistoricalNoTurnAdoption | HistoricalPreTurnAdoption,
+): string {
+  const noTurn = "kind" in value;
+  const { state } = startedOf(service);
+  const context = (
+    state as unknown as Record<string, (workId: string) => unknown>
+  )[noTurn ? "noTurnContext" : "preTurnContext"]?.call(state, value.workId);
+  assert.ok(context, "adoptable context");
+  const id = randomUUID();
+  const raw = db(service);
+  raw
+    .prepare(
+      noTurn
+        ? "INSERT INTO execution_no_turn_submissions (id,workId,contextMaterial,evidenceMaterial) VALUES (?,?,?,?)"
+        : "INSERT INTO execution_pre_turn_rejections (id,workId,source,contextMaterial,evidenceMaterial) VALUES (?,?,'operator-adopted',?,?)",
+    )
+    .run(
+      id,
+      value.workId,
+      canonicalMaterial(context),
+      canonicalMaterial(value),
+    );
+  raw
+    .prepare(
+      "INSERT INTO execution_pre_turn_commands (commandKey,scope,payloadMaterial,result) VALUES (?,?,?,?)",
+    )
+    .run(
+      value.key,
+      noTurn ? "adopt-no-turn" : "adopt",
+      canonicalMaterial(value),
+      JSON.stringify({ witnessId: id, workId: value.workId }),
+    );
+  return id;
+}
 
 /** A served CLI service whose runtime holds one generation of `mode`. */
 export async function servedGeneration(

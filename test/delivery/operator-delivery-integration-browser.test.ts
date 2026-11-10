@@ -10,7 +10,7 @@ import {
   until,
 } from "../fixtures/delivery-integration.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { taskReadiness } from "../../web/src/task-overview.js";
+import { taskStripReason } from "../../web/src/task-overview.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-delivery-integration-browser");
 
@@ -42,10 +42,11 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
       const data = (
         await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
       ).data;
-      assert.equal(
-        await page.locator("main [data-task-readiness]").innerText(),
-        taskReadiness(data),
-      );
+      assert.equal(await page.locator("main .task-state").count(), 1);
+      const reason = taskStripReason(data),
+        stripReason = page.locator("main [data-task-reason]");
+      if (reason === null) assert.equal(await stripReason.count(), 0);
+      else assert.equal(await stripReason.textContent(), reason);
     };
     await page.goto(web.origin + taskPath);
     await page.getByLabel("Password").fill(web.password);
@@ -276,9 +277,9 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     await reopened
       .getByRole("heading", { name: "Release delivery", exact: true })
       .waitFor();
-    assert.match(
-      await reopened.locator("main [data-task-readiness]").innerText(),
-      /^Done/,
+    assert.equal(
+      await reopened.locator("main .task-state").innerText(),
+      "Done",
     );
     assert.equal(f.scripted.state.writes, writes);
     assert.equal(f.runtime.turns, 0);

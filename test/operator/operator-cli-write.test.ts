@@ -39,6 +39,7 @@ const command = {
   type: "capacity.configure",
   key,
   globalLimit: 3,
+  minimumLeadSlots: 0,
   projectOverrides: {},
   note: secret,
 };
@@ -50,8 +51,9 @@ const receipt = {
     commandType: "capacity.configure",
     resourceId: "system:capacity",
     globalLimit: 3,
-    defaultProjectLimit: 2,
+    minimumLeadSlots: 0,
     projectOverrides: {},
+    agentOverrides: {},
   },
 };
 
@@ -398,6 +400,7 @@ test("operation get reads receipts by scope and type only", async (t) => {
     type: "capacity.configure",
     key: capacityKey,
     globalLimit: 5,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   assert.equal(posted.status, 200);

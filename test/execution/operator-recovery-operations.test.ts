@@ -30,16 +30,26 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     assert.equal(r.status, 200);
     return (await r.json()) as Json;
   };
-  const adopt = {
-    type: "recovery.no-turn.adopt",
-    assignmentId: g.assignmentId,
-    ...g.adoption(),
-  };
+  // An adoption an earlier build recorded keeps its receipt.
+  const adopt = { type: "recovery.no-turn.adopt", key: randomUUID() };
   assert.deepEqual((await read(adopt.type, adopt.key)).body.data, {
     state: "not-recorded",
   });
+  const witnessId = g.adoptAsBefore(adopt.key);
   const receipts: Array<[string, string, Json]> = [];
-  receipts.push([adopt.type, adopt.key, await post(adopt)]);
+  receipts.push([
+    adopt.type,
+    adopt.key,
+    {
+      kind: "recovery-adoption",
+      key: adopt.key,
+      recorded: true,
+      path: "no-turn-adopt",
+      assignmentId: g.assignmentId,
+      workId: g.workId,
+      witnessId,
+    },
+  ]);
   const recover = {
     type: "recovery.no-turn.recover",
     assignmentId: g.assignmentId,
@@ -63,6 +73,7 @@ test("every recovery receipt reads back exactly, only under its own type and ass
   // Another recovery type, another assignment or another scope kind never selects it.
   for (const [type, key] of [
     ["recovery.pre-turn.adopt", adopt.key],
+    ["recovery.release", adopt.key],
     ["recovery.no-turn.recover", adopt.key],
     ["recovery.conversation.replace", recover.key],
   ] as const)
@@ -129,6 +140,54 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     });
     assert.equal((await read(type, key)).status, 200, "restored");
   }
+});
+
+test("a release receipt reads back exactly, only under its own type and assignment", async (t) => {
+  const { s, g } = await servedGeneration(t, "pre-turn-defect");
+  const ro = (await s.issue("read", "release-ro")).token;
+  const read = async (
+    type: string,
+    key: string,
+    assignment = g.assignmentId,
+  ) => {
+    const query = new URLSearchParams({
+      scope: `assignment:${assignment}`,
+      type,
+      key,
+    });
+    const r = await s.bearer(ro, `/api/operator/operations?${query}`);
+    return { status: r.status, body: (await r.json()) as Json };
+  };
+  const key = randomUUID();
+  assert.deepEqual((await read("recovery.release", key)).body.data, {
+    state: "not-recorded",
+  });
+  const result = s.f.service.releaseUnboundHold({
+    key,
+    assignmentId: g.assignmentId,
+    workId: g.workId,
+    workRevision: g.workRevision,
+    requestSequence: g.requestSequence,
+  });
+  assert.deepEqual((await read("recovery.release", key)).body.data, {
+    state: "recorded",
+    receipt: {
+      kind: "recovery-release",
+      key,
+      recorded: true,
+      path: "release",
+      assignmentId: g.assignmentId,
+      workId: g.workId,
+      refusalId: result.id,
+    },
+  });
+  for (const [type, assignment] of [
+    ["recovery.no-turn.recover", g.assignmentId],
+    ["recovery.release", randomUUID()],
+  ] as const)
+    assert.deepEqual((await read(type, key, assignment)).body.data, {
+      state: "not-recorded",
+    });
 });
 
 test("bound receipt readback is scoped to its command type, assignment and stored material", async (t) => {

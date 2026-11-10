@@ -4,6 +4,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
+import {
+  adoptAsBefore,
+  bindLegacyHold,
+  failing,
+} from "../fixtures/recovery-generations.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type {
@@ -34,6 +39,7 @@ function deferred() {
   return { promise, resolve };
 }
 class RecoveryContinuationRuntime implements Runtime {
+  beforeFailure: ((error: Error) => void) | undefined;
   turns = 0;
   threads = 0;
   prompts: string[] = [];
@@ -62,15 +68,18 @@ class RecoveryContinuationRuntime implements Runtime {
   rejectResume = false;
   resumeError: Error | undefined;
   async resumeThread(threadId: string) {
-    if (this.resumeError) throw this.resumeError;
+    if (this.resumeError) throw failing(this.beforeFailure, this.resumeError);
     if (this.rejectResume)
-      throw new ArchivedResumeRejectedError({
-        method: "thread/resume",
-        requestId: 4,
-        threadId,
-        processIdentity: this.identity,
-        error: { code: -32600, message: archivedResumeMessage(threadId) },
-      });
+      throw failing(
+        this.beforeFailure,
+        new ArchivedResumeRejectedError({
+          method: "thread/resume",
+          requestId: 4,
+          threadId,
+          processIdentity: this.identity,
+          error: { code: -32600, message: archivedResumeMessage(threadId) },
+        }),
+      );
   }
   async startTurn(_thread: string, _workspace: string, prompt: string) {
     this.prompts.push(prompt);
@@ -158,25 +167,28 @@ async function heldFixture(
   if (preTurn) runtime.failedTurn = 0;
   let verified = true;
   const makeService = () =>
-    new StandaloneService(join(directory, "data"), () => runtime, undefined, {
-      power: { enabled: false },
-      routingClient: null,
-      terminationVerifier: {
-        async verify(identity) {
-          return verified
-            ? {
-                kind: "verified",
-                processIdentity: identity,
-                verifiedAt: "2026-10-03T10:05:00.000Z",
-                method: "mac-pid-absent-same-boot",
-              }
-            : {
-                kind: "unknown",
-                reason: "Synthetic process is not proven ended",
-              };
+    bindLegacyHold(
+      runtime,
+      new StandaloneService(join(directory, "data"), () => runtime, undefined, {
+        power: { enabled: false },
+        routingClient: null,
+        terminationVerifier: {
+          async verify(identity) {
+            return verified
+              ? {
+                  kind: "verified",
+                  processIdentity: identity,
+                  verifiedAt: "2026-10-03T10:05:00.000Z",
+                  method: "mac-pid-absent-same-boot",
+                }
+              : {
+                  kind: "unknown",
+                  reason: "Synthetic process is not proven ended",
+                };
+          },
         },
-      },
-    });
+      }),
+    );
   const service = makeService();
   const projectId = randomUUID(),
     taskId = randomUUID(),
@@ -225,7 +237,11 @@ async function heldFixture(
     expectedVersion: 1,
     ready: true,
   });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   await until(
     () =>
       service.coordinationView().readTask(taskId).questions.length === 1 &&
@@ -339,7 +355,11 @@ test("validated recovery requires a new operator message, processes old batch wi
         "SELECT * FROM coordination_delivery_events WHERE batchId = ? ORDER BY ordinal",
       )
       .all(oldBatch.batchId);
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     assert.equal(f.runtime.turns, 2, "receipt alone cannot dispatch");
     f.pause(true);
     const fresh = await service
@@ -407,7 +427,11 @@ test("validated recovery requires a new operator message, processes old batch wi
     assert.deepEqual(audit(service, f.old.workId), retainedAudit);
     assert.equal(f.runtime.turns, 2);
     f.pause(false, service);
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     await until(
       () => service.domain().task(f.taskId).state === "done",
       "fresh completion",
@@ -448,7 +472,11 @@ test("a shared comment's input delivery records the recovery continuation; a rec
   let service = f.service;
   try {
     await service.resolveHeldExecution(f.receipt);
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     f.pause(true);
     const view = () => service.coordinationView();
     const idle = await view().postTaskComment({
@@ -493,7 +521,11 @@ test("a shared comment's input delivery records the recovery continuation; a rec
     );
     assert.equal(f.runtime.turns, 2, "recording a comment starts no turn");
     f.pause(false, service);
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     await until(
       () => service.domain().task(f.taskId).state === "done",
       "fresh completion",
@@ -539,7 +571,11 @@ test("an invalidated recovery continuation keeps the successor waiting without s
       return list();
     };
     f.pause(false);
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     assert.equal(scansDuringAdmission, 0);
     const waiting = f.service
       .turnRequests()
@@ -725,7 +761,11 @@ test("wrong or unproved recovery never upgrades a pre-recovery message on replay
       "Confirmed PR feedback",
       "synthetic-feedback",
     );
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     assert.equal(
       audit(f.service, f.old.workId),
       undefined,
@@ -741,7 +781,11 @@ test("wrong or unproved recovery never upgrades a pre-recovery message on replay
       undefined,
       "existing key cannot retroactively authorize continuation",
     );
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     assert.equal(f.runtime.turns, 2);
   } finally {
     await close(f);
@@ -861,6 +905,7 @@ test("recorded recovery continuation still enforces current profile, dependency 
         await f.service.coordinationView().postOperatorMessage(f.message);
         await f.service.configureCapacity({
           key: randomUUID(),
+          minimumLeadSlots: 0,
           globalLimit: 1,
         });
         assert.equal(f.runtime.turns, 2);
@@ -921,6 +966,7 @@ test("every admission revalidates the recorded audit and current recovered proof
         f.pause(false);
         await f.service.configureCapacity({
           key: randomUUID(),
+          minimumLeadSlots: 0,
           globalLimit: 1,
         });
         assert.equal(
@@ -1309,7 +1355,7 @@ function preTurnRecovery(
   };
 }
 
-test("historical pre-turn proof requires explicit exact operator adoption and immutable command replay", async () => {
+test("a pre-turn witness adopted by an earlier build recovers with immutable command replay", async () => {
   const f = await heldFixture("historical");
   let service = f.service;
   try {
@@ -1319,43 +1365,7 @@ test("historical pre-turn proof requires explicit exact operator adoption and im
       undefined,
     );
     const input = adoption(f);
-    for (const changed of [
-      { ...input, workRevision: input.workRevision + 1 },
-      { ...input, requestSequence: input.requestSequence + 1 },
-      { ...input, predecessorWorkId: "wrong-predecessor" },
-      { ...input, predecessorThreadId: "wrong-thread" },
-      {
-        ...input,
-        processIdentity: {
-          ...input.processIdentity,
-          processId: "different-process",
-        },
-      },
-      { ...input, retainedReason: "different-reason" },
-      {
-        ...input,
-        evidence: { ...input.evidence, frozenSourceRevision: "missing" },
-      },
-      {
-        ...input,
-        attestation: { ...input.attestation, noTurnSubmitted: false },
-      },
-    ])
-      assert.throws(() =>
-        service.adoptHistoricalPreTurnRejection(
-          changed as HistoricalPreTurnAdoption,
-        ),
-      );
-    const adopted = service.adoptHistoricalPreTurnRejection(input);
-    assert.deepEqual(service.adoptHistoricalPreTurnRejection(input), adopted);
-    assert.throws(
-      () =>
-        service.adoptHistoricalPreTurnRejection({
-          ...input,
-          evidence: { ...input.evidence, evidenceSha256: "5".repeat(64) },
-        }),
-      /key was reused/,
-    );
+    const adopted = { witnessId: adoptAsBefore(service, input) };
     assert.equal(f.runtime.turns, 1);
     f.pause(true);
     const recovery = preTurnRecovery(f, adopted.witnessId);
@@ -1444,7 +1454,6 @@ test("historical pre-turn proof requires explicit exact operator adoption and im
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(service.adoptHistoricalPreTurnRejection(input), adopted);
     assert.deepEqual(await service.recoverPreTurnExecution(recovery), resolved);
     assert.deepEqual(service.replaceConversationCommand(replace), {
       revision: 2,
@@ -1817,6 +1826,7 @@ test("pre-turn continuation revalidates witness, receipt, effects and current ad
         f.pause(false);
         await f.service.configureCapacity({
           key: randomUUID(),
+          minimumLeadSlots: 0,
           globalLimit: 1,
         });
         await new Promise((resolve) => setTimeout(resolve, 20));

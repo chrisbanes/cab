@@ -13,7 +13,11 @@ import {
   isServiceDeliveryCaller,
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
-import { DomainConflictError } from "../core/domain-errors.js";
+import {
+  DeliveryApprovalRequiredError,
+  DeliveryHoldError,
+  DomainConflictError,
+} from "../core/domain-errors.js";
 import type { z } from "zod";
 import {
   type DeliveryStore,
@@ -182,6 +186,45 @@ function retryDue(record: DeliveryActionRecord): boolean {
     (record.observation.resumeAt ?? 0) <= Date.now()
   );
 }
+/** The agent's own tool arguments failed validation; a provider payload's `ZodError` is never one. */
+export class DeliveryArgumentsError extends Error {
+  constructor(override readonly cause: z.ZodError) {
+    super("Invalid delivery tool arguments");
+    this.name = "DeliveryArgumentsError";
+  }
+}
+/** Checks a delivery tool call's arguments, marking a failure as the agent's to fix. */
+export function assertDeliveryArguments(
+  schema: z.ZodType,
+  input: unknown,
+): void {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) throw new DeliveryArgumentsError(parsed.error);
+}
+export const deliveryInternalFailureText =
+  "Delivery request failed inside cab; report it to the operator rather than retrying";
+/**
+ * What an agent is told when a delivery tool fails, chosen by error type and never by message.
+ * Typed refusals carry cab-authored reasons; validation names key paths, never argument values;
+ * anything else, including provider failures, gets fixed text.
+ */
+export function deliveryToolFailureText(error: unknown): string {
+  if (error instanceof DeliveryArgumentsError)
+    return `Invalid arguments: ${error.cause.issues
+      .slice(0, 3)
+      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("; ")}`.slice(0, 500);
+  if (error instanceof DeliveryApprovalRequiredError)
+    return `Approval required: ${error.message}. Request approval with cab_request_approval, then send the action again with its approval and a new operationId.`;
+  if (error instanceof DeliveryHoldError)
+    return `Held: ${error.message}. Once it clears, send the action again with a new operationId; the operator resolves a task hold.`;
+  if (
+    error instanceof DomainPolicyError ||
+    error instanceof DomainConflictError
+  )
+    return `Refused by policy: ${error.message}`;
+  return deliveryInternalFailureText;
+}
 /** Serializes a task and exact target; awaits provider I/O outside SQLite transactions. */
 export class DeliveryCoordinator {
   private readonly tails = new Map<string, Promise<unknown>>();
@@ -332,6 +375,7 @@ export class DeliveryCoordinator {
   submit(
     input: unknown,
     caller: DeliveryCaller,
+    onRefused?: (error: unknown) => void,
   ): Promise<DeliveryActionRecord> {
     const request = externalActionArgumentsSchema.parse(input);
     if (
@@ -374,9 +418,10 @@ export class DeliveryCoordinator {
                   : undefined,
               );
           },
+          onRefused,
         );
         if (record.state !== "prepared") return record;
-        return this.attempt(record);
+        return this.attempt(record, onRefused);
       },
     );
   }
@@ -467,6 +512,7 @@ export class DeliveryCoordinator {
   }
   private async attempt(
     record: DeliveryActionRecord,
+    onRefused?: (error: unknown) => void,
   ): Promise<DeliveryActionRecord> {
     const caller = record.binding,
       policy = this.store.configuration(caller.projectId);
@@ -534,6 +580,7 @@ export class DeliveryCoordinator {
       }
     };
     let createBase: ReturnType<typeof stackedPrBase> = null;
+    let reused: PrDeliveryObservation | undefined;
     try {
       if (action.kind !== "pr.create")
         validatePreparation(() => {
@@ -557,7 +604,72 @@ export class DeliveryCoordinator {
           reason: "stacked-pr-base-must-match-blocker-branch",
           receipt: null,
         });
+      try {
+        if (action.kind === "pr.create") {
+          const bound = this.store.delivery(caller.taskId);
+          const candidates = [
+            ...(bound?.observation.repositoryId === target &&
+            bound.observation.headRef === action.target.headRef
+              ? [
+                  {
+                    nodeId: bound.observation.nodeId,
+                    number: bound.observation.number,
+                  },
+                ]
+              : []),
+            ...this.store.actions(caller.taskId).flatMap((prior) => {
+              const a = prior.request.action,
+                receipt = prior.observation?.receipt;
+              return prior.state === "confirmed-success" &&
+                a.kind === "pr.create" &&
+                a.target.repositoryId === target &&
+                a.target.headRef === action.target.headRef &&
+                receipt?.number
+                ? [{ nodeId: receipt.nodeId, number: receipt.number }]
+                : [];
+            }),
+          ];
+          for (const candidate of candidates) {
+            const observed = await this.bounded(
+              caller,
+              this.provider(caller.projectId, target, policy).inspectPr(
+                {
+                  repositoryId: target,
+                  prNumber: candidate.number,
+                  expectedPrNodeId: candidate.nodeId,
+                  expectedHeadSha: action.target.expectedHeadSha,
+                  ...(bound ? { recordedBaseRef: bound.acceptedBaseRef } : {}),
+                },
+                policy,
+              ),
+            );
+            if (
+              observed.repositoryId !== target ||
+              observed.nodeId !== candidate.nodeId ||
+              observed.number !== candidate.number
+            )
+              throw new Error("Existing PR identity changed");
+            if (observed.state !== "OPEN") continue;
+            if (
+              observed.headRef !== action.target.headRef ||
+              observed.headSha !== action.target.expectedHeadSha
+            )
+              throw new Error("Existing PR identity changed");
+            if (observed.baseRef !== action.target.baseRef)
+              throw new Error("Existing PR base changed");
+            reused = observed;
+            break;
+          }
+        }
+      } catch {
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "provider-preflight-held",
+          receipt: null,
+        });
+      }
       if (
+        !reused &&
         action.kind === "pr.create" &&
         createBase &&
         this.codeHost(caller.projectId, target).codeHost === "github"
@@ -595,11 +707,13 @@ export class DeliveryCoordinator {
       // Catch only the side-effect-free authority callbacks above, never a failed
       // journal read/write or an unexpected prepareStackCreate persistence error.
       if (!validationRefused || error !== validationRefused.error) throw error;
-      return this.store.recordObservation(record.operationId, {
+      const refused = this.store.recordObservation(record.operationId, {
         state: "confirmed-failure",
         reason: "delivery-authority-stale-or-held",
         receipt: null,
       });
+      onRefused?.(error);
+      return refused;
     }
     // Refused before any provider, preflight or Git transport runs for the target.
     // GitHub has a built-in provider; any other host or tracker needs an injected factory.
@@ -729,16 +843,18 @@ export class DeliveryCoordinator {
     }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;
     try {
-      before = await this.bounded(
-        caller,
-        provider.preflight(
-          action,
-          policy,
-          publication,
-          adoption,
-          stackedDependent ? { removeSourceBranch: true } : undefined,
-        ),
-      );
+      before = reused
+        ? { nodeId: reused.nodeId }
+        : await this.bounded(
+            caller,
+            provider.preflight(
+              action,
+              policy,
+              publication,
+              adoption,
+              stackedDependent ? { removeSourceBranch: true } : undefined,
+            ),
+          );
     } catch (error) {
       // The issue no longer shows the text the operator edit replaces, or the item the Status
       // the mapped write expected: nothing is written.
@@ -808,7 +924,7 @@ export class DeliveryCoordinator {
     // All new authority is checked synchronously after the final provider await.
     let attempting: DeliveryActionRecord;
     try {
-      attempting = this.store.beginAttempt(record.operationId, before, () =>
+      const validate = () =>
         validatePreparation(() => {
           if (
             action.kind === "pr.create" &&
@@ -864,12 +980,27 @@ export class DeliveryCoordinator {
             this.options.approved(record.request, caller),
             record.policyVersion,
           );
-        }),
-      );
+        });
+      // Reuse has no send boundary: persist its verified receipt and authority check atomically.
+      attempting = reused
+        ? this.store.recordObservation(
+            record.operationId,
+            {
+              state: "confirmed-success",
+              reason: null,
+              receipt: {
+                nodeId: reused.nodeId,
+                number: reused.number,
+                headSha: reused.headSha,
+              },
+            },
+            validate,
+          )
+        : this.store.beginAttempt(record.operationId, before, validate);
     } catch (error) {
       if (!validationRefused || validationRefused.error !== error) throw error;
       // Nothing was sent; a retry proves the commit against the new parent head.
-      return this.store.recordObservation(
+      const refused = this.store.recordObservation(
         record.operationId,
         baseMoved
           ? {
@@ -884,6 +1015,12 @@ export class DeliveryCoordinator {
               receipt: null,
             },
       );
+      onRefused?.(error);
+      return refused;
+    }
+    if (reused) {
+      await this.bindCreatedPr(attempting);
+      return attempting;
     }
     let observation: ProviderActionObservation;
     try {
@@ -913,6 +1050,7 @@ export class DeliveryCoordinator {
       this.store.delivery(caller.taskId)
     )
       await this.inspectBinding(caller.taskId).catch(() => {});
+    await this.bindCreatedPr(recorded);
     return recorded;
   }
   /** All second-effect sends recheck the original authority and the frozen blocker. */
@@ -1064,57 +1202,113 @@ export class DeliveryCoordinator {
     if (!isRuntimeDeliveryCaller(caller))
       throw Error("Only an agent caller can register a PR");
     const identity = registerPrArgumentsSchema.parse(input);
-    return this.serialize([`task:${caller.taskId}`], async () => {
+    return this.serialize([`task:${caller.taskId}`], () =>
+      this.registerPrWithinTask(identity, caller),
+    );
+  }
+  private async registerPrWithinTask(
+    identity: z.output<typeof registerPrArgumentsSchema>,
+    caller: Extract<DeliveryCaller, { assignmentId: string }>,
+  ) {
+    this.options.authorize(caller);
+    const registrationLead = () => {
+      const lead =
+        this.options.leadAssignmentId?.(caller.taskId) ?? caller.assignmentId;
+      if (
+        lead !== caller.assignmentId &&
+        !this.store
+          .actions(caller.taskId)
+          .some(
+            (record) =>
+              record.state === "confirmed-success" &&
+              isRuntimeDeliveryCaller(record.binding) &&
+              record.binding.assignmentId === caller.assignmentId &&
+              record.request.action.kind === "pr.create" &&
+              record.request.action.target.repositoryId ===
+                identity.repositoryId &&
+              record.observation?.receipt?.number === identity.prNumber &&
+              record.observation.receipt.nodeId === identity.expectedPrNodeId,
+          )
+      )
+        throw new DomainPolicyError(
+          "forbidden",
+          "Only the task lead or the same-task assignment whose confirmed pr.create produced this exact PR may register PR delivery",
+        );
+      return lead;
+    };
+    registrationLead();
+    const policy = this.store.configuration(caller.projectId),
+      taskVersion =
+        this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion;
+    const bound = this.store.delivery(caller.taskId);
+    const observation = await this.provider(
+      caller.projectId,
+      identity.repositoryId,
+      policy,
+    ).inspectPr(
+      {
+        ...identity,
+        ...(bound ? { recordedBaseRef: bound.acceptedBaseRef } : {}),
+      },
+      policy,
+    );
+    return this.store.transaction(() => {
       this.options.authorize(caller);
-      const policy = this.store.configuration(caller.projectId),
-        taskVersion =
-          this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion;
-      const bound = this.store.delivery(caller.taskId);
-      const observation = await this.provider(
-        caller.projectId,
-        identity.repositoryId,
-        policy,
-      ).inspectPr(
-        {
-          ...identity,
-          ...(bound ? { recordedBaseRef: bound.acceptedBaseRef } : {}),
-        },
-        policy,
+      if (
+        policy.version !== this.store.configuration(caller.projectId).version ||
+        taskVersion !==
+          (this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion) ||
+        observation.headSha !== identity.expectedHeadSha ||
+        observation.repositoryId !== identity.repositoryId ||
+        observation.number !== identity.prNumber ||
+        observation.nodeId !== identity.expectedPrNodeId
+      )
+        throw new DomainConflictError("PR registration material changed");
+      const lead = registrationLead();
+      // Recorded before registration so an existing binding's own observation cannot swallow it.
+      const outside = this.store.outsideHeadWithinTransaction(
+        caller.taskId,
+        observation,
       );
-      return this.store.transaction(() => {
-        this.options.authorize(caller);
-        if (
-          policy.version !==
-            this.store.configuration(caller.projectId).version ||
-          taskVersion !==
-            (this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion) ||
-          observation.headSha !== identity.expectedHeadSha
-        )
-          throw new Error("PR registration material changed");
-        const lead =
-          this.options.leadAssignmentId?.(caller.taskId) ?? caller.assignmentId;
-        if (lead !== caller.assignmentId)
-          throw new Error("Only the task lead registers PR delivery");
-        // Recorded before registration so an existing binding's own observation cannot swallow it.
-        const outside = this.store.outsideHeadWithinTransaction(
+      const registered = this.store.registerPrWithinTransaction(
+        caller,
+        observation,
+        lead,
+        this.codeHost(caller.projectId, observation.repositoryId).ref,
+      );
+      if (outside)
+        this.outsidePush(
           caller.taskId,
-          observation,
+          observation.repositoryId,
+          observation.headSha,
         );
-        const registered = this.store.registerPrWithinTransaction(
-          caller,
-          observation,
-          lead,
-          this.codeHost(caller.projectId, observation.repositoryId).ref,
-        );
-        if (outside)
-          this.outsidePush(
-            caller.taskId,
-            observation.repositoryId,
-            observation.headSha,
-          );
-        return registered;
-      });
+      return registered;
     });
+  }
+  private async bindCreatedPr(record: DeliveryActionRecord): Promise<void> {
+    const action = record.request.action,
+      receipt = record.observation?.receipt;
+    if (
+      action.kind !== "pr.create" ||
+      record.state !== "confirmed-success" ||
+      !receipt?.number ||
+      !isRuntimeDeliveryCaller(record.binding)
+    )
+      return;
+    try {
+      if (this.store.delivery(record.binding.taskId)) return;
+      await this.registerPrWithinTask(
+        {
+          repositoryId: action.target.repositoryId,
+          prNumber: receipt.number,
+          expectedPrNodeId: receipt.nodeId,
+          expectedHeadSha: receipt.headSha ?? action.target.expectedHeadSha,
+        },
+        record.binding,
+      );
+    } catch {
+      // Creation is already confirmed; its receipt remains the manual registration recovery path.
+    }
   }
   /**
    * Classifies a fresh read of an issue the task's confirmed delivery closed: `reopened`
@@ -1400,13 +1594,14 @@ export class DeliveryCoordinator {
           return;
         }
         if (current.stackCreate) {
-          await this.continueStackCreate(
+          const confirmed = await this.continueStackCreate(
             current,
             this.provider(
               current.binding.projectId,
               current.request.action.target.repositoryId,
             ),
           );
+          await this.bindCreatedPr(confirmed);
           return;
         }
         let observation: ProviderActionObservation;
@@ -1431,7 +1626,9 @@ export class DeliveryCoordinator {
             ...(current.observation?.ambiguous ? { ambiguous: true } : {}),
           };
         }
-        this.recordPublicationAware(current, observation);
+        await this.bindCreatedPr(
+          this.recordPublicationAware(current, observation),
+        );
       }).catch((error) => {
         if (this.store.isTaskWritable(record.binding.taskId)) throw error;
       });

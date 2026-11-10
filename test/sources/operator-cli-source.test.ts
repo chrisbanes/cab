@@ -95,7 +95,13 @@ test("project sources reads selections, links and observations without private t
     ["never", "never", "never"],
   );
   assert.match(human.out, /S-2 +Search +\(query private\)/);
-  assert.match(human.out, /Closed issues:? +Skip closed issues/);
+  assert.match(human.out, /Closed issues at import:? +Skip\n/);
+  assert.ok(
+    human.out.includes(
+      "An imported task completes when its issue closes, once its work and delivery have settled.",
+    ),
+    human.out,
+  );
   assert.equal(databaseDigest(w.s.f), before);
   // A partial provider read is an evidence gap, not a complete observation.
   const activated = await w.s.sessionPost("/api/operator/commands", {
@@ -326,7 +332,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
   const mode = JSON.parse(readFileSync(modeOut, "utf8"));
   assert.equal(mode.command.closedIssues, "done");
   assert.deepEqual(mode.preview.diff.lines, [
-    "Closed issues: Treat closure as Done",
+    "Closed issues at import: Import as Done",
   ]);
 
   // Parity: the operator UI builds the same command for the same edit.

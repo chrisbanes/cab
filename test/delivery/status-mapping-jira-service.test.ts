@@ -180,8 +180,9 @@ async function fixture(
       return "completed";
     },
   };
+  let served = pr;
   const codeHost = {
-    inspectPr: async () => pr,
+    inspectPr: async () => served,
   } as unknown as CodeHostDeliveryProvider;
   const make = () =>
     new StandaloneService(dataDir, () => runtime, undefined, {
@@ -430,6 +431,10 @@ async function fixture(
       hold = value;
     },
     run: () => f.service.runStatusMapping(),
+    /** The registered PR closes unmerged; the next refresh observes it. */
+    closePr: () => {
+      served = { ...pr, state: "CLOSED" };
+    },
     registerPr: async () =>
       assert.equal(
         (
@@ -861,6 +866,10 @@ for (const current of [false, true])
     assert.equal(f.domain().task(f.taskId).state, "open");
     await f.endTurn();
     await f.service.refreshGitHub();
+    // Provider closure waits for the open registered PR.
+    assert.equal(f.domain().task(f.taskId).state, "open");
+    f.closePr();
+    await f.service.refreshGitHub();
     assert.equal(f.domain().task(f.taskId).state, "done");
     assert.ok(closureStore(f).providerCompletion(f.taskId));
   });
@@ -904,6 +913,9 @@ for (const finalDone of [false, true])
     assert.equal(closureStore(f).providerCompletion(f.taskId), undefined);
     await f.endTurn();
     await f.service.refreshGitHub();
+    assert.equal(f.domain().task(f.taskId).state, "open");
+    f.closePr();
+    await f.service.refreshGitHub();
     assert.equal(f.domain().task(f.taskId).state, finalDone ? "done" : "open");
     assert.equal(
       Boolean(closureStore(f).providerCompletion(f.taskId)),
@@ -926,6 +938,10 @@ test("uncertain status POST remains non-holding and is not resent across restart
   await f.run();
   assert.deepEqual(f.posted(), [PROGRESS, REVIEW]);
   assert.equal(f.writes()[1]?.state, "uncertain");
+  assert.equal(f.domain().task(f.taskId).state, "open");
+  f.closePr();
+  await f.service.refreshGitHub();
+  assert.deepEqual(f.posted(), [PROGRESS, REVIEW]);
   assert.equal(f.domain().task(f.taskId).state, "done");
   assert.ok(closureStore(f).providerCompletion(f.taskId));
 });

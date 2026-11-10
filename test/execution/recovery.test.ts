@@ -485,10 +485,7 @@ test("lost turn-start response is quarantined without inspection or replay", asy
       "running",
       "a lost turn-start response must retain the admitted assignment state",
     );
-    assert.equal(
-      recovered.capacityLimits([old.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     assert.equal(runtime.threads, 0);
     assert.equal(runtime.turns, 0);
   } finally {
@@ -627,10 +624,7 @@ test("validated recovery receipt releases only the exact generation and preserve
       () => api.resolveHeldExecution(receipt),
       /conflicts with the stored identity/i,
     );
-    assert.equal(
-      recovered.capacityLimits([old.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     assert.equal(
       recovered.list().find((item) => item.workId === old.workId)?.state,
       "held",
@@ -643,10 +637,7 @@ test("validated recovery receipt releases only the exact generation and preserve
       recovered.list().find((item) => item.workId === old.workId)?.state,
       "reconciled",
     );
-    assert.equal(
-      recovered.capacityLimits([old.projectId]).currentUsage.global,
-      0,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 0);
     assert.equal(
       recovered.isCurrentResult(old.workId),
       false,

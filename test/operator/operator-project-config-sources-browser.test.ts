@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
+import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createFakeGlab } from "../fixtures/fake-glab.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
+import { createSetupHome } from "../fixtures/setup-home.js";
 import {
   captureSettingsEvidence as captureBrowserEvidence,
   createCheckout,
@@ -125,6 +127,106 @@ test("GitHub source shows search queries plainly and edits them in place", async
   assert.equal(await save.isDisabled(), true);
 });
 
+test("GitHub source explains a Project field rule without its matching selection", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, {});
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+    ],
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "PVT_atlas",
+          fieldNodeId: "FIELD_status",
+          operator: "in",
+          optionNodeIds: ["OPTION_ready"],
+        },
+      ],
+    },
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await page.reload();
+  await page
+    .getByText(
+      /This readiness rule can never match.*Add that Project as a selection or remove the condition\./,
+    )
+    .waitFor();
+  await page
+    .getByLabel("Readiness matching", { exact: true })
+    .selectOption("any");
+  await page
+    .getByText(
+      /This Project field condition never applies.*Add that Project as a selection or remove the condition\./,
+    )
+    .waitFor();
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await page
+    .getByLabel("Closed issues at import", { exact: true })
+    .selectOption({ label: "Import as Done" });
+  assert.equal(
+    await save.isEnabled(),
+    true,
+    "the advisory does not block saving",
+  );
+  const firstSave = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/operator/commands"),
+  );
+  await save.click();
+  assert.equal((await firstSave).ok(), true);
+  await savedOutcome(page);
+  const saved = d.githubConfiguration(ids.atlas);
+  assert.equal(saved.readiness?.mode, "any");
+  assert.equal(saved.readiness?.conditions[0]?.kind, "project-field");
+
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
+  await page
+    .getByLabel("Selection kind", { exact: true })
+    .last()
+    .selectOption("project");
+  await page
+    .getByLabel("GitHub Project", { exact: true })
+    .last()
+    .selectOption({ label: "Atlas roadmap" });
+  assert.equal(
+    await page.getByText(/This Project field condition never applies/).count(),
+    0,
+    "the exact matching Project in the draft clears the advisory before activation",
+  );
+  const secondSave = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/operator/commands"),
+  );
+  await save.click();
+  assert.equal((await secondSave).ok(), true);
+  await savedOutcome(page);
+  const project = d
+    .githubConfiguration(ids.atlas)
+    .selections.find((selection) => selection.kind === "project");
+  assert.equal(
+    project?.kind === "project" && project.projectNodeId,
+    "PVT_atlas",
+  );
+  await page
+    .locator(".settings-row", { hasText: "Atlas roadmap" })
+    .getByText("Inactive", { exact: true })
+    .waitFor();
+  await page
+    .getByRole("button", { name: /Remove Atlas roadmap \(S-\d+\)/ })
+    .last()
+    .click();
+  await page.getByText(/This Project field condition never applies/).waitFor();
+});
+
 test("repositories show local paths plainly and edit them in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
@@ -217,10 +319,10 @@ test("GitHub source private values unavailable keeps rows kept and saveable", as
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   assert.equal(await save.isDisabled(), true);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
-    .selectOption({ label: "Treat closure as Done" });
+    .getByLabel("Closed issues at import", { exact: true })
+    .selectOption({ label: "Import as Done" });
   await changes(page)
-    .getByText("Closed issues: Treat closure as Done")
+    .getByText("Closed issues at import: Import as Done")
     .waitFor();
   const body = commandBody(page);
   // The saved version moves, so the page reads the private values once more.
@@ -361,14 +463,20 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
     .locator("#repository-error")
-    .getByText("Check linked repository IDs, paths and refs.")
+    .getByText("Repository 2: the path is not an absolute directory path.", {
+      exact: true,
+    })
     .waitFor();
-  assert.equal(
+  const badPath = page.getByLabel("New local repository path", { exact: true });
+  assert.equal(await badPath.getAttribute("aria-invalid"), "true");
+  assert.notEqual(
     await page
-      .getByLabel("New local repository path", { exact: true })
-      .inputValue(),
-    "relative/PRIVATE-PATH",
+      .getByLabel("Linked repository ID", { exact: true })
+      .last()
+      .getAttribute("aria-invalid"),
+    "true",
   );
+  assert.equal(await badPath.inputValue(), "relative/PRIVATE-PATH");
   assert.equal(
     (await page.locator(".settings-page [role=alert]").allInnerTexts())
       .join(" ")
@@ -397,8 +505,12 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
   assert.equal(f.service.domain().repositoryLinks(ids.atlas).links.length, 2);
 });
 
-test("a new GitHub repository link is chosen from discovered repositories and a picked folder", async (_t, journey) => {
-  const { f, ids, page } = await startDiscovery(journey, {}, "repositories");
+test("a new GitHub repository link is chosen from discovery and saved from the home-relative folder picker", async (_t, journey) => {
+  const home = await createSetupHome();
+  journey.cleanup(() => home.close(), "picker-home.close");
+  const { f, ids, page } = await startDiscovery(journey, {}, "repositories", {
+    home: home.home,
+  });
   await page.getByRole("button", { name: "Add repository" }).click();
   const choice = page.getByLabel("Repository", { exact: true });
   await choice.selectOption({ label: "acme/relay" });
@@ -413,17 +525,22 @@ test("a new GitHub repository link is chosen from discovered repositories and a 
     .waitFor({ state: "attached" });
   assert.equal(await ref.inputValue(), "main");
   // The folder picker fills the new row's path.
-  const checkout = await createCheckout(f.directory, "relay-checkout");
   await page.getByRole("button", { name: "Choose folder…" }).click();
   const dialog = page.getByRole("dialog", { name: "Choose repository folder" });
-  await dialog.getByLabel("Or enter a path").fill(checkout);
+  await dialog.getByRole("button", { name: /^src/ }).click();
+  await dialog.getByRole("button", { name: /relay/ }).click();
+  await dialog.getByLabel("Or enter a path").waitFor();
+  assert.equal(
+    await dialog.getByLabel("Or enter a path").inputValue(),
+    "~/src/relay",
+  );
   await dialog.getByRole("button", { name: "Use this folder" }).click();
   await dialog.waitFor({ state: "detached" });
   assert.equal(
     await page
       .getByLabel("New local repository path", { exact: true })
       .inputValue(),
-    checkout,
+    "~/src/relay",
   );
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
@@ -432,6 +549,7 @@ test("a new GitHub repository link is chosen from discovered repositories and a 
     .repositoryLinks(ids.atlas)
     .links.find((l) => l.repositoryId === "R_relay");
   assert.equal(relay?.ref, "main");
+  assert.equal(relay?.path, join(home.home, "src", "relay"));
 });
 
 test("a new GitLab repository link is chosen from configured hosts and their projects", async (_t, journey) => {
@@ -721,7 +839,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
   const query = page.getByLabel("Search query", { exact: true });
-  const closed = page.getByLabel("Closed GitHub issues", { exact: true });
+  const closed = page.getByLabel("Closed issues at import", { exact: true });
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   await query.waitFor();
   // Edit and revert the value: nothing is listed, nothing can be sent.
@@ -741,7 +859,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   // Edited and reverted, then another writer changes the same query: nothing stale is kept.
   await query.fill("MINE");
   await query.fill("PRIVATE SAVED QUERY");
-  await closed.selectOption({ label: "Treat closure as Done" });
+  await closed.selectOption({ label: "Import as Done" });
   const writer = (text: string) =>
     api.execute({
       type: "github.configure",
@@ -787,7 +905,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
 
   // A real edit against older text says so after the other writer's change is adopted.
   await query.fill("MY REAL EDIT");
-  await closed.selectOption({ label: "Skip closed issues" });
+  await closed.selectOption({ label: "Skip" });
   await writer("THEIR SECOND QUERY");
   await save.click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
@@ -807,9 +925,9 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   await query.fill("THEIR SECOND QUERY");
   await noChanges(page);
   assert.equal(await save.isDisabled(), true);
-  await closed.selectOption({ label: "Treat closure as Done" });
+  await closed.selectOption({ label: "Import as Done" });
   assert.deepEqual(await changes(page).getByRole("listitem").allInnerTexts(), [
-    "Closed issues: Treat closure as Done",
+    "Closed issues at import: Import as Done",
   ]);
   const last = commandBody(page);
   await save.click();
@@ -1019,8 +1137,8 @@ test("Save waits for saved queries and paths to be read again, and an edit never
     .waitFor();
   assert.equal(await query.count(), 0);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
-    .selectOption({ label: "Treat closure as Done" });
+    .getByLabel("Closed issues at import", { exact: true })
+    .selectOption({ label: "Import as Done" });
   const body = commandBody(page);
   await save.click();
   const sent = await body;
@@ -1560,7 +1678,7 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   await remove().waitFor();
   assert.equal(await showsText(page, hidden.id), false);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
+    .getByLabel("Closed issues at import", { exact: true })
     .selectOption("done");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);

@@ -12,9 +12,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { renderLaunchAgent } from "../../src/standalone/launchd.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 test("generated macOS LaunchAgent environment captures complete boot birth and process identity without sbin in PATH", {
-  skip: process.platform !== "darwin",
+  skip: process.platform !== "darwin" || processIdentityDenied(),
 }, () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-termination-")));
   chmodSync(root, 0o700);
