@@ -224,9 +224,10 @@ the retained revision is neither redacted nor omitted; other fields have their o
 flags. A diff against redacted or withheld current text says so with the
 `content-redacted`, `redaction-unavailable` or `content-unavailable` gap; routing
 guidance is never read back, so its diff shows only the proposed text.
-`capacity.configure` accepts an optional `expectedCurrent` (global limit and the
-listed project overrides, `null` meaning none), compared inside the command
-transaction; a mismatch is a `409 conflict`. Commands without it hash and behave as
+`capacity.configure` requires `minimumLeadSlots` and takes `agentOverrides` and
+`projectOverrides` (`null` removes one). It accepts an optional `expectedCurrent`
+(global limit, minimum lead slots and the listed agent and project overrides, `null`
+meaning none), compared inside the command transaction; a mismatch is a `409 conflict`. Commands without it hash and behave as
 before, so the web UI keeps its last-writer-wins capacity form. Creation and
 adoption are deliberately irreversible; revoke, pause or restore instead.
 

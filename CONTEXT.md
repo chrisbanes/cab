@@ -180,6 +180,21 @@ investigating and talking with the operator. It grants no readiness and carries
 out no implementation.
 _Avoid_: Triage turn
 
+**Lead turn**:
+For capacity, a turn on a task's lead assignment, including a draft turn, or a
+project drafting run. Delegated assignments and direct work are not lead turns.
+_Avoid_: Coordination turn as a separate kind
+
+**Minimum lead slots**:
+The installation-wide number of global active-turn slots held for lead turns. Other
+turns cannot take a held slot; lead turns can also use any free slot.
+_Avoid_: Lead reserve per project
+
+**Agent cap**:
+An optional limit on how many active turns one agent runs at once, across projects
+and roles.
+_Avoid_: Agent concurrency setting in the agent revision
+
 **Start again**:
 The operator action that queues an assignment's request again when it was refused at
 admission before it ran, at the current revisions. The refused request stays as history.

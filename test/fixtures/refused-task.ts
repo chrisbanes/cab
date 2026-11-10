@@ -29,9 +29,17 @@ export async function refusedTask(f: Fixture, taskId?: string) {
     } as never);
   configure(f, task.projectId, true);
   edit({ ready: true });
-  await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await f.service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   edit({ outcome: "Changed after the request was queued" });
-  await f.service.configureCapacity({ key: randomUUID(), globalLimit: 2 });
+  await f.service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 2,
+  });
   const refused = f.service
     .turnRequests()
     .find((r) => r.taskId === task.taskId && r.state === "held");

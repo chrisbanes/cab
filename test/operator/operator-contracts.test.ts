@@ -343,17 +343,36 @@ test("capacity commands accept an optional strict expectedCurrent", () => {
     type: "capacity.configure",
     key,
     globalLimit: 3,
+    minimumLeadSlots: 0,
     projectOverrides: { [key]: null },
+    agentOverrides: {},
   };
   const parsed = operatorCommandSchema.parse(capacity);
   assert.ok(!("expectedCurrent" in parsed));
   assert.deepEqual(
     operatorCommandSchema.parse({
       ...capacity,
-      expectedCurrent: { globalLimit: 4 },
+      expectedCurrent: { globalLimit: 4, minimumLeadSlots: 1 },
     }),
-    { ...capacity, expectedCurrent: { globalLimit: 4, projectOverrides: {} } },
+    {
+      ...capacity,
+      expectedCurrent: {
+        globalLimit: 4,
+        minimumLeadSlots: 1,
+        projectOverrides: {},
+        agentOverrides: {},
+      },
+    },
   );
+  // Minimum lead slots must stay below the global cap, and a command without them is
+  // refused, as is a change document prepared before they existed.
+  for (const refused of [
+    { ...capacity, minimumLeadSlots: 3 },
+    { ...capacity, minimumLeadSlots: -1 },
+    { ...capacity, agentOverrides: { [key]: 0 } },
+    { ...capacity, minimumLeadSlots: undefined },
+  ])
+    assert.equal(operatorCommandSchema.safeParse(refused).success, false);
   for (const expectedCurrent of [
     { globalLimit: 0 },
     { globalLimit: 4, projectOverrides: { nope: 1 } },

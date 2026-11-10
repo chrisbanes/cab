@@ -346,7 +346,11 @@ test("a crashed runtime restarts after 30 s; queued work is admitted once and ru
     { behaviours: { codex: behaviour({ holdTurns: true }) } },
     async ({ service, clock, created, behaviours, latest }) => {
       await service.start();
-      await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+      await service.configureCapacity({
+        key: randomUUID(),
+        minimumLeadSlots: 0,
+        globalLimit: 4,
+      });
       const lead = profile(service, "codex");
       const projectId = project(service, lead);
       const running = await task(service, projectId, lead);
@@ -872,7 +876,11 @@ test("a disabled, draining or not-enabled runtime is never restarted", async () 
     { behaviours: { claude: behaviour({ holdTurns: true }) } },
     async ({ service, clock, latest }) => {
       await service.start();
-      await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+      await service.configureCapacity({
+        key: randomUUID(),
+        minimumLeadSlots: 0,
+        globalLimit: 4,
+      });
       const lead = profile(service, "claude");
       const projectId = project(service, lead);
       const work = await task(service, projectId, lead);
@@ -987,7 +995,11 @@ test("work created while a restarted runtime is still starting waits and runs on
     {},
     async ({ service, clock, created, behaviours, latest }) => {
       await service.start();
-      await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+      await service.configureCapacity({
+        key: randomUUID(),
+        minimumLeadSlots: 0,
+        globalLimit: 4,
+      });
       const lead = profile(service, "codex");
       const projectId = project(service, lead);
       latest("codex").crash();

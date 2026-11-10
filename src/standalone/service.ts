@@ -42,6 +42,7 @@ import {
 import {
   CommandResultValidationError,
   parseDomainCommandOutcome,
+  parseFreshDomainCommandOutcome,
 } from "../core/command-results.js";
 import {
   type CoordinationCall,
@@ -1853,7 +1854,8 @@ export class StandaloneService {
         "scheduler",
         new TurnScheduler(
           schedulerStore,
-          (request) => this.attemptRequest(request, generation),
+          (request, capacityFreed) =>
+            this.attemptRequest(request, generation, capacityFreed),
           this.retryNow,
           (error) =>
             this.handleBackgroundFailure(generation, "scheduler-drain", error),
@@ -4813,14 +4815,14 @@ export class StandaloneService {
     );
   }
 
-  capacityLimits(projectIds: string[] = []): CapacityLimits {
-    return this.domain().capacityLimits(projectIds);
+  capacityLimits(): CapacityLimits {
+    return this.domain().capacityLimits();
   }
 
   async configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
   ): Promise<CapacityLimits> {
-    const outcome = parseDomainCommandOutcome(
+    const outcome = parseFreshDomainCommandOutcome(
       "capacity.configure",
       this.domain().execute({
         ...command,
@@ -4828,7 +4830,10 @@ export class StandaloneService {
         actor: "operator",
       }),
     );
-    if (outcome.type !== "capacity.configure")
+    if (
+      outcome.type !== "capacity.configure" ||
+      !("minimumLeadSlots" in outcome.result)
+    )
       throw new CommandResultValidationError(
         "Capacity configuration returned the wrong result type",
       );
@@ -8389,6 +8394,7 @@ export class StandaloneService {
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
+    capacityFreed: () => boolean = () => false,
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
       return;
@@ -8703,6 +8709,9 @@ export class StandaloneService {
         await this.failQueuedDrafting(request);
         return;
       }
+      // A slot freed while this attempt awaited goes to the scheduler's next pass,
+      // which tries higher-priority requests first.
+      if (capacityFreed()) return;
       const admitted = state.begin(intent.id, {
         projectId: request.projectId,
         requestSequence: store.sequence(request.workId),
