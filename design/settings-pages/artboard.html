@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings page design proposal</title>
+    <style>
+      @font-face { font-family: Geist; src: url('../../node_modules/@fontsource/geist-sans/files/geist-sans-latin-400-normal.woff2'); }
+      @font-face { font-family: Geist; font-weight: 600; src: url('../../node_modules/@fontsource/geist-sans/files/geist-sans-latin-600-normal.woff2'); }
+      :root { color-scheme: dark; --bg:#0a0a0b; --surface:#0f0f11; --raised:#17171a; --overlay:#202024; --line:#26262b; --fg:#f4f4f5; --muted:#a6a6ae; --attention:#fbbf24; }
+      @media (prefers-color-scheme:light) { :root { color-scheme:light; --bg:#fff; --surface:#fafafa; --raised:#f4f4f5; --overlay:#ececf0; --line:#e4e4e7; --fg:#18181b; --muted:#52525b; --attention:#8a3b0c; } }
+      * { box-sizing:border-box; }
+      body { margin:0; font:13px/1.55 Geist,system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+      a { color:inherit; text-underline-offset:3px; }
+      a:focus-visible,summary:focus-visible,button:focus-visible,input:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
+      .sidebar { width:232px; position:fixed; inset:0 auto 0 0; background:var(--surface); border-right:1px solid var(--line); padding:20px 16px; display:flex; flex-direction:column; gap:24px; }
+      .brand { font-size:18px; font-weight:600; }
+      .muted { color:var(--muted); }
+      .sidebar nav { display:grid; gap:4px; }
+      .sidebar nav span,.account { padding:8px 12px; }
+      .sidebar .selected { background:var(--overlay); border-radius:6px; }
+      .account { margin-top:auto; border-top:1px solid var(--line); }
+      .app { margin-left:232px; }
+      .topbar { height:48px; padding:0 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+      .topbar .connection { margin-left:auto; color:var(--muted); }
+      .topbar .brand { font-size:14px; border-right:1px solid var(--line); padding-right:16px; }
+      .menu { display:none; }
+      main { max-width:1180px; padding:20px; }
+      h1 { font-size:18px; line-height:1.4; font-weight:600; margin:0; }
+      h2 { font-size:15px; font-weight:600; margin:0; }
+      h3 { font-size:13px; font-weight:600; margin:0; }
+      p { margin:4px 0 0; }
+      .heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; gap:16px; }
+      .layout { display:grid; grid-template-columns:176px minmax(0,1fr); gap:24px; align-items:start; }
+      .section-nav { display:grid; gap:4px; }
+      .section-nav a { padding:8px 12px; text-decoration:none; border-left:2px solid transparent; border-radius:0 6px 6px 0; color:var(--muted); }
+      .section-nav a:hover { background:var(--raised); color:var(--fg); }
+      .section-nav a[aria-current=page] { background:var(--overlay); color:var(--fg); border-left-color:var(--fg); }
+      .phone-sections { display:none; }
+      .content { display:grid; gap:16px; min-width:0; }
+      .panel { background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+      .panel-head { padding:16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; align-items:center; }
+      .panel-body { padding:16px; }
+      .row { padding:16px; border-bottom:1px solid var(--line); }
+      .row:last-child { border-bottom:0; }
+      .row-top { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+      .row-top .action { margin-left:auto; }
+      .badge { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:0 6px; border:1px solid var(--line); border-radius:4px; color:var(--muted); background:var(--raised); }
+      .attention { color:var(--attention); }
+      .action,button { font:inherit; min-height:32px; padding:5px 10px; border:1px solid var(--line); border-radius:6px; background:var(--raised); color:var(--fg); text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+      button:disabled { opacity:1; cursor:default; }
+      .primary { background:var(--fg); color:var(--bg); }
+      .facts { display:grid; grid-template-columns:120px 1fr; gap:4px 12px; margin:12px 0 0; color:var(--muted); font-size:12px; }
+      .facts dt,.facts dd { margin:0; }
+      .note { font-size:12px; color:var(--muted); }
+      .intro { margin-bottom:16px; color:var(--muted); }
+      .check { display:flex; align-items:center; gap:8px; }
+      .check input { margin:0; }
+      .review { margin-top:32px; padding-top:16px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+      .review nav { display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; }
+      .crumb { display:flex; gap:8px; align-items:center; }
+      .crumb a { color:var(--muted); text-decoration:none; }
+      .placeholder { display:none; }
+      @media (max-width:1120px) {
+        .sidebar { display:none; }
+        .app { margin-left:0; }
+        .menu { display:block; }
+        .topbar .brand { display:none; }
+      }
+      @media (max-width:760px) {
+        main { padding:16px; }
+        .topbar { height:56px; padding:0 16px; }
+        .topbar .connection { font-size:12px; }
+        .heading { margin-bottom:16px; align-items:start; }
+        .heading button { display:none; }
+        .layout { display:block; }
+        .desktop-sections { display:none; }
+        .phone-sections { display:block; margin-bottom:16px; border:1px solid var(--line); border-radius:6px; background:var(--surface); }
+        summary { min-height:44px; padding:11px 12px; cursor:pointer; }
+        .phone-sections .section-nav { padding:0 8px 8px; gap:0; }
+        .section-nav a { min-height:44px; padding:12px; }
+        button,.action { min-height:44px; }
+        .panel-head,.row,.panel-body { padding:12px; }
+        .row-top { gap:8px; }
+        .row-top h3 { flex:1; }
+        .row-top .action { width:100%; margin:4px 0 0; }
+        .facts { grid-template-columns:1fr; gap:2px; }
+        .facts dd { margin-bottom:6px; overflow-wrap:anywhere; }
+        .panel-head { flex-wrap:wrap; }
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="sidebar" aria-label="Global shell illustration">
+      <div class="brand">cab <span class="muted">/ local</span></div>
+      <div class="action muted">Search work <span style="margin-left:auto">⌘K</span></div>
+      <nav aria-label="Global navigation illustration"><span>Overview</span><span>Inbox</span><span>Tasks</span></nav>
+      <div><p class="muted">PROJECTS</p><nav aria-label="Projects illustration"><span>Haze</span><span>cab</span></nav></div>
+      <div class="account"><span class="muted">Account menu</span><nav aria-label="Account illustration"><span class="selected">Settings</span></nav></div>
+    </aside>
+    <div class="app">
+      <header class="topbar"><span class="menu" aria-hidden="true">☰</span><span class="brand">cab</span><nav class="crumb" aria-label="Breadcrumb"><a href="?page=projects">Settings</a><span aria-hidden="true">›</span><span id="crumb"></span></nav><span class="connection">Connected</span></header>
+      <main>
+        <div class="heading"><div><h1 id="title">Settings</h1><p id="description" class="muted"></p></div><button type="button" disabled>Refresh</button></div>
+        <div class="layout">
+          <nav class="section-nav desktop-sections" aria-label="Settings sections"></nav>
+          <div>
+            <details class="phone-sections"><summary>Sections · <strong id="current"></strong></summary><nav class="section-nav" aria-label="Settings sections"></nav></details>
+            <div class="content" id="content"></div>
+          </div>
+        </div>
+        <footer class="review">Design proposal · illustrative data · controls do not save. These three screens explore the shared page structure; other section links open the route proposal.
+          <nav aria-label="Artboard views"><a href="?page=projects">Returning landing / Projects</a><a href="?page=readiness">First-turn landing / Readiness</a><a href="?page=notifications">Notifications</a><a href="proposal.md">Route and read inventory</a></nav>
+        </footer>
+      </main>
+    </div>
+    <template id="projects">
+      <p class="intro">Repository access and discovery are configured per project. Saving never resumes work or clears holds.</p>
+      <section class="panel" aria-label="Projects">
+        <div class="panel-head"><div><h2>Projects</h2><p class="muted">2 projects · 1 paused</p></div><button type="button" class="primary" disabled>Create project</button></div>
+        <div class="panel-body"><label class="check"><input type="checkbox" disabled /> Show archived</label></div>
+        <article class="row"><div class="row-top"><h3>Haze</h3><span class="muted">Lead: Churchill</span><span class="badge">Ⅱ Paused</span><button type="button" class="action" disabled>Configure Haze</button></div><dl class="facts"><dt>Repository access</dt><dd>chrisbanes/haze · main · checkout configured</dd><dt>Discovery</dt><dd>Repository issues · Not synced</dd></dl></article>
+        <article class="row"><div class="row-top"><h3>cab</h3><span class="muted">Lead: Churchill</span><span class="badge">✓ Enabled</span><button type="button" class="action" disabled>Configure cab</button></div><dl class="facts"><dt>Repository access</dt><dd>chrisbanes/cab · main · checkout configured</dd><dt>Discovery</dt><dd>Repository issues · Synced 10:52</dd></dl></article>
+      </section>
+      <p class="note">Discovery and readiness never grant repository access. Each change is saved separately.</p>
+    </template>
+    <template id="readiness">
+      <p class="intro">Check what the running service can use before starting your first turn. Running checks never changes configuration.</p>
+      <section class="panel" aria-label="Readiness checks">
+        <div class="panel-head"><div><h2>Readiness checks</h2><p class="muted">Service capabilities and their next steps</p></div><button type="button" disabled>Run again</button></div>
+        <article class="row"><div class="row-top"><h3>Codex executable</h3><span class="badge">✓ Pass</span></div><p class="muted">The service can find the Codex executable.</p></article>
+        <article class="row" id="readiness-claude-executable"><div class="row-top"><h3>Claude executable</h3><span class="badge">○ Not configured</span></div><p class="muted">Claude is optional. Add it when you need agents that use Claude.</p><p><a href="proposal.md#route-table">Open Runtime to add Claude</a></p></article>
+        <article class="row"><div class="row-top"><h3>GitHub discovery</h3><span class="badge">○ Not configured</span></div><p class="muted">A discovery credential lists repositories, refs and GitHub Projects. It grants no repository access.</p><p><a href="proposal.md#route-table">Configure GitHub discovery</a></p></article>
+      </section>
+    </template>
+    <template id="notifications">
+      <p class="intro">Choose whether this browser receives cab notifications. Notifications open the Inbox and never change a task.</p>
+      <section class="panel" aria-label="This browser"><div class="panel-head"><h2>This browser</h2><span class="badge">○ Off</span></div><div class="panel-body"><p>Notifications are off for this browser.</p><p class="muted">Turning them on asks for permission in your browser.</p><p style="margin-top:16px"><button type="button" class="primary" disabled>Turn on notifications</button></p></div></section>
+      <section class="panel" aria-label="Registered browsers"><div class="panel-head"><h2>Registered browsers</h2></div><div class="panel-body"><p class="muted">No browsers are registered.</p></div></section>
+      <p class="note">Notification previews omit question text, task outcomes and credentials.</p>
+    </template>
+    <script>
+      const sections = [
+        ['projects','Projects'],['runtime','Runtime & recovery'],['agents','Agents'],
+        ['routing','Routing'],['github-discovery','GitHub discovery'],
+        ['gitlab-credentials','GitLab credentials'],['cli-credentials','CLI credentials'],
+        ['notifications','Notifications'],['readiness','Readiness']
+      ];
+      const requested = new URLSearchParams(location.search).get('page');
+      const page = ['projects','readiness','notifications'].includes(requested) ? requested : 'projects';
+      const label = sections.find(([id]) => id === page)[1];
+      for (const id of ['title','crumb','current']) document.getElementById(id).textContent = label;
+      document.title = `${label} · Settings design proposal`;
+      document.getElementById('description').textContent = {
+        projects:'Manage projects and their configuration.',
+        readiness:'What the running service can use.',
+        notifications:'Browser notifications and registered devices.'
+      }[page];
+      document.getElementById('content').append(document.getElementById(page).content.cloneNode(true));
+      for (const nav of document.querySelectorAll('.section-nav')) {
+        for (const [id, name] of sections) {
+          const link = document.createElement('a');
+          link.textContent = name;
+          link.href = ['projects','readiness','notifications'].includes(id) ? `?page=${id}` : 'proposal.md#route-table';
+          if (id === page) link.setAttribute('aria-current','page');
+          nav.append(link);
+        }
+      }
+    </script>
+  </body>
+</html>
