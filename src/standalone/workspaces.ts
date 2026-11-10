@@ -1203,10 +1203,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         }
       },
     ).catch(
-      (): CleanupOutcome => ({
-        outcome: "pending",
-        reason: "unavailable",
-      }),
+      (): CleanupOutcome => ({ outcome: "pending", reason: "unavailable" }),
     );
   }
 
