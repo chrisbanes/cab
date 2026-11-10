@@ -267,6 +267,11 @@ async function startChangesJourney(
   await changes
     .getByRole("heading", { name: "Workspace comparisons", exact: true })
     .waitFor();
+  // The repository listing must land before a test changes the task: a listing that overlaps
+  // a task change answers "conflict", which leaves Branch disabled until Refresh repositories.
+  await changes
+    .locator('#changes-target option[value="branch"]:not([disabled])')
+    .waitFor({ state: "attached" });
   const comparisonTargetControl = changes.getByLabel("Comparison target");
 
   return {
