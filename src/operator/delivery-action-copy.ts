@@ -53,6 +53,11 @@ export const deliveryActionCopy: Record<
     description:
       "Merge pull requests in the repository; a merge cannot be undone.",
   },
+  "pr.update-branch": {
+    label: "Update pull request branches",
+    description:
+      "Bring a pull request that is behind its base up to date on the code host.",
+  },
   "issue.close": {
     label: "Close issues",
     description: "Close issues of the repository.",

@@ -42,7 +42,16 @@ export function leadDeliveryGuidance(
     "Delivery levels for linked repositories:",
     ...(repositoryIds.length === 0
       ? ["No linked repositories."]
-      : repositoryIds.map((id) => `- ${id}: ${line(id)}`)),
+      : repositoryIds.map(
+          (id) =>
+            `- ${id}: ${line(id)}${
+              policy.grants.some(
+                (g) => g.action === "pr.update-branch" && g.repositoryId === id,
+              )
+                ? " If the PR is behind a base whose rules require an up-to-date branch, request pr.update-branch, then fetch the task branch before further commits."
+                : ""
+            }`,
+        )),
     "At every level, ask the operator through cab_ask_question after three unsuccessful repairs of the same failure, or when reviewers give conflicting direction. This is guidance, not enforced; project instructions still apply in addition.",
   ].join("\n");
 }

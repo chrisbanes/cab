@@ -79,3 +79,31 @@ test("merge guidance names the repository's configured method, or says pr.merge 
     /R1: Custom: .*Merge with the squash method\./,
   );
 });
+
+test("every preset level tells the lead to update a behind PR, then fetch", () => {
+  for (const level of [
+    "open-prs",
+    "merge-with-approval",
+    "merge-when-ready",
+  ] as const)
+    assert.match(
+      leadDeliveryGuidance(
+        {
+          mode: "through-merge",
+          grants: repositoryLevelGrants("R1", level),
+        },
+        ["R1"],
+      ),
+      /R1: .*request pr\.update-branch, then fetch the task branch before further commits\./,
+    );
+  assert.doesNotMatch(
+    leadDeliveryGuidance(
+      {
+        mode: "through-merge",
+        grants: [{ action: "branch.push", repositoryId: "R1", mode: "allow" }],
+      },
+      ["R1"],
+    ),
+    /pr\.update-branch/,
+  );
+});

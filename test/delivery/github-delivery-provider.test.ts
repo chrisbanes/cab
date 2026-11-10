@@ -283,12 +283,17 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     ];
   let write = (): Response =>
     Response.json({ status: "merged", details: { uuid: "u-1" } });
+  const sent: string[] = [];
+  let parents: string[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (init?.method && init.method !== "GET" && url.pathname !== "/graphql") {
       writes++;
+      sent.push(`${init.method} ${url.pathname} ${String(init.body)}`);
       return write();
     }
+    if (/^\/repos\/org\/repo\/commits\/[0-9a-f]{40}$/.test(url.pathname))
+      return Response.json({ parents: parents.map((sha) => ({ sha })) });
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
       if (body.query.includes("CabDeliveryPr")) {
@@ -323,6 +328,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
         default_branch: "main",
       });
     if (url.pathname.endsWith("/pulls/7")) return Response.json(raw);
+    if (url.pathname === "/user") return Response.json({ node_id: "U1" });
     if (url.pathname.endsWith("/check-runs"))
       return Response.json({ total_count: checks.length, check_runs: checks });
     if (
@@ -375,9 +381,14 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     setChecks: (v: unknown[]) => {
       checks = v;
     },
-    /** How the code host answers every REST write. */
+    /** How the code host answers every REST write, and each write sent. */
     setWrite: (v: () => Response) => {
       write = v;
+    },
+    sent,
+    /** The parents of every commit read. */
+    setParents: (v: string[]) => {
+      parents = v;
     },
   };
 }
@@ -729,6 +740,85 @@ test("a merge GitHub refuses because its head or base moved is a retryable confi
   assert.deepEqual(await f.provider.performAction(commentRecord()), {
     state: "confirmed-failure",
     reason: "provider-http-409",
+    receipt: null,
+  });
+});
+const updateAction: ExternalAction = {
+  kind: "pr.update-branch",
+  target: {
+    repositoryId: "R1",
+    number: 7,
+    nodeId: "P7",
+    baseRef: "main",
+    headRef: "cb/change",
+    expectedHeadSha: "1".repeat(40),
+  },
+};
+test("pr.update-branch is sent only for a conflict-free PR an up-to-date rule holds as behind", async () => {
+  const strictRule = {
+    type: "required_status_checks",
+    parameters: {
+      strict_required_status_checks_policy: true,
+      required_status_checks: [],
+    },
+  };
+  for (const [change, strict] of [
+    [{}, true],
+    [{ mergeStateStatus: "BEHIND" }, false],
+    [{ mergeStateStatus: "BEHIND", mergeable: "CONFLICTING" }, true],
+  ] as const) {
+    const f = prProviderFixture(change);
+    if (strict) f.setRules([strictRule]);
+    await assert.rejects(
+      f.provider.preflight(updateAction, f.policy),
+      /update-branch-held/,
+      JSON.stringify(change),
+    );
+    assert.equal(f.getWrites(), 0);
+  }
+  const f = prProviderFixture({ mergeStateStatus: "BEHIND" });
+  f.setRules([strictRule]);
+  await f.provider.preflight(updateAction, f.policy);
+  f.setWrite(() =>
+    Response.json(
+      { message: "Updating pull request branch." },
+      { status: 202 },
+    ),
+  );
+  const record = commentRecord();
+  record.request = { operationId: record.operationId, action: updateAction };
+  // GitHub updates the branch later, so the write alone proves nothing.
+  assert.deepEqual(await f.provider.performAction(record), {
+    state: "uncertain",
+    reason: "provider-update-branch-pending",
+    receipt: null,
+  });
+  assert.deepEqual(f.sent, [
+    `PUT /repos/org/repo/pulls/7/update-branch ${JSON.stringify({ expected_head_sha: "1".repeat(40) })}`,
+  ]);
+  const updated = "4".repeat(40);
+  f.raw.head.sha = updated;
+  f.setParents(["2".repeat(40)]);
+  assert.deepEqual(await f.provider.inspectAction(record), {
+    state: "uncertain",
+    reason: "provider-effect-unproved",
+    receipt: null,
+  });
+  f.setParents(["1".repeat(40), "2".repeat(40)]);
+  assert.deepEqual(await f.provider.inspectAction(record), {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "P7", number: 7, headSha: updated },
+  });
+  f.setWrite(() =>
+    Response.json(
+      { message: "expected head sha didn't match" },
+      { status: 422 },
+    ),
+  );
+  assert.deepEqual(await f.provider.performAction(record), {
+    state: "confirmed-failure",
+    reason: "provider-http-422",
     receipt: null,
   });
 });

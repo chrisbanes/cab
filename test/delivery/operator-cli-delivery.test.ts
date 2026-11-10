@@ -1270,6 +1270,7 @@ test("delivery configure prepares the exact delivery.configure, applies once and
       "R1:pr.ready:allow",
       "R1:pr.thread.reply:allow",
       "R1:pr.thread.resolve:allow",
+      "R1:pr.update-branch:allow",
       "R1:pr.merge:allow",
     ],
   );

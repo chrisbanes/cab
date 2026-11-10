@@ -29,7 +29,8 @@ export { until };
 class ReleaseRuntime extends OperatorFixtureRuntime {
   private readonly generation = randomUUID();
   private conversationEvent:
-    ((event: RuntimeConversationEvent) => void) | undefined;
+    | ((event: RuntimeConversationEvent) => void)
+    | undefined;
   onConversationEvent(listener: (event: RuntimeConversationEvent) => void) {
     this.conversationEvent = listener;
   }
@@ -109,6 +110,17 @@ export function scriptedDeliveryProvider() {
     mergeStateStatus: "CLEAN",
     /** A ruleset on every base branch requires an up-to-date branch. */
     strict: false,
+    /** The bound PR's head branch. */
+    headRef: "cb/change",
+    /** Each commit's parents, read back after a branch update; `commitsUnavailable` fails those reads. */
+    parents: {} as Record<string, string[]>,
+    commitsUnavailable: false,
+    /** `PUT .../update-branch` calls, the head the host's update makes, and whether its response is lost. */
+    updateBranch: {
+      writes: 0,
+      head: "5".repeat(40),
+      lostResponse: false,
+    },
     lower: null as null | {
       merged: boolean;
       open: boolean;
@@ -238,6 +250,33 @@ export function scriptedDeliveryProvider() {
         },
         { status: put.http },
       );
+    }
+    if (route === "PUT /repos/org/repo/pulls/7/update-branch") {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        expected_head_sha: state.head,
+      });
+      state.updateBranch.writes++;
+      // The host merges the base into the branch: a new head on top of the old one.
+      const { head } = state.updateBranch;
+      state.parents[head] = [state.head, state.baseTip ?? state.base];
+      state.head = head;
+      state.refs[state.headRef] = head;
+      state.mergeStateStatus = "CLEAN";
+      if (state.updateBranch.lostResponse)
+        throw Error("scripted lost update response");
+      return Response.json(
+        { message: "Updating pull request branch." },
+        { status: 202 },
+      );
+    }
+    const commit = /^GET \/repos\/org\/repo\/commits\/([0-9a-f]{40})$/.exec(
+      route,
+    );
+    if (commit) {
+      if (state.commitsUnavailable) throw Error("scripted commit read failed");
+      return Response.json({
+        parents: (state.parents[commit[1]!] ?? []).map((sha) => ({ sha })),
+      });
     }
     if (route.startsWith("GET /repos/org/repo/pulls/7/merge-async/")) {
       const uuid = route.slice(route.lastIndexOf("/") + 1);
@@ -386,7 +425,7 @@ export function scriptedDeliveryProvider() {
               number: 7,
               repository: { id: "R1", nameWithOwner: "org/repo" },
               baseRefName: state.baseRef,
-              headRefName: "cb/change",
+              headRefName: state.headRef,
               headRefOid: state.head,
               baseRefOid: state.base,
               state: state.merged ? "MERGED" : state.closed ? "CLOSED" : "OPEN",
@@ -474,7 +513,11 @@ export function scriptedDeliveryProvider() {
           merged: state.merged,
           stack: null,
           draft: false,
-          head: { sha: state.head, ref: "cb/change", repo: { node_id: "R1" } },
+          head: {
+            sha: state.head,
+            ref: state.headRef,
+            repo: { node_id: "R1" },
+          },
           base: {
             sha: state.base,
             ref: state.baseRef,
@@ -856,7 +899,7 @@ export async function createReleaseDeliveryFixture(
             repositoryId: "R1",
             nodeId: "P7",
             number: 7,
-            headRef: "cb/change",
+            headRef: scripted.state.headRef,
             baseRef,
             expectedHeadSha: scripted.state.head,
           },

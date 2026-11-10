@@ -2468,6 +2468,7 @@ const deliveryGrantSchema = z
       "pr.edit",
       "pr.ready",
       "pr.merge",
+      "pr.update-branch",
       "issue.close",
       "pr.thread.reply",
       "pr.thread.resolve",

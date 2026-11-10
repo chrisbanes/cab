@@ -489,7 +489,10 @@ export class DeliveryCoordinator {
     | {
         status: "unavailable";
         reason:
-          "credential-missing" | "provider-error" | "timeout" | "unsupported";
+          | "credential-missing"
+          | "provider-error"
+          | "timeout"
+          | "unsupported";
       }
   > {
     let provider: CodeHostDeliveryProvider;
@@ -1073,9 +1076,9 @@ export class DeliveryCoordinator {
           observation,
         )
       : this.recordPublicationAware(record, observation);
-    // The PR head moved with the push: observe it now, under the task's serialization.
+    // The PR head moved with the push or the host's update: observe it now, under the task's serialization.
     if (
-      assigned &&
+      (assigned || action.kind === "pr.update-branch") &&
       recorded.state === "confirmed-success" &&
       this.store.delivery(caller.taskId)
     )

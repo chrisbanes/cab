@@ -8,6 +8,7 @@ export const repositoryLevelActions = [
   "pr.ready",
   "pr.thread.reply",
   "pr.thread.resolve",
+  "pr.update-branch",
   "pr.merge",
 ] as const;
 
@@ -29,6 +30,7 @@ const levels = {
     ["pr.ready", "allow"],
     ["pr.thread.reply", "allow"],
     ["pr.thread.resolve", "allow"],
+    ["pr.update-branch", "allow"],
   ],
   "merge-with-approval": [
     ["branch.push", "allow"],
@@ -38,6 +40,7 @@ const levels = {
     ["pr.ready", "allow"],
     ["pr.thread.reply", "allow"],
     ["pr.thread.resolve", "allow"],
+    ["pr.update-branch", "allow"],
     ["pr.merge", "approval"],
   ],
   "merge-when-ready": [
@@ -48,6 +51,7 @@ const levels = {
     ["pr.ready", "allow"],
     ["pr.thread.reply", "allow"],
     ["pr.thread.resolve", "allow"],
+    ["pr.update-branch", "allow"],
     ["pr.merge", "allow"],
   ],
 } as const satisfies Record<

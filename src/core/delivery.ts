@@ -22,7 +22,11 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sourceCredentialReference } from "./credential-reference.js";
 import { DeliveryReadinessStore, type OwnClose } from "./delivery-readiness.js";
-import { applyRepositoryLevel, isCodeHostGrant } from "./delivery-levels.js";
+import {
+  applyRepositoryLevel,
+  isCodeHostGrant,
+  repositoryDeliveryLevel,
+} from "./delivery-levels.js";
 import { githubIssueTracker } from "./github-source-contracts.js";
 import {
   itemIs,
@@ -56,6 +60,7 @@ export const actionKinds = [
   "pr.edit",
   "pr.ready",
   "pr.merge",
+  "pr.update-branch",
   "issue.close",
   "pr.thread.reply",
   "pr.thread.resolve",
@@ -375,6 +380,9 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       method: z.enum(["merge", "squash", "rebase"]),
       reviewedResultIds: z.array(z.string().uuid()),
     })
+    .strict(),
+  z
+    .object({ kind: z.literal("pr.update-branch"), target: prTargetSchema })
     .strict(),
   z
     .object({
@@ -992,6 +1000,74 @@ export class DeliveryStore {
     new UnstackStore(this.db).migrate();
     // Before anything parses a policy, including applyOpenPrsDefault.
     this.stripIssueStatusGrants();
+    this.grantUpdateBranchAtPresetLevels();
+  }
+  /**
+   * Once per store: a repository whose grants were a preset level before `pr.update-branch` joined
+   * the presets gets its `allow` row, so it still reads as that level. Data-only like
+   * `stripIssueStatusGrants`: the version stays, so settlements and approvals bound to it stay valid.
+   */
+  private grantUpdateBranchAtPresetLevels(): void {
+    const migrationId = "update-branch-preset-v1";
+    this.transaction(() => {
+      if (
+        this.db
+          .prepare("SELECT 1 FROM delivery_migrations WHERE migrationId=?")
+          .get(migrationId)
+      )
+        return;
+      const rows = this.db
+        .prepare("SELECT projectId, policyJson FROM delivery_policies")
+        .all() as { projectId: string; policyJson: string }[];
+      for (const { projectId, policyJson } of rows) {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(policyJson);
+        } catch {
+          continue;
+        }
+        const parsed = deliveryPolicySchema.safeParse(raw);
+        // An invalid policy is left as it is; `configuration` keeps reporting it.
+        if (!parsed.success) continue;
+        const { grants } = parsed.data;
+        const added: DeliveryPolicy["grants"] = [];
+        for (const repositoryId of new Set(grants.map((g) => g.repositoryId))) {
+          const row = {
+            action: "pr.update-branch" as const,
+            mode: "allow" as const,
+            repositoryId,
+          };
+          // Never truncate: a policy at the cap stays as it is.
+          if (
+            grants.length + added.length < 256 &&
+            !grants.some(
+              (g) => g.repositoryId === repositoryId && g.action === row.action,
+            ) &&
+            !["custom", "not-set-up"].includes(
+              repositoryDeliveryLevel([...grants, row], repositoryId),
+            )
+          )
+            added.push(row);
+        }
+        if (!added.length) continue;
+        // The stored rows are kept as written; only the missing ones are appended.
+        const stored = raw as { grants: unknown[] };
+        this.db
+          .prepare(
+            "UPDATE delivery_policies SET policyJson=? WHERE projectId=?",
+          )
+          .run(
+            canonicalMaterial({
+              ...stored,
+              grants: [...stored.grants, ...added],
+            }),
+            projectId,
+          );
+      }
+      this.db
+        .prepare("INSERT INTO delivery_migrations VALUES (?)")
+        .run(migrationId);
+    });
   }
   /**
    * The status mapping is its own authority, so `issue.status` grants are retired. Data-only: every
@@ -1060,10 +1136,12 @@ export class DeliveryStore {
   /** Nested stack sends can remain unfinished after a PR receipt was persisted. */
   projectStackArchiveBlockers(projectId: string): ArchiveBlocker[] {
     const rows = this.db
-      .prepare(`SELECT a.operationId,a.taskId,a.recordJson FROM delivery_actions a
+      .prepare(
+        `SELECT a.operationId,a.taskId,a.recordJson FROM delivery_actions a
       WHERE a.taskId IN (SELECT id FROM domain_tasks WHERE projectId=? UNION SELECT id FROM tasks WHERE projectId=?)
       AND (json_type(a.recordJson,'$.stackCreate') IS NOT NULL OR json_type(a.recordJson,'$.stackLink') IS NOT NULL)
-      LIMIT 129`)
+      LIMIT 129`,
+      )
       .all(projectId, projectId) as {
       operationId: string;
       taskId: string;
@@ -2542,6 +2620,22 @@ export class DeliveryStore {
         )
           this.clearSettlementOnBranch(taskId, repositoryId);
       }
+      // The host's update is the task branch's new head, as a confirmed push is.
+      if (
+        action.kind === "pr.update-branch" &&
+        observation.state === "confirmed-success" &&
+        observation.receipt?.headSha
+      )
+        this.db
+          .prepare(
+            "UPDATE delivery_task_branches SET lastPushedSha=?1,outsideHeadSha=CASE WHEN outsideHeadSha=?1 THEN NULL ELSE outsideHeadSha END WHERE taskId=?2 AND repositoryId=?3 AND branch=?4",
+          )
+          .run(
+            observation.receipt.headSha,
+            record.binding.taskId,
+            action.target.repositoryId,
+            action.target.headRef,
+          );
       if (
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
@@ -2765,6 +2859,14 @@ export class DeliveryStore {
       ...adopted,
       ...this.actions(taskId).flatMap((a) => {
         const action = a.request.action;
+        if (
+          action.kind === "pr.update-branch" &&
+          action.target.repositoryId === repositoryId
+        )
+          return a.state === "confirmed-success" &&
+            a.observation?.receipt?.headSha
+            ? [a.observation.receipt.headSha]
+            : [];
         if (
           !action.kind.startsWith("branch.") ||
           action.target.repositoryId !== repositoryId
@@ -3034,6 +3136,16 @@ export class DeliveryStore {
     if (
       branch.outsideHeadSha === observation.headSha ||
       this.pushedShas(taskId, observation.repositoryId).has(observation.headSha)
+    )
+      return false;
+    // The host may show its update before the action confirms it; that action's outcome decides.
+    if (
+      this.actions(taskId).some(
+        (a) =>
+          a.request.action.kind === "pr.update-branch" &&
+          a.request.action.target.repositoryId === observation.repositoryId &&
+          (a.state === "attempting" || a.state === "uncertain"),
+      )
     )
       return false;
     this.db

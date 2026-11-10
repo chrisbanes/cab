@@ -380,8 +380,8 @@ export function repositoryDeliveryNeeds(
     needs.push({
       met: Boolean(
         method &&
-        read?.codeHost.status === "live" &&
-        read.codeHost.allowedMethods.includes(method),
+          read?.codeHost.status === "live" &&
+          read.codeHost.allowedMethods.includes(method),
       ),
       fix:
         !row || (method && read?.codeHost.status !== "live")

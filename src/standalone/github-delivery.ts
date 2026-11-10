@@ -2127,6 +2127,13 @@ export class GitHubHttpDeliveryProvider
               .mergeMethod)
       )
         throw new Error("provider-merge-gates-held");
+      // Only a PR an up-to-date rule holds, and that the host reports conflict-free, is updated.
+      if (
+        action.kind === "pr.update-branch" &&
+        (!observation.mergeBlockers.includes("strict-head-behind") ||
+          observation.mergeBlockers.includes("mergeability-unproved"))
+      )
+        throw new Error("provider-update-branch-held");
       if (action.kind === "pr.merge")
         await this.qualifyStackMerge(action, repo.path);
       return {
@@ -2287,6 +2294,13 @@ export class GitHubHttpDeliveryProvider
           await this.graph(deliveryDocuments.CabDeliveryReady, {
             id: a.target.nodeId,
           });
+          break;
+        case "pr.update-branch":
+          await this.request(
+            `${repo.path}/pulls/${a.target.number}/update-branch`,
+            "PUT",
+            { expected_head_sha: a.target.expectedHeadSha },
+          );
           break;
         case "pr.thread.reply":
           await this.graph(deliveryDocuments.CabDeliveryThreadReply, {
@@ -2714,6 +2728,34 @@ export class GitHubHttpDeliveryProvider
           p.base.repo.node_id !== a.target.repositoryId
         )
           throw new Error("provider-pr-mismatch");
+        // GitHub updates the branch later: only a new head on top of the old one proves the update.
+        if (a.kind === "pr.update-branch") {
+          if (p.head.sha === a.target.expectedHeadSha)
+            return {
+              state: "uncertain",
+              reason: "provider-update-branch-pending",
+              receipt: null,
+            };
+          const commit = z
+            .object({ parents: z.array(z.object({ sha })) })
+            .parse(
+              (await this.request(`${repo.path}/commits/${p.head.sha}`)).json,
+            );
+          if (
+            p.head.ref === a.target.headRef &&
+            commit.parents.some((c) => c.sha === a.target.expectedHeadSha)
+          )
+            receipt = {
+              nodeId: p.node_id,
+              number: p.number,
+              headSha: p.head.sha,
+            };
+          return actionObservationSchema.parse({
+            state: receipt ? "confirmed-success" : "uncertain",
+            reason: receipt ? null : "provider-effect-unproved",
+            receipt,
+          });
+        }
         const moved =
           p.head.sha !== a.target.expectedHeadSha ||
           p.head.ref !== a.target.headRef ||
