@@ -97,15 +97,13 @@ export class ResourceController<T> {
         if (generation !== this.generation || abort.signal.aborted) return;
         if (!this.retry?.(data)) break;
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, wait);
-          abort.signal.addEventListener(
-            "abort",
-            () => {
-              clearTimeout(timer);
-              resolve();
-            },
-            { once: true },
-          );
+          const done = () => {
+            clearTimeout(timer);
+            abort.signal.removeEventListener("abort", done);
+            resolve();
+          };
+          const timer = setTimeout(done, wait);
+          abort.signal.addEventListener("abort", done, { once: true });
         });
         if (generation !== this.generation || abort.signal.aborted) return;
         data = await loader(abort.signal);

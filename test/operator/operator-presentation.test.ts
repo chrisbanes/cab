@@ -62,7 +62,7 @@ test("a workspace read that stayed in conflict is worded plainly; other states k
       "conflict",
       "repository identity is unavailable",
     ),
-    "Repository listing could not be read because the workspace kept changing; repository identity is unavailable. Refresh to try again.",
+    "Repository listing could not be read consistently, usually because the workspace changed while it was read; repository identity is unavailable. Refresh to try again.",
   );
   assert.equal(
     workspaceStateText(
@@ -71,7 +71,7 @@ test("a workspace read that stayed in conflict is worded plainly; other states k
       "file bytes are unavailable",
       "too-large",
     ),
-    "Preview could not be read because the workspace kept changing; file bytes are unavailable. Refresh to try again.",
+    "Preview could not be read consistently, usually because the workspace changed while it was read; file bytes are unavailable. Refresh to try again.",
   );
   assert.equal(
     workspaceStateText(

@@ -30,7 +30,7 @@ export function workspaceStateText(
   detail?: string,
 ) {
   return state === "conflict"
-    ? `${subject} could not be read because the workspace kept changing; ${unavailable}. Refresh to try again.`
+    ? `${subject} could not be read consistently, usually because the workspace changed while it was read; ${unavailable}. Refresh to try again.`
     : `${subject} is ${state}${detail ? ` (${detail})` : ""}; ${unavailable}.`;
 }
 

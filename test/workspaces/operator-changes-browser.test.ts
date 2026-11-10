@@ -487,7 +487,7 @@ test("Changes reads a conflicted repository listing again on its own, and says s
   await refresh.click();
   await changes
     .getByText(
-      "Repository listing could not be read because the workspace kept changing; repository identity is unavailable. Refresh to try again.",
+      "Repository listing could not be read consistently, usually because the workspace changed while it was read; repository identity is unavailable. Refresh to try again.",
     )
     .waitFor();
   assert.equal(await changes.getByText(/is conflict/).count(), 0);
