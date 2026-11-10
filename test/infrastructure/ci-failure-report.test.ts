@@ -1331,6 +1331,7 @@ test("aggregate failure accounting follows complete dependencies and retains own
   for (const variant of [
     "guard",
     "split-topology",
+    "reftable-topology",
     "ordinary",
     "mixed",
     "checkout",
@@ -1369,7 +1370,7 @@ test("aggregate failure accounting follows complete dependencies and retains own
       );
     if (variant === "extra-job")
       jobs.push({ ...jobs[0]!, id: 999, name: "historical-extra-job" });
-    if (variant === "split-topology") {
+    if (variant === "split-topology" || variant === "reftable-topology") {
       // Browser-only lanes: execution and workspaces fold into integrations.
       for (const name of ["execution-1", "workspaces-1"])
         jobs.splice(
@@ -1384,6 +1385,8 @@ test("aggregate failure accounting follows complete dependencies and retains own
         "service-4",
       ].entries())
         jobs.push({ ...passing, id: 711 + index, name });
+      if (variant === "reftable-topology")
+        jobs.push({ ...passing, id: 714, name: "reftable" });
     }
     if (variant === "unfinished") jobs[0]!.status = "in_progress";
     const ordinary = variant === "ordinary" || variant === "mixed";
@@ -1447,15 +1450,21 @@ test("aggregate failure accounting follows complete dependencies and retains own
         throw Error(`Unexpected fixture endpoint ${url}`);
       },
     });
-    const positive = ["guard", "split-topology", "ordinary", "mixed"].includes(
-      variant,
-    );
+    const positive = [
+      "guard",
+      "split-topology",
+      "reftable-topology",
+      "ordinary",
+      "mixed",
+    ].includes(variant);
     const aggregateAccounted = positive || variant.startsWith("guard-");
     const aggregate = report.runs[0].attempts[0].jobs.find(
       (job: { name: string }) => job.name === "check",
     );
     assert.equal(Boolean(aggregate.accountedFor), aggregateAccounted, variant);
-    const guarded = variant === "guard" || variant === "split-topology";
+    const guarded = ["guard", "split-topology", "reftable-topology"].includes(
+      variant,
+    );
     assert.equal(report.observedFailures, guarded ? 0 : 1, variant);
     assert.equal(report.incomplete, positive ? 0 : 1, variant);
     assert.equal(report.confirmedUnrelated, 0, variant);
@@ -1481,7 +1490,7 @@ test("aggregate failure accounting follows complete dependencies and retains own
       ]);
       assert.equal(
         aggregate.accountedFor.dependencies.length,
-        variant === "split-topology" ? 11 : 10,
+        { "split-topology": 11, "reftable-topology": 12 }[variant] ?? 10,
       );
       assert.ok(aggregate.url);
     }
