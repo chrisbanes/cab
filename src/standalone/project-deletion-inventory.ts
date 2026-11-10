@@ -392,6 +392,10 @@ export const projectDeletionInventory = {
     columns: ["nodeId", "generation", "recipientAssignmentId", "eventId"],
     ownership: "eventId in E or recipientAssignmentId in A",
   },
+  coordination_source_hold_releases: {
+    columns: ["nodeId", "generation", "recipientAssignmentId", "eventId"],
+    ownership: "eventId in E or recipientAssignmentId in A",
+  },
   coordination_task_comment_deliveries: {
     columns: [
       "commentId",
@@ -1354,6 +1358,17 @@ export const projectDeletionInventory = {
       "active",
       "reason",
       "generation",
+    ],
+    ownership: "triple in X",
+  },
+  source_hold_release_records: {
+    columns: [
+      "provider",
+      "instance",
+      "externalId",
+      "generation",
+      "reason",
+      "taskId",
     ],
     ownership: "triple in X",
   },

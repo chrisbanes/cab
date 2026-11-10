@@ -131,6 +131,12 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM coordination_source_hold_notices WHERE eventId IN (SELECT value FROM json_each(:events)) OR recipientAssignmentId IN (SELECT value FROM json_each(:assignments))",
   },
   {
+    table: "coordination_source_hold_releases",
+    where:
+      "eventId IN (SELECT value FROM json_each(:events)) OR recipientAssignmentId IN (SELECT value FROM json_each(:assignments))",
+    sql: "DELETE FROM coordination_source_hold_releases WHERE eventId IN (SELECT value FROM json_each(:events)) OR recipientAssignmentId IN (SELECT value FROM json_each(:assignments))",
+  },
+  {
     table: "coordination_task_comment_deliveries",
     where:
       "commentId IN (SELECT value FROM json_each(:comments)) OR recipientAssignmentId IN (SELECT value FROM json_each(:assignments)) OR eventId IN (SELECT value FROM json_each(:events))",
@@ -491,6 +497,12 @@ export const projectDeletionStatements = [
     where:
       "EXISTS (SELECT 1 FROM json_each(:external) x WHERE json_extract(x.value,'$.provider')=provider AND json_extract(x.value,'$.instance')=instance AND json_extract(x.value,'$.externalId')=externalId)",
     sql: "DELETE FROM source_holds WHERE EXISTS (SELECT 1 FROM json_each(:external) x WHERE json_extract(x.value,'$.provider')=provider AND json_extract(x.value,'$.instance')=instance AND json_extract(x.value,'$.externalId')=externalId)",
+  },
+  {
+    table: "source_hold_release_records",
+    where:
+      "EXISTS (SELECT 1 FROM json_each(:external) x WHERE json_extract(x.value,'$.provider')=provider AND json_extract(x.value,'$.instance')=instance AND json_extract(x.value,'$.externalId')=externalId)",
+    sql: "DELETE FROM source_hold_release_records WHERE EXISTS (SELECT 1 FROM json_each(:external) x WHERE json_extract(x.value,'$.provider')=provider AND json_extract(x.value,'$.instance')=instance AND json_extract(x.value,'$.externalId')=externalId)",
   },
   {
     table: "source_issue_briefs",

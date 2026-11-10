@@ -585,6 +585,21 @@ test("a held canonical lead receives one source-hold notice without changing ass
       await service.refreshGitHub();
       assert.equal(count(), 1);
       assert.equal(domain.assignment(leadId).state, "held");
+      labels = issue.labels;
+      await service.refreshGitHub();
+      const releaseCount = () =>
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold-released'",
+              )
+              .get(leadId) as { count: number }
+          ).count,
+        );
+      assert.equal(releaseCount(), 1);
+      await service.refreshGitHub();
+      assert.equal(releaseCount(), 1);
     } finally {
       db.close();
     }
