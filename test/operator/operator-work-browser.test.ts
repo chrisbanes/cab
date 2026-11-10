@@ -359,6 +359,56 @@ test("default readiness discloses hidden drafts in List and Board and Show prese
   }
 });
 
+test("mixed dependency holds stay attributed in List, Board, Overview and project views", async (_t, journey) => {
+  const { ids, web, page } = await startDefaults(journey);
+  const heldIds = [ids.ready, ids.waiting, ids.importedId, ids.draft];
+  await page.route("**/api/operator/task-list*", async (route) => {
+    const response = await route.fetch(),
+      json = await response.json();
+    json.data.tasks = json.data.tasks.filter((task: { id: string }) =>
+      heldIds.includes(task.id),
+    );
+    for (const task of json.data.tasks) {
+      task.ready = true;
+      task.execution.state = "idle";
+      task.admission = {
+        eligible: false,
+        reasons: [
+          heldIds.indexOf(task.id) < 2
+            ? "imported-blockers-unknown"
+            : "stacked-blocker-unknown",
+        ],
+      };
+    }
+    await route.fulfill({ response, json });
+  });
+  for (const path of [
+    "/tasks?ready=any",
+    "/tasks?ready=any&view=board",
+    "/?ready=any",
+    `/projects/${ids.projectId}?ready=any&view=board`,
+  ]) {
+    await page.goto(web.origin + path);
+    for (const [index, id] of heldIds.entries()) {
+      const reason = page.locator(`[data-task-id="${id}"] .task-reason`);
+      await reason.waitFor();
+      assert.equal(
+        await reason.innerText(),
+        index < 2
+          ? "GitHub dependencies unavailable"
+          : "Blocker's change request unconfirmed",
+        path,
+      );
+    }
+    assert.equal(
+      await page
+        .getByText(/tasks share this readiness\/dependency reason/)
+        .count(),
+      0,
+    );
+  }
+});
+
 test("task filters are remembered across navigation and reload, and the URL wins", async (_t, journey) => {
   const { ids, web, page } = await startDefaults(journey, "/tasks");
   // Ready is the default readiness: a fresh visit lists no Draft task and stores nothing.

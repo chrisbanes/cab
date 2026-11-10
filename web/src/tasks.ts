@@ -302,6 +302,10 @@ export function sharedTaskReasons(tasks: readonly TaskListSummary[]) {
         counts.set(reason.text, (counts.get(reason.text) ?? 0) + 1);
     }
   }
+  // A subset summary cannot identify which rows have a dependency hold.
+  for (const [reason, count] of counts)
+    if (reason !== reasonLabels["task-unready"] && count !== tasks.length)
+      counts.delete(reason);
   // Different unmet conditions are exceptions; keep them beside their own task.
   for (const reasons of [readinessRules, unmetReasons]) {
     if (reasons.size === 1) {

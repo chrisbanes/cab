@@ -8,6 +8,7 @@ import {
   readinessHiddenCounts,
   taskLeadLabel,
   taskReasonItems,
+  taskColumn,
   taskVisibilityText,
 } from "../../web/src/tasks.js";
 import { summary } from "../fixtures/task-summary.js";
@@ -96,4 +97,54 @@ test("task visibility and shared readiness copy stay concise", () => {
   const differingLead = summary({ lead: "Mira" });
   differingLead.project.leadProfileId = "00000000-0000-4000-8000-000000000001";
   assert.equal(taskLeadLabel(differingLead), "Mira");
+});
+
+test("mixed generic dependency holds remain attributed to their Waiting rows", () => {
+  const tasks = [
+    summary({ reasons: ["imported-blockers-unknown"] }),
+    summary({ reasons: ["imported-blockers-unknown"] }),
+    summary({ reasons: ["stacked-blocker-unknown"] }),
+    summary({ reasons: ["stacked-blocker-unknown"] }),
+  ];
+  assert.deepEqual(tasks.map(taskColumn), Array(4).fill("Waiting"));
+  assert.deepEqual(sharedTaskReasons(tasks), []);
+  assert.deepEqual(tasks.map(taskReasonItems), [
+    [{ text: "GitHub dependencies unavailable" }],
+    [{ text: "GitHub dependencies unavailable" }],
+    [{ text: "Blocker's change request unconfirmed" }],
+    [{ text: "Blocker's change request unconfirmed" }],
+  ]);
+});
+
+test("a repeated dependency hold stays on its rows beside unrelated work", () => {
+  for (const reason of [
+    "local-dependency",
+    "stacked-blocker-unpublished",
+    "stacked-blocker-unknown",
+    "imported-blockers-unknown",
+  ]) {
+    const tasks = [
+      summary({ reasons: [reason] }),
+      summary({ reasons: [reason] }),
+    ];
+    assert.deepEqual(sharedTaskReasons([...tasks, summary()]), [], reason);
+    assert.equal(taskReasonItems(tasks[0]!).length, 1, reason);
+  }
+});
+
+test("whole-result dependency holds and identical drafts still reduce 29 repeated reasons", () => {
+  for (const reason of [
+    "local-dependency",
+    "stacked-blocker-unpublished",
+    "stacked-blocker-unknown",
+    "imported-blockers-unknown",
+    "task-unready",
+  ]) {
+    const tasks = Array.from({ length: 29 }, () =>
+      summary({ ready: reason !== "task-unready", reasons: [reason] }),
+    );
+    assert.deepEqual(sharedTaskReasons(tasks), [
+      [taskReasonItems(tasks[0]!)[0]!.text, 29],
+    ]);
+  }
 });
