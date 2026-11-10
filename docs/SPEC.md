@@ -842,24 +842,44 @@ continuation audit remain historical evidence, not a successful result or a forc
 unlock. Existing callbacks before any recorded continuation retain their previous
 recovery behaviour.
 
-A positively rejected archived `thread/resume` before turn submission has a
-separate pre-turn recovery proof. The Codex adapter retains the exact correlated
-RPC request, predecessor thread, `-32600` archived-session response and runtime
-process identity. The service persists that witness against the admitted request
-sequence, work revision and assignment binding before losing submission context.
-Missing thread/turn identities, a timeout, malformed response, another RPC error or
-a lost turn-start response cannot qualify. The never-admitted refusal and bound-turn
-recovery proofs remain distinct.
+A submission that fails before cab calls `startTurn` is refused before it ran, not held
+as uncertain. cab is the only sender of a turn, so its own record that `startTurn` was not
+called, known in the process that caught the failure, is the proof that nothing ran; no
+runtime evidence or process-termination proof is needed. The boundary is the `startTurn`
+call itself: a failure while starting, resuming, unarchiving or binding the thread, or
+while preparing the prompt, diagnostics or turn policy, qualifies on both harnesses. That
+includes a response cab's own parsing rejects, a runtime RPC error (an archived-session
+`thread/resume` rejection among them), a timeout, a transport loss or App Server failure,
+a thread identity mismatch and a conversation started under the previous harness home.
+A thread may exist (created, resumed or unarchived) and stay idle and unobserved; that
+is accepted. The refusal releases writer ownership and capacity at once, settles the
+pending assignment result and keeps the thread it bound, the submission stage and the
+failure class as its evidence. The task offers [Start again](#start-again-and-reset-task)
+with no operator evidence; cab never retries it automatically. A drafting run ends
+failed and releases its capacity. The reason names the class: *cab rejected the runtime's
+response*, which a fixed cab build is expected to help; *the runtime rejected the
+request*; or *the outcome is unknown*. A thread identity mismatch is the last, an anomaly
+in the runtime's reply rather than a cab defect. An execution already held for another
+reason (a Stop, a task hold, an unfinished callback, a known survivor or another pending
+effect) keeps that hold. A failure after `startTurn` was called, including a lost
+turn-start response, keeps the uncertain hold and the recovery below. A direct request
+outside a task keeps the uncertain hold, since nothing can start it again.
 
-A historical generation lacking that typed witness requires explicit authenticated
-operator adoption. Its immutable command receipt binds the exact held generation,
-predecessor, process and persisted response to operator attestations and reviewed
-source/harness/evidence/approval references. The host operator verifies those
-artifacts and the independently reviewed no-turn evidence; valid metadata syntax or
-an error string alone does not establish proof. Model tools cannot adopt evidence.
-Command replay returns the same result and rejects altered material or retargeting.
-Adoption and recovery are authenticated advanced operator routes; they grant no
-new model tool authority or automatic recovery control.
+A generation held before pre-turn failures became refusals has no persisted stage, so
+the rule above does not apply to it, and an error string alone is not proof. Such a
+generation that positively records an archived `thread/resume` rejection has a
+separate pre-turn recovery proof: either the runtime witness captured at the time (the
+exact correlated RPC request, predecessor thread, `-32600` archived-session response and
+runtime process identity, persisted against the admitted request sequence, work revision
+and assignment binding), or explicit authenticated operator adoption. Adoption's
+immutable command receipt binds the exact held generation, predecessor, process and
+persisted response to operator attestations and reviewed source/harness/evidence/approval
+references, and it accepts only a held reason that is exactly that archived rejection.
+The host operator verifies those artifacts; valid metadata syntax alone does not
+establish proof. Model tools cannot adopt evidence. Command replay returns the same result
+and rejects altered material or retargeting. Adoption and recovery are authenticated
+advanced operator routes; they grant no new model tool authority or automatic recovery
+control. cab no longer captures this witness for new failures.
 
 A keyed pre-turn recovery receipt requires the persisted witness, truthful null
 thread/turn identities, independent exact-process termination verification and
@@ -874,17 +894,20 @@ replay. Admission, completion and external actions revalidate the pre-turn witne
 receipt and continuation audit at use time. Independent holds, current admission
 gates and persistent late-callback/survivor holds remain enforced.
 
-A distinct historical no-turn-submission proof covers an admitted generation
-with a captured known-null predecessor and unbound thread/turn identities. It is
-operator-only adoption of independently reviewed frozen source, harness and a
-complete synchronous write-ahead invocation ledger establishing that `startTurn`
-was never called for the exact generation. A generic stop error, missing identities,
-process absence or metadata syntax alone cannot establish this proof. An initial
-`thread/start` may have created an unobserved idle thread; this contract does not
-claim thread noncreation, a positive archived-resume rejection or successful work.
-The existing archived-resume predicate and bound-turn proofs remain unchanged.
+A distinct historical no-turn-submission proof covers a held generation with unbound
+thread/turn identities and either a captured known-null predecessor or a resume of a
+known completed predecessor. It is operator-only adoption of independently reviewed
+frozen source, harness and a complete synchronous write-ahead invocation ledger
+establishing that `startTurn` was never called for the exact generation at that build.
+A generic stop error, missing identities, process absence or metadata syntax alone
+cannot establish this proof. An initial `thread/start` or a resume may have left an
+unobserved idle thread; this contract does not claim thread noncreation, a positive
+archived-resume rejection or successful work. Adopting a resume refuses the generation
+before it ran in the same transaction, exactly as a new pre-turn failure is refused, so
+Start again is offered and no termination proof is needed; the refusal's identity is the
+adoption's witness. Adopting a first turn records its no-turn witness for recovery.
 
-The separate no-turn witness and receipt discriminator bind request/work,
+The no-turn witness and receipt discriminator bind request/work,
 conversation/writer revisions, assignment snapshots, process and immutable operator
 command material. Recovery independently verifies exact-process termination and
 requires settled current workspace/effects, preserving null identities and all
@@ -895,7 +918,10 @@ old batch records `operator-reconciled` processing without replay. Admission,
 completion and actions recheck the distinct witness/receipt/audit and current gates;
 late callbacks or known survivors persist a hold and retract successors across
 restart. The advanced authenticated host routes expose bounded acknowledgement,
-with no new model tool authority or forms in the curated operator UI.
+with no new model tool authority or forms in the curated operator UI. The recovery
+read reports a path eligible only when the checks its command runs can pass, including
+the exact archived reason for pre-turn adoption and the termination proof for recovery,
+and names the failing check otherwise.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash releases neither writer ownership nor capacity. No
@@ -1227,8 +1253,8 @@ is queued for it. Revoked repository access (an imported task's ready workspace 
 repository the project no longer links) opens the project's repository settings, names no
 repository and grants nothing by itself. An assignment whose operator-reconciled
 recovery has no recorded continuation has no Fix and links to its recovery; opening
-it releases nothing. A request refused before it ran because the captured task or assignment
-revisions changed is shown as **Not started** (`not-started`, reason
+it releases nothing. A request refused before it ran, because the captured task or assignment
+revisions changed or because its submission failed before any turn was sent, is shown as **Not started** (`not-started`, reason
 `refused-before-start`), not as a wait or as uncertain execution: Start again, a
 recovery or a fresh operator message clears it. A Fix never clears
 holds or grants access by implication. These controls must preserve existing
@@ -1907,10 +1933,12 @@ is no way to release an execution that may still be writing, and interrupted, un
 submitting and held work stays with the `recovery` commands.
 
 - **Start again** (`task.start-again {key, taskId, expectedVersion, workId}`) queues an
-  assignment's newest request again when a witness-only proof shows it was refused at
-  admission before it ran: the request and intent are held with their matching revision
-  refusal and an exact binding; no thread or turn, writer admission, capacity
-  reservation, recovery identity, pending effect or stop target is recorded. It does not
+  assignment's newest request again when a witness-only proof shows it was refused before
+  it ran: the request and intent are held with their matching refusal and an exact
+  binding, and no turn, writer admission, capacity reservation, pending effect or stop
+  target is recorded. A refusal at admission also records no thread or recovery
+  identity; a [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
+  and its turn-less recovery identity. It does not
   read the refusal's reasons; every current admission check applies again to the new
   request. The refused request and its refusal stay in the history, linked to the new
   request by a restart record, so the restarted work is historically resolved. The new

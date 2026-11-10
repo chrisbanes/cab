@@ -53,6 +53,12 @@ import type {
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
 import { previousHarnessHomeMessage } from "./runtime-retention.js";
+import {
+  adoptedPreTurnRefusalReason,
+  type PreTurnFailureClass,
+  type PreTurnStage,
+  preTurnRefusalPrefix,
+} from "./pre-turn-failure.js";
 import type { TurnPlugin } from "./runtime-retention.js";
 import { nativeHarnessHome } from "./runtime-retention.js";
 
@@ -576,6 +582,15 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS execution_request_refusals (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       reason TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS execution_pre_turn_refusals (
+      workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      id TEXT NOT NULL UNIQUE,
+      origin TEXT NOT NULL CHECK(origin IN ('runtime','operator-adopted')),
+      stage TEXT CHECK(stage IN ('thread','resume','bound')),
+      failureClass TEXT CHECK(failureClass IN ('response-rejected','request-rejected','outcome-unknown')),
+      threadId TEXT,
+      CHECK((origin = 'runtime') = (stage IS NOT NULL AND failureClass IS NOT NULL))
     );
     CREATE TABLE IF NOT EXISTS turn_request_restarts (
       refusedWorkId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
@@ -2293,11 +2308,12 @@ export class ExecutionState {
   }
 
   /**
-   * Witness-only proof that an assignment request was refused at admission before it ran:
-   * the exact held request and intent still match their immutable revision refusal, and
-   * nothing records a thread, turn, writer admission, capacity reservation, recovery
-   * identity, pending effect or stop target. It does not look at the refusal's reasons
-   * or the work identity; admission applies again when the work is requeued.
+   * Witness-only proof that an assignment request was refused before it ran: the exact held
+   * request and intent still match their immutable refusal, and nothing records a turn,
+   * writer admission, capacity reservation, pending effect or stop target. A refusal at
+   * admission also records no thread or recovery identity; a pre-turn refusal may keep the
+   * idle thread it bound and its turn-less recovery identity. It does not look at the
+   * refusal's reasons or the work identity; admission applies again when the work is requeued.
    */
   refusedBeforeStart(workId: string): boolean {
     return this.refusedBeforeStartRow(workId) !== undefined;
@@ -2319,12 +2335,17 @@ export class ExecutionState {
         binding.instructionsRevision AS bindingInstructionsRevision,
         binding.profileRevision AS bindingProfileRevision,
         refusal.reason AS refusalReason,
+        preTurn.workId IS NOT NULL AS preTurnRefused,
+        preTurn.threadId AS preTurnThreadId,
         EXISTS (SELECT 1 FROM task_writer_admissions admission
           WHERE admission.workId = intent.workId) AS hasWriterAdmission,
         EXISTS (SELECT 1 FROM execution_capacity_reservations capacity
           WHERE capacity.workId = intent.workId) AS hasCapacityReservation,
+        -- A pre-turn refusal keeps the identity it was admitted with: no turn, its own thread.
         EXISTS (SELECT 1 FROM execution_recovery_identities recovery
-          WHERE recovery.workId = intent.workId) AS hasRecoveryIdentity,
+          WHERE recovery.workId = intent.workId AND (preTurn.workId IS NULL
+            OR recovery.turnId IS NOT NULL
+            OR recovery.threadId IS NOT preTurn.threadId)) AS hasRecoveryIdentity,
         EXISTS (SELECT 1 FROM execution_pending_effects effect
           WHERE effect.workId = intent.workId AND effect.state = 'pending')
           AS hasPendingEffect,
@@ -2334,6 +2355,7 @@ export class ExecutionState {
         JOIN execution_intents intent ON intent.workId = request.workId
         JOIN task_execution_bindings binding ON binding.workId = intent.workId
         JOIN execution_request_refusals refusal ON refusal.workId = intent.workId
+        LEFT JOIN execution_pre_turn_refusals preTurn ON preTurn.workId = intent.workId
         JOIN domain_tasks task ON task.id = request.taskId
           AND task.projectId = request.projectId
         JOIN domain_assignments assignment ON assignment.id = request.assignmentId
@@ -2363,6 +2385,8 @@ export class ExecutionState {
           bindingInstructionsRevision: number;
           bindingProfileRevision: number;
           refusalReason: string;
+          preTurnRefused: number;
+          preTurnThreadId: string | null;
           hasWriterAdmission: number;
           hasCapacityReservation: number;
           hasRecoveryIdentity: number;
@@ -2389,19 +2413,22 @@ export class ExecutionState {
       row.bindingAssignmentVersion !== row.assignmentVersion ||
       row.bindingInstructionsRevision !== row.instructionsRevision ||
       row.bindingProfileRevision !== row.profileRevision ||
-      row.threadId !== null ||
+      row.threadId !== (row.preTurnRefused ? row.preTurnThreadId : null) ||
       row.turnId !== null ||
       row.hasWriterAdmission !== 0 ||
       row.hasCapacityReservation !== 0 ||
       row.hasRecoveryIdentity !== 0 ||
       row.hasPendingEffect !== 0 ||
       row.hasStopTarget !== 0 ||
-      !row.refusalReason.startsWith(refusedRevisionPrefix) ||
-      !row.refusalReason.endsWith(")")
+      (row.preTurnRefused
+        ? !row.refusalReason.startsWith(preTurnRefusalPrefix)
+        : !row.refusalReason.startsWith(refusedRevisionPrefix) ||
+          !row.refusalReason.endsWith(")"))
     )
       return undefined;
     return {
       id,
+      preTurn: row.preTurnRefused !== 0,
       draftTurn: row.draftTurn,
       taskId: row.taskId,
       assignmentId: row.assignmentId,
@@ -2425,7 +2452,8 @@ export class ExecutionState {
     )
       return false;
     const row = this.refusedBeforeStartRow(workId);
-    if (!row) return false;
+    // A pre-turn refusal was admitted: it ran up to the runtime, so it is never "never admitted".
+    if (!row || row.preTurn) return false;
     const id = row.id;
     const initial = id === `assignment:${row.assignmentId}:initial`;
     const refusal = row.refusalReason;
@@ -3499,6 +3527,8 @@ export class ExecutionState {
         .object({ witnessId: z.string().uuid(), workId: z.string().min(1) })
         .strict()
         .parse(replay);
+    if (value.predecessorWorkId !== undefined)
+      return this.adoptHistoricalResumeNoTurn(value);
     return transaction(this.db, () => {
       const context = this.noTurnContext(value.workId);
       const intent = this.db
@@ -3550,6 +3580,84 @@ export class ExecutionState {
           value.workId,
           canonicalMaterial(context),
           canonicalMaterial(value),
+        );
+      this.recordPreTurnCommand("adopt-no-turn", value, result);
+      return result;
+    });
+  }
+
+  /**
+   * A held resume of a known completed predecessor, from before pre-turn failures became
+   * refusals, whose operator-reviewed evidence shows `startTurn` was never called. It is
+   * refused before it ran in the same transaction, so Start again can queue it afresh;
+   * no process proof is needed because nothing ran. The refusal id is the witness id.
+   */
+  private adoptHistoricalResumeNoTurn(value: HistoricalNoTurnAdoption): {
+    witnessId: string;
+    workId: string;
+  } {
+    return transaction(this.db, () => {
+      const context = this.preTurnContext(value.workId);
+      const intent = this.db
+        .prepare("SELECT state,reason FROM execution_intents WHERE workId=?")
+        .get(value.workId) as { state: string; reason: string } | undefined;
+      const request = this.db
+        .prepare("SELECT state,reason FROM turn_requests WHERE workId=?")
+        .get(value.workId) as { state: string; reason: string } | undefined;
+      if (
+        !context ||
+        intent?.state !== "held" ||
+        request?.state !== "held" ||
+        intent.reason !== value.retainedReason ||
+        request.reason !== value.retainedReason ||
+        context.workRevision !== value.workRevision ||
+        context.requestSequence !== value.requestSequence ||
+        context.conversationRevision !== value.conversationRevision ||
+        context.writerSequence !== value.writerSequence ||
+        context.predecessorWorkId !== value.predecessorWorkId ||
+        context.predecessorThreadId !== value.predecessorThreadId ||
+        context.processId !== value.processIdentity.processId ||
+        context.processStartedAt !== value.processIdentity.processStartedAt ||
+        context.bootId !== value.processIdentity.bootId ||
+        !this.db
+          .prepare(
+            "SELECT 1 FROM execution_capacity_reservations WHERE workId=?",
+          )
+          .get(value.workId) ||
+        this.db
+          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
+          .get(value.workId) ||
+        this.db
+          .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
+          .get(value.workId) ||
+        this.db
+          .prepare("SELECT 1 FROM execution_request_refusals WHERE workId=?")
+          .get(value.workId)
+      )
+        throw new RecoveryRejectedError(
+          "Historical no-turn adoption does not match the exact held generation",
+        );
+      const result = { witnessId: randomUUID(), workId: value.workId };
+      this.db
+        .prepare(
+          "UPDATE execution_intents SET reason = ? WHERE workId = ? AND state = 'held'",
+        )
+        .run(adoptedPreTurnRefusalReason, value.workId);
+      this.recordPreTurnRefusalWithin(
+        value.workId,
+        adoptedPreTurnRefusalReason,
+        {
+          origin: "operator-adopted",
+          stage: null,
+          failureClass: null,
+          threadId: null,
+        },
+        result.witnessId,
+      );
+      // A Stop target, a pending effect or another binding would leave it unresolved.
+      if (!this.refusedBeforeStart(value.workId))
+        throw new RecoveryRejectedError(
+          "Historical no-turn adoption cannot refuse this generation before it ran",
         );
       this.recordPreTurnCommand("adopt-no-turn", value, result);
       return result;
@@ -5923,6 +6031,116 @@ export class ExecutionState {
     return held !== undefined;
   }
 
+  /**
+   * Records an assignment request that failed before `startTurn` was called as refused
+   * before it ran, releasing its writer and capacity so Start again can queue it afresh.
+   * cab is the only sender of a turn, so nothing ran; a created or resumed thread may stay
+   * idle. Returns false, changing nothing, when anything else holds the execution: it is
+   * no longer submitting, a turn or other thread is bound, a Stop or task hold applies, or
+   * an effect other than its result is pending. The caller then holds it as before.
+   */
+  refusePreTurn(
+    id: string,
+    refusal: {
+      stage: PreTurnStage;
+      failureClass: PreTurnFailureClass;
+      reason: string;
+      threadId: string | null;
+    },
+  ): boolean {
+    const workId = this.get(id).workId;
+    assertOwnedWorkWritable(this.db, workId);
+    if (!this.hasTurnRequests) return false;
+    const reason = z.string().min(1).max(4000).parse(refusal.reason);
+    try {
+      return transaction(this.db, () => {
+        const intent = this.db
+          .prepare(
+            "SELECT state, threadId, turnId FROM execution_intents WHERE id = ?",
+          )
+          .get(id) as
+          | { state: string; threadId: string | null; turnId: string | null }
+          | undefined;
+        const binding = this.taskBinding(workId);
+        if (
+          intent?.state !== "submitting" ||
+          intent.turnId !== null ||
+          intent.threadId !== refusal.threadId ||
+          !binding ||
+          this.stopTarget(workId) ||
+          this.taskHold(binding.taskId) !== undefined ||
+          this.db
+            .prepare(`SELECT 1 FROM execution_pending_effects
+              WHERE workId = ? AND state = 'pending' AND effectKey != 'assignment-result'`)
+            .get(workId)
+        )
+          return false;
+        this.db
+          .prepare(
+            "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ?",
+          )
+          .run(reason, id);
+        this.recordPreTurnRefusalWithin(workId, reason, {
+          origin: "runtime",
+          ...refusal,
+        });
+        // Checked with the same proof Start again reads; anything else rolls back to a hold.
+        if (!this.refusedBeforeStart(workId))
+          throw new PreTurnRefusalUnprovenError();
+        return true;
+      });
+    } catch (error) {
+      if (error instanceof PreTurnRefusalUnprovenError) return false;
+      throw error;
+    }
+  }
+
+  /** Inside the caller's transaction, with the intent already held under `reason`. */
+  private recordPreTurnRefusalWithin(
+    workId: string,
+    reason: string,
+    refusal: {
+      origin: "runtime" | "operator-adopted";
+      stage: PreTurnStage | null;
+      failureClass: PreTurnFailureClass | null;
+      threadId: string | null;
+    },
+    id: string = randomUUID(),
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO execution_request_refusals (workId, reason) VALUES (?, ?)",
+      )
+      .run(workId, reason);
+    this.db
+      .prepare(`INSERT INTO execution_pre_turn_refusals
+        (workId, id, origin, stage, failureClass, threadId) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(
+        workId,
+        id,
+        refusal.origin,
+        refusal.stage,
+        refusal.failureClass,
+        refusal.threadId,
+      );
+    this.db
+      .prepare(
+        "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = ?",
+      )
+      .run(reason, workId);
+    this.db
+      .prepare(`UPDATE execution_pending_effects SET state = 'settled',
+        reason = 'Request refused before it ran'
+        WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'pending'`)
+      .run(workId);
+    this.db
+      .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
+      .run(workId);
+    this.db
+      .prepare("DELETE FROM task_writer_admissions WHERE workId = ?")
+      .run(workId);
+  }
+
   wait(id: string, reason: string): void {
     assertOwnedWorkWritable(this.db, this.get(id).workId);
     this.db
@@ -6760,6 +6978,9 @@ export class ExecutionState {
     });
   }
 }
+
+/** Rolls back a pre-turn refusal that would not read as refused before it ran. */
+class PreTurnRefusalUnprovenError extends Error {}
 
 const stopTargetSchema = z.object({
   taskId: z.string().uuid(),

@@ -7,9 +7,12 @@ import {
   assignmentRecoverySchema,
   recoveryOptionsSchema,
 } from "../../src/operator/contracts.js";
+import type { HistoricalPreTurnAdoption } from "../../src/standalone/pre-turn-recovery.js";
+import { RecoveryRejectedError } from "../../src/standalone/recovery-types.js";
 import { seedOperatorRecovery } from "../fixtures/operator-web.js";
 import {
   type GenerationMode,
+  type PreTurnRuntime,
   servedGeneration,
 } from "../fixtures/recovery-generations.js";
 
@@ -174,7 +177,8 @@ test("historical and runtime-captured pre-turn generations expose predecessor id
   assert.deepEqual(eligibility(record), {
     "pre-turn-adopt": "eligible",
     "pre-turn-recover": "witness-missing",
-    "no-turn-adopt": "context-unavailable",
+    // A held resume can also be adopted as never having called startTurn.
+    "no-turn-adopt": "eligible",
     "no-turn-recover": "context-unavailable,witness-missing",
     "bound-turn-recover": "bound-identity-missing",
   });
@@ -188,6 +192,123 @@ test("historical and runtime-captured pre-turn generations expose predecessor id
     "witness-present",
   ]);
   assert.equal(path(record, "pre-turn-recover")?.eligible, true);
+
+  // Recovery needs the exact process proven ended; eligibility reads the same proof.
+  runtime.verifier.set("unknown");
+  record = (await options(runtime, runtime.read)).records.find(
+    (r) => r.workId === runtime.g.workId,
+  );
+  assert.ok(record);
+  assert.deepEqual(path(record, "pre-turn-recover")?.blockedBy, [
+    "termination-unknown",
+  ]);
+  await assert.rejects(
+    runtime.s.f.service.recoverPreTurnExecution(runtime.g.recovery() as never),
+    RecoveryRejectedError,
+  );
+  runtime.verifier.set("verified");
+  await runtime.s.f.service.recoverPreTurnExecution(
+    runtime.g.recovery() as never,
+  );
+});
+
+test("a resume held by a cab defect is adopted as a refusal that Start again runs", async (t) => {
+  const w = await world(t, "pre-turn-defect");
+  const { g, s } = w;
+  const service = s.f.service;
+  let record = (await options(w, w.read)).records.find(
+    (r) => r.workId === g.workId,
+  );
+  assert.ok(record);
+  assert.match(
+    record.retainedReason ?? "",
+    /^Runtime submission or observation uncertain: .*invalid_value/s,
+  );
+  assert.deepEqual(eligibility(record), {
+    // Its reason is not the archived rejection that pre-turn adoption accepts.
+    "pre-turn-adopt": "reason-mismatch",
+    "pre-turn-recover": "witness-missing",
+    "no-turn-adopt": "eligible",
+    "no-turn-recover": "context-unavailable,witness-missing",
+    "bound-turn-recover": "bound-identity-missing",
+  });
+  assert.throws(
+    () =>
+      service.adoptHistoricalPreTurnRejection({
+        ...(g.adoption() as HistoricalPreTurnAdoption),
+        retainedReason: g.retainedReason,
+      }),
+    RecoveryRejectedError,
+  );
+  const adoption = g.resumeAdoption();
+  for (const altered of [
+    { predecessorThreadId: "other-thread" },
+    { retainedReason: `${g.retainedReason} ` },
+    { writerSequence: adoption.writerSequence + 1 },
+    { requestSequence: adoption.requestSequence + 1 },
+  ])
+    assert.throws(
+      () =>
+        service.adoptHistoricalNoTurnSubmission({
+          ...adoption,
+          key: randomUUID(),
+          ...altered,
+        }),
+      RecoveryRejectedError,
+    );
+  assert.throws(
+    () =>
+      service.adoptHistoricalNoTurnSubmission({
+        ...adoption,
+        predecessorWorkId: undefined,
+      }),
+    /both its work and thread/,
+  );
+  assert.equal(service.startAgainAvailability(g.taskId).available, false);
+
+  const adopted = service.adoptHistoricalNoTurnSubmission(adoption);
+  assert.deepEqual(service.adoptHistoricalNoTurnSubmission(adoption), adopted);
+  assert.throws(
+    () =>
+      service.adoptHistoricalNoTurnSubmission({
+        ...adoption,
+        evidence: { ...adoption.evidence, evidenceSha256: "f".repeat(64) },
+      }),
+    /reused with different material/,
+  );
+  record = (await options(w, w.read)).records.find(
+    (r) => r.workId === g.workId,
+  );
+  assert.ok(record);
+  assert.deepEqual(record.holds, {
+    ...record.holds,
+    writer: false,
+    capacity: false,
+  });
+  assert.ok(record.paths.every((p) => !p.eligible));
+  assert.deepEqual(service.startAgainAvailability(g.taskId), {
+    available: true,
+    assignmentId: g.assignmentId,
+    workId: g.workId,
+  });
+  (w.runtime as PreTurnRuntime).resumeError = undefined;
+  const receipt = await service.startAgain({
+    key: randomUUID(),
+    taskId: g.taskId,
+    expectedVersion: Number(service.domain().task(g.taskId).version),
+    workId: g.workId,
+  });
+  await until(
+    () =>
+      service.list().find((i) => i.workId === receipt.workId)?.state ===
+      "completed",
+    "started again",
+  );
+  assert.equal(
+    service.turnRequests().find((r) => r.workId === g.workId)?.state,
+    "held",
+    "the refused request stays as history",
+  );
 });
 
 test("redaction withholds exact strings and blocks the paths that would send them", async (t) => {

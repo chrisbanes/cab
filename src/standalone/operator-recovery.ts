@@ -12,7 +12,10 @@ import {
   recoveryOptionsSchema,
   type recoveryBlockerSchema,
 } from "../operator/contracts.js";
-import { boundTurnRecoveryCommandSchema } from "./pre-turn-recovery.js";
+import {
+  archivedResumeMessage,
+  boundTurnRecoveryCommandSchema,
+} from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import type { StandaloneService } from "./service.js";
 
@@ -114,6 +117,15 @@ export async function recoveryOptions(
         noTurn: r.noTurnSubmission ? { id: r.noTurnSubmission.id } : null,
       };
       const reconciled = r.receiptRecorded || r.intentState === "reconciled";
+      // The only reason a historical pre-turn adoption accepts: the exact archived rejection.
+      const archivedReason = exactPredecessor
+        ? `Runtime submission or observation uncertain: Error: ${JSON.stringify(
+            {
+              code: -32600,
+              message: archivedResumeMessage(exactPredecessor.threadId),
+            },
+          )}`
+        : null;
       const blockers = (path: RecoveryPath): Blocker[] => {
         if (path === "bound-turn-recover") return boundBlocked;
         const preTurn = path.startsWith("pre-turn");
@@ -129,13 +141,24 @@ export async function recoveryOptions(
           b.push("not-held");
         else if (!r.holds.capacity || (!adopt && !r.holds.writer))
           b.push("ownership-released");
-        if (!(preTurn ? own?.preTurn : own?.noTurn))
-          b.push("context-unavailable");
+        // A historical resume has the pre-turn context; its no-turn adoption accepts it.
+        const context = preTurn
+          ? own?.preTurn
+          : adopt
+            ? (own?.noTurn ?? own?.preTurn)
+            : own?.noTurn;
+        if (!context) b.push("context-unavailable");
         if (adopt && mine) b.push("witness-present");
         if (!adopt && !mine) b.push("witness-missing");
         if (other) b.push("other-witness");
         // Adoption must restate the held reason exactly; a withheld or split reason cannot be.
         if (adopt && reason === null) b.push("reason-withheld");
+        else if (
+          path === "pre-turn-adopt" &&
+          archivedReason !== null &&
+          reason !== archivedReason
+        )
+          b.push("reason-mismatch");
         if (identityWithheld) b.push("identity-withheld");
         return [...new Set(b)];
       };
@@ -156,18 +179,29 @@ export async function recoveryOptions(
         witnesses,
         receiptRecorded: r.receiptRecorded,
         workspace: r.workspace,
-        paths: (
-          [
-            "pre-turn-adopt",
-            "pre-turn-recover",
-            "no-turn-adopt",
-            "no-turn-recover",
-            "bound-turn-recover",
-          ] as const
-        ).map((path) => {
-          const blockedBy = blockers(path);
-          return { path, eligible: blockedBy.length === 0, blockedBy };
-        }),
+        paths: await Promise.all(
+          (
+            [
+              "pre-turn-adopt",
+              "pre-turn-recover",
+              "no-turn-adopt",
+              "no-turn-recover",
+              "bound-turn-recover",
+            ] as const
+          ).map(async (path) => {
+            let blockedBy = blockers(path);
+            // The recover commands verify the exact process ended; so does this advisory read.
+            if (
+              blockedBy.length === 0 &&
+              r.workId !== null &&
+              (path === "pre-turn-recover" || path === "no-turn-recover")
+            )
+              blockedBy = await service.unboundTurnTerminationBlockers(
+                r.workId,
+              );
+            return { path, eligible: blockedBy.length === 0, blockedBy };
+          }),
+        ),
       };
     }),
   );

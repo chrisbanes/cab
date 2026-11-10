@@ -873,7 +873,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
      immutable witness (`saved`); recovery verifies termination of the stored
      process and reconciles ownership (`completed`); conversation replacement
      increments the revision (`saved`). None resumes the task or dispatches work:
-     after replacement, continue with a new `task message`. A refusal (stale
+     after replacement, continue with a new `task message`. The exception is
+     `no-turn-adopt` of a held resume, whose document carries the predecessor from
+     the read: it refuses the generation before it ran, releasing its ownership,
+     and the task then offers `task start-again`. A refusal (stale
      identity, unverified termination, an existing witness, a stale revision or a
      task hold) exits 4 with the current blockers and observations; missing,
      expired or stale evidence is never a successful recovery, and that key is not

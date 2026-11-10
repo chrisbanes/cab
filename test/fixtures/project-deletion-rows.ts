@@ -1590,6 +1590,18 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "execution_pre_turn_refusals",
+      values: {
+        workId: i.workId,
+        id: i.uuid("pre-turn-refusal"),
+        origin: "runtime",
+        stage: "resume",
+        failureClass: "response-rejected",
+        threadId: null,
+      },
+    },
+    {
+      shared: false,
       table: "execution_request_refusals",
       values: { workId: i.workId, reason: "fixture-reason" },
     },

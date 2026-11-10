@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "../fixtures/temp.js";
+import { bindLegacyHold, failing } from "../fixtures/recovery-generations.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import type {
   Runtime,
@@ -19,6 +20,7 @@ import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
 
 class NoTurnRuntime implements Runtime {
+  beforeFailure: ((error: Error) => void) | undefined;
   rejectStart = true;
   threads = 0;
   turnInvocations: string[] = [];
@@ -40,7 +42,8 @@ class NoTurnRuntime implements Runtime {
   }
   async startThread() {
     const id = `possibly-created-idle-thread-${++this.threads}`;
-    if (this.rejectStart) throw new Error("Runtime stopped");
+    if (this.rejectStart)
+      throw failing(this.beforeFailure, new Error("Runtime stopped"));
     return id;
   }
   async resumeThread() {
@@ -92,25 +95,28 @@ async function fixture() {
   const runtime = new NoTurnRuntime();
   let verified = true;
   const makeService = () =>
-    new StandaloneService(join(directory, "data"), () => runtime, undefined, {
-      power: { enabled: false },
-      routingClient: null,
-      terminationVerifier: {
-        async verify(identity) {
-          return verified
-            ? {
-                kind: "verified",
-                processIdentity: identity,
-                verifiedAt: "2026-10-03T10:05:00.000Z",
-                method: "mac-pid-absent-same-boot",
-              }
-            : {
-                kind: "unknown",
-                reason: "Independent termination unavailable",
-              };
+    bindLegacyHold(
+      runtime,
+      new StandaloneService(join(directory, "data"), () => runtime, undefined, {
+        power: { enabled: false },
+        routingClient: null,
+        terminationVerifier: {
+          async verify(identity) {
+            return verified
+              ? {
+                  kind: "verified",
+                  processIdentity: identity,
+                  verifiedAt: "2026-10-03T10:05:00.000Z",
+                  method: "mac-pid-absent-same-boot",
+                }
+              : {
+                  kind: "unknown",
+                  reason: "Independent termination unavailable",
+                };
+          },
         },
-      },
-    });
+      }),
+    );
   const service = makeService();
   await service.start();
   const profileId = randomUUID(),

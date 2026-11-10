@@ -659,8 +659,14 @@ and uncertainty holds are this assignment's, Stop and task holds task-wide) with
 exact identity each command binds and advisory per-path
 eligibility with closed blockers (`not-held`, `ownership-released`,
 `context-unavailable`, `witness-missing`, `witness-present`, `other-witness`,
-`already-reconciled`, `reason-withheld`, `identity-withheld`, `task-held`,
-`unresolved-execution`). It discloses the held process identity to both credential
+`already-reconciled`, `reason-withheld`, `reason-mismatch`, `identity-withheld`, `task-held`,
+`unresolved-execution`, plus the termination blockers `termination-live`,
+`termination-conflict`, `termination-unknown` and `identity-changed` that the recover paths
+share with bound-turn recovery). A path is eligible only when the checks its command runs can
+pass: `pre-turn-adopt` needs the held reason to be the exact archived-resume rejection, and the
+recover paths need the stored process proven ended. `no-turn-adopt` also accepts a held resume
+of a known completed predecessor; its command then names `predecessorWorkId` and
+`predecessorThreadId`, and adoption refuses the generation before it ran so Start again applies. It discloses the held process identity to both credential
 scopes as permitted diagnostic content; a string redaction would change reads
 `null` and blocks the paths that would send it. `recovery prepare` writes an
 `cab.cli.recovery/v1` document (owner-only, at most 512 KiB, canonical-JSON

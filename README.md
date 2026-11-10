@@ -97,8 +97,8 @@ owns delivery scope and status.
   issue; delegation, writes, pull request actions, results and completion are refused,
   and the task stays not Ready. Codex runs it with a read-only sandbox policy and
   command network access off; cab claims no independent sandbox.
-- **Start again and Reset task.** A request refused at admission before it ran shows as
-  Not started, not Uncertain. Start again, from the task page, the Inbox, Home or
+- **Start again and Reset task.** A request refused before it ran, at admission or because
+  its submission failed before any turn was sent, shows as Not started, not Uncertain. Start again, from the task page, the Inbox, Home or
   `cab task start-again`, queues it again at the current revisions in the same
   workspace and keeps the refusal in the history. Reset task, from the task header or
   `cab task reset`, replaces every assignment's conversation and starts the lead

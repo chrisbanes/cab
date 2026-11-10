@@ -214,6 +214,13 @@ function buildCommand(
       assignmentId,
       kind: "historical-no-turn-submission",
       ...generation,
+      // A held resume names its predecessor; a first turn has none.
+      ...(record.predecessor
+        ? {
+            predecessorWorkId: record.predecessor.workId,
+            predecessorThreadId: record.predecessor.threadId,
+          }
+        : {}),
       conversationRevision: record.conversationRevision,
       writerSequence: record.writerSequence,
       retainedReason: record.retainedReason,

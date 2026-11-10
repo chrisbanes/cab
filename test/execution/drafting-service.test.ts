@@ -79,6 +79,8 @@ class DraftRuntime implements Runtime {
   threadDelayMs = 0;
   /** This many interrupt calls fail before one is accepted. */
   failInterrupts = 0;
+  /** When set, `startThread` fails with it, before any turn. */
+  threadError: Error | undefined;
   private readonly behaviors: Behavior[] = [];
   private tool:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -109,6 +111,7 @@ class DraftRuntime implements Runtime {
     this.threadSettings.push(settings);
     if (this.threadDelayMs)
       await new Promise((resolve) => setTimeout(resolve, this.threadDelayMs));
+    if (this.threadError) throw this.threadError;
     const id = `draft-thread-${++this.count}`;
     this.threads.push({ id, workspace, tools });
     return id;
@@ -1411,6 +1414,27 @@ test("a Stop during thread start is applied once the turn binds", async (t) => {
   );
   assert.equal(codex.interrupts.length, 1);
   assert.equal(service.readDrafting(runId)?.reason, "You stopped the draft");
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+});
+
+test("a run whose thread start fails before any turn ends failed and releases its capacity", async (t) => {
+  const w = world(t);
+  const opened = w.open();
+  const { service, codex } = opened;
+  codex.threadError = new Error("Runtime stopped");
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "failed",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(
+    service.readDrafting(runId)?.reason,
+    "The lead's turn could not start",
+  );
+  assert.equal(codex.prompts.length, 0);
   assert.equal(w.tracked(service).usage(projectId).global, 0);
 });
 
