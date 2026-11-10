@@ -9,6 +9,7 @@ import {
   orderWaits,
   runtimeWaitCodes,
   waitCodes,
+  waitLabels,
   waitSchema,
 } from "../../src/operator/wait-reasons.js";
 import {
@@ -57,6 +58,10 @@ const assignment = (reasons: readonly string[], profileName = "Worker") => ({
   profileName,
   reasons,
 });
+assert.match(
+  waitLabels["assignment-profile-not-permitted"],
+  /Permitted agents/,
+);
 const one = (facts: Partial<Parameters<typeof deriveWaits>[0]>) =>
   deriveWaits({ projectId, admissionReasons: [], ...facts });
 

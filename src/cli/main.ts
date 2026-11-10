@@ -383,6 +383,7 @@ export const OPTIONS = {
   "branch-prefix": { type: "string" },
   "branch-prefix-default": { type: "boolean" },
   candidates: { type: "string" },
+  "permitted-agents": { type: "string" },
   "global-limit": { type: "string" },
   "project-limit": { type: "string", multiple: true },
   "min-lead-slots": { type: "string" },

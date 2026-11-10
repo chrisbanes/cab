@@ -409,7 +409,9 @@ name, version and preview digest. The service rechecks every confirmation atomic
 
 5. Configuration changes, with a read/write credential to apply:
    - `profile prepare PROFILE_ID`, `profile prepare-create`, `project prepare
-     PROJECT_ID`, `project prepare-create`, `project prepare-routing PROJECT_ID` and
+     PROJECT_ID`, `project prepare-create`, `project prepare-permitted-agents PROJECT_ID` and
+     its compatible alias `project prepare-routing PROJECT_ID` (the list flags are
+     `--permitted-agents` and `--candidates`, respectively), and
      `capacity prepare` read the current state and write a change document with mode
      `0600`, to `--out FILE` or by default to `./cab-<kind>-<id8>.json` (kind
      such as `project-configure`, id8 the first eight characters of the target's ID;

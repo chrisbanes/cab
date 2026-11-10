@@ -23,6 +23,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
+import { Input } from "./ui/input.js";
 import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
 import {
@@ -72,7 +73,6 @@ import {
   type GhLogin,
 } from "./discovery-credential.js";
 import { settingsSectionHref } from "./settings-sections.js";
-import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import "./setup.css";
 
@@ -435,8 +435,7 @@ export function ProjectSetup(
     name: String(d.values.name ?? ""),
     leadProfileId: String(d.values.leadProfileId ?? ""),
     instructions: String(d.values.instructions ?? ""),
-    ...(d.values.createdLeadId === d.values.leadProfileId &&
-    Array.isArray(d.values.candidateProfileIds)
+    ...(Array.isArray(d.values.candidateProfileIds)
       ? { candidateProfileIds: d.values.candidateProfileIds }
       : {}),
   };
@@ -693,6 +692,44 @@ export function ProjectSetup(
                 </DraftField>
               )}
             </div>
+            {/* Shown once agents exist, so the inline lead form keeps its first-screen place. */}
+            {profiles.length > 0 && (
+              <fieldset className="settings-candidates" disabled={disabled}>
+                <legend className="small-heading">Permitted agents</legend>
+                <p className="metadata muted">
+                  The lead may delegate to these agents whether routing is on or
+                  off.
+                </p>
+                {profiles.map((r) => {
+                  const candidates = values.candidateProfileIds ?? [];
+                  return (
+                    <label
+                      key={r.id}
+                      className="check-field body"
+                      htmlFor={`setup-permitted-${r.id}`}
+                    >
+                      <Input
+                        id={`setup-permitted-${r.id}`}
+                        type="checkbox"
+                        className="native-check size-5 shrink-0 p-0 accent-foreground"
+                        checked={candidates.includes(r.id)}
+                        onChange={(e) =>
+                          d.set(
+                            "candidateProfileIds",
+                            e.target.checked
+                              ? [...candidates, r.id]
+                              : candidates.filter((id) => id !== r.id),
+                          )
+                        }
+                      />
+                      {[r.name ?? "Name unavailable", r.summary]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </label>
+                  );
+                })}
+              </fieldset>
+            )}
             {values.candidateProfileIds?.some(
               (id) =>
                 p.workspace &&

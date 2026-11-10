@@ -174,6 +174,13 @@ automated service/UI integration and bounded real-runtime validation before hand
 
 ## Assignment routing and accountability
 
+Each project has one **Permitted agents** list, editable on its own tab in
+project Settings and during project setup. It governs which agents the lead may
+delegate to whether routing is enabled or disabled. Routing chooses only from
+this same list; it has no separate candidate editor. The operator CLI prepares
+changes with `project prepare-permitted-agents --permitted-agents ID,ID|none`;
+`project prepare-routing --candidates ID,ID|none` remains a compatible alias.
+
 Routing is optional per project and part of the first standalone release. It
 requires explicit project opt-in and configured TypeSafe credentials. The service
 calls TypeSafe directly, with no PA agent turn. Supply the assignment brief,
@@ -1258,10 +1265,10 @@ The three agents and the original keyed receipt commit atomically. An unknown
 bundle outcome retains the frozen IDs and command and re-reads its operation;
 missing or unreadable receipts retain the hold without resending creation. Creating
 the lead selects it without losing other setup values. Agent and project creation
-remain separate submissions. Only the subsequent project using that inline lead
-receives both workers as candidates, with routing disabled, blank guidance and no
-routing credential; its coordination context permits them. Changing the selected
-lead adds no starter candidates. If a worker is revoked before project creation,
+remain separate submissions. The subsequent project starts with both workers
+checked in its **Permitted agents** list, whichever lead is selected, with routing
+disabled, blank guidance and no routing credential; its coordination context permits
+them. The operator can change that list before creation. If a worker is revoked before project creation,
 setup offers an explicit way to continue without starter candidates while preserving
 the lead and remaining draft. Later projects use ordinary candidate selection.
 While discovery is unconfigured the repository step starts collapsed behind "Add

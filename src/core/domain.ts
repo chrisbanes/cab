@@ -3938,7 +3938,7 @@ export class DomainStore {
         )
           throw new DomainPolicyError(
             "forbidden",
-            "Profile is not permitted for this project",
+            "Profile is not permitted for this project. Add it in Permitted agents in project Settings.",
           );
         if (command.requesterAssignmentId) {
           const requester = this.assignment(command.requesterAssignmentId);

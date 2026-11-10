@@ -20,6 +20,7 @@ import {
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { refreshed } from "../fixtures/browser-waits.js";
+import { refresh } from "../fixtures/project-config-browser.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-action-feedback-browser");
@@ -97,9 +98,10 @@ const surfaces: Surface[] = [
     path: "/projects/:relay/settings?tab=routing",
     save: "Save routing",
     command: "routing.configure",
-    edit: (page) => page.getByRole("checkbox", { name: /^Nora ·/ }).check(),
+    edit: (page) =>
+      page.getByRole("switch", { name: "Enable routing" }).uncheck(),
     editAgain: (page) =>
-      page.getByRole("checkbox", { name: /^Mira ·/ }).check(),
+      page.getByRole("switch", { name: "Enable routing" }).check(),
     invalid: async (page) => {
       await page
         .getByLabel("Credential reference change", { exact: true })
@@ -146,7 +148,12 @@ for (const [device, viewport] of [
 
     test(`${where}: a save leaves one quiet saved line and Details`, async (_t, journey) => {
       const { page, ids } = await open(journey, surface, viewport);
+      const routing = page.getByRole("switch", { name: "Enable routing" });
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), true);
       await surface.edit(page);
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), false);
       await page.getByRole("button", { name: surface.save }).click();
       const saved = await savedOutcome(page);
       assert.equal(await saved.getAttribute("role"), "status");
@@ -169,6 +176,8 @@ for (const [device, viewport] of [
       if (device === "phone") await noPageOverflow(page);
       // The next edit retires the confirmation.
       await surface.editAgain(page);
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), true);
       await outcomeMessages(page).waitFor({ state: "detached" });
     });
 
@@ -197,7 +206,12 @@ for (const [device, viewport] of [
     test(`${where}: a save elsewhere shows one warning with one action`, async (_t, journey) => {
       const fixture = await open(journey, surface, viewport);
       const { page } = fixture;
+      const routing = page.getByRole("switch", { name: "Enable routing" });
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), true);
       await surface.edit(page);
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), false);
       surface.elsewhere(fixture);
       await page.getByRole("button", { name: surface.save }).click();
       const warning = outcomeMessages(page);
@@ -214,17 +228,44 @@ for (const [device, viewport] of [
         await page.getByRole("button", { name: "Review changes" }).count(),
         1,
       );
+      if (surface.name === "Routing") {
+        await refresh(page);
+        const newer = Number(
+          fixture.f.service.domain().routing(fixture.ids.relay).version,
+        );
+        await warning.getByRole("button", { name: "Review changes" }).click();
+        assert.equal(await routing.isChecked(), false);
+        assert.equal(
+          await page.getByRole("button", { name: surface.save }).isEnabled(),
+          true,
+        );
+        const reviewed = commandBody(page);
+        await page.getByRole("button", { name: surface.save }).click();
+        const retried = (await reviewed) as {
+          key: string;
+          enabled: boolean;
+          expectedVersion: number;
+        };
+        assert.equal(retried.enabled, false);
+        assert.equal(retried.expectedVersion, newer);
+        await savedOutcome(page, /^Saved\./);
+      }
       if (device === "phone") await noPageOverflow(page);
     });
 
     test(`${where}: an unknown outcome shows one warning, locks the form and checks the exact request`, async (_t, journey) => {
       const { page, web } = await open(journey, surface, viewport);
+      const routing = page.getByRole("switch", { name: "Enable routing" });
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), true);
       await page
         .context()
         .grantPermissions(["clipboard-read", "clipboard-write"], {
           origin: web.origin,
         });
       await surface.edit(page);
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), false);
       await page.route("**/api/operator/commands", (r) => r.abort());
       const attempt = commandBody(page);
       await page.getByRole("button", { name: surface.save }).click();
@@ -271,6 +312,8 @@ for (const [device, viewport] of [
         .click();
       assert.equal((await replay).key, first.key);
       await savedOutcome(page);
+      if (surface.name === "Routing")
+        assert.equal(await routing.isChecked(), false);
     });
   }
 
