@@ -247,7 +247,7 @@ test("GitHub omitted reference is preserved at apply and its original receipt re
         },
       ],
     }),
-    { status: 400, code: "invalid-input", fieldPaths: ["repositories"] },
+    { status: 400, code: "invalid-input", fieldPaths: ["repositories.0.path"] },
   );
   assert.equal(f.service.domain().githubConfiguration(projectId).version, 4);
   assert.equal(f.service.domain().repositoryLinks(projectId).version, 1);
