@@ -1,4 +1,7 @@
-import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
+import type {
+  BoundTurnRecoveryBlocker,
+  ReleaseBlocker,
+} from "../core/recovery-contracts.js";
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { EventEmitter } from "node:events";
@@ -326,6 +329,14 @@ export class ExecutionSupervisor {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** In-process holds a release must also respect: an unfinished callback or a known survivor. */
+  releaseBlockers(workId: string): ReleaseBlocker[] {
+    return [
+      ...(this.hasPendingCallbacks(workId) ? (["callback-pending"] as const) : []),
+      ...(this.survivors.has(workId) ? (["known-survivor"] as const) : []),
+    ];
   }
 
   private boundTurnBlockers(

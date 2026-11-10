@@ -6,7 +6,10 @@ import {
   taskAcceptsWrites,
   workAcceptsWrites,
 } from "../core/project-lifecycle.js";
-import type { BoundTurnRecoveryBlocker } from "../core/recovery-contracts.js";
+import type {
+  BoundTurnRecoveryBlocker,
+  ReleaseBlocker,
+} from "../core/recovery-contracts.js";
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import {
@@ -28,7 +31,11 @@ import {
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
 import { createDraftingTable } from "./drafting.js";
-import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
+import {
+  recoveryReceiptSchema,
+  releaseCommandSchema,
+  releaseResultSchema,
+} from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -59,6 +66,7 @@ import {
   type PreTurnFailureClass,
   type PreTurnStage,
   preTurnRefusalPrefix,
+  releasedPreTurnRefusalReason,
 } from "./pre-turn-failure.js";
 import type { TurnPlugin } from "./runtime-retention.js";
 import { nativeHarnessHome } from "./runtime-retention.js";
@@ -4997,6 +5005,148 @@ export class ExecutionState {
           : null,
       };
     });
+  }
+
+  /**
+   * The durable checks a release reruns in its transaction: a held assignment generation
+   * whose saved thread and turn are null. cab saves the thread binding before it calls
+   * `startTurn`, so such a generation never sent a turn, whatever its hold reason says.
+   */
+  releaseBlockers(workId: string): ReleaseBlocker[] {
+    const binding = this.hasTurnRequests ? this.taskBinding(workId) : undefined;
+    const record = binding
+      ? this.recoveryFor(
+          binding.assignmentId,
+          binding.assignmentVersion,
+          workId,
+        )[0]
+      : undefined;
+    const request = this.hasTurnRequests
+      ? (this.db
+          .prepare("SELECT kind FROM turn_requests WHERE workId=?")
+          .get(workId) as { kind: string } | undefined)
+      : undefined;
+    if (!binding || !record || request?.kind !== "assignment")
+      return ["context-unavailable"];
+    const identity = this.db
+      .prepare(
+        "SELECT threadId, turnId FROM execution_recovery_identities WHERE workId=?",
+      )
+      .get(workId) as { threadId: string | null; turnId: string | null };
+    const blocked: ReleaseBlocker[] = [];
+    if (record.receipt || record.intent.state === "reconciled")
+      blocked.push("already-reconciled");
+    else if (record.intent.state !== "held" || record.request?.state !== "held")
+      blocked.push("not-held");
+    if (!record.holds.capacity) blocked.push("ownership-released");
+    if (record.intent.threadId !== null || identity.threadId !== null)
+      blocked.push("thread-bound");
+    if (record.intent.turnId !== null || identity.turnId !== null)
+      blocked.push("turn-bound");
+    if (record.preTurnRejection || record.noTurnSubmission)
+      blocked.push("witness-present");
+    const effects = this.db
+      .prepare(
+        "SELECT effectKey FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
+      )
+      .all(workId) as { effectKey: string }[];
+    if (
+      record.holds.stop ||
+      this.taskHold(binding.taskId) !== undefined ||
+      effects.some((e) => e.effectKey !== knownSurvivorEffect)
+    )
+      blocked.push("independent-hold");
+    if (
+      effects.some((e) => e.effectKey === knownSurvivorEffect) ||
+      record.observations.some((o) => o.kind === "known-survivor")
+    )
+      blocked.push("known-survivor");
+    return blocked;
+  }
+
+  /**
+   * Releases a held generation that never sent a turn: the same refusal a pre-turn
+   * failure records, so Start again applies with no operator evidence. Reruns
+   * `releaseBlockers` and `extra` inside the transaction and refuses unless the result
+   * passes the proof Start again reads. With a command, it is bound to the generation the
+   * operator read and replays by key.
+   */
+  releaseUnboundHold(
+    workId: string,
+    extra: readonly ReleaseBlocker[],
+    command?: z.infer<typeof releaseCommandSchema>,
+  ): { id: string; workId: string; state: "refused" } {
+    const value = command && releaseCommandSchema.parse(command);
+    if (value) {
+      const replay = this.preTurnCommandReplay("release", value);
+      if (replay) return releaseResultSchema.parse(replay);
+    }
+    return transaction(this.db, () => {
+      assertOwnedWorkWritable(this.db, workId);
+      const blocked = [...new Set([...this.releaseBlockers(workId), ...extra])];
+      if (blocked.length)
+        throw new RecoveryRejectedError(
+          `Release blocked: ${blocked.join(", ")}`,
+        );
+      if (value) {
+        const current = this.db
+          .prepare(`SELECT revision.workRevision, request.sequence, binding.assignmentId
+            FROM turn_requests request
+            JOIN task_execution_bindings binding ON binding.workId=request.workId
+            LEFT JOIN task_work_revisions revision ON revision.workId=request.workId
+            WHERE request.workId=?`)
+          .get(workId) as
+          | { workRevision: number | null; sequence: number; assignmentId: string }
+          | undefined;
+        if (
+          value.workId !== workId ||
+          current?.assignmentId !== value.assignmentId ||
+          current.workRevision !== value.workRevision ||
+          current.sequence !== value.requestSequence
+        )
+          throw new RecoveryRejectedError(
+            "Release does not match the held generation read",
+          );
+      }
+      const result = { id: randomUUID(), workId, state: "refused" as const };
+      this.db
+        .prepare(
+          "UPDATE execution_intents SET reason = ? WHERE workId = ? AND state = 'held'",
+        )
+        .run(releasedPreTurnRefusalReason, workId);
+      // The table admits only a runtime-staged origin or this stage-less one; the reason names a release.
+      this.recordPreTurnRefusalWithin(
+        workId,
+        releasedPreTurnRefusalReason,
+        {
+          origin: "operator-adopted",
+          stage: null,
+          failureClass: null,
+          threadId: null,
+        },
+        result.id,
+      );
+      if (!this.refusedBeforeStart(workId))
+        throw new RecoveryRejectedError(
+          "Release cannot refuse this generation before it ran",
+        );
+      if (value) this.recordPreTurnCommand("release", value, result);
+      return result;
+    });
+  }
+
+  /** Held generations with no saved thread or turn: the candidates startup tries to release. */
+  unboundHeldWorkIds(): string[] {
+    if (!this.hasTurnRequests) return [];
+    return (
+      this.db
+        .prepare(`SELECT intent.workId FROM execution_intents intent
+          JOIN turn_requests request ON request.workId = intent.workId
+          WHERE intent.state = 'held' AND request.kind = 'assignment'
+            AND intent.threadId IS NULL AND intent.turnId IS NULL
+          ORDER BY intent.rowid`)
+        .all() as { workId: string }[]
+    ).map((r) => r.workId);
   }
 
   /** Read-only ownership/effect checks shared by bound recovery eligibility and its transaction. */

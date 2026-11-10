@@ -10,6 +10,7 @@ import {
   processIdentitySchema,
   recoveryReceiptBaseSchema,
   recoveryRpcErrorSchema,
+  releaseBodySchema,
   replaceConversationBodySchema,
 } from "../core/recovery-contracts.js";
 import { RuntimeRequestRejectedError } from "./pre-turn-failure.js";
@@ -113,3 +114,12 @@ export const replaceConversationCommandSchema = replaceConversationBodySchema
 export type ReplaceConversationCommand = z.infer<
   typeof replaceConversationCommandSchema
 >;
+export const releaseCommandSchema = releaseBodySchema.extend({ key }).strict();
+export type ReleaseCommand = z.infer<typeof releaseCommandSchema>;
+export const releaseResultSchema = z
+  .object({
+    id: z.string().uuid(),
+    workId: z.string().min(1),
+    state: z.literal("refused"),
+  })
+  .strict();

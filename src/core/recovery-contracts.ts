@@ -120,6 +120,34 @@ export type BoundTurnRecoveryBlocker =
   | "other-witness"
   | "already-reconciled";
 
+/**
+ * Why a held generation cannot be released as never having sent a turn. cab saves the
+ * thread binding before it calls `startTurn`, so a null saved thread and turn prove no turn
+ * was sent; anything else keeps the hold.
+ */
+export const releaseBlockers = [
+  "already-reconciled",
+  "not-held",
+  "ownership-released",
+  "context-unavailable",
+  "thread-bound",
+  "turn-bound",
+  "witness-present",
+  "independent-hold",
+  "callback-pending",
+  "known-survivor",
+] as const;
+export type ReleaseBlocker = (typeof releaseBlockers)[number];
+/** Binds a release to the generation the operator read. */
+export const releaseBodySchema = z
+  .object({
+    assignmentId: z.string().uuid(),
+    workId: z.string().min(1).max(512),
+    workRevision: z.number().int().positive().safe(),
+    requestSequence: z.number().int().positive().safe(),
+  })
+  .strict();
+
 export const preTurnRecoveryReceiptSchema = recoveryReceiptBaseSchema
   .extend({
     kind: z.literal("pre-turn-rejection"),
