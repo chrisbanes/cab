@@ -43,7 +43,7 @@ note, **Cancel** and then **Create paused project** at every width.
    silently remove candidates or restore the revoked agent. The **Permitted agents**
    list in this step chooses who the lead may delegate to, whether routing is on or
    off. Routing chooses from this same list and has no second candidate editor. It
-   can also be changed beside the lead later in project Settings.
+   can also be changed later on the Permitted agents tab of project Settings.
 2. **Instructions.** Unchanged.
 3. **Repositories.** Discovered repository and ref, folder picker, checkout
    verification, typed fallback. While discovery is unconfigured the step starts
