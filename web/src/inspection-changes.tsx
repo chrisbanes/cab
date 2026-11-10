@@ -794,10 +794,7 @@ export function TaskWorkspaceChanges({
             snapshot.target !== "turn" &&
             !notReadYet &&
             !unavailableEmptySnapshot && (
-              <span>
-                Current workspace snapshots stay fixed until Refresh. Last turn
-                is a separate actual runtime capture.
-              </span>
+              <span>Current workspace snapshots stay fixed until Refresh.</span>
             )}
           <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
