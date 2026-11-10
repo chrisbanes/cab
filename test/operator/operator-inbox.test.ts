@@ -14,6 +14,7 @@ import {
   seedOwnIntervention,
   seedOwnQuestion,
   startOwnWork,
+  until,
 } from "../fixtures/questions.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
@@ -1177,13 +1178,39 @@ test("clearing one refused request preserves another request's dismissed episode
 
 test("runtime dismissal survives failed service restart and a fresh episode alerts even when the wall clock repeats", async () => {
   const exhaustion = exhaustibleRuntime();
+  let resolveGate: Promise<void> | undefined,
+    startGate: Promise<void> | undefined,
+    resolving = false,
+    starting = false,
+    releaseResolve = () => {},
+    releaseStart = () => {};
   const f = await createOperatorFixture(
     null,
     undefined,
     undefined,
     {},
-    exhaustion.factory,
-    exhaustion.serviceOptions,
+    () => {
+      const runtime = exhaustion.factory(),
+        start = runtime.start.bind(runtime);
+      runtime.start = async () => {
+        if (startGate) {
+          starting = true;
+          await startGate;
+        }
+        await start();
+      };
+      return runtime;
+    },
+    {
+      ...exhaustion.serviceOptions,
+      resolveExecutable: async () => {
+        if (resolveGate) {
+          resolving = true;
+          await resolveGate;
+        }
+        return true;
+      },
+    },
   );
   try {
     let api = new OperatorApi(f.service, [f.directory]);
@@ -1203,8 +1230,43 @@ test("runtime dismissal survives failed service restart and a fresh episode aler
       false,
     );
     await f.reopen();
-    await exhaustion.exhaust(f.runtime);
     api = new OperatorApi(f.service, [f.directory]);
+    resolveGate = new Promise<void>((resolve) => {
+      releaseResolve = resolve;
+    });
+    startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    exhaustion.clock.advance(30_000);
+    await until(() => resolving);
+    await api.readInbox();
+    assert.equal(
+      f.service.inboxLifecycle().get(first.id)?.status,
+      "dismissed",
+      "executable resolution is not recovery",
+    );
+    resolveGate = undefined;
+    releaseResolve();
+    await until(() => starting);
+    await api.readInbox();
+    assert.equal(
+      f.service.inboxLifecycle().get(first.id)?.status,
+      "dismissed",
+      "a pending start is not recovery",
+    );
+    startGate = undefined;
+    releaseStart();
+    await until(() => {
+      const status = f.service
+        .harnessStatuses()
+        .find((s) => s.harness === "codex");
+      return (
+        status?.state === "unavailable" &&
+        status.restart?.state === "pending" &&
+        status.restart.attempt === 2
+      );
+    });
+    await exhaustion.exhaust(f.runtime);
     assert.equal(
       (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
       false,
@@ -1239,6 +1301,8 @@ test("runtime dismissal survives failed service restart and a fresh episode aler
     assert.equal(next.lifecycle?.status, "actionable");
     assert.equal(f.service.inboxLifecycle().get(first.id)?.status, "resolved");
   } finally {
+    releaseResolve();
+    releaseStart();
     await f.close();
   }
 });

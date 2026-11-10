@@ -4949,7 +4949,9 @@ export class StandaloneService {
       }
       // Availability or explicit disabling is positive evidence; an incomplete restart is not.
       if (
-        status.state === "available" ||
+        (status.state === "available" &&
+          this.runtimes.has(status.harness) &&
+          !this.runtimeStarting.has(status.harness)) ||
         (status.state === "not-configured" && status.reason === "disabled")
       )
         for (const row of lifecycle.rows())
