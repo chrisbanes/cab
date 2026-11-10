@@ -29,8 +29,7 @@ export { until };
 class ReleaseRuntime extends OperatorFixtureRuntime {
   private readonly generation = randomUUID();
   private conversationEvent:
-    | ((event: RuntimeConversationEvent) => void)
-    | undefined;
+    ((event: RuntimeConversationEvent) => void) | undefined;
   onConversationEvent(listener: (event: RuntimeConversationEvent) => void) {
     this.conversationEvent = listener;
   }
@@ -108,6 +107,8 @@ export function scriptedDeliveryProvider() {
     baseTip: undefined as string | null | undefined,
     mergeable: "MERGEABLE",
     mergeStateStatus: "CLEAN",
+    /** A ruleset on every base branch requires an up-to-date branch. */
+    strict: false,
     lower: null as null | {
       merged: boolean;
       open: boolean;
@@ -435,9 +436,21 @@ export function scriptedDeliveryProvider() {
       throw Error(`Unhandled scripted GraphQL document: ${query}`);
     }
     if (method !== "GET") throw Error(`Unhandled scripted write: ${route}`);
-    // Any base branch: no ruleset and no classic protection.
+    // Any base branch: no classic protection, and a ruleset only when `strict`.
     if (/^\/repos\/org\/repo\/rules\/branches\/[^/]+$/.test(url.pathname))
-      return Response.json([]);
+      return Response.json(
+        state.strict
+          ? [
+              {
+                type: "required_status_checks",
+                parameters: {
+                  strict_required_status_checks_policy: true,
+                  required_status_checks: [],
+                },
+              },
+            ]
+          : [],
+      );
     if (/^\/repos\/org\/repo\/branches\/[^/]+\/protection$/.test(url.pathname))
       return new Response("", { status: 404 });
     switch (url.pathname) {

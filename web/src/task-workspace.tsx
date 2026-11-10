@@ -257,8 +257,7 @@ function ChecklistCoverage({
   source,
 }: {
   source:
-    | NonNullable<TaskRead["data"]["review"]>["sources"][number]
-    | undefined;
+    NonNullable<TaskRead["data"]["review"]>["sources"][number] | undefined;
 }) {
   if (!source || source.body === null) return <p>{sourceGap}</p>;
   if (source.criteriaOmittedCount === null)
@@ -1645,15 +1644,15 @@ export function TaskWorkspace({
         [...data.questions, ...data.approvals].some(
           (request) => request.interactionId === requestId,
         )) ||
-        (state.inlineAnswer &&
-          !openRequests.some((q) => q.interactionId === state.inlineAnswer)) ||
-        startedAgain === taskId ||
-        resumedSource?.taskId === taskId ||
-        // A Resume project save in flight or unknown outlives the wait it cleared; a rejected
-        // or conflicting one matters only while its wait, which pins the card, remains.
-        ["pending", "unknown"].includes(
-          drafts.phase(`project.resume-fix:${data.task.projectId}`),
-        ),
+      (state.inlineAnswer &&
+        !openRequests.some((q) => q.interactionId === state.inlineAnswer)) ||
+      startedAgain === taskId ||
+      resumedSource?.taskId === taskId ||
+      // A Resume project save in flight or unknown outlives the wait it cleared; a rejected
+      // or conflicting one matters only while its wait, which pins the card, remains.
+      ["pending", "unknown"].includes(
+        drafts.phase(`project.resume-fix:${data.task.projectId}`),
+      ),
     ),
     attentionPinned = attention.pinned || retainedAttention,
     // One rule for the banner and the collapse it toggles, so a collapsed card can always reopen.
@@ -3693,8 +3692,7 @@ function Changes({
 }: {
   data: TaskRead["data"];
   selected:
-    | NonNullable<TaskRead["data"]["review"]>["results"][number]
-    | undefined;
+    NonNullable<TaskRead["data"]["review"]>["results"][number] | undefined;
   client: OperatorClient;
   session: Session;
   taskId: string;
@@ -3834,7 +3832,11 @@ function Changes({
                     d.binding.mergeBlockers.map((code) =>
                       code === null
                         ? "Unavailable"
-                        : mergeBlockerText(code, d.binding?.codeHost),
+                        : mergeBlockerText(
+                            code,
+                            d.binding?.codeHost,
+                            d.binding?.baseRef,
+                          ),
                     ),
                   ),
                 ].map((text) => (

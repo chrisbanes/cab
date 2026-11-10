@@ -642,6 +642,28 @@ test("a pull request whose base advanced, with no up-to-date rule, merges", asyn
   }
 });
 
+test("the lead's delivery feedback says the PR is behind its base and how to update it", async () => {
+  const f = await createReleaseDeliveryFixture("through-merge");
+  try {
+    await f.register();
+    f.scripted.state.strict = true;
+    f.scripted.state.mergeStateStatus = "BEHIND";
+    await f.service.coordinationView().refreshDelivery(f.taskId);
+    assert.deepEqual(
+      f.service.delivery().delivery(f.taskId)?.observation.mergeBlockers,
+      ["strict-head-behind"],
+    );
+    assert.match(
+      JSON.stringify(f.service.coordinationView().readTask(f.taskId).messages),
+      /Behind main: the branch rules require an up-to-date branch, and this PR is behind main\. Update the branch on GitHub, or the lead can request pr\.update-branch\./,
+    );
+    assert.equal((await f.merge()).success, false);
+    assert.equal(f.scripted.state.writes, 0);
+  } finally {
+    await f.close();
+  }
+});
+
 test("assembled active child and successful worker terminal cannot independently complete the parent", async () => {
   const f = await createReleaseDeliveryFixture();
   try {

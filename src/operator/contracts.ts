@@ -1727,6 +1727,8 @@ export const deliveryReadSchema = z
         omittedFeedbackCount: z.number().int().nonnegative(),
         /** What holds a merge on the last read, as merge-gate codes; absent from older servers. */
         mergeBlockers: z.array(safeText).max(64).optional(),
+        /** The base branch the PR targets on the last read; absent from older servers. */
+        baseRef: safeText.optional(),
         checks: z
           .array(
             z

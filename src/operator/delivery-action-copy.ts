@@ -98,6 +98,29 @@ export const deliveryActionLabel = (kind: string) =>
     ? deliveryActionCopy[kind as ActionKind].label
     : (recordedOnlyLabels[kind] ?? kind);
 
+/**
+ * Plain words for a merge blocker about the PR's base branch, naming it; undefined for any other code.
+ * The CLI, the Delivery tab and the lead's feedback share it.
+ */
+export function mergeBlockerSentence(
+  code: string,
+  {
+    codeHost,
+    baseRef,
+  }: {
+    codeHost?: "github" | "gitlab" | undefined;
+    baseRef?: string | null | undefined;
+  },
+): string | undefined {
+  const base = baseRef || "its base branch",
+    host = codeHost === "gitlab" ? "GitLab" : "GitHub";
+  if (code === "strict-head-behind")
+    return `Behind ${base}: the branch rules require an up-to-date branch, and this PR is behind ${base}. Update the branch on ${host}, or the lead can request pr.update-branch.`;
+  if (code === "base-ref-missing")
+    return `Base branch missing: ${host} can't read ${base}, the branch this PR targets, so the merge is held until it can.`;
+  return undefined;
+}
+
 /** What a grant's IDs are called, where a read supplied the name; `options` follows `optionNodeIds`. */
 export type GrantNames = {
   repository?: string | undefined;

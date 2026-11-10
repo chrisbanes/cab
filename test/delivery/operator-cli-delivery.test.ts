@@ -395,6 +395,20 @@ test("delivery get shows what holds the merge, including no required checks", as
     "ro",
   ]);
   assert.match(human.out, /Merge blockers:\n {2}no-required-checks\n/);
+  w.scripted.strict = true;
+  w.scripted.mergeStateStatus = "BEHIND";
+  await w.f.service.coordinationView().refreshDelivery(w.f.taskId);
+  const behind = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(
+    behind.out,
+    /^ {2}Behind main: the branch rules require an up-to-date branch, and this PR is behind main\. Update the branch on GitHub, or the lead can request pr\.update-branch\. \(strict-head-behind\)$/m,
+  );
 });
 
 test("delivery refresh is a receipted write that reports partial outcomes", async (t) => {

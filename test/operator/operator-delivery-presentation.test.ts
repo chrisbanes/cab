@@ -461,6 +461,18 @@ test("merge blockers without a check or a method read as sentences, and other co
     "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
   );
   assert.match(mergeBlockerText("pr-base-change-held"), /^Base changed: /);
+  assert.equal(
+    mergeBlockerText("strict-head-behind", "github", "main"),
+    "Behind main: the branch rules require an up-to-date branch, and this PR is behind main. Update the branch on GitHub, or the lead can request pr.update-branch.",
+  );
+  assert.match(
+    mergeBlockerText("strict-head-behind"),
+    /^Behind its base branch: .* this PR is behind its base branch\. /,
+  );
+  assert.equal(
+    mergeBlockerText("base-ref-missing", "github", "release"),
+    "Base branch missing: GitHub can't read release, the branch this PR targets, so the merge is held until it can.",
+  );
   for (const code of [
     "check-build-unproved",
     "merge-status-checking",

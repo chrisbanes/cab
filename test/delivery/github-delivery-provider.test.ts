@@ -683,8 +683,12 @@ test("a base that advanced blocks only under an up-to-date rule, and a missing b
     mergeStateStatus: "DIRTY",
   });
   assert.deepEqual(
-    (await conflicting.provider.inspectPr(conflicting.identity, conflicting.policy))
-      .mergeBlockers,
+    (
+      await conflicting.provider.inspectPr(
+        conflicting.identity,
+        conflicting.policy,
+      )
+    ).mergeBlockers,
     ["mergeability-unproved"],
   );
   const missing = prProviderFixture({ baseRef: null });

@@ -13,6 +13,7 @@ import {
   isServiceDeliveryCaller,
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
+import { mergeBlockerSentence } from "../operator/delivery-action-copy.js";
 import {
   DeliveryActionHeldError,
   DeliveryApprovalRequiredError,
@@ -66,6 +67,14 @@ function baseSummary(binding: PrDeliveryBinding): string {
   return binding.baseChange
     ? `\nPR base change held: the code host shows base ${binding.baseChange.observedRef} but the delivery's accepted base is ${binding.acceptedBaseRef} (${binding.baseChange.reason}); edit, ready, merge and thread actions are refused until it is accepted or restored on the code host.`
     : "";
+}
+/** Each merge blocker about the PR's base branch, in the words the CLI and Delivery tab use. */
+function mergeBaseSummary(observation: PrDeliveryObservation): string {
+  return observation.mergeBlockers
+    .map((code) => mergeBlockerSentence(code, { baseRef: observation.baseRef }))
+    .filter((sentence) => sentence !== undefined)
+    .map((sentence) => `\n${sentence}`)
+    .join("");
 }
 /** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
 export function unresolvedThreadSummary(
@@ -480,10 +489,7 @@ export class DeliveryCoordinator {
     | {
         status: "unavailable";
         reason:
-          | "credential-missing"
-          | "provider-error"
-          | "timeout"
-          | "unsupported";
+          "credential-missing" | "provider-error" | "timeout" | "unsupported";
       }
   > {
     let provider: CodeHostDeliveryProvider;
@@ -1517,7 +1523,7 @@ export class DeliveryCoordinator {
             .map((f) => `${f.kind} ${f.nodeId} (${f.state}): ${f.body}`)
             .join(
               "\n",
-            )}\n${unresolvedThreadSummary(observation)}${baseSummary(result.binding)}`.trimEnd(),
+            )}\n${unresolvedThreadSummary(observation)}${baseSummary(result.binding)}${mergeBaseSummary(observation)}`.trimEnd(),
           `${result.binding.revision}:${result.binding.observationDigest}`,
         );
       return result.binding;
