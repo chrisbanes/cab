@@ -271,6 +271,7 @@ test("an override that was switched off again leaves the capacity form clean, an
     type: "capacity.configure",
     actor: "operator",
     key: randomUUID(),
+    minimumLeadSlots: 0,
     globalLimit: Number(saved) + 5,
     projectOverrides: {},
   });

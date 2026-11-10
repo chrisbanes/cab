@@ -180,7 +180,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "capacity",
     "prepare",
     "--global-limit",
-    "6",
+    "7",
     "--out",
     change,
     "--connection",
@@ -199,7 +199,7 @@ test("the packed CLI installs offline and works against a real service over loop
   ]);
   assert.equal(r.code, 0, r.detail);
   const applied = JSON.parse(r.out);
-  assert.equal(applied.data.receipt.result.globalLimit, 6);
+  assert.equal(applied.data.receipt.result.globalLimit, 7);
   r = await cli([
     "operation",
     "get",

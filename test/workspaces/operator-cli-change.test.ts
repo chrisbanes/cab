@@ -1275,7 +1275,7 @@ test("prepare writes a change document to a default path that never overwrites",
 
   // 9. Capacity has no target id, so its name has none.
   const cwd9 = cwdOf();
-  r = await cli("ro", ["capacity", "prepare", "--global-limit", "6"], {
+  r = await cli("ro", ["capacity", "prepare", "--global-limit", "7"], {
     cwd: cwd9,
   });
   assert.equal(r.code, 0, r.err + r.out);
@@ -1505,7 +1505,7 @@ test("apply --dry-run shows the stored change and sends nothing", async (t) => {
     "capacity",
     "prepare",
     "--global-limit",
-    "6",
+    "7",
     "--out",
     capacityDoc,
   ]);

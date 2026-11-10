@@ -206,8 +206,10 @@ for operator input on unresolved material scope or authority still applies.
 Initial assignment results return to the task-scoped lead conversation. Nested
 assignment results return to their requester; the lead can inspect all work without
 being woken for every child result. These destinations survive restart. All lead
-turns, including draft turns, use normal admission and capacity accounting, including project pause, task
-stop and writer controls. Project-wide coordination uses project context, separate from
+turns, including draft turns, use normal admission, including project pause, task
+stop and writer controls. For capacity they are lead turns: they may use the slots
+held for lead turns as well as any free slot, they count against the global cap and
+agent caps, and they do not count against a project cap. Project-wide coordination uses project context, separate from
 individual task histories. The lead assesses initial results and requests further
 work or task completion; the service enforces completion conditions and permissions.
 
@@ -330,8 +332,8 @@ Source syncs revise an imported task until its readiness and blockers settle, so
 first turn is queued only once the task is admissible, and a first turn that has never
 run, including one waiting for capacity, takes the task's current revision when it is
 admitted instead of being refused as stale.
-(A [drafting run](#drafting-runs) is not task work: it needs no Ready task but counts
-against the same global and project capacity. A [draft turn](#draft-turns) is task work
+(A [drafting run](#drafting-runs) is not task work: it needs no Ready task and counts
+as a lead turn against capacity. A [draft turn](#draft-turns) is task work
 whose only exemption is that the task is not Ready.) Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
@@ -711,12 +713,36 @@ Existing finished cab threads already archived are included in this lifecycle;
 unrelated threads and conversations from the previous Codex home are left alone.
 cab's captured history remains readable through the operator UI.
 
-cab owns capacity admission with both a global active-turn cap and a cap for
-each project. Waiting for workers, people or external feedback
-releases an execution slot; capacity one must not deadlock delegation. Default
-to four active turns globally and two per project, editable in configuration.
-Lowering a cap holds new admissions until active usage fits; it does not silently
-terminate active turns. Fairness remains a technical contract to specify.
+cab owns capacity admission. Waiting for workers, people or external feedback
+releases an execution slot; capacity one must not deadlock delegation. A turn is a
+lead turn when it runs on a task's lead assignment, including a draft turn, or is a
+project drafting run; delegated assignments and direct work are other turns.
+
+- **Global cap.** Every active turn counts against it. New installations default
+  to six; an upgrade keeps the stored value.
+- **Minimum lead slots.** One global setting, default one, of at least zero and below
+  the global cap. That many global slots are held for lead turns: another turn starts
+  only while total usage is below the global cap minus the held slots that lead turns
+  are not using. Lead turns may also use any free slot. Held slots are never lent.
+  Zero gives a single shared pool. A store upgraded with a global cap of one gets
+  zero.
+- **Agent caps.** An optional cap per agent covers every turn that agent runs,
+  across projects and in both roles. An agent without one is bounded only by the
+  other caps. Direct work has no agent.
+- **Project caps.** An optional cap per project counts only that project's other
+  turns, so its workers never block its lead. A project without one has no project
+  limit.
+
+A capacity-waiting turn shows the limit that holds it: global active-turn limit,
+held for lead turns, agent active-turn limit or project active-turn limit. Lowering
+a cap or raising minimum lead slots holds new admissions until usage fits; it does
+not terminate active turns. Queued turns are tried resumed work first, then work
+that has not started, oldest first within each group. Resumed work continues an
+assignment or conversation that has already been admitted: answers, results,
+follow-ups, operator messages and confirmed-failure retries. Each request is tried on
+its own, so one held by an agent or project cap does not hold a later one, and a
+change in capacity starts the pass again from the first request. Resumed work can
+delay unstarted tasks for as long as it keeps arriving.
 Retry confirmed transient
 execution failures at most twice with backoff, persisting the allowance across
 restart. Blind relaunches cannot reset it. Uncertain acceptance/effects must be
@@ -1571,8 +1597,9 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   This is not a read-only sandbox: reads keep the runtime's normal host access (see
   [Workspaces and execution access](#workspaces-and-execution-access)), and writes
   land only in the throwaway copy. The composer and docs say so.
-- **Capacity.** A drafting run counts against the global and project active-turn
-  limits and waits, with the same wait reason as any turn, when either is full. A
+- **Capacity.** A drafting run is a lead turn: it may use the slots held for lead
+  turns, counts against the global cap and its agent's cap but not the project cap,
+  and waits, with the same wait reason as any turn, when a limit is full. A
   paused project holds it like any other turn. Stop is available while it waits.
 - **Result.** The lead returns a title and an outcome through the result tool. The
   service validates them against the composer's field limits, with a non-blank outcome

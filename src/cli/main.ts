@@ -386,6 +386,8 @@ export const OPTIONS = {
   candidates: { type: "string" },
   "global-limit": { type: "string" },
   "project-limit": { type: "string", multiple: true },
+  "min-lead-slots": { type: "string" },
+  "agent-limit": { type: "string", multiple: true },
   scope: { type: "string" },
   task: { type: "string" },
   assignment: { type: "string" },

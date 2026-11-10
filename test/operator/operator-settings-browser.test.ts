@@ -997,9 +997,12 @@ test("Runtime Settings records lowered capacity separately from usage and retain
   page.setDefaultTimeout(5000);
   await signIn(page, web, "/settings/runtime");
   await page
-    .getByText("2 of 4 active turns in use; projects default to 2.", {
-      exact: false,
-    })
+    .getByText(
+      /^2 of 6 active turns in use; \d+ lead turns? running, with 1 of the global slots held/,
+      {
+        exact: false,
+      },
+    )
     .waitFor();
   await page.getByText("Execution hold recorded", { exact: true }).waitFor();
   const capacityControl = await page
@@ -1065,19 +1068,34 @@ test("Runtime Settings records lowered capacity separately from usage and retain
   );
   await override.uncheck();
   await page.getByLabel("Global active-turn cap", { exact: true }).fill("1");
+  // An empty lead-slot field is refused, not saved as zero.
+  const leadSlots = page.getByLabel("Minimum lead slots", { exact: true });
+  await leadSlots.fill("");
   await page
     .getByRole("button", { name: "Save capacity", exact: true })
     .click();
   await page
-    .getByText("2 of 1 active turns in use; projects default to 2.", {
-      exact: false,
-    })
+    .getByText(
+      "Enter a whole number of 0 or more, below the global active-turn cap.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(f.service.capacityLimits().globalLimit, 6);
+  // Held lead slots must stay below the global cap.
+  await leadSlots.fill("0");
+  await page
+    .getByRole("button", { name: "Save capacity", exact: true })
+    .click();
+  await page
+    .getByText(
+      /^2 of 1 active turns in use; \d+ lead turns? running, with 0 of the global slots held/,
+      {
+        exact: false,
+      },
+    )
     .waitFor();
   await savedOutcome(page);
-  assert.equal(
-    f.service.capacityLimits([ids.projectId]).currentUsage.global,
-    2,
-  );
+  assert.equal(f.service.capacityLimits().currentUsage.global, 2);
   assert.equal(f.service.list().filter((r) => r.state === "held").length, 1);
   await capture(page, "1366-capacity-below-usage");
   await page.getByRole("link", { name: /recovery evidence$/ }).click();

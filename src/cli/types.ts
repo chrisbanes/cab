@@ -109,6 +109,8 @@ export type Values = {
   candidates?: string | undefined;
   "global-limit"?: string | undefined;
   "project-limit"?: string[] | undefined;
+  "min-lead-slots"?: string | undefined;
+  "agent-limit"?: string[] | undefined;
   scope?: string | undefined;
   output?: string | undefined;
   task?: string | undefined;

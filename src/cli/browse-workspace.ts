@@ -568,31 +568,52 @@ const capacityGet: BrowseCommand = {
       override: p.override,
       usage: p.usage,
     }));
+    const agents = r.agents.map((a) => ({
+      agentId: a.agent.id,
+      name: a.agent.name,
+      limit: a.limit,
+      usage: a.usage,
+    }));
     return browseOutput(ctx, {
       data: {
         globalLimit: r.globalLimit,
-        defaultProjectLimit: r.defaultProjectLimit,
         globalUsage: r.globalUsage,
+        minimumLeadSlots: r.minimumLeadSlots,
+        leadUsage: r.leadUsage,
+        agents,
         projects,
       },
       observedAt: read.observedAt,
-      gaps: anyNull(...projects.map((p) => p.name))
+      gaps: anyNull(
+        ...projects.map((p) => p.name),
+        ...agents.map((a) => a.name),
+      )
         ? ["content-unavailable"]
         : [],
       human: [
         keyValues([
           ["Global limit", String(r.globalLimit)],
           ["Global usage", String(r.globalUsage)],
-          ["Default project limit", String(r.defaultProjectLimit)],
+          ["Minimum lead slots", String(r.minimumLeadSlots)],
+          ["Lead usage", String(r.leadUsage)],
         ]),
         "",
         table(
-          ["PROJECT", "NAME", "LIMIT", "OVERRIDE", "USAGE"],
+          ["AGENT", "NAME", "LIMIT", "USAGE"],
+          agents.map((a) => [
+            a.agentId,
+            oneLine(a.name, 40),
+            a.limit === null ? "none" : String(a.limit),
+            String(a.usage),
+          ]),
+        ),
+        "",
+        table(
+          ["PROJECT", "NAME", "LIMIT", "USAGE"],
           projects.map((p) => [
             p.projectId,
             oneLine(p.name, 40),
-            String(p.limit),
-            p.override === null ? "default" : String(p.override),
+            p.limit === null ? "none" : String(p.limit),
             String(p.usage),
           ]),
         ),

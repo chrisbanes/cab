@@ -43,6 +43,22 @@ export class DomainPolicyError extends Error {
   }
 }
 
+/** A delivery action waits on a hold only the operator or an outcome clears; the message is cab's reason. */
+export class DeliveryHoldError extends DomainConflictError {
+  constructor(message: string) {
+    super(message);
+    this.name = "DeliveryHoldError";
+  }
+}
+
+/** A delivery action needs the operator's approval of its exact material. */
+export class DeliveryApprovalRequiredError extends DomainPolicyError {
+  constructor(message = "Exact material approval required") {
+    super("forbidden", message);
+    this.name = "DeliveryApprovalRequiredError";
+  }
+}
+
 /** Another project already has this name, ignoring case (SPEC "Guided setup"). */
 export class ProjectNameTakenError extends DomainPolicyError {
   constructor(readonly existingName: string) {

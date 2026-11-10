@@ -219,14 +219,34 @@ const usageRecord = z.record(id, nonnegativeInteger);
 export const capacityCommandResultSchema = z
   .object({
     globalLimit: positiveInteger,
-    defaultProjectLimit: z.literal(2),
+    minimumLeadSlots: nonnegativeInteger,
     projectOverrides: numericRecord,
+    agentOverrides: numericRecord,
     currentUsage: z
-      .object({ global: nonnegativeInteger, projects: usageRecord })
+      .object({
+        global: nonnegativeInteger,
+        lead: nonnegativeInteger,
+        projects: usageRecord,
+        agents: usageRecord,
+      })
       .strict(),
-    effectiveProjectLimits: numericRecord,
   })
   .strict();
+// Receipts recorded before lead slots and agent caps, when projects defaulted to 2.
+const legacyCapacityCommandResultSchema = z.union([
+  capacityCommandResultSchema,
+  z
+    .object({
+      globalLimit: positiveInteger,
+      defaultProjectLimit: z.literal(2),
+      projectOverrides: numericRecord,
+      currentUsage: z
+        .object({ global: nonnegativeInteger, projects: usageRecord })
+        .strict(),
+      effectiveProjectLimits: numericRecord,
+    })
+    .strict(),
+]);
 
 export const credentialStatusCommandResultSchema = z
   .object({ configured: z.boolean() })
@@ -269,7 +289,7 @@ export interface DomainCommandResultMap {
   "dependency.add": z.output<typeof taskCommandResultSchema>;
   "dependency.remove": z.output<typeof taskCommandResultSchema>;
   "imported-blockers.set": z.output<typeof taskCommandResultSchema>;
-  "capacity.configure": z.output<typeof capacityCommandResultSchema>;
+  "capacity.configure": z.output<typeof legacyCapacityCommandResultSchema>;
   "discovery.configure": z.output<typeof credentialStatusCommandResultSchema>;
   "code-host-credential.configure": z.output<
     typeof credentialStatusCommandResultSchema
@@ -465,7 +485,12 @@ function parseCommandOutcome(
     case "capacity.configure":
       return {
         type,
-        result: parseUnchanged(capacityCommandResultSchema, value),
+        result: parseUnchanged(
+          fresh
+            ? capacityCommandResultSchema
+            : legacyCapacityCommandResultSchema,
+          value,
+        ),
       };
     case "discovery.configure":
     case "code-host-credential.configure":

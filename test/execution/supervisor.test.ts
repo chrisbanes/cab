@@ -333,10 +333,7 @@ test("Stop during delayed turn/start records the late identity, interrupts once,
       ],
     });
     assert.equal((await run).state, "held");
-    assert.equal(
-      f.service.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(f.service.capacityLimits().currentUsage.global, 1);
   } finally {
     turnStart.resolve("turn-late");
     await f.close();
@@ -348,7 +345,11 @@ test("Stop before capacity admission keeps queued work stopped until explicit re
   const activeGate = deferred<void>();
   const entered = deferred<void>();
   try {
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     f.runtime.turnGate = activeGate.promise;
     f.runtime.turnEntered = entered.resolve;
     const active = f.service.submitTask(

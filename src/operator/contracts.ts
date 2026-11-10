@@ -1180,7 +1180,7 @@ export const taskListSummarySchema = z
         globalUsage: time,
         globalLimit: revision,
         projectUsage: time,
-        projectLimit: revision,
+        projectLimit: revision.nullable(),
       })
       .strict(),
     source: taskSourceSummarySchema,
@@ -1234,7 +1234,7 @@ export const composerOptionsSchema = envelope(
           globalUsage: time,
           globalLimit: revision,
           projectUsage: time,
-          projectLimit: revision,
+          projectLimit: revision.nullable(),
         })
         .strict(),
       routingEnabled: z.boolean(),
@@ -3209,17 +3209,26 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...base,
       type: z.literal("capacity.configure"),
       globalLimit: revision,
+      /** Global slots held for lead turns; below the global cap. */
+      minimumLeadSlots: time,
       projectOverrides: z.record(uuid, revision.nullable()),
+      agentOverrides: z.record(uuid, revision.nullable()).default({}),
       /** Optional compare-and-swap: the limits this change was prepared against. */
       expectedCurrent: z
         .object({
           globalLimit: revision,
+          minimumLeadSlots: time,
           projectOverrides: z.record(uuid, revision.nullable()).default({}),
+          agentOverrides: z.record(uuid, revision.nullable()).default({}),
         })
         .strict()
         .optional(),
     })
-    .strict(),
+    .strict()
+    .refine((command) => command.minimumLeadSlots < command.globalLimit, {
+      path: ["minimumLeadSlots"],
+      message: "Minimum lead slots must be below the global active-turn cap",
+    }),
   z
     .object({
       ...base,
@@ -3719,8 +3728,10 @@ export const configurationReceiptSchema = z
           commandType: z.literal("capacity.configure"),
           resourceId: z.literal("system:capacity"),
           globalLimit: revision,
-          defaultProjectLimit: z.literal(2),
+          /** Absent on receipts recorded before lead slots and agent caps. */
+          minimumLeadSlots: time.optional(),
           projectOverrides: z.record(uuid, revision),
+          agentOverrides: z.record(uuid, revision).optional(),
         })
         .strict(),
       z
@@ -3805,13 +3816,26 @@ export const runtimeSettingsSchema = envelope(
           .strict(),
       ),
       globalLimit: revision,
-      defaultProjectLimit: z.literal(2),
       globalUsage: time,
+      /** Global slots held for lead turns, and lead turns now running. */
+      minimumLeadSlots: time,
+      leadUsage: time,
+      /** Every unrevoked agent and any agent with a cap; usage counts all its turns. */
+      agents: z.array(
+        z
+          .object({
+            agent: z.object({ id: uuid, name: safeText }).strict(),
+            limit: revision.nullable(),
+            usage: time,
+          })
+          .strict(),
+      ),
       projects: z.array(
         z
           .object({
             project: projectSummarySchema,
-            limit: revision,
+            /** Null when the project has no limit; usage counts non-lead turns only. */
+            limit: revision.nullable(),
             usage: time,
             override: revision.nullable(),
             tasks: z.array(

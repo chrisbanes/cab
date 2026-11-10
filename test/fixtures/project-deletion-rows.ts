@@ -159,7 +159,12 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     {
       shared: true,
       table: "scheduler_capacity_limits",
-      values: { singleton: 1, globalLimit: 1 },
+      values: { singleton: 1, globalLimit: 1, minimumLeadSlots: 0 },
+    },
+    {
+      shared: true,
+      table: "scheduler_agent_capacity_limits",
+      values: { profileId: i.uuid("profiles.id"), agentLimit: 1 },
     },
     {
       shared: true,
@@ -1682,7 +1687,13 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     {
       shared: false,
       table: "execution_capacity_reservations",
-      values: { workId: i.workId, projectId: i.projectId, admittedAt: 1 },
+      values: {
+        workId: i.workId,
+        projectId: i.projectId,
+        admittedAt: 1,
+        lead: 0,
+        agentId: null,
+      },
     },
     {
       shared: false,
