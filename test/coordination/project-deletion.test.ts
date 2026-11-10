@@ -491,7 +491,7 @@ for (const phase of projectDeletionFaultPhases)
 
 test("the inventory classifies every fresh table and column and refuses new unclassified schema", async (t) => {
   const f = await projectDeletionFixture(t);
-  assert.equal(Object.keys(projectDeletionInventory).length, 183);
+  assert.equal(Object.keys(projectDeletionInventory).length, 189);
   assertProjectDeletionInventory(f.db);
   f.db.exec("ALTER TABLE tasks ADD COLUMN unclassifiedOwner TEXT");
   assert.throws(() => assertProjectDeletionInventory(f.db), /column inventory/);
@@ -1010,7 +1010,9 @@ test("preview observes dirty/unknown Git state and captures identities without r
   assert.equal(f.fixture.runtime.turns, 0);
 });
 
-test("an extant historical Claude directory without a binding refuses unprovable cleanup ownership", async (t) => {
+test("an extant historical Claude directory without a binding refuses unprovable cleanup ownership", {
+  skip: slashTmpDenied(),
+}, async (t) => {
   const f = await projectDeletionFixture(t),
     temp = claudeTemporaryBase(f.fixture.directory);
   // The fixture directory is unique; no installed runtime or provider identity is touched.
@@ -1164,6 +1166,7 @@ import {
   unstackFixtureRecord,
   unstackFixtureRow,
 } from "../fixtures/unstack-journal.js";
+import { slashTmpDenied } from "../fixtures/host-access.js";
 
 test("every unfinished Unstack phase and malformed/no-effect claim blocks the actual archive drain", async (t) => {
   const f = await projectDeletionFixture(t, false);

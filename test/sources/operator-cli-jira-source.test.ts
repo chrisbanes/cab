@@ -305,7 +305,7 @@ test("Jira closed-issue policy previews without mutation, applies, and preserves
   assert.equal(w.d.jiraConfiguration(w.projectId), null);
   assert.equal(done.doc.command.closedIssues, "done");
   assert.ok(JSON.stringify(done.result).includes("closedIssues"));
-  assert.ok(JSON.stringify(done.result).includes("Treat closure as Done"));
+  assert.ok(JSON.stringify(done.result).includes("Import as Done"));
   await w.ok("rw", ["project", "apply", "--file", done.out]);
   assert.equal(
     (await w.ok("ro", ["project", "sources", w.projectId])).data.source

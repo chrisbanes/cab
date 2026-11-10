@@ -12,6 +12,7 @@ import {
   requestHeading,
   requestIdentity,
   requestKindLabel,
+  taskAttentionProjection,
   taskContext,
 } from "../../web/src/inbox-presentation.js";
 import type {
@@ -224,8 +225,385 @@ const task = (
     ),
     localDependencies: [],
     source: null,
+    unresolvedResults: [],
     ...extra,
   }) as unknown as TaskRead["data"];
+
+const attentionTask = (patch: Partial<TaskRead["data"]> = {}) =>
+  ({
+    ...task([]),
+    task: { state: "open", ready: true },
+    execution: {
+      state: "idle",
+      holds: {
+        stop: false,
+        writer: false,
+        capacity: false,
+        uncertainty: false,
+        task: false,
+      },
+      reasonCodes: [],
+    },
+    attention: { codes: [], count: 0 },
+    questions: [],
+    approvals: [],
+    completionRequests: [],
+    taskHold: null,
+    ...patch,
+  }) as unknown as TaskRead["data"];
+
+test("task attention projection filters normal running capacity and writer holds from every pinned surface", () => {
+  const running = attentionTask({
+    execution: {
+      state: "running",
+      holds: {
+        stop: false,
+        writer: true,
+        capacity: true,
+        uncertainty: false,
+        task: false,
+      },
+      reasonCodes: [],
+    } as never,
+    waits: [{ code: "capacity", fix: null, links: [] } as never],
+  });
+  const ordinary = taskAttentionProjection(running, "answer", null);
+  assert.equal(ordinary.pinned, false);
+  assert.deepEqual(ordinary.waits, []);
+  assert.deepEqual(ordinary.executionHolds, []);
+  assert.deepEqual(ordinary.rows, []);
+
+  // Submission reports a healthy turn start as starting, holding the same writer and capacity.
+  const starting = taskAttentionProjection(
+    {
+      ...running,
+      execution: { ...running.execution, state: "starting" },
+    } as TaskRead["data"],
+    "answer",
+    null,
+  );
+  assert.equal(starting.pinned, false);
+  assert.deepEqual(starting.executionHolds, []);
+  assert.deepEqual(starting.rows, []);
+
+  const withQuestion = taskAttentionProjection(
+    {
+      ...running,
+      questions: [
+        { interactionId: "question-1", kind: "question", status: "open" },
+      ] as never,
+    },
+    "answer",
+    null,
+  );
+  assert.equal(withQuestion.pinned, true);
+  assert.deepEqual(withQuestion.waits, []);
+  assert.deepEqual(withQuestion.executionHolds, []);
+  assert.deepEqual(withQuestion.rows, [
+    { id: "request:question-1", title: "Question pending", kind: "request" },
+  ]);
+});
+
+test("task attention projection pins a wait the operator can act on, never an idle task with none", () => {
+  assert.equal(
+    taskAttentionProjection(attentionTask(), "answer", null).pinned,
+    false,
+  );
+  const paused = taskAttentionProjection(
+    attentionTask({
+      waits: [
+        {
+          code: "project-paused",
+          fix: { kind: "resume-project", projectId: randomUUID() },
+          links: [],
+        } as never,
+      ],
+    }),
+    "answer",
+    null,
+  );
+  assert.equal(paused.pinned, true);
+  assert.deepEqual(
+    paused.waits.map((wait) => wait.code),
+    ["project-paused"],
+  );
+  assert.ok(paused.rows.length > 0, "the inspector counts what the card pins");
+
+  // Queued capacity is normal waiting: no pin, whatever the execution state.
+  const queued = taskAttentionProjection(
+    attentionTask({
+      waits: [{ code: "capacity", fix: null, links: [] } as never],
+    }),
+    "answer",
+    null,
+  );
+  assert.equal(queued.pinned, false);
+  assert.deepEqual(queued.rows, []);
+
+  // Beside a wait the card shows the wait with its Fix and no notices; the inspector agrees.
+  const unready = taskAttentionProjection(
+    attentionTask({
+      admission: { eligible: false, reasons: ["task-unready"] } as never,
+      waits: [
+        {
+          code: "project-paused",
+          fix: { kind: "resume-project", projectId: randomUUID() },
+          links: [],
+        } as never,
+      ],
+    }),
+    "answer",
+    null,
+  );
+  assert.deepEqual(unready.cardNotices, []);
+  assert.deepEqual(
+    unready.rows.map((row) => row.id),
+    ["hold:paused"],
+  );
+});
+
+test("task attention projection pins safety, source holds and operator recovery with readable rows", () => {
+  const execution = (state: string) =>
+    ({
+      state,
+      holds: {
+        stop: false,
+        writer: false,
+        capacity: false,
+        uncertainty: false,
+        task: false,
+      },
+      reasonCodes: [],
+    }) as never;
+  const uncertain = taskAttentionProjection(
+    attentionTask({ execution: execution("uncertain") }),
+    "approve",
+    null,
+  );
+  assert.equal(uncertain.pinned, true);
+  assert.ok(
+    uncertain.rows.some((row) => /ownership is uncertain/.test(row.title)),
+  );
+
+  const stopping = taskAttentionProjection(
+    attentionTask({ execution: execution("stopping") }),
+    "approve",
+    null,
+  );
+  assert.ok(
+    stopping.rows.some(
+      (row) => row.title === "Stop requested; effects may continue",
+    ),
+  );
+
+  const source = taskAttentionProjection(
+    attentionTask({
+      source: { hold: { active: true } } as never,
+      waits: [{ code: "source-held", fix: null, links: [] } as never],
+    }),
+    "approve",
+    null,
+  );
+  assert.equal(source.rows.length, 1);
+  assert.match(source.rows[0]!.title, /held by the source/);
+
+  const recovery = taskAttentionProjection(
+    attentionTask({ attention: { codes: ["not-started"], count: 1 } as never }),
+    "approve",
+    null,
+  );
+  assert.equal(recovery.pinned, true);
+  assert.ok(
+    recovery.rows.some((row) => /Refused before it started/.test(row.title)),
+  );
+});
+
+test("task attention projection counts combined uncertainty state, hold and code once", () => {
+  const result = taskAttentionProjection(
+    attentionTask({
+      execution: {
+        state: "uncertain",
+        holds: {
+          stop: false,
+          writer: false,
+          capacity: false,
+          uncertainty: true,
+          task: false,
+        },
+        reasonCodes: [],
+      } as never,
+      attention: { codes: ["execution-uncertain"], count: 1 } as never,
+    }),
+    "approve",
+    null,
+  );
+  assert.equal(result.pinned, true);
+  assert.deepEqual(result.rows, [
+    { id: "execution:uncertainty", title: "Uncertainty", kind: "execution" },
+  ]);
+});
+
+test("uncertainty keeps an unready explanation and rejected completion action beside it", () => {
+  const result = taskAttentionProjection(
+    attentionTask({
+      task: { state: "open", ready: false } as never,
+      admission: { eligible: false, reasons: ["task-unready"] } as never,
+      execution: {
+        state: "uncertain",
+        holds: {
+          stop: false,
+          writer: false,
+          capacity: false,
+          uncertainty: true,
+          task: false,
+        },
+        reasonCodes: [],
+      } as never,
+      attention: {
+        codes: ["execution-uncertain", "completion-rejected"],
+        count: 2,
+      } as never,
+    }),
+    "approve",
+    null,
+  );
+  assert.equal(result.rows.length, 3);
+  assert.deepEqual(
+    result.rows.map((row) => row.id),
+    ["hold:task-unready", "execution:uncertainty", "completion-rejected"],
+  );
+  assert.equal(result.cardNotices.length, 1);
+});
+
+test("task attention projection deduplicates stop state and flag and source notice while retaining intervention", () => {
+  const stopped = taskAttentionProjection(
+    attentionTask({
+      execution: {
+        state: "stopping",
+        holds: {
+          stop: true,
+          writer: false,
+          capacity: false,
+          uncertainty: false,
+          task: false,
+        },
+        reasonCodes: [],
+      } as never,
+    }),
+    "approve",
+    null,
+  );
+  assert.deepEqual(stopped.rows, [
+    {
+      id: "execution:stop",
+      title: "Operator Stop",
+      kind: "execution",
+    },
+  ]);
+
+  const source = taskAttentionProjection(
+    attentionTask({
+      source: { hold: { active: true } } as never,
+      waits: [{ code: "source-held", fix: null, links: [] } as never],
+      attention: { codes: ["unresolved-result"], count: 1 } as never,
+    }),
+    "approve",
+    null,
+  );
+  assert.equal(
+    source.rows.filter((row) => row.id === "hold:source-held").length,
+    1,
+  );
+  assert.ok(source.rows.some((row) => row.id === "unresolved-result"));
+});
+
+test("selected and unselected open approvals each produce one inspector request row", () => {
+  const approval = {
+    interactionId: "approval-1",
+    kind: "approval",
+    status: "open",
+  } as never;
+  const taskWithApproval = attentionTask({
+    approvals: [approval],
+    waits: [
+      {
+        code: "approval",
+        fix: null,
+        links: [{ kind: "request", id: "approval-1" }],
+      } as never,
+    ],
+  });
+  for (const deciding of [null, "approval-1"]) {
+    const result = taskAttentionProjection(
+      taskWithApproval,
+      "approve",
+      deciding,
+    );
+    assert.equal(result.pinned, true);
+    assert.deepEqual(result.rows, [
+      { id: "request:approval-1", title: "Approval pending", kind: "request" },
+    ]);
+  }
+});
+
+test("open approvals suppress their merged wait while project pause stays a single projected hold", () => {
+  const ids = ["approval-1", "approval-2"],
+    requests = ids.map(
+      (interactionId) =>
+        ({ interactionId, kind: "approval", status: "open" }) as never,
+    ),
+    result = taskAttentionProjection(
+      attentionTask({
+        approvals: requests,
+        waits: [
+          {
+            code: "approval",
+            fix: null,
+            links: ids.map((id) => ({
+              kind: "request",
+              id,
+            })),
+          } as never,
+          { code: "project-paused", fix: null, links: [] } as never,
+        ],
+      }),
+      "approve",
+      "approval-1",
+    );
+  assert.equal(result.rows.length, 3);
+  assert.deepEqual(
+    result.rows.map((row) => row.id),
+    ["request:approval-1", "request:approval-2", "hold:paused"],
+  );
+  assert.equal(
+    result.notices.filter((notice) => notice.id === "approval").length,
+    0,
+  );
+  assert.equal(
+    result.cardNotices.filter((notice) => notice.id === "paused").length,
+    1,
+  );
+});
+
+test("operator recovery hold pins the card even when the wait is its only signal", () => {
+  const result = taskAttentionProjection(
+    attentionTask({
+      waits: [
+        {
+          code: "assignment-recovery-unresolved",
+          fix: null,
+          links: [],
+        } as never,
+      ],
+    }),
+    "approve",
+    null,
+  );
+  assert.equal(result.pinned, true);
+  assert.ok(
+    result.rows.some((row) => row.id === "hold:assignment-recovery-unresolved"),
+  );
+});
 
 test("hold notices name each independent hold and what approval does not clear", () => {
   assert.deepEqual(holdNotices(task([]), "approve", null), []);

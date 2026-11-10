@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type ChildProcess, fork, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 const control = await import(
   pathToFileURL(resolve("test/execution/signal-qualification/live-control.mjs"))
     .href
@@ -1043,7 +1044,11 @@ test("grant marker is keyed by grant id, build is redone from HEAD and versions 
 });
 
 // Offline wiring: realBackend + live-host over the model-free fake-child/sdk fixtures.
-const darwin = { skip: process.platform !== "darwin", timeout: 120000 };
+// These journeys read process identity with ps, which an agent sandbox may deny.
+const darwin = {
+  skip: process.platform !== "darwin" || processIdentityDenied(),
+  timeout: 120000,
+};
 const fakeChild = new URL(
   "./signal-qualification/fake-child.js",
   import.meta.url,
@@ -1682,7 +1687,9 @@ test("polling reads skip a torn trace line and tolerate bounded SQLite BUSY; oth
     ),
   );
 });
-test("durable snapshots after a spent turn retry a transient BUSY within their deadline", async () => {
+test("durable snapshots after a spent turn retry a transient BUSY within their deadline", {
+  skip: processIdentityDenied(),
+}, async () => {
   const { root } = fixture();
   const fs = await import("node:fs");
   const { DatabaseSync } = await import("node:sqlite");

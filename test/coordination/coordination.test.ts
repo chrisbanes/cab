@@ -799,6 +799,37 @@ test("delegation derives same-task requester identity and replays exactly once",
   }
 });
 
+test("cab_delegate names Permitted agents when the requested profile is denied", () => {
+  const f = fixture();
+  try {
+    const routing = f.domain.routing(projectId);
+    const before = f.domain.assignments(taskA).length;
+    f.domain.execute({
+      type: "routing.configure",
+      actor: "operator",
+      key: nextCommand(),
+      projectId,
+      expectedVersion: Number(routing.version),
+      enabled: false,
+      candidateProfileIds: [],
+    });
+    const call = {
+      threadId: "thread-child-a",
+      turnId: "turn-child-a",
+      callId: "call-denied-agent",
+      tool: "cab_delegate",
+      arguments: { profileId: workerProfile, brief: "Must be refused." },
+    };
+    assert.throws(
+      () => f.coordination.delegate(call),
+      /Permitted agents in project Settings/,
+    );
+    assert.equal(f.domain.assignments(taskA).length, before);
+  } finally {
+    f.close();
+  }
+});
+
 test("delegation records its millisecond time once and legacy delegations anchor to their work", () => {
   const f = fixture();
   try {

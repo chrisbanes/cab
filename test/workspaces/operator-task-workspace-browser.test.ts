@@ -832,8 +832,9 @@ test("production workspace retains literal captured text, pending request, focus
   });
   await page.getByRole("button", { name: "Refresh task", exact: true }).click();
   // The changed visibility starts the window again from the newest page, below which the
-  // redacted item now waits.
-  await newestItem.waitFor();
+  // redacted item now waits. Item 250 predates the newer notes, so it leaves with the held pages.
+  await log.getByText("Newer note 47", { exact: true }).waitFor();
+  await newestItem.waitFor({ state: "detached" });
   await literalItem(0).waitFor({ state: "detached" });
   const replacementRequests = [...batchRequests];
   assert.equal(replacementRequests.length, 2);

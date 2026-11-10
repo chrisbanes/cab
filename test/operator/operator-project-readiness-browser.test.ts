@@ -805,7 +805,7 @@ test("a saved Ready label that discovery does not list stays selected and savabl
     "Other…",
   ]);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
+    .getByLabel("Closed issues at import", { exact: true })
     .selectOption("done");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);

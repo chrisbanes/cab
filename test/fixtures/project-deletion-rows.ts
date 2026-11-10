@@ -159,7 +159,12 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     {
       shared: true,
       table: "scheduler_capacity_limits",
-      values: { singleton: 1, globalLimit: 1 },
+      values: { singleton: 1, globalLimit: 1, minimumLeadSlots: 0 },
+    },
+    {
+      shared: true,
+      table: "scheduler_agent_capacity_limits",
+      values: { profileId: i.uuid("profiles.id"), agentLimit: 1 },
     },
     {
       shared: true,
@@ -1223,6 +1228,18 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "source_hold_release_records",
+      values: {
+        provider: "github",
+        instance: "github.com",
+        externalId: i.externalId,
+        generation: 1,
+        reason: "readiness-lost",
+        taskId: i.taskId,
+      },
+    },
+    {
+      shared: false,
       table: "source_dependency_observations",
       values: {
         provider: "github",
@@ -1432,6 +1449,11 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "project_reasoning_summaries",
+      values: { projectId: i.projectId, enabled: 1 },
+    },
+    {
+      shared: false,
       table: "project_dangerously_skip_sandbox",
       values: { projectId: i.projectId, enabled: 1 },
     },
@@ -1568,6 +1590,18 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "execution_pre_turn_refusals",
+      values: {
+        workId: i.workId,
+        id: i.uuid("pre-turn-refusal"),
+        origin: "runtime",
+        stage: "resume",
+        failureClass: "response-rejected",
+        threadId: null,
+      },
+    },
+    {
+      shared: false,
       table: "execution_request_refusals",
       values: { workId: i.workId, reason: "fixture-reason" },
     },
@@ -1666,13 +1700,24 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "execution_intent_reasoning_summaries",
+      values: { intentId: i.intentId, enabled: 1 },
+    },
+    {
+      shared: false,
       table: "execution_intent_dangerously_skip_sandbox",
       values: { intentId: i.intentId, enabled: 1 },
     },
     {
       shared: false,
       table: "execution_capacity_reservations",
-      values: { workId: i.workId, projectId: i.projectId, admittedAt: 1 },
+      values: {
+        workId: i.workId,
+        projectId: i.projectId,
+        admittedAt: 1,
+        lead: 0,
+        agentId: null,
+      },
     },
     {
       shared: false,
@@ -1930,6 +1975,16 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     {
       shared: false,
       table: "coordination_source_hold_notices",
+      values: {
+        nodeId: i.externalId,
+        generation: 1,
+        recipientAssignmentId: i.assignmentId,
+        eventId: i.eventId,
+      },
+    },
+    {
+      shared: false,
+      table: "coordination_source_hold_releases",
       values: {
         nodeId: i.externalId,
         generation: 1,

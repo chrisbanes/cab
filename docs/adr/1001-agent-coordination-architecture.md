@@ -94,8 +94,10 @@ existing ownership and work; do not dispatch newly conflicted unowned issues.
 Transfers of already-owned tasks between projects are deferred beyond the first release.
 Removing readiness, leaving all selections, or external closure holds new
 delegation and asks the owner to reach a safe stopping point. Operator resolution
-is required to resume, except closure confirmed as this task's own delivery and a withdrawn or
-readiness-lost hold that a later complete read of the listed, Ready issue releases.
+is required to resume, except closure confirmed as this task's own delivery, a withdrawn or
+readiness-lost hold that a later complete read of the listed, Ready issue releases, and
+external closure, which completes the task by provider closure once its execution and
+delivery have settled.
 Issue text is live: a title or body edit updates the task and holds nothing, and
 the lead sees the change on its next turn. Anyone who can edit the issue, including
 its author, can therefore change a Ready task's scope before it starts; cab accepts

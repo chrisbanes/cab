@@ -29,6 +29,11 @@ A container for tasks, optional linked repositories, agents, instructions, and p
 Its identity belongs to cab and is independent of the application hosting it.
 _Avoid_: Board or GitHub Project when referring to the cab container
 
+**Permitted agents**:
+The project-level list of agents the lead may delegate to. It applies whether
+automatic routing is on or off; Routing chooses only from this list.
+_Avoid_: Routing candidates as a separate permission list
+
 **Task**:
 A piece of work belonging to one project, created locally or linked to an external item.
 _Avoid_: Issue when referring to work independently of its external provider
@@ -94,9 +99,14 @@ _Avoid_: Retry when referring to a restart
 
 **Closure hold**:
 The hold on an imported open task whose external item was closed without
-cab delivering it. It is distinct from a project pause. An own closure that a
-reopen superseded no longer exempts the task.
+cab delivering it. It lasts until the task's execution and delivery settle, when
+the task completes by provider closure. It is distinct from a project pause. An
+own closure that a reopen superseded no longer exempts the task.
 _Avoid_: Paused when referring to an externally closed task
+
+**Provider closure**:
+Closure of an external item not proved as this task's own delivery; it completes
+the task, recorded separately from cab or manual completion.
 
 **Task source**:
 A project-scoped origin of tasks: built-in local creation or a configured external source supplied by a plugin.
@@ -180,9 +190,25 @@ investigating and talking with the operator. It grants no readiness and carries
 out no implementation.
 _Avoid_: Triage turn
 
+**Lead turn**:
+For capacity, a turn on a task's lead assignment, including a draft turn, or a
+project drafting run. Delegated assignments and direct work are not lead turns.
+_Avoid_: Coordination turn as a separate kind
+
+**Minimum lead slots**:
+The installation-wide number of global active-turn slots held for lead turns. Other
+turns cannot take a held slot; lead turns can also use any free slot.
+_Avoid_: Lead reserve per project
+
+**Agent cap**:
+An optional limit on how many active turns one agent runs at once, across projects
+and roles.
+_Avoid_: Agent concurrency setting in the agent revision
+
 **Start again**:
-The operator action that queues an assignment's request again when it was refused at
-admission before it ran, at the current revisions. The refused request stays as history.
+The operator action that queues an assignment's request again when it was refused before it
+ran, at admission or before any turn was submitted, at the current revisions. The refused
+request stays as history.
 _Avoid_: Retry, which resends work that may have run
 
 **Reset task**:

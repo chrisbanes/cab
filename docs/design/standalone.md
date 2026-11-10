@@ -64,9 +64,10 @@ cab-server provenance pass. See [ADR-1021](../adr/1021-profile-skill-plugins-and
   detached-child overlap is an accepted limit, not physical writer exclusion.
 - Use the explicit default execution policy below. Strict outside-read denial and
   complete descendant containment are separate product/deployment decisions.
-- Enforce both an installation-wide active-turn cap and per-project caps. Waiting
-  assignments yield slots. Defaults are four active turns globally and two per
-  project, editable by the operator.
+- Enforce an installation-wide active-turn cap with minimum lead slots held for
+  lead turns, optional per-agent caps and optional per-project caps that count only
+  non-lead turns. Waiting assignments yield slots. New installations default to six
+  active turns with one lead slot; projects and agents have no default cap.
 - Hold a macOS sleep assertion only while execution is active. Release it when
   idle; forced sleep/wake requires reconciliation before more dispatch.
 - Task discussion uses durable messages for the next eligible turn, with history
@@ -113,8 +114,8 @@ The project lead is accountable for task outcomes, with separate per-task
 conversations using the same lead agent. Assignees perform assignments; there
 is no separate task-owner role. Lead task conversations need durable, task-scoped
 execution identities, recipients and control bindings without an operator-managed
-owner record. Lead turns must take part in normal capacity, stop, recovery and writer
-protocols.
+owner record. Lead turns must take part in normal stop, recovery and writer
+protocols, and in capacity as lead turns that may use the held lead slots.
 
 The service may create the initial assignment from an eligible task's requested
 outcome and route it without waking the lead. Explicit permitted assignees bypass

@@ -904,12 +904,8 @@ for (const mode of ["done", "skip"] as const)
       f.setIssueOpen(false);
       await f.service.refreshGitHub();
       assert.equal(f.domain.providerClosure(f.taskId), "held");
-      await settleInto(f, mode === "done" ? "done" : "open");
-      assert.equal(
-        sources.providerCompletion(f.taskId) !== undefined,
-        mode === "done",
-      );
-      if (mode === "skip") assert.equal(sources.hold("I1")?.reason, "closed");
+      await settleInto(f, "done");
+      assert.ok(sources.providerCompletion(f.taskId));
     } finally {
       await f.close();
     }

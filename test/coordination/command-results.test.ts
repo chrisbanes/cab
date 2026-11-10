@@ -58,10 +58,10 @@ const assignment: DomainCommandResultMap["assignment.create"] = {
 };
 const capacity: DomainCommandResultMap["capacity.configure"] = {
   globalLimit: 1,
-  defaultProjectLimit: 2,
+  minimumLeadSlots: 0,
   projectOverrides: {},
-  currentUsage: { global: 0, projects: {} },
-  effectiveProjectLimits: {},
+  agentOverrides: {},
+  currentUsage: { global: 0, lead: 0, projects: {}, agents: {} },
 };
 const github: DomainCommandResultMap["github.configure"] = {
   version: 1,
@@ -97,6 +97,7 @@ const cases = {
   },
   "project.create": project,
   "project.configure": project,
+  "project.reasoning.delete": { ...project, archived: 0 },
   "project.archive": { ...project, archived: 1, paused: 1 },
   "project.restore": { ...project, archived: 0, paused: 1 },
   "project.delete": {

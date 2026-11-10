@@ -704,7 +704,11 @@ test("pause, Stop and capacity hold a queued draft turn like any other turn", as
   );
 
   // Capacity: another task's running turn occupies the only slot.
-  await f.service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+  await f.service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+  });
   const other = await draftTask(f, "Other task");
   f.service.domain().execute({
     type: "task.configure",

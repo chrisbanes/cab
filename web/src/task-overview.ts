@@ -3,6 +3,10 @@ import type {
   TaskRead,
 } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
+import {
+  type ClosureWait,
+  closureWaitText,
+} from "../../src/operator/closed-issue-copy.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 import { pullRequestReference } from "./delivery-presentation.js";
@@ -139,7 +143,7 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
                 : blocker
                   ? `Ready · waiting on ${blocker.label}`
                   : reason
-                    ? `Ready · ${midSentence(waitLabels[reason])}`
+                    ? `Ready · ${reason === "capacity" ? "waiting for capacity" : midSentence(waitLabels[reason])}`
                     : execution.state === "idle"
                       ? "Ready"
                       : `Ready · ${execution.state}`;
@@ -149,6 +153,33 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
 export const taskNextActor = (
   data: Pick<Data, "task" | "execution" | "admission" | "source" | "attention">,
 ) => nextActor(data.attention.codes, taskColumnOf(data));
+
+/** Strip repeats the state badge and shows at most one distinct reason. */
+export function taskStripReason(data: Omit<StatusData, "lead">) {
+  const readiness = taskReadiness(data),
+    column = taskColumnOf(data),
+    prefix = `${data.task.ready ? "Ready" : "Draft"} · `;
+  const reason = readiness.startsWith(`${column} · `)
+    ? readiness.slice(column.length + 3)
+    : readiness.startsWith(prefix)
+      ? readiness.slice(prefix.length)
+      : readiness;
+  if (reason === data.execution.state) return null;
+  if (readiness === column || readiness === "Ready" || readiness === "Draft")
+    return null;
+  if (readiness === "Stopping; effects may continue")
+    return "effects may continue";
+  if (readiness === "Execution uncertain") return "ownership uncertain";
+  if (
+    data.execution.state === "running" &&
+    !data.execution.holds.stop &&
+    !data.execution.holds.uncertainty &&
+    !data.source?.hold?.active &&
+    reason === "waiting for capacity"
+  )
+    return null;
+  return reason;
+}
 
 /** The ID slot: `repository#number` for an imported task, otherwise "Local task". */
 export function taskIdentity(data: Pick<Data, "source">) {
@@ -183,7 +214,8 @@ export const projectFieldRows = (source: NonNullable<Data["source"]>) =>
   );
 
 const sourceHoldReasons: Record<SourceHoldReason, string> = {
-  closed: "The issue was closed after import. Reopen it first, then resume.",
+  closed:
+    "The issue was closed after import. The task completes once its work and delivery settle; reopen the issue to keep working on it.",
   withdrawn:
     "The issue is no longer selected for this project. Select it again first, then resume.",
   "readiness-lost":
@@ -194,9 +226,17 @@ const sourceHoldReasons: Record<SourceHoldReason, string> = {
     "The issue was closed and cab could not show that its own delivery closed it. Reopen the issue first, then resume.",
 };
 
-/** Why the source holds the task, in provider-neutral words; null is a reason the read does not name. */
-export const sourceHoldReasonText = (reason: SourceHoldReason | null) =>
-  reason ? sourceHoldReasons[reason] : "The source holds this task.";
+/**
+ * Why the source holds the task, in provider-neutral words; null is a reason the read does not
+ * name. A closure hold also names the delivery it waits on.
+ */
+export const sourceHoldReasonText = (
+  reason: SourceHoldReason | null,
+  wait: ClosureWait | null = null,
+) =>
+  reason
+    ? `${sourceHoldReasons[reason]}${reason === "closed" && wait ? ` ${closureWaitText(wait)}` : ""}`
+    : "The source holds this task.";
 
 /** What resuming a source hold does and does not mean. */
 export const sourceHoldResumeCaveat =
@@ -241,7 +281,13 @@ const deliveryModes = {
  */
 export const deliveryApplies = (
   data: Pick<Data, "source" | "repositoryLinked" | "delivery">,
-) => Boolean(data.source || data.repositoryLinked || data.delivery?.binding);
+) =>
+  Boolean(
+    data.source ||
+      data.repositoryLinked ||
+      data.delivery?.binding ||
+      data.delivery?.unregisteredPr,
+  );
 
 /** The inspector's execution facts: running assignments, lead runtime and delivery. */
 export function executionFacts(
@@ -258,8 +304,9 @@ export function executionFacts(
     delivery: !delivery
       ? "Delivery not recorded"
       : binding
-        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}`
-        : `${deliveryModes[delivery.mode]} · no PR yet`,
+        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}${delivery.unregisteredPr ? ` · ${delivery.unregisteredPr}` : ""}`
+        : (delivery.unregisteredPr ??
+          `${deliveryModes[delivery.mode]} · no PR yet`),
   };
 }
 

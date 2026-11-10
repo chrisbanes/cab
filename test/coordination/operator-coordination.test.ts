@@ -93,8 +93,9 @@ test("operator status follows a newer queued continuation over completed history
   });
   await service.configureCapacity({
     key: randomUUID(),
-    globalLimit: 1,
-    projectOverrides: { [projectId]: 1 },
+    minimumLeadSlots: 0,
+    globalLimit: 2,
+    projectOverrides: {},
   });
   await service.provisionTask(taskId);
   await service.provisionTask(capacityTaskId);
@@ -113,14 +114,15 @@ test("operator status follows a newer queued continuation over completed history
     expectedVersion: 1,
     ready: true,
   });
-  await until(() =>
-    service
-      .turnRequests()
-      .some(
-        (request) =>
-          request.taskId === capacityTaskId && request.state === "queued",
-      ),
-  );
+  await until(() => runtime.turns === 2);
+  // The other task keeps its slot, so the continuation below has to queue: resumed
+  // work goes first only once a slot is free.
+  await service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 1,
+    projectOverrides: {},
+  });
 
   const assignment = service.domain().assignments(taskId)[0];
   assert.ok(assignment);
@@ -737,6 +739,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
 
   await service.configureCapacity({
     key: randomUUID(),
+    minimumLeadSlots: 0,
     globalLimit: 1,
     projectOverrides: { [projectId]: 1 },
   });

@@ -28,6 +28,7 @@ import type {
 } from "../../src/standalone/workspaces.js";
 import { WorkspaceManager } from "../../src/standalone/workspaces.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { processIdentityDenied } from "../fixtures/host-access.js";
 
 class RuntimeFixture implements Runtime {
   resultReports: Array<{
@@ -1426,7 +1427,9 @@ test("archival hold prevents writer admission after workspace validation", async
   }
 });
 
-test("uncertain archive status keeps its archival hold across restart", async (t) => {
+test("uncertain archive status keeps its archival hold across restart", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const repositoryRoot = mkdtempSync(join(tmpdir(), "cab-archive-source-"));
   const source = sourceRepository(repositoryRoot, "source");
   const controlled = controlledGit();
@@ -1712,7 +1715,9 @@ test("uncertain archive status keeps its archival hold across restart", async (t
   }
 });
 
-test("service stop settles direct workspace provisioning before database close", async (t) => {
+test("service stop settles direct workspace provisioning before database close", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const controlled = controlledGit();
   const failures: Parameters<
     NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
@@ -1853,7 +1858,9 @@ test("service stop settles direct workspace provisioning before database close",
   }
 });
 
-test("service stop settles archive status and worktree removal before database close", async (t) => {
+test("service stop settles archive status and worktree removal before database close", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const scenarios = [
     {
       name: "archive status",
@@ -2051,7 +2058,9 @@ test("service stop settles archive status and worktree removal before database c
   }
 });
 
-test("service stop cancels startup workspace recovery and settles before database close", async (t) => {
+test("service stop cancels startup workspace recovery and settles before database close", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const repositoryRoot = mkdtempSync(
     join(tmpdir(), "cab-startup-recovery-source-"),
   );
@@ -2502,7 +2511,9 @@ test("startup does not continue after workspace recovery returns to a cancelled 
   }
 });
 
-test("real Git service provisioning, execution lookup, and clean archive stay within measured bounds", async (t) => {
+test("real Git service provisioning, execution lookup, and clean archive stay within measured bounds", {
+  skip: processIdentityDenied(),
+}, async (t) => {
   const repositoryRoot = mkdtempSync(join(tmpdir(), "cab-git-timing-"));
   const source = sourceRepository(repositoryRoot, "timing-source");
   const secondSource = sourceRepository(repositoryRoot, "timing-source-two");
@@ -2985,10 +2996,7 @@ test("Stop persists bound execution identity before interrupt and keeps ownershi
       f.service.list().find((item) => item.workId === "stoppable")?.state,
       "held",
     );
-    assert.equal(
-      f.service.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(f.service.capacityLimits().currentUsage.global, 1);
     assert.equal(
       f.service.recordTaskResult("stoppable", "too early"),
       false,
@@ -3004,20 +3012,14 @@ test("Stop persists bound execution identity before interrupt and keeps ownershi
     );
     await recovered.start();
     assert.equal(recovered.taskHold(f.taskId), "Task stopped");
-    assert.equal(
-      recovered.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     recovered.resumeTask(f.taskId);
     assert.equal(recovered.taskHold(f.taskId), undefined);
     assert.equal(
       recovered.list().find((item) => item.workId === "stoppable")?.state,
       "held",
     );
-    assert.equal(
-      recovered.capacityLimits([f.projectId]).currentUsage.global,
-      1,
-    );
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     await recovered.stop();
   } finally {
     gate.resolve();

@@ -17,6 +17,10 @@ import {
   type ProfileRuntime,
   readinessCommandValue,
 } from "../../src/operator/contracts.js";
+import {
+  closedIssueLabels,
+  closureCompletionNote,
+} from "../../src/operator/closed-issue-copy.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { repositoryLabel } from "./presentation.js";
 import { diagnosticCaptureLabels, plural } from "./settings-view.js";
@@ -108,6 +112,14 @@ export function projectChanges(
       `Skip sandbox ${v.dangerouslySkipSandbox ? "enabled" : "disabled"}`,
     );
   const mode = diagnosticCaptureLabels;
+  const reasoning =
+    v.diagnosticCapture === "baseline" ? false : v.reasoningSummaries;
+  if (
+    data.reasoningSummaries !== undefined &&
+    reasoning !== undefined &&
+    Boolean(reasoning) !== data.reasoningSummaries
+  )
+    lines.push(`Reasoning summaries ${reasoning ? "enabled" : "disabled"}`);
   if (
     data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== undefined &&
@@ -154,8 +166,25 @@ export const runtimeChanged = (runtime: ProfileRuntime, v: Values) =>
 /** Candidates a routing save can keep: revoked profiles are not selectable. */
 const selectable = (data: ProjectConfigurationData, ids: string[]) =>
   ids.filter((id) => !data.profiles.find((p) => p.id === id)?.revoked);
+export const selectableCandidates = selectable;
 export const savedCandidates = (data: ProjectConfigurationData) =>
   selectable(data, data.routing.candidateProfileIds);
+
+export function permittedAgentsChanges(
+  data: ProjectConfigurationData,
+  ids: string[],
+) {
+  const saved = savedCandidates(data),
+    next = selectable(data, ids);
+  return [
+    ...next
+      .filter((id) => !saved.includes(id))
+      .map((id) => `Agent added: ${nameOf(data.profiles, id)}`),
+    ...saved
+      .filter((id) => !next.includes(id))
+      .map((id) => `Agent removed: ${nameOf(data.profiles, id)}`),
+  ];
+}
 
 export function routingChanges(
   data: ProjectConfigurationData,
@@ -391,7 +420,9 @@ export function sourceChanges(
     );
   // A draft without the field keeps the saved mode.
   if (v.closedIssues !== undefined && v.closedIssues !== source.closedIssues)
-    lines.push(`Closed issues: ${closedIssueLabels[String(v.closedIssues)]}`);
+    lines.push(
+      `Closed issues at import: ${closedIssueLabels[v.closedIssues === "done" ? "done" : "skip"]}`,
+    );
   return [
     ...lines,
     ...(v.referenceMode === "gh"
@@ -636,10 +667,7 @@ export const kindLabel = (kind: unknown) =>
       ? "GitHub Project"
       : "Search";
 
-export const closedIssueLabels: Record<string, string> = {
-  skip: "Skip closed issues",
-  done: "Treat closure as Done",
-};
+export { closedIssueLabels, closureCompletionNote };
 
 export function sourceCommand(
   projectId: string,
@@ -705,6 +733,17 @@ export function repositoryCommand(
   };
 }
 
+/** A capped row's usage, or that it has no limit of its own. */
+export function capacityUsage(
+  usage: number,
+  limit: number | null,
+  kind: "agent" | "project",
+) {
+  return limit === null
+    ? `Usage ${usage} · No ${kind} limit`
+    : `Usage ${usage} / limit ${limit}`;
+}
+
 export function capacityChanges(
   data: RuntimeSettingsData,
   v: Values,
@@ -717,17 +756,39 @@ export function capacityChanges(
     lines.push(
       `Global active-turn cap: ${data.globalLimit} → ${v.globalLimit}`,
     );
-  for (const r of data.projects) {
-    const name = labelOf(r);
-    const set = Boolean(v[`override-${r.project.id}`]),
-      limit = Number(v[`limit-${r.project.id}`]);
-    if (set && r.override === null)
+  if (
+    v.minimumLeadSlots !== undefined &&
+    Number(v.minimumLeadSlots) !== data.minimumLeadSlots
+  )
+    lines.push(
+      `Minimum lead slots: ${data.minimumLeadSlots} → ${v.minimumLeadSlots}`,
+    );
+  const override = (
+    name: string,
+    current: number | null,
+    set: boolean,
+    limit: number,
+  ) => {
+    if (set && current === null)
       lines.push(`${name}: override set to ${limit}`);
-    else if (!set && r.override !== null)
-      lines.push(`${name}: override cleared`);
-    else if (set && r.override !== limit)
-      lines.push(`${name} override: ${r.override} → ${limit}`);
-  }
+    else if (!set && current !== null) lines.push(`${name}: override cleared`);
+    else if (set && current !== limit)
+      lines.push(`${name} override: ${current} → ${limit}`);
+  };
+  for (const r of data.agents)
+    override(
+      r.agent.name ?? "Agent",
+      r.limit,
+      Boolean(v[`agent-override-${r.agent.id}`]),
+      Number(v[`agent-limit-${r.agent.id}`]),
+    );
+  for (const r of data.projects)
+    override(
+      labelOf(r),
+      r.override,
+      Boolean(v[`override-${r.project.id}`]),
+      Number(v[`limit-${r.project.id}`]),
+    );
   return lines;
 }
 

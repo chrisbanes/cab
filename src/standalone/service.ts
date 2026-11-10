@@ -42,6 +42,7 @@ import {
 import {
   CommandResultValidationError,
   parseDomainCommandOutcome,
+  parseFreshDomainCommandOutcome,
 } from "../core/command-results.js";
 import {
   type CoordinationCall,
@@ -266,17 +267,23 @@ import {
   type PowerEventSource,
 } from "./power.js";
 import {
-  ArchivedResumeRejectedError,
   type BoundTurnRecoveryCommand,
   boundTurnRecoveryCommandSchema,
-  type HistoricalNoTurnAdoption,
-  type HistoricalPreTurnAdoption,
   type NoTurnRecoveryCommand,
   noTurnRecoveryCommandSchema,
   type PreTurnRecoveryCommand,
   preTurnRecoveryCommandSchema,
+  type ReleaseCommand,
+  releaseCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import type { ReleaseBlocker } from "../core/recovery-contracts.js";
+import {
+  type PreTurnStage,
+  preTurnFailureClass,
+  preTurnHoldReason,
+  preTurnRefusalReason,
+} from "./pre-turn-failure.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import type {
   RecoveryReceipt,
@@ -542,6 +549,7 @@ const draftingStoppedReason = "You stopped the draft";
 const draftingTimeLimitReason = "The 10 minute time limit was reached";
 const draftingRestartedReason = "The service restarted";
 const draftingUnverifiedReason = "Waiting to confirm the runtime stopped";
+const draftingNotStartedReason = "The lead's turn could not start";
 const draftingCleanupReason = "Waiting to remove the working copy";
 const draftingWorkspaceFailedReason = "The working copy could not be prepared";
 
@@ -1795,6 +1803,7 @@ export class StandaloneService {
           harness !== defaultExecutionHarness,
         );
       await supervisor.reconcileOnStart();
+      this.releaseUnboundHoldsOnStart(state, supervisor);
       await this.resolveDraftingOnStart({
         drafting,
         draftingBindings,
@@ -1814,7 +1823,7 @@ export class StandaloneService {
       });
       await githubSynchronizer.refresh();
       await jiraSynchronizer.refresh();
-      this.completeSettledProviderClosures({ githubSources, state });
+      this.completeSettledProviderClosures({ githubSources, state, domain });
       this.emitSourceHoldNotices({ githubSources, domain, coordination });
       // Nothing is published until provider reconciliation and queued-inbox
       // supersession finish; domain notifications cannot admit work.
@@ -1869,7 +1878,8 @@ export class StandaloneService {
         "scheduler",
         new TurnScheduler(
           schedulerStore,
-          (request) => this.attemptRequest(request, generation),
+          (request, capacityFreed) =>
+            this.attemptRequest(request, generation, capacityFreed),
           this.retryNow,
           (error) =>
             this.handleBackgroundFailure(generation, "scheduler-drain", error),
@@ -3348,6 +3358,9 @@ export class StandaloneService {
       () => this.started().supervisor.resolveHeldExecution(receipt),
     );
   }
+  unboundTurnTerminationBlockers(workId: string) {
+    return this.started().supervisor.unboundTurnTerminationBlockers(workId);
+  }
   boundTurnRecoveryEligibility(workId: string, assignmentId: string) {
     return this.started().supervisor.boundTurnRecoveryEligibility(
       workId,
@@ -3398,8 +3411,64 @@ export class StandaloneService {
     });
     return result;
   }
-  adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption) {
-    return this.started().state.adoptHistoricalPreTurnRejection(command);
+  /** Every check a release runs, read without changing anything. */
+  releaseBlockers(workId: string): ReleaseBlocker[] {
+    const { state, supervisor } = this.started();
+    return [
+      ...new Set([
+        ...state.releaseBlockers(workId),
+        ...this.releaseInProcessBlockers(workId, supervisor),
+      ]),
+    ];
+  }
+  private releaseInProcessBlockers(
+    workId: string,
+    supervisor: ExecutionSupervisor,
+  ): ReleaseBlocker[] {
+    return [
+      ...supervisor.releaseBlockers(workId),
+      // Still being submitted in this process: its outcome is not settled yet.
+      ...(this.activeByWorkId.has(workId)
+        ? (["independent-hold"] as const)
+        : []),
+    ];
+  }
+  /** Releases one held generation that never sent a turn, bound to the generation read. */
+  releaseUnboundHold(command: ReleaseCommand) {
+    const value = releaseCommandSchema.parse(command);
+    const { state, supervisor } = this.started();
+    const result = state.releaseUnboundHold(
+      value.workId,
+      this.releaseInProcessBlockers(value.workId, supervisor),
+      value,
+    );
+    // A release frees capacity for queued work.
+    this.wakeAfterCommit();
+    return result;
+  }
+  /**
+   * Before admission: releases every held generation whose saved thread and turn are
+   * null and that nothing else holds. Any other generation is left exactly as it was.
+   */
+  private releaseUnboundHoldsOnStart(
+    state: ExecutionState,
+    supervisor: ExecutionSupervisor,
+  ): void {
+    for (const workId of state.unboundHeldWorkIds()) {
+      if (!state.projectWorkWritable(workId)) continue;
+      try {
+        state.releaseUnboundHold(
+          workId,
+          this.releaseInProcessBlockers(workId, supervisor),
+        );
+      } catch (error) {
+        if (error instanceof RecoveryRejectedError) continue;
+        throw error;
+      }
+      process.stderr.write(
+        `${JSON.stringify({ event: "held-generation-released", workId, reason: "no thread binding was saved, so no turn was sent" })}\n`,
+      );
+    }
   }
   recoverPreTurnExecution(command: PreTurnRecoveryCommand) {
     const value = preTurnRecoveryCommandSchema.parse(command);
@@ -3421,9 +3490,6 @@ export class StandaloneService {
       () =>
         this.started().supervisor.resolveHeldExecution(value.receipt, value),
     );
-  }
-  adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
-    return this.started().state.adoptHistoricalNoTurnSubmission(command);
   }
   recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
     const value = noTurnRecoveryCommandSchema.parse(command);
@@ -4738,16 +4804,20 @@ export class StandaloneService {
       }
   }
 
-  /** Done-mode sources complete closure-held tasks once their execution has settled. */
+  /** Every source completes closure-held tasks once their execution and delivery have settled. */
   private completeSettledProviderClosures({
     githubSources,
     state,
-  }: Pick<Started, "githubSources" | "state">): void {
+    domain,
+  }: Pick<Started, "githubSources" | "state" | "domain">): void {
     for (const sources of [githubSources, ...githubSources.jiraStores()])
       for (const hold of sources.activeHolds())
         if (hold.reason === "closed" && this.writableTask(hold.taskId))
-          sources.completeFromProviderClosure(hold.taskId, () =>
-            state.taskExecutionSettled(hold.taskId),
+          sources.completeFromProviderClosure(
+            hold.taskId,
+            () =>
+              state.taskExecutionSettled(hold.taskId) &&
+              !domain.publicationSending(hold.taskId),
           );
   }
 
@@ -4783,6 +4853,21 @@ export class StandaloneService {
       for (const recipientAssignmentId of recipients)
         coordination.ensureSourceHoldEvent({ ...hold, recipientAssignmentId });
     }
+    // Every live recipient of the hold notice hears that it cleared.
+    for (const release of coordination.sourceHoldReleases())
+      if (
+        this.writableTask(release.taskId) &&
+        (leadByTask.get(release.taskId) === release.recipientAssignmentId ||
+          domain
+            .assignments(release.taskId)
+            .some(
+              (assignment) =>
+                String(assignment.id) === release.recipientAssignmentId &&
+                (assignment.state === "pending" ||
+                  assignment.state === "running"),
+            ))
+      )
+        coordination.ensureSourceHoldReleasedEvent(release);
   }
 
   routingAvailability(projectId: string): RoutingAvailability {
@@ -4837,14 +4922,14 @@ export class StandaloneService {
     );
   }
 
-  capacityLimits(projectIds: string[] = []): CapacityLimits {
-    return this.domain().capacityLimits(projectIds);
+  capacityLimits(): CapacityLimits {
+    return this.domain().capacityLimits();
   }
 
   async configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
   ): Promise<CapacityLimits> {
-    const outcome = parseDomainCommandOutcome(
+    const outcome = parseFreshDomainCommandOutcome(
       "capacity.configure",
       this.domain().execute({
         ...command,
@@ -4852,7 +4937,10 @@ export class StandaloneService {
         actor: "operator",
       }),
     );
-    if (outcome.type !== "capacity.configure")
+    if (
+      outcome.type !== "capacity.configure" ||
+      !("minimumLeadSlots" in outcome.result)
+    )
       throw new CommandResultValidationError(
         "Capacity configuration returned the wrong result type",
       );
@@ -6154,7 +6242,7 @@ export class StandaloneService {
             call as CoordinationCall,
             caller,
             {
-              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}`,
+              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}${result.request.action.kind === "pr.create" && result.state === "confirmed-success" ? `\n${this.delivery().unregisteredPr(caller.taskId) ?? ""}` : ""}`,
               success: result.state === "confirmed-success",
             },
           );
@@ -7145,6 +7233,54 @@ export class StandaloneService {
     return run.reason === draftingWorkspaceFailedReason
       ? ["failed", draftingWorkspaceFailedReason]
       : ["interrupted", otherwise];
+  }
+
+  /**
+   * A submission that failed before `startTurn` was called sent no turn, so nothing ran.
+   * An assignment request is refused for Start again; a drafting run fails. False when
+   * anything else holds the execution (Stop, task hold, callback, known survivor), which
+   * then keeps its hold. cab never retries it automatically.
+   */
+  private async refuseBeforeTurn(
+    request: TurnRequest,
+    intent: ExecutionIntent,
+    stage: PreTurnStage,
+    error: unknown,
+    draftingRunId: string | undefined,
+  ): Promise<boolean> {
+    const { state, supervisor, drafting } = this.started();
+    try {
+      if (
+        (this.callbacks.get(request.workId)?.size ?? 0) > 0 ||
+        supervisor.hasKnownRisk(request.workId) ||
+        state.get(intent.id).state !== "submitting"
+      )
+        return false;
+      const failureClass = preTurnFailureClass(error);
+      const reason = preTurnRefusalReason(stage, failureClass, error);
+      if (request.kind === "assignment")
+        return state.refusePreTurn(intent.id, {
+          stage,
+          failureClass,
+          reason,
+          threadId: state.get(intent.id).threadId,
+        });
+      if (!draftingRunId) return false;
+      const run = drafting.get(draftingRunId);
+      if (run?.state !== "running" && run?.state !== "stopping") return false;
+      const [outcome, settled] =
+        run.state === "running"
+          ? (["failed", draftingNotStartedReason] as const)
+          : (["interrupted", run.reason ?? draftingStoppedReason] as const);
+      if (run.state === "running")
+        drafting.transition(draftingRunId, "stopping", settled);
+      state.releaseDraftingExecution(request.workId);
+      await this.settleUnadmitted(draftingRunId, outcome, settled);
+      return true;
+    } catch {
+      // Storage failure: the execution keeps today's uncertain hold.
+      return false;
+    }
   }
 
   /**
@@ -8413,6 +8549,7 @@ export class StandaloneService {
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
+    capacityFreed: () => boolean = () => false,
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
       return;
@@ -8727,6 +8864,9 @@ export class StandaloneService {
         await this.failQueuedDrafting(request);
         return;
       }
+      // A slot freed while this attempt awaited goes to the scheduler's next pass,
+      // which tries higher-priority requests first.
+      if (capacityFreed()) return;
       const admitted = state.begin(intent.id, {
         projectId: request.projectId,
         requestSequence: store.sequence(request.workId),
@@ -8870,7 +9010,8 @@ export class StandaloneService {
     const state = this.started().state;
     const harness = harnessForWork(state, request.workId);
     const runtime = this.runtimes.get(harness);
-    let submissionStage: "resume" | "thread" | "bound" | "turn" = "thread";
+    // `turn` only from the statement that calls `startTurn`: anything earlier sent no turn.
+    let submissionStage: PreTurnStage | "turn" = "thread";
     let captureThreadId: string | undefined;
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
     let conversationCapture: ConversationHistoryCapture | undefined;
@@ -9026,7 +9167,6 @@ export class StandaloneService {
         runtime,
         threadId,
       );
-      submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
       const settings = this.turnSettings(request);
       // Only a completed predecessor is known to hold its prompt; an interrupted one
@@ -9076,6 +9216,7 @@ export class StandaloneService {
               ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
             }
           : undefined;
+      submissionStage = "turn";
       const turnId = await guard(
         policy
           ? runtime.startTurn(threadId, workspace, prompt, settings, policy)
@@ -9370,22 +9511,31 @@ export class StandaloneService {
         }
       }
     } catch (error) {
-      if (
-        submissionStage === "resume" &&
-        error instanceof ArchivedResumeRejectedError &&
-        previous?.threadId === error.rejection.threadId &&
-        state.get(intent.id).state === "submitting"
-      )
-        state.capturePreTurnRejection(request.workId, error.rejection);
-      if (state.get(intent.id).state !== "held")
+      const refused =
+        submissionStage !== "turn" &&
+        (await this.refuseBeforeTurn(
+          request,
+          intent,
+          submissionStage,
+          error,
+          draftingRunId,
+        ));
+      if (!refused && state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
           error instanceof PreviousHarnessHomeError
             ? error.message
-            : `Runtime submission or observation uncertain: ${String(error)}`,
+            : submissionStage !== "turn"
+              ? preTurnHoldReason(
+                  submissionStage,
+                  preTurnFailureClass(error),
+                  error,
+                )
+              : `Runtime submission or observation uncertain: ${String(error)}`,
         );
       // The run stays held, with its capacity, until the next start verifies the runtime ended.
       if (
+        !refused &&
         draftingRunId &&
         this.current?.drafting.get(draftingRunId)?.state === "running"
       )

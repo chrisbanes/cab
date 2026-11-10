@@ -10,6 +10,7 @@ import {
   kindLabels,
   nextAttention,
 } from "../../src/operator/attention.js";
+import { holdLines } from "../../src/operator/wait-reasons.js";
 import {
   retriesExhausted,
   runtimeSettingsAction,
@@ -240,6 +241,181 @@ export function holdNoticesBesideRequests(
   return holdNotices(task, action, deciding).filter(
     (notice) => notice.id !== "approval" || deciding !== null,
   );
+}
+
+type TaskAttentionRow = {
+  id: string;
+  title: string;
+  kind: "request" | "hold" | "execution" | "action";
+};
+
+/** One projection feeds the pinned card, inspector count and inspector rows. */
+export function taskAttentionProjection(
+  task: TaskRead["data"],
+  action: "approve" | "answer",
+  deciding: string | null,
+) {
+  const requests = [...task.approvals, ...task.questions].filter(
+      (request) => request.status === "open",
+    ),
+    normalRunning =
+      // Submission reports a healthy turn start as starting, with the same writer and capacity.
+      (task.execution.state === "running" ||
+        task.execution.state === "starting") &&
+      !task.execution.holds.stop &&
+      !task.execution.holds.uncertainty,
+    // Capacity is normal queueing, never operator attention; the strip and Execution name it.
+    waits = task.waits.filter((wait) => wait.code !== "capacity"),
+    noticeTask = { ...task, waits },
+    notices = [
+      ...new Map(
+        holdNoticesBesideRequests(noticeTask, action, deciding)
+          .filter(
+            (notice) =>
+              notice.id !== "approval" ||
+              !requests.some((request) => request.kind === "approval"),
+          )
+          .map((notice) => [notice.id, notice] as const),
+      ).values(),
+    ],
+    cardWaits = waits.filter((wait) => wait.code !== "approval"),
+    // Beside a request every notice is listed. Otherwise card waits name their own holds with
+    // their Fix, and the inspector rows list only those, so the two agree and the card stays
+    // compact; the strip's state badge still says when the task itself is not startable.
+    shownNotices =
+      requests.length > 0 || cardWaits.length === 0
+        ? notices
+        : notices.filter(
+            (notice) =>
+              notice.id !== "task-unready" && notice.id !== "task-not-open",
+          ),
+    cardNotices =
+      requests.length > 0 || cardWaits.length === 0
+        ? notices.filter(
+            (notice) =>
+              !(notice.id === "source-held" && task.source?.hold?.active),
+          )
+        : [],
+    executionHolds = holdLines(task.execution.holds, task.taskHold)
+      .filter(
+        (hold) =>
+          !normalRunning ||
+          (hold.kind !== "writer" && hold.kind !== "capacity"),
+      )
+      .filter((hold) => !notices.some((notice) => notice.id === hold.kind)),
+    attentionCodes = task.attention.codes.filter(
+      (code) =>
+        attentionNext[code].operator &&
+        code !== "question" &&
+        code !== "approval" &&
+        !(code === "unresolved-result" && task.unresolvedResults.length > 0),
+    ),
+    unresolvedResults = task.unresolvedResults,
+    completionPending = task.completionRequests.filter(
+      (request) => request.status === "pending",
+    ),
+    actions: TaskAttentionRow[] = [];
+
+  if (
+    (task.execution.state === "stopping" || task.execution.holds.stop) &&
+    !executionHolds.some((hold) => hold.kind === "stop")
+  )
+    actions.push({
+      id: "execution-stop",
+      title: "Stop requested; effects may continue",
+      kind: "action",
+    });
+  if (
+    (task.execution.state === "uncertain" ||
+      task.execution.holds.uncertainty ||
+      attentionCodes.includes("execution-uncertain")) &&
+    !executionHolds.some((hold) => hold.kind === "uncertainty")
+  )
+    actions.push({
+      id: "execution-uncertain",
+      title: attentionNext["execution-uncertain"].reason,
+      kind: "action",
+    });
+  if (
+    task.source?.hold?.active &&
+    !notices.some((notice) => notice.id === "source-held")
+  )
+    actions.push({
+      id: "source-held",
+      title: "Source hold is active",
+      kind: "action",
+    });
+  for (const code of attentionCodes)
+    if (
+      (code !== "execution-uncertain" ||
+        !executionHolds.some((hold) => hold.kind === "uncertainty")) &&
+      !actions.some((item) => item.id === code)
+    )
+      actions.push({
+        id: code,
+        title: attentionNext[code].reason,
+        kind: "action",
+      });
+  for (const item of unresolvedResults)
+    actions.push({
+      id: `unresolved-result:${item.resultId}`,
+      title: attentionNext["unresolved-result"].reason,
+      kind: "action",
+    });
+  for (const request of completionPending)
+    actions.push({
+      id: `completion-pending:${request.requestId}`,
+      title: "Completion requested",
+      kind: "action",
+    });
+
+  const pinned = Boolean(
+    requests.length ||
+      actions.length ||
+      cardWaits.length ||
+      executionHolds.length ||
+      notices.some(
+        (notice) =>
+          notice.id === "source-held" ||
+          notice.id === "assignment-recovery-unresolved",
+      ),
+  );
+  const rows: TaskAttentionRow[] = pinned
+    ? [
+        ...requests.map((request) => ({
+          id: `request:${request.interactionId}`,
+          title: `${request.kind === "approval" ? "Approval" : "Question"} pending`,
+          kind: "request" as const,
+        })),
+        ...shownNotices.map((notice) => ({
+          id: `hold:${notice.id}`,
+          title: notice.title,
+          kind: "hold" as const,
+        })),
+        ...executionHolds.map((hold) => ({
+          id: `execution:${hold.kind}`,
+          title: hold.label,
+          kind: "execution" as const,
+        })),
+        ...actions.filter(
+          (actionItem) =>
+            !notices.some((notice) => notice.id === actionItem.id),
+        ),
+      ]
+    : [];
+  return {
+    pinned,
+    requests,
+    waits,
+    cardWaits,
+    notices,
+    cardNotices,
+    executionHolds,
+    actions,
+    unresolvedResults,
+    completionPending,
+    rows,
+  };
 }
 
 /**

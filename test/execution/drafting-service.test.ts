@@ -44,6 +44,7 @@ import {
   startedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
+import { slashTmpDenied } from "../fixtures/host-access.js";
 
 const processIdentity = {
   processId: "4242",
@@ -79,6 +80,8 @@ class DraftRuntime implements Runtime {
   threadDelayMs = 0;
   /** This many interrupt calls fail before one is accepted. */
   failInterrupts = 0;
+  /** When set, `startThread` fails with it, before any turn. */
+  threadError: Error | undefined;
   private readonly behaviors: Behavior[] = [];
   private tool:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -109,6 +112,7 @@ class DraftRuntime implements Runtime {
     this.threadSettings.push(settings);
     if (this.threadDelayMs)
       await new Promise((resolve) => setTimeout(resolve, this.threadDelayMs));
+    if (this.threadError) throw this.threadError;
     const id = `draft-thread-${++this.count}`;
     this.threads.push({ id, workspace, tools });
     return id;
@@ -517,8 +521,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
       (service as unknown as { db: import("node:sqlite").DatabaseSync }).db
         .prepare("SELECT runId, state, reason FROM drafting_runs")
         .all(),
-    usage: (projectId: string) =>
-      service.capacityLimits([projectId]).currentUsage,
+    usage: (_projectId: string) => service.capacityLimits().currentUsage,
     counts: () => {
       const db = (
         service as unknown as { db: import("node:sqlite").DatabaseSync }
@@ -632,7 +635,9 @@ test("codex: a drafting run uses the lead profile's captured model and effort", 
 });
 
 for (const harness of harnesses) {
-  test(`${harness}: a drafting run proposes from a disposable copy at the configured commit and creates no task`, async (t) => {
+  test(`${harness}: a drafting run proposes from a disposable copy at the configured commit and creates no task`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open();
     const { service } = opened;
@@ -697,7 +702,9 @@ for (const harness of harnesses) {
     assert.deepEqual(readdirSync(join(w.dataDir, "drafting-workspaces")), []);
   });
 
-  test(`${harness}: an invalid proposal is refused so the lead can retry, and a turn with no proposal fails`, async (t) => {
+  test(`${harness}: an invalid proposal is refused so the lead can retry, and a turn with no proposal fails`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open();
     const { service } = opened;
@@ -749,7 +756,9 @@ for (const harness of harnesses) {
     assert.equal(w.tracked(service).usage(projectId).global, 0);
   });
 
-  test(`${harness}: Stop interrupts a running draft, which settles as interrupted with capacity freed and the copy deleted`, async (t) => {
+  test(`${harness}: Stop interrupts a running draft, which settles as interrupted with capacity freed and the copy deleted`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open();
     const { service } = opened;
@@ -782,7 +791,9 @@ for (const harness of harnesses) {
     assert.equal(service.readDrafting(runId)?.proposal, null);
   });
 
-  test(`${harness}: the time limit stops a draft the same way`, async (t) => {
+  test(`${harness}: the time limit stops a draft the same way`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open({ draftingTimeLimitMs: 300 });
     const { service } = opened;
@@ -914,6 +925,7 @@ test("a queued run whose copy cannot be removed stays stopping, and Stop retries
   w.execute(service, {
     type: "capacity.configure",
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   codex.script(() => new Promise<void>(() => {}));
@@ -1414,7 +1426,28 @@ test("a Stop during thread start is applied once the turn binds", async (t) => {
   assert.equal(w.tracked(service).usage(projectId).global, 0);
 });
 
-test("capacity: a drafting run waits on the global and project limits and runs after the blocker ends", async (t) => {
+test("a run whose thread start fails before any turn ends failed and releases its capacity", async (t) => {
+  const w = world(t);
+  const opened = w.open();
+  const { service, codex } = opened;
+  codex.threadError = new Error("Runtime stopped");
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "failed",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(
+    service.readDrafting(runId)?.reason,
+    "The lead's turn could not start",
+  );
+  assert.equal(codex.prompts.length, 0);
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+});
+
+test("capacity: a drafting run waits on the global limit, is a lead turn and runs after the blocker ends", async (t) => {
   const w = world(t);
   const opened = w.open();
   const { service, codex } = opened;
@@ -1423,6 +1456,7 @@ test("capacity: a drafting run waits on the global and project limits and runs a
   w.execute(service, {
     type: "capacity.configure",
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   });
   const blocked: Array<() => void> = [];
@@ -1456,32 +1490,34 @@ test("capacity: a drafting run waits on the global and project limits and runs a
   );
   assert.equal(service.readDrafting(first)?.state, "failed");
 
-  // With the global limit raised, the project limit still holds a second run back.
+  // A drafting run is a lead turn: a project cap never holds it, and it may use a slot
+  // held for lead turns.
   w.execute(service, {
     type: "capacity.configure",
-    globalLimit: 4,
+    globalLimit: 2,
+    minimumLeadSlots: 1,
     projectOverrides: { [projectId]: 1 },
   });
   codex.script(hold);
-  codex.script(proposing(proposal));
+  codex.script(hold);
   const third = randomUUID();
   const fourth = randomUUID();
   await service.startDrafting({ runId: third, projectId, idea });
-  await waitUntil(
-    () => service.readDrafting(third)?.state === "running",
-    () => w.tracked(service).runs(),
-  );
   await service.startDrafting({ runId: fourth, projectId, idea });
-  assert.match(
-    service.turnRequests().find((item) => item.workId === `drafting:${fourth}`)
-      ?.reason ?? "",
-    /Capacity waiting: project active-turn limit \(1\)/,
-  );
-  blocked[1]?.();
   await waitUntil(
-    () => service.readDrafting(fourth)?.state === "proposed",
-    () => w.tracked(service).runs(),
+    () =>
+      service.readDrafting(third)?.state === "running" &&
+      service.readDrafting(fourth)?.state === "running",
+    () => ({
+      runs: w.tracked(service).runs(),
+      requests: service.turnRequests(),
+    }),
   );
+  const usage = w.tracked(service).usage(projectId);
+  assert.equal(usage.lead, 2);
+  assert.equal(usage.projects[projectId] ?? 0, 0);
+  blocked[1]?.();
+  blocked[2]?.();
 });
 
 test("Stop on a queued run settles it at once with no reservation", async (t) => {
@@ -1493,6 +1529,7 @@ test("Stop on a queued run settles it at once with no reservation", async (t) =>
   w.execute(service, {
     type: "capacity.configure",
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   codex.script(() => new Promise<void>(() => {}));
@@ -1751,7 +1788,9 @@ const issueProposal = {
 };
 const issueIdea = "Mention the command menu";
 for (const harness of harnesses) {
-  test(`${harness}: an issue run proposes a title and body from the synced text and creates nothing`, async (t) => {
+  test(`${harness}: an issue run proposes a title and body from the synced text and creates nothing`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
     const w = world(t);
     const opened = w.open({ issue: {} });
     const { service } = opened;
