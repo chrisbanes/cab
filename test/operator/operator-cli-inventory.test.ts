@@ -47,6 +47,8 @@ const documented = [
 
 /** The documented CLI3 configuration, adoption and receipt commands. */
 const documentedWrites = [
+  "inbox dismiss",
+  "inbox restore",
   "profile prepare",
   "profile prepare-create",
   "profile apply",

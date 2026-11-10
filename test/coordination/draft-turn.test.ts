@@ -9,6 +9,8 @@ import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import { configure, until } from "../fixtures/completed-lead.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { SchedulerStore } from "../../src/standalone/scheduler.js";
+import { ExecutionState } from "../../src/standalone/state.js";
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 
@@ -374,14 +376,133 @@ for (const edit of [
       1,
     );
     assert.equal(pendingEventCount(f, task.assignmentId), 1);
-    assert.deepEqual((await task.api.readTask(task.taskId)).data.draftTurn, {
-      available: true,
+    const atRest = (await task.api.readTask(task.taskId)).data;
+    assert.deepEqual(atRest.draftTurn, { available: true });
+    const interventions = async () =>
+      (await task.api.readInbox()).data.items.filter(
+        (i) => i.kind === "intervention" && i.taskId === task.taskId,
+      );
+    assert.deepEqual(await interventions(), []);
+    const workerId = randomUUID(),
+      workerWork = `assignment:${workerId}:stale`,
+      domain = f.service.domain();
+    domain.execute({
+      type: "assignment.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: task.projectId,
+      taskId: task.taskId,
+      assignmentId: workerId,
+      profileId: task.profileId,
+      brief: "Other refused work",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
     });
+    const worker = domain.assignment(workerId);
+    f.seedPersistedState((db) => {
+      new SchedulerStore(db).createAssignment(
+        {
+          taskId: task.taskId,
+          projectId: task.projectId,
+          assignmentId: workerId,
+          taskVersion: 1,
+          assignmentVersion: Number(worker.version),
+          instructionsRevision: Number(worker.instructionsRevision),
+          profileRevision: Number(worker.profileRevision),
+          prompt: "Uncaptured stale request",
+          previousWorkId: null,
+        },
+        { requestKey: workerWork, workId: workerWork },
+      );
+      assert.equal(
+        new ExecutionState(db).refuseUncapturedRevision(workerWork),
+        true,
+      );
+    });
+    assert.equal(f.service.startAgainAvailability(task.taskId).available, true);
+    if ("outcome" in edit)
+      domain.execute({
+        type: "assignment.apply",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: task.projectId,
+        assignmentId: task.assignmentId,
+        expectedVersion: Number(domain.assignment(task.assignmentId).version),
+      });
+    const refused = f.service
+      .turnRequestsForTask(task.taskId)
+      .find((r) => r.draftTurn && r.state === "held")!;
+    let finishCallback = () => {};
+    const callback = new Promise<void>((resolve) => {
+      finishCallback = resolve;
+    });
+    f.service.registerExecutionCallback(refused.workId, callback);
+    try {
+      const before = f.service.turnRequestsForTask(task.taskId);
+      const beforeInput = rows(f, task.taskId);
+      await assert.rejects(
+        task.api.execute({
+          type: "task.start-again",
+          key: randomUUID(),
+          taskId: task.taskId,
+          expectedVersion: version(f, task.taskId),
+          workId: workerWork,
+        }),
+        /conflict/,
+      );
+      await assert.rejects(
+        task.api.execute(
+          startCommand(f, task.taskId, "Must wait for callback"),
+        ),
+        /conflict/,
+      );
+      assert.deepEqual(f.service.turnRequestsForTask(task.taskId), before);
+      assert.deepEqual(rows(f, task.taskId), beforeInput);
+      assert.deepEqual(f.service.startAgainAvailability(task.taskId), {
+        available: false,
+        reason: "execution-unresolved",
+      });
+      const during = (await task.api.readTask(task.taskId)).data;
+      assert.equal(during.execution.state, "uncertain");
+      assert.equal(
+        during.attention.codes.includes("execution-uncertain"),
+        true,
+      );
+      assert.equal(during.draftTurn?.available, false);
+      const pending = await interventions();
+      assert.deepEqual(
+        pending
+          .map((i) => (i.kind === "intervention" ? i.attentionCode : null))
+          .sort(),
+        ["execution-uncertain", "not-started"],
+      );
+      assert.equal(pending[0]?.dismissible, false);
+    } finally {
+      finishCallback();
+    }
+    await Promise.resolve();
+    assert.deepEqual(
+      (await interventions()).map((i) =>
+        i.kind === "intervention" ? i.attentionCode : null,
+      ),
+      ["not-started"],
+    );
+    const after = (await task.api.readTask(task.taskId)).data;
+    for (const settled of [atRest, after]) {
+      assert.notEqual(settled.execution.state, "uncertain");
+      assert.equal(
+        settled.attention.codes.includes("execution-uncertain"),
+        false,
+      );
+    }
+    assert.equal(after.draftTurn?.available, true);
+    assert.equal(f.service.startAgainAvailability(task.taskId).available, true);
     // The released message reaches the next draft turn.
     await task.api.execute(startCommand(f, task.taskId, "Second question."));
     await until(() => f.runtime.hasPending(1), "second draft turn");
     assert.match(f.runtime.prompts[0] ?? "", /First question\./);
     assert.match(f.runtime.prompts[0] ?? "", /Second question\./);
+    assert.doesNotMatch(f.runtime.prompts[0] ?? "", /Must wait for callback/);
     assert.equal(f.runtime.policies[0]?.access, "read-only");
   });
 

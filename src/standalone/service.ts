@@ -1,3 +1,5 @@
+import { selectAssignmentExecution } from "./operator-runtime.js";
+import { attentionNext } from "../operator/attention.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
@@ -1458,6 +1460,11 @@ export class StandaloneService {
               domain.leadBindings().find((b) => b.taskId === taskId)
                 ?.assignmentId ?? "",
             ),
+          observedPr: (taskId, observation) =>
+            coordination.supersedePrApprovalsWithinTransaction(
+              taskId,
+              observation,
+            ),
           failedStackedDependents: (blockerTaskId) =>
             domain.failedStackedDependents(blockerTaskId),
           feedback: (taskId, reason, identity) => {
@@ -2334,6 +2341,7 @@ export class StandaloneService {
     const delay = runtimeRestartDelaysMs[state.attempts];
     if (delay === undefined) {
       state.exhaustedAt = this.wallNow();
+      if (this.current) this.reconcileInbox();
       return;
     }
     const token = {};
@@ -3223,6 +3231,10 @@ export class StandaloneService {
     return this.started().state.recoveryForTask(taskId, alsoWorkId);
   }
 
+  uncertainAssignmentsForTask(taskId: string): string[] {
+    return this.started().state.uncertainAssignmentsForTask(taskId);
+  }
+
   powerStatus() {
     return this.current?.power?.status() ?? null;
   }
@@ -3580,6 +3592,10 @@ export class StandaloneService {
     version: number,
   ): TurnRequest | undefined {
     return this.started().schedulerStore.current(assignmentId, version);
+  }
+
+  latestTurnRequest(assignmentId: string): TurnRequest | undefined {
+    return this.started().schedulerStore.latest(assignmentId);
   }
 
   turnRequestsForTask(taskId: string): TurnRequest[] {
@@ -4922,6 +4938,219 @@ export class StandaloneService {
     };
   }
 
+  inboxLifecycle() {
+    return this.started().coordination.inboxLifecycle();
+  }
+
+  /** Reconcile recorded facts without changing execution or response state. */
+  reconcileInbox(): void {
+    const { domain, coordination } = this.started();
+    coordination.reconcileInboxInteractions();
+    const lifecycle = coordination.inboxLifecycle();
+    for (const project of domain.projects())
+      for (const task of domain.tasks(String(project.id))) {
+        const taskId = String(task.id),
+          active = new Set<string>();
+        const conditions = this.inboxConditions(taskId);
+        for (const condition of conditions) {
+          const row = lifecycle.observe({
+            id: `intervention:${taskId}:${randomUUID()}`,
+            taskId,
+            kind: "intervention",
+            sourceKey: condition.key,
+            data: { code: condition.code },
+          });
+          active.add(row.id);
+        }
+        for (const row of lifecycle.rows(taskId))
+          if (
+            row.kind === "intervention" &&
+            row.status !== "resolved" &&
+            (task.state !== "open" || !active.has(row.id))
+          )
+            lifecycle.resolve(
+              row.id,
+              task.state !== "open"
+                ? task.state === "done"
+                  ? "Task is Done"
+                  : "Task is Cancelled"
+                : "The intervention condition cleared",
+            );
+      }
+    const activeRuntimes = new Set<string>();
+    for (const status of this.harnessStatuses()) {
+      if (
+        status.state === "unavailable" &&
+        status.restart?.state === "exhausted"
+      ) {
+        const existing = lifecycle
+          .rows()
+          .find(
+            (row) =>
+              row.kind === "runtime" &&
+              row.status !== "resolved" &&
+              JSON.parse(row.dataJson).harness === status.harness,
+          );
+        const sourceKey =
+          existing?.sourceKey ??
+          `runtime:${status.harness}:${this.restartStateOf(status.harness).episodeId}`;
+        const row = lifecycle.observe({
+          id: existing?.id ?? sourceKey,
+          taskId: null,
+          kind: "runtime",
+          sourceKey,
+          data: { harness: status.harness, ...status.restart },
+          createdAt: status.restart.since,
+        });
+        activeRuntimes.add(row.id);
+      }
+      // Availability or explicit disabling is positive evidence; an incomplete restart is not.
+      if (
+        (status.state === "available" &&
+          this.runtimes.has(status.harness) &&
+          !this.runtimeStarting.has(status.harness)) ||
+        (status.state === "not-configured" && status.reason === "disabled")
+      )
+        for (const row of lifecycle.rows())
+          if (
+            row.kind === "runtime" &&
+            row.status !== "resolved" &&
+            JSON.parse(row.dataJson).harness === status.harness &&
+            !activeRuntimes.has(row.id)
+          )
+            lifecycle.resolve(
+              row.id,
+              "Runtime is available or was disabled by the operator",
+            );
+    }
+  }
+
+  inboxConditions(taskId: string) {
+    const { domain, coordination, schedulerStore, state } = this.started(),
+      task = domain.task(taskId);
+    const conditions: Array<{
+      code:
+        | "execution-uncertain"
+        | "not-started"
+        | "stacked-blocker-failed"
+        | "external-action-uncertain"
+        | "unresolved-result"
+        | "completion-rejected";
+      key: string;
+      reason: string;
+    }> = [];
+    if (task.state !== "open") return conditions;
+    const edge = domain.activeStackedDependency(taskId);
+    if (edge) {
+      const prefix = `stack-failure:${JSON.stringify([taskId, edge.blockerTaskId, edge.repositoryId])}:`;
+      const existing = this.inboxLifecycle()
+        .rows(taskId)
+        .find(
+          (r) =>
+            r.kind === "intervention" &&
+            r.status !== "resolved" &&
+            r.sourceKey.startsWith(prefix),
+        );
+      const gate = domain.stackedBlockerGate(taskId);
+      const failed = gate === "failed";
+      const unknown = gate === "unknown";
+      // A failed refresh cannot clear an observed episode or discard its dismissal.
+      if (failed || (existing && unknown))
+        conditions.push({
+          code: "stacked-blocker-failed",
+          key: existing?.sourceKey ?? `${prefix}${randomUUID()}`,
+          reason: failed
+            ? attentionNext["stacked-blocker-failed"].reason
+            : "Stacked blocker state is unknown; refresh delivery evidence",
+        });
+    }
+    for (const action of this.delivery().actions(taskId))
+      if (
+        action.state === "uncertain" &&
+        !isServiceDeliveryCaller(action.binding)
+      )
+        conditions.push({
+          code: "external-action-uncertain",
+          key: `external-action:${action.operationId}:${action.attempts}`,
+          reason: attentionNext["external-action-uncertain"].reason,
+        });
+    const held: string[] = [];
+    const assignments = domain.assignments(taskId);
+    for (const a of assignments) {
+      const s = selectAssignmentExecution(a, this);
+      const request = s.request ?? schedulerStore.latest(String(a.id));
+      const refused =
+        request?.state === "held" &&
+        request.kind === "assignment" &&
+        state.refusedBeforeStart(request.workId);
+      const notStarted =
+        request?.state === "held" && this.notStartedWork(request.workId);
+      const settledDraft =
+        request?.draftTurn && this.settledDraftRefusal(request.workId);
+      const confirmed =
+        s.request?.state === "active" &&
+        ["running", "submitting"].includes(s.intent?.state ?? "");
+      if (
+        (request?.state === "held" && !notStarted && !settledDraft) ||
+        (s.request?.state === "active" && !confirmed) ||
+        Boolean(
+          (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
+        )
+      )
+        held.push(String(domain.profile(String(a.profileId)).name));
+      // A temporary callback blocks Start again, not the durable refusal episode.
+      if (refused && request && !request.draftTurn)
+        conditions.push({
+          code: "not-started",
+          key: `refused:${request.workId}`,
+          reason: notStarted
+            ? "Refused before it started; nothing ran"
+            : "Refused request is waiting for execution ownership to settle",
+        });
+    }
+    if (this.hasNonStopTaskHold(taskId))
+      held.push(`task hold: ${this.nonStopTaskHoldReason(taskId)}`);
+    if (!held.length)
+      for (const id of this.uncertainAssignmentsForTask(taskId)) {
+        const assignment = assignments.find((a) => a.id === id);
+        held.push(
+          assignment
+            ? String(domain.profile(String(assignment.profileId)).name)
+            : "retained execution ownership",
+        );
+      }
+    if (held.length) {
+      // Keep a combined ownership episode while any hold remains; it cannot be dismissed.
+      const existing = this.inboxLifecycle()
+        .rows(taskId)
+        .find(
+          (r) =>
+            r.kind === "intervention" &&
+            r.status !== "resolved" &&
+            JSON.parse(r.dataJson).code === "execution-uncertain",
+        );
+      conditions.push({
+        code: "execution-uncertain",
+        key: existing?.sourceKey ?? `hold:${taskId}:${randomUUID()}`,
+        reason: `Still waiting on ${held.join("; ")}`,
+      });
+    }
+    for (const r of coordination.unresolvedResultDestinations(taskId))
+      conditions.push({
+        code: "unresolved-result",
+        key: `result:${r.resultId}:${r.revision}`,
+        reason: "Result destination needs attention",
+      });
+    for (const c of coordination.completionRequests(taskId))
+      if (c.status === "rejected" && c.taskVersion === Number(task.version))
+        conditions.push({
+          code: "completion-rejected",
+          key: `completion:${c.requestId}:${c.revision}`,
+          reason: "Completion requires review",
+        });
+    return conditions;
+  }
+
   coordinationView(): CoordinationView {
     const { domain, coordination, state, routingAttempts } = this.started();
     return new CoordinationView(
@@ -5475,9 +5704,11 @@ export class StandaloneService {
       // A draft request that a completed retry or shutdown requeue replaced stays held as history.
       draftTurnActive:
         this.started()
-          .schedulerStore.unfinishedDraftTurns(taskId)
+          .schedulerStore.draftTurnCandidates(taskId)
           .some(
             (request) =>
+              (this.callbacks.get(request.workId)?.size ?? 0) > 0 ||
+              this.started().supervisor.hasKnownRisk(request.workId) ||
               !this.started().coordination.isHistoricalWorkResolved(
                 request.workId,
               ),
@@ -5573,6 +5804,20 @@ export class StandaloneService {
     );
   }
 
+  /** A refused draft is history only after its callbacks and known execution risks settle. */
+  settledDraftRefusal(workId: string): boolean {
+    const { schedulerStore, state, supervisor } = this.started();
+    const request = schedulerStore.find(workId);
+    return (
+      request?.kind === "assignment" &&
+      request.draftTurn &&
+      request.state === "held" &&
+      !this.callbacks.get(workId)?.size &&
+      !supervisor.hasKnownRisk(workId) &&
+      state.refusedBeforeStart(workId)
+    );
+  }
+
   requestRefusalForAssignment(assignmentId: string) {
     const request = this.started().schedulerStore.latest(assignmentId);
     if (!request || !this.notStartedWork(request.workId)) return undefined;
@@ -5599,8 +5844,7 @@ export class StandaloneService {
     if (request.state !== "held") return "settled";
     const { state } = this.started();
     if (this.notStartedWork(request.workId)) return "refused";
-    if (request.draftTurn && state.refusedBeforeStart(request.workId))
-      return "settled";
+    if (this.settledDraftRefusal(request.workId)) return "settled";
     const intent = state.byWorkId(request.workId);
     return intent?.state === "submitting" ||
       (intent &&
@@ -7479,6 +7723,7 @@ export class StandaloneService {
     } = this.current;
     if (this.current.taskUnstack.hasPending())
       await this.current.taskUnstack.reconcileAll();
+    this.reconcileInbox();
     this.flushRuntimeAnswers();
     // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
     // fails is reported and retried on the next wake; the others and the wake go on.

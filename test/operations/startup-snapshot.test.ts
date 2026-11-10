@@ -786,6 +786,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Inbox lifecycle and visibility command receipts.
+  23: "51b28528321bf63fe8328ab1f4c2ab36d06f4bfb107f19484644383932d68ebc",
   22: "eb44198cc5d906ff18e6de43cc4c77c217ffb8a135fffc08f35610e8fe668e2a",
   // Pre-turn refusals record their stage and failure class.
   21: "fa0d59290d2982c50fb1b80fc81f6bf5c30015fa4b57131e34678192f30c0f1e",
@@ -901,7 +903,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         .run(intentId);
       restoreRequestSchema21(before);
       before.exec(
-        "DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals",
+        "DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals",
       );
     } finally {
       before.close();
@@ -1011,7 +1013,9 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
     restoreRequestSchema21(before);
-    before.exec("DROP TABLE execution_pre_turn_refusals");
+    before.exec(
+      "DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE execution_pre_turn_refusals",
+    );
     before.close();
     assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[20]);
     await run(dirs.data);
@@ -1020,7 +1024,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     const snapshot = join(dirs.snapshots, snapshots[0]!);
     await verifySnapshot(snapshot);
     assert.equal(schemaDigest(snapshot), SCHEMA_PINS[20]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[22]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
     const current = new DatabaseSync(database, { readOnly: true });
     try {
       assert.equal(
@@ -1234,12 +1238,46 @@ test("Unstack journal migration snapshots level 13 before creating task-owned ro
   }
 });
 
+test("Inbox lifecycle migration snapshots level 22 and initializes both tables without ownership changes", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 22);
+    const database = join(dirs.data, "standalone.sqlite"),
+      before = new DatabaseSync(database);
+    before.exec(
+      "DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle",
+    );
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[22]);
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[22]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const current = new DatabaseSync(database, { readOnly: true });
+    try {
+      for (const table of ["inbox_lifecycle", "inbox_lifecycle_receipts"])
+        assert.equal(
+          current.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n,
+          0,
+        );
+    } finally {
+      current.close();
+    }
+  } finally {
+    dirs.cleanup();
+  }
+});
+
 test("request-only refusal migration snapshots level 21 and preserves restart lineage", async () => {
   const dirs = layout();
   try {
     await run(dirs.data, 21);
     const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
     restoreRequestSchema21(db);
+    db.exec("DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle");
     db.exec(`INSERT INTO execution_intents (id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
       VALUES ('00000000-0000-4000-8000-000000000001','legacy-refused','p','/legacy','completed',NULL,NULL,'chatgpt','workspaceWrite','never');
       INSERT INTO turn_requests (requestKey,workId,kind,prompt,state) VALUES ('legacy-key','legacy-refused','direct','p','completed');
@@ -1253,7 +1291,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
     const snapshot = join(dirs.snapshots, snapshots[0]!);
     await verifySnapshot(snapshot);
     assert.equal(schemaDigest(snapshot), SCHEMA_PINS[21]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[22]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
     const current = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
     assert.equal(
       current

@@ -399,6 +399,8 @@ export const OPTIONS = {
   assignment: { type: "string" },
   execution: { type: "string" },
   kind: { type: "string" },
+  status: { type: "string" },
+  note: { type: "string" },
   severity: { type: "string" },
   follow: { type: "boolean" },
   yes: { type: "boolean" },
@@ -921,6 +923,16 @@ async function run(
         `Next:    ${next.text}${next.operator ? ` (cab inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
+        ...read.data.completionRequests
+          .filter(
+            (c) => c.status === "rejected" && c.taskVersion === task.version,
+          )
+          .flatMap((c) =>
+            (c.blockingInteractions ?? []).map(
+              (i) =>
+                `Completion ${c.blockingInteractionsBasis === "current" ? "current blocker" : "recorded request"}: ${i.kind} ${i.interactionId} · ${i.state}${i.state === "required" ? `; answer or dismiss: cab inbox dismiss ${i.interactionId}${i.revision === null ? " (read cab inbox list for its revision)" : ` --expected-revision ${i.revision}`}; dismissal grants no approval` : "; no longer required for completion"}`,
+            ),
+          ),
         ...(stackSummary(read.data.stack, read.data.stackDelivery)
           ? [
               `Stack:   ${stackSummary(read.data.stack, read.data.stackDelivery)}`,

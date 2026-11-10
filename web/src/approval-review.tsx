@@ -75,7 +75,8 @@ export function ApprovalReview({
     ),
     compareHostName = codeHostName(approval.compareCodeHost),
     actsOn = approvalActsOn(approval),
-    open = approval.status === "open",
+    open =
+      approval.status === "open" && approval.lifecycle?.status !== "dismissed",
     // Deny never needs the disclosed fields: the server binds it to the retained originals.
     decidable =
       open && outcome?.kind !== "recorded" && outcome?.kind !== "conflict",
@@ -108,7 +109,14 @@ export function ApprovalReview({
       data-record-id={approval.interactionId}
     >
       <div className="approval-review-head">
-        <StatusBadge {...badges[approval.status]} />
+        <StatusBadge
+          {...(approval.lifecycle?.status === "dismissed"
+            ? {
+                tone: "idle" as const,
+                children: "Dismissed · no approval granted",
+              }
+            : badges[approval.status])}
+        />
         {requesterName && (
           <span className="metadata muted">Requested by {requesterName}</span>
         )}
@@ -264,4 +272,6 @@ const badges = {
   approved: { tone: "success", children: "Approved" },
   denied: { tone: "idle", children: "Denied" },
   answered: { tone: "idle", children: "Answered" },
+  resolved: { tone: "idle", children: "Resolved" },
+  superseded: { tone: "idle", children: "Superseded" },
 } as const;

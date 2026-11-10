@@ -1583,7 +1583,7 @@ export function TaskWorkspace({
   }
   const requestId = state.cardRequest,
     openRequests = [...data.questions, ...data.approvals].filter(
-      (q) => q.status === "open",
+      (q) => q.status === "open" && q.lifecycle?.status !== "dismissed",
     ),
     nextActor = taskNextActor(data),
     inView = openRequests.find(
@@ -1640,8 +1640,14 @@ export function TaskWorkspace({
     inline: state.inlineAnswer,
     card: requestId,
     status: (id) =>
-      [...data.questions, ...data.approvals].find((q) => q.interactionId === id)
-        ?.status,
+      (() => {
+        const request = [...data.questions, ...data.approvals].find(
+          (q) => q.interactionId === id,
+        );
+        return request?.lifecycle?.status === "dismissed"
+          ? "dismissed"
+          : request?.status;
+      })(),
     answerHere: (id) => {
       state.inlineAnswer = id;
       if (state.cardRequest === id) state.cardRequest = null;
@@ -2463,6 +2469,39 @@ export function TaskWorkspace({
               The lead's completion request was rejected at this task version.
               The lead continues on its next turn.
             </p>
+            {data.completionRequests
+              .filter(
+                (c) =>
+                  c.status === "rejected" &&
+                  c.taskVersion === data.task.version,
+              )
+              .map((c) => (
+                <div key={c.requestId}>
+                  {!!c.blockingInteractions?.length && (
+                    <p>
+                      {c.blockingInteractionsBasis === "current"
+                        ? "Current open requests (not captured with this historical rejection):"
+                        : "Requests recorded with this rejection:"}
+                    </p>
+                  )}
+                  {c.blockingInteractions?.map((i) => (
+                    <p key={i.interactionId}>
+                      {i.kind === "question" ? "Question" : "Approval"}{" "}
+                      {i.interactionId} ·{" "}
+                      {i.state === "required"
+                        ? "Answer or dismiss in Inbox to clear this completion requirement. Dismissal grants no approval."
+                        : i.state === "dismissed"
+                          ? "Dismissed; no longer required for completion."
+                          : "Resolved; no longer required for completion."}{" "}
+                      <ActionLink variant="secondary" href={i.destination}>
+                        {i.state === "required"
+                          ? "Review or dismiss request"
+                          : "View request history"}
+                      </ActionLink>
+                    </p>
+                  ))}
+                </div>
+              ))}
             <ActionLink
               variant="secondary"
               href={`/tasks/${taskId}?section=reply`}

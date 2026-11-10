@@ -117,6 +117,8 @@ export type Values = {
   assignment?: string | undefined;
   execution?: string | undefined;
   kind?: string | undefined;
+  status?: string | undefined;
+  note?: string | undefined;
   severity?: string | undefined;
   follow?: boolean | undefined;
   yes?: boolean | undefined;

@@ -1194,6 +1194,34 @@ then questions and approvals oldest first. Show project and task context on each
 task item, or the runtime for a runtime problem. Unresolved questions, pending approvals and failures remain visible even
 when related history is collapsed.
 
+The Actionable view excludes Done/cancelled tasks and operator-dismissed items. Resolved
+and Dismissed views retain history with reasons and times, without timed deletion. A
+terminal task's execution holds remain accessible through Execution and recovery. Clearing
+one delegate's hold does not clear the lead's: a remaining intervention names the actual
+assignment/work or task hold still requiring action.
+
+Dismiss records a time and optional note. A dismissed question or approval remains unanswered
+but no longer blocks completion as an open interaction. A withheld question is dismissible
+without disclosing or reconstructing its form. Restore reinstates the completion requirement
+only while the request remains actionable. Completion rejection identifies the blocking
+interaction and links to its answer/dismiss controls; historical rejections without captured
+identities label any listed blockers as current. Other result-review and ownership gates remain.
+Dismiss sends no answer, decision or agent input,
+starts no work and releases no ownership. Ownership-blocking interventions cannot be
+dismissed, including when a hold arose after the operator read the item. Restore brings
+back only a still-actionable dismissed item; obsolete items stay resolved. Dismissal is
+scoped to the request or failure episode and survives refresh/restart, so a new episode
+can alert again. Unanswered dismissed requests remain on task detail, and genuine blockers
+remain on List/Board. Inbox badges count actionable items; task blocker counts describe
+underlying blockers and can differ.
+
+A successful current provider read confirming the exact approval target PR merged or
+closed supersedes its pending approval. Unknown/stale observations and unrelated PRs are
+insufficient. On an open task, the requesting assignment receives one durable notice that
+no approval was granted, through ordinary scheduling and its existing admission/hold checks.
+Obsolete requests cannot accept new answers or decisions. Actual refusals retain manual
+Start again under ADR-1031; ordinary capacity waiting continues automatically.
+
 Failed stacked blockers and unresolved external actions with unknown outcomes use
 the existing intervention kind, derived from current state without a recorded
 refusal. Their operator-owned attention codes rank after Not started, before
@@ -1201,7 +1229,9 @@ approvals and questions. A failed blocker says "Stacked blocker failed; Unstack 
 Cancel this task", with next action "Unstack or Cancel this task". An unknown
 action outcome says "Refresh delivery or check the action". Independent
 status-mapping writes do not raise this intervention. Each intervention clears
-with its condition; clearing wakes an open task's retained lead once with what
+with its condition; a failed provider refresh preserves an observed blocker's
+Inbox episode and dismissal, describing its state as unknown until a confirmed
+read clears it. Clearing wakes an open task's retained lead once with what
 changed, including the existing Unstack restack notice. Cancellation removes the
 intervention without a wake. Delivery tools refused by either typed hold name
 the cause, say the operator was notified in the Inbox, and tell the agent to stop

@@ -1047,6 +1047,10 @@ for (const cancelled of [false, true])
       assert.ok(item && item.kind === "intervention");
       assert.equal(item.attentionCode, "external-action-uncertain");
       assert.equal(item.reason, "External action outcome is unknown");
+      assert.equal(
+        (await api.readInbox()).data.items.find((i) => i.id === item.id)?.id,
+        item.id,
+      );
       if (cancelled)
         f.service.domain().execute({
           type: "task.configure",
@@ -1105,6 +1109,12 @@ for (const cancelled of [false, true])
           );
         }
       });
+      const history = (
+        await new OperatorApi(f.service, [f.directory]).readInbox(
+          new URLSearchParams({ status: "resolved" }),
+        )
+      ).data.items.find((i) => i.id === item.id)!;
+      assert.equal(history.lifecycle?.status, "resolved");
       assert.equal(f.scripted.state.threadResolves, 1);
     } finally {
       await f.close();

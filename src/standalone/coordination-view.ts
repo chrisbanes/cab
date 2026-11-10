@@ -878,6 +878,7 @@ export class CoordinationView {
             .strict()
             .parse(JSON.parse(event.payload)).reason,
         };
+      case "approval-superseded":
       case "source-hold-released":
         return {
           ...base,

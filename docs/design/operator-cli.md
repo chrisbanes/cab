@@ -533,9 +533,21 @@ reuse and, for Stop and Resume, whether Stop is in effect after a possible repla
 which task command produced them, so an uncertain outcome is settled by retrying
 the same command with its key and checked with `task get`, `question get` or
 `approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
-`kind` (`question|approval|intervention|runtime`) and `project`, each at most once and
-applied before paging; a cursor from other parameters is `409`. A `runtime` item is
-derived on each read and carries `harness` and `since` instead of task fields.
+`kind` (`question|approval|intervention|runtime`), `status`
+(`actionable|resolved|dismissed`, default `actionable`) and `project`, each at most once and
+applied before paging; a cursor from other parameters is `409`. A `runtime` item carries `harness` and `since` instead of task fields.
+Every item carries durable lifecycle status/revision and resolution/dismissal metadata.
+
+`inbox dismiss ITEM_ID --expected-revision N [--note TEXT] [--request-id UUID]` and
+`inbox restore ITEM_ID --expected-revision N [--request-id UUID]` change Inbox visibility.
+Dismissal of a question or approval also removes its open-interaction completion requirement;
+Restore reinstates that requirement only while the request remains actionable. Neither grants
+approval, answers the request or releases an execution hold.
+They use the Inbox lifecycle revision and the normal authenticated command journal/receipts.
+`operation get` supports both types under the task scope, or `system:runtime:HARNESS`.
+Ownership-blocking interventions cannot be dismissed. Restore requires the underlying
+request/episode to remain actionable; terminal and superseded items remain history.
+The web Inbox exposes the same actions and Actionable, Resolved and Dismissed views.
 
 Stack recovery uses the existing operator authority and journal. `task unstack-preview
 TASK_ID` is a read of the current filtered full-stack preview and its exact task version

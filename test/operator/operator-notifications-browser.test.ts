@@ -228,7 +228,10 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   const after = fake.payloads(device);
   assert.equal(after.length, 3);
   assert.equal(after[2].title, "Codex runtime unavailable");
-  assert.equal(after[2].url, "/inbox?request=runtime%3Acodex");
+  assert.match(
+    after[2].url,
+    /^\/inbox\?request=runtime%3Acodex%3A[0-9a-f-]{36}$/,
+  );
   await context.clearCookies();
   await page.goto(web.origin + after[2].url);
   await page.getByLabel("Password").waitFor();

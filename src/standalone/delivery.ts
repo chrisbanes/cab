@@ -125,6 +125,7 @@ export interface DeliveryCoordinatorOptions {
     run: (current: () => boolean) => Promise<T>,
   ) => Promise<T>;
   leadAssignmentId?: (taskId: string) => string;
+  observedPr?: (taskId: string, observation: PrDeliveryObservation) => void;
   /** Return false when no new notice was recorded (for example, a duplicate). */
   feedback?: (taskId: string, reason: string, identity: string) => unknown;
   failedStackedDependents?: (blockerTaskId: string) => string[];
@@ -1494,6 +1495,7 @@ export class DeliveryCoordinator {
         this.codeHost(current.projectId, observation.repositoryId).ref,
       );
       this.failedBlockerCleared(taskId, failedDependents);
+      this.options.observedPr?.(taskId, observation);
       // One event: an outside head is the more specific notice for a changed PR.
       if (result.outsideHead)
         this.outsidePush(taskId, observation.repositoryId, observation.headSha);

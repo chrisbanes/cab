@@ -277,6 +277,10 @@ for (const cause of ["closed", "cancelled"] as const)
     assert.ok(item && item.kind === "intervention");
     assert.equal(item.attentionCode, "stacked-blocker-failed");
     assert.equal(
+      (await api.readInbox()).data.items.find((i) => i.id === item.id)?.id,
+      item.id,
+    );
+    assert.equal(
       item.reason,
       "Stacked blocker failed; Unstack or Cancel this task",
     );
@@ -300,6 +304,19 @@ for (const cause of ["closed", "cancelled"] as const)
           i.taskId === f.dependent &&
           i.attentionCode === "stacked-blocker-failed",
       ),
+    );
+    const history = (
+      await api.readInbox(new URLSearchParams({ status: "resolved" }))
+    ).data.items.find((i) => i.id === item.id)!;
+    assert.equal(history.lifecycle?.resolution, "Task is Cancelled");
+    await assert.rejects(
+      api.execute({
+        type: "inbox.restore",
+        key: randomUUID(),
+        itemId: item.id,
+        expectedRevision: history.lifecycle!.revision,
+      }),
+      /conflict/,
     );
     f.prs.set(f.lowerPr.nodeId, f.lowerPr);
     await f.currentService().refreshGitHub();
@@ -695,6 +712,35 @@ test("a stale closed-unmerged observation followed by a read failure is unknown 
     f.currentService().domain().failedStackedBlocker(f.dependent),
     true,
   );
+  const extra = randomUUID();
+  f.run({
+    type: "task.create",
+    projectId: f.projectId,
+    taskId: extra,
+    title: "Independent blocker",
+    outcome: "O",
+    ready: false,
+  });
+  f.run({
+    type: "dependency.add",
+    projectId: f.projectId,
+    taskId: f.dependent,
+    expectedVersion: Number(
+      f.currentService().domain().task(f.dependent).version,
+    ),
+    blockerTaskId: extra,
+  });
+  const api = new OperatorApi(f.currentService(), [f.root]);
+  const item = (await api.readInbox()).data.items.find(
+    (i) =>
+      i.kind === "intervention" && i.attentionCode === "stacked-blocker-failed",
+  )!;
+  await api.execute({
+    type: "inbox.dismiss",
+    key: randomUUID(),
+    itemId: item.id,
+    expectedRevision: item.lifecycle!.revision,
+  });
   f.prs.delete(f.lowerPr.nodeId);
   await f.currentService().refreshGitHub();
   assert.equal(
@@ -703,9 +749,18 @@ test("a stale closed-unmerged observation followed by a read failure is unknown 
   );
   assert.equal(
     f.currentService().domain().stackFacts(f.dependent)?.reason,
-    "blocker-unknown",
+    "multiple-blockers",
   );
-  const api = new OperatorApi(f.currentService(), [f.root]);
+  const hidden = (
+    await api.readInbox(new URLSearchParams({ status: "dismissed" }))
+  ).data.items.find((i) => i.id === item.id);
+  assert.ok(
+    hidden,
+    "a failed refresh must retain the dismissed episode despite another blocker",
+  );
+  assert.equal(hidden.lifecycle?.status, "dismissed");
+  assert.equal(hidden.kind, "intervention");
+  assert.match(hidden.reason!, /state is unknown/);
   assert.ok(
     !(await api.readTask(f.dependent)).data.attention.codes.includes(
       "stacked-blocker-failed",
@@ -721,4 +776,27 @@ test("a stale closed-unmerged observation followed by a read failure is unknown 
   );
   assert.equal(notices.length, 1);
   assert.match(String(notices[0]!.payload), /current state: unknown/);
+  f.prs.set(f.lowerPr.nodeId, { ...f.lowerPr, state: "CLOSED", merged: false });
+  await f.currentService().refreshGitHub();
+  assert.equal(
+    (
+      await api.readInbox(new URLSearchParams({ status: "dismissed" }))
+    ).data.items.find((i) => i.id === item.id)?.lifecycle?.status,
+    "dismissed",
+  );
+  f.prs.set(f.lowerPr.nodeId, f.lowerPr);
+  await f.currentService().refreshGitHub();
+  assert.equal(
+    (
+      await api.readInbox(new URLSearchParams({ status: "resolved" }))
+    ).data.items.find((i) => i.id === item.id)?.lifecycle?.status,
+    "resolved",
+  );
+  f.prs.set(f.lowerPr.nodeId, { ...f.lowerPr, state: "CLOSED", merged: false });
+  await f.currentService().refreshGitHub();
+  const next = (await api.readInbox()).data.items.find(
+    (i) =>
+      i.kind === "intervention" && i.attentionCode === "stacked-blocker-failed",
+  )!;
+  assert.notEqual(next.id, item.id);
 });

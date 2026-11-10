@@ -1,3 +1,4 @@
+import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
 import {
   maxToolPathChars,
   maxToolPaths,
@@ -1405,6 +1406,8 @@ const result = z
   .strict();
 export const interactionSchema = z
   .object({
+    lifecycle: inboxLifecycleSchema.optional(),
+    obsolescence: z.string().max(4096).nullable().optional(),
     interactionId: uuid,
     taskId: uuid,
     requestingAssignmentId: uuid,
@@ -1413,7 +1416,14 @@ export const interactionSchema = z
     requestingAssignmentVersion: revision,
     conversationRevision: revision,
     kind: z.enum(["question", "approval"]),
-    status: z.enum(["open", "answered", "approved", "denied"]),
+    status: z.enum([
+      "open",
+      "answered",
+      "approved",
+      "denied",
+      "resolved",
+      "superseded",
+    ]),
     prompt: safeText,
     action: safeText,
     target: safeText,
@@ -1450,6 +1460,20 @@ const completion = z
     reviewedResultIds: z.array(uuid),
     status: z.enum(["pending", "rejected", "finalized"]),
     rejectionReasons: z.array(z.literal("completion-rejected")),
+    blockingInteractionsBasis: z.enum(["recorded", "current"]).optional(),
+    blockingInteractions: z
+      .array(
+        z
+          .object({
+            interactionId: uuid,
+            kind: z.enum(["question", "approval"]),
+            state: z.enum(["required", "dismissed", "resolved"]),
+            destination: z.string().max(512),
+            revision: revision.nullable(),
+          })
+          .strict(),
+      )
+      .optional(),
     revision,
     createdAt: time,
     finalizedAt: time.nullable(),
@@ -2250,7 +2274,14 @@ export const taskTimelineSchema = envelope(
                 kind: z.literal("request"),
                 requestKind: z.enum(["question", "approval"]),
                 interactionId: uuid,
-                status: z.enum(["open", "answered", "approved", "denied"]),
+                status: z.enum([
+                  "open",
+                  "answered",
+                  "approved",
+                  "denied",
+                  "resolved",
+                  "superseded",
+                ]),
                 prompt: safeText,
                 action: safeText,
                 target: safeText,
@@ -3646,6 +3677,23 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       previewDigest: hash,
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("inbox.dismiss"),
+      itemId: z.string().min(1).max(128),
+      expectedRevision: revision,
+      note: z.string().max(4096).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("inbox.restore"),
+      itemId: z.string().min(1).max(128),
+      expectedRevision: revision,
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -4306,6 +4354,8 @@ export const questionReadSchema = z
 export type QuestionRead = z.infer<typeof questionReadSchema>;
 export const taskInboxItemSchema = z
   .object({
+    lifecycle: inboxLifecycleSchema.optional(),
+    dismissible: z.boolean().optional(),
     id: z.string().min(1).max(128),
     kind: z.enum(["question", "approval", "intervention"]),
     urgency: z.number().int().min(0).max(1),
@@ -4333,6 +4383,8 @@ export const taskInboxItemSchema = z
  */
 export const runtimeInboxItemSchema = z
   .object({
+    lifecycle: inboxLifecycleSchema.optional(),
+    dismissible: z.boolean().optional(),
     id: z.string().min(1).max(128),
     kind: z.literal("runtime"),
     urgency: z.literal(0),
@@ -4383,6 +4435,16 @@ export const questionCommandRawLimit =
   2;
 
 export const commandReceiptSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("inbox"),
+      key: uuid,
+      recorded: z.literal(true),
+      itemId: z.string(),
+      revision,
+      status: z.enum(["actionable", "dismissed"]),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("drafting"),
@@ -5310,6 +5372,8 @@ export const configurationImpactSchema = envelope(
 );
 /** Commands whose receipts `GET /api/operator/operations` reads back. */
 export const operationTypeSchema = z.enum([
+  "inbox.dismiss",
+  "inbox.restore",
   "task.unstack",
   "task.cancel",
   "profile.create",

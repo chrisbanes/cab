@@ -1,3 +1,4 @@
+import { InboxLifecycle } from "./inbox-lifecycle.js";
 import {
   assertOwnedTaskWritable,
   assertOwnedWorkWritable,
@@ -410,7 +411,13 @@ export interface CoordinationInteraction {
   requestingAssignmentVersion: number;
   conversationRevision: number;
   kind: "question" | "approval";
-  status: "open" | "answered" | "approved" | "denied";
+  status:
+    | "open"
+    | "answered"
+    | "approved"
+    | "denied"
+    | "resolved"
+    | "superseded";
   prompt: string;
   action: string | null;
   target: string | null;
@@ -459,6 +466,7 @@ export interface TaskCompletionRequest {
   reviewedResultIds: string[];
   status: "pending" | "rejected" | "finalized";
   rejectionReasons: string[];
+  blockingInteractionIds?: string[];
   revision: number;
   createdAt: number;
   finalizedAt: number | null;
@@ -494,6 +502,98 @@ export class CoordinationStore {
     this.domain = domain ?? new DomainStore(db);
     this.isNeverAdmittedRefusedAssignmentWork =
       isNeverAdmittedRefusedAssignmentWork;
+  }
+
+  inboxLifecycle(): InboxLifecycle {
+    return new InboxLifecycle(this.db);
+  }
+
+  reconcileInboxInteractions(): void {
+    const lifecycle = this.inboxLifecycle();
+    for (const interaction of this.interactions()) {
+      const task = this.domain.task(interaction.taskId);
+      const episode = lifecycle.observe({
+        id: interaction.interactionId,
+        taskId: interaction.taskId,
+        kind: interaction.kind,
+        sourceKey: interaction.interactionId,
+        createdAt: interaction.createdAt * 1000,
+      });
+      if (task.state !== "open")
+        lifecycle.resolve(
+          episode.id,
+          task.state === "done" ? "Task is Done" : "Task is Cancelled",
+          true,
+        );
+      else if (interaction.status !== "open") {
+        const native = this.runtimeQuestionByInteractionId(
+          interaction.interactionId,
+        );
+        if (!native || native.deliveryState === "confirmed")
+          lifecycle.resolve(episode.id, "Request answered or decided");
+      }
+    }
+  }
+
+  openInteractionsForCompletion(taskId: string): CoordinationInteraction[] {
+    return this.interactions(taskId).filter(
+      (i) =>
+        i.status === "open" && this.inboxLifecycle().required(i.interactionId),
+    );
+  }
+
+  /** Called only inside a successful, fenced provider-observation transaction. */
+  supersedePrApprovalsWithinTransaction(
+    taskId: string,
+    pr: { repositoryId: string; number: number; nodeId: string; state: string },
+  ) {
+    if (pr.state !== "MERGED" && pr.state !== "CLOSED") return;
+    const lifecycle = this.inboxLifecycle();
+    for (const request of this.interactions(taskId)) {
+      if (
+        request.kind !== "approval" ||
+        request.status !== "open" ||
+        !request.materialJson
+      )
+        continue;
+      const material = externalActionSchema.safeParse(
+        JSON.parse(request.materialJson),
+      );
+      if (
+        !material.success ||
+        request.action !== material.data.kind ||
+        !material.data.kind.startsWith("pr.") ||
+        !("number" in material.data.target) ||
+        !("nodeId" in material.data.target)
+      )
+        continue;
+      const target = material.data.target;
+      if (
+        target.repositoryId !== pr.repositoryId ||
+        target.number !== pr.number ||
+        target.nodeId !== pr.nodeId
+      )
+        continue;
+      const row = lifecycle.observe({
+        id: request.interactionId,
+        taskId,
+        kind: "approval",
+        sourceKey: request.interactionId,
+        createdAt: request.createdAt * 1000,
+      });
+      if (row.status === "resolved") continue;
+      const reason = `Approval superseded: exact PR ${pr.state === "MERGED" ? "merged" : "closed"}; no approval was granted`;
+      lifecycle.resolve(row.id, reason, true);
+      this.resolveAttention(request.interactionId);
+      if (this.domain.task(taskId).state === "open")
+        this.insertInteractionEvent(
+          taskId,
+          request.requestingAssignmentId,
+          request.interactionId,
+          "approval-superseded",
+          { message: reason },
+        );
+    }
   }
 
   taskReview(): TaskReviewStore {
@@ -592,6 +692,7 @@ export class CoordinationStore {
   }
 
   migrate(): void {
+    this.inboxLifecycle().migrate();
     this.migrateResultWorkIdentity();
     new TaskReviewStore(this.db).migrate();
     transaction(this.db, () => {
@@ -1628,6 +1729,12 @@ export class CoordinationStore {
           `INSERT INTO coordination_operator_attention (attentionId,taskId,interactionId,status,revision) VALUES (?,?,?,'open',1)`,
         )
         .run(randomUUID(), String(binding.taskId), interactionId);
+      this.inboxLifecycle().observe({
+        id: interactionId,
+        taskId: String(binding.taskId),
+        kind: "question",
+        sourceKey: interactionId,
+      });
       return this.requiredRuntimeQuestion(
         interactionId,
         String(binding.taskId),
@@ -1654,6 +1761,11 @@ export class CoordinationStore {
         );
       }
       assertOwnedTaskWritable(this.db, command.taskId);
+      if (
+        this.domain.task(command.taskId).state !== "open" ||
+        this.inboxLifecycle().obsolete(command.interactionId)
+      )
+        throw new DomainConflictError("Native question is obsolete");
       const question = this.runtimeQuestionByInteractionId(
         command.interactionId,
         command.taskId,
@@ -3122,7 +3234,12 @@ export class CoordinationStore {
             leadWorkRevision, taskVersion, reviewedResultIds, status,
             rejectionReasons, revision, createdAt, finalizedAt`)
           .get(
-            JSON.stringify(rejectionReasons),
+            JSON.stringify({
+              reasons: rejectionReasons,
+              blockingInteractionIds: this.openInteractionsForCompletion(
+                request.taskId,
+              ).map((i) => i.interactionId),
+            }),
             request.requestId,
             request.revision,
           ) as Row | undefined;
@@ -3133,7 +3250,15 @@ export class CoordinationStore {
           !rejectionReasons.includes("lead-result-effect-missing")
         ) {
           const rejectionReason =
-            `Completion rejected: ${rejectionReasons.join(", ")}`.slice(0, 512);
+            `Completion rejected: ${rejectionReasons.join(", ")}${
+              rejectionReasons.includes("open-interaction")
+                ? `. Operator: answer or dismiss open requests in Inbox: ${this.openInteractionsForCompletion(
+                    request.taskId,
+                  )
+                    .map((i) => i.interactionId)
+                    .join(", ")}`
+                : ""
+            }`.slice(0, 512);
           const settledLeadEffect = this.db
             .prepare(`UPDATE execution_pending_effects
             SET state = 'settled', reason = ?
@@ -3643,11 +3768,9 @@ export class CoordinationStore {
   ): boolean {
     return Boolean(
       new DeliveryStore(this.db).hasWaitingPr(work) ||
-        this.one(
-          `SELECT 1 FROM coordination_interactions
-          WHERE requestingAssignmentId = ? AND status = 'open' LIMIT 1`,
-          assignment,
-        ) ||
+        this.openInteractionsForCompletion(
+          String(this.domain.assignment(assignment).taskId),
+        ).some((i) => i.requestingAssignmentId === assignment) ||
         this.one(
           `SELECT 1 FROM domain_assignments
           WHERE requesterAssignmentId = ? AND state <> 'completed' LIMIT 1`,
@@ -3680,7 +3803,7 @@ export class CoordinationStore {
         ) ||
         this.one(
           `SELECT 1 AS found FROM coordination_interactions
-        WHERE requestingWorkId = ? AND status = 'open' LIMIT 1`,
+        WHERE requestingWorkId = ? AND status = 'open' AND NOT EXISTS (SELECT 1 FROM inbox_lifecycle l WHERE l.id=coordination_interactions.interactionId AND l.obsolete=1) LIMIT 1`,
           work,
         ) ||
         this.one(
@@ -4608,6 +4731,12 @@ export class CoordinationStore {
           material,
         );
       }
+      this.inboxLifecycle().observe({
+        id: interactionId,
+        taskId: String(binding.taskId),
+        kind,
+        sourceKey: interactionId,
+      });
       const attentionId = randomUUID();
       this.db
         .prepare(`INSERT INTO coordination_operator_attention
@@ -4769,6 +4898,13 @@ export class CoordinationStore {
     expectedRevision: number,
   ): void {
     assertOwnedTaskWritable(this.db, String(interaction.taskId));
+    if (
+      this.domain.task(String(interaction.taskId)).state !== "open" ||
+      this.inboxLifecycle().obsolete(String(interaction.interactionId))
+    )
+      throw new DomainConflictError(
+        "Request is obsolete; no answer or approval can be recorded",
+      );
     if (interaction.kind !== kind || interaction.status !== "open")
       throw new DomainConflictError(
         "Interaction is not open for this response",
@@ -4802,9 +4938,17 @@ export class CoordinationStore {
       requestingAssignmentVersion: Number(row.requestingAssignmentVersion),
       conversationRevision: Number(row.conversationRevision),
       kind: z.enum(["question", "approval"]).parse(row.kind),
-      status: z
-        .enum(["open", "answered", "approved", "denied"])
-        .parse(row.status),
+      status:
+        row.status === "open" &&
+        this.inboxLifecycle().obsolete(String(row.interactionId))
+          ? this.inboxLifecycle()
+              .get(String(row.interactionId))
+              ?.resolution?.startsWith("Approval superseded:")
+            ? "superseded"
+            : "resolved"
+          : z
+              .enum(["open", "answered", "approved", "denied"])
+              .parse(row.status),
       prompt: String(row.prompt),
       action: row.action === null ? null : String(row.action),
       target: row.target === null ? null : String(row.target),
@@ -5000,6 +5144,13 @@ export class CoordinationStore {
   }
 
   private parseCompletionRequest(row: Row): TaskCompletionRequest {
+    const reasons = z.array(z.string().min(1).max(128)).max(32);
+    const rejection = z
+      .union([
+        reasons,
+        z.object({ reasons, blockingInteractionIds: z.array(uuid) }).strict(),
+      ])
+      .parse(JSON.parse(String(row.rejectionReasons)));
     return {
       requestId: String(row.requestId),
       taskId: String(row.taskId),
@@ -5011,10 +5162,12 @@ export class CoordinationStore {
         .array(uuid)
         .parse(JSON.parse(String(row.reviewedResultIds))),
       status: z.enum(["pending", "rejected", "finalized"]).parse(row.status),
-      rejectionReasons: z
-        .array(z.string().min(1).max(128))
-        .max(32)
-        .parse(JSON.parse(String(row.rejectionReasons))),
+      rejectionReasons: Array.isArray(rejection)
+        ? rejection
+        : rejection.reasons,
+      ...(!Array.isArray(rejection)
+        ? { blockingInteractionIds: rejection.blockingInteractionIds }
+        : {}),
       revision: Number(row.revision),
       createdAt: Number(row.createdAt),
       finalizedAt: row.finalizedAt === null ? null : Number(row.finalizedAt),
@@ -5195,12 +5348,7 @@ export class CoordinationStore {
       )
     )
       reasons.push("completed-assignment-missing-result");
-    if (
-      this.one(
-        "SELECT 1 AS open FROM coordination_interactions WHERE taskId = ? AND status = 'open' LIMIT 1",
-        request.taskId,
-      )
-    )
+    if (this.openInteractionsForCompletion(request.taskId).length)
       reasons.push("open-interaction");
     if (
       this.one(
