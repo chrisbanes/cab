@@ -8600,6 +8600,12 @@ export class StandaloneService {
       instructionsRevision: request.instructionsRevision,
       profileRevision: request.profileRevision,
     }).reasons;
+    // Queued work keeps independent waits so first-turn revalidation can run once they clear.
+    if (
+      request.state === "queued" &&
+      reasons.some((reason) => !immutableRevisionMismatches.has(reason))
+    )
+      return false;
     return state.refuseStaleRevision(request.workId, reasons);
   }
 
@@ -8747,6 +8753,7 @@ export class StandaloneService {
     } catch (error) {
       if (
         !this.started().supervisor.hasKnownRisk(request.workId) &&
+        !this.reobservedAllowance(request) &&
         this.refuseStaleRequest(request, state, this.domain())
       )
         return;
