@@ -782,10 +782,8 @@ test("The strip and decision card follow the server's attention codes, not a cli
   codes = ["lead-review"];
   await page.reload();
   await strip.waitFor();
-  assert.equal(
-    await strip.getByRole("button", { name: /Next|routing fallback/ }).count(),
-    0,
-  );
+  await strip.locator("[data-task-reason]").waitFor();
+  assert.equal(await strip.getByText(/routing fallback/).count(), 0);
   // The decision card offers the operator nothing to do for it.
   assert.equal(
     await card
@@ -845,9 +843,12 @@ for (const [label, viewport] of [
       },
     );
     await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+    // The inspector renders with the task read, so the card's absence is settled.
+    await page
+      .getByText("Holds · 0", { exact: true })
+      .waitFor({ state: "attached" });
     assert.equal(await page.locator("#decisions[data-pinned]").count(), 0);
     assert.equal(await page.locator("#decisions").isHidden(), true);
-    assert.equal(await page.getByText("Holds · 0", { exact: true }).count(), 1);
     await taskTab(page, "Execution").click();
     await page
       .locator("#execution")

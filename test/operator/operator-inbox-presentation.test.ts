@@ -313,6 +313,41 @@ test("task attention projection pins a wait the operator can act on, never an id
     ["project-paused"],
   );
   assert.ok(paused.rows.length > 0, "the inspector counts what the card pins");
+
+  // Queued capacity is normal waiting: no pin, whatever the execution state.
+  const queued = taskAttentionProjection(
+    attentionTask({
+      waits: [{ code: "capacity", fix: null, links: [] } as never],
+    }),
+    "answer",
+    null,
+  );
+  assert.equal(queued.pinned, false);
+  assert.deepEqual(queued.rows, []);
+
+  // A wait names its own hold; an admission hold no wait renders stays a card notice.
+  const unready = taskAttentionProjection(
+    attentionTask({
+      admission: { eligible: false, reasons: ["task-unready"] } as never,
+      waits: [
+        {
+          code: "project-paused",
+          fix: { kind: "resume-project", projectId: randomUUID() },
+          links: [],
+        } as never,
+      ],
+    }),
+    "answer",
+    null,
+  );
+  assert.deepEqual(
+    unready.cardNotices.map((notice) => notice.id),
+    ["task-unready"],
+  );
+  assert.deepEqual(
+    unready.rows.map((row) => row.id),
+    ["hold:paused", "hold:task-unready"],
+  );
 });
 
 test("task attention projection pins safety, source holds and operator recovery with readable rows", () => {

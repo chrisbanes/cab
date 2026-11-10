@@ -262,9 +262,8 @@ export function taskAttentionProjection(
       task.execution.state === "running" &&
       !task.execution.holds.stop &&
       !task.execution.holds.uncertainty,
-    waits = task.waits.filter(
-      (wait) => !(normalRunning && wait.code === "capacity"),
-    ),
+    // Capacity is normal queueing, never operator attention; the strip and Execution name it.
+    waits = task.waits.filter((wait) => wait.code !== "capacity"),
     noticeTask = { ...task, waits },
     notices = [
       ...new Map(
@@ -277,8 +276,16 @@ export function taskAttentionProjection(
           .map((notice) => [notice.id, notice] as const),
       ).values(),
     ],
+    cardWaits = waits.filter((wait) => wait.code !== "approval"),
+    // Beside a request every notice is listed; otherwise card waits name their own holds and
+    // only the admission notices no wait renders remain.
     cardNotices = notices.filter(
-      (notice) => !(notice.id === "source-held" && task.source?.hold?.active),
+      (notice) =>
+        !(notice.id === "source-held" && task.source?.hold?.active) &&
+        (requests.length > 0 ||
+          cardWaits.length === 0 ||
+          notice.id === "task-unready" ||
+          notice.id === "task-not-open"),
     ),
     executionHolds = holdLines(task.execution.holds, task.taskHold)
       .filter(
@@ -356,7 +363,7 @@ export function taskAttentionProjection(
   const pinned = Boolean(
     requests.length ||
       actions.length ||
-      waits.some((wait) => wait.code !== "approval") ||
+      cardWaits.length ||
       executionHolds.length ||
       notices.some(
         (notice) =>
@@ -391,6 +398,7 @@ export function taskAttentionProjection(
     pinned,
     requests,
     waits,
+    cardWaits,
     notices,
     cardNotices,
     executionHolds,

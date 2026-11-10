@@ -1756,16 +1756,14 @@ remote-write reconciliation and permission rules.
 The task Overview is the task's conversation
 ([ADR-1022](adr/1022-task-conversation-view.md)). The pinned Decisions and holds
 card lists open questions and approvals, execution uncertainty or Stop, active source
-holds, interventions, wait reasons and operator-action recovery. Normal writer and capacity waits
-during a running turn stay on Execution. The task strip pairs its state badge with at
-most one distinct reason and omits duplicate readiness or next-actor wording. Beneath
-the card the lead's
-conversation runs oldest to newest, and the reply composer is docked at the bottom.
-The outcome and current situation stay in the task header, while its strip shows a
-state badge and at most one distinct reason without repeating readiness or next-actor
-wording. The brief, evidence, delivery observations, artifacts, dependencies and
-assignments stay in the inspector. Understanding current work must not require reading
-raw runtime output.
+holds, interventions, wait reasons and operator-action recovery. Normal writer and
+capacity holds during a running turn stay on Execution, and waiting for capacity is
+named by the strip, never pinned. Beneath the card the lead's conversation runs oldest
+to newest, and the reply composer is docked at the bottom. The outcome and current
+situation stay in the task header, while its strip shows a state badge and at most one
+distinct reason without repeating readiness or next-actor wording. The brief,
+evidence, delivery observations, artifacts, dependencies and assignments stay in the
+inspector. Understanding current work must not require reading raw runtime output.
 
 The conversation interleaves captured assistant text (sanitized Markdown with a
 raw-text view), operator messages and follow-ups, questions and answers, approvals,

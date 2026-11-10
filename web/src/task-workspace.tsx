@@ -1608,8 +1608,7 @@ export function TaskWorkspace({
         startedAgain === taskId ||
         resumedSource?.taskId === taskId,
     ),
-    attentionPinned = attention.pinned || retainedAttention,
-    cardWaits = attention.waits.filter((wait) => wait.code !== "approval");
+    attentionPinned = attention.pinned || retainedAttention;
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -2483,11 +2482,10 @@ export function TaskWorkspace({
           />
         )}
         {/* The projection removes requests already represented by their own rows. */}
-        {/* Waits render below with their Fix; notices repeat them only beside a request. */}
-        {attention.cardNotices.length > 0 &&
-          (attention.requests.length > 0 || cardWaits.length === 0) && (
-            <QuestionHolds holds={attention.cardNotices} />
-          )}
+        {/* The projection drops notices the waits below already name with their Fix. */}
+        {attention.cardNotices.length > 0 && (
+          <QuestionHolds holds={attention.cardNotices} />
+        )}
         {!nextActor.operator &&
           !data.source?.hold?.active &&
           !data.completionRequests.some((r) => r.status === "pending") &&
@@ -2497,7 +2495,7 @@ export function TaskWorkspace({
           )}
         {/* The merged approval wait is left out: the open approvals are rows above. */}
         <WaitReasons
-          waits={cardWaits}
+          waits={attention.cardWaits}
           taskId={taskId}
           projectId={data.task.projectId}
           client={client}
