@@ -2441,8 +2441,9 @@ export class ExecutionState {
   /**
    * A revision refusal is ignorable only when it is `refusedBeforeStart`, its reasons are
    * the safe revision changes, and it identifies canonical initial work or a durable inbox
-   * event. Current assignment eligibility is checked by admission/delivery withdrawal,
-   * not here, so this historical proof remains stable after later completion.
+   * event. A draft turn refused before any turn was sent also qualifies: its message was
+   * never delivered. Current assignment eligibility is checked by admission/delivery
+   * withdrawal, not here, so this historical proof remains stable after later completion.
    */
   isNeverAdmittedRefusedAssignmentWork(workId: string): boolean {
     if (
