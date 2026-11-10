@@ -4801,7 +4801,11 @@ export class ExecutionState {
     const binding = this.taskBinding(workId);
     const record =
       binding &&
-      this.recoveryFor(binding.assignmentId, binding.assignmentVersion, workId)[0];
+      this.recoveryFor(
+        binding.assignmentId,
+        binding.assignmentVersion,
+        workId,
+      )[0];
     const request = this.db
       .prepare("SELECT kind FROM turn_requests WHERE workId=?")
       .get(workId) as { kind: string } | undefined;
