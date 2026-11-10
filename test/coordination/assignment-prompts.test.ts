@@ -281,6 +281,7 @@ test("task turns include their captured instructions and lead accountability con
 
     await service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 2,
     });
     command(service, {
@@ -589,7 +590,11 @@ test("project lead prompt states each linked repository's delivery level and fol
         arguments: { question: `GUIDANCE_QUESTION_${turnId}` },
       });
     };
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 2 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 2,
+    });
     for (const taskId of [workerTaskId, leadTaskId])
       command(service, {
         type: "task.configure",
@@ -761,7 +766,11 @@ test("a resumed thread receives each instruction revision once", async () => {
         arguments: { question: `ONCE_QUESTION_${turnId}` },
       });
     };
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 2 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 2,
+    });
     command(service, {
       type: "task.configure",
       projectId,
@@ -975,6 +984,7 @@ test("routed candidate result materializes and wakes the task lead at capacity o
     });
     await service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 1,
       projectOverrides: { [projectId]: 1 },
     });
@@ -1257,7 +1267,11 @@ test("instruction apply rebinds only a never-admitted stale inbox batch", async 
       guidance: "",
       candidateProfileIds: [],
     });
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
     await createReadyTask(refusedBeforeApplyTaskId, "refused before apply");
     const firstQuestion = await waitForQuestion(refusedBeforeApplyTaskId);
     assert.ok(firstQuestion);
@@ -1646,7 +1660,11 @@ test("stale inbox withdrawal preserves independent stop and admission holds", as
       guidance: "",
       candidateProfileIds: [],
     });
-    await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+    await service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 1,
+    });
 
     for (const [index, witness] of [
       "stop",
@@ -1788,7 +1806,11 @@ test("stale inbox withdrawal preserves independent stop and admission holds", as
         assignmentId,
         expectedVersion: Number(currentAssignment.version),
       });
-      await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
+      await service.configureCapacity({
+        key: randomUUID(),
+        minimumLeadSlots: 0,
+        globalLimit: 1,
+      });
       assert.ok(
         row(
           "SELECT batchId FROM coordination_delivery_batches WHERE batchId = ? AND state = 'queued'",

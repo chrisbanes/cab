@@ -33,6 +33,7 @@ import {
   adoptRepositoryRows,
   adoptSourceRows,
   capacityChanges,
+  capacityUsage,
   nextSelectionId,
   parseRows,
   profileChanges,
@@ -888,12 +889,15 @@ test("no readiness rule loads no condition, saves null and never clears an unava
   );
 });
 
-test("capacity changes name global and override edits", () => {
+test("capacity changes name global, lead-slot and override edits", () => {
   const p = id();
+  const a = id();
   const data = {
     globalLimit: 4,
-    defaultProjectLimit: 2,
     globalUsage: 1,
+    minimumLeadSlots: 1,
+    leadUsage: 0,
+    agents: [{ agent: { id: a, name: "Builder" }, limit: 2, usage: 1 }],
     projects: [
       {
         project: {
@@ -903,29 +907,47 @@ test("capacity changes name global and override edits", () => {
           paused: true,
           leadProfileId: null,
         },
-        limit: 2,
+        limit: null,
         usage: 1,
         override: null,
         tasks: [],
       },
     ],
   } as unknown as RuntimeSettingsData;
+  const unchanged = {
+    globalLimit: "4",
+    minimumLeadSlots: "1",
+    [`agent-override-${a}`]: true,
+    [`agent-limit-${a}`]: "2",
+    [`override-${p}`]: false,
+    [`limit-${p}`]: "2",
+  };
+  assert.deepEqual(capacityChanges(data, unchanged), []);
   assert.deepEqual(
     capacityChanges(data, {
-      globalLimit: "4",
-      [`override-${p}`]: false,
-      [`limit-${p}`]: "2",
-    }),
-    [],
-  );
-  assert.deepEqual(
-    capacityChanges(data, {
+      ...unchanged,
       globalLimit: "1",
+      minimumLeadSlots: "0",
       [`override-${p}`]: true,
       [`limit-${p}`]: "3",
     }),
-    ["Global active-turn cap: 4 → 1", "Relay: override set to 3"],
+    [
+      "Global active-turn cap: 4 → 1",
+      "Minimum lead slots: 1 → 0",
+      "Relay: override set to 3",
+    ],
   );
+  assert.deepEqual(
+    capacityChanges(data, { ...unchanged, [`agent-limit-${a}`]: "3" }),
+    ["Builder override: 2 → 3"],
+  );
+  assert.deepEqual(
+    capacityChanges(data, { ...unchanged, [`agent-override-${a}`]: false }),
+    ["Builder: override cleared"],
+  );
+  assert.equal(capacityUsage(1, null, "project"), "Usage 1 · No project limit");
+  assert.equal(capacityUsage(0, null, "agent"), "Usage 0 · No agent limit");
+  assert.equal(capacityUsage(2, 3, "agent"), "Usage 2 / limit 3");
 });
 
 test("settings headers, saved lines, state cards and hold pills", () => {
