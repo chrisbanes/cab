@@ -8600,10 +8600,11 @@ export class StandaloneService {
       instructionsRevision: request.instructionsRevision,
       profileRevision: request.profileRevision,
     }).reasons;
-    // Queued work keeps independent waits so first-turn revalidation can run once they clear.
+    // Queued work keeps waits and revision mismatches that normal first-turn admission can refresh.
     if (
       request.state === "queued" &&
-      reasons.some((reason) => !immutableRevisionMismatches.has(reason))
+      (reasons.some((reason) => !immutableRevisionMismatches.has(reason)) ||
+        reasons.every((reason) => this.firstTurnResolves(request, reason)))
     )
       return false;
     return state.refuseStaleRevision(request.workId, reasons);
