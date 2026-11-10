@@ -481,6 +481,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     ready: false,
   });
   await page.goto(`${web.origin}/tasks/${localId}`);
+  await page.getByLabel("More task options").click();
   await page
     .getByRole("button", { name: /Publish/ })
     .first()

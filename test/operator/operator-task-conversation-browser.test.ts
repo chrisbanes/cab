@@ -1438,6 +1438,48 @@ async function assertConversationViewport(page: Page) {
     );
 }
 
+async function assertReplyUsable(page: Page) {
+  const reply = page.locator("#reply");
+  const remove = reply.getByRole("button", { name: /^Remove @/ });
+  while (await remove.count()) await remove.first().click();
+  const editor = page.getByLabel("Editable reply", { exact: true });
+  await editor.fill("Viewport reply");
+  await editor.press("End");
+  await page.keyboard.type(" typed with keyboard");
+  assert.equal(await editor.inputValue(), "Viewport reply typed with keyboard");
+  const send = reply.getByRole("button", { name: "Send comment", exact: true });
+  for (
+    let i = 0;
+    i < 8 && !(await send.evaluate((e) => e === document.activeElement));
+    i++
+  )
+    await page.keyboard.press("Tab");
+  assert.equal(
+    await send.evaluate((e) => e === document.activeElement),
+    true,
+    "Send is reachable by keyboard inside the dock",
+  );
+  assert.equal(
+    await send.evaluate((e) => {
+      const r = e.getBoundingClientRect();
+      return (
+        r.top >= 0 &&
+        r.bottom <= innerHeight &&
+        document
+          .elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+          ?.closest("button") === e
+      );
+    }),
+    true,
+    "Send is visible and not occluded",
+  );
+  await page.keyboard.press("Enter");
+  await reply
+    .getByText("Comment recorded. No assignment was woken.", { exact: true })
+    .waitFor();
+  assert.equal(await editor.inputValue(), "");
+}
+
 test("conversation-first viewport evidence", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -1451,6 +1493,7 @@ test("conversation-first viewport evidence", async (_t, j) => {
   const s = await seed(f);
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
+  const pages: Page[] = [];
   for (const viewport of evidenceViewports) {
     const page = await browser.newPage({ viewport });
     j.observe(page);
@@ -1476,6 +1519,11 @@ test("conversation-first viewport evidence", async (_t, j) => {
       await page.locator("[data-task-strip] .task-source-chip").count(),
       1,
     );
+    pages.push(page);
+  }
+  // Capture the unchanged fixture at every size before recording usability comments.
+  for (const page of pages) {
+    await assertReplyUsable(page);
     await page.close();
   }
 });
@@ -1516,6 +1564,7 @@ for (const mode of ["running", "ready"] as const)
     }
     const web = await j.start("fixture.web", () => f.startWeb());
     browser = await j.start("browser.launch", () => chromium.launch());
+    const pages: Page[] = [];
     for (const viewport of evidenceViewports) {
       const page = await browser.newPage({ viewport });
       j.observe(page);
@@ -1546,6 +1595,10 @@ for (const mode of ["running", "ready"] as const)
         `${mode}-task-${viewport.width}-${viewport.height}`,
         false,
       );
+      pages.push(page);
+    }
+    for (const page of pages) {
+      await assertReplyUsable(page);
       await page.close();
     }
   });

@@ -68,6 +68,10 @@ conversation and starts the lead fresh in the same workspace, from the task head
 offered only when nothing is queued, running or unresolved and the task has no hold.
 The old conversation and workspace stay readable.
 
+Task-card budgets start at the explicit Decisions and holds target
+(`?section=decisions`). Untargeted task links open the latest conversation;
+following the strip's operator action reaches the card in one additional click.
+
 ## Budget
 
 | Entry point | Interactions to the recovery page | First screen must show |

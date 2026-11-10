@@ -81,7 +81,7 @@ const entries: Record<string, Entry> = {
         expectedVersion: Number(d.task(taskId).version),
       });
     },
-    path: ({ taskId }) => `/tasks/${taskId}`,
+    path: ({ taskId }) => `/tasks/${taskId}?section=decisions`,
     first: (page) => [
       waits(page).getByText("Waiting · Project paused", { exact: true }),
       waits(page).getByRole("button", { name: "Fix: Resume project" }),
@@ -224,7 +224,8 @@ for (const [label, viewport] of [
           true,
           `the wait and its Fix are in the first view ${JSON.stringify(await target.boundingBox())}`,
         );
-      assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
+      if (name !== "task detail")
+        assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
       await noPageOverflow(page);
       let interactions = 0;
       await entry.fix(page).click();

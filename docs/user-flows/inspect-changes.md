@@ -41,7 +41,10 @@ feedback to the lead without leaving the task.
 | Entry point | Interactions to a diff | First screen must show |
 | --- | --- | --- |
 | Task header | 2 (Changes, file) | the changed-file list with counts |
-| Latest result | 2 (Changes link, file) | the result summary and its changed-file count |
+| Latest result (`?section=review`) | 2 (Changes link, file) | the selected result summary and its changed-file count |
+
+On a phone, an untargeted task opens the conversation; Latest result follows below
+it. A direct result target brings its Changes link into view.
 
 The reply box is reachable from the diff without scrolling past the brief or
 retained evidence. An Inbox evidence link lands on the task evidence it names (1).

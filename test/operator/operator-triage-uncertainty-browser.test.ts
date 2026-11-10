@@ -74,7 +74,7 @@ async function assertInView(page: Page, targets: Locator[], scrolled = false) {
       true,
       `in view ${JSON.stringify(await target.boundingBox())}`,
     );
-  if (!scrolled)
+  if (!scrolled && !/^\/tasks\/[^/]+$/.test(new URL(page.url()).pathname))
     assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
   await noPageOverflow(page);
 }
@@ -159,7 +159,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}?section=decisions`,
     );
     const line = s.page
       .locator("section#decisions")

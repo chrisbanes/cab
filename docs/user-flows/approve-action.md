@@ -38,6 +38,10 @@ material invalidates approval".
 4. The recorded decision shows on the request, the task and the Inbox row, with any
    remaining hold stated beside it.
 
+Task-card budgets start at the explicit Decisions and holds target
+(`?section=decisions`). Untargeted task links open the latest conversation;
+following the strip's operator action reaches the card in one additional click.
+
 ## Budget
 
 | Entry point | Interactions to a recorded decision | First screen must show |

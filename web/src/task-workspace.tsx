@@ -1054,6 +1054,14 @@ export function TaskWorkspace({
   // biome-ignore lint/correctness/useExhaustiveDependencies: conversation DOM insertion must restore the previously captured reading anchor.
   useLayoutEffect(() => {
     if (!data) return;
+    // Let the opening timeline and shell header settle before aligning an Overview target.
+    if (
+      first.current &&
+      state.tab === "overview" &&
+      !timeline.window &&
+      !timeline.error
+    )
+      return;
     // New conversation entries count as updates, like a changed result or message.
     const appended = timeline.appended !== appendedSeen.current;
     appendedSeen.current = timeline.appended;

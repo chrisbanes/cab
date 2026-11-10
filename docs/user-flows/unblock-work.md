@@ -34,6 +34,10 @@ place.
 3. The reason list re-reads after the Fix; a cleared reason disappears and the next
    becomes primary.
 
+Task-card budgets start at the explicit Decisions and holds target
+(`?section=decisions`). Untargeted task links open the latest conversation;
+following the strip's operator action reaches the card in one additional click.
+
 ## Budget
 
 | Entry point | Interactions to the fix sent or its screen open | First screen must show |

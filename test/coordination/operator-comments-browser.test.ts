@@ -1031,7 +1031,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     });
   });
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await sourceEntry;
   await page
@@ -1080,7 +1084,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     }),
   );
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await page
     .getByText(/source comparison unknown; current source state unavailable/)
@@ -1098,7 +1106,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   );
   await page.unroute("**/api/operator/tasks/*");
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await page.getByText(/source unchanged/).waitFor({ state: "attached" });
   phase = "delayed task read";
@@ -1116,7 +1128,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   });
   const refreshSource = () =>
     page
-      .getByRole("button", { name: "Refresh source", exact: true })
+      .getByRole("button", {
+        name: "Refresh source",
+        exact: true,
+        includeHidden: true,
+      })
       .evaluate((el) => (el as HTMLElement).click());
   const failSource = (route: import("playwright").Route) =>
     route.fulfill({
@@ -1194,7 +1210,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .getByLabel("Editable reply")
     .fill("Private old-session source draft");
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await lateSourceEntry;
   await signOutFromSidebar(page);

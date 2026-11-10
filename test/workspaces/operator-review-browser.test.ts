@@ -682,7 +682,7 @@ for (const [limitCase, sourceBody] of [
     assert.equal(
       await page
         .locator("[data-task-strip]")
-        .getByRole("link", { name: "Open GitHub to edit source", exact: true })
+        .locator("a.task-source-chip")
         .count(),
       1,
     );

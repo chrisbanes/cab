@@ -81,10 +81,14 @@ async function showTools(page: Page) {
   if ((await menu.getAttribute("open")) === null)
     await page.getByLabel("More task options").click();
 }
-const pressed = async (page: Page) => {
-  await showTools(page);
-  return toggle(page).getAttribute("aria-pressed");
-};
+const pressed = (page: Page) =>
+  page
+    .getByRole("button", {
+      name: "Focus mode",
+      exact: true,
+      includeHidden: true,
+    })
+    .getAttribute("aria-pressed");
 const boxWidth = async (page: Page, selector: string) => {
   const box = await page.locator(selector).first().boundingBox();
   assert.ok(box, selector);
@@ -286,7 +290,10 @@ test("the key leaves focus and the scroll position where they were and the short
   const { page } = await start(j, { viewport: { width: 1366, height: 400 } });
   await readyPage(page);
   assert.equal(await toggle(page).getAttribute("aria-keyshortcuts"), "\\");
-  await page.evaluate(() => scrollTo(0, 200));
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement)?.blur();
+    scrollTo(0, 200);
+  });
   await page.keyboard.press("\\");
   await page.waitForTimeout(200);
   assert.equal(await pressed(page), "true");

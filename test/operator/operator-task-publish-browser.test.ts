@@ -80,6 +80,7 @@ async function launch(
     await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByLabel("More task options").click();
     await page
       .locator(".task-tools")
       .getByRole("button", { name: "Publish to GitHub" })
@@ -164,9 +165,7 @@ for (const [name, viewport] of viewports) {
     assert.equal(commands("task.publish.send").length, 1);
     assert.equal(gh.posts, 1);
     // The task now is the issue: its identity and source link show and the task cannot be published again.
-    await page
-      .getByRole("link", { name: "Open GitHub to edit source" })
-      .waitFor();
+    await page.locator("[data-task-strip] a.task-source-chip").waitFor();
     assert.equal(await header(page).count(), 0);
     assert.equal(f.service.domain().importedTask(taskId) !== undefined, true);
     await panel(page).getByRole("button", { name: "Done" }).click();
@@ -261,7 +260,15 @@ test("a publication whose create is still being resolved links to the issue that
 test("the panel is operable from the keyboard", async (_t, j) => {
   const { page, open } = await launch(j, desktop, { ready: false });
   await open();
-  await header(page).focus();
+  const options = page.getByLabel("More task options");
+  await options.focus();
+  await page.keyboard.press("Enter"); // Close the fixture's open menu.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await header(page).evaluate((e) => e === document.activeElement),
+    true,
+  );
   await page.keyboard.press("Enter");
   await panel(page).waitFor();
   // Choose a target and review with the keyboard only.

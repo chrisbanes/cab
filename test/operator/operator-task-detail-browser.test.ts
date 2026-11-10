@@ -172,7 +172,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     ((await strip.locator("[data-task-reason]").textContent()) ?? "").length >
       0,
   );
-  // Exactly four header actions (Execution, Edit task, Reset task, Stop), and the direct-load Back names the project.
+  // Unavailable Reset is omitted; the pending work still offers Stop and Back names the project.
   assert.deepEqual(
     await header
       .locator(".task-header-actions > *")
@@ -180,7 +180,6 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     [
       ["A", "Execution"],
       ["BUTTON", "Edit task…"],
-      ["BUTTON", "Reset task…"],
       ["BUTTON", "Stop…"],
     ],
   );
@@ -432,12 +431,12 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       `${name} ${JSON.stringify(b)}`,
     );
   }
-  // On a phone the inspector sits above the conversation and the reply ends the page.
+  // The phone inspector follows the entire conversation column, including Reply's normal-flow space.
   const phoneInspector = await box('aside[aria-label="Task context"]'),
-    phoneConversation = await box("section#conversation"),
+    phoneMain = await box(".task-columns"),
     phoneReply = await box("section#reply");
-  assert.ok(phoneInspector.y + phoneInspector.height <= phoneConversation.y);
-  assert.ok(phoneConversation.y + phoneConversation.height <= phoneReply.y);
+  assert.ok(phoneMain.y + phoneMain.height <= phoneInspector.y);
+  assert.ok(phoneReply.y + phoneReply.height <= phoneInspector.y);
   assert.ok(await noHorizontalScroll(page));
   await captureBrowserEvidence(page, "task-detail-phone", { fullPage: false });
   await page.getByLabel("Editable reply").waitFor();
@@ -616,23 +615,16 @@ test("An empty local task says so honestly", async (_t, j) => {
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
-  // A one-line outcome is the whole recorded subtitle. On a phone the header carries the
-  // identity instead, so the strip's disclosure is where the outcome is read.
+  // The meaningful outcome is the phone subtitle; identity remains one strip chip.
   assert.equal(
-    await page.locator(".page-header-title p.introduction").textContent(),
+    await page.locator(".page-subtitle-short").textContent(),
     "Write the field notes guide.",
   );
   assert.equal(
-    await page.locator(".page-header-title p.introduction").isVisible(),
-    false,
-  );
-  assert.equal(
-    await page.locator(".page-subtitle-short").textContent(),
+    await page.locator("[data-task-strip] .task-source-chip").textContent(),
     "Local task",
   );
-  const phoneOutcome = page.locator("details.task-outcome[data-phone-only]");
-  await phoneOutcome.locator("summary").click();
-  await phoneOutcome.getByText("Write the field notes guide.").waitFor();
+  assert.equal(await page.locator("details.task-outcome").count(), 0);
   await openOverviewCard(page, "assignments");
   await page
     .locator("#assignments")
@@ -2409,16 +2401,20 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     tabletMain = await box(".task-columns");
   assert.ok(tabletMain.x + tabletMain.width <= tablet.x, "beside at 1024");
 
-  // Phone: one column, the inspector between the decisions and the conversation, 44px buttons.
+  // Phone: conversation and Reply precede the inspector; controls keep 44px targets.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => scrollTo(0, 0));
   const phoneCard = await box("section#decisions"),
     phoneAside = await box('aside[aria-label="Task context"]'),
     phoneConversation = await box("section#conversation"),
     phoneReply = await box("section#reply");
-  assert.ok(phoneCard.y + phoneCard.height <= phoneAside.y);
-  assert.ok(phoneAside.y + phoneAside.height <= phoneConversation.y);
-  assert.ok(phoneConversation.y + phoneConversation.height <= phoneReply.y);
+  assert.ok(phoneCard.y + phoneCard.height <= phoneConversation.y);
+  const phoneColumn = await box(".task-columns");
+  assert.ok(
+    phoneColumn.y + phoneColumn.height <= phoneAside.y,
+    "results and Details follow the conversation column",
+  );
+  assert.ok(phoneReply.y + phoneReply.height <= phoneAside.y);
   await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")
@@ -3201,7 +3197,7 @@ test("The meaningful outcome sentence stays in the header and the full brief sta
   );
   await openOverviewCard(page, "brief");
   const disclosure = overviewCard(page, "brief");
-  await disclosure.getByText("Retain drafts", { exact: false }).waitFor();
+  await disclosure.getByText("Retain drafts", { exact: true }).waitFor();
   await refreshTask(page, a.taskId);
   await settle(page);
   assert.notEqual(await disclosure.getAttribute("open"), null);
@@ -4065,6 +4061,8 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
         bottom: box?.bottom ?? Number.NaN,
         left: box?.left ?? Number.NaN,
         right: box?.right ?? Number.NaN,
+        sticky: e ? getComputedStyle(e).position === "sticky" : false,
+        shown: Boolean(box?.width && box.height),
       };
     });
   }, selectors);
@@ -4077,7 +4075,10 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
     // Stacked within one column; the docked reply and the beside-column inspector overlap in height.
     const above = found[i - 1];
     if (
-      above &&
+      above?.shown &&
+      f.shown &&
+      !above.sticky &&
+      !f.sticky &&
       selectors[i] !== "section#reply" &&
       above.left < f.right &&
       f.left < above.right

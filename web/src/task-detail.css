@@ -834,7 +834,7 @@ a.task-source-chip:hover {
   position: sticky;
   top: 0;
   z-index: 3;
-  max-height: 25dvh;
+  max-height: 45dvh;
   overflow-y: auto;
 }
 
@@ -1392,4 +1392,18 @@ a.task-source-chip:hover {
   flex-shrink: 0;
   min-width: 44px;
   max-width: 35%;
+}
+
+/* A request owns the reading area while its form or recovery outcome is open. */
+.task-workspace
+  .task-columns
+  > section#decisions:has(.question-response, .approval-review) {
+  position: relative;
+  max-height: none;
+  overflow: visible;
+}
+.task-workspace
+  .task-columns:has(.question-response, .approval-review)
+  > section.reply-card {
+  position: static;
 }

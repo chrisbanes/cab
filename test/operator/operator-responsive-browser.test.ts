@@ -150,7 +150,7 @@ async function runResponsiveBrowserJourney(
     project: `/projects/${question.projectId}?ready=any`,
     inbox: "/inbox",
     question: `/tasks/${question.taskId}?request=${question.interactionId}`,
-    approval: `/tasks/${approval.taskId}`,
+    approval: `/tasks/${approval.taskId}?section=decisions`,
     composer: `/tasks/new?project=${question.projectId}`,
     search: "/search?query=Reconcile",
     settings: "/settings",
