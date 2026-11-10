@@ -478,12 +478,12 @@ test("bulk presets preserve unrelated rows and keys, derive mode over unlinked I
   assert.equal(result.kind, "applied");
   if (result.kind !== "applied") return;
   assert.equal(result.draft.mode, "through-merge");
-  assert.deepEqual(result.draft.grants.slice(0, 12), draft.grants.slice(0, 12));
+  assert.deepEqual(result.draft.grants.slice(0, 13), draft.grants.slice(0, 13));
   assert.deepEqual(
-    result.draft.grantKeys.slice(0, 12),
-    draft.grantKeys.slice(0, 12),
+    result.draft.grantKeys.slice(0, 13),
+    draft.grantKeys.slice(0, 13),
   );
-  assert.deepEqual(result.draft.grants.slice(12), [
+  assert.deepEqual(result.draft.grants.slice(13), [
     ...repositoryLevelGrants("R", "open-prs"),
     ...repositoryLevelGrants("42", "open-prs"),
   ]);

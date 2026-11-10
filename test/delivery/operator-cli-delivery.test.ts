@@ -1322,7 +1322,7 @@ test("delivery configure prepares the exact delivery.configure, applies once and
   const read = await w.cli("ro", ["project", "get", w.project]);
   assert.equal(
     read.json().data.delivery.grants.length,
-    8,
+    9,
     "the read shows the level",
   );
   const recorded = await w.cli("ro", [
