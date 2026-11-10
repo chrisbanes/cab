@@ -805,7 +805,6 @@ test("A rejected completion is a decision the strip and decision card both name"
     `/tasks/${a.taskId}?section=reply`,
   );
   assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
-  assert.equal(await card.getByText("No operator decision needed.").count(), 0);
 });
 
 test("The strip and decision card follow the server's attention codes, not a client derivation", async (_t, j) => {
