@@ -1500,7 +1500,11 @@ test("the request pane shows kind, position, identities and a sticky response ba
   );
   await serveSourceHold(page, approval.taskId);
   const taskReads: string[] = [];
+  let phase = "before-click";
+  const readJournal: string[] = [];
   page.on("request", (request) => {
+    if (/\/api\/operator\/(inbox|tasks\/)/.test(request.url()))
+      readJournal.push(`${phase} request ${request.url()}`);
     if (
       new URL(request.url()).pathname ===
       `/api/operator/tasks/${approval.taskId}`
@@ -1533,6 +1537,8 @@ test("the request pane shows kind, position, identities and a sticky response ba
   await until(() => inboxInFlight === 0, "no Inbox read in flight");
   await settle(page);
   const inboxReadsBeforeClick = inboxReads;
+  phase = "selection";
+  readJournal.push(`selection starts with ${taskReads.length} task reads`);
   await page.locator('.inbox-row[data-kind="approval"]').click();
   await detail
     .getByText("Execution blocked by dependency", { exact: true })
@@ -1586,9 +1592,14 @@ test("the request pane shows kind, position, identities and a sticky response ba
     await settle(page);
     const p = (await pane.boundingBox())!,
       b = (await bar.boundingBox())!;
+    const atFoot = Math.abs(b.y + b.height - (p.y + p.height)) <= 1;
+    if (!atFoot)
+      await captureBrowserEvidence(page, "approval-footer-mismatch", {
+        fullPage: false,
+      });
     assert.ok(
-      Math.abs(b.y + b.height - (p.y + p.height)) <= 1,
-      `bar at the pane's foot at ${where}`,
+      atFoot,
+      `bar at the pane's foot at ${where}: ${JSON.stringify({ pane: p, bar: b, scroll: await pane.evaluate((e) => ({ top: e.scrollTop, height: e.scrollHeight, client: e.clientHeight })), inboxInFlight, taskReads })}`,
     );
   }
   await captureBrowserEvidence(page, "1366-inbox-approval-pane", {
@@ -1600,7 +1611,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
   assert.ok(
     taskReads.length >= 1 &&
       taskReads.length - 1 <= inboxReads - inboxReadsBeforeClick,
-    `${taskReads.length} task reads for ${inboxReads - inboxReadsBeforeClick} Inbox reads`,
+    `${taskReads.length} task reads for ${inboxReads - inboxReadsBeforeClick} Inbox reads; ${JSON.stringify(readJournal)}`,
   );
   const reread = page.waitForResponse(
     (r) =>

@@ -33,6 +33,99 @@ async function signIn(
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
 }
+test("composer preselects its sole visible project", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Only visible project",
+    leadProfileId: null,
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  await signIn(page, web.origin, web.password, "/tasks/new");
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
+    null,
+  );
+  await page.reload();
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Resume unfinished input" }).count(),
+    0,
+  );
+  await page
+    .getByLabel("Task title", { exact: true })
+    .fill("Recovered then discarded");
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel("Task title", { exact: true }).inputValue(),
+    "Recovered then discarded",
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Discard unfinished input", exact: true })
+    .click();
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('[aria-label="Project"]')
+        ?.value === id,
+    projectId,
+  );
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    projectId,
+  );
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
+    null,
+  );
+  const explicitProject = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: explicitProject,
+    name: "Explicit project",
+    leadProfileId: null,
+  });
+  await page.goto(`${web.origin}/tasks/new?project=${explicitProject}`);
+  await page.getByLabel("Task title", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    explicitProject,
+  );
+});
 test("List and Board preserve identical filtered task IDs and never submit commands", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
@@ -925,6 +1018,19 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
   journey.observe(page);
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password);
+  const taskFacts = await page.evaluate(async () => {
+    const response = await fetch("/api/operator/task-list");
+    return (await response.json()).data.tasks;
+  });
+  const facts = (id: string) =>
+    taskFacts.find((task: { id: string }) => task.id === id);
+  const leadIsProjectDefault = (id: string) => {
+    const task = facts(id);
+    return Boolean(
+      task?.lead?.profileId &&
+        task.project.leadProfileId === task.lead.profileId,
+    );
+  };
   let commandPosts = 0;
   page.on("request", (request) => {
     if (
@@ -981,10 +1087,13 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
       .innerText();
     assert.match(importedMetadata, /Service integration/);
     assert.match(importedMetadata, /fixture\/source#42/);
-    assert.equal(
-      await importedRow.locator(".task-lead").innerText(),
-      "Accountable lead · lead",
-    );
+    if (leadIsProjectDefault(ids.importedId))
+      assert.equal(await importedRow.locator(".task-lead").count(), 0);
+    else
+      assert.equal(
+        await importedRow.locator(".task-lead").innerText(),
+        facts(ids.importedId).lead.name,
+      );
     assert.equal(await importedRow.locator(".task-source-state").count(), 0);
     const questionRow = page.locator(
       `.task-list [data-task-id="${ids.question.id}"]`,
@@ -996,9 +1105,13 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
     await questionRow
       .getByText("Question needs an answer", { exact: true })
       .waitFor({ state: "visible" });
-    await questionRow
-      .getByText("Accountable lead · lead", { exact: true })
-      .waitFor({ state: "visible" });
+    if (leadIsProjectDefault(ids.question.id))
+      assert.equal(await questionRow.locator(".task-lead").count(), 0);
+    else
+      assert.equal(
+        await questionRow.locator(".task-lead").innerText(),
+        facts(ids.question.id).lead.name,
+      );
     const rowOverflow = await page
       .locator(".task-list .task-row")
       .evaluateAll((rows) =>
@@ -1959,10 +2072,14 @@ test("replacement composer owns recovery before a detached committed receipt or 
     } else {
       f.advanceClock(61_000);
       // The composer is locked while it saves, so leaving it finds the expired session.
+      const expired = page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname ===
+            `/api/operator/projects/${projectId}/configuration` &&
+          r.status() === 401,
+      );
       await page.getByRole("link", { name: /^Back to /, exact: false }).click();
-      await page
-        .getByRole("button", { name: "Refresh tasks", exact: true })
-        .click();
+      await expired;
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.getByRole("link", { name: "New task", exact: true }).click();
@@ -2081,10 +2198,19 @@ test("List and Board name an imported Draft task's unmet readiness condition", a
       await card.getByText("Draft: not Ready", { exact: true }).count(),
       0,
     );
-    // Local Draft tasks keep the generic reason.
     await page
-      .locator(`${surface} [data-task-id="${ids.draft}"]`)
-      .getByText("Draft: not Ready", { exact: true })
+      .getByText(
+        "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+        { exact: true },
+      )
       .waitFor();
+    for (const localDraft of [ids.blocker, ids.draft])
+      assert.equal(
+        await page
+          .locator(`${surface} [data-task-id="${localDraft}"] .task-reason`)
+          .filter({ hasText: "Draft: not Ready" })
+          .count(),
+        0,
+      );
   }
 });

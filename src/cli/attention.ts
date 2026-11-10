@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { attentionNext } from "../operator/attention.js";
 import { z } from "zod";
 import {
   nativeQuestionAnswers,
@@ -86,6 +87,18 @@ function formLines(form: QuestionForm): string[] {
   });
 }
 
+const inboxNext = (item: InboxItem) =>
+  item.lifecycle?.status === "resolved"
+    ? "View history"
+    : item.lifecycle?.status === "dismissed"
+      ? "Restore"
+      : item.kind === "runtime"
+        ? "Open runtime settings"
+        : attentionNext[
+            item.attentionCode ??
+              (item.kind === "intervention" ? "execution-uncertain" : item.kind)
+          ].inboxAction;
+
 const inboxList: BrowseCommand = {
   usage:
     "inbox list [--status actionable|resolved|dismissed] [--kind question|approval|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
@@ -141,6 +154,7 @@ const inboxList: BrowseCommand = {
               "Rev",
               "Requester",
               "Reason",
+              "Next",
             ],
             items.map((i) =>
               i.kind === "runtime"
@@ -161,6 +175,7 @@ const inboxList: BrowseCommand = {
                     "-",
                     "-",
                     oneLine(i.lifecycle?.resolution ?? i.reason, 60),
+                    inboxNext(i),
                   ]
                 : [
                     i.id,
@@ -178,6 +193,7 @@ const inboxList: BrowseCommand = {
                     i.revision === null ? "-" : String(i.revision),
                     oneLine(i.requesterName, 30),
                     oneLine(i.lifecycle?.resolution ?? i.reason, 60),
+                    inboxNext(i),
                   ],
             ),
           ) +

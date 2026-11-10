@@ -3350,6 +3350,19 @@ export class OperatorApi {
       }
     };
     add(
+      "stacked-blocker-failed",
+      task.state === "open" && this.domain().failedStackedBlocker(taskId)
+        ? 1
+        : 0,
+    );
+    add(
+      "external-action-uncertain",
+      task.state === "open" &&
+        this.service.delivery().hasUncertainAction(taskId)
+        ? 1
+        : 0,
+    );
+    add(
       "question",
       view.questions.filter(
         (i) =>

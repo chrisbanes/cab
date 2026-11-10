@@ -1,4 +1,5 @@
 import { selectAssignmentExecution } from "./operator-runtime.js";
+import { attentionNext } from "../operator/attention.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
 import {
@@ -1087,6 +1088,14 @@ export class StandaloneService {
               reason: "An execution callback has not ended",
             })),
         ],
+        (taskId, blockerTaskId, version) => {
+          if (domain.leadBindings().some((b) => b.taskId === taskId))
+            coordination.ensureDeliveryEventWithinTransaction(
+              taskId,
+              "The stacked blocker's task state changed and its failure hold cleared; other admission holds still apply.",
+              `stacked-blocker-cleared:${blockerTaskId}:task:${version}`,
+            );
+        },
       );
       domain.migrate();
       let diagnostics: ExecutionDiagnosticsStore | undefined;
@@ -1456,12 +1465,20 @@ export class StandaloneService {
               taskId,
               observation,
             ),
-          feedback: (taskId, reason, identity) =>
-            coordination.ensureDeliveryEventWithinTransaction(
-              taskId,
-              reason,
-              identity,
-            ),
+          failedStackedDependents: (blockerTaskId) =>
+            domain.failedStackedDependents(blockerTaskId),
+          feedback: (taskId, reason, identity) => {
+            if (
+              domain.task(taskId).state === "open" &&
+              domain.leadBindings().some((b) => b.taskId === taskId)
+            )
+              return coordination.ensureDeliveryEventWithinTransaction(
+                taskId,
+                reason,
+                identity,
+              );
+            return false;
+          },
           taskWorkspace,
           projectWrite: (taskId, run) =>
             this.withProjectWrite(
@@ -4121,6 +4138,9 @@ export class StandaloneService {
     )
       throw new DeliveryHoldError(
         "Stacked blocker failed; Unstack or Cancel the dependent",
+        domain.task(caller.taskId).state === "open"
+          ? "stacked-blocker-failed"
+          : undefined,
       );
     if (domain.project(caller.projectId).archived)
       throw new DomainConflictError("Archived projects are read-only");
@@ -4185,6 +4205,11 @@ export class StandaloneService {
     });
     if (canonicalMaterial(current) !== canonicalMaterial(caller))
       throw new Error("Delivery caller revision changed");
+    if (deliveryStore.hasUncertainAction(caller.taskId, exceptOperationId))
+      throw new DeliveryHoldError(
+        "External action outcome is unknown",
+        "external-action-uncertain",
+      );
     if (state.taskHold(caller.taskId))
       throw new DeliveryHoldError("Task is held");
     const draftTurn =
@@ -5003,12 +5028,47 @@ export class StandaloneService {
       code:
         | "execution-uncertain"
         | "not-started"
+        | "stacked-blocker-failed"
+        | "external-action-uncertain"
         | "unresolved-result"
         | "completion-rejected";
       key: string;
       reason: string;
     }> = [];
     if (task.state !== "open") return conditions;
+    const edge = domain.activeStackedDependency(taskId);
+    if (edge) {
+      const prefix = `stack-failure:${JSON.stringify([taskId, edge.blockerTaskId, edge.repositoryId])}:`;
+      const existing = this.inboxLifecycle()
+        .rows(taskId)
+        .find(
+          (r) =>
+            r.kind === "intervention" &&
+            r.status !== "resolved" &&
+            r.sourceKey.startsWith(prefix),
+        );
+      const failed = domain.failedStackedBlocker(taskId);
+      const unknown = domain.stackFacts(taskId)?.reason === "blocker-unknown";
+      // A failed refresh cannot clear an observed episode or discard its dismissal.
+      if (failed || (existing && unknown))
+        conditions.push({
+          code: "stacked-blocker-failed",
+          key: existing?.sourceKey ?? `${prefix}${randomUUID()}`,
+          reason: failed
+            ? attentionNext["stacked-blocker-failed"].reason
+            : "Stacked blocker state is unknown; refresh delivery evidence",
+        });
+    }
+    for (const action of this.delivery().actions(taskId))
+      if (
+        action.state === "uncertain" &&
+        !isServiceDeliveryCaller(action.binding)
+      )
+        conditions.push({
+          code: "external-action-uncertain",
+          key: `external-action:${action.operationId}:${action.attempts}`,
+          reason: attentionNext["external-action-uncertain"].reason,
+        });
     const held: string[] = [];
     for (const a of domain.assignments(taskId)) {
       const s = selectAssignmentExecution(a, this);

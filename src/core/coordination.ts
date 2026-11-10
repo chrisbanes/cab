@@ -997,7 +997,7 @@ export class CoordinationStore {
     taskId: string,
     reason: string,
     identity: string,
-  ): void {
+  ): boolean {
     const lead = this.required(
       "SELECT assignmentId FROM task_lead_bindings WHERE taskId=?",
       taskId,
@@ -1007,7 +1007,7 @@ export class CoordinationStore {
       taskId,
       identity,
     );
-    if (prior) return;
+    if (prior) return false;
     const event = this.newEvent(
       taskId,
       String(lead.assignmentId),
@@ -1020,6 +1020,7 @@ export class CoordinationStore {
         "INSERT INTO coordination_external_delivery_notices VALUES (?,?,?)",
       )
       .run(taskId, identity, event.eventId);
+    return true;
   }
   deliveryActionBlockers(
     caller: RuntimeDeliveryCaller,

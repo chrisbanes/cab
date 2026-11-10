@@ -532,7 +532,7 @@ test("a remote that already equals the commit but was not pushed by cab is an ou
   }
 });
 
-test("a retry may find its own earlier push, which landed late, without a push or a wake", async (t) => {
+test("a retry finds its late push without resending and wakes once when uncertainty clears", async (t) => {
   const world = publicationWorld(t);
   const sha = world.commit();
   world.setPush("uncertain-lost");
@@ -550,7 +550,10 @@ test("a retry may find its own earlier push, which landed late, without a push o
     "confirmed-success",
   );
   assert.equal(world.pushes.length, 1);
-  assert.deepEqual(world.wakes, []);
+  assert.deepEqual(
+    world.wakes.map((wake) => wake.identity),
+    [`external-action-resolved:${record.operationId}:1`],
+  );
   assert.equal(
     world.store.taskBranch(world.taskId, repositoryId)?.lastPushedSha,
     sha,

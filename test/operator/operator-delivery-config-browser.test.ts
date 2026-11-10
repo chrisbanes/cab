@@ -23,11 +23,11 @@ const test = browserSuite("operator-delivery-config-browser");
 const path = "/projects/:atlas/settings?tab=delivery";
 const save = (page: Page) =>
   page.getByRole("button", { name: "Save delivery", exact: true });
-const read = async (page: Page) => {
+const read = async (page: Page, button = "Refresh") => {
   const response = page.waitForResponse(
     (r) => r.request().method() === "GET" && /configuration$/.test(r.url()),
   );
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: button, exact: true }).click();
   await response;
   await page.waitForFunction(
     () => !document.body.innerText.includes("Refreshing."),
@@ -52,6 +52,155 @@ const addCheck = (page: Page) =>
     name: "Add additional check for acme/atlas",
     exact: true,
   });
+
+test("project warning clears after fixing delivery needs and returns when the host is unavailable", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  let hostAvailable = true;
+  const { page, ids } = await startSettings(
+    journey,
+    path,
+    undefined,
+    undefined,
+    {
+      serviceOptions: {
+        ghExecutable: gh.executable,
+        delivery: {
+          providerFactories: {
+            github: () =>
+              ({
+                repositoryRequirements: async () => {
+                  if (!hostAvailable) throw new Error("offline");
+                  return { hostChecks: [], allowedMethods: ["squash"] };
+                },
+              }) as never,
+          },
+        },
+      },
+    },
+  );
+  const projectUrl = new URL(`/projects/${ids.atlas}`, page.url()).href;
+  await page.goto(projectUrl);
+  await page
+    .getByText("The delivery agent has no confirmed usable repository.", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByRole("link", { name: "Fix delivery setup", exact: true })
+    .click();
+  const needs = page.getByRole("list", {
+    name: "Delivery needs for acme/atlas",
+  });
+  await needs.getByText(/Cannot push branches/).waitFor();
+  await needs
+    .getByRole("button", { name: "Choose delivery level" })
+    .first()
+    .click();
+  assert.equal(
+    await levelControl(page).evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await levelControl(page).selectOption("merge-with-approval");
+  await needs.getByText(/Choose a merge method below/).waitFor();
+  await needs.getByText(/No required checks/).waitFor();
+  const authority = page.getByRole("region", {
+    name: "Effective authority for acme/atlas",
+  });
+  await authority
+    .getByText(/Unavailable until credential is fixed.*Require approval: merge/)
+    .waitFor();
+  await grant(page, 1)
+    .getByLabel("Authority", { exact: true })
+    .selectOption("approval");
+  assert.equal(await levelControl(page).inputValue(), "");
+  await authority.getByText(/Require approval: push branches/).waitFor();
+  await levelControl(page).selectOption("merge-with-approval");
+  await page.getByLabel("Completion mode").selectOption("reviewable-pr");
+  await needs.getByRole("button", { name: "Change completion mode" }).click();
+  assert.equal(
+    await page
+      .getByLabel("Completion mode")
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.getByLabel("Completion mode").selectOption("through-merge");
+  await needs.getByRole("button", { name: "Choose merge method" }).click();
+  assert.equal(
+    await page
+      .getByLabel("Merge method for acme/atlas", { exact: true })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page
+    .getByLabel("Merge method for acme/atlas", { exact: true })
+    .selectOption("squash");
+  await needs
+    .getByRole("button", { name: "Configure required checks" })
+    .click();
+  assert.equal(
+    await addCheck(page).evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await addCheck(page).click();
+  await check(page).getByLabel("Check name").fill("build");
+  await needs.getByRole("button", { name: "Set credential" }).click();
+  assert.equal(
+    await page
+      .getByLabel("Credential reference change")
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.getByLabel("Credential reference change").selectOption("gh");
+  await authority
+    .getByText(/Credential unconfirmed.*Require approval: merge/)
+    .waitFor();
+  await save(page).click();
+  await savedOutcome(page);
+  await read(page);
+  assert.doesNotMatch(await needs.innerText(), /Needs attention/);
+  await authority.getByText(/^Require approval: merge pull requests/).waitFor();
+  await captureBrowserEvidence(page, "delivery-needs-fixed");
+  const reloaded = page.waitForResponse((r) => /configuration$/.test(r.url()));
+  await page.goto(projectUrl);
+  await page
+    .getByRole("link", { name: "Project settings", exact: true })
+    .waitFor();
+  await reloaded;
+  await page
+    .getByText("Loading delivery readiness…", { exact: true })
+    .waitFor({ state: "detached" });
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Fix delivery setup", exact: true })
+      .count(),
+    0,
+  );
+  hostAvailable = false;
+  await read(page, "Refresh tasks");
+  await page
+    .getByRole("link", { name: "Fix delivery setup", exact: true })
+    .waitFor();
+  await page
+    .getByText(/GitHub requirements are unavailable.*Check the credential/)
+    .waitFor();
+  await page
+    .getByRole("link", { name: "Fix delivery setup", exact: true })
+    .click();
+  await needs.getByText(/GitHub requirements are unavailable/).waitFor();
+  hostAvailable = true;
+  const refreshed = page.waitForResponse((r) => /configuration$/.test(r.url()));
+  await needs
+    .getByRole("button", { name: "Refresh host access" })
+    .first()
+    .click();
+  await refreshed;
+  await needs.getByText(/GitHub requirements were read/).waitFor();
+  assert.equal(
+    await needs.getByRole("button", { name: "Refresh host access" }).count(),
+    0,
+  );
+});
 
 test("Delivery edits exact scopes and checks with keyboard focus, discard, credential intents and readback", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path);
@@ -1196,6 +1345,12 @@ test("bulk targets the complete saved link snapshot and cancels without editing"
     await route.fulfill({ response, json });
   });
   await read(page);
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Open GitLab Settings", exact: true })
+      .getAttribute("href"),
+    "/settings#gitlab-credentials",
+  );
   await page
     .getByRole("region", { name: "Repository 42", exact: true })
     .getByText("Not set up", { exact: true })

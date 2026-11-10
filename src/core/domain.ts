@@ -714,6 +714,11 @@ export class DomainStore {
     private readonly onChange?: () => void,
     private readonly verifyRepository: RepositoryVerifier = unconfiguredVerifier,
     private readonly lifecycleFacts?: ProjectLifecycleFacts,
+    private readonly stackedBlockerCleared?: (
+      taskId: string,
+      blockerTaskId: string,
+      version: number,
+    ) => void,
   ) {}
 
   /** Credential references a command selected but has not recorded yet; see select. */
@@ -2465,6 +2470,17 @@ export class DomainStore {
       this.blockerGate(edge.blockerTaskId, edge.repositoryId, true) === "failed"
     );
   }
+  failedStackedDependents(blockerTaskId: string): string[] {
+    return this.tasks(String(this.task(blockerTaskId).projectId))
+      .filter(
+        (task) =>
+          task.state === "open" &&
+          this.activeStackedDependency(String(task.id))?.blockerTaskId ===
+            blockerTaskId &&
+          this.failedStackedBlocker(String(task.id)),
+      )
+      .map((task) => String(task.id));
+  }
 
   /** Whether the task stacks or waits on a single blocker, and why; null when that does not apply. */
   stackFacts(taskId: string): StackFacts | null {
@@ -3431,6 +3447,10 @@ export class DomainStore {
         this.preflightTaskConfigure(command);
         const current = this.task(command.taskId);
         this.version(current, command.expectedVersion);
+        const failedDependents =
+          command.state !== undefined
+            ? this.failedStackedDependents(command.taskId)
+            : [];
         if (command.title !== undefined)
           this.db
             .prepare("UPDATE tasks SET title = ? WHERE id = ?")
@@ -3452,6 +3472,13 @@ export class DomainStore {
           this.db
             .prepare("DELETE FROM source_completions WHERE taskId = ?")
             .run(command.taskId);
+        for (const taskId of failedDependents)
+          if (!this.failedStackedBlocker(taskId))
+            this.stackedBlockerCleared?.(
+              taskId,
+              command.taskId,
+              Number(current.version) + 1,
+            );
         return this.task(command.taskId);
       }
       case "profile.create": {

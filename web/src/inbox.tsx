@@ -699,6 +699,15 @@ export function Inbox({
                 </div>
               )}
               {!isQuestion && meta}
+              {selected && (
+                <InboxVisibility
+                  key={`${selected.id}:${selected.lifecycle?.status}`}
+                  item={selected}
+                  client={client}
+                  session={session}
+                  onChanged={resource.refresh}
+                />
+              )}
               {selected?.lifecycle &&
               selected.lifecycle.status !== "actionable" ? (
                 <p>
@@ -746,15 +755,6 @@ export function Inbox({
                 />
               ) : (
                 <p>Selected request is unavailable.</p>
-              )}
-              {selected && (
-                <InboxVisibility
-                  key={`${selected.id}:${selected.lifecycle?.status}`}
-                  item={selected}
-                  client={client}
-                  session={session}
-                  onChanged={resource.refresh}
-                />
               )}
               {isQuestion && meta}
             </div>

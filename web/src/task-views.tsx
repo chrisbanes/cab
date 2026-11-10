@@ -60,7 +60,11 @@ import {
   operatorNext,
   readyButBlocked,
   nextActor,
+  readinessHiddenCounts,
   taskReasonItems,
+  taskLeadLabel,
+  sharedTaskReasons,
+  sharedTaskReasonText,
   visibleColumns,
   type TaskAggregate,
   type TaskColumn,
@@ -103,9 +107,13 @@ const identity = (task: TaskListSummary) =>
   task.source
     ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
     : "Local task";
-const leadName = (task: TaskListSummary) =>
-  task.lead?.name ?? (task.lead ? "Name unavailable" : null);
-function TaskFacts({ task }: { task: TaskListSummary }) {
+function TaskFacts({
+  task,
+  shared = [],
+}: {
+  task: TaskListSummary;
+  shared?: readonly string[];
+}) {
   // The Next line names who acts; a task nobody must act on shows none (the task strip still says so).
   const next = nextActor(task.attention.codes, taskColumn(task));
   return (
@@ -113,11 +121,13 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
       {stackedPrMarker(task) && (
         <p className="body muted">{stackedPrMarker(task)}</p>
       )}
-      {taskReasonItems(task).map((r) => (
-        <p key={r.text} className="body muted task-reason">
-          <ReasonText reason={r} />
-        </p>
-      ))}
+      {taskReasonItems(task)
+        .filter((r) => !shared.includes(r.text))
+        .map((r) => (
+          <p key={r.text} className="body muted task-reason">
+            <ReasonText reason={r} />
+          </p>
+        ))}
       {next.code && (
         <p
           className="body task-next"
@@ -129,7 +139,13 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
     </>
   );
 }
-export function TaskRow({ task }: { task: TaskListSummary }) {
+export function TaskRow({
+  task,
+  shared = [],
+}: {
+  task: TaskListSummary;
+  shared?: readonly string[];
+}) {
   return (
     <article className="task-row" data-task-id={task.id}>
       <a className="small-heading task-title" href={taskDetailHref(task)}>
@@ -142,16 +158,16 @@ export function TaskRow({ task }: { task: TaskListSummary }) {
         <TaskStateMark task={task} />
       </p>
       <div className="task-detail">
-        <TaskFacts task={task} />
+        <TaskFacts task={task} shared={shared ?? []} />
         {task.source && task.source.state !== "open" && (
           <p className="metadata muted task-source-state">
             GitHub source: {task.source.state ?? "state unavailable"}
           </p>
         )}
       </div>
-      <p className="metadata muted task-lead">
-        {leadName(task) ? `${leadName(task)} · lead` : "No lead configured"}
-      </p>
+      {taskLeadLabel(task) && (
+        <p className="metadata muted task-lead">{taskLeadLabel(task)}</p>
+      )}
       <ChevronRight aria-hidden="true" className="task-chevron" />
     </article>
   );
@@ -159,12 +175,14 @@ export function TaskRow({ task }: { task: TaskListSummary }) {
 export function TaskCard({
   task,
   request,
+  shared,
 }: {
   task: TaskListSummary;
   request?: InboxItem | undefined;
+  shared?: readonly string[];
 }) {
   const url = task.source?.url,
-    lead = leadName(task),
+    lead = taskLeadLabel(task),
     column = taskColumn(task);
   return (
     <article data-task-id={task.id}>
@@ -207,16 +225,14 @@ export function TaskCard({
             </span>
           )}
         </p>
-        <TaskFacts task={task} />
+        <TaskFacts task={task} shared={shared ?? []} />
         {task.source && task.source.state !== "open" && (
           <p className="metadata muted task-source-state">
             GitHub source: {task.source.state ?? "state unavailable"}
           </p>
         )}
         <div className="metadata task-card-footer">
-          <span className="task-lead">
-            {lead ? `${lead} · accountable lead` : "No lead configured"}
-          </span>
+          {lead && <span className="task-lead">{lead} · accountable lead</span>}
           {request && (
             <a className="task-request" href={requestHref(request)}>
               {requestActionLabel(request)} →
@@ -229,12 +245,16 @@ export function TaskCard({
 }
 export function TaskBoard({
   tasks,
+  hiddenByReadiness = [],
+  sharedReasons = [],
   columns,
   initial,
   requests,
   columnsTarget,
 }: {
   tasks: TaskListSummary[];
+  hiddenByReadiness?: TaskListSummary[];
+  sharedReasons?: readonly [string, number][];
   columns: readonly TaskColumn[];
   /** The column a State filter names, shown first unless the operator already chose one. */
   initial: TaskColumn | undefined;
@@ -251,6 +271,7 @@ export function TaskBoard({
     selected = Math.min(stored, columns.length - 1);
   const board = useRef<HTMLDivElement>(null);
   const counts = columnCounts(tasks);
+  const hiddenCounts = columnCounts(hiddenByReadiness);
   const firstRequest = new Map<string, InboxItem>();
   for (const item of requests.data?.items ?? [])
     if (item.kind !== "runtime" && !firstRequest.has(item.taskId))
@@ -372,6 +393,9 @@ export function TaskBoard({
           >
             {risky && <CircleQuestionMark aria-hidden="true" />}
             {column} · {counts[column]}
+            {hiddenCounts[column] > 0
+              ? ` (${hiddenCounts[column]} hidden)`
+              : ""}
           </Button>
         );
       })}
@@ -392,6 +416,11 @@ export function TaskBoard({
             <h2 className="board-column-heading">
               <ColumnMark column={column} className="board-column-name" />
               <span className="board-column-count">{counts[column]}</span>
+              {hiddenCounts[column] > 0 && (
+                <span className="metadata muted">
+                  {hiddenCounts[column]} hidden by Ready filter
+                </span>
+              )}
             </h2>
             {tasks
               .filter((t) => taskColumn(t) === column)
@@ -400,6 +429,7 @@ export function TaskBoard({
                   key={t.id}
                   task={t}
                   request={firstRequest.get(t.id)}
+                  shared={sharedReasons.map(([reason]) => reason)}
                 />
               ))}
             {!counts[column] && (
@@ -522,6 +552,13 @@ export function TaskViews({
       ? all.filter((t) => t.projectId === projectId).length
       : all.length,
     tasks = filterTasks(all, filters, projectId),
+    eligible = filterTasks(all, { ...filters, ready: "any" }, projectId),
+    hiddenByReadiness =
+      filters.ready === "yes" ? eligible.filter((task) => !task.ready) : [],
+    hiddenCounts = readinessHiddenCounts(hiddenByReadiness),
+    hiddenDrafts = hiddenCounts.drafts,
+    hiddenOther = hiddenCounts.other,
+    sharedReasons = sharedTaskReasons(tasks),
     notice = capacityNotice(tasks);
   const project = workspace?.data.projects.find((p) => p.id === projectId),
     scope = projectId || filters.project;
@@ -540,6 +577,9 @@ export function TaskViews({
         overview={overview}
         count={tasks.length}
         total={inScope}
+        eligible={eligible.length}
+        hiddenDrafts={hiddenDrafts}
+        hiddenOther={hiddenOther}
         loaded={Boolean(state.data)}
         reset={reset}
         refresh={refresh}
@@ -548,6 +588,11 @@ export function TaskViews({
         columnsSlot={phone && filters.view === "board" ? setSlot : undefined}
       />
       {notice && <p className="metadata muted work-capacity">{notice}</p>}
+      {sharedReasons.map(([reason, count]) => (
+        <p key={reason} className="metadata muted">
+          {sharedTaskReasonText(count, reason)}
+        </p>
+      ))}
       {/* Home with no project shows the getting-started checklist instead. */}
       {state.data &&
         !tasks.length &&
@@ -572,6 +617,8 @@ export function TaskViews({
           // A new State filter picks its column again; other filters keep the operator's tab.
           key={filters.state}
           tasks={tasks}
+          hiddenByReadiness={hiddenByReadiness}
+          sharedReasons={sharedReasons}
           columns={visibleColumns(filters.state)}
           initial={allColumns.find((c) => c === filters.state)}
           requests={requests}
@@ -592,7 +639,11 @@ export function TaskViews({
             data-density={overview ? "compact" : undefined}
           >
             {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} />
+              <TaskRow
+                key={t.id}
+                task={t}
+                shared={sharedReasons.map(([reason]) => reason)}
+              />
             ))}
           </div>
         </>
