@@ -1,3 +1,4 @@
+import { requestRefusalText } from "../../src/operator/task-restart-copy.js";
 import { randomUUID } from "./browser-crypto.js";
 import {
   Fragment,
@@ -1411,15 +1412,33 @@ export function AssignmentRecovery(
             <section className="settings-aside" aria-label="Next step">
               <h2 className="small-heading">Next step</h2>
               <p className="body">
-                Inspect the execution. Release a generation that never sent a
-                turn, or review the exact bound turn and independent evidence
-                below. Neither resumes work.
+                {data.assignment.requestRefusal
+                  ? requestRefusalText(data.assignment.requestRefusal)
+                  : "Inspect the execution. Release a generation that never sent a turn, or review the exact bound turn and independent evidence below. Neither resumes work."}
               </p>
+              {data.assignment.requestRefusal && (
+                <ActionLink href={`/tasks/${data.taskId}`} variant="secondary">
+                  Review Start again on task
+                </ActionLink>
+              )}
             </section>
           </div>
           <div className="settings-split">
             <div className="settings-column">
               <Panel title="Execution and assignment">
+                {data.assignment.requestRefusal && (
+                  <>
+                    <p className="body">
+                      {requestRefusalText(data.assignment.requestRefusal)}
+                    </p>
+                    <ActionLink
+                      href={`/tasks/${data.taskId}`}
+                      variant="secondary"
+                    >
+                      Review Start again on task
+                    </ActionLink>
+                  </>
+                )}
                 {status?.note && <p className="body">{status.note}</p>}
                 <p className="body">
                   Accountable project lead: {taskFacts?.lead}.

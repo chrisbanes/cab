@@ -477,3 +477,24 @@ test("stack markers use exactly the recorded blocker PR number and invent no ide
     /membership unconfirmed/,
   );
 });
+
+test("request-only refusal copy names Start again or its independent blocker", async () => {
+  const { requestRefusalText } = await import(
+    "../../src/operator/task-restart-copy.js"
+  );
+  const request = {
+    workId: "old-request",
+    reason: "Prepared against older revisions and never ran.",
+  };
+  assert.match(
+    requestRefusalText({ ...request, startAgain: { available: true } }),
+    /never ran.*Start again is available/,
+  );
+  assert.match(
+    requestRefusalText({
+      ...request,
+      startAgain: { available: false, reason: "source-held" },
+    }),
+    /source.*held/,
+  );
+});
