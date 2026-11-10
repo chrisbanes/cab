@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings design artboards</title>
+    <style>
+      body { margin:24px; background:#e4e4e7; color:#18181b; font:14px/1.5 system-ui,sans-serif; }
+      h1 { font-size:24px; margin:0; }
+      h2 { font-size:18px; margin:32px 0 8px; }
+      p { max-width:85ch; }
+      a { color:inherit; }
+      .pair { display:flex; gap:24px; align-items:start; }
+      figure { margin:0; }
+      figcaption { margin-bottom:8px; }
+      .desktop { width:888px; height:585px; overflow:hidden; }
+      .desktop iframe { width:1366px; height:900px; transform:scale(.65); transform-origin:top left; }
+      iframe { border:0; background:#fff; }
+      .phone { width:390px; height:844px; }
+    </style>
+  </head>
+  <body>
+    <h1>Settings · section pages</h1>
+    <p>Design proposal for maintainer review. Illustrative fixture data; settings controls do not save.
+      Desktop frames render at 1366 × 900 (shown at 65%); phone frames render at 390 × 844.
+      Scroll inside each frame to inspect the rest of its page. Frames follow your system theme.</p>
+    <p><a href="proposal.md">Read the route table, read inventory and implementation slices</a> ·
+      <a href="artboard.html">Open the responsive prototype</a></p>
+    <h2>Returning landing → Projects</h2>
+    <div class="pair">
+      <figure><figcaption>Desktop · returning /settings resolves to /settings/projects</figcaption><div class="desktop"><iframe title="Projects desktop" src="artboard.html?page=projects"></iframe></div></figure>
+      <figure><figcaption>Phone · Sections closed</figcaption><iframe class="phone" title="Projects phone" src="artboard.html?page=projects"></iframe></figure>
+    </div>
+    <h2>First-turn landing → Readiness</h2>
+    <div class="pair">
+      <figure><figcaption>Desktop · first-turn /settings resolves to /settings/readiness</figcaption><div class="desktop"><iframe title="Readiness desktop" src="artboard.html?page=readiness"></iframe></div></figure>
+      <figure><figcaption>Phone · open Sections to inspect all nine links</figcaption><iframe class="phone" title="Readiness phone" src="artboard.html?page=readiness"></iframe></figure>
+    </div>
+    <h2>Notifications</h2>
+    <div class="pair">
+      <figure><figcaption>Desktop · explicit /settings/notifications</figcaption><div class="desktop"><iframe title="Notifications desktop" src="artboard.html?page=notifications"></iframe></div></figure>
+      <figure><figcaption>Phone · explicit destination is honoured before the first turn too</figcaption><iframe class="phone" title="Notifications phone" src="artboard.html?page=notifications"></iframe></figure>
+    </div>
+  </body>
+</html>

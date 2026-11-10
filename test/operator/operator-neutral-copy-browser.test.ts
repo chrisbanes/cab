@@ -70,7 +70,11 @@ for (const [name, viewport] of [
       workerId = randomUUID();
     const run = (command: Record<string, unknown>) =>
       d.execute({ actor: "operator", key: randomUUID(), ...command } as never);
-    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      minimumLeadSlots: 0,
+      globalLimit: 4,
+    });
     run({
       type: "profile.create",
       profileId: lead,

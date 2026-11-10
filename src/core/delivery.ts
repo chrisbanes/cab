@@ -12,7 +12,12 @@ import {
   issueCurrentBodyLimit,
   issueTitleLimit,
 } from "./issue-text-limits.js";
-import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
+import {
+  DeliveryApprovalRequiredError,
+  DeliveryHoldError,
+  DomainConflictError,
+  DomainPolicyError,
+} from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sourceCredentialReference } from "./credential-reference.js";
@@ -1240,7 +1245,10 @@ export class DeliveryStore {
       )
         approved = this.operatorApprovalCurrent(request, binding);
     } else if (request.operatorReviewId)
-      throw Error("Runtime caller cannot use an operator confirmation");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Runtime caller cannot use an operator confirmation",
+      );
     if (
       request.action.kind === "issue.status" &&
       !isServiceDeliveryCaller(binding)
@@ -1263,7 +1271,7 @@ export class DeliveryStore {
         "Only the operator's task publication may use this action",
       );
     if (policyVersion !== undefined && policy.version !== policyVersion)
-      throw new Error("Delivery policy changed");
+      throw new DomainPolicyError("forbidden", "Delivery policy changed");
     const action = request.action;
     // The saved status mapping, checked above, is the service's authority; no grant is consulted for it.
     const grant = isServiceDeliveryCaller(binding)
@@ -1295,7 +1303,7 @@ export class DeliveryStore {
         isRecoveryAction(action)) &&
       !approved
     )
-      throw new Error("Exact material approval required");
+      throw new DeliveryApprovalRequiredError();
     if (isRecoveryAction(action)) {
       const branch = this.taskBranch(
         binding.taskId,
@@ -1307,15 +1315,24 @@ export class DeliveryStore {
         branch.outsideHeadSha !== action.outsideHeadSha ||
         branch.lastPushedSha !== action.lastPushedSha
       )
-        throw new Error("Recovery material is not the recorded outside change");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Recovery material is not the recorded outside change",
+        );
       if (
         action.kind === "branch.adopt" &&
         action.outsideHeadSha === absentBranchHead
       )
-        throw new Error("A deleted branch cannot be adopted");
+        throw new DomainPolicyError(
+          "forbidden",
+          "A deleted branch cannot be adopted",
+        );
     }
     if (action.kind === "pr.merge" && policy.mode !== "through-merge")
-      throw new Error("Project delivery mode forbids merge");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Project delivery mode forbids merge",
+      );
     if ("headRef" in action.target) {
       const branch = this.taskBranch(
         binding.taskId,
@@ -1325,7 +1342,10 @@ export class DeliveryStore {
         action.kind === "pr.create" &&
         branch?.branch !== action.target.headRef
       )
-        throw new Error("PR head is not the task's assigned branch");
+        throw new DomainPolicyError(
+          "forbidden",
+          "PR head is not the task's assigned branch",
+        );
       // A PR from the task branch may only be acted on at the commit cab last pushed there.
       if (
         branch?.branch === action.target.headRef &&
@@ -1333,7 +1353,10 @@ export class DeliveryStore {
           branch.outsideHeadSha !== null ||
           action.target.expectedHeadSha !== branch.lastPushedSha)
       )
-        throw new Error("PR head is not the task branch's last cab push");
+        throw new DomainPolicyError(
+          "forbidden",
+          "PR head is not the task branch's last cab push",
+        );
     }
     if (
       action.kind === "pr.thread.reply" ||
@@ -1349,7 +1372,10 @@ export class DeliveryStore {
           (t) => t.nodeId === action.target.threadNodeId,
         )
       )
-        throw new Error("Review thread is not on the task's bound PR");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Review thread is not on the task's bound PR",
+        );
     }
     const boundPr = this.boundPrOf(binding.taskId, action);
     if (
@@ -1358,7 +1384,10 @@ export class DeliveryStore {
         ("baseRef" in action.target &&
           action.target.baseRef !== boundPr.acceptedBaseRef))
     )
-      throw new Error("PR base is not the delivery's accepted base");
+      throw new DomainPolicyError(
+        "forbidden",
+        "PR base is not the delivery's accepted base",
+      );
     const source = this.db
       .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(binding.projectId) as { readiness: string } | undefined;
@@ -1384,7 +1413,10 @@ export class DeliveryStore {
           (action.kind === "issue.create" &&
             action.labels.some((l) => readinessLabels.has(l.toLowerCase()))))
       )
-        throw new Error("Agent cannot change readiness labels");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Agent cannot change readiness labels",
+        );
       if (
         !exempt &&
         action.kind === "project.field" &&
@@ -1395,7 +1427,10 @@ export class DeliveryStore {
             c.fieldNodeId === action.fieldNodeId,
         )
       )
-        throw new Error("Agent cannot change readiness fields");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Agent cannot change readiness fields",
+        );
     }
   }
   /**
@@ -1998,10 +2033,12 @@ export class DeliveryStore {
     caller: DeliveryCaller,
     approved: boolean,
     admission: () => void = () => {},
+    onRefused?: (error: unknown) => void,
   ): DeliveryActionRecord {
     const request = externalActionArgumentsSchema.parse(input),
       binding = bindingSchema.parse(caller);
-    return this.transaction(() => {
+    let refusal: { error: unknown } | undefined;
+    const prepared = this.transaction(() => {
       const prior = this.db
         .prepare(
           "SELECT materialHash FROM delivery_actions WHERE operationId=?",
@@ -2026,7 +2063,7 @@ export class DeliveryStore {
             : this.actionBlockers(binding.taskId)
           ).length
         )
-          throw new Error("Task has unresolved external action");
+          throw new DeliveryHoldError("Task has unresolved external action");
         if (approved && request.approval && isRuntimeDeliveryCaller(binding)) {
           if (
             !this.approvalCurrent(
@@ -2036,7 +2073,10 @@ export class DeliveryStore {
               request.operationId,
             )
           )
-            throw new Error("Approval is stale or bound to another operation");
+            throw new DomainPolicyError(
+              "forbidden",
+              "Approval is stale or bound to another operation",
+            );
           this.db
             .prepare(
               "UPDATE delivery_approval_bindings SET operationId=? WHERE interactionId=? AND (operationId IS NULL OR operationId=?)",
@@ -2047,8 +2087,9 @@ export class DeliveryStore {
               request.operationId,
             );
         }
-      } catch {
+      } catch (error) {
         denied = true;
+        refusal = { error };
       }
       if (!denied && request.action.kind.startsWith("branch."))
         this.assignTaskBranchWithinTransaction(
@@ -2089,6 +2130,9 @@ export class DeliveryStore {
         );
       return record;
     });
+    // Reported only after the denial is committed, so the caller can explain it.
+    if (refusal) onRefused?.(refusal.error);
+    return prepared;
   }
   beginAttempt(
     operationId: string,

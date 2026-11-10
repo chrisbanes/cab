@@ -3416,8 +3416,9 @@ function settingsFakeRuntime(options: { failLists?: number } = {}) {
     "  { data: [{ model: 'm-alt', isDefault: false, supportedReasoningEfforts: efforts('medium') }], nextCursor: null },",
     "];",
     "let lists = 0;",
+    "let sandboxType = 'workspaceWrite';",
     "const write = (message) => process.stdout.write(JSON.stringify(message) + '\\n');",
-    "const reported = (params) => ({ thread: { id: 'thread-1' }, approvalPolicy: 'never', sandbox: { type: 'workspaceWrite' }, model: params.model ?? 'm-default', modelProvider: 'fake', reasoningEffort: params.config?.model_reasoning_effort ?? 'low', serviceTier: null });",
+    "const reported = (params) => ({ thread: { id: 'thread-1' }, approvalPolicy: 'never', sandbox: { type: sandboxType }, model: params.model ?? 'm-default', modelProvider: 'fake', reasoningEffort: params.config?.model_reasoning_effort ?? 'low', serviceTier: null });",
     "for await (const line of createInterface({ input: process.stdin })) {",
     "  const message = JSON.parse(line);",
     "  if (message.id !== undefined) appendFileSync(log, JSON.stringify({ method: message.method, params: message.params }) + '\\n');",
@@ -3429,8 +3430,8 @@ function settingsFakeRuntime(options: { failLists?: number } = {}) {
     "    if (lists <= failLists) write({ id: message.id, error: { code: -32000, message: 'unavailable' } });",
     "    else write({ id: message.id, result: pages[message.params?.cursor ? 1 : 0] });",
     "  }",
-    "  else if (message.method === 'thread/start') write({ id: message.id, result: reported(message.params) });",
-    "  else if (message.method === 'turn/start') write({ id: message.id, result: { turn: { id: 'turn-1' } } });",
+    "  else if (message.method === 'thread/start' || message.method === 'thread/resume') write({ id: message.id, result: reported(message.params) });",
+    "  else if (message.method === 'turn/start') { sandboxType = message.params.sandboxPolicy?.type ?? sandboxType; write({ id: message.id, result: { turn: { id: 'turn-1' } } }); }",
     "}",
   ].join("\n");
   writeFileSync(executable, source);
@@ -3616,6 +3617,33 @@ test("a skip-sandbox task turn sends full access, never to a read-only turn", as
       type: "readOnly",
       networkAccess: false,
     });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a thread resumed after a skip-sandbox or read-only turn is accepted", async () => {
+  const { root, runtime, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "skip", undefined, {
+        networkAccess: false,
+        skipSandbox: true,
+      }),
+      3000,
+    );
+    // The thread now reports dangerFullAccess, as the App Server does after such a turn.
+    await bounded(runtime.resumeThread("thread-1", []), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "draft", undefined, {
+        networkAccess: false,
+        access: "read-only",
+      }),
+      3000,
+    );
+    await bounded(runtime.resumeThread("thread-1", []), 3000);
   } finally {
     await cleanup();
   }

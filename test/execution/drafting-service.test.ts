@@ -517,8 +517,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
       (service as unknown as { db: import("node:sqlite").DatabaseSync }).db
         .prepare("SELECT runId, state, reason FROM drafting_runs")
         .all(),
-    usage: (projectId: string) =>
-      service.capacityLimits([projectId]).currentUsage,
+    usage: (_projectId: string) => service.capacityLimits().currentUsage,
     counts: () => {
       const db = (
         service as unknown as { db: import("node:sqlite").DatabaseSync }
@@ -914,6 +913,7 @@ test("a queued run whose copy cannot be removed stays stopping, and Stop retries
   w.execute(service, {
     type: "capacity.configure",
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   codex.script(() => new Promise<void>(() => {}));
@@ -1414,7 +1414,7 @@ test("a Stop during thread start is applied once the turn binds", async (t) => {
   assert.equal(w.tracked(service).usage(projectId).global, 0);
 });
 
-test("capacity: a drafting run waits on the global and project limits and runs after the blocker ends", async (t) => {
+test("capacity: a drafting run waits on the global limit, is a lead turn and runs after the blocker ends", async (t) => {
   const w = world(t);
   const opened = w.open();
   const { service, codex } = opened;
@@ -1423,6 +1423,7 @@ test("capacity: a drafting run waits on the global and project limits and runs a
   w.execute(service, {
     type: "capacity.configure",
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: { [projectId]: 1 },
   });
   const blocked: Array<() => void> = [];
@@ -1456,32 +1457,34 @@ test("capacity: a drafting run waits on the global and project limits and runs a
   );
   assert.equal(service.readDrafting(first)?.state, "failed");
 
-  // With the global limit raised, the project limit still holds a second run back.
+  // A drafting run is a lead turn: a project cap never holds it, and it may use a slot
+  // held for lead turns.
   w.execute(service, {
     type: "capacity.configure",
-    globalLimit: 4,
+    globalLimit: 2,
+    minimumLeadSlots: 1,
     projectOverrides: { [projectId]: 1 },
   });
   codex.script(hold);
-  codex.script(proposing(proposal));
+  codex.script(hold);
   const third = randomUUID();
   const fourth = randomUUID();
   await service.startDrafting({ runId: third, projectId, idea });
-  await waitUntil(
-    () => service.readDrafting(third)?.state === "running",
-    () => w.tracked(service).runs(),
-  );
   await service.startDrafting({ runId: fourth, projectId, idea });
-  assert.match(
-    service.turnRequests().find((item) => item.workId === `drafting:${fourth}`)
-      ?.reason ?? "",
-    /Capacity waiting: project active-turn limit \(1\)/,
-  );
-  blocked[1]?.();
   await waitUntil(
-    () => service.readDrafting(fourth)?.state === "proposed",
-    () => w.tracked(service).runs(),
+    () =>
+      service.readDrafting(third)?.state === "running" &&
+      service.readDrafting(fourth)?.state === "running",
+    () => ({
+      runs: w.tracked(service).runs(),
+      requests: service.turnRequests(),
+    }),
   );
+  const usage = w.tracked(service).usage(projectId);
+  assert.equal(usage.lead, 2);
+  assert.equal(usage.projects[projectId] ?? 0, 0);
+  blocked[1]?.();
+  blocked[2]?.();
 });
 
 test("Stop on a queued run settles it at once with no reservation", async (t) => {
@@ -1493,6 +1496,7 @@ test("Stop on a queued run settles it at once with no reservation", async (t) =>
   w.execute(service, {
     type: "capacity.configure",
     globalLimit: 1,
+    minimumLeadSlots: 0,
     projectOverrides: {},
   });
   codex.script(() => new Promise<void>(() => {}));

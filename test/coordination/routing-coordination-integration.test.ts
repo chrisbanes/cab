@@ -275,6 +275,7 @@ async function routedFixture(
   if (options.fillCapacity) {
     await service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 4,
       projectOverrides: { [projectId]: 1 },
     });
@@ -568,6 +569,7 @@ test("capacity waiting preserves the routing-selected candidate", async () => {
 
     await f.service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 4,
       projectOverrides: { [f.projectId]: 2 },
     });
@@ -649,7 +651,10 @@ test("a first turn waiting for capacity is re-captured at a newer assignment ver
       1,
     );
     // The turn never started, so admission re-captures and re-binds it at version 2.
+    // The holder's continuation is resumed work and takes the project slot first.
     f.runtime.complete(1);
+    await f.runtime.waitForTurnNumber(2);
+    f.runtime.complete(2);
     await until(() =>
       f.service
         .list()
@@ -1349,7 +1354,11 @@ test("routing fallbacks retain one lead event across duplicate wakes and restart
       );
       assert.equal(payload.reason, scenario.expectedReason, scenario.name);
 
-      await f.service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+      await f.service.configureCapacity({
+        key: randomUUID(),
+        minimumLeadSlots: 0,
+        globalLimit: 4,
+      });
       assert.equal(
         rowCount(
           f.service,
@@ -2232,6 +2241,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
     });
     await service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 1,
       projectOverrides: { [projectId]: 1 },
     });
@@ -2567,6 +2577,7 @@ test("restart acknowledges the exact lead inbox batch before finalizing a comple
     });
     await service.configureCapacity({
       key: randomUUID(),
+      minimumLeadSlots: 0,
       globalLimit: 1,
       projectOverrides: { [projectId]: 1 },
     });
