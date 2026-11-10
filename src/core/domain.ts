@@ -212,6 +212,7 @@ const commandSchema = z.discriminatedUnion("type", [
       leadProfileId: id.nullable().optional(),
       // Applies to executions admitted afterwards; absent leaves it unchanged.
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      reasoningSummaries: z.boolean().optional(),
       // Applies to turns admitted afterwards; absent leaves it unchanged.
       commandNetworkAccess: z.boolean().optional(),
       // Applies to turns admitted afterwards; absent leaves it unchanged.
@@ -220,6 +221,15 @@ const commandSchema = z.discriminatedUnion("type", [
       dangerouslySkipSandbox: z.boolean().optional(),
       // Applies to dependents not yet started; absent leaves it unchanged.
       stacking: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("project.reasoning.delete"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+      confirmed: z.literal(true),
     })
     .strict(),
   z
@@ -837,6 +847,10 @@ export class DomainStore {
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
         CREATE TABLE IF NOT EXISTS project_local_listening (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+        );
+        CREATE TABLE IF NOT EXISTS project_reasoning_summaries (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
@@ -2126,6 +2140,16 @@ export class DomainStore {
     return row?.mode === "baseline" ? "baseline" : "enhanced";
   }
 
+  /** Opt-in for later turns; no row means off. Runtime capture is not implemented. */
+  reasoningSummaries(projectId: string): boolean {
+    return (
+      this.one(
+        "SELECT enabled FROM project_reasoning_summaries WHERE projectId = ?",
+        id.parse(projectId),
+      )?.enabled === 1
+    );
+  }
+
   /** Command network access for new Codex turns; no row means off. */
   commandNetworkAccess(projectId: string): boolean {
     return (
@@ -3253,6 +3277,16 @@ export class DomainStore {
         this.operator(command);
         const current = this.project(command.projectId);
         this.version(current, command.expectedVersion);
+        if (
+          command.reasoningSummaries === true &&
+          (command.diagnosticCapture ??
+            this.diagnosticCaptureMode(command.projectId)) !== "enhanced"
+        )
+          throw new DomainPolicyError(
+            "invalid-input",
+            "Reasoning summaries require enhanced diagnostic capture",
+            ["reasoningSummaries"],
+          );
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
         // Saving under its own name (or only changing its case) never conflicts with itself.
         if (
@@ -3297,6 +3331,22 @@ export class DomainStore {
               "INSERT INTO project_command_network_access (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
             )
             .run(command.projectId, Number(command.commandNetworkAccess));
+        if (
+          command.reasoningSummaries !== undefined ||
+          command.diagnosticCapture === "baseline"
+        )
+          this.db
+            .prepare(
+              "INSERT INTO project_reasoning_summaries (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
+            )
+            .run(
+              command.projectId,
+              Number(
+                command.diagnosticCapture === "baseline"
+                  ? false
+                  : command.reasoningSummaries,
+              ),
+            );
         if (command.localListening !== undefined)
           this.db
             .prepare(
@@ -3315,6 +3365,17 @@ export class DomainStore {
               "INSERT INTO project_stacking (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
             )
             .run(command.projectId, Number(command.stacking));
+        return this.project(command.projectId);
+      }
+      case "project.reasoning.delete": {
+        this.operator(command);
+        this.version(this.project(command.projectId), command.expectedVersion);
+        // shortcut: no reasoning is stored yet, add erasure when summary storage lands.
+        this.db
+          .prepare(
+            "UPDATE domain_projects SET version = version + 1 WHERE id = ?",
+          )
+          .run(command.projectId);
         return this.project(command.projectId);
       }
       case "task.create": {

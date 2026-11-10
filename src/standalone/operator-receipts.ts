@@ -39,6 +39,7 @@ export function commandReceipt(
         };
       case "project.create":
       case "project.configure":
+      case "project.reasoning.delete":
         return {
           kind: "configuration" as const,
           key,
@@ -310,6 +311,7 @@ export function commandReceipt(
       if (outcome.result.version !== 1) throw new ReceiptShapeError();
       break;
     case "project.configure":
+    case "project.reasoning.delete":
     case "profile.configure":
     case "assignment.apply":
       if (outcome.result.version === 1) throw new ReceiptShapeError();

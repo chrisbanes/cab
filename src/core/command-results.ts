@@ -265,6 +265,7 @@ export interface DomainCommandResultMap {
   "status-mapping.configure": z.output<typeof statusMappingCommandResultSchema>;
   "project.create": z.output<typeof legacyProjectCommandResultSchema>;
   "project.configure": z.output<typeof legacyProjectCommandResultSchema>;
+  "project.reasoning.delete": z.output<typeof projectCommandResultSchema>;
   "project.archive": z.output<typeof projectCommandResultSchema>;
   "project.restore": z.output<typeof projectCommandResultSchema>;
   "project.delete": z.output<typeof projectDeletionCommandResultSchema>;
@@ -404,6 +405,7 @@ function parseCommandOutcome(
         result: parseUnchanged(projectDeletionCommandResultSchema, value),
       };
     case "project.archive":
+    case "project.reasoning.delete":
     case "project.restore":
       return {
         type,

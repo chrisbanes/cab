@@ -367,6 +367,7 @@ export const OPTIONS = {
   paused: { type: "string" },
   "lead-profile": { type: "string" },
   "diagnostic-capture": { type: "string" },
+  "reasoning-summaries": { type: "string" },
   "command-network-access": { type: "string" },
   "local-listening": { type: "string" },
   "dangerously-skip-sandbox": { type: "string" },

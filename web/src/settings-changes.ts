@@ -108,6 +108,14 @@ export function projectChanges(
       `Skip sandbox ${v.dangerouslySkipSandbox ? "enabled" : "disabled"}`,
     );
   const mode = diagnosticCaptureLabels;
+  const reasoning =
+    v.diagnosticCapture === "baseline" ? false : v.reasoningSummaries;
+  if (
+    data.reasoningSummaries !== undefined &&
+    reasoning !== undefined &&
+    Boolean(reasoning) !== data.reasoningSummaries
+  )
+    lines.push(`Reasoning summaries ${reasoning ? "enabled" : "disabled"}`);
   if (
     data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== undefined &&

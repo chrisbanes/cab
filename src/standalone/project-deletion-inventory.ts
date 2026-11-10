@@ -677,6 +677,10 @@ export const projectDeletionInventory = {
     columns: ["intentId", "enabled"],
     ownership: "intentId in I",
   },
+  execution_intent_reasoning_summaries: {
+    columns: ["intentId", "enabled"],
+    ownership: "intentId in I",
+  },
   execution_intent_network_access: {
     columns: ["intentId", "enabled"],
     ownership: "intentId in I",
@@ -1044,6 +1048,10 @@ export const projectDeletionInventory = {
     ownership: "projectId=P",
   },
   project_local_listening: {
+    columns: ["projectId", "enabled"],
+    ownership: "projectId=P",
+  },
+  project_reasoning_summaries: {
     columns: ["projectId", "enabled"],
     ownership: "projectId=P",
   },
