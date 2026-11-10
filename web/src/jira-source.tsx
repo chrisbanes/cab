@@ -285,7 +285,10 @@ export function JiraSourceTab(
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const instance = String(d.values.instance ?? "");
+  // Keep the saved site visible before the draft's passive initialization.
+  const instance = String(
+    d.values.instance ?? (saved ? (data.source.instance ?? "") : ""),
+  );
   const [previews, setPreviews] = useState<Preview[] | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const preview = async () => {

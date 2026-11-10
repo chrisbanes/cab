@@ -23,6 +23,7 @@ import {
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import { fakeJira, json } from "../fixtures/fake-jira.js";
 import { git } from "../fixtures/setup-home.js";
+import { refresh } from "../fixtures/project-config-browser.js";
 import {
   outcomeMessages,
   savedOutcome,
@@ -98,13 +99,56 @@ test("Jira setup persists the tracker and opens Task source with a usable site c
       tokenRef: "env:FIXTURE_SETUP_JIRA_TOKEN",
     },
   });
+  let releasePrivate!: () => void;
+  const privateGate = new Promise<void>((resolve) => {
+    releasePrivate = resolve;
+  });
+  journey.cleanup(async () => releasePrivate(), "release-setup-private-read");
+  let privateReceived!: () => void;
+  const received = new Promise<void>((resolve) => {
+    privateReceived = resolve;
+  });
+  const privatePath = `**/api/operator/projects/${projectId}/private-values`;
+  await page.route(privatePath, async (route) => {
+    const response = await route.fetch();
+    privateReceived();
+    await privateGate;
+    await route.fulfill({ response });
+  });
   await page.reload();
+  await received;
   assert.equal(
     await page.getByLabel("Issue tracker", { exact: true }).inputValue(),
     "jira",
   );
   await page.getByLabel("Jira site", { exact: true }).selectOption(site);
   await page.getByLabel("JQL queries, one per line").fill("project = ABC");
+  for (let reread = 0; reread < 2; reread++) {
+    await refresh(page);
+    assert.equal(
+      await page.getByLabel("Jira site", { exact: true }).inputValue(),
+      site,
+    );
+    assert.equal(
+      await page.getByLabel("JQL queries, one per line").inputValue(),
+      "project = ABC",
+    );
+  }
+  releasePrivate();
+  await page
+    .getByText("Loading saved queries; kept as unavailable rows.", {
+      exact: true,
+    })
+    .waitFor({ state: "hidden" });
+  assert.equal(
+    await page.getByLabel("Jira site", { exact: true }).inputValue(),
+    site,
+  );
+  assert.equal(
+    await page.getByLabel("JQL queries, one per line").inputValue(),
+    "project = ABC",
+  );
+  await page.unroute(privatePath);
   await page
     .getByRole("button", { name: "Save Jira source", exact: true })
     .click();
@@ -117,7 +161,24 @@ test("Jira setup persists the tracker and opens Task source with a usable site c
     f.service.domain().jiraConfiguration(projectId)?.selections[0]?.jql,
     "project = ABC",
   );
+  await page.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      const select = document.querySelector<HTMLSelectElement>(
+        'select[aria-label="Jira site"]',
+      );
+      if (select) {
+        select.dataset.siteAtMount = select.value;
+        observer.disconnect();
+      }
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
   await page.reload();
+  const siteControl = page.locator(
+    'select[aria-label="Jira site"][data-site-at-mount]',
+  );
+  await siteControl.waitFor();
+  assert.equal(await siteControl.getAttribute("data-site-at-mount"), site);
   assert.equal(
     await page.getByLabel("Jira site", { exact: true }).inputValue(),
     site,
@@ -126,6 +187,13 @@ test("Jira setup persists the tracker and opens Task source with a usable site c
     await page.getByLabel("Jira site", { exact: true }).isDisabled(),
     true,
   );
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="JQL queries, one per line"]',
+      )?.value === "project = ABC",
+  );
+  assert.equal(await siteControl.inputValue(), site);
 });
 
 const fixFields =
