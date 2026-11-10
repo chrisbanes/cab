@@ -126,9 +126,9 @@ for (const engine of ["chromium", "webkit"] as const)
       await page.waitForFunction(
         () => document.activeElement?.textContent === "Add recipient",
       );
-      await page
-        .getByRole("button", { name: "Refresh task", exact: true })
-        .click();
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await page.getByText(recordOnlyText).waitFor();
       assert.equal(await chips(page).count(), 0);
 

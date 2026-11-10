@@ -105,6 +105,11 @@ export function ApprovalReview({
   return (
     <section
       className="approval-review"
+      data-request-active={
+        Boolean(
+          (open && outcome?.kind !== "recorded") || sending || uncertain,
+        ) || undefined
+      }
       aria-labelledby={heading}
       data-record-id={approval.interactionId}
     >

@@ -503,6 +503,7 @@ export function TaskWorkspace({
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const wide = useMediaQuery("(min-width: 1024px)");
+  const initialVisit = useRef(!state.selectionInitialized);
   const selectedPath = useRef<string | null>(null);
   if (selectedPath.current !== path) {
     selectedPath.current = path;
@@ -718,7 +719,13 @@ export function TaskWorkspace({
   const toBottom = () => {
     const end = document.getElementById("conversation-end");
     if (state.tab === "overview" && end)
-      return end.getBoundingClientRect().bottom - innerHeight;
+      return (
+        end.getBoundingClientRect().bottom -
+        (innerHeight -
+          (document.getElementById("reply")?.getBoundingClientRect().height ??
+            0) -
+          16)
+      );
     return document.documentElement.scrollHeight - innerHeight - scrollY;
   };
   // Scrolled past the conversation, into the inspector, the operator is reading elsewhere.
@@ -731,7 +738,9 @@ export function TaskWorkspace({
   const followLatest = () => {
     // Following the bottom ends a hold on a restored position.
     holdReading.current();
-    scrollBy(0, Math.max(0, toBottom()));
+    bottom.current = true;
+    setUpdates(false);
+    scrollBy(0, toBottom());
   };
   const capture = () => {
     if (leaving.current) return;
@@ -850,9 +859,11 @@ export function TaskWorkspace({
       ".task-inspector, aside[aria-label='Changes']",
     );
     if (inPanel)
-      requestAnimationFrame(() =>
-        focusToggle.current?.focus({ preventScroll: true }),
-      );
+      requestAnimationFrame(() => {
+        const menu = focusToggle.current?.closest("details");
+        if (menu) menu.open = true;
+        focusToggle.current?.focus({ preventScroll: true });
+      });
   };
   const toggleFocusRef = useRef(toggleFocus);
   toggleFocusRef.current = toggleFocus;
@@ -1046,15 +1057,21 @@ export function TaskWorkspace({
         .map((a) => a.assignmentId),
     ),
     beforeApply: (first) => {
-      // Opening a task shows its header and decisions first; the conversation is followed from there.
-      if (first) bottom.current = false;
-      else captureRef.current();
+      if (!first) captureRef.current();
     },
   });
   const layoutPath = useRef(path);
   // biome-ignore lint/correctness/useExhaustiveDependencies: conversation DOM insertion must restore the previously captured reading anchor.
   useLayoutEffect(() => {
     if (!data) return;
+    // Let the opening timeline and shell header settle before aligning an Overview target.
+    if (
+      first.current &&
+      state.tab === "overview" &&
+      !timeline.window &&
+      !timeline.error
+    )
+      return;
     // New conversation entries count as updates, like a changed result or message.
     const appended = timeline.appended !== appendedSeen.current;
     appendedSeen.current = timeline.appended;
@@ -1082,7 +1099,14 @@ export function TaskWorkspace({
               : tabSections[tab]));
         selectTab(tab);
         // A link into the conversation waits for the conversation to be read.
-        const link = conversationTarget(path);
+        const link =
+          conversationTarget(path) ??
+          (!p.has("request") &&
+          !p.has("record") &&
+          !tabForLocation(path) &&
+          !linkNamesInspector(path)
+            ? { kind: "latest" as const }
+            : null);
         if (link) pendingLink.current = link;
         const target = link ? null : document.getElementById(id);
         if (target || link) {
@@ -1138,7 +1162,19 @@ export function TaskWorkspace({
               ? document.getElementById(linked)
               : null;
       // A link into the conversation waits for the conversation to be read.
-      if (link && state.scrollY === 0) pendingLink.current = link;
+      if (state.scrollY === 0 && !state.readingAnchor) {
+        if (link) pendingLink.current = link;
+        else if (
+          initialVisit.current &&
+          !record &&
+          !section &&
+          !fragment &&
+          !linked &&
+          !tabForLocation(path) &&
+          !linkNamesInspector(path)
+        )
+          pendingLink.current = { kind: "latest" };
+      }
       if (!link && target && state.scrollY === 0) {
         // A Search record can sit in a closed card; only its first arrival opens it, so a
         // Back or Forward keeps the operator's choice.
@@ -1189,7 +1225,7 @@ export function TaskWorkspace({
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
       if (newMaterial || appended) setUpdates(true);
     }
-  }, [data, state, path, timeline.window]);
+  }, [data, state, path, timeline.window, timeline.error]);
   // A link into the conversation is followed once the task and the conversation have been read.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the link is read from its ref; the reads and the path are the triggers.
   useEffect(() => {
@@ -2167,7 +2203,7 @@ export function TaskWorkspace({
           if (destination === "github") state.commentReview = null;
           changed();
         }}
-        rows={5}
+        rows={2}
       />
       {destination === "lead" && state.reference && (
         <p>Immutable reference: {JSON.stringify(state.reference)}</p>
@@ -2685,59 +2721,54 @@ export function TaskWorkspace({
           </p>
         )}
         <TaskStrip data={data}>
-          <div className="task-actions task-tools">
-            {data.source && (
-              <>
-                <ActionLink variant="secondary" href={data.source.url ?? "#"}>
-                  {data.source.identity.tracker === "jira"
-                    ? "Edit in Jira"
-                    : "Open GitHub to edit source"}
-                </ActionLink>
-                {improvePolicy && (
+          <details className="task-tools">
+            <summary aria-label="More task options">•••</summary>
+            <div className="task-actions">
+              {data.source && (
+                <>
+                  {improvePolicy && (
+                    <Button
+                      variant="secondary"
+                      disabled={projectReadOnly}
+                      aria-expanded={improveShown}
+                      onClick={() => setImproveOpen(!improveShown)}
+                    >
+                      Improve with lead
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     disabled={projectReadOnly}
-                    aria-expanded={improveShown}
-                    onClick={() => setImproveOpen(!improveShown)}
+                    onClick={() => void refreshSource()}
                   >
-                    Improve with lead
+                    Refresh source
                   </Button>
-                )}
+                </>
+              )}
+              {!data.source && publishPolicy && (
                 <Button
                   variant="secondary"
                   disabled={projectReadOnly}
-                  onClick={() => void refreshSource()}
+                  aria-expanded={publishShown}
+                  onClick={() => setPublishOpen(!publishShown)}
                 >
-                  Refresh source
+                  Publish to GitHub
                 </Button>
-              </>
-            )}
-            {!data.source && publishPolicy && (
-              <Button
-                variant="secondary"
-                disabled={projectReadOnly}
-                aria-expanded={publishShown}
-                onClick={() => setPublishOpen(!publishShown)}
-              >
-                Publish to GitHub
-              </Button>
-            )}
-            <Button variant="secondary" onClick={refreshAll}>
-              Refresh task
-            </Button>
-            {wide && (
-              <Button
-                ref={focusToggle}
-                variant="secondary"
-                aria-pressed={focus}
-                aria-keyshortcuts={"\\"}
-                title={"Focus mode (\\)"}
-                onClick={toggleFocus}
-              >
-                Focus mode
-              </Button>
-            )}
-          </div>
+              )}
+              {wide && (
+                <Button
+                  ref={focusToggle}
+                  variant="secondary"
+                  aria-pressed={focus}
+                  aria-keyshortcuts={"\\"}
+                  title={"Focus mode (\\)"}
+                  onClick={toggleFocus}
+                >
+                  Focus mode
+                </Button>
+              )}
+            </div>
+          </details>
         </TaskStrip>
         {!projectReadOnly && publishPolicy && publishShown && (
           <PublishToGitHub
@@ -2843,14 +2874,10 @@ export function TaskWorkspace({
                         </p>
                       )}
                       {selected ? (
-                        <div data-record-id={selected.resultId}>
-                          <p className="metadata muted">
-                            R{data.results.indexOf(selected) + 1} ·{" "}
-                            <ShortId value={selected.resultId} /> · assignment{" "}
-                            <ShortId value={selected.assignmentId} /> · work
-                            revision {selected.workRevision} ·{" "}
-                            {date(selected.createdAt)}
-                          </p>
+                        <article
+                          data-record-id={selected.resultId}
+                          aria-label={`Result R${data.results.indexOf(selected) + 1}`}
+                        >
                           <Literal text={selected.summary} />
                           <p className="metadata">
                             <ActionLink
@@ -2900,7 +2927,7 @@ export function TaskWorkspace({
                           >
                             Ask lead about result
                           </Button>
-                        </div>
+                        </article>
                       ) : (
                         !state.selectedResult && <p>No result recorded.</p>
                       )}
@@ -3005,6 +3032,19 @@ export function TaskWorkspace({
                   </>
                 }
               >
+                {selected && (
+                  <section
+                    id="result-details"
+                    aria-label="Selected result details"
+                  >
+                    <p className="metadata muted">
+                      R{data.results.indexOf(selected) + 1} ·{" "}
+                      <ShortId value={selected.resultId} /> · assignment{" "}
+                      <ShortId value={selected.assignmentId} /> · work revision{" "}
+                      {selected.workRevision} · {date(selected.createdAt)}
+                    </p>
+                  </section>
+                )}
                 <section id="brief">
                   <details
                     className="overview-disclosure"

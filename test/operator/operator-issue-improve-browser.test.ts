@@ -181,6 +181,7 @@ async function launch(
     await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByLabel("More task options").click();
     await page.getByRole("button", { name: "Improve with lead" }).waitFor();
   };
   return {

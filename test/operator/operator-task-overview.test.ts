@@ -17,6 +17,7 @@ import {
   sourceHoldReasonText,
   sourceHoldResumeCaveat,
   stopConsequences,
+  taskStopOffered,
   taskIdentity,
   trackerName,
   sourceStateText,
@@ -393,6 +394,74 @@ test("task strip shows one distinct reason", () => {
     } as unknown as Data),
     "effects may continue",
   );
+});
+
+test("Stop follows pending work and execution ownership, not the task's Ready badge", () => {
+  const base = {
+    task: { state: "open", ready: true },
+    execution: { state: "idle", holds },
+    assignments: [{ state: "completed" }, { state: "cancelled" }],
+  } as unknown as Data;
+  const offer = (
+    execution: Partial<Data["execution"]> = {},
+    extra: Partial<Data> = {},
+  ) =>
+    taskStopOffered({
+      ...base,
+      ...extra,
+      execution: { ...base.execution, ...execution },
+    });
+  for (const state of [
+    "idle",
+    "completed",
+    "cancelled",
+    "paused",
+    "waiting",
+  ] as const)
+    assert.equal(
+      offer({ state }),
+      false,
+      `${state}: no work to hold or interrupt`,
+    );
+  for (const state of [
+    "selected",
+    "queued",
+    "starting",
+    "running",
+    "stopping",
+    "uncertain",
+  ] as const)
+    assert.equal(offer({ state }), true, `${state}: Stop remains applicable`);
+  for (const hold of ["writer", "capacity", "uncertainty", "task"] as const)
+    assert.equal(
+      offer({ holds: { ...holds, [hold]: true } }),
+      true,
+      `${hold}: ownership/recovery remains`,
+    );
+  for (const state of ["pending", "running", "held"] as const)
+    for (const executionState of ["paused", "waiting", "not-started"] as const)
+      assert.equal(
+        offer(
+          { state: executionState },
+          { assignments: [{ state }] as Data["assignments"] },
+        ),
+        true,
+        `${state} work remains stoppable while ${executionState}`,
+      );
+  assert.equal(
+    offer({ state: "running", holds: { ...holds, stop: true } }),
+    false,
+    "Stop hold offers Resume instead",
+  );
+  for (const state of ["done", "cancelled"] as const)
+    assert.equal(
+      offer(
+        { state: "uncertain", holds: { ...holds, writer: true } },
+        { task: { ...base.task, state } },
+      ),
+      false,
+      `${state}: the command refuses a new Stop even if execution remains uncertain`,
+    );
 });
 
 test("stopConsequences counts unfinished delegated assignments", () => {

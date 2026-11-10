@@ -1877,9 +1877,22 @@ card lists open questions and approvals, execution uncertainty or Stop, active s
 holds, interventions, wait reasons and operator-action recovery. Normal writer and
 capacity holds while a turn starts or runs stay on Execution, and waiting for capacity
 is named by the strip, never pinned. Beneath the card the lead's conversation runs oldest
-to newest, and the reply composer is docked at the bottom. The outcome and current
-situation stay in the task header, while its strip shows a state badge and at most one
-distinct reason without repeating readiness or next-actor wording. The brief,
+to newest. First arrival shows the newest entry with Reply docked at the bottom of
+the conversation column; returning and incoming updates preserve the existing reading
+position. Explicit section, record, request and legacy conversation links keep their
+targets. An opened question or approval owns the reading area: its form scrolls
+without the docked Reply covering its controls. Reply resumes docking when the
+interaction ends or is left; retained receipts alone do not undock it. On phones,
+Latest result and Task details follow the conversation.
+The subtitle is the first meaningful outcome sentence, skipping headings, quoted
+context and source metadata. The one-line strip shows the state badge, at most one
+distinct reason, a clickable operator next action and one source identity chip. A lead
+name appears there only when it differs from the project default. Meaningful cab-owned
+next actions remain plain text. Stop is offered for pending, active or recovery-owned
+work, not an idle Ready task; an open confirmation or uncertain send keeps its control.
+Resume stays available for an existing Stop hold. Refresh source,
+Focus mode and Improve with lead share More task options; polling and New updates
+replace a separate Refresh task control. The brief,
 evidence, delivery observations, artifacts, dependencies and assignments stay in the
 inspector. Understanding current work must not require reading raw runtime output.
 

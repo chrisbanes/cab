@@ -474,7 +474,11 @@ test("a changed file in the conversation leaves focus mode and opens the pane", 
   await pane(page).waitFor();
   assert.equal(
     await page
-      .getByRole("button", { name: "Focus mode", exact: true })
+      .getByRole("button", {
+        name: "Focus mode",
+        exact: true,
+        includeHidden: true,
+      })
       .getAttribute("aria-pressed"),
     "false",
   );

@@ -124,18 +124,14 @@ const markDone = (s: { f: Fixture; taskId: string }) =>
       .run(s.taskId),
   );
 
-/** The result summary and the first three criterion outcomes are the first screen. */
-const resultScreen = (page: Page) => [
-  page.locator(`#review .literal-text`).getByText(summary, { exact: true }),
-  ...[0, 1, 2].map((i) =>
-    page.locator("#review .criterion-row > p:first-child").nth(i),
-  ),
-];
-
 /** Opens Evidence by its summary and shows its records in the viewport. */
 async function openEvidence(page: Page) {
+  let interactions = 0;
   const card = overviewCard(page, "evidence");
-  await card.locator("> summary").click();
+  if ((await card.getAttribute("open")) === null) {
+    await card.locator("> summary").click();
+    interactions++;
+  }
   await card.and(page.locator("[open]")).waitFor();
   const record = card.getByText("Unit tests").first();
   await record.waitFor();
@@ -147,6 +143,7 @@ async function openEvidence(page: Page) {
     `the evidence is in view ${JSON.stringify(await record.boundingBox())}`,
   );
   await noPageOverflow(page);
+  return interactions;
 }
 
 for (const [label, viewport] of [
@@ -160,13 +157,15 @@ for (const [label, viewport] of [
       seedFourCriteria,
       ({ taskId }) => `/tasks/${taskId}`,
     );
-    await assertFirstScreen(s.page, resultScreen(s.page));
-    // Headroom for font metrics that differ between macOS and CI.
-    const third = await resultScreen(s.page)[3]!.boundingBox();
-    assert.ok(
-      third!.y + third!.height <= viewport.height - 8,
-      `the third outcome keeps 8px of headroom ${JSON.stringify(third)}`,
+    await settleOn(
+      s.page,
+      s.page.getByRole("log", { name: "Task conversation" }),
     );
+    await settleOn(
+      s.page,
+      s.page.getByRole("heading", { name: "Reply", exact: true }),
+    );
+    // Results stay beside the conversation, and follow it on phones.
     // Each row reads its recorded outcome, not a default.
     assert.deepEqual(
       await s.page
@@ -211,10 +210,38 @@ for (const [label, viewport] of [
       assert.ok(box.height >= 44, `Ask lead is a 44px target ${box.height}`);
       assert.ok(box.width <= 120, `Ask lead stays narrow ${box.width}`);
     }
-    let interactions = 0;
-    await openEvidence(s.page);
-    interactions++;
+    const result = s.page.locator(`#review [data-record-id="${s.resultId}"]`);
+    assert.equal(await result.getAttribute("aria-label"), "Result R1");
+    const metadata = s.page.locator("#result-details p.metadata");
+    assert.equal(
+      await metadata.isVisible(),
+      viewport !== phone,
+      "result provenance follows the existing Task details fold",
+    );
+    assert.equal(
+      await result
+        .locator(":scope > p.metadata")
+        .filter({ hasText: "work revision" })
+        .count(),
+      0,
+    );
+    const interactions = await openEvidence(s.page);
     assert.equal(interactions, 1);
+    const fold = s.page.locator("details.inspector-fold");
+    assert.equal(
+      (await fold.getAttribute("open")) !== null,
+      viewport !== phone,
+      "opening Evidence does not change Task details",
+    );
+    assert.equal(await metadata.isVisible(), viewport !== phone);
+    // Inspecting provenance is separate from the Evidence interaction budget.
+    let provenanceInteractions = 0;
+    if (viewport === phone) {
+      await fold.locator("> summary").click();
+      provenanceInteractions++;
+    }
+    assert.equal(provenanceInteractions, viewport === phone ? 1 : 0);
+    assert.equal(await metadata.isVisible(), true);
   });
 
   test(`review a result budget: two interactions from Home Completed work (${label})`, async (_t, journey) => {
@@ -234,10 +261,42 @@ for (const [label, viewport] of [
     await link.click();
     interactions++;
     await s.page.waitForURL(new RegExp(`/tasks/${s.taskId}`));
-    await assertFirstScreen(s.page, [resultScreen(s.page)[0]!]);
-    await openEvidence(s.page);
-    interactions++;
+    await settleOn(
+      s.page,
+      s.page.getByRole("heading", { name: "Reply", exact: true }),
+    );
+    interactions += await openEvidence(s.page);
     assert.equal(interactions, 2);
+    assert.equal(
+      (await s.page.locator("details.inspector-fold").getAttribute("open")) !==
+        null,
+      viewport !== phone,
+    );
+  });
+
+  test(`an explicit evidence link needs no extra disclosure click (${label})`, async (_t, journey) => {
+    const s = await start(
+      journey,
+      viewport,
+      seedFourCriteria,
+      ({ taskId }) => `/tasks/${taskId}?section=result-evidence`,
+    );
+    assert.equal(await openEvidence(s.page), 0);
+    assert.equal(
+      await s.page.locator("#result-details p.metadata").isVisible(),
+      viewport !== phone,
+    );
+    assert.equal(
+      await openEvidence(s.page),
+      0,
+      "already-open disclosures stay open",
+    );
+    assert.equal(
+      (await s.page.locator("details.inspector-fold").getAttribute("open")) !==
+        null,
+      viewport !== phone,
+      "the Evidence link and helper leave phone Task details closed",
+    );
   });
 
   test(`review a result budget: one interaction from the Inbox evidence link (${label})`, async (_t, journey) => {

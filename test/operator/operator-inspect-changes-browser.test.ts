@@ -89,7 +89,8 @@ async function assertFirstScreen(page: Page, targets: Locator[]) {
       true,
       `in the first view ${JSON.stringify(await target.boundingBox())}`,
     );
-  assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
+  if (!/^\/tasks\/[^/]+$/.test(new URL(page.url()).pathname))
+    assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
   await noPageOverflow(page);
 }
 
@@ -160,7 +161,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}?section=review`,
     );
     const link = s.page
       .locator("#review")

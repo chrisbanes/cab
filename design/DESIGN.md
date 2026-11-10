@@ -178,7 +178,7 @@ fixed application dimensions.
   a time with 44px tree rows, and the diff is always unified. The diff is one tab stop:
   Up and Down move the selected line, Shift extends the range, Left and Right switch
   side and Escape clears; clicking a line number selects and Shift-click extends.
-- **Focus mode:** from 1024px a `Focus mode` button in the task tools row, and the `\`
+- **Focus mode:** from 1024px a `Focus mode` control in More task options, and the `\`
   key, hide the inspector and the Changes pane so the conversation takes the whole row.
   The button is a pressed toggle (`aria-pressed`, `--primary` fill when on). The key is
   ignored in editable fields and dialogs and with Ctrl, Alt or Meta held, so layouts
@@ -215,7 +215,8 @@ Rules:
   actions, with one primary action per view. Desktop buttons hug their label.
 - Stop uses the destructive treatment and confirms first; reversible states show
   their counterpart (for example Restore agent).
-- Task lead names and accountability remain visible wherever a task appears.
+- Task accountability stays available in Details; the task strip names the lead only
+  when different from the project default.
 
 ## Operator refinement brief
 
@@ -230,7 +231,12 @@ Make the next decision obvious, and keep its evidence close:
   cancellation and provider closure without delivery distinguishable.
 - **Task detail:** the Overview is the task's conversation. Pin what is waiting on
   the operator above it, keep outcome and next actor in the header, and put the
-  brief, evidence and assignments in the inspector. Delegations read as collapsible
+  brief, evidence and assignments in the inspector. Default visibility is task
+  meaning, state, next actor and decision; Details holds identifiers, revisions,
+  provenance and contract caveats. First arrival shows the latest conversation entry
+  with Reply docked within its column; phone results and Details follow it. The strip
+  stays on one line with one identity chip. Refresh source, Focus mode and Improve
+  with lead share More task options. Delegations read as collapsible
   sub-conversations in place, retaining the task's accountable lead and
   assignment/conversation identities. Use recorded facts and attributed excerpts;
   add no invented summary capability.

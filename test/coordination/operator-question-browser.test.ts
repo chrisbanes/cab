@@ -53,11 +53,19 @@ test("a page refresh does not reread a request whose answer is unconfirmed", asy
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   const reads = questionReads.length;
+  assert.equal(await form.getAttribute("data-request-active"), "true");
+  assert.equal(
+    await page.locator("#reply").evaluate((e) => getComputedStyle(e).position),
+    "static",
+    "Reply yields to unknown-send recovery controls",
+  );
   // The page's own refresh settles, yet the unconfirmed request is not reread or replaced.
   const taskRead = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await taskRead;
   await page.evaluate(
     () => new Promise<void>((resolve) => setTimeout(() => resolve(), 300)),
@@ -72,6 +80,11 @@ test("a page refresh does not reread a request whose answer is unconfirmed", asy
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   await form.getByText("Answer recorded", { exact: true }).first().waitFor();
+  assert.equal(await form.getAttribute("data-request-active"), null);
+  assert.equal(
+    await page.locator("#reply").evaluate((e) => getComputedStyle(e).position),
+    "sticky",
+  );
   assert.equal(
     f.service.coordinationView().readTask(a.taskId).questions[0]?.status,
     "answered",

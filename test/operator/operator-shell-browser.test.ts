@@ -593,7 +593,6 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     ["/", "Refresh tasks"],
     ["/tasks", "Refresh tasks"],
     [`/projects/${projectId}`, "Refresh tasks"],
-    [`/tasks/${taskId}`, "Refresh task"],
     ["/search?query=Refresh", "Refresh results"],
   ];
   for (const [route, name] of owned) {

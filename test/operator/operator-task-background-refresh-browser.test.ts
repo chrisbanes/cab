@@ -13,7 +13,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 const test = browserSuite("task-background-refresh-browser");
 
-test("a task workspace timer poll keeps the conversation, position and status quiet; explicit Refresh still shows progress", async (_t, j) => {
+test("a task workspace timer poll keeps the conversation, position and status quiet; a task-change reread still shows progress", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -66,11 +66,10 @@ test("a task workspace timer poll keeps the conversation, position and status qu
   await page.waitForLoadState("networkidle");
   const status = page.locator(".resource-status");
   const openCount = () => conversation.locator(".conv-entry").count();
-  const refresh = page.getByRole("button", {
-    name: "Refresh task",
-    exact: true,
-  });
-  const top = () => refresh.evaluate((el) => el.getBoundingClientRect().top);
+  const refresh = () =>
+    page.evaluate(() => window.dispatchEvent(new Event("cab-task-changed")));
+  const top = () =>
+    conversation.evaluate((el) => el.getBoundingClientRect().top);
   const opened = await openCount(),
     shown = await marker(2).count();
   assert.ok(shown > 0);
@@ -131,12 +130,12 @@ test("a task workspace timer poll keeps the conversation, position and status qu
   assert.equal(await marker(2).count(), shown);
   await failing.stop();
 
-  // 3. Explicit Refresh keeps its progress status over the last good content.
+  // 3. A task-change reread keeps its progress status over the last good content.
   const explicit = await holdResponse(
     page,
     `**/api/operator/tasks/${a.taskId}*`,
   );
-  await refresh.click();
+  await refresh();
   await explicit.entered;
   await page
     .getByText("Refreshing. Showing the last fetched data.", { exact: true })
@@ -160,10 +159,10 @@ test("a task workspace timer poll keeps the conversation, position and status qu
     page,
     `**/api/operator/tasks/${a.taskId}/timeline*`,
   );
-  await refresh.click();
+  await refresh();
   await late.entered;
   addHistory("NEW");
-  await refresh.click();
+  await refresh();
   await marker("NEW").first().waitFor();
   late.release();
   await page.waitForLoadState("networkidle");

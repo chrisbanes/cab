@@ -262,6 +262,13 @@ export function QuestionResponse({
   return (
     <section
       className="question-response"
+      data-request-active={
+        Boolean(
+          (!recorded && data?.status === "pending") ||
+            state?.sending ||
+            state?.lifecycle.uncertain,
+        ) || undefined
+      }
       aria-label="Exact question response"
       data-record-id={interactionId}
     >

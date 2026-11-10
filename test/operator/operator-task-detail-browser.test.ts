@@ -164,18 +164,18 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   // The subtitle is the outcome's first line; the strip carries state and the lead.
   assert.equal(
     await header.locator(".page-header-title p.introduction").textContent(),
-    "Context",
+    "Let keyboard users **open** the command menu.",
   );
   const strip = page.locator("[data-task-strip]");
-  assert.match(
-    (await strip.textContent()) ?? "",
-    /Accountable lead · Task lead/,
+  assert.doesNotMatch((await strip.textContent()) ?? "", /Lead · Task lead/);
+  assert.deepEqual(await strip.locator(".task-state").allTextContents(), [
+    "Paused",
+  ]);
+  assert.deepEqual(
+    await strip.locator("[data-task-reason]").allTextContents(),
+    ["project paused"],
   );
-  assert.ok(
-    ((await strip.locator("[data-task-reason]").textContent()) ?? "").length >
-      0,
-  );
-  // Exactly four header actions (Execution, Edit task, Reset task, Stop), and the direct-load Back names the project.
+  // Unavailable Reset is omitted; the pending work still offers Stop and Back names the project.
   assert.deepEqual(
     await header
       .locator(".task-header-actions > *")
@@ -183,7 +183,6 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     [
       ["A", "Execution"],
       ["BUTTON", "Edit task…"],
-      ["BUTTON", "Reset task…"],
       ["BUTTON", "Stop…"],
     ],
   );
@@ -233,11 +232,16 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     assert.ok(b, selector);
     return b;
   };
-  const card = await box('section[aria-label="Pending requests and holds"]'),
-    conversation = await box("section#conversation"),
+  const conversation = await box("section#conversation"),
     review = await box("section#review"),
     brief = await box("section#brief");
-  assert.ok(card.y + card.height <= conversation.y);
+  assert.equal(
+    await page
+      .locator("#decisions")
+      .evaluate((e) => getComputedStyle(e).position),
+    "sticky",
+    "attention stays pinned while the conversation opens at its newest entry",
+  );
   // The reply card is docked at the bottom of the view, so its place is the document order.
   assert.equal(
     await page.evaluate(() => {
@@ -272,12 +276,20 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       .isVisible(),
   );
   assert.ok(await noHorizontalScroll(page));
-  assert.ok(
+  // The pinned decision card and Reply dock are height-capped and scroll within themselves by design.
+  assert.deepEqual(
     await page
-      .locator(".task-columns, .task-columns > section")
+      .locator(
+        ".task-columns, .task-columns > section:not(#decisions):not(#reply)",
+      )
       .evaluateAll((els) =>
-        els.every((e) => e.scrollHeight <= e.clientHeight + 1),
+        els
+          .filter((e) => e.scrollHeight > e.clientHeight + 1)
+          .map(
+            (e) => `${e.tagName}#${e.id} ${e.scrollHeight}/${e.clientHeight}`,
+          ),
       ),
+    [],
   );
 
   // The brief starts closed; its summary carries the label and the supplied-criteria count.
@@ -397,9 +409,9 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
   // Dispatch without scrolling the button into view, as a timed re-read would.
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .dispatchEvent("click");
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
   // Settled: two frames after the read, the layout effect has restored the anchor.
   await page.evaluate(
@@ -435,12 +447,12 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       `${name} ${JSON.stringify(b)}`,
     );
   }
-  // On a phone the inspector sits above the conversation and the reply ends the page.
+  // The phone inspector follows the entire conversation column, including Reply's normal-flow space.
   const phoneInspector = await box('aside[aria-label="Task context"]'),
-    phoneConversation = await box("section#conversation"),
+    phoneMain = await box(".task-columns"),
     phoneReply = await box("section#reply");
-  assert.ok(phoneInspector.y + phoneInspector.height <= phoneConversation.y);
-  assert.ok(phoneConversation.y + phoneConversation.height <= phoneReply.y);
+  assert.ok(phoneMain.y + phoneMain.height <= phoneInspector.y);
+  assert.ok(phoneReply.y + phoneReply.height <= phoneInspector.y);
   assert.ok(await noHorizontalScroll(page));
   await captureBrowserEvidence(page, "task-detail-phone", { fullPage: false });
   await page.getByLabel("Editable reply").waitFor();
@@ -619,23 +631,16 @@ test("An empty local task says so honestly", async (_t, j) => {
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
-  // A one-line outcome is the whole recorded subtitle. On a phone the header carries the
-  // identity instead, so the strip's disclosure is where the outcome is read.
+  // The meaningful outcome is the phone subtitle; identity remains one strip chip.
   assert.equal(
-    await page.locator(".page-header-title p.introduction").textContent(),
+    await page.locator(".page-subtitle-short").textContent(),
     "Write the field notes guide.",
   );
   assert.equal(
-    await page.locator(".page-header-title p.introduction").isVisible(),
-    false,
-  );
-  assert.equal(
-    await page.locator(".page-subtitle-short").textContent(),
+    await page.locator("[data-task-strip] .task-source-chip").textContent(),
     "Local task",
   );
-  const phoneOutcome = page.locator("details.task-outcome[data-phone-only]");
-  await phoneOutcome.locator("summary").click();
-  await phoneOutcome.getByText("Write the field notes guide.").waitFor();
+  assert.equal(await page.locator("details.task-outcome").count(), 0);
   await openOverviewCard(page, "assignments");
   await page
     .locator("#assignments")
@@ -646,9 +651,9 @@ test("An empty local task says so honestly", async (_t, j) => {
     .locator("#brief")
     .getByText("None supplied", { exact: true })
     .waitFor();
-  assert.match(
+  assert.doesNotMatch(
     (await page.locator("[data-task-strip]").textContent()) ?? "",
-    /Accountable lead · Unconfigured/,
+    /Lead ·/,
   );
   await page
     .locator('aside[aria-label="Task context"]')
@@ -747,9 +752,9 @@ test("An unknown Resume project outcome keeps the card and its check after the w
   const reread = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .dispatchEvent("click");
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
   await card.getByText("Waiting · Project paused", { exact: true }).waitFor({
     state: "detached",
@@ -793,9 +798,13 @@ test("A rejected completion is a decision the strip and decision card both name"
     web.password,
     `/tasks/${a.taskId}?section=files`,
   );
-  assert.equal(await page.locator("[data-task-strip] .task-next").count(), 0);
-  // The strip no longer switches tabs; the pinned card is on Overview.
-  await openTaskTab(page, "Overview");
+  const next = page.locator("[data-task-strip] a.task-next");
+  assert.equal(
+    await next.innerText(),
+    "Next: you · review rejected completion",
+  );
+  await next.click();
+  await page.getByRole("tab", { name: "Overview", selected: true }).waitFor();
   const card = page.locator("section#decisions");
   await card.getByText(/completion request was rejected/).waitFor();
   assert.equal(
@@ -827,7 +836,32 @@ test("The strip and decision card follow the server's attention codes, not a cli
   );
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
-  assert.equal(await strip.locator(".task-next").count(), 0);
+  assert.equal(
+    await strip.locator("a.task-next").innerText(),
+    "Next: you · inspect execution",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  const usable = await strip.evaluate((element) => {
+    const next = element.querySelector(".task-next")!.getBoundingClientRect();
+    const chip = element
+      .querySelector(".task-source-chip")!
+      .getBoundingClientRect();
+    return {
+      nextWidth: next.width,
+      chipWidth: chip.width,
+      oneLine:
+        Math.abs(next.top + next.height / 2 - chip.top - chip.height / 2) < 2,
+      noOverflow: document.documentElement.scrollWidth <= innerWidth,
+    };
+  });
+  assert.ok(
+    usable.nextWidth >= 44 && usable.chipWidth >= 44,
+    "action and identity stay usable on a phone",
+  );
+  assert.ok(
+    usable.oneLine && usable.noOverflow,
+    "strip stays on one line without widening the phone",
+  );
   const card = page.locator("section#decisions");
   assert.equal(
     await card
@@ -840,7 +874,27 @@ test("The strip and decision card follow the server's attention codes, not a cli
   await page.reload();
   await strip.waitFor();
   await strip.locator("[data-task-reason]").waitFor();
-  assert.equal(await strip.getByText(/routing fallback/).count(), 0);
+  assert.equal(
+    await strip.locator("span.task-next").innerText(),
+    "Next: cab · recording routing fallback",
+  );
+  assert.equal(await strip.locator("a.task-next").count(), 0);
+  codes = ["question-delivery"];
+  await page.reload();
+  await strip.waitFor();
+  assert.equal(
+    await strip.locator("span.task-next").innerText(),
+    "Next: cab · delivering answer",
+  );
+  assert.equal(await strip.locator("a.task-next").count(), 0);
+  codes = [];
+  await page.reload();
+  await strip.waitFor();
+  assert.equal(await strip.locator(".task-next").count(), 0);
+  assert.doesNotMatch(
+    await strip.innerText(),
+    /No operator decision|Next: none/,
+  );
   // The decision card offers the operator nothing to do for it.
   assert.equal(
     await card
@@ -904,6 +958,17 @@ for (const [label, viewport] of [
     await page
       .getByText("Holds · 0", { exact: true })
       .waitFor({ state: "attached" });
+    assert.equal(
+      await page
+        .locator(".task-header-actions")
+        .getByRole("button", {
+          name: "Stop…",
+          exact: true,
+          includeHidden: true,
+        })
+        .count(),
+      1,
+    );
     assert.equal(await page.locator("#decisions[data-pinned]").count(), 0);
     assert.equal(await page.locator("#decisions").isHidden(), true);
     await taskTab(page, "Execution").click();
@@ -920,6 +985,17 @@ for (const [label, viewport] of [
     await openTaskTab(page, "Overview");
     const decisions = page.locator("#decisions[data-pinned]");
     await decisions.waitFor();
+    assert.equal(
+      await page
+        .locator(".task-header-actions")
+        .getByRole("button", {
+          name: "Stop…",
+          exact: true,
+          includeHidden: true,
+        })
+        .count(),
+      1,
+    );
     const inspectorFold = page.locator(".task-inspector .inspector-fold");
     if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();
@@ -1976,8 +2052,11 @@ for (const engine of ["chromium", "webkit"] as const)
       assert.deepEqual(commands, []);
       // A local task shows "Local task" and no source chip; no raw UUID is shown.
       const strip = page.locator("[data-task-strip]");
-      assert.equal(await strip.locator(".task-id").innerText(), "Local task");
-      assert.equal(await strip.locator(".task-source-chip").count(), 0);
+      assert.equal(
+        await strip.locator(".task-source-chip").innerText(),
+        "Local task",
+      );
+      assert.equal(await strip.locator("a.task-source-chip").count(), 0);
       assert.doesNotMatch(
         await strip.innerText(),
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
@@ -2056,10 +2135,12 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
         await page.getByRole("link", { name: tool, exact: true }).count(),
         0,
       );
-    assert.ok(
+    assert.ok(await page.getByLabel("More task options").isVisible());
+    assert.equal(
       await page
         .getByRole("button", { name: "Refresh task", exact: true })
-        .isVisible(),
+        .count(),
+      0,
     );
     assert.equal(
       await page.locator('aside[aria-label="Task context"]').isVisible(),
@@ -2103,9 +2184,9 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   const reread = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .dispatchEvent("click");
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
   await settle(page);
   await kept("Refresh task on Files");
@@ -2336,16 +2417,20 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     tabletMain = await box(".task-columns");
   assert.ok(tabletMain.x + tabletMain.width <= tablet.x, "beside at 1024");
 
-  // Phone: one column, the inspector between the decisions and the conversation, 44px buttons.
+  // Phone: conversation and Reply precede the inspector; controls keep 44px targets.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => scrollTo(0, 0));
   const phoneCard = await box("section#decisions"),
     phoneAside = await box('aside[aria-label="Task context"]'),
     phoneConversation = await box("section#conversation"),
     phoneReply = await box("section#reply");
-  assert.ok(phoneCard.y + phoneCard.height <= phoneAside.y);
-  assert.ok(phoneAside.y + phoneAside.height <= phoneConversation.y);
-  assert.ok(phoneConversation.y + phoneConversation.height <= phoneReply.y);
+  assert.ok(phoneCard.y + phoneCard.height <= phoneConversation.y);
+  const phoneColumn = await box(".task-columns");
+  assert.ok(
+    phoneColumn.y + phoneColumn.height <= phoneAside.y,
+    "results and Details follow the conversation column",
+  );
+  assert.ok(phoneReply.y + phoneReply.height <= phoneAside.y);
   await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")
@@ -2391,12 +2476,9 @@ test("An imported task separates read-only GitHub source from cab execution", as
     (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
     ids.importedId,
   );
-  assert.equal(
-    await strip.locator(".task-id").innerText(),
-    "fixture/source#42",
-  );
+  assert.equal(await strip.locator(".task-id").count(), 0);
   const chip = strip.locator(".task-source-chip");
-  assert.equal(await chip.innerText(), "Imported · fixture/source#42 ↗");
+  assert.equal(await chip.innerText(), "fixture/source#42 ↗");
   assert.equal(await chip.getAttribute("href"), read.data.source.url);
   assert.doesNotMatch(
     await strip.innerText(),
@@ -2654,7 +2736,9 @@ const refreshTask = async (page: Page, taskId: string) => {
   const reread = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${taskId}`,
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
 };
 /** The text of every paragraph between the destination buttons and the reply label. */
@@ -3112,45 +3196,27 @@ test("A viewing reference the service refuses while the task page is away says s
   assert.equal(await view.isEnabled(), true);
 });
 
-test("The outcome shows its first line and a closed disclosure with rendered Markdown", async (_t, j) => {
+test("The meaningful outcome sentence stays in the header and the full brief stays in Details", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seed(fixture.f);
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const subtitle = page.locator(".page-header-title p.introduction");
   await subtitle.waitFor();
-  assert.equal(await subtitle.textContent(), "Context");
-  const disclosure = page.locator("[data-task-strip] details.task-outcome");
-  const summary = disclosure.locator("summary");
-  assert.equal(await summary.textContent(), "Full desired outcome");
   assert.equal(
-    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
-    false,
+    await subtitle.textContent(),
+    "Let keyboard users **open** the command menu.",
   );
-
-  // The keyboard opens it, and it renders the whole outcome as Markdown.
-  await summary.focus();
-  await page.keyboard.press("Enter");
   assert.equal(
-    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
-    true,
+    await page.locator("[data-task-strip] details.task-outcome").count(),
+    0,
   );
-  assert.equal(await disclosure.locator("li").count(), 3);
-  // The preview draws each task item's inert checkbox as "[ ]".
-  const items = await disclosure.locator("li").allInnerTexts();
-  assert.deepEqual(
-    items.map((item) => item.replace(/^\[ \] /, "")),
-    ["Restore focus", "Retain drafts", "Announce results"],
-  );
-  assert.doesNotMatch(await disclosure.innerText(), /- \[ \]|##/);
-
-  // A refresh keeps it open.
+  await openOverviewCard(page, "brief");
+  const disclosure = overviewCard(page, "brief");
+  await disclosure.getByText("Retain drafts", { exact: true }).waitFor();
   await refreshTask(page, a.taskId);
   await settle(page);
-  assert.equal(
-    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
-    true,
-  );
+  assert.notEqual(await disclosure.getAttribute("open"), null);
 });
 
 test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => {
@@ -3221,16 +3287,24 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const result = page.locator(`#review [data-record-id="${r2.resultId}"]`);
   await result.waitFor();
+  assert.equal(await result.getAttribute("aria-label"), "Result R2");
+  assert.equal(
+    await result
+      .locator(":scope > p.metadata")
+      .filter({ hasText: "work revision" })
+      .count(),
+    0,
+  );
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/;
 
-  // Metadata shows 8 mono characters; the full value is the title; no full id is visible.
+  // Task details keeps 8 mono characters; the full value is the title; no full id is visible.
   await openOverviewCard(page, "brief");
   const brief = page.locator("#brief .metadata").filter({ hasText: "source" });
   assert.match(
     await brief.innerText(),
     /^Local source · revision 1 · [0-9a-f]{8}$/,
   );
-  const meta = result.locator("p.metadata").first();
+  const meta = page.locator("#result-details p.metadata");
   assert.match(
     await meta.innerText(),
     /^R2 · [0-9a-f]{8} · assignment [0-9a-f]{8} · work revision \d+ · /,
@@ -3251,12 +3325,7 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
             ),
           ].map((el) => [el.title, el.textContent, el.tabIndex]),
         ),
-      [
-        [
-          "#brief .metadata",
-          `#review [data-record-id="${r2.resultId}"] p.metadata`,
-        ],
-      ],
+      [["#brief .metadata", "#result-details p.metadata"]],
     ),
     [
       [a.source.sourceId, a.source.sourceId.slice(0, 8), 0],
@@ -4008,6 +4077,8 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
         bottom: box?.bottom ?? Number.NaN,
         left: box?.left ?? Number.NaN,
         right: box?.right ?? Number.NaN,
+        sticky: e ? getComputedStyle(e).position === "sticky" : false,
+        shown: Boolean(box?.width && box.height),
       };
     });
   }, selectors);
@@ -4020,7 +4091,10 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
     // Stacked within one column; the docked reply and the beside-column inspector overlap in height.
     const above = found[i - 1];
     if (
-      above &&
+      above?.shown &&
+      f.shown &&
+      !above.sticky &&
+      !f.sticky &&
       selectors[i] !== "section#reply" &&
       above.left < f.right &&
       f.left < above.right
@@ -4038,6 +4112,7 @@ const overviewOrder = [
   "section#reply",
   "section#review",
   "section#result-evidence",
+  "section#result-details",
   "section#brief",
   "section#assignments",
   "section#context",
@@ -4165,6 +4240,7 @@ for (const engine of ["chromium", "webkit"] as const)
         "result-evidence",
         // The inspector fold's own summary, ahead of the brief and the cards beneath it.
         "outside",
+        "result-details",
         "brief",
         "assignments",
       ];
@@ -4614,9 +4690,9 @@ for (const engine of ["chromium", "webkit"] as const)
 
       // Refresh task, dispatched so the button does not take the focus.
       const reread = taskRead();
-      await page
-        .getByRole("button", { name: "Refresh task", exact: true })
-        .dispatchEvent("click");
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await reread;
       await unchanged("Refresh task");
 
@@ -4831,9 +4907,12 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     ["nowrap", "ellipsis", true],
   );
   const identity = header.locator(".page-subtitle-short");
-  assert.equal(await identity.textContent(), "Local task");
+  assert.equal(
+    await identity.textContent(),
+    "Let keyboard users **open** the command menu.",
+  );
   assert.ok(await identity.isVisible());
-  assert.match(
+  assert.doesNotMatch(
     await identity.evaluate((e) => getComputedStyle(e).fontFamily),
     /mono/i,
   );
@@ -4930,7 +5009,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await header.locator(".page-subtitle-short").waitFor();
   assert.equal(
     await header.locator(".page-subtitle-short").textContent(),
-    "fixture/source#42",
+    "Source-owned imported outcome",
   );
 
   // A finished task offers Execution and no Stop….
@@ -4966,19 +5045,13 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
       !document.querySelector(".task-header-overflow")?.hasAttribute("open"),
   );
 
-  // A one-line outcome is read through the strip's disclosure on a phone, and only there.
-  const outcome = page.locator(
-    "[data-task-strip] details.task-outcome[data-phone-only]",
-  );
+  // The meaningful outcome is the phone subtitle; source identity stays in the strip.
   assert.equal(
-    await outcome.locator("summary").textContent(),
-    "Full desired outcome",
+    await header.locator(".page-subtitle-short").textContent(),
+    "One line outcome.",
   );
-  await outcome.locator("summary").click();
-  await outcome.getByText("One line outcome.").waitFor();
   await page.setViewportSize({ width: 1366, height: 900 });
   await settle(page);
-  assert.equal(await outcome.isVisible(), false);
   // From 760px the header keeps the recorded outcome and carries no phone identity line.
   assert.equal(await header.locator(".page-subtitle-short").isVisible(), false);
   assert.ok(await header.locator(".introduction").isVisible());

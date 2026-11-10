@@ -242,9 +242,9 @@ test("production workspace retains literal captured text, pending request, focus
     },
     { timeout: 15_000 },
   );
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await timelineRead;
   await newestItem.waitFor();
   assert.ok(
@@ -290,16 +290,14 @@ test("production workspace retains literal captured text, pending request, focus
     await readingButton.evaluate((el) => el === document.activeElement),
     true,
   );
-  const explicitRefresh = page.getByRole("button", {
-    name: "Refresh task",
-    exact: true,
-  });
   const explicitTimeline = page.waitForResponse(newestTimeline);
-  await explicitRefresh.click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await explicitTimeline;
   await reading.waitFor();
   assert.equal(
-    await explicitRefresh.evaluate((el) => el === document.activeElement),
+    await readingButton.evaluate((el) => el === document.activeElement),
     true,
   );
   await readingButton.focus();
@@ -317,7 +315,9 @@ test("production workspace retains literal captured text, pending request, focus
     }
     await route.fulfill({ response });
   });
-  await explicitRefresh.evaluate((el) => (el as HTMLElement).click());
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await focusEntry;
   // The validated conversation stays shown while the read is held.
   assert.equal(await reading.count(), 1);
@@ -451,11 +451,9 @@ test("production workspace retains literal captured text, pending request, focus
   );
   a.delegatedResult("Newer result must not replace selected historical result");
   await page.getByLabel("Editable reply").focus();
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => {
-      if (el instanceof HTMLElement) el.click();
-    });
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await page
     .locator("#review")
     .getByText("Original source-faithful result", { exact: true })
@@ -478,7 +476,9 @@ test("production workspace retains literal captured text, pending request, focus
       body: JSON.stringify({ error: { code: "unavailable" } }),
     }),
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await page
     .getByText("Refresh failed. Showing the last fetched data.", {
       exact: true,
@@ -513,7 +513,9 @@ test("production workspace retains literal captured text, pending request, focus
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await page
     .getByRole("button", { name: "Send to task lead", exact: true })
     .waitFor();
@@ -720,7 +722,9 @@ test("production workspace retains literal captured text, pending request, focus
     1,
   );
   a.result("Terminal accountable lead result");
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   // A completed lead is resumed by feedback (#828): the line says so and Send stays enabled.
   await page
     .getByText(leadResumeNotice("Task lead"), { exact: true })
@@ -771,9 +775,7 @@ test("production workspace retains literal captured text, pending request, focus
         ),
     );
   const refreshTask = () =>
-    page
-      .getByRole("button", { name: "Refresh task", exact: true })
-      .evaluate((el) => (el as HTMLElement).click());
+    page.evaluate(() => window.dispatchEvent(new Event("cab-task-changed")));
   markLeadStarted(f, r.assignmentId);
   addItem("streaming", "streaming", null, streamingAt);
   await refreshTask();
@@ -830,7 +832,9 @@ test("production workspace retains literal captured text, pending request, focus
     expectedVersion: Number(f.service.domain().profile(a.profileId).version),
     instructions: "Literal update 0 long supplied text",
   });
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   // The changed visibility starts the window again from the newest page, below which the
   // redacted item now waits. Item 250 predates the newer notes, so it leaves with the held pages.
   await log.getByText("Newer note 47", { exact: true }).waitFor();

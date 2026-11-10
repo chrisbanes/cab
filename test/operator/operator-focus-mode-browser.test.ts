@@ -65,6 +65,7 @@ async function start(
       };
     });
   await signIn(page, web, options.path ?? `/tasks/${task.taskId}`);
+  await page.getByLabel("More task options").click();
   return { page, errors, task, other, web };
 }
 
@@ -74,7 +75,20 @@ const inspector = (page: Page) => page.locator(".task-inspector");
 const pane = (page: Page) => page.locator("aside[aria-label='Changes']");
 const stored = (page: Page) =>
   page.evaluate((k) => localStorage.getItem(k), KEY);
-const pressed = (page: Page) => toggle(page).getAttribute("aria-pressed");
+async function showTools(page: Page) {
+  const menu = page.locator("details.task-tools");
+  await menu.waitFor();
+  if ((await menu.getAttribute("open")) === null)
+    await page.getByLabel("More task options").click();
+}
+const pressed = (page: Page) =>
+  page
+    .getByRole("button", {
+      name: "Focus mode",
+      exact: true,
+      includeHidden: true,
+    })
+    .getAttribute("aria-pressed");
 const boxWidth = async (page: Page, selector: string) => {
   const box = await page.locator(selector).first().boundingBox();
   assert.ok(box, selector);
@@ -102,6 +116,7 @@ const rgb = (page: Page, css: string) =>
     return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
   }, css);
 const readyPage = async (page: Page) => {
+  await showTools(page);
   await toggle(page).waitFor();
   await inspector(page).first().waitFor();
 };
@@ -124,6 +139,7 @@ test("the button hides the inspector, widens the conversation and is remembered 
   assert.equal(await stored(page), "1");
   await noPageOverflow(page);
   await page.reload();
+  await showTools(page);
   await toggle(page).waitFor();
   assert.equal(await pressed(page), "true");
   assert.equal(await inspector(page).count(), 0);
@@ -195,6 +211,7 @@ test("the choice carries to another task without a reload", async (_t, j) => {
   }, other.taskId);
   await page.locator("#to-other").click();
   await page.waitForURL(new RegExp(other.taskId));
+  await showTools(page);
   await toggle(page).waitFor();
   assert.equal(await pressed(page), "true");
   assert.equal(await inspector(page).count(), 0);
@@ -202,6 +219,7 @@ test("the choice carries to another task without a reload", async (_t, j) => {
 
 test("a link to an inspector section shows it and the choice returns on Back", async (_t, j) => {
   const { page, task } = await start(j, { stored: true });
+  await showTools(page);
   await toggle(page).waitFor();
   assert.equal(await pressed(page), "true");
   assert.equal(await inspector(page).count(), 0);
@@ -217,6 +235,7 @@ test("a link to an inspector section shows it and the choice returns on Back", a
   assert.equal(await pressed(page), "false");
   assert.ok(await page.locator("#brief").isVisible());
   await page.goBack();
+  await showTools(page);
   await toggle(page).waitFor();
   assert.equal(await pressed(page), "true");
   assert.equal(await inspector(page).count(), 0);
@@ -271,7 +290,10 @@ test("the key leaves focus and the scroll position where they were and the short
   const { page } = await start(j, { viewport: { width: 1366, height: 400 } });
   await readyPage(page);
   assert.equal(await toggle(page).getAttribute("aria-keyshortcuts"), "\\");
-  await page.evaluate(() => scrollTo(0, 200));
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement)?.blur();
+    scrollTo(0, 200);
+  });
   await page.keyboard.press("\\");
   await page.waitForTimeout(200);
   assert.equal(await pressed(page), "true");
@@ -299,11 +321,13 @@ test("below 1024px there is no button, the key does nothing and the inspector st
     stored: true,
     viewport: { width: 1024, height: 900 },
   });
+  await showTools(page);
   await toggle(page).waitFor();
   assert.equal(await inspector(page).count(), 0);
   await page.setViewportSize({ width: 800, height: 900 });
   await inspector(page).first().waitFor();
   await page.setViewportSize({ width: 1366, height: 900 });
+  await showTools(page);
   await toggle(page).waitFor();
   assert.equal(await inspector(page).count(), 0);
 });
@@ -370,6 +394,7 @@ test(
     await toggle(page).click();
     assert.equal(await inspector(page).count(), 0);
     await page.reload();
+    await showTools(page);
     await toggle(page).waitFor();
     assert.equal(await pressed(page), "true");
     await page.keyboard.press("\\");

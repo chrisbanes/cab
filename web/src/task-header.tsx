@@ -18,13 +18,14 @@ import { useCommandSend, useCommandSends } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button } from "./components.js";
 import { outcomeLine } from "./presentation.js";
-import { MarkdownPreview } from "./task-files.js";
 import {
   originLabel,
   stopConsequences,
+  taskStopOffered,
   taskColumnOf,
   taskIdentity,
   taskStripReason,
+  taskNextActor,
 } from "./task-overview.js";
 import { type TaskTab, taskTabs } from "./task-tabs.js";
 import { useMediaQuery } from "./use-media-query.js";
@@ -48,7 +49,7 @@ export interface TaskHeaderReport {
   /** The mono identity the phone header shows under the title: `repository#N` or "Local task". */
   identity: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
-  stop: { affected: string; held: boolean; open: boolean };
+  stop: { affected: string; held: boolean; open: boolean; offered: boolean };
   /** Reset task: whether it is offered, the task version it is sent with and why not. */
   reset: {
     offer: NonNullable<TaskRead["data"]["reset"]>;
@@ -69,7 +70,7 @@ export function taskHeaderReport(
   return {
     taskId: data.task.id,
     title,
-    // The outcome's first line; the strip discloses the rest and carries state and readiness.
+    // The brief keeps the full outcome; the strip carries state and the next action.
     subtitle: outcomeLine(data.task.outcome).line || undefined,
     identity: taskIdentity(data).label,
     back: origin
@@ -85,7 +86,12 @@ export function taskHeaderReport(
           ariaLabel: `Back to ${project}`,
           history: false,
         },
-    stop: { affected, held, open: data.task.state === "open" },
+    stop: {
+      affected,
+      held,
+      open: data.task.state === "open",
+      offered: taskStopOffered(data),
+    },
     reset: data.reset
       ? { offer: data.reset, version: data.task.version }
       : null,
@@ -207,22 +213,27 @@ export function TaskHeaderActions({
             }}
           />
         )}
-        {report.reset && (report.stop.open || resetOpen || resetUncertain) && (
-          <ResetTask
-            client={client}
-            session={session}
-            taskId={report.taskId}
-            title={report.title}
-            version={report.reset.version}
-            offer={report.reset.offer}
-            onOpenChange={(next) => {
-              // The trigger lives in the overflow, which stays open behind the dialog.
-              if (phone) setMenuOpen(true);
-              setResetOpen(next);
-            }}
-            onChanged={() => window.dispatchEvent(new Event(taskChangedEvent))}
-          />
-        )}
+        {report.reset &&
+          ((report.stop.open && report.reset.offer.available) ||
+            resetOpen ||
+            resetUncertain) && (
+            <ResetTask
+              client={client}
+              session={session}
+              taskId={report.taskId}
+              title={report.title}
+              version={report.reset.version}
+              offer={report.reset.offer}
+              onOpenChange={(next) => {
+                // The trigger lives in the overflow, which stays open behind the dialog.
+                if (phone) setMenuOpen(true);
+                setResetOpen(next);
+              }}
+              onChanged={() =>
+                window.dispatchEvent(new Event(taskChangedEvent))
+              }
+            />
+          )}
         {(["stop", "resume"] as const).map((kind) => (
           <HoldCommand
             key={kind}
@@ -244,8 +255,8 @@ export function TaskHeaderActions({
 }
 
 /**
- * The identity and status strip under the shell header: ID and source chip, state,
- * one distinct reason, the lead, then the page's persistent tools.
+ * One line of state, one reason, the operator action and one identity chip.
+ * Only a lead differing from the project default needs a name here.
  */
 export function TaskStrip({
   data,
@@ -258,38 +269,48 @@ export function TaskStrip({
     column = taskColumnOf(data),
     Icon = stateIcons[column],
     reason = taskStripReason(data),
-    outcome = outcomeLine(data.task.outcome);
+    next = taskNextActor(data);
   return (
     <div className="task-strip" data-task-strip>
       <div className="task-strip-facts">
-        <span className="task-id">{identity.label}</span>
-        {data.source &&
-          (identity.url ? (
-            <a className="task-source-chip" href={identity.url}>
-              Imported · {identity.label} ↗
-            </a>
-          ) : (
-            <span className="task-source-chip">
-              Imported · {identity.label}
-            </span>
-          ))}
         <span className="task-state" data-column={column}>
           <Icon aria-hidden="true" />
           {column}
         </span>
-        {reason && <span data-task-reason>{reason}</span>}
-        <span>Accountable lead · {data.lead?.name ?? "Unconfigured"}</span>
+        {reason && (
+          <span data-task-reason title={reason}>
+            {reason}
+          </span>
+        )}
+        {next.code &&
+          (next.operator ? (
+            <a
+              className="task-next"
+              href={`/tasks/${data.task.id}?section=decisions`}
+              title={next.text}
+            >
+              {next.text}
+            </a>
+          ) : (
+            <span className="task-next" title={next.text}>
+              {next.text}
+            </span>
+          ))}
+        {identity.url ? (
+          <a
+            className="task-source-chip"
+            href={identity.url}
+            title={identity.label}
+          >
+            {identity.label} ↗
+          </a>
+        ) : (
+          <span className="task-source-chip">{identity.label}</span>
+        )}
+        {data.lead && data.lead.profileId !== data.project?.leadProfileId && (
+          <span>Lead · {data.lead?.name ?? "Unconfigured"}</span>
+        )}
       </div>
-      {/* On a phone the header subtitle is the identity, so a one-line outcome is read here too. */}
-      {(outcome.more || outcome.line) && data.task.outcome && (
-        <details
-          className="task-outcome"
-          data-phone-only={outcome.more ? undefined : true}
-        >
-          <summary>Full desired outcome</summary>
-          <MarkdownPreview text={data.task.outcome} />
-        </details>
-      )}
       {children}
     </div>
   );
@@ -382,7 +403,7 @@ const holdCopy = {
 } as const;
 
 /**
- * Stop… on an open task that is not stopped, Resume… on a stopped one. The dialog opens on its
+ * Stop… for pending, active or recovery-owned work, Resume… on a stopped task. The dialog opens on its
  * safe choice; it stays open after a send to report the outcome, and an unconfirmed send keeps
  * its control so the same request can be checked after a reread drops the offer.
  */
@@ -430,8 +451,7 @@ function HoldCommand({
     addEventListener("pageshow", restored);
     return () => removeEventListener("pageshow", restored);
   }, []);
-  const offered =
-    kind === "stop" ? report.stop.open && !report.stop.held : report.stop.held;
+  const offered = kind === "stop" ? report.stop.offered : report.stop.held;
   if (!offered && !open && !uncertain) return null;
   return (
     <Dialog

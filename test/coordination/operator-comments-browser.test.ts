@@ -645,15 +645,15 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page.setViewportSize({ width: 1366, height: 900 });
   sourceComplete = true;
   await f.service.refreshGitHub();
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await page.getByText(/source unchanged/).waitFor();
   issue.body += "\nNew complete source observation";
   await f.service.refreshGitHub();
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await page.getByText(/source requirements changed/).waitFor();
   assert.deepEqual(
     f.service.taskReview().read(taskId).viewed,
@@ -781,17 +781,28 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
       post ?? Promise.resolve(null),
       request,
       taskRead,
-      page
-        .getByRole("button", {
-          name:
-            action === "view"
-              ? "Set viewing reference"
-              : action === "source"
-                ? "Refresh source"
-                : "Refresh task",
-          exact: true,
-        })
-        .click(),
+      action === "task"
+        ? page.evaluate(() =>
+            window.dispatchEvent(new Event("cab-task-changed")),
+          )
+        : (async () => {
+            if (
+              action === "source" &&
+              (await page
+                .locator("details.task-tools")
+                .getAttribute("open")) === null
+            )
+              await page.getByLabel("More task options").click();
+            await page
+              .getByRole("button", {
+                name:
+                  action === "view"
+                    ? "Set viewing reference"
+                    : "Refresh source",
+                exact: true,
+              })
+              .click();
+          })(),
     ]);
     page.off("request", recordRead);
     // All waiters are owned immediately, even if actionability or an assertion fails.
@@ -1020,7 +1031,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     });
   });
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await sourceEntry;
   await page
@@ -1069,7 +1084,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     }),
   );
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await page
     .getByText(/source comparison unknown; current source state unavailable/)
@@ -1087,7 +1106,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   );
   await page.unroute("**/api/operator/tasks/*");
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await page.getByText(/source unchanged/).waitFor({ state: "attached" });
   phase = "delayed task read";
@@ -1105,7 +1128,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   });
   const refreshSource = () =>
     page
-      .getByRole("button", { name: "Refresh source", exact: true })
+      .getByRole("button", {
+        name: "Refresh source",
+        exact: true,
+        includeHidden: true,
+      })
       .evaluate((el) => (el as HTMLElement).click());
   const failSource = (route: import("playwright").Route) =>
     route.fulfill({
@@ -1183,7 +1210,11 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .getByLabel("Editable reply")
     .fill("Private old-session source draft");
   await page
-    .getByRole("button", { name: "Refresh source", exact: true })
+    .getByRole("button", {
+      name: "Refresh source",
+      exact: true,
+      includeHidden: true,
+    })
     .evaluate((el) => (el as HTMLElement).click());
   await lateSourceEntry;
   await signOutFromSidebar(page);
