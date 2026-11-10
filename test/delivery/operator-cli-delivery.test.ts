@@ -468,6 +468,82 @@ test("delivery refresh is a receipted write that reports partial outcomes", asyn
   assert.equal(rerun.request.key, lost.json().error.request.key);
 });
 
+test("delivery get names each gate that held a refused operation", async (t) => {
+  const w = await deliveryWorld(t);
+  const held = randomUUID(),
+    plain = randomUUID();
+  w.f.seedPersistedState((db) => {
+    for (const [operationId, refusalReasons] of [
+      [held, ["open-interaction", "merge-target-not-current-delivery"]],
+      [plain, undefined],
+    ] as const) {
+      const request = {
+          operationId,
+          action: {
+            kind: "issue.comment",
+            target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+            body: "Hello",
+          },
+        },
+        binding = {
+          projectId: w.f.projectId,
+          taskId: w.f.taskId,
+          taskVersion: 1,
+          assignmentId: randomUUID(),
+          assignmentVersion: 1,
+          workId: "work",
+          workRevision: 1,
+          conversationRevision: 1,
+        };
+      db.prepare("INSERT INTO delivery_actions VALUES (?,?,?,?)").run(
+        operationId,
+        w.f.taskId,
+        "0".repeat(64),
+        JSON.stringify({
+          operationId,
+          request,
+          binding,
+          policyVersion: 1,
+          state: "confirmed-failure",
+          attempts: 0,
+          beforeState: null,
+          observation: {
+            state: "confirmed-failure",
+            reason: "delivery-authority-stale-or-held",
+            receipt: null,
+            ...(refusalReasons ? { refusalReasons } : {}),
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      );
+    }
+  });
+  const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
+  const action = (id: string) =>
+    json.data.delivery.actions.find((a: Json) => a.operationId === id);
+  assert.deepEqual(action(held).refusalReasons, [
+    "open-interaction",
+    "merge-target-not-current-delivery",
+  ]);
+  assert.equal("refusalReasons" in action(plain), false);
+  const human = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(
+    human.out,
+    /delivery-authority-stale-or-held \(open-interaction, merge-target-not-current-delivery\)/,
+  );
+  assert.match(
+    human.out,
+    /confirmed-failure +delivery-authority-stale-or-held *\n/,
+  );
+});
+
 test("delivery get lists thread reply and resolve actions with their outcomes", async (t) => {
   const w = await deliveryWorld(t);
   w.scripted.thread = {

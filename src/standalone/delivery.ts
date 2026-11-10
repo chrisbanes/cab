@@ -14,6 +14,7 @@ import {
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import {
+  DeliveryActionHeldError,
   DeliveryApprovalRequiredError,
   DeliveryHoldError,
   DomainConflictError,
@@ -189,6 +190,11 @@ function retryDue(record: DeliveryActionRecord): boolean {
     (record.observation.resumeAt ?? 0) <= Date.now()
   );
 }
+/** The gates a held completion action names, kept on its refused operation. */
+const heldReasons = (error: unknown) =>
+  error instanceof DeliveryActionHeldError
+    ? { refusalReasons: [...error.reasons] }
+    : {};
 /** The agent's own tool arguments failed validation; a provider payload's `ZodError` is never one. */
 export class DeliveryArgumentsError extends Error {
   constructor(override readonly cause: z.ZodError) {
@@ -727,6 +733,7 @@ export class DeliveryCoordinator {
         state: "confirmed-failure",
         reason: "delivery-authority-stale-or-held",
         receipt: null,
+        ...heldReasons(error),
       });
       onRefused?.(error);
       return refused;
@@ -1029,6 +1036,7 @@ export class DeliveryCoordinator {
               state: "confirmed-failure",
               reason: "delivery-authority-stale-or-held",
               receipt: null,
+              ...heldReasons(error),
             },
       );
       onRefused?.(error);

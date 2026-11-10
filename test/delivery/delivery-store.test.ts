@@ -1038,6 +1038,79 @@ test("persisted runtime, operator and service records parse and hash as they alw
   }
 });
 
+test("a stored refused operation reads with or without its refusal reasons, and malformed reasons are rejected", () => {
+  const w = publicationWorld({ ready: false });
+  try {
+    const operationId = "66666666-6666-4666-8666-666666666666",
+      request = {
+        operationId,
+        action: {
+          kind: "issue.comment" as const,
+          target: { repositoryId: "R_1", number: 7, nodeId: "I_7" },
+          body: "Hello",
+        },
+      },
+      binding = {
+        projectId: "11111111-1111-4111-8111-111111111111",
+        taskId: w.taskId,
+        taskVersion: 1,
+        assignmentId: "33333333-3333-4333-8333-333333333333",
+        assignmentVersion: 1,
+        workId: "work",
+        workRevision: 1,
+        conversationRevision: 1,
+      };
+    const seed = (observation: Record<string, unknown>) => {
+      w.db
+        .prepare("DELETE FROM delivery_actions WHERE operationId=?")
+        .run(operationId);
+      w.db.prepare("INSERT INTO delivery_actions VALUES (?,?,?,?)").run(
+        operationId,
+        w.taskId,
+        materialDigest({ request, binding }),
+        JSON.stringify({
+          operationId,
+          request,
+          binding,
+          policyVersion: 1,
+          state: "confirmed-failure",
+          attempts: 0,
+          beforeState: null,
+          observation: {
+            state: "confirmed-failure",
+            reason: "delivery-authority-stale-or-held",
+            receipt: null,
+            ...observation,
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      );
+    };
+    const publicAction = () =>
+      w.delivery
+        .publicTask(w.taskId)
+        .actions.find((a) => a.operationId === operationId);
+    seed({});
+    assert.equal(
+      w.delivery.action(operationId).observation?.refusalReasons,
+      undefined,
+    );
+    assert.equal(publicAction()?.reason, "delivery-authority-stale-or-held");
+    assert.equal(publicAction()?.refusalReasons, undefined);
+    seed({ refusalReasons: ["open-interaction", "unfinished-callback"] });
+    assert.deepEqual(publicAction()?.refusalReasons, [
+      "open-interaction",
+      "unfinished-callback",
+    ]);
+    for (const malformed of [{ refusalReasons: [] }, { unknownKey: true }]) {
+      seed(malformed);
+      assert.throws(() => w.delivery.action(operationId));
+    }
+  } finally {
+    w.db.close();
+  }
+});
 test("a policy stored with a project-wide check list reads with no repository entries and applies it to every repository", () => {
   const db = new DatabaseSync(":memory:");
   try {

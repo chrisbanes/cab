@@ -93,7 +93,9 @@ const actionRows = (actions: Action[]) =>
         ? `${deliveryActionLabel(a.kind)} (${statusMappingActionLabel}: ${a.event})`
         : deliveryActionLabel(a.kind),
       a.state,
-      a.reason ?? "-",
+      a.refusalReasons
+        ? `${a.reason ?? "-"} (${a.refusalReasons.join(", ")})`
+        : (a.reason ?? "-"),
     ]),
   );
 

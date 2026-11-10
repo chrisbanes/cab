@@ -180,9 +180,10 @@ export const deliveryActionLine = (a: {
   event: StatusMappingEvent | null;
   state: string;
   reason: string | null;
+  refusalReasons?: readonly string[] | undefined;
   operationId: string;
 }) =>
-  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${deliveryActionLabel(a.kind)}: ${a.state} · ${(a.caller === "service" ? statusMappingActionNote(a.reason) : null) ?? (a.reason && mergeTrainNotes.get(a.reason)) ?? a.reason ?? "receipt recorded"} · operation ${a.operationId}`;
+  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${deliveryActionLabel(a.kind)}: ${a.state} · ${(a.caller === "service" ? statusMappingActionNote(a.reason) : null) ?? (a.reason && mergeTrainNotes.get(a.reason)) ?? a.reason ?? "receipt recorded"}${a.refusalReasons?.length ? ` (${a.refusalReasons.join(", ")})` : ""} · operation ${a.operationId}`;
 
 export const deliveryLevelLabels = {
   "not-set-up": "Not set up",
