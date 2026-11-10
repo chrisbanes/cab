@@ -732,7 +732,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   assert.equal(await save.isDisabled(), true);
   // An edit survives leaving the tab, and typing the saved text back afterwards reverts it.
   await query.fill("EDIT ONE");
-  await leaveAndReturn(page, "GitHub source", "General");
+  await leaveAndReturn(page, "Task source", "General");
   assert.equal(await query.inputValue(), "EDIT ONE");
   await changes(page).getByText("Search query edited for S-2").waitFor();
   await query.fill("PRIVATE SAVED QUERY");

@@ -230,7 +230,7 @@ export function ProjectConfiguration(
             />
           ) : tab === "source" ? (
             <TaskSourceTab
-              key={`${projectId}:${data.source.version}:${p.query}`}
+              key={`${projectId}:${p.query}`}
               {...tabProps}
               data={data}
               query={p.query}
@@ -281,11 +281,19 @@ function TaskSourceTab(
   const trackerId = useId();
   const locked = p.data.source.selections.length > 0;
   const saved = p.data.source.tracker === "jira" ? "jira" : "github";
-  const [tracker, setTracker] = useState(
+  const preferred =
     !locked && new URLSearchParams(p.query).get("tracker") === "jira"
       ? "jira"
-      : saved,
-  );
+      : saved;
+  const [choice, setChoice] = useState({
+    version: p.data.source.version,
+    tracker: preferred,
+  });
+  const tracker = locked
+    ? saved
+    : choice.version === p.data.source.version
+      ? choice.tracker
+      : preferred;
   return (
     <>
       <Panel
@@ -296,10 +304,16 @@ function TaskSourceTab(
           <span>Issue tracker</span>
           <NativeSelect
             id={trackerId}
+            aria-label="Issue tracker"
             className="control"
             value={tracker}
             disabled={locked || p.readOnly}
-            onChange={(e) => setTracker(e.target.value)}
+            onChange={(e) =>
+              setChoice({
+                version: p.data.source.version,
+                tracker: e.target.value,
+              })
+            }
             aria-describedby="tracker-choice-note"
           >
             <option value="github">GitHub</option>

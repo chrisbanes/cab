@@ -108,7 +108,10 @@ test("Jira setup persists the tracker and opens Task source with a usable site c
   await page
     .getByRole("button", { name: "Save Jira source", exact: true })
     .click();
-  await savedOutcome(page);
+  await page
+    .locator(".settings-status")
+    .filter({ hasText: /Saved \d\d:\d\d/ })
+    .waitFor();
   assert.equal(f.service.domain().jiraConfiguration(projectId)?.instance, site);
   assert.equal(
     f.service.domain().jiraConfiguration(projectId)?.selections[0]?.jql,

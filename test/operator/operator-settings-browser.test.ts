@@ -1466,15 +1466,15 @@ test("mounted reference and placement fields have unique associated controls", a
   });
   for (const [tab, value] of [
     ["Routing", "env:ROUTING_NEW"],
-    ["GitHub source", "env:SOURCE_NEW"],
+    ["Task source", "env:SOURCE_NEW"],
   ] as const) {
     await sections.getByRole("link", { name: tab, exact: true }).click();
-    if (tab === "GitHub source")
+    if (tab === "Task source")
       await page
         .getByRole("button", { name: /(?:Set|Change) source credential/ })
         .click();
     const reference = page.getByLabel(
-      tab === "GitHub source"
+      tab === "Task source"
         ? "Source credential choice"
         : "Credential reference change",
       {

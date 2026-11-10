@@ -93,7 +93,10 @@ for (const hidden of [false, true])
     const command = (await sent).postDataJSON();
     assert.equal("instance" in command, false);
     assert.equal("readiness" in command, !hidden);
-    await savedOutcome(page);
+    await page
+      .locator(".settings-status")
+      .filter({ hasText: /Saved \d\d:\d\d/ })
+      .waitFor();
     assert.deepEqual(domain.jiraConfiguration(projectId)?.readiness, rule);
   });
 
