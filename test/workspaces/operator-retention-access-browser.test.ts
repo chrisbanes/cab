@@ -443,9 +443,9 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     .delivery()
     .observePrWithinTransaction(a.taskId, { ...observation, headSha: headB });
   await readingDiagnostic("before-header");
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => (el as HTMLButtonElement).click());
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   const singleItem = log.locator(".conv-agent", {
     hasText: "Only retained item",
   });
@@ -587,9 +587,9 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   stage("bound-head-read-begin");
   f.service.delivery().recordPrReadFailure(a.taskId);
   try {
-    await page
-      .getByRole("button", { name: "Refresh task", exact: true })
-      .evaluate((el) => (el as HTMLButtonElement).click());
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("cab-task-changed")),
+    );
     await headTimelineArrival;
     await page
       .locator("#result-evidence")

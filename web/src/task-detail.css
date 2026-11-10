@@ -154,17 +154,6 @@
     min-height: 44px;
     justify-content: center;
   }
-
-  /* The identity moved to the header subtitle; the outcome is read in the strip. */
-  .task-strip .task-id {
-    display: none;
-  }
-}
-
-@media (min-width: 760px) {
-  .task-outcome[data-phone-only] {
-    display: none;
-  }
 }
 
 .stop-dialog ul {
@@ -194,16 +183,21 @@
   }
 }
 
-/* Strip: ID, source chip, state, readiness, next actor and lead; then the tools row. */
+/* One line of task state, action and identity beside the options menu. */
 .task-strip {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  min-width: 0;
   gap: var(--space-8);
 }
 
 .task-strip-facts {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
   align-items: center;
   gap: var(--space-8) var(--space-16);
   font-size: var(--type-xs);
@@ -243,21 +237,6 @@ a.task-source-chip:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
-}
-
-/* The rest of the desired outcome: closed by default, the summary is the only chrome. */
-.task-outcome {
-  font-size: var(--type-sm);
-  color: var(--fg-2);
-}
-
-.task-outcome > summary {
-  cursor: pointer;
-  font-size: var(--type-xs);
-}
-
-.task-outcome .file-markdown {
-  margin-top: var(--space-8);
 }
 
 .task-strip .task-tools {
@@ -855,7 +834,7 @@ a.task-source-chip:hover {
   position: sticky;
   top: 0;
   z-index: 3;
-  max-height: 45vh;
+  max-height: 25dvh;
   overflow-y: auto;
 }
 
@@ -892,11 +871,7 @@ a.task-source-chip:hover {
   }
 }
 
-/* The composer ends the column after the conversation at every width. Docking it to the
-   viewport bottom hid the conversation and the composer's own heading under the pinned
-   attention card whenever the page header filled the first screen. The browser must not
-   anchor scrolling to it: a linked inspector record would otherwise leave the view when the
-   conversation loads above the composer. */
+/* Loading conversation entries must not anchor the page to the composer or plan. */
 .task-workspace .task-columns > section.plan-card,
 .task-workspace .task-columns > section.reply-card {
   overflow-anchor: none;
@@ -907,31 +882,6 @@ a.task-source-chip:hover {
   padding: 0;
   border: 0;
   background: none;
-}
-
-/* Below 1024px the inspector folds sit between the attention card and the conversation, so the
-   conversation and the composer end the page. */
-@media (max-width: 1023px) {
-  .task-columns {
-    display: contents;
-  }
-
-  .task-columns > #decisions {
-    order: 0;
-  }
-
-  .task-inspector {
-    order: 1;
-  }
-
-  .task-columns > .conversation {
-    order: 2;
-  }
-
-  .task-columns > .plan-card,
-  .task-columns > .reply-card {
-    order: 3;
-  }
 }
 
 .inspector-fold > summary {
@@ -1367,4 +1317,68 @@ a.task-source-chip:hover {
 }
 .comment-preview p {
   margin: 0;
+}
+
+/* Keep Reply inside its conversation column; overflow keeps short screens usable. */
+.task-workspace .task-columns > section.reply-card {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  max-height: 40dvh;
+  overflow-y: auto;
+  box-shadow: 0 -8px 16px var(--surface);
+}
+
+.task-tools {
+  position: relative;
+}
+.task-tools > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px;
+}
+.task-tools > .task-actions {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  min-width: 200px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.task-strip .task-next {
+  color: var(--attn);
+  text-decoration: underline;
+}
+@media (max-width: 759px) {
+  .page-header[data-desktop-back] .page-header-title .page-subtitle-short {
+    font-family: var(--font-sans);
+  }
+}
+
+.task-strip-facts > [data-task-reason],
+.task-strip-facts > .task-next,
+.task-strip-facts > .task-source-chip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-strip-facts > .task-state {
+  flex: none;
+}
+@media (max-width: 759px) {
+  .task-tools > summary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .task-strip-facts {
+    gap: var(--space-8);
+  }
+  .task-strip-facts > [data-task-reason] {
+    max-width: 25%;
+  }
+  .task-strip-facts > .task-source-chip {
+    max-width: 35%;
+  }
 }

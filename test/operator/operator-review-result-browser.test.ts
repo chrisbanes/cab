@@ -124,16 +124,11 @@ const markDone = (s: { f: Fixture; taskId: string }) =>
       .run(s.taskId),
   );
 
-/** The result summary and the first three criterion outcomes are the first screen. */
-const resultScreen = (page: Page) => [
-  page.locator(`#review .literal-text`).getByText(summary, { exact: true }),
-  ...[0, 1, 2].map((i) =>
-    page.locator("#review .criterion-row > p:first-child").nth(i),
-  ),
-];
-
 /** Opens Evidence by its summary and shows its records in the viewport. */
 async function openEvidence(page: Page) {
+  const fold = page.locator("details.inspector-fold");
+  if ((await fold.getAttribute("open")) === null)
+    await fold.locator("> summary").click();
   const card = overviewCard(page, "evidence");
   await card.locator("> summary").click();
   await card.and(page.locator("[open]")).waitFor();
@@ -160,13 +155,15 @@ for (const [label, viewport] of [
       seedFourCriteria,
       ({ taskId }) => `/tasks/${taskId}`,
     );
-    await assertFirstScreen(s.page, resultScreen(s.page));
-    // Headroom for font metrics that differ between macOS and CI.
-    const third = await resultScreen(s.page)[3]!.boundingBox();
-    assert.ok(
-      third!.y + third!.height <= viewport.height - 8,
-      `the third outcome keeps 8px of headroom ${JSON.stringify(third)}`,
+    await settleOn(
+      s.page,
+      s.page.getByRole("log", { name: "Task conversation" }),
     );
+    await settleOn(
+      s.page,
+      s.page.getByRole("heading", { name: "Reply", exact: true }),
+    );
+    // Results stay beside the conversation, and follow it on phones.
     // Each row reads its recorded outcome, not a default.
     assert.deepEqual(
       await s.page
@@ -234,7 +231,10 @@ for (const [label, viewport] of [
     await link.click();
     interactions++;
     await s.page.waitForURL(new RegExp(`/tasks/${s.taskId}`));
-    await assertFirstScreen(s.page, [resultScreen(s.page)[0]!]);
+    await settleOn(
+      s.page,
+      s.page.getByRole("heading", { name: "Reply", exact: true }),
+    );
     await openEvidence(s.page);
     interactions++;
     assert.equal(interactions, 2);

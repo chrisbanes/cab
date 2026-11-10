@@ -181,7 +181,9 @@ for (const engine of [
         expectedVersion: Number(project.version),
         instructions: "Updated instructions",
       });
-      await page.getByRole("button", { name: "Refresh task" }).click();
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await page.getByRole("tab", { name: "Overview" }).click();
       const fold = page.locator("details.inspector-fold");
       if ((await fold.getAttribute("open")) === null)
@@ -208,7 +210,9 @@ for (const engine of [
           "INSERT INTO task_execution_bindings (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision) VALUES ('started-work',?,?,1,1,1,1)",
         ).run(a.taskId, a.assignmentId);
       });
-      await page.getByRole("button", { name: "Refresh task" }).click();
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await facts.getByText(/Captured revisions are behind/).waitFor();
       await facts
         .getByRole("button", {

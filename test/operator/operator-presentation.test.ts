@@ -177,10 +177,10 @@ test("a reason code reads as its sentence and an unmapped code never leaks", () 
   assert.doesNotMatch(unmapped, /reviewable-pr/);
 });
 
-test("the outcome line is its first non-empty line without Markdown markers", () => {
+test("the outcome line skips context and metadata and uses the first meaningful sentence", () => {
   assert.deepEqual(outcomeLine("## Context\n\n- [ ] Restore focus"), {
-    line: "Context",
-    more: true,
+    line: "Restore focus",
+    more: false,
   });
   assert.deepEqual(outcomeLine("- [ ] Restore focus\n- [ ] Retain drafts"), {
     line: "Restore focus",
@@ -201,6 +201,15 @@ test("the outcome line is its first non-empty line without Markdown markers", ()
   });
   // Nothing meaningful, and a redacted outcome, give no line and no exception.
   assert.deepEqual(outcomeLine("  \n- [ ]  \n"), { line: "", more: false });
+  assert.deepEqual(
+    outcomeLine(
+      "> Imported context\n# Outcome\nPart of #1506. Blocked by none.\nRestore focus. Keep drafts.",
+    ),
+    {
+      line: "Restore focus.",
+      more: true,
+    },
+  );
   assert.deepEqual(outcomeLine(null), { line: "", more: false });
 });
 

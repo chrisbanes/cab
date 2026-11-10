@@ -57,7 +57,9 @@ test("a page refresh does not reread a request whose answer is unconfirmed", asy
   const taskRead = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await taskRead;
   await page.evaluate(
     () => new Promise<void>((resolve) => setTimeout(() => resolve(), 300)),

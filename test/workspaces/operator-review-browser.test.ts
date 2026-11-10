@@ -701,9 +701,9 @@ for (const [limitCase, sourceBody] of [
     assert.notEqual(next.digest, source.digest);
     assert.equal(next.body, null);
     assert.deepEqual(next.criteria, []);
-    await page
-      .getByRole("button", { name: "Refresh task", exact: true })
-      .click();
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("cab-task-changed")),
+    );
     await brief
       .getByText(
         `GitHub source · revision ${next.revision} · ${next.sourceId.slice(0, 8)}`,

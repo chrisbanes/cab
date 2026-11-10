@@ -20,7 +20,15 @@ why meant reassembling it across tabs, so the task view was hard to read.
   and waiting for capacity is named by the strip, never pinned. The task strip shows
   its state badge and at most one distinct reason, without repeating the next actor
   or readiness wording. The lead's conversation runs oldest to newest beneath it, and
-  the reply composer is docked at the bottom.
+  the reply composer is docked in view at the bottom of the conversation column.
+  Untargeted first visits open at the newest entry; explicit links win, while return
+  visits and updates keep the reading position, disclosures and drafts. On phones,
+  Latest result and Task details follow the conversation.
+  The subtitle uses the first meaningful outcome sentence, skipping headings, quotes
+  and source metadata. The one-line strip carries one source identity chip, and shows
+  the lead only when different from the project default. Operator next actions link
+  to their decision. Refresh source, Focus mode and Improve with lead share one
+  overflow menu; polling and New updates replace Refresh task.
   The brief, evidence and assignments move to the inspector. The History tab is
   removed; links that opened it (`#history`, `?section=context`, `?assignment=`)
   open the Overview at the matching place in the conversation.

@@ -19,7 +19,9 @@ they are, and gets one confirmation that the answer was recorded.
 
 - Home "Needs you" card.
 - Inbox queue row.
-- Task detail decision card.
+- Task detail decision card, reached through the strip's operator next-action link.
+  An explicit request link opens that request; an untargeted task starts at the latest
+  conversation entry with Reply in view.
 - Browser notification (opt-in, Settings → Notifications): opens the exact Inbox
   selection after sign-in. It is outside the budget below, and it never answers.
 - Operator CLI `question answer`.
@@ -40,7 +42,7 @@ they are, and gets one confirmation that the answer was recorded.
 | --- | --- | --- |
 | Home card, single choice | 2 (choose, Submit) | the question text and its options |
 | Inbox row | 3 (row, choose, Submit) | the question text in the row |
-| Task decision card | 3 (Answer question, choose, Submit) | the question text on the card |
+| Task decision card | 3 (Answer question, choose, Submit), once at the card | explicit request links show the named question; untargeted visits show the latest conversation |
 
 The operator CLI is outside the budget: it has no screens.
 

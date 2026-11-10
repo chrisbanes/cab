@@ -104,15 +104,12 @@ for (const [name, viewport] of Object.entries(viewports)) {
         .getAttribute("href"),
       `/tasks/${held.taskId}?section=execution`,
     );
-    // Reset is disabled, with its reason as the tooltip.
+    // Reset is absent while a held assignment makes it unavailable.
     if (viewport.width < 760)
       await page.locator(".task-header-overflow-toggle").click();
     const disabledReset = page.getByRole("button", { name: "Reset task…" });
-    assert.equal(await disabledReset.isDisabled(), true);
-    assert.match(
-      (await disabledReset.getAttribute("title")) ?? "",
-      /the task or an assignment is held/,
-    );
+    assert.equal(await disabledReset.count(), 0);
+
     assert.equal(await startAgain().count(), 0);
     assert.equal(commands.length, 1);
 
@@ -192,7 +189,9 @@ for (const [name, viewport] of Object.entries(viewports)) {
       minimumLeadSlots: 0,
       globalLimit: 3,
     });
-    await page.getByRole("button", { name: "Refresh task" }).click();
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("cab-task-changed")),
+    );
     await startAgain().waitFor();
     assert.equal(commands.length, 5);
 
@@ -235,7 +234,9 @@ for (const [name, viewport] of Object.entries(viewports)) {
           ))
       )
         await page.mouse.click(4, 700);
-      await page.getByRole("button", { name: "Refresh task" }).click();
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await read;
       await page.waitForTimeout(300);
     };
@@ -483,7 +484,9 @@ test("the header drops Reset task… once the task is no longer open", async (_t
       "UPDATE domain_tasks SET state = 'done', version = version + 1 WHERE id = ?",
     ).run(task.taskId);
   });
-  await page.getByRole("button", { name: "Refresh task" }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await page
     .locator(".page-header .task-header-actions")
     .getByRole("link", { name: "Execution" })

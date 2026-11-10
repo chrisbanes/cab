@@ -103,8 +103,8 @@ const lineMarkers =
   /^\s*(?:#{1,6}\s+|(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\](?:\s+|$))?/;
 
 /**
- * A recorded outcome as one plain line: its first non-empty line with Markdown markers removed.
- * `more` is true when anything meaningful follows. A redacted (null) outcome has no line.
+ * The first meaningful outcome sentence, skipping headings, quoted context and source metadata.
+ * `more` is true when meaningful text follows. A redacted outcome has no line.
  */
 export function outcomeLine(text: string | null): {
   line: string;
@@ -112,7 +112,13 @@ export function outcomeLine(text: string | null): {
 } {
   const lines = (text ?? "")
     .split("\n")
+    .filter((raw) => !/^\s*(?:>|#{1,6}\s)/.test(raw))
     .map((raw) => raw.trim().replace(lineMarkers, "").trim())
+    .map((line) =>
+      line.replace(/^(?:(?:Part of\s+#\d+|Blocked by\s+[^.]+)\.\s*)+/i, ""),
+    )
     .filter(Boolean);
-  return { line: lines[0] ?? "", more: lines.length > 1 };
+  const first = lines[0] ?? "";
+  const line = first.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? first;
+  return { line, more: lines.length > 1 || line.length < first.length };
 }

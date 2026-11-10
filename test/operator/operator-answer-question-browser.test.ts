@@ -165,7 +165,7 @@ for (const [label, viewport] of [
     const s = await start(
       journey,
       viewport,
-      ({ taskId }) => `/tasks/${taskId}`,
+      ({ taskId }) => `/tasks/${taskId}?section=decisions`,
     );
     const decision = s.page.locator(
       `#decisions .decision[data-record-id="${s.interactionId}"]`,
@@ -195,13 +195,20 @@ for (const [label, viewport] of [
 }
 
 test("the task decision card withdraws the question text when a refresh withholds or fails the exact read", async (_t, journey) => {
-  const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId }) => `/tasks/${taskId}?section=decisions`,
+  );
   const decision = s.page.locator(
       `#decisions .decision[data-record-id="${s.interactionId}"]`,
     ),
     label = decision.getByText(question, { exact: true }),
     readUrl = `**/api/operator/tasks/${s.taskId}/questions/${s.interactionId}`,
-    refresh = s.page.getByRole("button", { name: "Refresh task", exact: true });
+    refresh = () =>
+      s.page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
   await label.waitFor();
   // The read now withholds the form, as it does once privacy coverage changes.
   await s.page.route(readUrl, async (route) => {
@@ -210,12 +217,12 @@ test("the task decision card withdraws the question text when a refresh withhold
     body.data.form = null;
     await route.fulfill({ json: body });
   });
-  await refresh.click();
+  await refresh();
   await label.waitFor({ state: "detached" });
   await decision.getByText("Structured question").waitFor();
   // A refresh that finds it available shows the label again, and a failed one withdraws it.
   await s.page.unroute(readUrl);
-  await refresh.click();
+  await refresh();
   await label.waitFor();
   await s.page.route(readUrl, (route) =>
     route.fulfill({
@@ -224,7 +231,7 @@ test("the task decision card withdraws the question text when a refresh withhold
       body: JSON.stringify({ error: { code: "unavailable" } }),
     }),
   );
-  await refresh.click();
+  await refresh();
   await label.waitFor({ state: "detached" });
   await decision.getByText("Structured question").waitFor();
 });

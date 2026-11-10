@@ -1005,7 +1005,7 @@ export function App() {
     ? {
         title: taskReport.title,
         subtitle: taskReport.subtitle,
-        shortSubtitle: taskReport.identity,
+        shortSubtitle: taskReport.subtitle,
         back: taskReport.back,
         desktopBack: true,
         action: (

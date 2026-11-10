@@ -164,13 +164,10 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   // The subtitle is the outcome's first line; the strip carries state and the lead.
   assert.equal(
     await header.locator(".page-header-title p.introduction").textContent(),
-    "Context",
+    "Let keyboard users **open** the command menu.",
   );
   const strip = page.locator("[data-task-strip]");
-  assert.match(
-    (await strip.textContent()) ?? "",
-    /Accountable lead · Task lead/,
-  );
+  assert.doesNotMatch((await strip.textContent()) ?? "", /Lead · Task lead/);
   assert.ok(
     ((await strip.locator("[data-task-reason]").textContent()) ?? "").length >
       0,
@@ -397,9 +394,9 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
   // Dispatch without scrolling the button into view, as a timed re-read would.
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .dispatchEvent("click");
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
   // Settled: two frames after the read, the layout effect has restored the anchor.
   await page.evaluate(
@@ -646,9 +643,9 @@ test("An empty local task says so honestly", async (_t, j) => {
     .locator("#brief")
     .getByText("None supplied", { exact: true })
     .waitFor();
-  assert.match(
+  assert.doesNotMatch(
     (await page.locator("[data-task-strip]").textContent()) ?? "",
-    /Accountable lead · Unconfigured/,
+    /Lead ·/,
   );
   await page
     .locator('aside[aria-label="Task context"]')
@@ -747,9 +744,9 @@ test("An unknown Resume project outcome keeps the card and its check after the w
   const reread = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .dispatchEvent("click");
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
   await card.getByText("Waiting · Project paused", { exact: true }).waitFor({
     state: "detached",
@@ -1976,8 +1973,11 @@ for (const engine of ["chromium", "webkit"] as const)
       assert.deepEqual(commands, []);
       // A local task shows "Local task" and no source chip; no raw UUID is shown.
       const strip = page.locator("[data-task-strip]");
-      assert.equal(await strip.locator(".task-id").innerText(), "Local task");
-      assert.equal(await strip.locator(".task-source-chip").count(), 0);
+      assert.equal(
+        await strip.locator(".task-source-chip").innerText(),
+        "Local task",
+      );
+      assert.equal(await strip.locator("a.task-source-chip").count(), 0);
       assert.doesNotMatch(
         await strip.innerText(),
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
@@ -2056,10 +2056,12 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
         await page.getByRole("link", { name: tool, exact: true }).count(),
         0,
       );
-    assert.ok(
+    assert.ok(await page.getByLabel("More task options").isVisible());
+    assert.equal(
       await page
         .getByRole("button", { name: "Refresh task", exact: true })
-        .isVisible(),
+        .count(),
+      0,
     );
     assert.equal(
       await page.locator('aside[aria-label="Task context"]').isVisible(),
@@ -2103,9 +2105,9 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   const reread = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .dispatchEvent("click");
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
   await settle(page);
   await kept("Refresh task on Files");
@@ -2391,12 +2393,9 @@ test("An imported task separates read-only GitHub source from cab execution", as
     (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
     ids.importedId,
   );
-  assert.equal(
-    await strip.locator(".task-id").innerText(),
-    "fixture/source#42",
-  );
+  assert.equal(await strip.locator(".task-id").count(), 0);
   const chip = strip.locator(".task-source-chip");
-  assert.equal(await chip.innerText(), "Imported · fixture/source#42 ↗");
+  assert.equal(await chip.innerText(), "fixture/source#42 ↗");
   assert.equal(await chip.getAttribute("href"), read.data.source.url);
   assert.doesNotMatch(
     await strip.innerText(),
@@ -2654,7 +2653,9 @@ const refreshTask = async (page: Page, taskId: string) => {
   const reread = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${taskId}`,
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("cab-task-changed")),
+  );
   await reread;
 };
 /** The text of every paragraph between the destination buttons and the reply label. */
@@ -3112,45 +3113,27 @@ test("A viewing reference the service refuses while the task page is away says s
   assert.equal(await view.isEnabled(), true);
 });
 
-test("The outcome shows its first line and a closed disclosure with rendered Markdown", async (_t, j) => {
+test("The meaningful outcome sentence stays in the header and the full brief stays in Details", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seed(fixture.f);
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const subtitle = page.locator(".page-header-title p.introduction");
   await subtitle.waitFor();
-  assert.equal(await subtitle.textContent(), "Context");
-  const disclosure = page.locator("[data-task-strip] details.task-outcome");
-  const summary = disclosure.locator("summary");
-  assert.equal(await summary.textContent(), "Full desired outcome");
   assert.equal(
-    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
-    false,
+    await subtitle.textContent(),
+    "Let keyboard users **open** the command menu.",
   );
-
-  // The keyboard opens it, and it renders the whole outcome as Markdown.
-  await summary.focus();
-  await page.keyboard.press("Enter");
   assert.equal(
-    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
-    true,
+    await page.locator("[data-task-strip] details.task-outcome").count(),
+    0,
   );
-  assert.equal(await disclosure.locator("li").count(), 3);
-  // The preview draws each task item's inert checkbox as "[ ]".
-  const items = await disclosure.locator("li").allInnerTexts();
-  assert.deepEqual(
-    items.map((item) => item.replace(/^\[ \] /, "")),
-    ["Restore focus", "Retain drafts", "Announce results"],
-  );
-  assert.doesNotMatch(await disclosure.innerText(), /- \[ \]|##/);
-
-  // A refresh keeps it open.
+  await openOverviewCard(page, "brief");
+  const disclosure = overviewCard(page, "brief");
+  await disclosure.getByText("Retain drafts", { exact: false }).waitFor();
   await refreshTask(page, a.taskId);
   await settle(page);
-  assert.equal(
-    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
-    true,
-  );
+  assert.notEqual(await disclosure.getAttribute("open"), null);
 });
 
 test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => {
@@ -4614,9 +4597,9 @@ for (const engine of ["chromium", "webkit"] as const)
 
       // Refresh task, dispatched so the button does not take the focus.
       const reread = taskRead();
-      await page
-        .getByRole("button", { name: "Refresh task", exact: true })
-        .dispatchEvent("click");
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await reread;
       await unchanged("Refresh task");
 
@@ -4831,9 +4814,12 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     ["nowrap", "ellipsis", true],
   );
   const identity = header.locator(".page-subtitle-short");
-  assert.equal(await identity.textContent(), "Local task");
+  assert.equal(
+    await identity.textContent(),
+    "Let keyboard users **open** the command menu.",
+  );
   assert.ok(await identity.isVisible());
-  assert.match(
+  assert.doesNotMatch(
     await identity.evaluate((e) => getComputedStyle(e).fontFamily),
     /mono/i,
   );
@@ -4930,7 +4916,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await header.locator(".page-subtitle-short").waitFor();
   assert.equal(
     await header.locator(".page-subtitle-short").textContent(),
-    "fixture/source#42",
+    "Source-owned imported outcome",
   );
 
   // A finished task offers Execution and no Stop….
@@ -4966,19 +4952,13 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
       !document.querySelector(".task-header-overflow")?.hasAttribute("open"),
   );
 
-  // A one-line outcome is read through the strip's disclosure on a phone, and only there.
-  const outcome = page.locator(
-    "[data-task-strip] details.task-outcome[data-phone-only]",
-  );
+  // The meaningful outcome is the phone subtitle; source identity stays in the strip.
   assert.equal(
-    await outcome.locator("summary").textContent(),
-    "Full desired outcome",
+    await header.locator(".page-subtitle-short").textContent(),
+    "One line outcome.",
   );
-  await outcome.locator("summary").click();
-  await outcome.getByText("One line outcome.").waitFor();
   await page.setViewportSize({ width: 1366, height: 900 });
   await settle(page);
-  assert.equal(await outcome.isVisible(), false);
   // From 760px the header keeps the recorded outcome and carries no phone identity line.
   assert.equal(await header.locator(".page-subtitle-short").isVisible(), false);
   assert.ok(await header.locator(".introduction").isVisible());

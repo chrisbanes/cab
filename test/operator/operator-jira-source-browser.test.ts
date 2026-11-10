@@ -456,12 +456,13 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   await chip.waitFor();
   assert.equal(await chip.getAttribute("href"), `https://${site}/browse/ABC-1`);
   assert.match(await chip.innerText(), /ABC-1/);
-  const edit = page.getByRole("link", { name: "Edit in Jira" });
+  const edit = chip;
   assert.equal(await edit.getAttribute("href"), `https://${site}/browse/ABC-1`);
   await page
     .getByText(`${site} · Issue open (To Do)`, { exact: false })
     .first()
     .waitFor();
+  await page.getByLabel("More task options").click();
   await page.getByRole("button", { name: "Improve with lead" }).click();
   await page
     .getByText("Improve with lead isn’t available for Jira issues yet.")

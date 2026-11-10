@@ -11,7 +11,7 @@ import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagno
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { desktop, phone, signIn } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
-import { finishOwnWork, startOwnWork } from "../fixtures/questions.js";
+import { finishOwnWork, startOwnWork, until } from "../fixtures/questions.js";
 import { markLeadStarted } from "../fixtures/task-review.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
@@ -226,12 +226,17 @@ async function seed(f: Fixture, filler = earlier) {
 /** A newer captured entry on the lead's stream, shown after the next task read. */
 function appendEntry(
   f: Fixture,
-  s: Awaited<ReturnType<typeof seed>>,
+  s: Pick<Awaited<ReturnType<typeof seed>>, "taskId" | "assignmentId">,
   text: string,
 ) {
   f.seedPersistedState((db) => {
     db.exec("PRAGMA foreign_keys = OFF");
-    const at = Date.now();
+    const previous = db
+      .prepare(
+        "SELECT MAX(createdAt) AS at FROM conversation_history_items WHERE taskId=?",
+      )
+      .get(s.taskId) as { at: number | null };
+    const at = Math.max(Date.now(), (previous.at ?? 0) + 1);
     db.prepare(
       "INSERT INTO conversation_history_items(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,workRevision,threadId,turnId,itemId,lifecycle,text,omissionReason,deltaBytes,createdAt,updatedAt) VALUES(?,?,?,1,1,1,1,1,?,?,?,'completed',?,NULL,0,?,?)",
     ).run(
@@ -240,7 +245,7 @@ function appendEntry(
       s.assignmentId,
       "thread-work-conv-lead",
       "turn-work-conv-lead",
-      `late-${at}`,
+      `late-${randomUUID()}`,
       text,
       at,
       at,
@@ -250,9 +255,7 @@ function appendEntry(
 
 // A script click, so the page does not scroll to the header button first.
 const refresh = (page: Page) =>
-  page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((button) => (button as HTMLButtonElement).click());
+  page.evaluate(() => window.dispatchEvent(new Event("cab-task-changed")));
 /** The newest conversation entry is in view, as it is when the page follows the bottom. */
 const atBottom = (page: Page) =>
   page.evaluate(
@@ -302,9 +305,9 @@ for (const [label, viewport] of [
     await page
       .getByRole("heading", { name: "Command menu", level: 1 })
       .waitFor();
-    assert.match(
+    assert.doesNotMatch(
       (await page.locator("[data-task-strip]").textContent()) ?? "",
-      /Accountable lead · Task lead/,
+      /Lead · Task lead/,
     );
     const decisions = page.locator("#decisions");
     assert.equal(await decisions.locator(".decision").count(), 2);
@@ -451,7 +454,10 @@ for (const [label, viewport] of [
       name: "Focus mode",
       exact: true,
     });
-    if (viewport === desktop) await focusMode.click();
+    if (viewport === desktop) {
+      await page.getByLabel("More task options").click();
+      await focusMode.click();
+    }
     await opener.click();
     if (viewport === desktop) {
       // Wide screens open the pane beside the conversation, with focus inside it.
@@ -1365,3 +1371,166 @@ test("the working status line is static under reduced motion", async (_t, j) => 
   });
   assert.deepEqual(style, { name: "none", image: "none" });
 });
+
+const evidenceViewports = [
+  { width: 1366, height: 850 },
+  { width: 390, height: 844 },
+  { width: 1024, height: 768 },
+  { width: 390, height: 480 },
+];
+
+async function assertConversationViewport(page: Page) {
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForFunction(() => {
+    const end = document
+      .getElementById("conversation-end")
+      ?.getBoundingClientRect();
+    const reply = document.getElementById("reply")?.getBoundingClientRect();
+    const log = document
+      .querySelector(".conversation-log")
+      ?.getBoundingClientRect();
+    return (
+      end &&
+      reply &&
+      log &&
+      end.bottom <= reply.top &&
+      end.bottom > 0 &&
+      reply.top > 0 &&
+      reply.bottom <= innerHeight + 1 &&
+      log.top < reply.top
+    );
+  });
+  const bounds = await page.evaluate(() => {
+    const reply = document.getElementById("reply")!.getBoundingClientRect();
+    const inspector = document
+      .querySelector(".task-inspector")!
+      .getBoundingClientRect();
+    const columns = document
+      .querySelector(".task-columns")!
+      .getBoundingClientRect();
+    const last = document
+      .querySelector(".conversation-log > :last-child")!
+      .getBoundingClientRect();
+    return {
+      reply: { left: reply.left, right: reply.right, top: reply.top },
+      columns: {
+        left: columns.left,
+        right: columns.right,
+        bottom: columns.bottom,
+      },
+      inspectorTop: inspector.top,
+      latestBottom: last.bottom,
+    };
+  });
+  assert.ok(
+    bounds.latestBottom > 0 && bounds.latestBottom <= bounds.reply.top,
+    "the newest conversation entry is visible above Reply",
+  );
+  assert.ok(
+    bounds.reply.left >= bounds.columns.left &&
+      bounds.reply.right <= bounds.columns.right,
+    "Reply stays within the conversation column",
+  );
+  if (page.viewportSize()!.width < 1024)
+    assert.ok(
+      bounds.inspectorTop >= bounds.columns.bottom,
+      "Latest result and Details follow the conversation",
+    );
+}
+
+test("conversation-first viewport evidence", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const s = await seed(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  for (const viewport of evidenceViewports) {
+    const page = await browser.newPage({ viewport });
+    j.observe(page);
+    await stubReadiness(page);
+    await signIn(page, web, `/tasks/${s.taskId}`);
+    await page
+      .getByRole("log", { name: "Task conversation" })
+      .getByText("Second: all steps ran.")
+      .waitFor();
+    await assertConversationViewport(page);
+    await j.capture(
+      page,
+      `long-task-${viewport.width}-${viewport.height}`,
+      false,
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Refresh task", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page.locator("[data-task-strip] .task-source-chip").count(),
+      1,
+    );
+    await page.close();
+  }
+});
+
+for (const mode of ["running", "ready"] as const)
+  test(`conversation-first viewport evidence for a normal ${mode} task`, async (_t, j) => {
+    const f = await j.start("fixture.create", () =>
+      createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+    );
+    let browser: Browser | undefined;
+    j.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const started = await startOwnWork(f, "Long conversation", "Viewport");
+    const s = started.a;
+    markLeadStarted(f, s.assignmentId);
+    appendEntry(f, s, "Earlier discussion.\n\n".repeat(100));
+    appendEntry(f, s, "Newest viewport marker.");
+    if (mode === "ready") {
+      const result = await f.runtime.callTool({
+        threadId: started.work.threadId!,
+        turnId: started.work.turnId!,
+        callId: randomUUID(),
+        tool: "cab_report_result",
+        arguments: { summary: "Ready for review." },
+      });
+      assert.equal(result.success, true, result.text);
+      f.runtime.complete(started.priorTurns + 1);
+      await until(() =>
+        f.service
+          .list()
+          .some(
+            (w) => w.workId === started.work.workId && w.state === "completed",
+          ),
+      );
+    }
+    const web = await j.start("fixture.web", () => f.startWeb());
+    browser = await j.start("browser.launch", () => chromium.launch());
+    for (const viewport of evidenceViewports) {
+      const page = await browser.newPage({ viewport });
+      j.observe(page);
+      await stubReadiness(page);
+      await signIn(page, web, `/tasks/${s.taskId}`);
+      await page
+        .getByRole("log", { name: "Task conversation" })
+        .getByText("Newest viewport marker.")
+        .waitFor();
+      await assertConversationViewport(page);
+      await j.capture(
+        page,
+        `${mode}-task-${viewport.width}-${viewport.height}`,
+        false,
+      );
+      await page.close();
+    }
+  });

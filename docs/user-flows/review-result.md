@@ -1,6 +1,7 @@
 # Review a result
 
-**Status:** built. Task detail opens on the latest result with its summary and
+**Status:** built. Task detail opens at the latest conversation entry. Latest result
+sits beside the conversation on desktop and follows it on phones, with its summary and
 the first three criterion outcomes; further criteria sit behind "N more". No
 criterion-to-evidence relationship is recorded, so the evidence is the Evidence
 card, one step away. The Recent results strip on Home is not built; Home reaches
@@ -16,13 +17,14 @@ to say to the lead.
 ## Entry points
 
 - Home Completed work.
-- Task detail Overview (latest result first when one exists).
+- Task detail Overview (Latest result beside or after the conversation).
 - Inbox request pane evidence links.
 - Operator CLI `result` reads.
 
 ## Steps
 
-1. The task opens on the latest result: summary, the first three supplied
+1. An untargeted task opens at the newest conversation entry with Reply in view.
+   Read Latest result beside the conversation, or below it on a phone: summary, the first three supplied
    criteria with their recorded outcomes (the rest sit behind "N more"), and the
    recorded decisions attributed to who made them.
 2. A criterion without a recorded outcome reads Unverified. Every criterion offers
@@ -35,16 +37,11 @@ to say to the lead.
 
 | Entry point | Interactions to the evidence | First screen must show |
 | --- | --- | --- |
-| Task detail | 1 (Evidence) | the result summary and at most three criterion outcomes, with "N more" for the rest |
-| Home Completed work | 2 (the task, Evidence) | the task in Completed work (below the first screen on a phone); after the first interaction, the result summary on the task page |
+| Task detail | 1 (Evidence) | latest conversation and Reply; Latest result follows on a phone |
+| Home Completed work | 2 (the task, Evidence) | the task in Completed work (below the first screen on a phone); after the first interaction, the latest conversation on the task page |
 
-The first-screen promise holds for criterion text up to about one line each. A longer
-or multiline criterion is shown in full, never clamped, and can push later outcomes
-below the first screen.
-
-The "N more" disclosure follows the third outcome. The first screen promises the
-summary and up to three outcomes, so "N more" may sit just below it (about 40px at
-a 1366 × 900 desktop, one row on a phone); reaching it is a scroll, not an interaction.
+Explicit result, source, record and section links keep their named target. Returning
+to a task preserves reading position, expanded criteria and unfinished replies.
 
 Home's Completed work lists the task title only, so the summary is not on Home. On a
 phone the panel sits below Home's first screen; scrolling is not an interaction.
