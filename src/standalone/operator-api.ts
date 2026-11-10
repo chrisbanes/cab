@@ -2409,6 +2409,14 @@ export class OperatorApi {
           this.service.notStartedWork(s.request.workId)
       : this.service.latestNotStarted(s.assignmentId);
   }
+  private unresolvedHeldRequest(s: ReturnType<OperatorApi["selection"]>) {
+    const request = s.request ?? this.service.latestTurnRequest(s.assignmentId);
+    return (
+      request?.state === "held" &&
+      !this.service.notStartedWork(request.workId) &&
+      !this.service.settledDraftRefusal(request.workId)
+    );
+  }
   private nonStopTaskHold(
     taskId: string,
     excluded: readonly string[] | undefined,
@@ -2439,12 +2447,7 @@ export class OperatorApi {
     else if (
       holds.uncertainty ||
       holds.task ||
-      selections.some(
-        (s) =>
-          s.request?.state === "held" &&
-          !this.notStarted(s) &&
-          !this.service.settledDraftRefusal(s.request.workId),
-      ) ||
+      selections.some((s) => this.unresolvedHeldRequest(s)) ||
       selections.some(
         (s) =>
           (s.record?.holds.writer || s.record?.holds.capacity) &&
@@ -3392,9 +3395,7 @@ export class OperatorApi {
           s.request?.state === "active" &&
           ["running", "submitting"].includes(s.intent?.state ?? "");
         return (
-          (s.request?.state === "held" &&
-            !this.notStarted(s) &&
-            !this.service.settledDraftRefusal(s.request.workId)) ||
+          this.unresolvedHeldRequest(s) ||
           (s.request?.state === "active" && !confirmed) ||
           Boolean(
             (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,

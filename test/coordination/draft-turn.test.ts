@@ -420,6 +420,15 @@ for (const edit of [
       );
     });
     assert.equal(f.service.startAgainAvailability(task.taskId).available, true);
+    if ("outcome" in edit)
+      domain.execute({
+        type: "assignment.apply",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: task.projectId,
+        assignmentId: task.assignmentId,
+        expectedVersion: Number(domain.assignment(task.assignmentId).version),
+      });
     const refused = f.service
       .turnRequestsForTask(task.taskId)
       .find((r) => r.draftTurn && r.state === "held")!;

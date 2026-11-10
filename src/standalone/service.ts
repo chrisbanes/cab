@@ -3573,6 +3573,10 @@ export class StandaloneService {
     return this.started().schedulerStore.current(assignmentId, version);
   }
 
+  latestTurnRequest(assignmentId: string): TurnRequest | undefined {
+    return this.started().schedulerStore.latest(assignmentId);
+  }
+
   turnRequestsForTask(taskId: string): TurnRequest[] {
     return this.started().schedulerStore.forTask(taskId);
   }
