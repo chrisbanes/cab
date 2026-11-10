@@ -26,6 +26,7 @@ import {
   glabReferenceMatchesHost,
 } from "./credential-reference.js";
 import {
+  type ClosureCompletionWait,
   DeliveryStore,
   deliveryPolicySchema,
   repositorySettingsSchema,
@@ -1659,7 +1660,7 @@ export class DomainStore {
   }
 
   /** Whether the task is being published: its text, Ready and dependencies are frozen until that ends. */
-  private publicationSending(taskId: string): boolean {
+  publicationSending(taskId: string): boolean {
     return (
       this.one(
         "SELECT 1 AS present FROM task_publications WHERE taskId = ? AND state = 'sending'",
@@ -2275,6 +2276,12 @@ export class DomainStore {
         String(row.nodeId),
       )
       ? "held"
+      : null;
+  }
+  /** What a closure-held task waits on before provider closure completes it; null otherwise. */
+  providerClosureWait(taskId: string): ClosureCompletionWait | null {
+    return this.providerClosure(taskId) === "held"
+      ? new DeliveryStore(this.db).closureCompletionWait(taskId)
       : null;
   }
   admission(
@@ -3666,14 +3673,6 @@ export class DomainStore {
             .run(command.projectId, selectionIds);
         const sources = new GitHubSourceStore(this.db);
         for (const taskId of affectedTasks) sources.updateReadiness(taskId);
-        // Skip never leaves a provider closure as Done: reopen those tasks under their
-        // closure hold now, since retained selections stay inactive until previewed.
-        if (current.closedIssues === "done" && command.closedIssues === "skip")
-          for (const row of this.db
-            .prepare(`SELECT p.taskId FROM source_completions p
-              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
-            .all(command.projectId) as Row[])
-            sources.updateReadiness(String(row.taskId));
         this.db
           .prepare(
             "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
@@ -3777,14 +3776,6 @@ export class DomainStore {
             .run(command.projectId, selection.id, Number(row.version) + 1);
         const sources = new GitHubSourceStore(this.db);
         for (const taskId of affectedTasks) sources.updateReadiness(taskId);
-        if (row.closedIssues === "done" && closedIssues === "skip")
-          for (const completed of this.db
-            .prepare(`SELECT p.taskId FROM source_completions p
-              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
-            .all(command.projectId) as Row[])
-            sources
-              .forTracker({ provider: "jira", instance: command.instance })
-              .updateReadiness(String(completed.taskId));
         this.db
           .prepare(
             "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",

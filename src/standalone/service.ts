@@ -1799,7 +1799,7 @@ export class StandaloneService {
       });
       await githubSynchronizer.refresh();
       await jiraSynchronizer.refresh();
-      this.completeSettledProviderClosures({ githubSources, state });
+      this.completeSettledProviderClosures({ githubSources, state, domain });
       this.emitSourceHoldNotices({ githubSources, domain, coordination });
       // Nothing is published until provider reconciliation and queued-inbox
       // supersession finish; domain notifications cannot admit work.
@@ -4716,16 +4716,20 @@ export class StandaloneService {
       }
   }
 
-  /** Done-mode sources complete closure-held tasks once their execution has settled. */
+  /** Every source completes closure-held tasks once their execution and delivery have settled. */
   private completeSettledProviderClosures({
     githubSources,
     state,
-  }: Pick<Started, "githubSources" | "state">): void {
+    domain,
+  }: Pick<Started, "githubSources" | "state" | "domain">): void {
     for (const sources of [githubSources, ...githubSources.jiraStores()])
       for (const hold of sources.activeHolds())
         if (hold.reason === "closed" && this.writableTask(hold.taskId))
-          sources.completeFromProviderClosure(hold.taskId, () =>
-            state.taskExecutionSettled(hold.taskId),
+          sources.completeFromProviderClosure(
+            hold.taskId,
+            () =>
+              state.taskExecutionSettled(hold.taskId) &&
+              !domain.publicationSending(hold.taskId),
           );
   }
 

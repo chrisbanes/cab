@@ -517,7 +517,7 @@ export class GitHubSourceStore {
       .get(...this.key(nodeId)) as Row | undefined;
   }
 
-  /** Set only while a Done task was completed by GitHub closure under a Done-mode source. */
+  /** Set only while a Done task was completed by provider closure. */
   providerCompletion(taskId: string): Row | undefined {
     return this.db
       .prepare(
@@ -527,8 +527,9 @@ export class GitHubSourceStore {
   }
 
   /**
-   * Completes a closure-held task under a Done-mode source. Every condition is
-   * rechecked here, and `settled` runs inside the same transaction.
+   * Completes a closure-held task under every closed-issue setting once its execution and
+   * delivery have settled. Every condition is rechecked here, and `settled` runs inside the
+   * same transaction.
    */
   completeFromProviderClosure(taskId: string, settled: () => boolean): boolean {
     return transaction(this.db, () => {
@@ -536,9 +537,7 @@ export class GitHubSourceStore {
       const task = this.db
         .prepare(`SELECT e.externalId AS nodeId, e.provider, e.instance, t.projectId FROM external_items e
         JOIN domain_tasks t ON t.id = e.taskId
-        JOIN project_task_sources c ON c.projectId = t.projectId
         WHERE e.taskId = ? AND t.state = 'open' AND e.observedState = 'closed'
-          AND c.closedIssues = 'done'
           AND EXISTS (SELECT 1 FROM source_holds h
             WHERE ${sameItem("h", "e")} AND h.active = 1 AND h.reason = 'closed')
           AND NOT ${effectiveOwnClosure(itemColumns("e"))}`)
@@ -568,6 +567,7 @@ export class GitHubSourceStore {
       if (
         memberships.length === 0 ||
         memberships.some((row) => Number(row.complete) !== 1) ||
+        new DeliveryStore(this.db).closureCompletionWait(taskId) ||
         !settled()
       )
         return false;
@@ -1657,17 +1657,12 @@ export class GitHubSourceStore {
       )
       .get(taskId) as Row;
     const config = this.db
-      .prepare(
-        "SELECT closedIssues, readiness FROM project_task_sources WHERE projectId = ?",
-      )
+      .prepare("SELECT readiness FROM project_task_sources WHERE projectId = ?")
       .get(String(external.projectId)) as Row;
     const nodeId = String(external.nodeId);
     const closed = external.observedState === "closed";
-    // Reopening, or a switch to Skip, reverses a provider completion; holds are untouched.
-    if (
-      (!closed || config.closedIssues !== "done") &&
-      this.providerCompletion(taskId)
-    ) {
+    // Reopening reverses a provider completion; holds are untouched.
+    if (!closed && this.providerCompletion(taskId)) {
       this.db
         .prepare("DELETE FROM source_completions WHERE taskId = ?")
         .run(taskId);

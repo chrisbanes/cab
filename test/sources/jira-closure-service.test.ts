@@ -9,6 +9,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { databaseOf } from "../fixtures/service-internals.js";
 import { jiraIssue, json } from "../fixtures/fake-jira.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { seedPrBinding } from "../fixtures/closure-delivery.js";
 
 async function fixture(
   t: { after: (f: () => Promise<void> | void) => void },
@@ -177,19 +178,10 @@ for (const mode of ["skip", "done"] as const)
     const f = await fixture(t, mode);
     f.observed.closed = true;
     await f.service.refreshGitHub();
-    assert.equal(
-      f.service.domain().task(f.taskId).state,
-      mode === "done" ? "done" : "open",
-    );
+    assert.equal(f.service.domain().task(f.taskId).state, "done");
     assert.equal(f.sources().hold("10007")?.reason, "closed");
-    assert.equal(
-      Boolean(f.sources().providerCompletion(f.taskId)),
-      mode === "done",
-    );
-    assert.equal(
-      (await f.read()).source?.closure,
-      mode === "done" ? "completed" : "held",
-    );
+    assert.ok(f.sources().providerCompletion(f.taskId));
+    assert.equal((await f.read()).source?.closure, "completed");
     f.observed.closed = false;
     await f.service.refreshGitHub();
     assert.equal(f.service.domain().task(f.taskId).state, "open");
@@ -261,11 +253,12 @@ test("startup and ordinary refresh keep colliding Jira issue IDs on separate sit
   assert.equal(f.service.domain().task(secondTask).state, "done");
 });
 
-test("operator reopen under Jira Done recompletes only while settled; Skip keeps it open", async (t) => {
-  const f = await fixture(t);
-  f.observed.closed = true;
-  await f.service.refreshGitHub();
-  const reopen = () =>
+for (const mode of ["skip", "done"] as const)
+  test(`operator reopen under Jira ${mode} recompletes once settled`, async (t) => {
+    const f = await fixture(t, mode);
+    f.observed.closed = true;
+    await f.service.refreshGitHub();
+    assert.equal(f.service.domain().task(f.taskId).state, "done");
     f.service.domain().execute({
       type: "task.configure",
       actor: "operator",
@@ -275,19 +268,33 @@ test("operator reopen under Jira Done recompletes only while settled; Skip keeps
       expectedVersion: Number(f.service.domain().task(f.taskId).version),
       state: "open",
     });
-  reopen();
-  await f.service.refreshGitHub();
-  assert.equal(f.service.domain().task(f.taskId).state, "done");
-  f.service.domain().execute({
-    type: "jira.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: f.projectId,
-    expectedVersion: f.service.domain().jiraConfiguration(f.projectId)!.version,
-    instance: "example.atlassian.net",
-    selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
-    closedIssues: "skip",
+    assert.equal(f.service.domain().task(f.taskId).state, "open");
+    await f.service.refreshGitHub();
+    assert.equal(f.service.domain().task(f.taskId).state, "done");
   });
+
+test("a Jira closure under Skip waits for an open bound PR, then completes", async (t) => {
+  const f = await fixture(t, "skip");
+  const seed = (state: "OPEN" | "MERGED") =>
+    seedPrBinding(databaseOf(f.service), {
+      taskId: f.taskId,
+      projectId: f.projectId,
+      state,
+    });
+  seed("OPEN");
+  f.observed.closed = true;
   await f.service.refreshGitHub();
   assert.equal(f.service.domain().task(f.taskId).state, "open");
+  assert.equal(f.sources().hold("10007")?.reason, "closed");
+  assert.equal(f.sources().providerCompletion(f.taskId), undefined);
+  const held = (await f.read()).source;
+  assert.equal(held?.closure, "held");
+  assert.deepEqual(held?.closureWait, { kind: "change-request", number: 7 });
+  seed("MERGED");
+  await f.service.refreshGitHub();
+  assert.equal(f.service.domain().task(f.taskId).state, "done");
+  assert.ok(f.sources().providerCompletion(f.taskId));
+  const done = (await f.read()).source;
+  assert.equal(done?.closure, "completed");
+  assert.equal(done?.closureWait, null);
 });
