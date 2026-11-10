@@ -4761,10 +4761,19 @@ export class StandaloneService {
       for (const recipientAssignmentId of recipients)
         coordination.ensureSourceHoldEvent({ ...hold, recipientAssignmentId });
     }
+    // Every live recipient of the hold notice hears that it cleared.
     for (const release of coordination.sourceHoldReleases())
       if (
         this.writableTask(release.taskId) &&
-        leadByTask.get(release.taskId) === release.recipientAssignmentId
+        (leadByTask.get(release.taskId) === release.recipientAssignmentId ||
+          domain
+            .assignments(release.taskId)
+            .some(
+              (assignment) =>
+                String(assignment.id) === release.recipientAssignmentId &&
+                (assignment.state === "pending" ||
+                  assignment.state === "running"),
+            ))
       )
         coordination.ensureSourceHoldReleasedEvent(release);
   }

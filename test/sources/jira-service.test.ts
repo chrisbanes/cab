@@ -774,7 +774,7 @@ test("a Jira readiness loss gives the lead one source-hold notice, and a repeat 
   assert.equal(notices(), 1);
 });
 
-test("a withdrawn Jira hold explains self-release and sends one lead event when relisted Ready", async (t) => {
+test("a withdrawn Jira hold explains self-release and sends one release event to each live recipient when relisted Ready", async (t) => {
   const f = await fixture(t, { lead: true });
   await f.configureCredential();
   const jql = "project = ABC";
@@ -789,16 +789,29 @@ test("a withdrawn Jira hold explains self-release and sends one lead event when 
     .forTracker({ provider: "jira", instance: site });
   const taskId = String(stores.issue("10001")?.taskId);
   const leadId = String(f.service.domain().ensureLeadAssignment(taskId)?.id);
+  const workerId = randomUUID();
+  f.service.domain().execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    taskId,
+    assignmentId: workerId,
+    profileId: String(f.service.domain().project(f.projectId).leadProfileId),
+    brief: "Worker",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
   const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
   t.after(() => db.close());
-  const count = (eventType: string) =>
+  const count = (eventType: string, recipient = leadId) =>
     Number(
       (
         db
           .prepare(
             "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = ?",
           )
-          .get(leadId, eventType) as { count: number }
+          .get(recipient, eventType) as { count: number }
       ).count,
     );
   f.state.issues[jql] = [];
@@ -806,6 +819,7 @@ test("a withdrawn Jira hold explains self-release and sends one lead event when 
   await f.api.refreshSources();
   assert.equal(stores.hold("10001")?.reason, "withdrawn");
   assert.equal(count("source-hold"), 1);
+  assert.equal(count("source-hold", workerId), 1);
   const payload = JSON.parse(
     String(
       (
@@ -823,8 +837,10 @@ test("a withdrawn Jira hold explains self-release and sends one lead event when 
   await f.api.refreshSources();
   assert.equal(stores.hold("10001")?.active, 0);
   assert.equal(count("source-hold-released"), 1);
+  assert.equal(count("source-hold-released", workerId), 1);
   await f.api.refreshSources();
   assert.equal(count("source-hold-released"), 1);
+  assert.equal(count("source-hold-released", workerId), 1);
 });
 
 test("a non-self-releasing Jira hold keeps its original notice contract", async (t) => {

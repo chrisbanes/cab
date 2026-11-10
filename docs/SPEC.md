@@ -497,8 +497,9 @@ releases nothing, and every other source hold, including closure, still needs
 the operator to resume it. A withdrawn or readiness-lost hold notice tells the
 recipient to stop new work and wait for the qualifying complete read, without
 asking the operator to clear it. When a previously announced hold clears,
-one durable Inbox release event goes to the task lead and says the complete read
-listed the issue again while it was Ready. A hold created and cleared in one
+one durable Inbox release event goes to each notified recipient that is still the
+task lead or an active assignee, and says the complete read listed the issue again
+while it was Ready. A hold created and cleared in one
 refresh emits neither event. External closure
 after import holds the task in both closed-issue modes, whatever its readiness. Under
 Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
