@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Route } from "playwright";
 import {
   browserSuite,
   type BrowserJourney,
@@ -486,27 +486,104 @@ test("workspace-unavailable hides a stored empty snapshot and refreshes only whe
   );
 });
 
-test("a newer Files observation marks the cached Branch snapshot stale without rereading it", async (_t, j) => {
+test("Files observations arriving after navigation stay stale after closing the preview", async (_t, j) => {
   const { page, changes, comparisonRequests } = await startChangesJourney(j);
   await changes.getByText(/^As of /).waitFor();
   assert.equal(await changes.getByText(/^Stale\./).count(), 0);
-  const readsBeforeFilesObservation = comparisonRequests.length;
-  await page.route("**/api/operator/tasks/*/files*", async (route) => {
-    if (new URL(route.request().url()).pathname.match(/\/files\/[^/]+/)) {
-      await route.continue();
-      return;
-    }
+  let previewReadStarted!: () => void;
+  const previewStarted = new Promise<void>((resolve) => {
+    previewReadStarted = resolve;
+  });
+  let releasePreviewRead!: () => void;
+  const previewReadGate = new Promise<void>((resolve) => {
+    releasePreviewRead = resolve;
+  });
+  const observeFileResponse = async (route: Route) => {
+    const url = new URL(route.request().url());
+    if (!url.pathname.endsWith("/files") && !url.pathname.endsWith("/preview"))
+      return route.continue();
     const response = await route.fetch();
     const body = (await response.json()) as { observedAt: number };
-    body.observedAt = Math.max(body.observedAt + 1, Date.now() + 60_000);
+    if (url.pathname.endsWith("/files")) body.observedAt = 1;
+    else {
+      body.observedAt = Date.now() + 60_000;
+      previewReadStarted();
+      await previewReadGate;
+    }
     await route.fulfill({ response, body: JSON.stringify(body) });
-  });
+  };
+  await page.route("**/api/operator/tasks/*/files*", observeFileResponse);
+  await page.route("**/api/operator/tasks/*/preview*", observeFileResponse);
   await openTaskTab(page, "Files");
+  const directoryRefresh = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith("/files"),
+  );
+  await page.locator("#files").getByRole("button", { name: "Refresh" }).click();
+  assert.equal((await directoryRefresh).status(), 200);
+  await page.waitForFunction(() => {
+    const button = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("#files button"),
+    ).find((candidate) => candidate.textContent === "Refresh");
+    return button !== undefined && !button.disabled;
+  });
   await page.getByRole("button", { name: /guide\.md/ }).click();
-  await page.getByText(/Listing observed/).waitFor();
+  await previewStarted;
+  await openTaskTab(page, "Changes");
+
+  const refreshed = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.get("target") === "branch" &&
+      url.searchParams.get("refresh") === "true"
+    );
+  });
+  const refreshedExactRead = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.get("target") === "branch" &&
+      url.searchParams.has("comparisonId")
+    );
+  });
+  await changes.getByRole("button", { name: "Refresh comparison" }).click();
+  assert.equal((await refreshed).status(), 200);
+  assert.equal((await refreshedExactRead).status(), 200);
+  await page.waitForFunction(() => {
+    const button = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("#changes button"),
+    ).find((candidate) => candidate.textContent === "Refresh comparison");
+    return button !== undefined && !button.disabled;
+  });
+  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  const branchComparisonId = comparisonRequests
+    .map((request) => new URL(request))
+    .filter(
+      (url) =>
+        url.searchParams.get("target") === "branch" &&
+        url.searchParams.has("comparisonId"),
+    )
+    .at(-1)
+    ?.searchParams.get("comparisonId");
+  assert.ok(branchComparisonId);
+  const readsBeforeFilesObservation = comparisonRequests.length;
+  releasePreviewRead();
+  await changes.getByText(/^Stale\./).waitFor();
+  assert.equal(comparisonRequests.length, readsBeforeFilesObservation);
+  assert.equal(
+    await changes.getByText(branchComparisonId, { exact: true }).count(),
+    1,
+  );
+
+  await openTaskTab(page, "Files");
+  await page.getByRole("button", { name: "Close guide.md tab" }).click();
   await openTaskTab(page, "Changes");
   await changes.getByText(/^Stale\./).waitFor();
   assert.equal(comparisonRequests.length, readsBeforeFilesObservation);
+  assert.equal(
+    await changes.getByText(branchComparisonId, { exact: true }).count(),
+    1,
+  );
 });
 
 test("Changes labels repositories by verified name, selects by ID and falls back to the ID", async (_t, j) => {

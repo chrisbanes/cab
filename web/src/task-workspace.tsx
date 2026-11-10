@@ -471,7 +471,15 @@ export function TaskWorkspace({
     changed();
   };
   const [, render] = useState(0),
-    changed = () => render((n) => n + 1);
+    changed = useCallback(() => render((n) => n + 1), []),
+    recordWorkspaceObservation = useCallback(
+      (observedAt: number) => {
+        if (observedAt <= (state.files.workspaceObservedAt ?? 0)) return;
+        state.files.workspaceObservedAt = observedAt;
+        changed();
+      },
+      [state.files, changed],
+    );
   const [sendingNow, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
   // A write sent before the page was left may still be in flight when it is reopened.
@@ -3145,6 +3153,7 @@ export function TaskWorkspace({
             taskId={taskId}
             state={state.files}
             changes={state.changes}
+            onObservation={recordWorkspaceObservation}
           />
         </TabPanel>
         <TabPanel tab="changes" active={state.tab}>
@@ -3595,12 +3604,7 @@ function Changes({
         taskId={taskId}
         assignments={data.assignments}
         state={state.changes}
-        knownWorkspaceObservationAt={
-          Math.max(
-            state.files.directoryObservedAt ?? 0,
-            ...state.files.tabs.map((tab) => tab.observedAt ?? 0),
-          ) || null
-        }
+        knownWorkspaceObservationAt={state.files.workspaceObservedAt}
         changed={changed}
       />
       {changes && (

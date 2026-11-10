@@ -31,7 +31,11 @@ test("comparison reasons say what happened and offer a useful next step", () => 
   assert.match(comparisonReasonSentence("workspace-unavailable"), /Refresh/);
   assert.match(
     comparisonReasonSentence("time-limit"),
-    /5-second observation budget/,
+    /A time limit stopped the comparison/,
+  );
+  assert.match(
+    comparisonReasonSentence("time-limit"),
+    /overall observation budget is 5 seconds/,
   );
   const output = comparisonReasonSentence("output-limit");
   assert.match(output, /2,048-lines-per-side/);

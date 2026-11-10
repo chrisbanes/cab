@@ -13,7 +13,7 @@ export function comparisonReasonSentence(reason: string | undefined) {
     case "workspace-unavailable":
       return "Not read yet: workspace was unavailable. Refresh to read it again.";
     case "time-limit":
-      return "The comparison reached its 5-second observation budget. Reduce the comparison scope, then refresh.";
+      return "A time limit stopped the comparison. The overall observation budget is 5 seconds; reduce the comparison scope, then refresh.";
     case "output-limit":
       return "The comparison stopped at a bounded output limit. The recorded reason does not identify which limit; it may include the 2,048-lines-per-side or 1 MiB rendered-diff bound. Reduce the comparison scope or inspect files locally.";
     case "base-branch-required":
