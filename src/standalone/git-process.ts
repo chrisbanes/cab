@@ -42,6 +42,8 @@ export type GitRunResult =
       signal: NodeJS.Signals | null;
       childExitObserved: boolean;
       stdout: Buffer;
+      /** Collected within the same `maxOutputBytes` cap as stdout. */
+      stderr: Buffer;
     }
   /** Spawn failure, timeout, abort, output cap or a post-spawn error. */
   | {
@@ -142,6 +144,7 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
     let outputBytes = 0;
     let failureKind: GitRunFailureKind | undefined;
     const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
     let deadlineTimer: NodeJS.Timeout | undefined;
     let graceTimer: NodeJS.Timeout | undefined;
     let observationTimer: NodeJS.Timeout | undefined;
@@ -202,6 +205,7 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
           signal: childExitSignal ?? closeSignal,
           childExitObserved,
           stdout: output,
+          stderr: Buffer.concat(stderr),
         });
         return;
       }
@@ -293,7 +297,8 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
       if (buffer) stdout.push(buffer);
     };
     const onStderr = (chunk: Buffer | string) => {
-      appendOutput(chunk);
+      const buffer = appendOutput(chunk);
+      if (buffer) stderr.push(buffer);
     };
     const onAbort = () => beginFailure("cancelled");
 

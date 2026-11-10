@@ -35,6 +35,7 @@ function reservation(t: TestContext) {
         state: "ready" as const,
         reason: null,
         gitUncertain: false,
+        holdReleasable: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
