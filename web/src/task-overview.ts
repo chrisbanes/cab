@@ -3,6 +3,10 @@ import type {
   TaskRead,
 } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
+import {
+  type ClosureWait,
+  closureWaitText,
+} from "../../src/operator/closed-issue-copy.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 import { pullRequestReference } from "./delivery-presentation.js";
@@ -210,7 +214,8 @@ export const projectFieldRows = (source: NonNullable<Data["source"]>) =>
   );
 
 const sourceHoldReasons: Record<SourceHoldReason, string> = {
-  closed: "The issue was closed after import. Reopen it first, then resume.",
+  closed:
+    "The issue was closed after import. The task completes once its work and delivery settle; reopen the issue to keep working on it.",
   withdrawn:
     "The issue is no longer selected for this project. Select it again first, then resume.",
   "readiness-lost":
@@ -221,9 +226,17 @@ const sourceHoldReasons: Record<SourceHoldReason, string> = {
     "The issue was closed and cab could not show that its own delivery closed it. Reopen the issue first, then resume.",
 };
 
-/** Why the source holds the task, in provider-neutral words; null is a reason the read does not name. */
-export const sourceHoldReasonText = (reason: SourceHoldReason | null) =>
-  reason ? sourceHoldReasons[reason] : "The source holds this task.";
+/**
+ * Why the source holds the task, in provider-neutral words; null is a reason the read does not
+ * name. A closure hold also names the delivery it waits on.
+ */
+export const sourceHoldReasonText = (
+  reason: SourceHoldReason | null,
+  wait: ClosureWait | null = null,
+) =>
+  reason
+    ? `${sourceHoldReasons[reason]}${reason === "closed" && wait ? ` ${closureWaitText(wait)}` : ""}`
+    : "The source holds this task.";
 
 /** What resuming a source hold does and does not mean. */
 export const sourceHoldResumeCaveat =

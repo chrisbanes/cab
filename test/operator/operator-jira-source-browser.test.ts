@@ -90,7 +90,7 @@ for (const schedule of [
     );
     await waitForQueries(page, original.map((row) => row.jql).join("\n"));
     if (schedule === "untouched query")
-      await page.getByLabel("Closed Jira issues").selectOption("done");
+      await page.getByLabel("Closed issues at import").selectOption("done");
     else
       await page
         .getByLabel("JQL queries, one per line")
@@ -282,10 +282,10 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
 
   // Bad JQL is refused by Jira with its own words and nothing is saved.
   const source = page.getByRole("region", { name: "Jira source" });
-  const closedIssues = page.getByLabel("Closed Jira issues");
+  const closedIssues = page.getByLabel("Closed issues at import");
   assert.equal(await closedIssues.inputValue(), "skip");
   await closedIssues.focus();
-  await closedIssues.press("t");
+  await closedIssues.press("i");
   assert.equal(await closedIssues.inputValue(), "done");
   assert.equal(
     await closedIssues.evaluate((el) => el === document.activeElement),

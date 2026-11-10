@@ -11,6 +11,7 @@ import type { TabProps } from "./project-config.js";
 import {
   adoptSourceRows,
   closedIssueLabels,
+  closureCompletionNote,
   duplicateSourceIds,
   nextSelectionId,
   parseRows,
@@ -761,7 +762,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
             <DraftField
               draft={d}
               field="closedIssues"
-              label="Closed GitHub issues"
+              label="Closed issues at import"
             >
               {Object.entries(closedIssueLabels).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -769,10 +770,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 </option>
               ))}
             </DraftField>
-            <p className="metadata muted">
-              Treat closure as Done marks the task closed on GitHub, not
-              delivered by cab, once its work has stopped.
-            </p>
+            <p className="metadata muted">{closureCompletionNote}</p>
           </Panel>
         </div>
         <div className="settings-column">

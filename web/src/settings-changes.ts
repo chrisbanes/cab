@@ -17,6 +17,10 @@ import {
   type ProfileRuntime,
   readinessCommandValue,
 } from "../../src/operator/contracts.js";
+import {
+  closedIssueLabels,
+  closureCompletionNote,
+} from "../../src/operator/closed-issue-copy.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { repositoryLabel } from "./presentation.js";
 import { diagnosticCaptureLabels, plural } from "./settings-view.js";
@@ -416,7 +420,9 @@ export function sourceChanges(
     );
   // A draft without the field keeps the saved mode.
   if (v.closedIssues !== undefined && v.closedIssues !== source.closedIssues)
-    lines.push(`Closed issues: ${closedIssueLabels[String(v.closedIssues)]}`);
+    lines.push(
+      `Closed issues at import: ${closedIssueLabels[v.closedIssues === "done" ? "done" : "skip"]}`,
+    );
   return [
     ...lines,
     ...(v.referenceMode === "gh"
@@ -661,10 +667,7 @@ export const kindLabel = (kind: unknown) =>
       ? "GitHub Project"
       : "Search";
 
-export const closedIssueLabels: Record<string, string> = {
-  skip: "Skip closed issues",
-  done: "Treat closure as Done",
-};
+export { closedIssueLabels, closureCompletionNote };
 
 export function sourceCommand(
   projectId: string,

@@ -168,8 +168,8 @@ test("GitHub source explains a Project field rule without its matching selection
     .waitFor();
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
-    .selectOption({ label: "Treat closure as Done" });
+    .getByLabel("Closed issues at import", { exact: true })
+    .selectOption({ label: "Import as Done" });
   assert.equal(
     await save.isEnabled(),
     true,
@@ -319,10 +319,10 @@ test("GitHub source private values unavailable keeps rows kept and saveable", as
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   assert.equal(await save.isDisabled(), true);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
-    .selectOption({ label: "Treat closure as Done" });
+    .getByLabel("Closed issues at import", { exact: true })
+    .selectOption({ label: "Import as Done" });
   await changes(page)
-    .getByText("Closed issues: Treat closure as Done")
+    .getByText("Closed issues at import: Import as Done")
     .waitFor();
   const body = commandBody(page);
   // The saved version moves, so the page reads the private values once more.
@@ -839,7 +839,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
   const query = page.getByLabel("Search query", { exact: true });
-  const closed = page.getByLabel("Closed GitHub issues", { exact: true });
+  const closed = page.getByLabel("Closed issues at import", { exact: true });
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   await query.waitFor();
   // Edit and revert the value: nothing is listed, nothing can be sent.
@@ -859,7 +859,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   // Edited and reverted, then another writer changes the same query: nothing stale is kept.
   await query.fill("MINE");
   await query.fill("PRIVATE SAVED QUERY");
-  await closed.selectOption({ label: "Treat closure as Done" });
+  await closed.selectOption({ label: "Import as Done" });
   const writer = (text: string) =>
     api.execute({
       type: "github.configure",
@@ -905,7 +905,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
 
   // A real edit against older text says so after the other writer's change is adopted.
   await query.fill("MY REAL EDIT");
-  await closed.selectOption({ label: "Skip closed issues" });
+  await closed.selectOption({ label: "Skip" });
   await writer("THEIR SECOND QUERY");
   await save.click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
@@ -925,9 +925,9 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
   await query.fill("THEIR SECOND QUERY");
   await noChanges(page);
   assert.equal(await save.isDisabled(), true);
-  await closed.selectOption({ label: "Treat closure as Done" });
+  await closed.selectOption({ label: "Import as Done" });
   assert.deepEqual(await changes(page).getByRole("listitem").allInnerTexts(), [
-    "Closed issues: Treat closure as Done",
+    "Closed issues at import: Import as Done",
   ]);
   const last = commandBody(page);
   await save.click();
@@ -1137,8 +1137,8 @@ test("Save waits for saved queries and paths to be read again, and an edit never
     .waitFor();
   assert.equal(await query.count(), 0);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
-    .selectOption({ label: "Treat closure as Done" });
+    .getByLabel("Closed issues at import", { exact: true })
+    .selectOption({ label: "Import as Done" });
   const body = commandBody(page);
   await save.click();
   const sent = await body;
@@ -1678,7 +1678,7 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   await remove().waitFor();
   assert.equal(await showsText(page, hidden.id), false);
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
+    .getByLabel("Closed issues at import", { exact: true })
     .selectOption("done");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);

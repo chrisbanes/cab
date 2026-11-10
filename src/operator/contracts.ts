@@ -991,6 +991,18 @@ const jiraSourceDetail = {
  * held because GitHub's closure could not be attributed to cab's own delivery.
  */
 const sourceClosure = z.enum(["held", "completed", "unattributed"]).nullable();
+/** What a closure-held task waits on before provider closure completes it; null otherwise. */
+const sourceClosureWait = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("change-request"), number: revision }).strict(),
+    z
+      .object({
+        kind: z.literal("delivery-action"),
+        action: z.string().min(1).max(64),
+      })
+      .strict(),
+  ])
+  .nullable();
 /**
  * The field and option names the last complete read of a Project listed; a read that has
  * not listed them, or no longer lists them, leaves only the node IDs. Never sent back.
@@ -1116,6 +1128,7 @@ export const taskSourceSummarySchema = z
     ...jiraSourceDetail,
     state: z.enum(["open", "closed"]).nullable(),
     closure: sourceClosure,
+    closureWait: sourceClosureWait,
     readiness: taskReadinessSchema,
     /** The open GitHub issues blocking it; the cab task and its disclosable title when imported into the same project. */
     openBlockers: z
@@ -1462,6 +1475,7 @@ const source = z
     body: safeText,
     state: z.enum(["open", "closed"]).nullable(),
     closure: sourceClosure,
+    closureWait: sourceClosureWait,
     readiness: taskReadinessSchema,
     memberships: z.array(
       z

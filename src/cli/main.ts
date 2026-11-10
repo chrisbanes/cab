@@ -197,8 +197,11 @@ Sources and delivery: delivery send-comment posts a public GitHub comment that
 The CLI cannot edit or retract, and a confirm-comment decision is final (deny
 is the counterpart of approve). Removing a source selection discards its saved
 definition. preview-source has no deactivate command; saving any source change
-deactivates every selection. place-task is final once the task has an
-assignment. delivery refresh is installation-wide. send-comment --review-id
+deactivates every selection. closedIssues (Closed issues at import: Skip or Import
+as Done) decides only whether an issue first observed closed is imported. An
+imported task completes when its issue closes, once its work and delivery have
+settled. place-task is final once the task has an assignment. delivery refresh
+is installation-wide. send-comment --review-id
 first replays that review to check it is approved; an ID that is not an existing
 review records a new pending review instead, and nothing is posted.
 delivery publish-send creates a public GitHub issue and turns the local task into
@@ -902,7 +905,7 @@ async function run(
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
-        `State:   ${column}${closureSuffix(read.data.source?.closure)}`,
+        `State:   ${column}${closureSuffix(read.data.source?.closure, read.data.source?.closureWait)}`,
         ...(task.issueChangedSinceHandback
           ? ["Issue:   changed since handback; nothing reopened"]
           : []),

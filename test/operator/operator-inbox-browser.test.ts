@@ -524,6 +524,7 @@ async function serveSourceHold(page: Page, taskId: string) {
       body: "",
       state: "open",
       closure: null,
+      closureWait: null,
       readiness: {
         rule: { kind: "none" },
         outcome: "not-evaluated",

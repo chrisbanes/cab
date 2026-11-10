@@ -3198,6 +3198,7 @@ export class OperatorApi {
       ...detail,
       state: issue?.observedState ?? null,
       closure: this.domain().providerClosure(taskId),
+      closureWait: this.domain().providerClosureWait(taskId),
       readiness: this.taskReadiness(
         () => String(this.domain().task(taskId).projectId),
         taskId,
@@ -5246,6 +5247,9 @@ export class OperatorApi {
       state: issue?.observedState ?? null,
       closure: issue
         ? this.domain().providerClosure(String(issue.taskId))
+        : null,
+      closureWait: issue
+        ? this.domain().providerClosureWait(String(issue.taskId))
         : null,
       readiness: this.taskReadiness(
         () => projectId,

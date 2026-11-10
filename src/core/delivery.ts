@@ -877,6 +877,43 @@ const actionRecordSchema = z
   })
   .strict();
 export type DeliveryActionRecord = z.output<typeof actionRecordSchema>;
+/** What a closure-held task waits on before provider closure completes it. */
+export type ClosureCompletionWait =
+  | { kind: "change-request"; number: number }
+  | { kind: "delivery-action"; action: string };
+/** Whether a stack action has no nested provider effect left to drain or prove. */
+function stackDrained(record: DeliveryActionRecord): boolean {
+  const { stackCreate: create, stackLink: link, observation } = record;
+  // A proved refusal before creating a PR has no nested provider effect to drain.
+  const noEffect =
+    !link &&
+    !observation?.receipt &&
+    !observation?.ambiguous &&
+    ((record.state === "denied" && record.attempts === 0) ||
+      (record.state === "confirmed-failure" &&
+        observation?.state === "confirmed-failure"));
+  const receipt = observation?.receipt;
+  const settled =
+    record.state === "confirmed-success" &&
+    observation?.state === "confirmed-success" &&
+    create &&
+    link?.phase === "link-attempting" &&
+    link.target !== undefined &&
+    record.request.action.kind === "pr.create" &&
+    create.repositoryId === record.request.action.target.repositoryId &&
+    create.blockerBranch === record.request.action.target.baseRef &&
+    create.blockerTaskId === link.identity.blockerTaskId &&
+    create.repositoryId === link.identity.repositoryId &&
+    create.blockerBranch === link.identity.blockerBranch &&
+    create.blockerPrNodeId === link.identity.blockerPrNodeId &&
+    create.blockerPrNumber === link.identity.blockerPrNumber &&
+    receipt?.nodeId === link.identity.dependentPrNodeId &&
+    receipt?.number === link.identity.dependentPrNumber &&
+    receipt?.headSha === record.request.action.target.expectedHeadSha &&
+    observation.stack !== undefined &&
+    (observation.stack !== null || observation.stackLinkRefused === true);
+  return Boolean(noEffect || settled);
+}
 const taskBranchSchema = z
   .object({
     repositoryId: identity,
@@ -1046,36 +1083,7 @@ export class DeliveryStore {
           record.binding.projectId !== projectId
         )
           throw new Error("Stack action ownership mismatch");
-        const { stackCreate: create, stackLink: link, observation } = record;
-        // A proved refusal before creating a PR has no nested provider effect to drain.
-        const noEffect =
-          !link &&
-          !observation?.receipt &&
-          !observation?.ambiguous &&
-          ((record.state === "denied" && record.attempts === 0) ||
-            (record.state === "confirmed-failure" &&
-              observation?.state === "confirmed-failure"));
-        const receipt = observation?.receipt;
-        const settled =
-          record.state === "confirmed-success" &&
-          observation?.state === "confirmed-success" &&
-          create &&
-          link?.phase === "link-attempting" &&
-          link.target !== undefined &&
-          record.request.action.kind === "pr.create" &&
-          create.repositoryId === record.request.action.target.repositoryId &&
-          create.blockerBranch === record.request.action.target.baseRef &&
-          create.blockerTaskId === link.identity.blockerTaskId &&
-          create.repositoryId === link.identity.repositoryId &&
-          create.blockerBranch === link.identity.blockerBranch &&
-          create.blockerPrNodeId === link.identity.blockerPrNodeId &&
-          create.blockerPrNumber === link.identity.blockerPrNumber &&
-          receipt?.nodeId === link.identity.dependentPrNodeId &&
-          receipt?.number === link.identity.dependentPrNumber &&
-          receipt?.headSha === record.request.action.target.expectedHeadSha &&
-          observation.stack !== undefined &&
-          (observation.stack !== null || observation.stackLinkRefused === true);
-        if (noEffect || settled) return [];
+        if (stackDrained(record)) return [];
       } catch {
         // Unknown phases, malformed saved values and mismatched identities cannot prove drain.
       }
@@ -1128,6 +1136,31 @@ export class DeliveryStore {
         exceptOperationId,
       ),
     ];
+  }
+  /**
+   * The delivery a provider closure waits on before completing the task: its bound open PR
+   * (a stacked task's own layer) or one whose latest read failed, so its last observed state
+   * may be stale, an unresolved agent or operator action, or a stack create
+   * whose nested link is unproved. A status-mapping write never waits, as for completion, and
+   * an unregistered PR does not either: nobody can register or observe it once work settled.
+   */
+  closureCompletionWait(taskId: string): ClosureCompletionWait | null {
+    const binding = this.delivery(taskId);
+    if (binding?.observation.state === "OPEN" || binding?.readError)
+      return { kind: "change-request", number: binding.observation.number };
+    if (new UnstackStore(this.db).pending(taskId).length)
+      return { kind: "delivery-action", action: "unstack" };
+    const pending = this.actions(taskId).find(
+      (record) =>
+        !isServiceDeliveryCaller(record.binding) &&
+        (["prepared", "attempting", "uncertain"].includes(record.state) ||
+          ((record.stackCreate !== undefined ||
+            record.stackLink !== undefined) &&
+            !stackDrained(record))),
+    );
+    return pending
+      ? { kind: "delivery-action", action: pending.request.action.kind }
+      : null;
   }
   /**
    * Status-mapping writes still in flight: they serialize the task's next status write. An

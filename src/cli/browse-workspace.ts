@@ -394,7 +394,7 @@ const taskListCommand: BrowseCommand = {
               return [
                 oneLine(t.title),
                 ...(project ? [] : [oneLine(t.project.name, 30)]),
-                `${column}${closureSuffix(t.source?.closure)}`,
+                `${column}${closureSuffix(t.source?.closure, t.source?.closureWait)}`,
                 nextText(t.attention.codes, column).text,
                 t.lead ? oneLine(t.lead.name, 30) : "none",
                 t.id,
