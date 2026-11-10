@@ -1,3 +1,7 @@
+import {
+  skipSandboxGrantLines,
+  skipSandboxSupersededLine,
+} from "../../src/operator/skip-sandbox-copy.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -232,5 +236,125 @@ test("no coordination tool can read or change a project's local listening settin
   assert.doesNotMatch(
     JSON.stringify(coordinationTools),
     /listen|localBinding/i,
+  );
+});
+
+test("skip sandbox is off by default, operator-only and versioned through the API and the CLI", async (t) => {
+  const s = await startCliService(t);
+  const d = s.f.service.domain();
+  const configure = (enabled: boolean, expectedVersion?: number) => ({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId: s.projectId,
+    expectedVersion: expectedVersion ?? Number(d.project(s.projectId).version),
+    dangerouslySkipSandbox: enabled,
+  });
+  const config = async (token: string) => {
+    const r = await s.bearer(
+      token,
+      `/api/operator/projects/${s.projectId}/configuration`,
+    );
+    assert.equal(r.status, 200);
+    return ((await r.json()) as { data: { dangerouslySkipSandbox?: boolean } })
+      .data;
+  };
+  const read = await s.issue("read", "skip-ro");
+  const write = await s.issue("read-write", "skip-rw");
+  assert.equal((await config(read.token)).dangerouslySkipSandbox, false);
+
+  const denied = await s.bearer(read.token, "/api/operator/commands", {
+    method: "POST",
+    body: configure(true),
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(d.dangerouslySkipSandbox(s.projectId), false);
+
+  // A stale expected version is refused like any other project setting.
+  const staleVersion = Number(d.project(s.projectId).version);
+  const set = await s.bearer(write.token, "/api/operator/commands", {
+    method: "POST",
+    body: configure(true),
+  });
+  assert.equal(set.status, 200);
+  const stale = await s.bearer(write.token, "/api/operator/commands", {
+    method: "POST",
+    body: configure(false, staleVersion),
+  });
+  assert.equal(stale.status, 409);
+  assert.equal((await config(read.token)).dangerouslySkipSandbox, true);
+  // The settings are independent.
+  assert.equal(d.commandNetworkAccess(s.projectId), false);
+  assert.equal(d.localListening(s.projectId), false);
+
+  const h = harness(t);
+  for (const [name, token] of [
+    ["ro", read.token],
+    ["rw", write.token],
+  ] as const) {
+    const login = await h.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(token),
+    ]);
+    assert.equal(login.code, 0, login.err);
+  }
+  const cli = (connection: "ro" | "rw", args: string[]) =>
+    h.run([...args, "--connection", connection, "--output", "json"]);
+  const prepare = (value: string) => {
+    const out = join(h.dir, `${randomUUID()}.json`);
+    return {
+      out,
+      run: () =>
+        cli("ro", [
+          "project",
+          "prepare",
+          s.projectId,
+          "--dangerously-skip-sandbox",
+          value,
+          "--out",
+          out,
+        ]),
+    };
+  };
+  const same = prepare("true");
+  let r = await same.run();
+  assert.equal(r.code, 2, r.err + r.out);
+  assert.match(r.err + r.out, /No change/);
+
+  const off = prepare("false");
+  r = await off.run();
+  assert.equal(r.code, 0, r.err + r.out);
+  const doc = JSON.parse(readFileSync(off.out, "utf8")) as Json;
+  assert.deepEqual(doc.preview.changes, [
+    { field: "dangerouslySkipSandbox", from: "true", to: "false" },
+  ]);
+  r = await cli("rw", ["project", "apply", "--file", off.out]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.dangerouslySkipSandbox(s.projectId), false);
+
+  // Turning it on states both grants and that network access and listening are superseded.
+  const on = prepare("true");
+  r = await on.run();
+  assert.equal(r.code, 0, r.err + r.out);
+  const notes = JSON.stringify(
+    (JSON.parse(readFileSync(on.out, "utf8")) as Json).preview.notes,
+  );
+  for (const line of [...skipSandboxGrantLines, skipSandboxSupersededLine])
+    assert.ok(notes.includes(line), line);
+
+  const bad = prepare("maybe");
+  r = await bad.run();
+  assert.equal(r.code, 2, r.err + r.out);
+});
+
+test("no coordination tool can read or change a project's skip-sandbox setting", () => {
+  assert.doesNotMatch(
+    JSON.stringify(coordinationTools),
+    /skipSandbox|dangerously|sandbox/i,
   );
 });

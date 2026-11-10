@@ -115,7 +115,7 @@ routing and accountability.
 | ID | Required observable result |
 | --- | --- |
 | R01 | Codex App Server uses the existing operator login on macOS, including restart. Expired/unavailable login visibly holds affected work; no silent switch of agent execution to API credentials or billing. TypeSafe routing credentials are a separate opt-in integration. |
-| R02 | Defaults are four active turns globally and two per project; concurrent admission respects both. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
+| R02 | New installations default to six active turns globally with one slot held for lead turns, and no project or agent cap; concurrent admission respects the global cap, held lead slots, agent caps and project caps (non-lead turns only), trying resumed work before unstarted work. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
 | R03 | Sleep assertion exists only during active execution and releases when idle or supervision ends. Forced sleep/wake reconciles execution before more dispatch, without duplicates. |
 | R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. Explicit LAN HTTP access retains those checks and sends credentials without TLS. |
 | R05 | Conversation history and durable operator messages survive restart. Duplicate submission does not duplicate delivery; the next eligible turn receives the message without bypassing holds. No live steering is exposed. |
@@ -847,6 +847,29 @@ does not repeat.
 | Both disclosures state local listening within the disclosure caps; the CLI and task page show a Claude turn's admitted value | `operator-execution-runtime.test.ts`, `operator-cli-browse.test.ts`, `operator-harness-assignment-browser.test.ts` |
 | Project deletion removes both tables | `project-deletion.test.ts` |
 | A live task turn in each harness binds and serves on `127.0.0.1`, and Claude's outbound stays denied | [live evidence](evidence/2026-11-06-local-listening-live.md) |
+
+## Skip sandbox
+
+A project's `dangerouslySkipSandbox` runs its task turns without the harness sandbox so
+they can launch browsers and Android emulators: Codex sends `dangerFullAccess` and Claude
+Code disables its sandbox, with Claude's tool policy and edit-hook confinement unchanged
+([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)). The service, both runtimes and the
+operator surfaces are covered by deterministic suites; the sandbox behaviour is proved by the
+[probe](evidence/skip-sandbox-probe-2026-11-09.md) and by one live service turn per harness
+and setting, recorded by `npm run skip-sandbox:live` in the [live record](evidence/2026-11-09-skip-sandbox-live.md), which CI does not repeat.
+
+| Criteria | Evidence |
+| --- | --- |
+| Under each harness's sandbox Chromium and the emulator fail; with Claude's sandbox disabled both succeed | [probe](evidence/skip-sandbox-probe-2026-11-09.md) |
+| The setting is off by default, versioned and operator-only through the API and `project prepare --dangerously-skip-sandbox` | `operator-command-network.test.ts` |
+| A task turn of either harness records the setting at its own admission and runs with it only when it was on; drafting runs, draft turns and unadmitted turns never record it | `command-network-admission.test.ts`, `draft-turn.test.ts` |
+| Codex sends `dangerFullAccess` with approval `never` and never to a read-only turn; off leaves `workspaceWrite` unchanged | `codex-runtime.test.ts` |
+| Claude disables only the sandbox, keeps permission mode and tool lists, and still confines Write to the hook roots; the self-test does not gate such a turn and its passed probe is not consumed | `claude-runtime.test.ts` |
+| Both disclosures state the grant and the risks within the disclosure caps and neutral wording | `operator-execution-runtime.test.ts`, `neutral-runtime-copy.test.ts` |
+| Settings asks for confirmation when the setting is turned on and saves off without one; the change list and each turn's admission read from shared copy | `operator-project-config-general-browser.test.ts`, `operator-settings-presentation.test.ts`, `operator-harness-assignment-browser.test.ts` |
+| `project get` and `assignment get` show the setting and the turn's admission, and mark network access and local listening superseded when it is on | `operator-cli-browse.test.ts` |
+| The startup migration adds both tables empty, so every project stays off; project deletion removes them | `startup-snapshot.test.ts`, `project-deletion.test.ts` |
+| A live task turn in each harness with the setting on launches Chromium and boots the emulator, and with it off does neither | [live evidence](evidence/2026-11-09-skip-sandbox-live.md) |
 
 ## Draft turns
 

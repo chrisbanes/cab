@@ -287,4 +287,18 @@ test("assignment facts state the command network access or local listening each 
       .count(),
     1,
   );
+  // Skip sandbox is every task turn's line, not recorded yet, then admitted on.
+  await claude
+    .getByText(/No skip-sandbox admission recorded/)
+    .waitFor(attached);
+  f.seedPersistedState((db) =>
+    db.exec(
+      "INSERT OR REPLACE INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) SELECT id, 1 FROM execution_intents",
+    ),
+  );
+  await page.reload();
+  await openOverviewCard(page, "assignments");
+  await claude
+    .getByText(/Admitted with the sandbox skipped\. Superseded while skipping/)
+    .waitFor(attached);
 });

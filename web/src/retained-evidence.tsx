@@ -7,11 +7,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { Button, ShortId, StatusBadge } from "./components.js";
-import {
-  DiffHunk,
-  DiffLayoutControls,
-  type DiffHunkData,
-} from "./diff-view.js";
+import { FileDiffView, type DiffHunkData } from "./diff-view.js";
 import { codeSentence } from "./presentation.js";
 import { useRepositoryLabel } from "./repository-names.js";
 import { useOperatorResource } from "./resource.js";
@@ -184,8 +180,13 @@ function RetainedDiffView({
         Review comments cannot be added to a retained diff. The service anchors
         retained result evidence to retained file bytes only.
       </p>
-      <DiffLayoutControls layout={layout} onChange={onLayout} />
-      <DiffHunk hunk={rendered.hunk} hunkIndex={0} layout={layout} />
+      <FileDiffView
+        path={diff.path}
+        previousPath={diff.previousPath}
+        hunks={[rendered.hunk]}
+        layout={layout}
+        onLayout={onLayout}
+      />
       {rendered.approximate && (
         <p role="status">
           This diff is too large to align line by line; the changed section is

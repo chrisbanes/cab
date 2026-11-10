@@ -42,6 +42,7 @@ import {
 import {
   CommandResultValidationError,
   parseDomainCommandOutcome,
+  parseFreshDomainCommandOutcome,
 } from "../core/command-results.js";
 import {
   type CoordinationCall,
@@ -70,6 +71,7 @@ import {
   type DeliveryCaller,
   DeliveryStore,
   type ExternalAction,
+  externalActionArgumentsSchema,
   isOperatorAction,
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
@@ -77,6 +79,7 @@ import {
   materialDigest,
   type OperatorCommentReview,
   type OperatorDeliveryCaller,
+  registerPrArgumentsSchema,
   type RuntimeDeliveryCaller,
 } from "../core/delivery.js";
 import { leadDeliveryGuidance } from "../core/delivery-guidance.js";
@@ -171,7 +174,14 @@ import {
   STANDALONE_MARKER_CONTENTS,
   StandaloneDataDirectory,
 } from "./data-directory.js";
-import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
+import {
+  DeliveryCoordinator,
+  deliveryInternalFailureText,
+  deliveryToolFailureText,
+  assertDeliveryArguments,
+  unresolvedThreadSummary,
+} from "./delivery.js";
+import { DeliveryHoldError } from "../core/domain-errors.js";
 import { StatusMappingStore } from "../core/status-mapping.js";
 import { StatusMappingWriter, statusMappingEvent } from "./status-mapping.js";
 import { type PushWorkspace, verifyTaskPush } from "./push-verification.js";
@@ -1417,7 +1427,12 @@ export class StandaloneService {
                 )
                   reasons.push("closure-target-not-task-issue");
               }
-              if (reasons.length) throw new Error("Completion action held");
+              if (reasons.length)
+                // Mostly the request's own reviewed results or target, which the agent can correct.
+                throw new DomainPolicyError(
+                  "forbidden",
+                  `Completion action held: ${reasons.join(", ")}`,
+                );
             }
           },
           taskVersion: (taskId) => Number(domain.task(taskId).version),
@@ -1839,7 +1854,8 @@ export class StandaloneService {
         "scheduler",
         new TurnScheduler(
           schedulerStore,
-          (request) => this.attemptRequest(request, generation),
+          (request, capacityFreed) =>
+            this.attemptRequest(request, generation, capacityFreed),
           this.retryNow,
           (error) =>
             this.handleBackgroundFailure(generation, "scheduler-drain", error),
@@ -3135,6 +3151,14 @@ export class StandaloneService {
     return intent ? this.started().state.localListening(intent.id) : null;
   }
 
+  /** Skip-sandbox a work's turn was admitted with; null when no admission recorded it. */
+  dangerouslySkipSandboxFor(workId: string): boolean | null {
+    const intent = this.executionForWork(workId);
+    return intent
+      ? this.started().state.dangerouslySkipSandbox(intent.id)
+      : null;
+  }
+
   recoveryFor(
     assignmentId: string,
     assignmentVersion: number,
@@ -3996,7 +4020,7 @@ export class StandaloneService {
       !isServiceDeliveryCaller(caller) &&
       domain.failedStackedBlocker(caller.taskId)
     )
-      throw new DomainConflictError(
+      throw new DeliveryHoldError(
         "Stacked blocker failed; Unstack or Cancel the dependent",
       );
     if (domain.project(caller.projectId).archived)
@@ -4062,7 +4086,8 @@ export class StandaloneService {
     });
     if (canonicalMaterial(current) !== canonicalMaterial(caller))
       throw new Error("Delivery caller revision changed");
-    if (state.taskHold(caller.taskId)) throw new Error("Task is held");
+    if (state.taskHold(caller.taskId))
+      throw new DeliveryHoldError("Task is held");
     const draftTurn =
       this.started().schedulerStore.find(caller.workId)?.draftTurn === true;
     const reasons = domain
@@ -4076,7 +4101,7 @@ export class StandaloneService {
       reasons.length ||
       deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
     )
-      throw new DomainConflictError("Task admission is held");
+      throw new DeliveryHoldError("Task admission is held");
   }
   operatorCommentCaller(taskId: string): OperatorDeliveryCaller {
     const d = this.domain(),
@@ -4790,14 +4815,14 @@ export class StandaloneService {
     );
   }
 
-  capacityLimits(projectIds: string[] = []): CapacityLimits {
-    return this.domain().capacityLimits(projectIds);
+  capacityLimits(): CapacityLimits {
+    return this.domain().capacityLimits();
   }
 
   async configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
   ): Promise<CapacityLimits> {
-    const outcome = parseDomainCommandOutcome(
+    const outcome = parseFreshDomainCommandOutcome(
       "capacity.configure",
       this.domain().execute({
         ...command,
@@ -4805,7 +4830,10 @@ export class StandaloneService {
         actor: "operator",
       }),
     );
-    if (outcome.type !== "capacity.configure")
+    if (
+      outcome.type !== "capacity.configure" ||
+      !("minimumLeadSlots" in outcome.result)
+    )
       throw new CommandResultValidationError(
         "Capacity configuration returned the wrong result type",
       );
@@ -6089,15 +6117,25 @@ export class StandaloneService {
         if (call.tool === "cab_external_action") {
           const caller = coordination.deliveryCaller(call as CoordinationCall);
           capturedDeliveryCaller = caller;
+          let refusal: string | undefined;
+          assertDeliveryArguments(
+            externalActionArgumentsSchema,
+            call.arguments,
+          );
           const result = await this.started().deliveryCoordinator.submit(
             call.arguments,
             caller,
+            (error) => {
+              // Untyped refusals (mostly send-time races) keep just their recorded reason.
+              const text = deliveryToolFailureText(error);
+              if (text !== deliveryInternalFailureText) refusal = text;
+            },
           );
           const response = coordination.recordAsyncReceipt(
             call as CoordinationCall,
             caller,
             {
-              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}`,
+              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}`,
               success: result.state === "confirmed-success",
             },
           );
@@ -6130,6 +6168,7 @@ export class StandaloneService {
         if (call.tool === "cab_register_pr") {
           const caller = coordination.deliveryCaller(call as CoordinationCall);
           capturedDeliveryCaller = caller;
+          assertDeliveryArguments(registerPrArgumentsSchema, call.arguments);
           const result = await this.started().deliveryCoordinator.registerPr(
             call.arguments,
             caller,
@@ -6264,7 +6303,7 @@ export class StandaloneService {
           call.tool === "cab_register_pr";
         const response = {
           text: deliveryCall
-            ? "Delivery request rejected or held"
+            ? deliveryToolFailureText(error)
             : String(error).slice(0, 1000),
           success: false,
         };
@@ -8355,6 +8394,7 @@ export class StandaloneService {
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
+    capacityFreed: () => boolean = () => false,
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
       return;
@@ -8612,9 +8652,15 @@ export class StandaloneService {
           runtime,
           (async () => {
             const settings = this.turnSettings(request);
+            // A stale hint fails closed: admission records the setting itself, and a
+            // sandboxed turn keeps `failIfUnavailable: true`.
+            const skipSandbox =
+              request.projectId !== null &&
+              state.skipSandboxApplies(intent.id, request.projectId);
             return preflight({
               workspace: workspaceKey,
               ...(settings ? { settings } : {}),
+              ...(skipSandbox ? { skipSandbox: true } : {}),
             });
           })(),
           () => failed,
@@ -8663,6 +8709,9 @@ export class StandaloneService {
         await this.failQueuedDrafting(request);
         return;
       }
+      // A slot freed while this attempt awaited goes to the scheduler's next pass,
+      // which tries higher-priority requests first.
+      if (capacityFreed()) return;
       const admitted = state.begin(intent.id, {
         projectId: request.projectId,
         requestSequence: store.sequence(request.workId),
@@ -8987,8 +9036,8 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
-      // Passed only when network access, local listening or Git roots apply, so otherwise keeps
-      // today's call shapes. A draft turn is always read-only with network and listening off.
+      // Passed only when network access, local listening, skip-sandbox or Git roots apply, so otherwise keeps
+      // today's call shapes. A draft turn is always read-only with network, listening and skip-sandbox off.
       const binding = request.taskId
         ? this.started().workspaceBindings.get(request.taskId)
         : undefined;
@@ -8998,12 +9047,17 @@ export class StandaloneService {
           : [];
       const networkAccess = state.commandNetworkAccess(intent.id) === true;
       const localListening = state.localListening(intent.id) === true;
+      const skipSandbox = state.dangerouslySkipSandbox(intent.id) === true;
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
-        : networkAccess || localListening || gitWritableRoots.length > 0
+        : networkAccess ||
+            localListening ||
+            skipSandbox ||
+            gitWritableRoots.length > 0
           ? {
               networkAccess,
               ...(localListening ? { localListening: true } : {}),
+              ...(skipSandbox ? { skipSandbox: true } : {}),
               ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
             }
           : undefined;

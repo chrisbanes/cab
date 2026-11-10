@@ -180,6 +180,21 @@ investigating and talking with the operator. It grants no readiness and carries
 out no implementation.
 _Avoid_: Triage turn
 
+**Lead turn**:
+For capacity, a turn on a task's lead assignment, including a draft turn, or a
+project drafting run. Delegated assignments and direct work are not lead turns.
+_Avoid_: Coordination turn as a separate kind
+
+**Minimum lead slots**:
+The installation-wide number of global active-turn slots held for lead turns. Other
+turns cannot take a held slot; lead turns can also use any free slot.
+_Avoid_: Lead reserve per project
+
+**Agent cap**:
+An optional limit on how many active turns one agent runs at once, across projects
+and roles.
+_Avoid_: Agent concurrency setting in the agent revision
+
 **Start again**:
 The operator action that queues an assignment's request again when it was refused at
 admission before it ran, at the current revisions. The refused request stays as history.
@@ -257,6 +272,15 @@ _Avoid_: Token or secret when referring to the stored reference
 The association between an assignment and its runtime-specific session or process
 identity and validated execution settings.
 _Avoid_: Assignment identity when referring only to an execution session
+
+**Skip sandbox**:
+A per-project setting, `dangerouslySkipSandbox`, that the operator turns on so a project's task turns
+run without the harness sandbox and can launch host tools such as browsers and Android emulators.
+It is recorded when a turn is admitted and never applies to draft turns, drafting runs or turns
+without a task binding. Agents then act with the service user's full filesystem, process, network
+and credential access, and command network access and local listening are superseded while it is on.
+It is a short-term measure until the verification tool replaces it.
+_Avoid_: Sandbox bypass, unsandboxed mode, when referring to the setting
 
 **Task workspace**:
 The working files allocated to a task, retained independently of its conversations.

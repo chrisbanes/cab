@@ -1,3 +1,8 @@
+import {
+  claudeSkipSandboxLine,
+  codexSkipSandboxLine,
+  skipSandboxSupersededLine,
+} from "../../src/operator/skip-sandbox-copy.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -643,6 +648,92 @@ test("assignment get states local listening for a Claude assignment only", async
   assert.match(claude, /connect to a listening port/);
   assert.doesNotMatch(claude, /command network access/i);
   assert.doesNotMatch(await lines(seed.betaSharedTaskId), /local listening/i);
+});
+
+test("assignment get states skip sandbox for both harnesses", async (t) => {
+  const { s, seed, h, ok } = await setup(t);
+  // A Claude assignment not yet admitted, and Beta's Codex lead.
+  const claudeId = randomUUID();
+  s.f.service.domain().execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: seed.alphaId,
+    taskId: seed.alphaSharedTaskId,
+    assignmentId: claudeId,
+    profileId: seed.alphaLeadId,
+    brief: "Skip",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const codexId = (await ok(["task", "get", seed.betaSharedTaskId])).data
+    .leadAssignmentId as string;
+  for (const id of [claudeId, codexId]) {
+    const human = (await h.run(["assignment", "get", id])).out;
+    assert.ok(
+      human.includes(
+        "No skip-sandbox admission recorded; the project's setting at admission applies.",
+      ),
+      human,
+    );
+  }
+  // An admitted-on turn states its own harness's grant, and only that one.
+  const a = (await ok(["assignment", "get", codexId])).data;
+  const workId = randomUUID();
+  s.f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        assignmentVersion, instructionsRevision, profileRevision, prompt, state)
+        VALUES (?, ?, 'assignment', ?, ?, ?, ?, ?, ?, 'p', 'completed')`,
+    ).run(
+      randomUUID(),
+      workId,
+      a.taskId,
+      a.projectId,
+      codexId,
+      a.version,
+      a.instructionsRevision,
+      a.profileRevision,
+    );
+    const intentId = randomUUID();
+    db.prepare(
+      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed','chatgpt','workspaceWrite','never')",
+    ).run(intentId, workId);
+    db.prepare(
+      "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
+    ).run(intentId);
+  });
+  const on = (await h.run(["assignment", "get", codexId])).out;
+  assert.ok(on.includes("Admitted with the sandbox skipped."), on);
+  assert.ok(on.includes(codexSkipSandboxLine), on);
+  assert.ok(!on.includes(claudeSkipSandboxLine), on);
+  assert.ok(on.includes(skipSandboxSupersededLine), on);
+});
+
+test("project get shows skip sandbox and marks network access and local listening superseded when on", async (t) => {
+  const { seed, h, d } = await setup(t);
+  const row = (out: string, label: string) =>
+    out.split("\n").find((l) => l.startsWith(`${label}:`)) ?? "";
+  const get = async () => (await h.run(["project", "get", seed.alphaId])).out;
+  let out = await get();
+  assert.match(row(out, "Skip sandbox"), /disabled/);
+  assert.doesNotMatch(out, /superseded/i);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: seed.alphaId,
+    expectedVersion: Number(d.project(seed.alphaId).version),
+    dangerouslySkipSandbox: true,
+  });
+  out = await get();
+  assert.match(row(out, "Skip sandbox"), /enabled/);
+  assert.match(row(out, "Command network access"), /superseded/);
+  assert.match(row(out, "Local listening"), /superseded/);
+  assert.match(out, /full filesystem, process, network and credential access/);
+  assert.ok(out.includes(codexSkipSandboxLine));
+  assert.ok(out.includes(claudeSkipSandboxLine));
 });
 
 test("task get names the lead assignment, execution and who acts next", async (t) => {
