@@ -5047,8 +5047,9 @@ export class StandaloneService {
             r.status !== "resolved" &&
             r.sourceKey.startsWith(prefix),
         );
-      const failed = domain.failedStackedBlocker(taskId);
-      const unknown = domain.stackFacts(taskId)?.reason === "blocker-unknown";
+      const gate = domain.stackedBlockerGate(taskId);
+      const failed = gate === "failed";
+      const unknown = gate === "unknown";
       // A failed refresh cannot clear an observed episode or discard its dismissal.
       if (failed || (existing && unknown))
         conditions.push({
@@ -5106,11 +5107,12 @@ export class StandaloneService {
     }
     if (this.hasNonStopTaskHold(taskId))
       held.push(`task hold: ${this.nonStopTaskHoldReason(taskId)}`);
-    if (
-      this.recoveryForTask(taskId).some((r) => r.holds.uncertainty) &&
-      !held.length
-    )
-      held.push("unresolved execution recovery");
+    if (!held.length)
+      for (const r of this.recoveryForTask(taskId))
+        if (r.holds.uncertainty)
+          held.push(
+            `${r.binding?.assignmentId ?? "unbound execution"} (${r.workId})`,
+          );
     if (held.length) {
       // Keep a combined ownership episode while any hold remains; it cannot be dismissed.
       const existing = this.inboxLifecycle()

@@ -357,6 +357,8 @@ function inboxVisibilityCommand(action: "dismiss" | "restore"): WriteCommand {
   return {
     usage: `inbox ${action} ITEM_ID --expected-revision N${action === "dismiss" ? " [--note TEXT]" : ""} [--request-id UUID]`,
     positionals: 1,
+    expects:
+      "--expected-revision: the Inbox item's lifecycle revision ('cab inbox list' or 'cab inbox list --status dismissed'); required.",
     flags: [
       "expected-revision",
       "request-id",

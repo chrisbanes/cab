@@ -1442,7 +1442,10 @@ test("a non-Stop task hold is execution-uncertain on the List, the task read and
   const inbox = await api.readInbox(),
     item = taskItems(inbox.data.items).find((i) => i.taskId === ids.taskId);
   assert.equal(item?.attentionCode, "execution-uncertain");
-  assert.equal(item?.reason, "Execution ownership is uncertain");
+  assert.equal(
+    item?.reason,
+    "Still waiting on task hold: Writer ownership is unclear",
+  );
   // The contract validates the new fields at runtime.
   assert.equal(taskSchema.safeParse(read).success, true);
   const attention = read.data.attention;
@@ -2728,8 +2731,13 @@ test("an answered native question awaiting delivery is cab's, not an operator qu
   );
   assert.deepEqual(await listedAttention(api, task.taskId), [
     "question-delivery",
+    "execution-uncertain",
   ]);
-  // The recorded answer stays listed as cab's delivery, with no intervention.
+  // The answer remains cab's delivery; its unconfirmed native turn retains ownership.
+  assert.equal(
+    (await api.readTask(task.taskId)).data.execution.holds.uncertainty,
+    true,
+  );
   assert.deepEqual(
     taskItems((await api.readInbox()).data.items)
       .filter((i) => i.taskId === task.taskId)
@@ -2739,6 +2747,11 @@ test("an answered native question awaiting delivery is cab's, not an operator qu
         reason,
       })),
     [
+      {
+        kind: "intervention",
+        attentionCode: "execution-uncertain",
+        reason: `Still waiting on ${task.assignmentId} (${work.workId})`,
+      },
       {
         kind: "question",
         attentionCode: "question-delivery",

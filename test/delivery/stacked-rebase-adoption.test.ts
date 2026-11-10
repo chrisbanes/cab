@@ -712,6 +712,24 @@ test("a stale closed-unmerged observation followed by a read failure is unknown 
     f.currentService().domain().failedStackedBlocker(f.dependent),
     true,
   );
+  const extra = randomUUID();
+  f.run({
+    type: "task.create",
+    projectId: f.projectId,
+    taskId: extra,
+    title: "Independent blocker",
+    outcome: "O",
+    ready: false,
+  });
+  f.run({
+    type: "dependency.add",
+    projectId: f.projectId,
+    taskId: f.dependent,
+    expectedVersion: Number(
+      f.currentService().domain().task(f.dependent).version,
+    ),
+    blockerTaskId: extra,
+  });
   const api = new OperatorApi(f.currentService(), [f.root]);
   const item = (await api.readInbox()).data.items.find(
     (i) =>
@@ -731,11 +749,15 @@ test("a stale closed-unmerged observation followed by a read failure is unknown 
   );
   assert.equal(
     f.currentService().domain().stackFacts(f.dependent)?.reason,
-    "blocker-unknown",
+    "multiple-blockers",
   );
   const hidden = (
     await api.readInbox(new URLSearchParams({ status: "dismissed" }))
-  ).data.items.find((i) => i.id === item.id)!;
+  ).data.items.find((i) => i.id === item.id);
+  assert.ok(
+    hidden,
+    "a failed refresh must retain the dismissed episode despite another blocker",
+  );
   assert.equal(hidden.lifecycle?.status, "dismissed");
   assert.equal(hidden.kind, "intervention");
   assert.match(hidden.reason!, /state is unknown/);

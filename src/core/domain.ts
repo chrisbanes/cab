@@ -2462,13 +2462,16 @@ export class DomainStore {
       ? edge
       : null;
   }
+  /** The selected edge's evidence, independent of other dependency holds. */
+  stackedBlockerGate(taskId: string) {
+    const edge = this.activeStackedDependency(taskId);
+    return edge
+      ? this.blockerGate(edge.blockerTaskId, edge.repositoryId, true)
+      : null;
+  }
   /** The selected failed edge remains actionable even while independent dependencies also hold. */
   failedStackedBlocker(taskId: string): boolean {
-    const edge = this.activeStackedDependency(taskId);
-    return (
-      !!edge &&
-      this.blockerGate(edge.blockerTaskId, edge.repositoryId, true) === "failed"
-    );
+    return this.stackedBlockerGate(taskId) === "failed";
   }
   failedStackedDependents(blockerTaskId: string): string[] {
     return this.tasks(String(this.task(blockerTaskId).projectId))

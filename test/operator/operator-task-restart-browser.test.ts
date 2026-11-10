@@ -9,6 +9,23 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { configure, until } from "../fixtures/completed-lead.js";
 import { refusedTask } from "../fixtures/refused-task.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+
+async function refusalId(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  taskId: string,
+) {
+  const item = (
+    await new OperatorApi(f.service, [f.directory]).readInbox()
+  ).data.items.find(
+    (i) =>
+      i.kind === "intervention" &&
+      i.taskId === taskId &&
+      i.attentionCode === "not-started",
+  );
+  assert.ok(item);
+  return item.id;
+}
 
 const test = browserSuite("ui-task-restart");
 
@@ -118,7 +135,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // The Inbox intervention offers the same action.
     await page.goto(
-      `${web.origin}/inbox?task=${inbox.taskId}&request=${encodeURIComponent(`intervention:${inbox.taskId}`)}`,
+      `${web.origin}/inbox?task=${inbox.taskId}&request=${encodeURIComponent(await refusalId(f, inbox.taskId))}`,
     );
     await startAgain().waitFor();
     await startAgain().click();
@@ -129,7 +146,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     // Home's Needs you card offers it in place.
     await page.goto(`${web.origin}/`);
     const card = page.locator(
-      `.overview-card[data-request-id="intervention:${home.taskId}"]`,
+      `.overview-card[data-request-id="${await refusalId(f, home.taskId)}"]`,
     );
     await card
       .getByRole("button", { name: "Start again", exact: true })
@@ -289,7 +306,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     // The phone has no Refresh: a fake clock drives its Inbox poll (15s, web/src/inbox.tsx).
     if (viewport.width < 760) await page.clock.install();
     await page.goto(
-      `${web.origin}/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(`intervention:${lostInbox.taskId}`)}`,
+      `${web.origin}/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(await refusalId(f, lostInbox.taskId))}`,
     );
     await loseNextReply("task.start-again");
     await startAgain().click();
@@ -308,9 +325,29 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // And in Home's card, which re-reads the Inbox as soon as the start is sent.
     const lostHome = await refusedTask(f);
+    const lostHomeId = await refusalId(f, lostHome.taskId);
+    // Home shows three oldest requests; make this journey's target one of those cards.
+    f.seedPersistedState((db) =>
+      db
+        .prepare("UPDATE inbox_lifecycle SET createdAt=0 WHERE id=?")
+        .run(lostHomeId),
+    );
+    const homeRead = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/operator/inbox" && r.ok(),
+    );
     await page.goto(`${web.origin}/`);
+    const homeItems = (await (await homeRead).json()).data.items;
+    await page.locator(".overview-card").first().waitFor();
+    if (
+      !(await page
+        .locator(`.overview-card[data-request-id="${lostHomeId}"]`)
+        .count())
+    )
+      _t.diagnostic(
+        `settled Home Inbox read: ${JSON.stringify({ target: lostHomeId, items: homeItems.map((i: { id: string; createdAt: number }) => ({ id: i.id, createdAt: i.createdAt })), rendered: await page.locator(".overview-card").evaluateAll((cards) => cards.map((c) => c.getAttribute("data-request-id"))) })}`,
+      );
     const lostCard = page.locator(
-      `.overview-card[data-request-id="intervention:${lostHome.taskId}"]`,
+      `.overview-card[data-request-id="${lostHomeId}"]`,
     );
     await lostCard
       .getByRole("button", { name: "Start again", exact: true })
@@ -328,7 +365,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     const dropped = page.waitForResponse(
       async (r) =>
         r.url().includes("/api/operator/inbox") &&
-        !(await r.text()).includes(`intervention:${lostHome.taskId}`),
+        !(await r.text()).includes(lostHomeId),
       { timeout: 20000 },
     );
     dropped.catch(() => {});
@@ -517,8 +554,7 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
   });
   await until(() => f.runtime.hasPending(1), "the restarted turn starts");
 
-  // Home lists interventions, which carry no time, by task id. Fix the ids up front so the
-  // request added later sorts ahead of the kept (last) one without depending on random UUIDs.
+  // Fix episode times so a new request sorts ahead of the kept card regardless of UUIDs.
   const [aheadId, ...initial] = [
     randomUUID(),
     randomUUID(),
@@ -526,10 +562,20 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
     randomUUID(),
   ].sort((a, b) => a.localeCompare(b));
   const ids: string[] = [...initial];
-  for (const id of initial) await refusedTask(f, id);
+  const requestIds = new Map<string, string>();
+  for (const [index, id] of initial.entries()) {
+    await refusedTask(f, id);
+    const requestId = await refusalId(f, id);
+    requestIds.set(id, requestId);
+    f.seedPersistedState((db) =>
+      db
+        .prepare("UPDATE inbox_lifecycle SET createdAt=? WHERE id=?")
+        .run(2000 + index, requestId),
+    );
+  }
   const kept = initial.at(-1)!;
   const card = (taskId: string) =>
-    page.locator(`.overview-card[data-request-id="intervention:${taskId}"]`);
+    page.locator(`.overview-card[data-request-id="${requestIds.get(taskId)}"]`);
   const overflow = page.locator(".overview-overflow");
   await page.goto(`${web.origin}/`);
   await card(kept).waitFor();
@@ -542,6 +588,13 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
   await checkButton(card(kept)).waitFor();
 
   const ahead = (await refusedTask(f, aheadId)).taskId;
+  const aheadRequest = await refusalId(f, ahead);
+  requestIds.set(ahead, aheadRequest);
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE inbox_lifecycle SET createdAt=? WHERE id=?")
+      .run(1000, aheadRequest),
+  );
   ids.push(ahead);
   await page
     .getByRole("button", { name: "Refresh tasks", exact: true })

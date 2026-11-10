@@ -2436,7 +2436,11 @@ export class OperatorApi {
         selections.some((s) => s.record?.holds.stop),
       writer: selections.some((s) => s.record?.holds.writer),
       capacity: selections.some((s) => s.record?.holds.capacity),
-      uncertainty: selections.some((s) => s.record?.holds.uncertainty),
+      uncertainty:
+        selections.some((s) => s.record?.holds.uncertainty) ||
+        this.service
+          .recoveryForTask(String(task.id))
+          .some((r) => r.holds.uncertainty),
       task:
         Boolean(this.service.taskHold(String(task.id))) ||
         selections.some((s) => s.record?.holds.task),
@@ -4071,10 +4075,11 @@ export class OperatorApi {
       )
         throw new OperatorApiError(503, "unavailable");
     }
-    // Derived on every read from in-memory restart state; no row stores it. They belong to
-    // no project, so a project filter excludes them.
+    // Runtime episodes belong to no project, so a project filter excludes them.
     const filtered: InboxItem[] = [
-      ...this.runtimeInboxItems(await this.exclusions()),
+      ...this.runtimeInboxItems(
+        await this.exclusions(undefined, undefined, [], [], exclusionBase),
+      ),
       ...items,
     ].filter(
       (item) =>
