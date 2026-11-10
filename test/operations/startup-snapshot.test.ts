@@ -764,6 +764,8 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Pre-turn refusals record their stage and failure class.
+  21: "fa0d59290d2982c50fb1b80fc81f6bf5c30015fa4b57131e34678192f30c0f1e",
   // Reasoning summaries add the project setting and per-turn opt-in tables.
   20: "e859135b764a04ca14786b9e75948f7971cc88bb88e27b44b65a9677245eddd3",
   // Source hold release records and their lead/assignee Inbox events.
@@ -875,7 +877,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         )
         .run(intentId);
       before.exec(
-        "DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries",
+        "DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals",
       );
     } finally {
       before.close();
@@ -973,6 +975,41 @@ test("reasoning migration protects the level 19 schema before adding either tabl
     assert.deepEqual(readFileSync(database), bytes);
     assert.deepEqual(readStartupState(dirs.data), state);
     assert.deepEqual(startupSnapshots(dirs.snapshots), snapshots);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("pre-turn refusal migration snapshots the level 20 schema and adds its table empty", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 20);
+    const database = join(dirs.data, "standalone.sqlite");
+    const before = new DatabaseSync(database);
+    before.exec("DROP TABLE execution_pre_turn_refusals");
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[20]);
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[20]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[21]);
+    const current = new DatabaseSync(database, { readOnly: true });
+    try {
+      assert.equal(
+        current
+          .prepare("SELECT COUNT(*) AS n FROM execution_pre_turn_refusals")
+          .get()?.n,
+        0,
+      );
+    } finally {
+      current.close();
+    }
+    const bytes = readFileSync(database);
+    await assert.rejects(run(dirs.data, 20), refusal("startup-schema-newer"));
+    assert.deepEqual(readFileSync(database), bytes);
   } finally {
     dirs.cleanup();
   }
