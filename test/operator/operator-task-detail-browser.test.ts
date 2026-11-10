@@ -790,9 +790,13 @@ test("A rejected completion is a decision the strip and decision card both name"
     web.password,
     `/tasks/${a.taskId}?section=files`,
   );
-  assert.equal(await page.locator("[data-task-strip] .task-next").count(), 0);
-  // The strip no longer switches tabs; the pinned card is on Overview.
-  await openTaskTab(page, "Overview");
+  const next = page.locator("[data-task-strip] a.task-next");
+  assert.equal(
+    await next.innerText(),
+    "Next: you · review rejected completion",
+  );
+  await next.click();
+  await page.getByRole("tab", { name: "Overview", selected: true }).waitFor();
   const card = page.locator("section#decisions");
   await card.getByText(/completion request was rejected/).waitFor();
   assert.equal(
@@ -824,7 +828,32 @@ test("The strip and decision card follow the server's attention codes, not a cli
   );
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
-  assert.equal(await strip.locator(".task-next").count(), 0);
+  assert.equal(
+    await strip.locator("a.task-next").innerText(),
+    "Next: you · inspect execution",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  const usable = await strip.evaluate((element) => {
+    const next = element.querySelector(".task-next")!.getBoundingClientRect();
+    const chip = element
+      .querySelector(".task-source-chip")!
+      .getBoundingClientRect();
+    return {
+      nextWidth: next.width,
+      chipWidth: chip.width,
+      oneLine:
+        Math.abs(next.top + next.height / 2 - chip.top - chip.height / 2) < 2,
+      noOverflow: document.documentElement.scrollWidth <= innerWidth,
+    };
+  });
+  assert.ok(
+    usable.nextWidth >= 44 && usable.chipWidth >= 44,
+    "action and identity stay usable on a phone",
+  );
+  assert.ok(
+    usable.oneLine && usable.noOverflow,
+    "strip stays on one line without widening the phone",
+  );
   const card = page.locator("section#decisions");
   assert.equal(
     await card
@@ -837,7 +866,27 @@ test("The strip and decision card follow the server's attention codes, not a cli
   await page.reload();
   await strip.waitFor();
   await strip.locator("[data-task-reason]").waitFor();
-  assert.equal(await strip.getByText(/routing fallback/).count(), 0);
+  assert.equal(
+    await strip.locator("span.task-next").innerText(),
+    "Next: cab · recording routing fallback",
+  );
+  assert.equal(await strip.locator("a.task-next").count(), 0);
+  codes = ["question-delivery"];
+  await page.reload();
+  await strip.waitFor();
+  assert.equal(
+    await strip.locator("span.task-next").innerText(),
+    "Next: cab · delivering answer",
+  );
+  assert.equal(await strip.locator("a.task-next").count(), 0);
+  codes = [];
+  await page.reload();
+  await strip.waitFor();
+  assert.equal(await strip.locator(".task-next").count(), 0);
+  assert.doesNotMatch(
+    await strip.innerText(),
+    /No operator decision|Next: none/,
+  );
   // The decision card offers the operator nothing to do for it.
   assert.equal(
     await card
@@ -901,6 +950,17 @@ for (const [label, viewport] of [
     await page
       .getByText("Holds · 0", { exact: true })
       .waitFor({ state: "attached" });
+    assert.equal(
+      await page
+        .locator(".task-header-actions")
+        .getByRole("button", {
+          name: "Stop…",
+          exact: true,
+          includeHidden: true,
+        })
+        .count(),
+      1,
+    );
     assert.equal(await page.locator("#decisions[data-pinned]").count(), 0);
     assert.equal(await page.locator("#decisions").isHidden(), true);
     await taskTab(page, "Execution").click();
@@ -917,6 +977,17 @@ for (const [label, viewport] of [
     await openTaskTab(page, "Overview");
     const decisions = page.locator("#decisions[data-pinned]");
     await decisions.waitFor();
+    assert.equal(
+      await page
+        .locator(".task-header-actions")
+        .getByRole("button", {
+          name: "Stop…",
+          exact: true,
+          includeHidden: true,
+        })
+        .count(),
+      1,
+    );
     const inspectorFold = page.locator(".task-inspector .inspector-fold");
     if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();

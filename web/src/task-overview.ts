@@ -310,6 +310,33 @@ export function executionFacts(
   };
 }
 
+/** Stop can hold selected/pending work or interrupt active/recovery-owned work, not an idle task. */
+export function taskStopOffered(
+  data: Pick<Data, "task" | "execution" | "assignments">,
+) {
+  const { task, execution, assignments } = data;
+  if (task.state !== "open" || execution.holds.stop) return false;
+  return (
+    [
+      "selected",
+      "queued",
+      "starting",
+      "running",
+      "stopping",
+      "uncertain",
+    ].includes(execution.state) ||
+    execution.holds.writer ||
+    execution.holds.capacity ||
+    execution.holds.uncertainty ||
+    execution.holds.task ||
+    // Pause and admission waiting can hide selected work in the execution state's precedence.
+    assignments.some(
+      (a) =>
+        a.state === "pending" || a.state === "running" || a.state === "held",
+    )
+  );
+}
+
 /** Who a Stop affects, for the confirmation's first line. */
 export function stopConsequences(
   data: Pick<Data, "lead" | "leadAssignmentId" | "assignments" | "execution">,

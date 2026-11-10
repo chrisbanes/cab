@@ -1525,6 +1525,21 @@ for (const mode of ["running", "ready"] as const)
         .getByRole("log", { name: "Task conversation" })
         .getByText("Newest viewport marker.")
         .waitFor();
+      assert.equal(
+        await page.locator("[data-task-strip] .task-state").innerText(),
+        mode === "running" ? "Running" : "Ready",
+      );
+      assert.equal(
+        await page
+          .locator(".task-header-actions")
+          .getByRole("button", {
+            name: "Stop…",
+            exact: true,
+            includeHidden: true,
+          })
+          .count(),
+        mode === "running" ? 1 : 0,
+      );
       await assertConversationViewport(page);
       await j.capture(
         page,

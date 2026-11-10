@@ -252,6 +252,43 @@ for (const engine of [
       await stop.getByRole("button", { name: "Stop task" }).click();
       await stop
         .getByRole("button", { name: "Check whether it saved" })
+        .waitFor();
+      // A newer read drops the offer; the uncertain original still has its own check.
+      const taskRead = `**/api/operator/tasks/${a.taskId}`;
+      await page.route(taskRead, async (route) => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.data.task.state = "done";
+        json.data.execution.state = "completed";
+        json.data.execution.holds = {
+          stop: false,
+          writer: false,
+          capacity: false,
+          uncertainty: false,
+          task: false,
+        };
+        for (const assignment of json.data.assignments)
+          assignment.state = "completed";
+        json.data.admission = { eligible: false, reasons: ["task-not-open"] };
+        await route.fulfill({ response, json });
+      });
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
+      await page
+        .locator("[data-task-strip] .task-state")
+        .getByText("Done", { exact: true })
+        .waitFor({ state: "attached" });
+      assert.equal(
+        await stop.isVisible(),
+        true,
+        "an open confirmation survives withdrawal of the offer",
+      );
+      await page.keyboard.press("Escape");
+      await stop.waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "Stop…", exact: true }).click();
+      await stop
+        .getByRole("button", { name: "Check whether it saved" })
         .click();
       await stop.getByText(/^Stop requested\./).waitFor();
       const stops = commands.filter((c) => c.type === "task.stop");
@@ -260,6 +297,16 @@ for (const engine of [
       assert.equal(f.service.isTaskStopped(a.taskId), true);
       await page.unroute("**/api/operator/commands");
       await stop.getByRole("button", { name: "Close" }).click();
+      await stop.waitFor({ state: "detached" });
+      assert.equal(
+        await page.getByRole("button", { name: "Stop…", exact: true }).count(),
+        0,
+        "once the original is confirmed, an inapplicable Stop is removed",
+      );
+      await page.unroute(taskRead);
+      await page.evaluate(() =>
+        window.dispatchEvent(new Event("cab-task-changed")),
+      );
       await page
         .getByRole("button", { name: "Resume…", exact: true })
         .waitFor();

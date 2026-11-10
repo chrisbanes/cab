@@ -1834,7 +1834,10 @@ targets. On phones, Latest result and Task details follow the conversation.
 The subtitle is the first meaningful outcome sentence, skipping headings, quoted
 context and source metadata. The one-line strip shows the state badge, at most one
 distinct reason, a clickable operator next action and one source identity chip. A lead
-name appears there only when it differs from the project default. Refresh source,
+name appears there only when it differs from the project default. Meaningful cab-owned
+next actions remain plain text. Stop is offered for pending, active or recovery-owned
+work, not an idle Ready task; an open confirmation or uncertain send keeps its control.
+Resume stays available for an existing Stop hold. Refresh source,
 Focus mode and Improve with lead share More task options; polling and New updates
 replace a separate Refresh task control. The brief,
 evidence, delivery observations, artifacts, dependencies and assignments stay in the

@@ -21,6 +21,7 @@ import { outcomeLine } from "./presentation.js";
 import {
   originLabel,
   stopConsequences,
+  taskStopOffered,
   taskColumnOf,
   taskIdentity,
   taskStripReason,
@@ -48,7 +49,7 @@ export interface TaskHeaderReport {
   /** The mono identity the phone header shows under the title: `repository#N` or "Local task". */
   identity: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
-  stop: { affected: string; held: boolean; open: boolean };
+  stop: { affected: string; held: boolean; open: boolean; offered: boolean };
   /** Reset task: whether it is offered, the task version it is sent with and why not. */
   reset: {
     offer: NonNullable<TaskRead["data"]["reset"]>;
@@ -85,7 +86,12 @@ export function taskHeaderReport(
           ariaLabel: `Back to ${project}`,
           history: false,
         },
-    stop: { affected, held, open: data.task.state === "open" },
+    stop: {
+      affected,
+      held,
+      open: data.task.state === "open",
+      offered: taskStopOffered(data),
+    },
     reset: data.reset
       ? { offer: data.reset, version: data.task.version }
       : null,
@@ -271,17 +277,31 @@ export function TaskStrip({
           <Icon aria-hidden="true" />
           {column}
         </span>
-        {reason && <span data-task-reason>{reason}</span>}
-        {next.operator && (
-          <a
-            className="task-next"
-            href={`/tasks/${data.task.id}?section=decisions`}
-          >
-            {next.text}
-          </a>
+        {reason && (
+          <span data-task-reason title={reason}>
+            {reason}
+          </span>
         )}
+        {next.code &&
+          (next.operator ? (
+            <a
+              className="task-next"
+              href={`/tasks/${data.task.id}?section=decisions`}
+              title={next.text}
+            >
+              {next.text}
+            </a>
+          ) : (
+            <span className="task-next" title={next.text}>
+              {next.text}
+            </span>
+          ))}
         {identity.url ? (
-          <a className="task-source-chip" href={identity.url}>
+          <a
+            className="task-source-chip"
+            href={identity.url}
+            title={identity.label}
+          >
             {identity.label} ↗
           </a>
         ) : (
@@ -383,7 +403,7 @@ const holdCopy = {
 } as const;
 
 /**
- * Stop… on an open task that is not stopped, Resume… on a stopped one. The dialog opens on its
+ * Stop… for pending, active or recovery-owned work, Resume… on a stopped task. The dialog opens on its
  * safe choice; it stays open after a send to report the outcome, and an unconfirmed send keeps
  * its control so the same request can be checked after a reread drops the offer.
  */
@@ -431,8 +451,7 @@ function HoldCommand({
     addEventListener("pageshow", restored);
     return () => removeEventListener("pageshow", restored);
   }, []);
-  const offered =
-    kind === "stop" ? report.stop.open && !report.stop.held : report.stop.held;
+  const offered = kind === "stop" ? report.stop.offered : report.stop.held;
   if (!offered && !open && !uncertain) return null;
   return (
     <Dialog
