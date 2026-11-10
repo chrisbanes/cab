@@ -4069,9 +4069,9 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
           i === 0 ||
           Boolean(
             e &&
-            previous &&
-            previous.compareDocumentPosition(e) &
-              Node.DOCUMENT_POSITION_FOLLOWING,
+              previous &&
+              previous.compareDocumentPosition(e) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
           ),
         top: box?.top ?? Number.NaN,
         bottom: box?.bottom ?? Number.NaN,
