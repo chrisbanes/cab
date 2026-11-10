@@ -81,7 +81,7 @@ const entries: Record<string, Entry> = {
         expectedVersion: Number(d.task(taskId).version),
       });
     },
-    path: ({ taskId }) => `/tasks/${taskId}?section=execution`,
+    path: ({ taskId }) => `/tasks/${taskId}`,
     first: (page) => [
       waits(page).getByText("Waiting · Project paused", { exact: true }),
       waits(page).getByRole("button", { name: "Fix: Resume project" }),

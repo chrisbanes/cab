@@ -165,7 +165,7 @@ import {
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { ApplyInstructions, TaskExecution } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
-import { HoldRecoveryLinks } from "./wait-reasons.js";
+import { WaitReasons } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
 const sectionIds = [
@@ -1608,7 +1608,8 @@ export function TaskWorkspace({
         startedAgain === taskId ||
         resumedSource?.taskId === taskId,
     ),
-    attentionPinned = attention.pinned || retainedAttention;
+    attentionPinned = attention.pinned || retainedAttention,
+    cardWaits = attention.waits.filter((wait) => wait.code !== "approval");
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -2482,9 +2483,11 @@ export function TaskWorkspace({
           />
         )}
         {/* The projection removes requests already represented by their own rows. */}
-        {attention.cardNotices.length > 0 && (
-          <QuestionHolds holds={attention.cardNotices} />
-        )}
+        {/* Waits render below with their Fix; notices repeat them only beside a request. */}
+        {attention.cardNotices.length > 0 &&
+          (attention.requests.length > 0 || cardWaits.length === 0) && (
+            <QuestionHolds holds={attention.cardNotices} />
+          )}
         {!nextActor.operator &&
           !data.source?.hold?.active &&
           !data.completionRequests.some((r) => r.status === "pending") &&
@@ -2492,33 +2495,35 @@ export function TaskWorkspace({
           !Object.values(data.execution.holds).some(Boolean) && (
             <p className="muted">No operator decision needed.</p>
           )}
-        {attention.executionHolds.length > 0 && (
-          <ul className="execution-list" aria-label="Execution holds">
-            {attention.executionHolds.map((hold) => (
-              <li key={hold.kind}>
-                <strong>{hold.label}</strong> · {hold.clears} ·{" "}
-                <HoldRecoveryLinks
-                  href={`/tasks/${taskId}?section=execution`}
-                  assignments={data.assignments}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-        <TaskUnstack
+        {/* The merged approval wait is left out: the open approvals are rows above. */}
+        <WaitReasons
+          waits={cardWaits}
+          taskId={taskId}
+          projectId={data.task.projectId}
           client={client}
           session={session}
-          taskId={taskId}
-          taskVersion={data.task.version}
-          stacked={data.stack?.state === "stacked"}
-          readOnly={projectReadOnly}
+          drafts={drafts}
+          workspace={workspace ?? null}
+          onChanged={refreshAll}
+          holds={attention.executionHolds}
+          executionHref={`/tasks/${taskId}?section=execution`}
+          assignments={data.assignments}
         />
-        {stackSummary(data.stack, data.stackDelivery) && (
-          <p className="metadata muted">
-            {stackSummary(data.stack, data.stackDelivery)}
-          </p>
-        )}
       </section>
+      {/* Outside the card: stack recovery stays reachable when no attention pins it. */}
+      <TaskUnstack
+        client={client}
+        session={session}
+        taskId={taskId}
+        taskVersion={data.task.version}
+        stacked={data.stack?.state === "stacked"}
+        readOnly={projectReadOnly}
+      />
+      {stackSummary(data.stack, data.stackDelivery) && (
+        <p className="metadata muted">
+          {stackSummary(data.stack, data.stackDelivery)}
+        </p>
+      )}
       <TaskConversation
         client={client}
         taskId={taskId}
@@ -3189,8 +3194,6 @@ export function TaskWorkspace({
             project={data.project}
             client={client}
             session={session}
-            drafts={drafts}
-            workspace={workspace ?? null}
             onChanged={refreshAll}
           />
         </TabPanel>

@@ -1,7 +1,7 @@
 # Unblock waiting work
 
-**Status:** implemented. Wait reasons with a Fix appear on the task's Execution
-view and the composer, and the project page's paused banner and the getting-started Project row
+**Status:** implemented. Wait reasons with a Fix appear on the task and the
+composer, and the project page's paused banner and the getting-started Project row
 offer Resume, which confirms once and sends only the project resume. The Inbox shows
 holds without a Fix and is outside the budget. The budget is asserted only for a
 paused project (Resume project, the one Fix with a confirmation) at 1366 x 900 and
@@ -18,9 +18,7 @@ place.
 
 ## Entry points
 
-- Task detail Execution view and compact status strip. Ordinary writer and capacity
-  waits during a running turn stay on Execution; the Decisions and holds card is
-  reserved for operator attention.
+- Task detail decision card and status strip.
 - Composer "If you create it now" and the created-task receipt.
 - Project page paused banner.
 - Getting-started checklist Project row.

@@ -736,6 +736,8 @@ test("A rejected completion is a decision the strip and decision card both name"
     `/tasks/${a.taskId}?section=files`,
   );
   assert.equal(await page.locator("[data-task-strip] .task-next").count(), 0);
+  // The strip no longer switches tabs; the pinned card is on Overview.
+  await openTaskTab(page, "Overview");
   const card = page.locator("section#decisions");
   await card.getByText(/completion request was rejected/).waitFor();
   assert.equal(
@@ -779,7 +781,11 @@ test("The strip and decision card follow the server's attention codes, not a cli
   // cab records a routing fallback itself: plain text, never an operator button.
   codes = ["lead-review"];
   await page.reload();
-  await strip.getByText("Ready", { exact: true }).waitFor();
+  await strip.waitFor();
+  assert.equal(
+    await strip.getByRole("button", { name: /Next|routing fallback/ }).count(),
+    0,
+  );
   // The decision card offers the operator nothing to do for it.
   assert.equal(
     await card
@@ -1236,7 +1242,6 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
       commands.push(request.postDataJSON());
   });
   await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
-  await openTaskTab(page, "Execution");
   const waits = page.locator(".wait-reasons");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   const list = waits.locator(".wait-list li");
@@ -1317,7 +1322,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   assert.equal(d.project(projectId).paused, 0);
 
   // Claude token unavailable opens Add Claude.
-  await page.goto(`${web.origin}/tasks/${claudeTask}?section=execution`);
+  await page.goto(`${web.origin}/tasks/${claudeTask}`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.equal(
     await waits
@@ -1352,7 +1357,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
 
   // A revoked delegate profile is listed by its label and name, and its Fix opens that profile.
   await page.setViewportSize({ width: 1366, height: 900 });
-  await page.goto(`${web.origin}/tasks/${delegateTask}?section=execution`);
+  await page.goto(`${web.origin}/tasks/${delegateTask}`);
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
     "Assignment agent revoked",
@@ -1420,12 +1425,7 @@ test("Holds stay listed beneath Fix: Resume project with what clears them and Ex
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(
-    page,
-    web.origin,
-    web.password,
-    `/tasks/${taskId}?section=execution`,
-  );
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   const waits = page.locator(".wait-reasons");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
   const primary = waits.locator(".wait-primary");
@@ -1620,12 +1620,7 @@ test("Task detail explains a held assignment, revoked repository access and unre
     )
       commands.push(request.postDataJSON());
   });
-  await signIn(
-    page,
-    web.origin,
-    web.password,
-    `/tasks/${taskId}?section=execution`,
-  );
+  await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   const waits = page.locator(".wait-reasons");
   const list = waits.locator(".wait-list li");
   await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
@@ -2147,7 +2142,7 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
   await page.clock.install();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
   const strip = page.locator("[data-task-strip]");
-  await strip.getByText("No operator decision", { exact: true }).waitFor();
+  await strip.waitFor();
   await openTaskTab(page, "Files");
   const files = taskTab(page, "Files");
   await files.focus();
@@ -2157,7 +2152,9 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
   );
   await page.clock.runFor(15000);
   await polled;
-  await page.locator("#decisions").waitFor();
+  await page
+    .locator("#decisions[data-attention]")
+    .waitFor({ state: "attached" });
   // The arriving request moves neither the tab nor the focus.
   assert.equal(await selectedTab(page), "Files");
   assert.equal(
@@ -4197,13 +4194,11 @@ for (const engine of ["chromium", "webkit"] as const)
 
       // Holds are lines inside the decision card, above the result.
       await page.goto(`${web.origin}/tasks/${held}`);
-      const heldLines = page.getByRole("list", {
-        name: "Execution holds",
-        exact: true,
-      });
-      await heldLines.waitFor();
+      await page.locator("section#decisions .wait-reasons").waitFor();
       assert.ok(
-        (await heldLines.innerText()).includes("Archival is awaiting review"),
+        (
+          await page.locator("section#decisions .wait-reasons").innerText()
+        ).includes("Archival is awaiting review"),
       );
       await expectOverviewOrder(page, await present(overviewOrder));
       assert.equal(

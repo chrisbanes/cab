@@ -289,6 +289,32 @@ test("task attention projection filters normal running capacity and writer holds
   ]);
 });
 
+test("task attention projection pins a wait the operator can act on, never an idle task with none", () => {
+  assert.equal(
+    taskAttentionProjection(attentionTask(), "answer", null).pinned,
+    false,
+  );
+  const paused = taskAttentionProjection(
+    attentionTask({
+      waits: [
+        {
+          code: "project-paused",
+          fix: { kind: "resume-project", projectId: randomUUID() },
+          links: [],
+        } as never,
+      ],
+    }),
+    "answer",
+    null,
+  );
+  assert.equal(paused.pinned, true);
+  assert.deepEqual(
+    paused.waits.map((wait) => wait.code),
+    ["project-paused"],
+  );
+  assert.ok(paused.rows.length > 0, "the inspector counts what the card pins");
+});
+
 test("task attention projection pins safety, source holds and operator recovery with readable rows", () => {
   const execution = (state: string) =>
     ({

@@ -95,7 +95,7 @@ async function assertRecovery(s: Awaited<ReturnType<typeof start>>) {
 
 const holdLink = (scope: Locator, name = "Recovery evidence") =>
   scope
-    .getByRole("list", { name: "Execution holds", exact: true })
+    .getByRole("list", { name: "Also held", exact: true })
     .getByRole("link", { name, exact: true });
 
 for (const [label, viewport] of [
@@ -163,7 +163,7 @@ for (const [label, viewport] of [
     );
     const line = s.page
       .locator("section#decisions")
-      .getByRole("list", { name: "Execution holds", exact: true })
+      .getByRole("list", { name: "Also held", exact: true })
       .getByRole("listitem")
       .filter({ hasText: "Uncertainty" });
     const link = line.getByRole("link", { name: "Recovery evidence" });
@@ -197,7 +197,7 @@ test("hold lines name each assignment's recovery page when the task has several"
   });
   await s.page.reload();
   const holds = s.page.getByRole("list", {
-    name: "Execution holds",
+    name: "Also held",
     exact: true,
   });
   await holds.waitFor();

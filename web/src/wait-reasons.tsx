@@ -134,35 +134,25 @@ function HoldList({
             <span className="metadata muted wait-hold-clears">
               {line.clears}
             </span>
-            <HoldRecoveryLinks href={href} assignments={assignments} />
+            {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
+            {assignments.length === 0 ? (
+              <a href={href}>Execution details</a>
+            ) : (
+              assignments.map((a) => (
+                <a
+                  key={a.assignmentId}
+                  href={`/assignments/${a.assignmentId}/recovery`}
+                >
+                  {assignments.length === 1
+                    ? "Recovery evidence"
+                    : `${a.name ?? "Agent name unavailable"}: recovery evidence`}
+                </a>
+              ))
+            )}
           </li>
         ))}
       </ul>
     </div>
-  );
-}
-
-/** Direct recovery destinations for a hold, or Execution when the task has no assignment. */
-export function HoldRecoveryLinks({
-  href,
-  assignments,
-}: {
-  href: string;
-  assignments: readonly RecoveryAssignment[];
-}) {
-  return assignments.length === 0 ? (
-    <a href={href}>Execution details</a>
-  ) : (
-    assignments.map((assignment) => (
-      <a
-        key={assignment.assignmentId}
-        href={`/assignments/${assignment.assignmentId}/recovery`}
-      >
-        {assignments.length === 1
-          ? "Recovery evidence"
-          : `${assignment.name ?? "Agent name unavailable"}: recovery evidence`}
-      </a>
-    ))
   );
 }
 
@@ -179,7 +169,6 @@ export function WaitReasons({
   holds = [],
   executionHref,
   assignments = [],
-  holdsHeading,
   ...p
 }: WaitProps & {
   waits: readonly Wait[];
@@ -195,8 +184,6 @@ export function WaitReasons({
   executionHref?: string;
   /** The task's assignments; each hold line links every one's recovery page. */
   assignments?: readonly RecoveryAssignment[];
-  /** Heading for ownership holds when no Resume-project wait provides its own context. */
-  holdsHeading?: string;
 }) {
   const [first, ...rest] = waits;
   // One owner for the draft: its store notifies a single listener.
@@ -283,7 +270,7 @@ export function WaitReasons({
           ))}
         </ul>
       )}
-      {!pausedFirst && holdList(holdsHeading)}
+      {!pausedFirst && holdList()}
       <ResumeOutcome p={p} draft={resume} projectId={projectId} />
     </div>
   );

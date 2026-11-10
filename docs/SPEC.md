@@ -1756,7 +1756,7 @@ remote-write reconciliation and permission rules.
 The task Overview is the task's conversation
 ([ADR-1022](adr/1022-task-conversation-view.md)). The pinned Decisions and holds
 card lists open questions and approvals, execution uncertainty or Stop, active source
-holds, interventions and operator-action recovery. Normal writer and capacity waits
+holds, interventions, wait reasons and operator-action recovery. Normal writer and capacity waits
 during a running turn stay on Execution. The task strip pairs its state badge with at
 most one distinct reason and omits duplicate readiness or next-actor wording. Beneath
 the card the lead's

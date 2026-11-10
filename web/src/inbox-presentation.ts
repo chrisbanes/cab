@@ -280,10 +280,7 @@ export function taskAttentionProjection(
     cardNotices = notices.filter(
       (notice) => !(notice.id === "source-held" && task.source?.hold?.active),
     ),
-    executionHolds = holdLines(
-      task.execution.holds,
-      task.taskHold ?? (task.execution.holds.task ? { reason: null } : null),
-    )
+    executionHolds = holdLines(task.execution.holds, task.taskHold)
       .filter(
         (hold) =>
           !normalRunning ||
@@ -359,6 +356,7 @@ export function taskAttentionProjection(
   const pinned = Boolean(
     requests.length ||
       actions.length ||
+      waits.some((wait) => wait.code !== "approval") ||
       executionHolds.length ||
       notices.some(
         (notice) =>

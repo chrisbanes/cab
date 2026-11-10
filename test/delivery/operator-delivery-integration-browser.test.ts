@@ -449,7 +449,7 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   // The hold line is in Overview's decision card; the strip names the state on every tab.
   await openTaskTab(page, "Overview");
   const heldLines = page
-    .getByRole("list", { name: "Execution holds", exact: true })
+    .getByRole("list", { name: "Also held", exact: true })
     .locator("li");
   await heldLines.first().waitFor();
   const heldLabels = (await heldLines.allInnerTexts()).map(

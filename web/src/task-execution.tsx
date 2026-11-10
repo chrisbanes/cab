@@ -13,8 +13,6 @@ import type { OperatorClient } from "./api.js";
 import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
-import { WaitReasons } from "./wait-reasons.js";
-import type { ConfigurationDrafts } from "./settings-state.js";
 import {
   admissionLine,
   evidenceNotice,
@@ -229,16 +227,12 @@ export function TaskExecution({
   project,
   client,
   session,
-  drafts,
-  workspace,
   onChanged,
 }: {
   data: Data;
   project: Workspace["data"]["projects"][number] | undefined;
   client: OperatorClient;
   session: Session;
-  drafts: ConfigurationDrafts;
-  workspace: Workspace | null;
   onChanged: () => void;
 }) {
   const taskId = data.task.id,
@@ -292,35 +286,23 @@ export function TaskExecution({
           )}
         </dd>
       </dl>
-      <WaitReasons
-        waits={data.waits.filter(
-          (wait) =>
-            wait.code !== "approval" &&
-            !(data.execution.state === "running" && wait.code === "capacity"),
+      <section aria-labelledby="execution-holds">
+        <h4 id="execution-holds">Execution ownership and recovery</h4>
+        {holds.length ? (
+          <ul className="execution-list">
+            {holds.map((h) => (
+              <li key={h.kind}>
+                <strong>{h.label}</strong> · {h.clears}
+              </li>
+            ))}
+          </ul>
+        ) : recovery ? (
+          <p>No unresolved execution hold is reported.</p>
+        ) : (
+          <p>{holdsUnreadable}</p>
         )}
-        taskId={taskId}
-        projectId={data.task.projectId}
-        client={client}
-        session={session}
-        drafts={drafts}
-        workspace={workspace}
-        onChanged={onChanged}
-        holds={holds}
-        holdsHeading="Execution ownership and recovery"
-        executionHref={`/tasks/${taskId}?section=execution`}
-        assignments={data.assignments}
-      />
-      {holds.length === 0 && (
-        <section aria-labelledby="execution-holds">
-          <h4 id="execution-holds">Execution ownership and recovery</h4>
-          {recovery ? (
-            <p>No unresolved execution hold is reported.</p>
-          ) : (
-            <p>{holdsUnreadable}</p>
-          )}
-        </section>
-      )}
-      <p className="muted">{resumeWarning}</p>
+        <p className="muted">{resumeWarning}</p>
+      </section>
       <section aria-labelledby="execution-evidence">
         <h4 id="execution-evidence">Recorded recovery evidence</h4>
         {notice && <p>{notice}</p>}
