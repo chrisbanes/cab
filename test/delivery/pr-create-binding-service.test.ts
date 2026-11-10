@@ -114,7 +114,11 @@ async function world() {
     ready: false,
   });
   await f.service.provisionTask(taskId);
-  await f.service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+  await f.service.configureCapacity({
+    key: randomUUID(),
+    globalLimit: 4,
+    minimumLeadSlots: 0,
+  });
   domain.execute({
     type: "project.configure",
     key: randomUUID(),
