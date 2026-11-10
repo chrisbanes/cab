@@ -73,22 +73,25 @@ test("repositories.configure expands home-relative GitHub paths and keeps the ve
   const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
     home: home.home,
   });
-  const result = await api.execute({
-    type: "repositories.configure",
+  const homeRelative = {
+    type: "repositories.configure" as const,
     key: randomUUID(),
     projectId,
     expectedVersion: 1,
     repositories: [
       {
-        codeHost: "github",
+        codeHost: "github" as const,
         host: "github.com",
         repositoryId: "R_atlas",
         path: "~/src/atlas",
         ref: "main",
       },
     ],
-  });
+  };
+  const result = await api.execute(homeRelative);
   assert.equal(result.kind, "configuration");
+  // A same-key retry of the typed `~` command replays its receipt.
+  assert.deepEqual(await api.execute(homeRelative), result);
   assert.equal(
     f.service.domain().repositoryLinks(projectId).links[0]?.path,
     join(home.home, "src", "atlas"),

@@ -9185,7 +9185,11 @@ export class OperatorApi {
     const normalized = (() => {
       if (c.type === "repositories.configure") {
         const expanded = c.repositories.map((row, index) => {
-          if (!("savedRow" in row)) return row;
+          // Expand before the replay check so a same-key retry hashes as recorded.
+          if (!("savedRow" in row))
+            return row.path === undefined
+              ? row
+              : { ...row, path: resolveHomePath(row.path, this.home()) };
           const link =
             repositories.links[
               resolve(
@@ -10135,16 +10139,7 @@ export class OperatorApi {
                   path: resolveHomePath(r.path, this.home()),
                 })),
               }
-            : c.type === "repositories.configure"
-              ? {
-                  ...c,
-                  repositories: c.repositories.map((r) =>
-                    r.path === undefined
-                      ? r
-                      : { ...r, path: resolveHomePath(r.path, this.home()) },
-                  ),
-                }
-              : c;
+            : c;
         const raw = await this.executeDomain({ ...command, actor: "operator" });
         return commandReceipt(
           parseDomainCommandOutcome(c.type, raw),
