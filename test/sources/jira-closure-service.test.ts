@@ -9,7 +9,8 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { databaseOf } from "../fixtures/service-internals.js";
 import { jiraIssue, json } from "../fixtures/fake-jira.js";
 import { tmpdir } from "../fixtures/temp.js";
-import { seedPrBinding } from "../fixtures/closure-delivery.js";
+import { prObservation, seedPrBinding } from "../fixtures/closure-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 
 async function fixture(
   t: { after: (f: () => Promise<void> | void) => void },
@@ -273,15 +274,13 @@ for (const mode of ["skip", "done"] as const)
     assert.equal(f.service.domain().task(f.taskId).state, "done");
   });
 
-test("a Jira closure under Skip waits for an open bound PR, then completes", async (t) => {
+test("a Jira closure under Skip waits for and names an open bound PR, then completes once unbound", async (t) => {
   const f = await fixture(t, "skip");
-  const seed = (state: "OPEN" | "MERGED") =>
-    seedPrBinding(databaseOf(f.service), {
-      taskId: f.taskId,
-      projectId: f.projectId,
-      state,
-    });
-  seed("OPEN");
+  seedPrBinding(databaseOf(f.service), {
+    taskId: f.taskId,
+    projectId: f.projectId,
+    state: "OPEN",
+  });
   f.observed.closed = true;
   await f.service.refreshGitHub();
   assert.equal(f.service.domain().task(f.taskId).state, "open");
@@ -290,7 +289,10 @@ test("a Jira closure under Skip waits for an open bound PR, then completes", asy
   const held = (await f.read()).source;
   assert.equal(held?.closure, "held");
   assert.deepEqual(held?.closureWait, { kind: "change-request", number: 7 });
-  seed("MERGED");
+  // No code host reads it here, so unbinding stands in for the PR closing.
+  databaseOf(f.service)
+    .prepare("DELETE FROM delivery_pr_bindings WHERE taskId = ?")
+    .run(f.taskId);
   await f.service.refreshGitHub();
   assert.equal(f.service.domain().task(f.taskId).state, "done");
   assert.ok(f.sources().providerCompletion(f.taskId));

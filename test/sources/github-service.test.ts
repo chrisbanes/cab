@@ -19,7 +19,8 @@ import { Store } from "../../src/core/store.js";
 import { GitHubSynchronizer } from "../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { until } from "../fixtures/until.js";
-import { seedPrBinding } from "../fixtures/closure-delivery.js";
+import { prObservation, seedPrBinding } from "../fixtures/closure-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -1610,6 +1611,8 @@ async function closedIssueService(closedIssues: "skip" | "done") {
   const projectId = randomUUID();
   const profileId = randomUUID();
   const reader = { state: "open" as "open" | "closed", interrupted: 0 };
+  /** What the code host reports for a bound PR #7. */
+  const pr = { state: "OPEN" as "OPEN" | "CLOSED" | "MERGED" };
   let release!: () => void;
   const heldTurn = new Promise<void>((resolve) => {
     release = resolve;
@@ -1660,6 +1663,14 @@ async function closedIssueService(closedIssues: "skip" | "done") {
         intervalMs: 60_000,
       },
       power: { enabled: false },
+      delivery: {
+        providerFactories: {
+          github: () =>
+            ({
+              inspectPr: async () => prObservation(pr.state),
+            }) as unknown as CodeHostDeliveryProvider,
+        },
+      },
     },
   );
   await service.start();
@@ -1757,6 +1768,7 @@ async function closedIssueService(closedIssues: "skip" | "done") {
     projectId,
     taskId,
     reader,
+    pr,
     db,
     turns: () => turns,
     notices: () =>
@@ -1840,11 +1852,7 @@ test("a settled closed task with an open bound PR keeps its closure hold until t
     assert.equal(w.domain.task(w.taskId).state, "open");
     assert.equal(w.completion(), false);
     assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
-    seedPrBinding(w.db, {
-      taskId: w.taskId,
-      projectId: w.projectId,
-      state: "CLOSED",
-    });
+    w.pr.state = "CLOSED";
     await w.service.refreshGitHub();
     assert.equal(w.domain.task(w.taskId).state, "done");
     assert.equal(w.completion(), true);

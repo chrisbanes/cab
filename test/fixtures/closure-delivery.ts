@@ -1,14 +1,39 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-/** A schema-valid bound PR #7 in `state`, replacing any earlier binding. */
+/** PR #7 in R_1 as the code host reports it in `state`. */
+export const prObservation = (state: "OPEN" | "CLOSED" | "MERGED") => ({
+  repositoryId: "R_1",
+  nodeId: "PR_7",
+  number: 7,
+  baseRef: "main",
+  headRef: "task",
+  headSha: "a".repeat(40),
+  baseSha: "b".repeat(40),
+  state,
+  draft: false,
+  merged: state === "MERGED",
+  reviewDecision: null,
+  checks: [],
+  mergeBlockers: [],
+  allowedMethods: ["merge"],
+});
+
+/** A schema-valid bound PR #7 last observed in `state`, replacing any earlier binding. */
 export function seedPrBinding(
   db: DatabaseSync,
   {
     taskId,
     projectId,
     state,
-  }: { taskId: string; projectId: string; state: "OPEN" | "CLOSED" | "MERGED" },
+    readError = null,
+  }: {
+    taskId: string;
+    projectId: string;
+    state: "OPEN" | "CLOSED" | "MERGED";
+    /** The latest read failed; `state` is the last successful observation. */
+    readError?: string | null;
+  },
 ): void {
   db.prepare(
     "INSERT INTO delivery_pr_bindings VALUES (?,?) ON CONFLICT(taskId) DO UPDATE SET recordJson=excluded.recordJson",
@@ -21,25 +46,10 @@ export function seedPrBinding(
       registeredWorkId: "work",
       revision: 1,
       mode: "reviewable-pr",
-      observation: {
-        repositoryId: "R_1",
-        nodeId: "PR_7",
-        number: 7,
-        baseRef: "main",
-        headRef: "task",
-        headSha: "a".repeat(40),
-        baseSha: "b".repeat(40),
-        state,
-        draft: false,
-        merged: state === "MERGED",
-        reviewDecision: null,
-        checks: [],
-        mergeBlockers: [],
-        allowedMethods: ["merge"],
-      },
+      observation: prObservation(state),
       observationDigest: "c".repeat(64),
       observedAt: 1,
-      readError: null,
+      readError,
       settlement: null,
     }),
   );

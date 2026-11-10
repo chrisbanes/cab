@@ -602,8 +602,11 @@ function closedIssueWorld(
     completion: (taskId: unknown) =>
       sources.providerCompletion(String(taskId)) !== undefined,
     hold: () => sources.hold("I_1"),
-    seedPr: (taskId: string, state: "OPEN" | "CLOSED" | "MERGED") =>
-      seedPrBinding(db, { taskId, projectId, state }),
+    seedPr: (
+      taskId: string,
+      state: "OPEN" | "CLOSED" | "MERGED",
+      readError: string | null = null,
+    ) => seedPrBinding(db, { taskId, projectId, state, readError }),
     seedAction: (
       taskId: string,
       state: "uncertain" | "confirmed-success",
@@ -901,6 +904,16 @@ for (const mode of ["skip", "done"] as const)
       // Open or uncertain delivery waits; a closed PR and a confirmed action do not.
       const delivery = new DeliveryStore(w.db);
       w.seedPr(taskId, "OPEN");
+      assert.deepEqual(delivery.closureCompletionWait(taskId), {
+        kind: "change-request",
+        number: 7,
+      });
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        false,
+      );
+      // A failed read leaves the last CLOSED observation possibly stale: the PR may have reopened.
+      w.seedPr(taskId, "CLOSED", "provider-read-unavailable");
       assert.deepEqual(delivery.closureCompletionWait(taskId), {
         kind: "change-request",
         number: 7,

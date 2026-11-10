@@ -1139,14 +1139,15 @@ export class DeliveryStore {
   }
   /**
    * The delivery a provider closure waits on before completing the task: its bound open PR
-   * (a stacked task's own layer), an unresolved agent or operator action, or a stack create
+   * (a stacked task's own layer) or one whose latest read failed, so its last observed state
+   * may be stale, an unresolved agent or operator action, or a stack create
    * whose nested link is unproved. A status-mapping write never waits, as for completion, and
    * an unregistered PR does not either: nobody can register or observe it once work settled.
    */
   closureCompletionWait(taskId: string): ClosureCompletionWait | null {
-    const bound = this.delivery(taskId)?.observation;
-    if (bound?.state === "OPEN")
-      return { kind: "change-request", number: bound.number };
+    const binding = this.delivery(taskId);
+    if (binding?.observation.state === "OPEN" || binding?.readError)
+      return { kind: "change-request", number: binding.observation.number };
     if (new UnstackStore(this.db).pending(taskId).length)
       return { kind: "delivery-action", action: "unstack" };
     const pending = this.actions(taskId).find(
