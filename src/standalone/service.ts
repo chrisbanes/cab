@@ -1455,11 +1455,12 @@ export class StandaloneService {
               domain.task(taskId).state === "open" &&
               domain.leadBindings().some((b) => b.taskId === taskId)
             )
-              coordination.ensureDeliveryEventWithinTransaction(
+              return coordination.ensureDeliveryEventWithinTransaction(
                 taskId,
                 reason,
                 identity,
               );
+            return false;
           },
           taskWorkspace,
           projectWrite: (taskId, run) =>

@@ -125,7 +125,8 @@ export interface DeliveryCoordinatorOptions {
     run: (current: () => boolean) => Promise<T>,
   ) => Promise<T>;
   leadAssignmentId?: (taskId: string) => string;
-  feedback?: (taskId: string, reason: string, identity: string) => void;
+  /** Return false when no new notice was recorded (for example, a duplicate). */
+  feedback?: (taskId: string, reason: string, identity: string) => unknown;
   failedStackedDependents?: (blockerTaskId: string) => string[];
   /** Offline check of a push's commit in the task worktree; null when it cannot be verified. */
   verifyPush?: (input: {
@@ -341,15 +342,18 @@ export class DeliveryCoordinator {
       // The recovery's approval binds exactly these values, so the lead gets them as recorded.
       const recorded = this.store.taskBranch(taskId, repositoryId);
       const material = `branch ${recorded?.branch ?? "unknown"}, outsideHeadSha ${sha ?? absentBranchHead}, lastPushedSha ${recorded?.lastPushedSha ?? "null"}`;
-      this.options.feedback?.(
-        taskId,
-        sha
-          ? `The task branch changed outside cab (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
-          : `The task branch was deleted outside cab. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
-        `outside-push:${repositoryId}:${sha ?? "absent"}`,
+      return (
+        this.options.feedback?.(
+          taskId,
+          sha
+            ? `The task branch changed outside cab (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
+            : `The task branch was deleted outside cab. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
+          `outside-push:${repositoryId}:${sha ?? "absent"}`,
+        ) !== false
       );
     } catch {
       // The outside head is already recorded; a task without a lead has nobody to wake.
+      return false;
     }
   }
   private serialize<T>(keys: string[], run: () => Promise<T>): Promise<T> {
@@ -1115,17 +1119,11 @@ export class DeliveryCoordinator {
           : observation.outsideDeleted
             ? null
             : undefined);
-    const newOutside =
-      action.kind.startsWith("branch.") &&
-      outside !== undefined &&
-      this.store.taskBranch(record.binding.taskId, action.target.repositoryId)
-        ?.outsideHeadSha !== (outside ?? absentBranchHead);
     return this.store.recordObservation(
       record.operationId,
       observation,
       (updated) => {
-        // A new outside-branch notice already wakes the lead with the settled action's cause.
-        if (!newOutside) this.actionResolved(record, updated);
+        let outsideNotified = false;
         if (observation.reason === "branch-outside-cleared") {
           // The branch is back at cab's own push: only the head this recovery named is obsolete.
           const named = isRecoveryAction(action) ? action.outsideHeadSha : null;
@@ -1140,11 +1138,13 @@ export class DeliveryCoordinator {
               action.target.repositoryId,
             );
         } else if (action.kind.startsWith("branch.") && outside !== undefined)
-          this.outsidePush(
+          outsideNotified = this.outsidePush(
             record.binding.taskId,
             action.target.repositoryId,
             outside,
           );
+        // A historical outside notice cannot replace this uncertainty episode's clearance.
+        if (!outsideNotified) this.actionResolved(record, updated);
       },
     );
   }
