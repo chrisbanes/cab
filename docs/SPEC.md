@@ -1831,8 +1831,9 @@ to newest. First arrival shows the newest entry with Reply docked at the bottom 
 the conversation column; returning and incoming updates preserve the existing reading
 position. Explicit section, record, request and legacy conversation links keep their
 targets. An opened question or approval owns the reading area: its form scrolls
-without the docked Reply covering its controls. On phones, Latest result and Task
-details follow the conversation.
+without the docked Reply covering its controls. Reply resumes docking when the
+interaction ends or is left; retained receipts alone do not undock it. On phones,
+Latest result and Task details follow the conversation.
 The subtitle is the first meaningful outcome sentence, skipping headings, quoted
 context and source metadata. The one-line strip shows the state badge, at most one
 distinct reason, a clickable operator next action and one source identity chip. A lead

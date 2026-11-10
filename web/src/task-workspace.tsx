@@ -1215,7 +1215,7 @@ export function TaskWorkspace({
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
       if (newMaterial || appended) setUpdates(true);
     }
-  }, [data, state, path, timeline.window]);
+  }, [data, state, path, timeline.window, timeline.error]);
   // A link into the conversation is followed once the task and the conversation have been read.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the link is read from its ref; the reads and the path are the triggers.
   useEffect(() => {

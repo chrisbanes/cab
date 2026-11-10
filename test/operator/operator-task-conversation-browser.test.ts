@@ -345,6 +345,24 @@ for (const [label, viewport] of [
       .getByRole("link", { name: "Review material & decide" })
       .click();
     const approval = decisions.locator(".approval-review");
+    assert.equal(await approval.getAttribute("data-request-active"), "true");
+    await approval.getByRole("link", { name: "Leave pending" }).click();
+    assert.equal(
+      await page
+        .locator("#reply")
+        .evaluate((e) => getComputedStyle(e).position),
+      "sticky",
+      "leaving an unresolved approval restores Reply docking",
+    );
+    await decisions
+      .getByRole("link", { name: "Review material & decide" })
+      .click();
+    assert.equal(
+      await page
+        .locator("#reply")
+        .evaluate((e) => getComputedStyle(e).position),
+      "static",
+    );
     await approval
       .getByRole("button", { name: "Approve this exact material" })
       .click();
@@ -354,6 +372,21 @@ for (const [label, viewport] of [
       .first()
       .waitFor();
     assert.equal(answers.filter((c) => c.type === "approval.decide").length, 1);
+    await page.waitForFunction(
+      () => !document.querySelector(".approval-review[data-request-active]"),
+    );
+    assert.equal(
+      await approval.count(),
+      1,
+      "the decided material stays mounted",
+    );
+    assert.equal(
+      await page
+        .locator("#reply")
+        .evaluate((e) => getComputedStyle(e).position),
+      "sticky",
+      "a decided approval does not keep Reply undocked",
+    );
 
     // 2. Markdown renders without executing; Raw text shows the source.
     const intro = log.locator(".conv-agent", { hasText: "First:" });
@@ -524,6 +557,7 @@ for (const [label, viewport] of [
       name: "Exact question response",
     });
     await response.getByRole("radio", { name: /^Team owners/ }).check();
+    assert.equal(await response.getAttribute("data-request-active"), "true");
     await decisions.getByText("Answering in the conversation.").waitFor();
     await decisions
       .getByRole("button", { name: "Answer here instead" })
@@ -548,6 +582,21 @@ for (const [label, viewport] of [
     await decisions
       .getByText("No longer waiting; see the conversation.")
       .waitFor();
+    await page.waitForFunction(
+      () => !document.querySelector(".question-response[data-request-active]"),
+    );
+    await response
+      .getByText("Answer recorded", { exact: true })
+      .first()
+      .waitFor();
+    await log.getByText("Second: all steps ran.").scrollIntoViewIfNeeded();
+    assert.equal(
+      await page
+        .locator("#reply")
+        .evaluate((e) => getComputedStyle(e).position),
+      "sticky",
+      "reading resumes with docked Reply while the inline receipt is retained",
+    );
     const recorded = answers.filter((c) => c.type === "question.form.answer");
     assert.equal(recorded.length, 1);
     assert.equal(
@@ -734,6 +783,64 @@ test("the conversation and the composer heading are readable on first load when 
   }
   assert.equal(await page.title(), "Task · cab");
 });
+
+for (const destination of ["reply", "request"] as const)
+  test(`an opening timeline failure still aligns the explicit ${destination} without a poll`, async (_t, j) => {
+    const { f, s, web, page } = await openFixture(j);
+    const question = f.service.coordinationView().readTask(s.taskId)
+      .questions[0]!;
+    const targetId = destination === "reply" ? "reply" : question.interactionId;
+    const link =
+      destination === "reply" ? "?section=reply" : `?request=${targetId}`;
+    let rejectTimeline!: () => void;
+    const delayed = new Promise<void>((resolve) => {
+      rejectTimeline = resolve;
+    });
+    j.cleanup(async () => rejectTimeline(), "release opening timeline");
+    await page.route("**/api/operator/tasks/*/timeline?*", async (route) => {
+      await delayed;
+      await route.abort();
+    });
+    let taskReads = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === `/api/operator/tasks/${s.taskId}`)
+        taskReads++;
+    });
+    await signIn(page, web, `/tasks/${s.taskId}${link}`);
+    await page
+      .getByRole("heading", { name: "Command menu", level: 1 })
+      .waitFor();
+    if (destination === "request")
+      await page.getByRole("radio", { name: /^Team owners/ }).waitFor();
+    const readsBeforeFailure = taskReads;
+    await page.evaluate(() => {
+      scrollTo(0, 0);
+      (
+        window as unknown as { __landing: { scrolls: unknown[] } }
+      ).__landing.scrolls = [];
+    });
+    rejectTimeline();
+    await page.waitForFunction(
+      (id) =>
+        (
+          window as unknown as {
+            __landing: { scrolls: Array<{ id: string; recordId: string }> };
+          }
+        ).__landing.scrolls.some((s) => s.id === id || s.recordId === id),
+      targetId,
+      { timeout: 3000 },
+    );
+    const target =
+      destination === "reply"
+        ? page.locator("#reply")
+        : page.getByRole("region", { name: "Exact question response" });
+    assert.equal(await inView(target), true);
+    assert.equal(
+      taskReads,
+      readsBeforeFailure,
+      "alignment did not wait for another task read",
+    );
+  });
 
 test("every former History link lands at its place in the conversation", async (_t, j) => {
   const { f, s, web, page } = await openFixture(j);

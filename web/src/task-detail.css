@@ -1395,15 +1395,11 @@ a.task-source-chip:hover {
 }
 
 /* A request owns the reading area while its form or recovery outcome is open. */
-.task-workspace
-  .task-columns
-  > section#decisions:has(.question-response, .approval-review) {
+.task-workspace .task-columns > section#decisions:has([data-request-active]) {
   position: relative;
   max-height: none;
   overflow: visible;
 }
-.task-workspace
-  .task-columns:has(.question-response, .approval-review)
-  > section.reply-card {
+.task-workspace .task-columns:has([data-request-active]) > section.reply-card {
   position: static;
 }
