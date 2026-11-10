@@ -3334,7 +3334,7 @@ test("daemon mode only an agent record never carries an observed process", async
 });
 
 test("daemon mode exit confirmation treats a reused pid or a new boot as gone, and a live process as running", {
-  skip: process.platform !== "darwin",
+  skip: process.platform !== "darwin" || processIdentityDenied(),
 }, async () => {
   const host = defaultServiceHost();
   const identity = (await host.captureIdentity(process.pid)) as {
