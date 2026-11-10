@@ -319,10 +319,11 @@ membership satisfies readiness whatever its labels or Project fields. Absence of
 rule is stored explicitly (`null`), never as an empty condition list, and a rule
 withheld from a read is shown as unavailable, never as no rule. Readiness alone is
 not admission: activation, complete source observations, placement, repository
-access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub or Jira source also has a closed-issue mode, changed only through
-its versioned configuration: **Skip closed issues** (the default) never imports an
-issue first observed closed, and **Treat closure as Done** imports one as Done from a
-complete read only. Membership in another source cannot grant admission. Each selection's
+access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub or Jira source also has a **Closed issues at import** setting, changed only
+through its versioned configuration. It decides only first import: **Skip** (the default)
+never imports an issue first observed closed, and **Import as Done** imports one as Done
+from a complete read only. Under either setting, an imported task completes when its
+issue closes, once its work and delivery have settled. Membership in another source cannot grant admission. Each selection's
 source observation counts its observed items (including closed issues skipped without a
 task), open items and open items matching the readiness rule, and warns when a complete
 read matches none; an imported open Draft task names the conditions it does not meet.
@@ -505,34 +506,44 @@ between projects are deferred. Discovery grants no additional repository access.
 
 Losing readiness, leaving all selections or external closure holds new delegation
 and notifies the lead and active assignees to reach a safe stopping point. Operator resolution is needed
-to resume, except confirmed closure from this task's own delivery and the two source-caused holds
+to resume, except confirmed closure from this task's own delivery, external closure, which
+completes the task once settled (below), and the two source-caused holds
 that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
-releases nothing, and every other source hold, including closure, still needs
-the operator to resume it. A withdrawn or readiness-lost hold notice tells the
+releases nothing, and every other source hold still needs the operator to resume it. A withdrawn or readiness-lost hold notice tells the
 recipient to stop new work and wait for the qualifying complete read, without
 asking the operator to clear it. When a previously announced hold clears,
 one durable Inbox release event goes to each notified recipient that is still the
 task lead or an active assignee, and says the complete read listed the issue again
 while it was Ready. A hold created and cleared in one
 refresh emits neither event. External closure
-after import holds the task in both closed-issue modes, whatever its readiness. Under
-Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
-is complete and its execution has settled, with no writer, ambiguity or unfinished
-execution; provider closure never resolves uncertain execution or clears other holds.
+after import holds the task with reason `closed` under either setting, whatever its
+readiness, and the task completes by provider closure: startup and recurring
+reconciliation complete it once current membership evidence is complete, its execution
+has settled, with no writer, ambiguity or unfinished execution, and its delivery has
+settled. Delivery is settled when the task has no open bound change request (a stacked
+task's own layer included) and no agent or operator delivery action, unstack or stacked
+link with an unknown outcome, such as an unproved push, merge or close. Status-mapping
+writes never wait, and neither does a created change request that was never registered,
+which cab cannot observe. While it waits, the hold keeps reason `closed` and the task
+names what it waits on, such as "Completes when PR #123 merges or closes"; the operator
+can still cancel it. Anyone's closure, including collaborators, automation and bots,
+completes the task; the record keeps provider closure distinct from cab or manual
+completion. Provider closure never resolves uncertain execution or clears other holds.
 When proving an own confirmed `issue.close`, a current, complete, uninvalidated settlement
 can also establish the readiness that the close removed by moving a referenced Project
 field from an accepted option set to a different nonempty unaccepted set. The same item
 and rule must still apply, and every other referenced input is compared; attribution,
 membership, execution and independent holds remain subject to their existing gates.
 Reopening returns a provider-completed task to open and recomputes readiness from the
-rule; reopening grants no readiness and keeps any closure hold. Switching a source to
-Skip reopens its provider-completed tasks under a closure hold. Under Treat closure
-as Done, a task the operator reopens while its issue stays closed is completed again
-once settled; switching the source to Skip keeps it open; no mode or switch
-deletes tasks or history. Once an issue this task's delivery closed is reopened, that
-own closure is superseded: a later closure, by anyone but a new confirmed cab
-closure, is provider closure in both modes. Supersession keeps the delivery history
+rule; reopening grants no readiness and keeps any closure hold. A task the operator
+reopens while its issue stays closed is completed again once settled. Changing the
+setting changes no existing task: switching to Skip leaves provider-completed tasks
+Done, and switching to Import as Done imports previously skipped closed issues as Done
+on the next complete read; no setting or switch deletes tasks or history. Once an issue
+this task's delivery closed is reopened, that own closure is superseded: a later
+closure, by anyone but a new confirmed cab closure, is provider closure under either
+setting. Supersession keeps the delivery history
 and any closure hold. When GitHub or Jira shows the issue closed but not provably by the
 task's own delivery, the task keeps the explained `closure-attribution-unproved`
 hold, never a pending read, and is never completed by that closure; reopening the
@@ -1185,9 +1196,9 @@ view. Provide readable narrow-screen navigation between columns.
 
 Attention appears alongside work state rather than replacing it. Keep actionable
 readiness, successful completion, cancellation and provider closure without
-delivery visibly distinguishable. Provider closure alone does not establish task
-completion, except under a source's Treat closure as Done mode, which records the task
-as completed by provider closure, distinct from cab or manual completion. Prioritise the task's meaning, current situation and next actor;
+delivery visibly distinguishable. Provider closure completes an imported
+task only once its work and delivery have settled, and records it as completed by
+provider closure, distinct from cab or manual completion. Prioritise the task's meaning, current situation and next actor;
 supporting identifiers and timestamps must remain readable and accessible without
 competing with that information. These refinements do not change the existing
 board state mapping.
@@ -2844,9 +2855,9 @@ confirmed only when the issue is Done and exactly one status entry in its change
 made by the credential account, moves it to that status. A rejection of the single request (400, 401,
 403, 404 or 429) is a confirmed failure; any other failure after the request is sent is uncertain,
 kept across restart and never resent. A Done transition by anyone else, or by GitLab's Jira
-integration, is an external closure, which holds the task. With explicit Treat closure as Done,
-startup and recurring reconciliation may then complete it under the current membership,
-execution-settlement and independent-hold gates described above; Skip remains the default. A task imported from Jira has a task branch
+integration, is an external closure, which holds the task. Under either setting, startup and
+recurring reconciliation then complete it under the current membership, execution-settlement,
+delivery-settlement and independent-hold gates described above. A task imported from Jira has a task branch
 named `<prefix><KEY>-<task id>-<slug>`, assigned once like every task branch, and its change request
 title must start with the issue key. In a Jira project, change request titles and text with a closing
 keyword (close, fix, resolve or implement, in any form) followed by a Jira issue key on the same line
@@ -2936,7 +2947,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   the authority check refuses it unless the Status sent as expected is exactly that one.
   It is refused if that option is one the readiness rule accepts, a done task that is not Ready
   while its issue is open writes nothing until the issue closes, and a task first seen already
-  done (for example a closed issue a Done-mode source imports, or a Ready task done before the
+  done (for example a closed issue an Import as Done source imports, or a Ready task done before the
   mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
   readiness rule accepts (an `in` set holding it, a `not-in` set leaving it out), checked at save and again at write against the task's stored facts with only
   that value replaced; for Jira the rule's `status` conditions decide, and a rule with none accepts

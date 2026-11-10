@@ -787,10 +787,10 @@ test("source replacement verifies repositories without diagnostic echo and obser
   assert.equal(f.service.domain().repositoryLinks(ids.projectId).version, 3);
   await sections.getByRole("link", { name: "GitHub source" }).click();
   await page
-    .getByLabel("Closed GitHub issues", { exact: true })
+    .getByLabel("Closed issues at import", { exact: true })
     .selectOption("done");
   await page
-    .getByText("Closed issues: Treat closure as Done", { exact: true })
+    .getByText("Closed issues at import: Import as Done", { exact: true })
     .waitFor();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
@@ -802,7 +802,9 @@ test("source replacement verifies repositories without diagnostic echo and obser
     [3, "done"],
   );
   assert.equal(
-    await page.getByLabel("Closed GitHub issues", { exact: true }).inputValue(),
+    await page
+      .getByLabel("Closed issues at import", { exact: true })
+      .inputValue(),
     "done",
   );
 });

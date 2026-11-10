@@ -99,9 +99,14 @@ _Avoid_: Retry when referring to a restart
 
 **Closure hold**:
 The hold on an imported open task whose external item was closed without
-cab delivering it. It is distinct from a project pause. An own closure that a
-reopen superseded no longer exempts the task.
+cab delivering it. It lasts until the task's execution and delivery settle, when
+the task completes by provider closure. It is distinct from a project pause. An
+own closure that a reopen superseded no longer exempts the task.
 _Avoid_: Paused when referring to an externally closed task
+
+**Provider closure**:
+Closure of an external item not proved as this task's own delivery; it completes
+the task, recorded separately from cab or manual completion.
 
 **Task source**:
 A project-scoped origin of tasks: built-in local creation or a configured external source supplied by a plugin.

@@ -743,8 +743,9 @@ name, version and preview digest. The service rechecks every confirmation atomic
      `{"kind":"search","query"}` or `{"kind":"project","projectNodeId","filter"}`),
      `removeSelections` (ids), `readiness` (a rule replaces, `null` removes the
      rule, omitted keeps it; a saved rule the read withholds must be given),
-     `closedIssues` (`"skip"`
-     or `"done"`; omitted keeps the saved mode) and `credentialRef` (`"env:NAME"` or
+     `closedIssues` (Closed issues at import: `"skip"`
+     or `"done"`; omitted keeps the saved setting; it decides only first import, and an
+     imported task completes when its issue closes once its work and delivery have settled) and `credentialRef` (`"env:NAME"` or
      `null`). The repository keys of earlier releases are refused with a pointer to
      `project prepare-repositories`. Saving makes every selection inactive until it is
      previewed again and marks observations incomplete until the next sync

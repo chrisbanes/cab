@@ -75,6 +75,7 @@ export function summary(o: Overrides = {}): TaskListSummary {
             url: "https://github.com/acme/atlas/issues/1",
             state: o.readiness ? "open" : "closed",
             closure: o.closure,
+            closureWait: null,
             readiness: o.readiness ?? {
               rule: { kind: "none" },
               outcome: "not-evaluated",

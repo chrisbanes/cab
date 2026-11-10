@@ -3,6 +3,10 @@ import {
   selectionCountsText,
   zeroMatchWarning,
 } from "../operator/readiness-text.js";
+import {
+  closedIssueLabels,
+  closureCompletionNote,
+} from "../operator/closed-issue-copy.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
@@ -188,8 +192,9 @@ const sourcesCommand: BrowseCommand = {
               ]
             : []),
           ["Readiness", readinessText(source.readiness)],
-          ["Closed issues", closedIssueLabels[source.closedIssues]],
+          ["Closed issues at import", closedIssueLabels[source.closedIssues]],
         ] as [string, string][]),
+        closureCompletionNote,
         "",
         source.selections.length
           ? table(
@@ -267,11 +272,6 @@ const sourcesCommand: BrowseCommand = {
     });
   },
 };
-
-const closedIssueLabels = {
-  skip: "Skip closed issues",
-  done: "Treat closure as Done",
-} as const;
 
 const editSchema = z
   .object({
@@ -448,7 +448,7 @@ function jiraEditCommand(
     diff: [
       ...(modeChanged
         ? [
-            `Closed issues: ${closedIssueLabels[savedMode]} → ${closedIssueLabels[jira.closedIssues ?? savedMode]}`,
+            `Closed issues at import: ${closedIssueLabels[savedMode]} → ${closedIssueLabels[jira.closedIssues ?? savedMode]}`,
           ]
         : []),
       ...selections.map((s) => `${s.id} · Jira JQL (query private) · active`),
@@ -572,7 +572,7 @@ export function sourceEditCommand(
     edit.closedIssues !== source.closedIssues;
   if (closedIssuesChanged)
     diff.push(
-      `Closed issues: ${closedIssueLabels[edit.closedIssues ?? "skip"]}`,
+      `Closed issues at import: ${closedIssueLabels[edit.closedIssues ?? "skip"]}`,
     );
   if (edit.credentialRef !== undefined)
     diff.push(

@@ -1097,7 +1097,7 @@ export class GitHubSourceStore {
         // An issue cab is publishing is not new: its task is converted when the create resolves.
         if (!existing && this.publishingIssue(issue)) continue;
         if (!existing) {
-          // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
+          // A closed issue is imported, as Done, only by an Import as Done source on a complete read.
           const importClosed =
             config.closedIssues === "done" && snapshot.complete;
           if (issue.state === "closed" && !importClosed) {

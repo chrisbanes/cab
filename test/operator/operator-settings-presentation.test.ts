@@ -467,7 +467,7 @@ test("source rows, change lines and command use keep markers and never put a val
   );
   assert.ok(
     sourceChanges(c.source, { ...values, closedIssues: "done" }).includes(
-      "Closed issues: Treat closure as Done",
+      "Closed issues at import: Import as Done",
     ),
   );
   assert.equal(

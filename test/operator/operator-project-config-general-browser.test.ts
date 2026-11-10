@@ -698,8 +698,8 @@ test("readiness matching with no condition is no edit, and the adopted note goes
   await matching.selectOption({ label: "Any condition" });
   await assertClean(page, "Save changes");
   // After Review changes, typing the adopted value back clears the note that it was loaded.
-  const closed = page.getByLabel("Closed GitHub issues", { exact: true });
-  await closed.selectOption({ label: "Treat closure as Done" });
+  const closed = page.getByLabel("Closed issues at import", { exact: true });
+  await closed.selectOption({ label: "Import as Done" });
   await api.execute({
     type: "github.configure",
     key: randomUUID(),
@@ -721,7 +721,7 @@ test("readiness matching with no condition is no edit, and the adopted note goes
   await page
     .getByText("Loaded the latest version.", { exact: false })
     .waitFor();
-  await closed.selectOption({ label: "Skip closed issues" });
+  await closed.selectOption({ label: "Skip" });
   await page.waitForFunction(
     () => !document.body.innerText.includes("Loaded the latest version."),
   );

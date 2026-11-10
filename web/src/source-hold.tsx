@@ -74,7 +74,9 @@ export function SourceHoldCard({
       </p>
       {!resolve && source && hold?.active && (
         <>
-          <p>{sourceHoldReasonText(hold?.reason ?? null)}</p>
+          <p>
+            {sourceHoldReasonText(hold?.reason ?? null, source.closureWait)}
+          </p>
           <dl className="inspector-facts">
             <dt>Source title</dt>
             <dd>{source.title ?? unavailable}</dd>

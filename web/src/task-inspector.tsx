@@ -107,7 +107,11 @@ export function TaskInspector({
                     </p>
                     {source.hold?.active && (
                       <p>
-                        Source hold · {sourceHoldReasonText(source.hold.reason)}
+                        Source hold ·{" "}
+                        {sourceHoldReasonText(
+                          source.hold.reason,
+                          source.closureWait,
+                        )}
                       </p>
                     )}
                     {source.review && (
