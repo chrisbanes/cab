@@ -53,10 +53,12 @@ The operator CLI is outside the budget: it has no screens.
 - A comparison that cannot be computed names the reason in a sentence and keeps the
   last computed one visible as stale.
 - Branch and Uncommitted stay fixed until Refresh; a newer workspace observation or
-  known turn capture is labelled beside the results. An unavailable workspace says
-  it was not read and offers an explicit Refresh. Bounded file and output limits name
-  the selected file's exceeded side when its size or line count proves it; an
-  ambiguous output-limit lists the relevant bounds without guessing its cause.
+  known turn capture is labelled beside the results. An empty unavailable current
+  workspace read says it was not read and offers an explicit Refresh; partial current
+  and Last-turn captures keep available changes visible and label the gap. A partial
+  Last turn also retains its identity. Bounded file and output limits name the selected
+  file's exceeded side when its size or line count proves it; an ambiguous
+  output-limit lists the relevant bounds without guessing its cause.
 - A sent review shows its receipt; a failed send keeps the comments as a draft.
 - An ordinary refresh re-reads the workspace and keeps an unsent draft. When
   repository access or exclusions change, the draft's text and anchors are

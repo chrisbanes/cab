@@ -481,19 +481,29 @@ export function TaskWorkspaceChanges({
   const snapshot = snapshotFor(current);
   const reason = current && "reason" in current ? current.reason : undefined;
   const workspaceUnavailable = reason === "workspace-unavailable";
+  const unavailableEmptySnapshot =
+    workspaceUnavailable && snapshot?.entries.length === 0;
+  const notReadYet =
+    workspaceUnavailable &&
+    state.target !== "last-turn" &&
+    (!snapshot || snapshot.entries.length === 0);
   const knownObservationTimes = [
     knownWorkspaceObservationAt,
     repositoriesResource.state.data?.observedAt ?? null,
     ...Object.values(state.comparisonReads).flatMap(comparisonObservationTimes),
   ].filter((observedAt): observedAt is number => observedAt !== null);
   const staleWorkspaceSnapshot =
-    !workspaceUnavailable &&
+    !unavailableEmptySnapshot &&
     snapshot?.target !== "turn" &&
     snapshot !== undefined &&
     isWorkspaceComparisonStale(snapshot.observedAt, knownObservationTimes);
   const currentRequest = request.key === key ? request : null;
   const id = responseId(current);
-  const reasonSentence = comparisonReasonSentence(reason);
+  const reasonSentence = comparisonReasonSentence(
+    reason,
+    state.target,
+    Boolean(snapshot?.entries.length),
+  );
   const detailFields = (
     [
       ["Comparison", id ?? undefined],
@@ -774,12 +784,15 @@ export function TaskWorkspaceChanges({
             </span>
           )}
           {reasonSentence && <span>{reasonSentence}</span>}
-          {snapshot && !workspaceUnavailable && (
-            <span>
-              Current workspace snapshots stay fixed until Refresh. Last turn is
-              a separate actual runtime capture.
-            </span>
-          )}
+          {snapshot &&
+            snapshot.target !== "turn" &&
+            !notReadYet &&
+            !unavailableEmptySnapshot && (
+              <span>
+                Current workspace snapshots stay fixed until Refresh. Last turn
+                is a separate actual runtime capture.
+              </span>
+            )}
           <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
@@ -824,7 +837,7 @@ export function TaskWorkspaceChanges({
           No current comparison is available for this selection.
         </p>
       )}
-      {current?.state === "gap" && !workspaceUnavailable && (
+      {current?.state === "gap" && !notReadYet && (
         <p role="status">
           This comparison has gaps; unavailable or unsupported entries stay
           marked as such.
@@ -838,7 +851,7 @@ export function TaskWorkspaceChanges({
             turns cannot be reconstructed from a result revision.
           </p>
         )}
-      {snapshot && !workspaceUnavailable && (
+      {snapshot && !unavailableEmptySnapshot && (
         <ChangesWorkbench
           mobileView={state.mobileView}
           files={

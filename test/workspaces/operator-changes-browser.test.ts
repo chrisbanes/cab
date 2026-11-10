@@ -486,6 +486,172 @@ test("workspace-unavailable hides a stored empty snapshot and refreshes only whe
   );
 });
 
+test("workspace-unavailable preserves entries from a partial current comparison", async (_t, j) => {
+  const { page, changes, comparisonTargetControl } = await startChangesJourney(
+    j,
+    {
+      beforeOpen: (workspace) =>
+        writeFileSync(
+          join(workspace, "partial-current.md"),
+          "captured change\n",
+        ),
+    },
+  );
+  let comparisonId: string | null = null;
+  let capturedPaths: string[] = [];
+  await page.route("**/api/operator/tasks/*/comparisons*", async (route) => {
+    const url = new URL(route.request().url());
+    const exactRead =
+      comparisonId !== null &&
+      url.searchParams.get("comparisonId") === comparisonId;
+    const selectedRead =
+      url.searchParams.get("target") === "uncommitted" &&
+      url.searchParams.get("repositoryId") === "repo-alpha" &&
+      !url.searchParams.has("comparisonId");
+    if (!selectedRead && !exactRead) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      data: {
+        state: string;
+        comparisonId?: string;
+        reason?: string;
+        comparison?: {
+          comparisonId: string;
+          state: string;
+          reason?: string;
+          entries: Array<{ path: string }>;
+        };
+      };
+    };
+    assert.ok(body.data.comparison);
+    if (!url.searchParams.has("comparisonId"))
+      comparisonId =
+        body.data.comparisonId ?? body.data.comparison.comparisonId;
+    capturedPaths = body.data.comparison.entries.map((entry) => entry.path);
+    body.data.state = "gap";
+    body.data.reason = "workspace-unavailable";
+    body.data.comparison.state = "gap";
+    body.data.comparison.reason = "workspace-unavailable";
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption("repo-alpha");
+  await comparisonTargetControl.selectOption("uncommitted");
+  await changes
+    .getByText(
+      "The workspace became unavailable during this comparison. Available changes remain visible; unavailable files stay marked as gaps. Refresh to retry.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.ok(capturedPaths.includes("partial-current.md"));
+  await changedFile(changes, "partial-current.md").waitFor();
+  await changes
+    .getByText(
+      "This comparison has gaps; unavailable or unsupported entries stay marked as such.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await changes.getByText(/Not read yet/).count(), 0);
+  assert.equal(await changes.getByText(/No changed files/).count(), 0);
+  assert.equal(
+    await changes.getByRole("button", { name: "Refresh comparison" }).count(),
+    1,
+  );
+});
+
+test("workspace-unavailable Last turn keeps captured changes and identity", async (_t, j) => {
+  const { fixture, task, alpha, page, changes, comparisonTargetControl } =
+    await startChangesJourney(j, { recordResult: false });
+  const domain = fixture.service.domain();
+  domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  await until(
+    () => fixture.runtime.turns >= 1 && fixture.runtime.hasPending(1),
+    "Last-turn partial capture to start",
+  );
+  writeFileSync(
+    join(alpha.workspacePath, "turn-captured.md"),
+    "captured during turn\n",
+  );
+  fixture.runtime.complete(1);
+  await until(
+    () =>
+      fixture.service
+        .list()
+        .find(
+          (work) => work.workId === `assignment:${task.assignmentId}:initial`,
+        )?.state === "completed",
+    "Last-turn partial capture to finish",
+  );
+
+  let capturedPaths: string[] = [];
+  await page.route("**/api/operator/tasks/*/comparisons*", async (route) => {
+    if (
+      new URL(route.request().url()).searchParams.get("target") !== "last-turn"
+    ) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      data: {
+        state: string;
+        reason?: string;
+        comparison?: {
+          state: string;
+          reason?: string;
+          entries: Array<{ path: string }>;
+        };
+      };
+    };
+    assert.ok(body.data.comparison);
+    capturedPaths = body.data.comparison.entries.map((entry) => entry.path);
+    body.data.state = "gap";
+    body.data.reason = "workspace-unavailable";
+    body.data.comparison.state = "gap";
+    body.data.comparison.reason = "workspace-unavailable";
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await comparisonTargetControl.selectOption("last-turn");
+  await changes
+    .getByText(
+      "This Last turn capture is partial because workspace observation was unavailable. Captured changes remain visible; unavailable files stay marked as gaps.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.ok(capturedPaths.includes("turn-captured.md"));
+  await changedFile(changes, "turn-captured.md").waitFor();
+  await changes
+    .getByText(
+      "This comparison has gaps; unavailable or unsupported entries stay marked as such.",
+      { exact: true },
+    )
+    .waitFor();
+  await changes.getByLabel("Last turn identity").waitFor();
+  assert.equal(await changes.getByText(/Not read yet/).count(), 0);
+  assert.equal(await changes.getByText(/No changed files/).count(), 0);
+});
+
 test("Files observations arriving after navigation stay stale after closing the preview", async (_t, j) => {
   const { page, changes, comparisonRequests } = await startChangesJourney(j);
   await changes.getByText(/^As of /).waitFor();

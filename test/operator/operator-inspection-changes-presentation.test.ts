@@ -29,6 +29,29 @@ test("comparison reasons say what happened and offer a useful next step", () => 
     /Not read yet: workspace was unavailable/,
   );
   assert.match(comparisonReasonSentence("workspace-unavailable"), /Refresh/);
+  const partialTurn = comparisonReasonSentence(
+    "workspace-unavailable",
+    "last-turn",
+    true,
+  );
+  assert.match(partialTurn, /Last turn capture is partial/);
+  assert.match(partialTurn, /Captured changes remain visible/);
+  assert.match(partialTurn, /unavailable files stay marked as gaps/);
+  assert.doesNotMatch(partialTurn, /Not read yet/);
+  const emptyTurn = comparisonReasonSentence(
+    "workspace-unavailable",
+    "last-turn",
+  );
+  assert.match(emptyTurn, /No captured file changes are available/);
+  assert.match(emptyTurn, /capture gap is recorded/);
+  assert.doesNotMatch(emptyTurn, /Not read yet/);
+  const partialCurrent = comparisonReasonSentence(
+    "workspace-unavailable",
+    "uncommitted",
+    true,
+  );
+  assert.match(partialCurrent, /Available changes remain visible/);
+  assert.doesNotMatch(partialCurrent, /Not read yet/);
   assert.match(
     comparisonReasonSentence("time-limit"),
     /A time limit stopped the comparison/,

@@ -8,9 +8,19 @@ type ComparisonEntry = NonNullable<
   >["comparison"]["entries"][number]
 >;
 
-export function comparisonReasonSentence(reason: string | undefined) {
+export function comparisonReasonSentence(
+  reason: string | undefined,
+  target?: "branch" | "last-turn" | "uncommitted",
+  hasEntries = false,
+) {
   switch (reason) {
     case "workspace-unavailable":
+      if (target === "last-turn")
+        return hasEntries
+          ? "This Last turn capture is partial because workspace observation was unavailable. Captured changes remain visible; unavailable files stay marked as gaps."
+          : "Workspace observation was unavailable for the Last turn capture. No captured file changes are available to show; the capture gap is recorded.";
+      if (hasEntries)
+        return "The workspace became unavailable during this comparison. Available changes remain visible; unavailable files stay marked as gaps. Refresh to retry.";
       return "Not read yet: workspace was unavailable. Refresh to read it again.";
     case "time-limit":
       return "A time limit stopped the comparison. The overall observation budget is 5 seconds; reduce the comparison scope, then refresh.";
