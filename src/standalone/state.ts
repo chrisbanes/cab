@@ -4822,35 +4822,24 @@ export class ExecutionState {
         "SELECT threadId, turnId FROM execution_recovery_identities WHERE workId=?",
       )
       .get(workId) as { threadId: string | null; turnId: string | null };
+    const held = this.heldGenerationFacts(record);
     const blocked: ReleaseBlocker[] = [];
-    if (record.receipt || record.intent.state === "reconciled")
-      blocked.push("already-reconciled");
-    else if (record.intent.state !== "held" || record.request?.state !== "held")
-      blocked.push("not-held");
+    if (held.reconciled) blocked.push("already-reconciled");
+    else if (held.notHeld) blocked.push("not-held");
     if (!record.holds.capacity) blocked.push("ownership-released");
     if (record.intent.threadId !== null || identity.threadId !== null)
       blocked.push("thread-bound");
     if (record.intent.turnId !== null || identity.turnId !== null)
       blocked.push("turn-bound");
-    if (record.preTurnRejection || record.noTurnSubmission)
-      blocked.push("witness-present");
-    const effects = this.db
-      .prepare(
-        "SELECT effectKey FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
-      )
-      .all(workId) as { effectKey: string }[];
+    if (held.witness) blocked.push("witness-present");
     if (
       record.holds.stop ||
       this.stopTarget(workId) !== undefined ||
       this.taskHold(binding.taskId) !== undefined ||
-      effects.some((e) => e.effectKey !== knownSurvivorEffect)
+      held.pendingEffects
     )
       blocked.push("independent-hold");
-    if (
-      effects.some((e) => e.effectKey === knownSurvivorEffect) ||
-      record.observations.some((o) => o.kind === "known-survivor")
-    )
-      blocked.push("known-survivor");
+    if (held.knownSurvivor) blocked.push("known-survivor");
     if (!this.projectWorkWritable(workId)) blocked.push("project-archived");
     return blocked;
   }
@@ -4988,10 +4977,9 @@ export class ExecutionState {
       current?.turnId !== current?.actualTurnId
     )
       blocked.push("identity-changed");
-    if (record.receipt || record.intent.state === "reconciled")
-      blocked.push("already-reconciled");
-    else if (record.intent.state !== "held" || record.request?.state !== "held")
-      blocked.push("not-held");
+    const held = this.heldGenerationFacts(record);
+    if (held.reconciled) blocked.push("already-reconciled");
+    else if (held.notHeld) blocked.push("not-held");
     if (!record.holds.writer || !record.holds.capacity)
       blocked.push("ownership-released");
     if (
@@ -5001,21 +4989,34 @@ export class ExecutionState {
       record.generation.workRevision === null
     )
       blocked.push("bound-identity-missing");
-    if (record.preTurnRejection || record.noTurnSubmission)
-      blocked.push("other-witness");
+    if (held.witness) blocked.push("other-witness");
+    if (held.pendingEffects) blocked.push("pending-effects");
+    if (held.knownSurvivor) blocked.push("known-survivor");
+    return [...new Set(blocked)];
+  }
+
+  /**
+   * The held-generation facts release and bound-turn recovery both check, so a new hold
+   * or effect kind changes both: settled, still held, witnessed, pending effects other
+   * than its result, and a known survivor.
+   */
+  private heldGenerationFacts(record: RecoveryRecord) {
     const effects = this.db
       .prepare(
         "SELECT effectKey FROM execution_pending_effects WHERE workId=? AND state='pending' AND effectKey<>'assignment-result'",
       )
-      .all(workId) as { effectKey: string }[];
-    if (effects.some((e) => e.effectKey !== knownSurvivorEffect))
-      blocked.push("pending-effects");
-    if (
-      effects.some((e) => e.effectKey === knownSurvivorEffect) ||
-      record.observations.some((o) => o.kind === "known-survivor")
-    )
-      blocked.push("known-survivor");
-    return [...new Set(blocked)];
+      .all(record.workId) as { effectKey: string }[];
+    return {
+      reconciled:
+        Boolean(record.receipt) || record.intent.state === "reconciled",
+      notHeld:
+        record.intent.state !== "held" || record.request?.state !== "held",
+      witness: Boolean(record.preTurnRejection || record.noTurnSubmission),
+      pendingEffects: effects.some((e) => e.effectKey !== knownSurvivorEffect),
+      knownSurvivor:
+        effects.some((e) => e.effectKey === knownSurvivorEffect) ||
+        record.observations.some((o) => o.kind === "known-survivor"),
+    };
   }
 
   resolveHeldExecution(
