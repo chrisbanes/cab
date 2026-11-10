@@ -3,6 +3,7 @@ import {
   starterOptionCopy,
 } from "../../web/src/setup-model.js";
 import type { Workspace } from "../../src/operator/contracts.js";
+import { githubReadinessSchema } from "../../src/core/github-source-contracts.js";
 import { sourceCredentialExplanation } from "../../src/standalone/github-source-credential.js";
 import {
   commandNetworkAppliesNote,
@@ -870,6 +871,57 @@ test("a new GitLab link names its project path and reads like the CLI preview; a
   assert.deepEqual(
     repositoryChanges(saved, values([{ ...kept, removed: false }])),
     ["Ref for 4242: main → dev"],
+  );
+});
+
+test("switching from Jira initializes only GitHub source data", () => {
+  for (const conditions of [
+    [
+      {
+        kind: "status" as const,
+        operator: "in" as const,
+        statusIds: ["10001"],
+      },
+    ],
+    [
+      {
+        kind: "select-field" as const,
+        operator: "in" as const,
+        fieldId: "customfield_10010",
+        optionIds: ["20"],
+      },
+    ],
+  ]) {
+    const source = {
+      ...config().source,
+      tracker: "jira" as const,
+      selections: [],
+      readiness: { kind: "rule" as const, mode: "any" as const, conditions },
+    };
+    const loaded = sourceRowsFrom(source);
+    const command = sourceCommand(projectId, {
+      expectedVersion: String(source.version),
+      selections: JSON.stringify(loaded.selections),
+      conditions: JSON.stringify(loaded.conditions),
+      mode: loaded.mode,
+      closedIssues: loaded.closedIssues,
+      preserveReadiness: loaded.preserveReadiness,
+    });
+    assert.deepEqual(loaded.conditions, []);
+    assert.equal(loaded.preserveReadiness, false);
+    assert.equal(command.readiness, null);
+    assert.equal(
+      githubReadinessSchema.nullable().safeParse(command.readiness).success,
+      true,
+    );
+  }
+  assert.equal(
+    sourceRowsFrom({
+      ...config().source,
+      tracker: "jira",
+      readiness: { kind: "unavailable" },
+    }).preserveReadiness,
+    false,
   );
 });
 

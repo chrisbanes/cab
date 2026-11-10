@@ -40,6 +40,26 @@ test("only an explicit empty Jira setup site unlocks site selection; withheld re
   );
 });
 
+test("switching from GitHub does not carry visible or withheld readiness into Jira", () => {
+  for (const readiness of [
+    { kind: "unavailable" as const },
+    {
+      kind: "rule" as const,
+      mode: "all" as const,
+      conditions: [
+        { kind: "label" as const, operator: "has" as const, name: "ready" },
+      ],
+    },
+  ]) {
+    assert.deepEqual(jiraEditorState({ readiness }), {
+      saved: false,
+      unconfigured: true,
+      rule: null,
+      withheld: false,
+    });
+  }
+});
+
 test("readiness lines round-trip every Jira condition kind", () => {
   const text = [
     "label has ready",

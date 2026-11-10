@@ -69,6 +69,55 @@ test("CLI settle refusals name GitHub pull requests and GitLab merge requests", 
   }
 });
 
+test("CLI service settle conflicts and receipts name the bound code host", async (t) => {
+  for (const host of ["github", "gitlab"] as const) {
+    const w = await deliveryWorld(t);
+    await w.f.register();
+    let posts = 0;
+    const rewrite: typeof fetch = async (input, init) => {
+      if (init?.method === "POST") posts++;
+      const response = await fetch(input, init);
+      if (String(input).endsWith(`/api/operator/tasks/${w.f.taskId}`)) {
+        const read = (await response.json()) as Json;
+        read.data.delivery.binding.codeHost = host;
+        return new Response(JSON.stringify(read), {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+      return response;
+    };
+    const noun = host === "gitlab" ? "merge request" : "pull request";
+    const refused = await w.cli(
+      "rw",
+      settleArgs(
+        w,
+        "--decision",
+        "accepted",
+        "--expected-head-sha",
+        "9".repeat(40),
+      ),
+      { fetch: rewrite },
+    );
+    assert.equal(refused.code, 4, refused.out);
+    assert.equal(posts, 1, "the service must receive and refuse the stale pin");
+    assert.match(
+      refused.json().error.message,
+      new RegExp(`service refused it: the ${noun},`),
+    );
+    assert.equal(settlementRows(w), 0);
+    const accepted = await w.h.run(
+      [...settleArgs(w, "--decision", "accepted"), "--connection", "rw"],
+      { fetch: rewrite },
+    );
+    assert.equal(accepted.code, 0, accepted.err);
+    assert.match(
+      accepted.out,
+      new RegExp(`does not merge, close or comment on the ${noun}`),
+    );
+  }
+});
+
 test("CLI comment receipts describe either tracker's source issue", async (t) => {
   const w = await deliveryWorld(t);
   for (const jira of [false, true]) {
@@ -875,7 +924,7 @@ test("delivery settle sends nothing for a read-only credential, bad flags or a t
     { fetch: wire.fetch },
   );
   assert.equal(refused.code, 4, refused.out);
-  assert.match(refused.json().error.message, /no reviewable pull request/);
+  assert.match(refused.json().error.message, /no reviewable change request/);
   assert.equal(wire.posts, 0);
   assert.equal(settlementRows(w), 0);
 });

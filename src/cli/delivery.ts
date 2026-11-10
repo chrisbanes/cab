@@ -117,7 +117,7 @@ function handbackLine(d: Delivery, b: NonNullable<Delivery["binding"]>) {
 const noHandback = (taskId: string) =>
   new CliError(
     "policy-denied",
-    "This task has no reviewable pull request handback to settle. Nothing was sent.",
+    "This task has no reviewable change request handback to settle. Nothing was sent.",
     {
       fix: `Run 'cab delivery get ${taskId}' to see the task's delivery.`,
     },
@@ -455,7 +455,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         )
           throw new CliError(
             "invalid-input",
-            "--expected-head-sha must be the 40-character lowercase hex head of the pull request.",
+            "--expected-head-sha must be the 40-character lowercase hex head of the change request.",
           );
         const session = await connectWrite(ctx, [
           "cli.identity",
@@ -465,6 +465,11 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         const read = await readTask(session.client, taskId);
         const d = read.data.delivery,
           b = d?.binding;
+        const noun = b
+          ? b.codeHost === "gitlab"
+            ? "merge request"
+            : "pull request"
+          : "change request";
         // An omitted pin is the value this read saw.
         const pins = {
           taskVersion: pinned.taskVersion ?? read.data.task.version,
@@ -500,8 +505,6 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         if (!reached) {
           if (!d || !b || d.mode !== "reviewable-pr") throw noHandback(taskId);
           const host = b.codeHost === "gitlab" ? "GitLab" : "GitHub";
-          const noun =
-            b.codeHost === "gitlab" ? "merge request" : "pull request";
           const view = `Run 'cab delivery get ${taskId}' to see the handback.`;
           const settled = currentSettlement(d);
           if (settled)
@@ -566,7 +569,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               : "not readable now";
             throw new CliError(
               "conflict",
-              `Not settled; nothing was recorded. The service refused it: the pull request, branch or policy no longer matches what was sent, the pull request is not reviewable, or this request ID was used with other material. Sent: ${sent}. Current: ${current}.`,
+              `Not settled; nothing was recorded. The service refused it: the ${noun}, branch or policy no longer matches what was sent, the ${noun} is not reviewable, or this request ID was used with other material. Sent: ${sent}. Current: ${current}.`,
               {
                 ...error.extra,
                 fix: `Run 'cab delivery get ${taskId}' to review the current head and policy, then rerun (omit the --expected-* flags to use the current values, and use a new --request-id if you reused one).`,
@@ -590,7 +593,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             ["Bound to", sent],
           ],
           notes: [
-            "This does not merge, close or comment on the pull request, and does not complete the task.",
+            `This does not merge, close or comment on the ${noun}, and does not complete the task.`,
             "It covers this head and policy version only; a new push or policy change needs a new settlement. It cannot be undone.",
           ],
           data: { decision, pins },

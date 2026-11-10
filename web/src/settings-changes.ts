@@ -259,8 +259,10 @@ export function parseRows(value: Values[string] | undefined): SourceRow[] {
  * saved selection or link cannot be named, so an in-place save could not keep it.
  */
 export function sourceRowsFrom(source: Source) {
+  const saved = source.tracker !== "jira";
+  const readiness = saved ? source.readiness : { kind: "none" as const };
   return {
-    selections: source.selections.map((s) =>
+    selections: (saved ? source.selections : []).map((s) =>
       s.id === null && s.savedRow
         ? { ...opaqueRow(s.savedRow), kind: s.kind, active: s.active }
         : {
@@ -272,13 +274,14 @@ export function sourceRowsFrom(source: Source) {
           },
     ),
     // No rule and an unavailable rule both load no condition; nothing is prefilled.
-    conditions: (readinessCommandValue(source.readiness)?.conditions ?? []).map(
+    conditions: (readinessCommandValue(readiness)?.conditions ?? []).map(
       (c) => ({ ...c }),
     ),
-    mode: source.readiness.kind === "rule" ? source.readiness.mode : "all",
-    closedIssues: source.closedIssues,
-    incomplete: source.selections.some((s) => s.id === null && !s.savedRow),
-    preserveReadiness: source.readiness.kind === "unavailable",
+    mode: readiness.kind === "rule" ? readiness.mode : "all",
+    closedIssues: saved ? source.closedIssues : "skip",
+    incomplete:
+      saved && source.selections.some((s) => s.id === null && !s.savedRow),
+    preserveReadiness: readiness.kind === "unavailable",
   };
 }
 
