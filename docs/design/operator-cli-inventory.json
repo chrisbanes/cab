@@ -955,6 +955,23 @@
       "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
+      "id": "task workspace-recheck",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI04"],
+      "evidence": [
+        "test/operator/operator-cli-workspace-recheck.test.ts",
+        "test/workspaces/workspace-recheck.test.ts"
+      ],
+      "effect": "Reruns the worktree identity check of a workspace held only because Git could not read that identity and returns it to ready (effect saved); an already ready workspace reports effect none.",
+      "denial": "A still-failing check, or a hold that needs a person (interrupted cleanup, a path or repository mismatch, uncertain Git), exits 4 with the reason and nothing recorded; a read-only credential exits 3.",
+      "revision": "n/a: no version check; cab re-establishes the Git identity itself.",
+      "retry": "A rerun with the same key replays the receipt without running Git.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI and the operator API against a real loopback service with a controlled Git executable, not through the installed binary; no live journey."
+    },
+    {
       "id": "assignment get",
       "kind": "command",
       "area": "assignment",

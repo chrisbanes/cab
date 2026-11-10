@@ -73,6 +73,10 @@ export type TaskControlReceipt = Extract<
   CommandReceipt,
   { kind: "task-stop" | "task-resume" }
 >;
+export type WorkspaceRecheckReceipt = Extract<
+  CommandReceipt,
+  { kind: "workspace-recheck" }
+>;
 export type DraftTurnReceipt = Extract<CommandReceipt, { kind: "draft-turn" }>;
 export type StartAgainReceipt = Extract<
   CommandReceipt,
@@ -1073,6 +1077,63 @@ export class ExecutionState {
           "INSERT INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
         )
         .run(id, key, payloadHash, JSON.stringify(receipt), Date.now());
+      return { receipt, replayed: false };
+    });
+  }
+
+  /**
+   * The stored receipt of a workspace recheck under this key, read before any Git runs;
+   * other content under the same key conflicts.
+   */
+  workspaceRecheckReplay(command: {
+    key: string;
+    taskId: string;
+  }): WorkspaceRecheckReceipt | undefined {
+    const id = z.string().uuid().parse(command.taskId);
+    const key = z.string().uuid().parse(command.key);
+    const stored = this.db
+      .prepare(
+        "SELECT payloadHash, receiptJson FROM task_control_receipts WHERE taskId = ? AND key = ?",
+      )
+      .get(id, key) as { payloadHash: string; receiptJson: string } | undefined;
+    if (!stored) return undefined;
+    if (
+      stored.payloadHash !==
+      materialDigest({ type: "task.workspace.recheck", taskId: id })
+    )
+      throw new DomainConflictError("Request key reused for other content");
+    return JSON.parse(stored.receiptJson) as WorkspaceRecheckReceipt;
+  }
+
+  /** Records a recheck that left the workspace ready; a concurrent same-key record wins. */
+  recordWorkspaceRecheck(
+    command: { key: string; taskId: string },
+    released: boolean,
+  ): { receipt: WorkspaceRecheckReceipt; replayed: boolean } {
+    return transaction(this.db, () => {
+      const stored = this.workspaceRecheckReplay(command);
+      if (stored) return { receipt: stored, replayed: true };
+      const receipt: WorkspaceRecheckReceipt = {
+        kind: "workspace-recheck",
+        key: command.key,
+        recorded: true,
+        taskId: command.taskId,
+        released,
+      };
+      this.db
+        .prepare(
+          "INSERT INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(
+          receipt.taskId,
+          receipt.key,
+          materialDigest({
+            type: "task.workspace.recheck",
+            taskId: receipt.taskId,
+          }),
+          JSON.stringify(receipt),
+          Date.now(),
+        );
       return { receipt, replayed: false };
     });
   }

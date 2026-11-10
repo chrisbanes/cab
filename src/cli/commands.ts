@@ -25,6 +25,7 @@ import { recoveryBrowseCommands, recoveryWriteCommands } from "./recovery.js";
 import { runtimeBrowseCommands, runtimeWriteCommands } from "./runtime.js";
 import { sourceBrowseCommands, sourceWriteCommands } from "./source.js";
 import { taskControlCommands } from "./task-control.js";
+import { taskWorkspaceCommands } from "./task-workspace.js";
 import { taskWriteCommands } from "./task-write.js";
 import type { WriteCommand } from "./write.js";
 
@@ -58,6 +59,7 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...taskWriteCommands,
   ...attentionWriteCommands,
   ...taskControlCommands,
+  ...taskWorkspaceCommands,
   ...sourceWriteCommands,
   ...deliveryWriteCommands,
   ...deliveryConfigureCommands,

@@ -283,6 +283,7 @@ import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
 import {
   RuntimeConfigurationRefusedError,
   type StandaloneService,
+  WorkspaceRecheckRefusedError,
 } from "./service.js";
 import { refusedRevisionPrefix } from "./state.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
@@ -10449,6 +10450,32 @@ export class OperatorApi {
               `Only an open task can be stopped. This task is ${error.taskState === "done" ? "Done" : "Cancelled"}.`,
             );
           throw error;
+        }
+      }
+      if (c.type === "task.workspace.recheck") {
+        const task = this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(
+            await this.service.recheckTaskWorkspace(c),
+          );
+        } catch (error) {
+          if (!(error instanceof WorkspaceRecheckRefusedError)) throw error;
+          // Redacted like any read: the reason names the task's own workspace paths.
+          const message = this.safe(
+            error.message,
+            await this.exclusions(String(task.projectId), c.taskId),
+          );
+          throw new OperatorApiError(
+            409,
+            "conflict",
+            undefined,
+            undefined,
+            message === null
+              ? "The workspace recheck was refused. The task's workspace reason says why."
+              : message.length <= 256
+                ? message
+                : `${message.slice(0, 255)}…`,
+          );
         }
       }
       if (c.type === "task.draft-turn") {

@@ -3599,6 +3599,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision.optional(),
     })
     .strict(),
+  // No fence or evidence: cab re-establishes the Git identity itself (ADR-1032).
+  z
+    .object({
+      ...base,
+      type: z.literal("task.workspace.recheck"),
+      taskId: uuid,
+    })
+    .strict(),
   // Recovery: the inner service command plus its assignment scope.
   z
     .object({
@@ -4752,6 +4760,16 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       /** False when no operator Stop was in effect (a recorded no-op). */
       stopCleared: z.boolean(),
       requeued: z.number().int().nonnegative().safe(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("workspace-recheck"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      /** False when the workspace was already ready (a recorded no-op). */
+      released: z.boolean(),
     })
     .strict(),
   z

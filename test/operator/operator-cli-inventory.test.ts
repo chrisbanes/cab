@@ -86,6 +86,7 @@ const documentedWrites = [
   "task cancel",
   "task unstack",
   "task resume",
+  "task workspace-recheck",
   "project prepare-source",
   "project preview-source",
   "project place-task",
