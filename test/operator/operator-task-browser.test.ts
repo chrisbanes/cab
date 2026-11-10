@@ -1959,10 +1959,14 @@ test("replacement composer owns recovery before a detached committed receipt or 
     } else {
       f.advanceClock(61_000);
       // The composer is locked while it saves, so leaving it finds the expired session.
+      const expired = page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname ===
+            `/api/operator/projects/${projectId}/configuration` &&
+          r.status() === 401,
+      );
       await page.getByRole("link", { name: /^Back to /, exact: false }).click();
-      await page
-        .getByRole("button", { name: "Refresh tasks", exact: true })
-        .click();
+      await expired;
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.getByRole("link", { name: "New task", exact: true }).click();

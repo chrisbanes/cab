@@ -1,4 +1,5 @@
 import { randomUUID } from "./browser-crypto.js";
+import { ProjectDeliveryWarning } from "./project-delivery-warning.js";
 import { visibleProjects } from "./project-lifecycle-model.js";
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
@@ -964,7 +965,7 @@ export function App() {
   const refreshAll = () => {
     workspace.refresh();
     if (!onInboxRoute) inboxSummary.refresh();
-    if (settingsPage) setRefreshNonce((n) => n + 1);
+    if (settingsPage || projectId) setRefreshNonce((n) => n + 1);
   };
   // These pages own a refresh that already re-reads their data, or are create forms with nothing to refresh.
   const ownsRefresh =
@@ -1386,6 +1387,15 @@ export function App() {
                 {pathname === "/" && (
                   <GettingStarted mode="home" {...waitProps} />
                 )}
+                {showBoard &&
+                  (projectId ? (
+                    <ProjectDeliveryWarning
+                      client={client}
+                      projectId={projectId}
+                      scope={session.csrfToken}
+                      refreshNonce={refreshNonce}
+                    />
+                  ) : null)}
                 {showBoard && (
                   <TaskViews
                     state={tasks.state}
