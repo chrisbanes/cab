@@ -54,8 +54,6 @@ const linkHref = (link: WaitLink, taskId: string | null) =>
           ? `/assignments/${link.assignmentId}/recovery`
           : "/tasks?state=Running&ready=any";
 
-export { recoveryEvidenceLabels, type RecoveryAssignment };
-
 /** One wait's Fix, or the links to what blocks it; holds never get a Fix. */
 function WaitAction({
   wait,

@@ -224,3 +224,30 @@ test("hold lines name each assignment's recovery page when the task has several"
   assert.equal(await holds.getByText("Execution details").count(), 0);
   assert.equal(await holds.getByRole("button").count(), 0);
 });
+
+test("hold-line recovery links for assignments sharing a name differ by brief", async (_t, journey) => {
+  const s = await start(journey, desktop, ({ taskId }) => `/tasks/${taskId}`);
+  const graceId = randomUUID();
+  await s.page.route(`**/api/operator/tasks/${s.taskId}`, async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as TaskRead,
+      first = body.data.assignments[0]!;
+    first.brief = "Restore focus. Then more.";
+    body.data.assignments.push({
+      ...first,
+      assignmentId: graceId,
+      brief: "Fix the strip.",
+    });
+    taskSchema.parse(body);
+    await route.fulfill({ response, json: body });
+  });
+  await s.page.reload();
+  const holds = s.page.getByRole("list", { name: "Also held", exact: true });
+  await holds.waitFor();
+  const links = holds.getByRole("listitem").first().getByRole("link");
+  const names = await links.allInnerTexts();
+  assert.equal(names.length, 2);
+  assert.equal(new Set(names).size, 2);
+  assert.match(names[0]!, /\(Restore focus\.\)$/);
+  assert.match(names[1]!, /\(Fix the strip\.\)$/);
+});
