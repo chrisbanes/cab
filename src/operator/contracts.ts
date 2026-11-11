@@ -86,14 +86,10 @@ import {
   taskReviewReadSchema,
 } from "../core/task-review-contracts.js";
 import {
-  boundTurnRecoveryBodySchema,
   boundTurnRecoveryBlockers,
-  noTurnRecoveryBodySchema,
-  preTurnRecoveryBodySchema,
   recoveryPaths,
   releaseBlockers,
   releaseBodySchema,
-  replaceConversationBodySchema,
 } from "../core/recovery-contracts.js";
 import {
   executionHarnessSchema,
@@ -797,6 +793,8 @@ export const executionSchema = z
         "recovery-held",
         "admission-blocked",
         "runtime-unconfirmed",
+        "turn-release-pending",
+        "held-turn-released",
       ]),
     ),
     holds: z
@@ -3719,36 +3717,6 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...base,
-      type: z.literal("recovery.pre-turn.recover"),
-      assignmentId: uuid,
-      ...preTurnRecoveryBodySchema.shape,
-    })
-    .strict(),
-  z
-    .object({
-      ...base,
-      type: z.literal("recovery.no-turn.recover"),
-      assignmentId: uuid,
-      ...noTurnRecoveryBodySchema.shape,
-    })
-    .strict(),
-  z
-    .object({
-      ...base,
-      type: z.literal("recovery.bound-turn.recover"),
-      ...boundTurnRecoveryBodySchema.shape,
-    })
-    .strict(),
-  z
-    .object({
-      ...base,
-      type: z.literal("recovery.conversation.replace"),
-      ...replaceConversationBodySchema.shape,
-    })
-    .strict(),
-  z
-    .object({
-      ...base,
       type: z.literal("drafting.start"),
       runId: uuid,
       projectId: uuid,
@@ -4068,7 +4036,6 @@ export const recoveryBlockerSchema = z.enum([
   "ownership-released",
   "context-unavailable",
   "witness-missing",
-  "witness-present",
   "other-witness",
   "already-reconciled",
   "identity-withheld",
@@ -4099,12 +4066,27 @@ export const recoveryOptionsSchema = envelope(
       omittedCount: time,
       /** Exact strings withheld because redaction changed them or was unavailable. */
       gaps: z.array(z.enum(["content-redacted", "redaction-unavailable"])),
-      replacement: z
+      /** Start again for this assignment: a released held turn or a request refused before it ran. */
+      restart: z
         .object({
           eligible: z.boolean(),
-          blockedBy: z.array(recoveryBlockerSchema),
-          expectedAssignmentVersion: revision,
-          expectedConversationRevision: revision,
+          blockedBy: z.array(
+            z.union([startAgainReasonSchema, z.literal("other-assignment")]),
+          ),
+          /** A held turn cab interrupted; `releasesBy` is when its quiet period ends unless activity continues. */
+          releasePending: z
+            .object({
+              workId: z.string().max(512),
+              interruptState: z.enum([
+                "pending",
+                "acknowledged",
+                "failed",
+                "unbound",
+              ]),
+              releasesBy: time,
+            })
+            .strict()
+            .nullable(),
         })
         .strict(),
       records: z

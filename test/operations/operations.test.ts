@@ -876,6 +876,8 @@ test("restored public state reconciles exact execution evidence before one eligi
       power: { enabled: false },
       routingClient,
       supervisor: { observationMs: 1 },
+      // An earlier build: these generations reconcile through recorded receipts.
+      heldTurnRelease: false,
     },
   );
   let restoredService: StandaloneService | undefined;
@@ -1073,6 +1075,8 @@ test("restored public state reconciles exact execution evidence before one eligi
         power: { enabled: false },
         routingClient: null,
         supervisor: { observationMs: 1 },
+        // An earlier build: these generations reconcile through recorded receipts.
+        heldTurnRelease: false,
         terminationVerifier,
         workspaceManager: {
           beforePathAccess: (path) => restoredPathAccesses.push(path),
@@ -1220,6 +1224,7 @@ test("restored public state reconciles exact execution evidence before one eligi
         power: { enabled: false },
         routingClient: null,
         supervisor: { observationMs: 1 },
+        heldTurnRelease: false,
       },
     );
     await restoredService.start();

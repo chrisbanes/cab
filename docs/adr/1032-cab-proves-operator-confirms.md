@@ -29,7 +29,10 @@ only for a judgement, such as whether the work is still wanted.
   and capacity when the runtime reports the turn ended, when cab verifies the exact runtime
   process exited (process ID, start time and boot ID), or after 30 minutes with no runtime event
   or callback for that turn. cab never kills a shared Codex App Server to end one turn. Claude
-  records no process identity, so a Claude turn releases on a reported end or the quiet period.
+  runs each turn in its own CLI process and records that process's identity, so a Claude turn
+  releases on a reported end, a verified exit of its own CLI process or the quiet period. A
+  generation whose turn ID was never saved cannot have its activity attributed, so it never
+  releases on silence: only a verified process exit releases it.
 - **Late activity.** A runtime event or callback that arrives after release records an
   uncertainty hold and retracts admitted successors, as late callbacks do today.
 - **Continuing.** Once released, the task offers Start again after one confirmation. It resumes
@@ -57,9 +60,9 @@ only for a judgement, such as whether the work is still wanted.
 
 - **Keep operator receipts.** Rejected. Each field restates a fact cab verifies, so the operator
   can only copy it or invent it.
-- **Never release without verified process exit.** Rejected. A Claude turn has no process
-  identity, and a Codex turn shares its App Server with other tasks, so this keeps capacity held
-  indefinitely for an operator to clear with an attestation.
+- **Never release any held turn without verified process exit.** Rejected. A Codex turn
+  shares its App Server with other tasks, so its process rarely exits, and this keeps
+  capacity held indefinitely for an operator to clear with an attestation.
 - **Kill the App Server to prove exit.** Rejected. It ends every task's turn, and tool processes
   can outlive it.
 - **Approve an action kind instead of exact material.** Rejected. Actions that still need
@@ -72,6 +75,8 @@ only for a judgement, such as whether the work is still wanted.
 
 Two writers in one worktree become possible but bounded: a tool process that outlives the
 interrupt and stays silent for 30 minutes can still write after release. Any later activity
-re-holds the task and retracts successors, but cannot undo those writes. The approval migration
+re-holds the task and retracts successors, but cannot undo those writes. A generation whose
+turn ID was never saved keeps its writer and capacity until its process exits; on a shared
+Codex App Server, that is until cab restarts the App Server. The approval migration
 widens authority on existing projects for the allow-by-default kinds. `docs/SPEC.md` recovery,
 hold and policy sections, `CONTEXT.md` and the CLI usage change with the implementation.

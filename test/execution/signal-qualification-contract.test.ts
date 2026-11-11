@@ -487,10 +487,8 @@ test("fake-boundary journeys enforce the complete six-case signal/restart/refusa
         },
       ],
       results: done ? [{ id: "one-result" }] : [],
-      receipts:
-        s.kind === "uncertain" && (s.phase === "reconciled" || done)
-          ? [s.receipt]
-          : [],
+      // Held-turn release records no recovery receipt.
+      receipts: [],
     };
   };
   type Host = { id: string; generation: number; closed: boolean };
@@ -532,17 +530,18 @@ test("fake-boundary journeys enforce the complete six-case signal/restart/refusa
         s.phase = "held";
       }
       if (op === "get")
-        return { code: 0, data: { blocker: "termination-live" } };
-      if (op === "prepare") return { code: s.phase === "exited" ? 0 : 4 };
-      if (op === "submit") {
-        s.phase = "reconciled";
+        return { code: 0, data: { restart: { eligible: false } } };
+      if (op === "released") return s.phase === "exited";
+      if (op === "restart") {
+        if (s.phase === "exited") {
+          // Start again queues the one continuation turn.
+          reserve(host.id);
+          s.phase = "done";
+        }
+        if (s.phase !== "done") return { code: 4 };
         return { code: 0, data: { data: { receipt: s.receipt } } };
       }
       if (op === "inspect") return { stopped: true, paused: true };
-      if (op === "continue") {
-        reserve(host.id);
-        s.phase = "done";
-      }
       return undefined;
     },
     async active(host: Host) {
@@ -553,7 +552,7 @@ test("fake-boundary journeys enforce the complete six-case signal/restart/refusa
       return { list: [] };
     },
     async continuations() {
-      return 1;
+      return 0;
     },
     async held(host: Host) {
       calls.push(`${host.id}:held`);
@@ -607,9 +606,9 @@ test("fake-boundary journeys enforce the complete six-case signal/restart/refusa
       );
     else {
       assert.ok(
-        calls.indexOf(`${c.id}:prepare`) < calls.indexOf(`${c.id}:exact-exit`),
+        calls.indexOf(`${c.id}:restart`) < calls.indexOf(`${c.id}:exact-exit`),
       );
-      assert.equal(calls.filter((x) => x === `${c.id}:submit`).length, 2);
+      assert.equal(calls.filter((x) => x === `${c.id}:restart`).length, 3);
       assert.ok(
         calls.indexOf(`${c.id}:inspect`) < calls.indexOf(`${c.id}:continue`),
       );
@@ -1733,7 +1732,7 @@ test("durable snapshots after a spent turn retry a transient BUSY within their d
   } else writer.exec("COMMIT");
   writer.close();
 });
-test("the brief keeps a long first delivery, a one-sentence continuation, and the explicit continuation is unchanged", () => {
+test("the brief keeps a long first delivery and a one-sentence continuation", () => {
   const brief: string = hostModule.SIGNAL_BRIEF;
   assert.match(brief, /Write a long original story \(about 1500 words\)/);
   assert.ok(
@@ -1742,10 +1741,6 @@ test("the brief keeps a long first delivery, a one-sentence continuation, and th
     ),
   );
   assert.doesNotMatch(brief, /finish the story and report once/);
-  assert.equal(
-    hostModule.CONTINUATION_MESSAGE,
-    "Explicit continuation: call cab_report_result once with summary CONTINUATION DONE and end this existing conversation. No other tools.",
-  );
   const source = readFileSync(
     resolve("test/execution/signal-qualification/live-host.mjs"),
     "utf8",
@@ -1753,10 +1748,8 @@ test("the brief keeps a long first delivery, a one-sentence continuation, and th
   // Clean-case assignments and the uncertain follow-up both carry the same long brief.
   assert.match(source, /const prompt = SIGNAL_BRIEF;/);
   assert.match(source, /feedLead\(ids, prompt, "followup\.txt", "follow-up"\)/);
-  assert.match(
-    source,
-    /feedLead\(ids, CONTINUATION_MESSAGE, "continue\.txt", "message"\)/,
-  );
+  // Start again continues the held turn; no continuation message is sent.
+  assert.doesNotMatch(source, /"recovery", "(prepare|submit)"/);
 });
 for (const harness of ["codex", "claude"] as const)
   test(
@@ -1819,7 +1812,10 @@ for (const harness of ["codex", "claude"] as const)
           readFileSync(join(caseRoot, "followup.txt"), "utf8"),
           hostModule.SIGNAL_BRIEF,
         );
-        assert.ok(existsSync(join(caseRoot, "continue.txt")));
+        assert.ok(
+          !existsSync(join(caseRoot, "continue.txt")),
+          "Start again sends no continuation message",
+        );
       } finally {
         delete process.env.CAB_SIGNAL_OFFLINE_TOKEN;
         await backend.closeAll();
@@ -1910,12 +1906,15 @@ function uncertainBackend(
           for (let i = 0; i < (overrides.seedTurns ?? 1); i++) reserve();
           return ids;
         }
-        if (op === "followup" || op === "continue") reserve();
-        if (op === "get") return { code: 0, data: "termination-live" };
-        if (op === "prepare")
-          return { code: calls.includes("endRuntime") ? 0 : 4 };
-        if (op === "submit")
+        if (op === "followup") reserve();
+        if (op === "get")
+          return { code: 0, data: { restart: { eligible: false } } };
+        if (op === "released") return calls.includes("endRuntime");
+        if (op === "restart") {
+          if (!calls.includes("endRuntime")) return { code: 4 };
+          if (calls.filter((c) => c === "restart").length === 2) reserve();
           return { code: 0, data: { data: { receipt: { id: "r" } } } };
+        }
         if (op === "inspect") return { stopped: true, paused: true };
         return undefined;
       },
@@ -1945,14 +1944,14 @@ function uncertainBackend(
               : []),
           ],
           inbox: [{ eventId: "e" }],
-          receipts: calls.includes("submit") ? [{ id: "r" }] : [],
+          receipts: [],
         };
       },
       async endRuntime() {
         calls.push("endRuntime");
       },
       async continuations() {
-        return overrides.continuations ?? 1;
+        return overrides.continuations ?? 0;
       },
       async close() {
         return true;
@@ -1989,9 +1988,9 @@ test("a delegating seed fails at seed-completed with its reservations, before th
     );
   }
 });
-test("a continuation that records no recovery continuation fails at continuation-recorded", async () => {
+test("a Start again that records a receipt continuation fails at continuation-recorded", async () => {
   const f = fixture();
-  const { backend } = uncertainBackend(f, { continuations: 0 });
+  const { backend } = uncertainBackend(f, { continuations: 1 });
   const error = await driver
     .runCases(backend, f.journal, uncertainCase())
     .catch((e: unknown) => e);
@@ -2000,7 +1999,7 @@ test("a continuation that records no recovery continuation fails at continuation
       stage: error.results[0].failure.stage,
       message: error.results[0].failure.message,
     },
-    { stage: "continuation-recorded", message: "recovery continuations=0" },
+    { stage: "continuation-recorded", message: "recovery continuations=1" },
   );
   const f2 = fixture();
   const ok = uncertainBackend(f2, {});

@@ -75,6 +75,55 @@ export const readAfter = (session: Session, taskId: string) =>
     () => undefined,
   );
 
+/** Sends Start again for one refused or released request; `cab recovery restart` shares it. */
+export async function sendStartAgain(
+  ctx: WriteContext,
+  session: Session,
+  taskId: string,
+  expectedVersion: number,
+  workId: string,
+) {
+  const type = "task.start-again";
+  const scope = `task:${taskId}`;
+  const command = { type, taskId, expectedVersion, workId };
+  const { key, digest, reused } = await chooseKey(
+    ctx,
+    session,
+    { scope, type },
+    command,
+  );
+  const { receipt, request } = await withConflictRemedy(
+    () =>
+      sendCommand(ctx, session, {
+        scope,
+        type,
+        key,
+        digest,
+        resource: taskId,
+        command: exactCommand(command, key),
+        match: (r) => r.kind === "start-again" && r.taskId === taskId,
+      }),
+    taskVersion(session, taskId, expectedVersion),
+  );
+  const restarted = receipt.kind === "start-again" ? receipt : undefined;
+  return writeOutput({
+    request,
+    receipt,
+    reused,
+    effect: "queued",
+    summary: "Queued the request again",
+    lines: [
+      ["Task", taskId],
+      ["Refused work", restarted?.refusedWorkId ?? ""],
+      ["Work", restarted?.workId ?? ""],
+    ],
+    notes: [
+      "Re-captured the turn at the current task, profile and instructions revisions and queued it under every current admission check, in the task's workspace. The refused request and its refusal stay in the history; nothing was sent to the lead.",
+    ],
+    data: { workId: restarted?.workId ?? null },
+  });
+}
+
 export function requiredVersion(ctx: WriteContext) {
   const version = positiveIntFlag(
     ctx.values["expected-version"],
@@ -701,8 +750,6 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         const workId =
           ctx.values.work ??
           (available?.available ? available.workId : undefined);
-        const type = "task.start-again";
-        const scope = `task:${taskId}`;
         const refusal = available && !available.available && available.reason;
         // A retry of an earlier attempt must reach the service, which replays or refuses.
         if (!workId)
@@ -716,43 +763,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
               )} To replay a request whose reply was lost, repeat it with --work WORK and the same --request-id.`,
             },
           );
-        const command = { type, taskId, expectedVersion, workId };
-        const { key, digest, reused } = await chooseKey(
-          ctx,
-          session,
-          { scope, type },
-          command,
-        );
-        const { receipt, request } = await withConflictRemedy(
-          () =>
-            sendCommand(ctx, session, {
-              scope,
-              type,
-              key,
-              digest,
-              resource: taskId,
-              command: exactCommand(command, key),
-              match: (r) => r.kind === "start-again" && r.taskId === taskId,
-            }),
-          taskVersion(session, taskId, expectedVersion),
-        );
-        const restarted = receipt.kind === "start-again" ? receipt : undefined;
-        return writeOutput({
-          request,
-          receipt,
-          reused,
-          effect: "queued",
-          summary: "Queued the refused request again",
-          lines: [
-            ["Task", taskId],
-            ["Refused work", restarted?.refusedWorkId ?? ""],
-            ["Work", restarted?.workId ?? ""],
-          ],
-          notes: [
-            "Re-captured the turn at the current task, profile and instructions revisions and queued it under every current admission check, in the task's workspace. The refused request and its refusal stay in the history; nothing was sent to the lead.",
-          ],
-          data: { workId: restarted?.workId ?? null },
-        });
+        return sendStartAgain(ctx, session, taskId, expectedVersion, workId);
       },
     },
   ],

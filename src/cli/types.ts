@@ -153,6 +153,4 @@ export type Values = {
   "expected-head-sha"?: string | undefined;
   "review-id"?: string | undefined;
   work?: string | undefined;
-  "evidence-file"?: string | undefined;
-  "expected-conversation-revision"?: string | undefined;
 };

@@ -22,8 +22,6 @@ import {
  */
 export const SIGNAL_BRIEF =
   "Disposable repository-free qualification. Use no shell, file, network, delegation or other tools. Write a long original story (about 1500 words), then call cab_report_result once with summary SIGNAL QUALIFICATION DONE and end the turn. If this conversation already contains this request (you are continuing after an interruption), do not write or finish the story: reply with one sentence, call cab_report_result once with summary SIGNAL QUALIFICATION DONE, and end the turn.";
-export const CONTINUATION_MESSAGE =
-  "Explicit continuation: call cab_report_result once with summary CONTINUATION DONE and end this existing conversation. No other tools.";
 let leaving = false;
 /** `offline` swaps only the runtime executable/SDK for the model-free fixtures; it never accepts a live grant. */
 export async function host(config, offline = false) {
@@ -568,6 +566,8 @@ export async function host(config, offline = false) {
     assert.equal(result.code, 0, `CLI follow-up refused: ${cliCode(result)}`);
     return result;
   };
+  const restartKey = randomUUID();
+  let restartWork;
   const operations = {
     seed,
     inspect: () => {
@@ -611,40 +611,37 @@ export async function host(config, offline = false) {
       const ids = JSON.parse(readFileSync(idsFile));
       return runCli(["recovery", "get", ids.assignmentId]);
     },
-    prepare: async () => {
+    // cab releases the held turn itself: at startup once the exact process exited, else
+    // after the quiet period.
+    released: async () => {
       const ids = JSON.parse(readFileSync(idsFile));
-      const held = service
-        .recoveryForTask(ids.taskId)
-        .find((r) => r.intent.state === "held");
-      assert.ok(held);
-      const file = join(root, "receipt-evidence.json");
-      writeFileSync(
-        file,
-        JSON.stringify({
-          schema: "cab.cli.recovery-evidence/v1",
-          receipt: {
-            termination: { kind: "process-exit" },
-            effects: "settled",
-            workspace: "preserved",
-          },
-        }),
-        { mode: 0o600 },
-      );
+      // Inside the driver's operation bound: cab rechecks once Resume clears the Stop.
+      const until = Date.now() + 50_000;
+      for (;;) {
+        const held = service
+          .recoveryForTask(ids.taskId)
+          .some((r) => r.intent.state === "held");
+        if (!held) return true;
+        if (Date.now() > until) return false;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    },
+    restart: async () => {
+      const ids = JSON.parse(readFileSync(idsFile));
       return runCli([
         "recovery",
-        "prepare",
-        "bound-turn-recover",
+        "restart",
         ids.assignmentId,
-        "--work",
-        held.workId,
-        "--evidence-file",
-        file,
-        "--out",
-        join(root, "recovery.json"),
-      ]);
+        "--yes",
+        "--request-id",
+        restartKey,
+        ...(restartWork ? ["--work", restartWork] : []),
+      ]).then((result) => {
+        if (result.code === 0)
+          restartWork = result.data?.data?.receipt?.refusedWorkId;
+        return result;
+      });
     },
-    submit: () =>
-      runCli(["recovery", "submit", "--file", join(root, "recovery.json")]),
     continue: async () => {
       const ids = JSON.parse(readFileSync(idsFile));
       assert.equal((await runCli(["task", "resume", ids.taskId])).code, 0);
@@ -656,8 +653,7 @@ export async function host(config, offline = false) {
         paused: false,
       });
       loseObservation = false;
-      // A message after recovery records the recovery continuation; a follow-up never does.
-      await feedLead(ids, CONTINUATION_MESSAGE, "continue.txt", "message");
+      // Start again already queued the turn; it runs once Stop and pause clear.
     },
     stop: async () => {
       await service.stop();

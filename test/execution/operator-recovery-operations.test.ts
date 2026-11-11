@@ -2,14 +2,17 @@ import { boundWorld } from "./bound-turn-recovery-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { servedGeneration } from "../fixtures/recovery-generations.js";
+import {
+  reconcileAsBefore,
+  replaceConversationAsBefore,
+  servedGeneration,
+} from "../fixtures/recovery-generations.js";
 
 type Json = Record<string, unknown>;
 
 test("every recovery receipt reads back exactly, only under its own type and assignment", async (t) => {
   const { s, g } = await servedGeneration(t, "no-turn");
   const ro = (await s.issue("read", "operations-ro")).token;
-  const rw = (await s.issue("read-write", "operations-rw")).token;
   const scope = `assignment:${g.assignmentId}`;
   const read = async (
     type: string,
@@ -21,14 +24,6 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     const path = `/api/operator/operations?${query}`;
     const r = session ? await s.sessionGet(path) : await s.bearer(ro, path);
     return { status: r.status, body: (await r.json()) as Json };
-  };
-  const post = async (body: Json) => {
-    const r = await s.bearer(rw, "/api/operator/commands", {
-      method: "POST",
-      body,
-    });
-    assert.equal(r.status, 200);
-    return (await r.json()) as Json;
   };
   // An adoption an earlier build recorded keeps its receipt.
   const adopt = { type: "recovery.no-turn.adopt", key: randomUUID() };
@@ -55,7 +50,23 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     assignmentId: g.assignmentId,
     ...g.recovery(),
   };
-  receipts.push([recover.type, recover.key, await post(recover)]);
+  // Receipts of retired commands an earlier build recorded.
+  const { type: _t, assignmentId: _a, ...recoverInner } = recover;
+  const recovered = await reconcileAsBefore(s.f.service, recoverInner);
+  receipts.push([
+    recover.type,
+    recover.key,
+    {
+      kind: "recovery-resolution",
+      key: recover.key,
+      recorded: true,
+      path: "no-turn-recover",
+      assignmentId: g.assignmentId,
+      workId: g.workId,
+      receiptId: recovered.id,
+      state: "reconciled",
+    },
+  ]);
   const replace = {
     type: "recovery.conversation.replace",
     key: randomUUID(),
@@ -63,7 +74,19 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     expectedAssignmentVersion: 1,
     expectedConversationRevision: 1,
   };
-  receipts.push([replace.type, replace.key, await post(replace)]);
+  const { type: _r, ...replaceInner } = replace;
+  replaceConversationAsBefore(s.f.service, replaceInner);
+  receipts.push([
+    replace.type,
+    replace.key,
+    {
+      kind: "conversation-replacement",
+      key: replace.key,
+      recorded: true,
+      assignmentId: g.assignmentId,
+      revision: 2,
+    },
+  ]);
   for (const [type, key, receipt] of receipts)
     for (const session of [false, true]) {
       const r = await read(type, key, scope, session);
@@ -204,7 +227,8 @@ test("bound receipt readback is scoped to its command type, assignment and store
     return { status: response.status, body: await response.json() };
   };
   assert.deepEqual((await read()).body.data, { state: "not-recorded" });
-  const result = await w.s.f.service.recoverBoundTurnExecution(
+  const result = await reconcileAsBefore(
+    w.s.f.service,
     w.recovery(command.key),
   );
   const receipt = (await read()).body.data;

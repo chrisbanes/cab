@@ -171,6 +171,8 @@ const keepers: [string, (db: DatabaseSync, workId: string) => void][] = [
 for (const [name, seed] of keepers)
   test(`startup leaves a hold with ${name} unchanged`, async (t) => {
     const w = await servedGeneration(t, "pre-turn-defect");
+    // A live process: a saved thread is left to held-turn release, which waits.
+    w.verifier.set("unknown");
     await w.s.f.service.stop();
     w.s.f.seedPersistedState((db) => seed(db, w.g.workId));
     await w.s.f.service.start();
@@ -182,11 +184,23 @@ for (const [name, seed] of keepers)
     assert.ok(before.capacity);
   });
 
-test("startup leaves a hold with a runtime witness or an operator Stop unchanged", async (t) => {
+test("startup releases a hold with a runtime witness and leaves an operator Stop unchanged", async (t) => {
   const witnessed = await servedGeneration(t, "pre-turn-runtime");
-  let before = holdRows(witnessed);
-  assert.deepEqual(await restart(witnessed), []);
-  assert.deepEqual(holdRows(witnessed), before);
+  const witness = () => {
+    let row: unknown;
+    witnessed.s.f.seedPersistedState((db) => {
+      row = db
+        .prepare("SELECT id FROM execution_pre_turn_rejections WHERE workId=?")
+        .get(witnessed.g.workId);
+    });
+    return row;
+  };
+  const kept = witness();
+  assert.ok(kept);
+  assert.equal((await restart(witnessed)).length, 1);
+  assert.equal(holdRows(witnessed).capacity, null);
+  // The witness stays as evidence.
+  assert.deepEqual(witness(), kept);
 
   const stopped = await servedGeneration(t, "pre-turn-defect");
   const token = (await stopped.s.issue("read-write", "stop")).token;
@@ -195,7 +209,7 @@ test("startup leaves a hold with a runtime witness or an operator Stop unchanged
     body: { type: "task.stop", key: randomUUID(), taskId: stopped.g.taskId },
   });
   assert.equal(r.status, 200, await r.text());
-  before = holdRows(stopped);
+  const before = holdRows(stopped);
   assert.deepEqual(await restart(stopped), []);
   assert.deepEqual(holdRows(stopped), before);
 });

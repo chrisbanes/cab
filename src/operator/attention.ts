@@ -41,7 +41,8 @@ export const attentionNext: Record<
   "not-started": {
     operator: true,
     action: "start again",
-    reason: "Refused before it started; nothing ran",
+    reason:
+      "Refused before it ran, or its held turn was released; Start again queues it",
     inboxAction: "Start again",
   },
   "stacked-blocker-failed": {

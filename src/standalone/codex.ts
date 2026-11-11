@@ -122,6 +122,14 @@ const codexErrorInfoSchema = z.enum([
   "sandboxError",
   "other",
 ]);
+/** The thread and turn a notification names, at the top level or as `turn.id`. */
+const turnActivityId = z.string().min(1).max(512);
+const turnActivitySchema = z.object({
+  threadId: turnActivityId,
+  // Each source is read on its own, so an odd shape in one never hides the other.
+  turnId: turnActivityId.optional().catch(undefined),
+  turn: z.object({ id: turnActivityId }).optional().catch(undefined),
+});
 const completedTurn = z.object({
   threadId: z.string().min(1),
   turn: z.object({
@@ -749,6 +757,13 @@ export interface Runtime {
   ): void;
   /** Best-effort tool and turn metadata; listener failures never affect the runtime. */
   onDiagnosticEvent?(listener: (event: RuntimeDiagnosticEvent) => void): void;
+  /**
+   * Every raw message the runtime receives for a turn, before any presentation filtering or
+   * size limit (output and reasoning deltas included). Listener failures never affect it.
+   */
+  onTurnActivity?(
+    listener: (activity: { threadId: string; turnId: string }) => void,
+  ): void;
   /** Settings the runtime reported when it started the thread, if known. */
   observedSettings?(threadId: string): RuntimeObservedSettings | undefined;
   processIdentity?():
@@ -1558,6 +1573,10 @@ export class CodexRuntime implements Runtime {
   }) => void;
   private conversationEvent?: (event: RuntimeConversationEvent) => void;
   private diagnosticEvent?: (event: RuntimeDiagnosticEvent) => void;
+  private turnActivity?: (activity: {
+    threadId: string;
+    turnId: string;
+  }) => void;
   private readonly observedThreadSettings = new Map<
     string,
     RuntimeObservedSettings
@@ -1876,6 +1895,12 @@ export class CodexRuntime implements Runtime {
     listener: (event: RuntimeConversationEvent) => void,
   ): void {
     this.conversationEvent = listener;
+  }
+
+  onTurnActivity(
+    listener: (activity: { threadId: string; turnId: string }) => void,
+  ): void {
+    this.turnActivity = listener;
   }
 
   onDiagnosticEvent(listener: (event: RuntimeDiagnosticEvent) => void): void {
@@ -2408,6 +2433,8 @@ export class CodexRuntime implements Runtime {
       this.failChild(child, new Error("Malformed App Server message"));
       return;
     }
+    // Requests and notifications alike, before any handling: activity of the turn they name.
+    if (message.method) this.noteTurnActivity(message.params);
     if (message.method && message.id !== undefined) {
       const method = message.method;
       if (
@@ -2554,6 +2581,21 @@ export class CodexRuntime implements Runtime {
     // completion remains the only terminal signal.
     if (message.method && message.method !== "error")
       this.events.emit(message.method, message.params);
+  }
+
+  /** Any notification naming a thread and turn, raw and unfiltered, is activity of that turn. */
+  private noteTurnActivity(params: unknown): void {
+    const listener = this.turnActivity;
+    if (!listener) return;
+    const activity = turnActivitySchema.safeParse(params);
+    if (!activity.success) return;
+    const turnId = activity.data.turnId ?? activity.data.turn?.id;
+    if (!turnId) return;
+    try {
+      listener({ threadId: activity.data.threadId, turnId });
+    } catch {
+      // Activity is observational; it never alters runtime control.
+    }
   }
 
   private projectDiagnosticEvent(method: string, params: unknown): void {

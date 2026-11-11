@@ -107,6 +107,31 @@ const legacyFailedInterruptReason = "Codex interrupt request failed";
 /** Durable pending effect of a known unfinished execution; it refuses bound recovery. */
 const knownSurvivorEffect = "known-survivor";
 
+const heldTurnCandidateSchema = z.object({
+  workId: z.string().min(1),
+  threadId: z.string().min(1),
+  turnId: z.string().min(1).nullable(),
+  taskId: z.string().uuid(),
+  harness: executionHarnessSchema,
+});
+export type HeldTurnCandidate = z.infer<typeof heldTurnCandidateSchema>;
+export type HeldTurnReleaseBasis =
+  | "turn-ended"
+  | "process-exited"
+  | "quiet-period";
+const heldTurnReleaseReasons: Record<HeldTurnReleaseBasis, string> = {
+  "turn-ended": "the runtime reported the turn ended",
+  "process-exited": "its runtime process was verified to have exited",
+  "quiet-period": "no runtime event or callback arrived for 30 minutes",
+};
+const heldTurnReleaseSchema = z.object({
+  interruptState: z.enum(["pending", "acknowledged", "failed", "unbound"]),
+  interruptRequestedAt: z.number().int(),
+  basis: z.enum(["turn-ended", "process-exited", "quiet-period"]).nullable(),
+  releasedAt: z.number().int().nullable(),
+});
+export type HeldTurnReleaseRecord = z.infer<typeof heldTurnReleaseSchema>;
+
 const recoveryReceiptColumns = `(
       id TEXT PRIMARY KEY,
       workId TEXT NOT NULL UNIQUE REFERENCES execution_intents(workId),
@@ -522,6 +547,8 @@ function recoveryReason(kind: string): string {
       return "A validated transient failure queued one bounded retry generation";
     case "shutdown-requeued":
       return "Planned shutdown interrupted this turn; one fresh generation was queued";
+    case "held-turn-released":
+      return "cab interrupted this held turn and released its writer and capacity";
     default:
       return "Execution state requires operator attention";
   }
@@ -709,6 +736,19 @@ export class ExecutionState {
       turnId TEXT NOT NULL,
       harness TEXT NOT NULL,
       createdAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS execution_held_turn_releases (
+      workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      taskId TEXT NOT NULL,
+      threadId TEXT NOT NULL,
+      turnId TEXT,
+      harness TEXT NOT NULL,
+      interruptState TEXT NOT NULL
+        CHECK(interruptState IN ('pending','acknowledged','failed','unbound')),
+      interruptRequestedAt INTEGER NOT NULL,
+      basis TEXT CHECK(basis IN ('turn-ended','process-exited','quiet-period')),
+      releasedAt INTEGER,
+      CHECK((basis IS NULL) = (releasedAt IS NULL))
     );
     CREATE TABLE IF NOT EXISTS execution_recovery_identities (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
@@ -4103,7 +4143,8 @@ export class ExecutionState {
   holdKnownSurvivor(input: {
     workId: string;
     reason: string;
-    reconciledContinuation: boolean;
+    /** A reconciled or released generation whose successor may already run. */
+    continuation: boolean;
     holdIds: readonly string[];
   }): void {
     assertOwnedWorkWritable(this.db, input.workId);
@@ -4118,7 +4159,7 @@ export class ExecutionState {
           knownSurvivorEffect,
           reason,
         );
-      if (input.reconciledContinuation)
+      if (input.continuation)
         this.holdReconciledContinuationSurvivor(input.workId, reason);
       for (const id of input.holdIds) this.holdTerminalConflict(id, reason);
     });
@@ -4131,8 +4172,13 @@ export class ExecutionState {
       .prepare(`INSERT OR IGNORE INTO task_writer_ambiguity_holds (taskId, reason)
       SELECT binding.taskId, ? FROM task_execution_bindings binding
       JOIN execution_intents intent ON intent.workId = binding.workId
-      JOIN coordination_recovery_continuations audit ON audit.workId = binding.workId
-      WHERE binding.workId = ? AND intent.state = 'reconciled'`)
+      WHERE binding.workId = ? AND (
+        (intent.state = 'reconciled' AND EXISTS (
+          SELECT 1 FROM coordination_recovery_continuations audit
+          WHERE audit.workId = binding.workId))
+        OR (intent.state = 'resolved-failed' AND EXISTS (
+          SELECT 1 FROM execution_held_turn_releases release
+          WHERE release.workId = binding.workId AND release.basis IS NOT NULL)))`)
       .run(
         z.string().min(1).max(1000).parse(reason),
         z.string().min(1).max(512).parse(workId),
@@ -4165,7 +4211,7 @@ export class ExecutionState {
         rows
           .filter(
             ({ workId, state }) =>
-              !(state === "held" && this.refusedBeforeStart(workId)),
+              !(state === "held" && this.startAgainTarget(workId)),
           )
           .map(({ workId }) => workId),
       ),
@@ -5134,7 +5180,6 @@ export class ExecutionState {
       blocked.push("thread-bound");
     if (record.intent.turnId !== null || identity.turnId !== null)
       blocked.push("turn-bound");
-    if (held.witness) blocked.push("witness-present");
     if (
       record.holds.stop ||
       this.stopTarget(workId) !== undefined ||
@@ -5241,6 +5286,245 @@ export class ExecutionState {
           ORDER BY intent.rowid`)
         .all() as { workId: string }[]
     ).map((r) => r.workId);
+  }
+
+  /**
+   * Held task-assignment generations with a saved thread that still hold capacity: the
+   * turns held-turn release interrupts and then releases.
+   */
+  heldTurnReleaseCandidates(): HeldTurnCandidate[] {
+    if (!this.hasTurnRequests) return [];
+    return this.db
+      .prepare(
+        `SELECT intent.workId, intent.threadId, intent.turnId,
+          binding.taskId, binding.harness
+        FROM execution_intents intent
+        JOIN turn_requests request ON request.workId = intent.workId
+        JOIN task_execution_bindings binding ON binding.workId = intent.workId
+        WHERE intent.state = 'held' AND request.state = 'held'
+          AND request.kind = 'assignment' AND request.draftTurn = 0
+          AND intent.threadId IS NOT NULL
+          AND EXISTS (SELECT 1 FROM execution_capacity_reservations capacity
+            WHERE capacity.workId = intent.workId)
+        ORDER BY intent.rowid`,
+      )
+      .all()
+      .map((row) => heldTurnCandidateSchema.parse(row));
+  }
+
+  /**
+   * What keeps a held turn from being interrupted or released: anything other than the
+   * turn itself that holds it. Independent holds win.
+   */
+  heldTurnBlockers(workId: string): string[] {
+    const binding = this.taskBinding(workId);
+    const record =
+      binding &&
+      this.recoveryFor(
+        binding.assignmentId,
+        binding.assignmentVersion,
+        workId,
+      )[0];
+    if (!binding || !record) return ["context-unavailable"];
+    const held = this.heldGenerationFacts(record);
+    const blocked: string[] = [];
+    if (held.reconciled) blocked.push("already-reconciled");
+    else if (held.notHeld) blocked.push("not-held");
+    if (!record.holds.capacity) blocked.push("ownership-released");
+    if (!record.intent.threadId) blocked.push("thread-unbound");
+    // A Stop holds the task until Resume; the Stop target it leaves is released with the turn.
+    if (
+      record.holds.stop ||
+      this.taskHold(binding.taskId) !== undefined ||
+      held.pendingEffects ||
+      (this.hasTable("coordination_completion_requests") &&
+        this.db
+          .prepare(
+            `SELECT 1 FROM coordination_completion_requests
+            WHERE leadWorkId = ? AND status = 'pending'`,
+          )
+          .get(workId) !== undefined)
+    )
+      blocked.push("independent-hold");
+    if (held.knownSurvivor) blocked.push("known-survivor");
+    if (!this.projectWorkWritable(workId)) blocked.push("project-archived");
+    return blocked;
+  }
+
+  /** The runtime reported this exact thread and turn ended, durably or on inspection. */
+  heldTurnEnded(candidate: HeldTurnCandidate): boolean {
+    if (candidate.turnId === null) return false;
+    if (
+      this.recoveryInspectionKind(candidate.workId)?.startsWith(
+        "exact-terminal",
+      )
+    )
+      return true;
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM runtime_terminal_evidence
+          WHERE threadId = ? AND turnId = ? AND workId = ?
+            AND firstStatus IS NOT NULL AND conflicted = 0`,
+        )
+        .get(candidate.threadId, candidate.turnId, candidate.workId) !==
+      undefined
+    );
+  }
+
+  /** Records the one interrupt of a held turn; a turn bound later updates it. */
+  recordHeldTurnInterrupt(
+    candidate: HeldTurnCandidate,
+    interruptState: "pending" | "acknowledged" | "failed" | "unbound",
+  ): void {
+    assertOwnedWorkWritable(this.db, candidate.workId);
+    this.db
+      .prepare(
+        `INSERT INTO execution_held_turn_releases
+        (workId, taskId, threadId, turnId, harness, interruptState, interruptRequestedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(workId) DO UPDATE SET turnId = excluded.turnId,
+          interruptState = excluded.interruptState
+        WHERE basis IS NULL`,
+      )
+      .run(
+        candidate.workId,
+        candidate.taskId,
+        candidate.threadId,
+        candidate.turnId,
+        candidate.harness,
+        interruptState,
+        Date.now(),
+      );
+  }
+
+  heldTurnRelease(workId: string): HeldTurnReleaseRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT interruptState, interruptRequestedAt, basis, releasedAt
+        FROM execution_held_turn_releases WHERE workId = ?`,
+      )
+      .get(workId);
+    return row === undefined ? undefined : heldTurnReleaseSchema.parse(row);
+  }
+
+  /**
+   * Releases a held turn's writer and capacity without requeueing it, so Start again
+   * continues the task. Reruns every blocker and the exact thread and turn inside the
+   * transaction; returns false, changing nothing, when anything else holds it now.
+   */
+  releaseHeldTurn(
+    workId: string,
+    basis: HeldTurnReleaseBasis,
+    extra: readonly string[],
+  ): boolean {
+    return transaction(this.db, () => {
+      assertOwnedWorkWritable(this.db, workId);
+      const current = this.db
+        .prepare(
+          `SELECT intent.threadId = release.threadId
+            AND intent.turnId IS release.turnId AS same
+          FROM execution_intents intent
+          JOIN execution_held_turn_releases release ON release.workId = intent.workId
+          WHERE intent.workId = ? AND release.basis IS NULL`,
+        )
+        .get(workId) as { same: number } | undefined;
+      if (
+        current?.same !== 1 ||
+        extra.length > 0 ||
+        this.heldTurnBlockers(workId).length > 0
+      )
+        return false;
+      const reason = `Held turn released: ${heldTurnReleaseReasons[basis]}`;
+      this.db
+        .prepare(
+          `UPDATE execution_intents SET state = 'resolved-failed', reason = ?
+          WHERE workId = ? AND state = 'held'`,
+        )
+        .run(reason, workId);
+      this.db
+        .prepare(
+          "UPDATE turn_requests SET reason = ? WHERE workId = ? AND state = 'held'",
+        )
+        .run(reason, workId);
+      this.db
+        .prepare(
+          `UPDATE execution_pending_effects SET state = 'settled',
+          reason = 'Superseded by held-turn release'
+          WHERE workId = ? AND effectKey = 'assignment-result'`,
+        )
+        .run(workId);
+      for (const table of [
+        "execution_capacity_reservations",
+        "task_writer_admissions",
+        "execution_stop_targets",
+      ])
+        this.db.prepare(`DELETE FROM ${table} WHERE workId = ?`).run(workId);
+      const now = Date.now();
+      this.db
+        .prepare(
+          `UPDATE execution_held_turn_releases SET basis = ?, releasedAt = ?
+          WHERE workId = ?`,
+        )
+        .run(basis, now, workId);
+      this.db
+        .prepare(
+          `INSERT INTO execution_recovery_observations
+          (id, workId, kind, reason, recordedAt)
+          VALUES (?, ?, 'held-turn-released', ?, ?)`,
+        )
+        .run(randomUUID(), workId, recoveryReason("held-turn-released"), now);
+      return true;
+    });
+  }
+
+  /**
+   * A released held turn that nothing has held since: a Start again target, as a request
+   * refused before it ran is. Late activity records a known survivor, which ends it.
+   */
+  heldTurnReleased(workId: string): boolean {
+    if (!this.hasTurnRequests) return false;
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM execution_held_turn_releases release
+          JOIN execution_intents intent ON intent.workId = release.workId
+          JOIN turn_requests request ON request.workId = release.workId
+          WHERE release.workId = ? AND release.basis IS NOT NULL
+            AND intent.state = 'resolved-failed' AND request.state = 'held'
+            AND request.kind = 'assignment' AND request.draftTurn = 0
+            AND NOT EXISTS (SELECT 1 FROM task_writer_admissions a WHERE a.workId = release.workId)
+            AND NOT EXISTS (SELECT 1 FROM execution_capacity_reservations c WHERE c.workId = release.workId)
+            AND NOT EXISTS (SELECT 1 FROM execution_stop_targets t WHERE t.workId = release.workId)
+            AND NOT EXISTS (SELECT 1 FROM execution_pending_effects e
+              WHERE e.workId = release.workId AND e.state = 'pending')`,
+        )
+        .get(z.string().min(1).max(512).parse(workId)) !== undefined
+    );
+  }
+
+  /** Released held turns with a saved turn, for activity matching kept in memory. */
+  releasedHeldTurns(): { harness: string; threadId: string; turnId: string }[] {
+    if (!this.hasTurnRequests) return [];
+    return (
+      this.db
+        .prepare(`SELECT workId, harness, threadId, turnId
+          FROM execution_held_turn_releases
+          WHERE basis IS NOT NULL AND turnId IS NOT NULL`)
+        .all() as {
+        workId: string;
+        harness: string;
+        threadId: string;
+        turnId: string;
+      }[]
+    )
+      .filter((row) => this.heldTurnReleased(row.workId))
+      .map(({ harness, threadId, turnId }) => ({ harness, threadId, turnId }));
+  }
+
+  /** A held request Start again may queue afresh: refused before it ran, or a released held turn. */
+  startAgainTarget(workId: string): boolean {
+    return this.refusedBeforeStart(workId) || this.heldTurnReleased(workId);
   }
 
   /** Read-only ownership/effect checks shared by bound recovery eligibility and its transaction. */

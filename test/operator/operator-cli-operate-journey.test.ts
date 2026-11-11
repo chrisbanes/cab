@@ -252,16 +252,8 @@ test("read-only bearer tokens are refused for every task and execution command t
     { type: "task.cancel", taskId: s.taskId, expectedVersion: 1 },
     { type: "task.stop", taskId: s.taskId },
     { type: "task.resume", taskId: s.taskId },
-    // CLI6 recovery types are refused by scope before any validation.
+    // Recovery types are refused by scope before any validation.
     { type: "recovery.release", assignmentId: id },
-    { type: "recovery.pre-turn.recover", assignmentId: id },
-    { type: "recovery.no-turn.recover", assignmentId: id },
-    {
-      type: "recovery.conversation.replace",
-      assignmentId: id,
-      expectedAssignmentVersion: 1,
-      expectedConversationRevision: 1,
-    },
   ]) {
     const r = await s.bearer(read.token, "/api/operator/commands", {
       method: "POST",

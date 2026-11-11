@@ -73,7 +73,6 @@ export const releaseBlockers = [
   "context-unavailable",
   "thread-bound",
   "turn-bound",
-  "witness-present",
   "independent-hold",
   "callback-pending",
   "known-survivor",
@@ -116,47 +115,10 @@ export const replaceConversationBodySchema = z
   })
   .strict();
 
-/** The operator recovery paths, in the order an operator meets them. */
-export const recoveryPaths = [
-  "release",
-  "pre-turn-recover",
-  "no-turn-recover",
-  "bound-turn-recover",
-  "conversation-replace",
-] as const;
+/** The operator recovery paths. Start again continues a released held turn. */
+export const recoveryPaths = ["release"] as const;
 export type RecoveryPath = (typeof recoveryPaths)[number];
 /** Operator command type of each path. */
 export const recoveryCommandTypes = {
   release: "recovery.release",
-  "pre-turn-recover": "recovery.pre-turn.recover",
-  "no-turn-recover": "recovery.no-turn.recover",
-  "bound-turn-recover": "recovery.bound-turn.recover",
-  "conversation-replace": "recovery.conversation.replace",
 } as const satisfies Record<RecoveryPath, string>;
-
-/**
- * What each path needs beyond the identity the service observes: the operator evidence
- * file's fields and its attestations.
- */
-export const recoveryRequirements: Record<
-  RecoveryPath,
-  { evidence: string[]; attestations: string[]; receipt: string[] }
-> = {
-  release: { evidence: [], attestations: [], receipt: [] },
-  "pre-turn-recover": {
-    evidence: [],
-    attestations: [],
-    receipt: ["termination", "effects", "workspace"],
-  },
-  "no-turn-recover": {
-    evidence: [],
-    attestations: [],
-    receipt: ["termination", "effects", "workspace"],
-  },
-  "bound-turn-recover": {
-    evidence: [],
-    attestations: [],
-    receipt: ["termination", "effects", "workspace"],
-  },
-  "conversation-replace": { evidence: [], attestations: [], receipt: [] },
-};

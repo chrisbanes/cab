@@ -285,6 +285,8 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         runtimeHarnesses: [harness],
         power: { enabled: false },
         routingClient: null,
+        // The approved crash proof reconciles through a receipt, as the build it qualified.
+        heldTurnRelease: false,
       });
     const command = (body) =>
       service
@@ -488,7 +490,8 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         Date.now() + 5000,
         "ended crash callbacks",
       );
-      await service.recoverBoundTurnExecution({
+      // The retired recover command's receipt path, which this approved proof qualified.
+      const recover = {
         key: randomUUID(),
         assignmentId: held.binding.assignmentId,
         receipt: {
@@ -503,7 +506,11 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
           effects: "settled",
           workspace: "preserved",
         },
-      });
+      };
+      await service["started"]().supervisor.resolveHeldExecution(
+        recover.receipt,
+        recover,
+      );
       assert.equal(
         evidence.turns.length,
         stopTurns + 2,

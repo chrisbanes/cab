@@ -8,7 +8,7 @@ below require bounded evidence before dependent implementation. GitHub issues un
 and status.
 
 The service implements durable request admission, shared writer/capacity limits,
-bounded Stop, exact restart-recovery receipts, constrained retries and macOS
+bounded Stop, held-turn release, constrained retries and macOS
 power-event admission quarantine. It also implements durable task-scoped
 coordination, results/inboxes, operator-attention interactions, follow-up
 revisions, lead-gated completion, bounded routing provenance and a typed task
@@ -492,9 +492,10 @@ Codex CLI and native host commands. Passwords and shell wrappers are absent
 from the plist. The opt-in LaunchDaemon form adds only `UserName` and `HOME`
 ([ADR-1011](../adr/1011-packaging-and-distribution.md)).
 
-A deterministic restored-service fixture proves wrong/exact recovery
-receipt handling, independent Stop/Resume behavior and exactly one admitted
-turn after reconciliation. The bounded
+A deterministic restored-service fixture proves wrong/exact handling of the
+retired recovery receipts an earlier build recorded, independent Stop/Resume
+behavior and exactly one admitted turn after reconciliation; it runs without
+held-turn release, so it does not qualify that release. The bounded
 [macOS launchd evidence](../evidence/s08a-operations-2026-09-30.md) proves the
 per-user service lifecycle and backup/restore of populated paused/unready
 public records; that live fixture admits no work and does not inject an exact

@@ -5,9 +5,14 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { db } from "../fixtures/refused-turn.js";
 import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
+import { ManualRestartClock } from "../fixtures/restart-clock.js";
 import { boundWorld } from "./bound-turn-recovery-fixture.js";
+import {
+  reconcileAsBefore,
+  replaceConversationAsBefore,
+} from "../fixtures/recovery-generations.js";
 
-/** Recovers the held bound turn of `assignmentId` through the operator's real recovery path. */
+/** Recovers the held bound turn of `assignmentId` through the receipt an earlier build recorded. */
 async function recoverHeldTurn(
   w: Awaited<ReturnType<typeof boundWorld>>,
   assignmentId: string,
@@ -39,7 +44,7 @@ async function recoverHeldTurn(
       record.processIdentity &&
       record.generation.workRevision,
   );
-  await service.recoverBoundTurnExecution({
+  await reconcileAsBefore(service, {
     key: randomUUID(),
     assignmentId,
     receipt: {
@@ -81,7 +86,7 @@ test("a delegate whose interrupted turn was recovered with no successor, and its
     service.turnRequest(workId)?.reason,
     "Execution reconciled; no automatic successor",
   );
-  service.replaceConversationCommand({
+  replaceConversationAsBefore(service, {
     key: randomUUID(),
     assignmentId: delegateId,
     expectedAssignmentVersion: Number(
@@ -217,4 +222,77 @@ test("another turn a Stop interrupted only holds a recovered delegate's withdraw
   assert.deepEqual(blockers(), []);
   // Recovery callers keep the strict proof while the task is stopped.
   assert.equal(strict(), undefined);
+});
+
+test("a delegate whose held turn cab released can be withdrawn, and is never offered Start again", async (t) => {
+  const clock = new ManualRestartClock();
+  const w = await boundWorld(t, "codex", [], false, false, {
+    mode: "unknown",
+    heldTurnRelease: { clock, wallNow: clock.wallNow },
+  });
+  const service = w.s.f.service;
+  const { state } = startedOf(service);
+  // Each poll moves the clock a minute, so the quiet period passes whenever watching began.
+  const quiet = (workId: string) =>
+    until(() => {
+      clock.advance(60_000);
+      return state.heldTurnReleased(workId);
+    }, "held turn released");
+  // The lead's held turn is released first, so the delegate can take the writer.
+  await quiet(w.g.workId);
+  const delegateId = randomUUID();
+  w.command({
+    type: "assignment.create",
+    actor: "agent",
+    projectId: w.g.projectId,
+    taskId: w.g.taskId,
+    assignmentId: delegateId,
+    profileId: String(service.domain().assignment(w.g.assignmentId).profileId),
+    brief: "Delegated work",
+    resultDestination: "requester",
+    requesterAssignmentId: w.g.assignmentId,
+  });
+  const held = () =>
+    service
+      .recoveryForTask(w.g.taskId)
+      .find(
+        (r) =>
+          r.request?.assignmentId === delegateId &&
+          r.intent.state === "held" &&
+          r.intent.turnId !== null,
+      );
+  await until(() => held() !== undefined, "delegate held turn");
+  const workId = held()!.workId;
+  // While the release waits, the delegate is not withdrawable.
+  assert.ok(
+    startedOf(service)
+      .coordination.delegateStatus(delegateId)
+      .blockers.some(
+        (b) => b === "uncertain-execution" || b === "held-execution",
+      ),
+  );
+  await quiet(workId);
+
+  const api = new OperatorApi(service);
+  const read = await api.readAssignment(delegateId);
+  assert.deepEqual(
+    read.data.withdrawal,
+    { record: null, available: true },
+    JSON.stringify(read.data.withdrawal),
+  );
+  await api.execute({
+    type: "assignment.withdraw",
+    key: randomUUID(),
+    taskId: w.g.taskId,
+    assignmentId: delegateId,
+    expectedVersion: read.data.version,
+    reason: "Its held turn was released",
+  });
+  assert.equal(service.domain().assignment(delegateId).state, "withdrawn");
+  // Start again targets the lead's released turn, never the withdrawn delegate.
+  assert.deepEqual(service.startAgainAvailability(w.g.taskId), {
+    available: true,
+    assignmentId: w.g.assignmentId,
+    workId: w.g.workId,
+  });
 });

@@ -58,11 +58,8 @@ waiting reasons and project views replace it.
 | Advanced route | Owner and disposition |
 | --- | --- |
 | `recovery.release` | release of a held generation with no saved thread or turn; bound to the generation read and rechecked by the service. React Assignment Recovery owns its confirmation and recorded, refused and uncertain outcomes; the CLI confirms with `--yes`. |
-| `recovery.pre-turn.recover` | exact witness-bound recovery; independently verified termination and settled effects/workspace reconcile ownership without dispatch. Assignment recovery records the receipt and retained holds. |
-| `recovery.pre-turn.adopt`, `recovery.no-turn.adopt` | retired; no longer accepted. Their recorded receipts still read back through the operation GET, and the witnesses they recorded still recover. |
-| `recovery.no-turn.recover` | exact no-turn witness-bound recovery; verified process termination and settled effects/workspace reconcile ownership without dispatch. Separate conversation replacement and NEW message remain required; no model tool authority or new forms in the curated operator UI. |
-| `recovery.bound-turn.recover` and original operation GET | React Assignment Recovery owns exact review/cancel/confirmation and frozen original-receipt GET readback; JSON and CLI preserve keyed recovery and independent holds. |
-| `recovery.conversation.replace` | explicit recovery counterpart; assignment/conversation revision checks and immutable keyed result prevent duplicate increments. Fresh operator message remains separately required for continuation. |
+| `task.start-again` from Assignment Recovery | the same Start again as the task page once cab has released a held turn; the recovery page shows a pending release instead. |
+| `recovery.pre-turn.adopt`, `recovery.no-turn.adopt`, `recovery.pre-turn.recover`, `recovery.no-turn.recover`, `recovery.bound-turn.recover`, `recovery.conversation.replace` | retired; no longer accepted. Their recorded receipts still read back through the operation GET. |
 
 Programmatic support (no new HTTP exposure):
 

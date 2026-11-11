@@ -126,18 +126,15 @@ and drive the existing refresh, handback settlement and staged comment commands;
 `result deliver` delivers an undelivered result to its permitted recipient; and
 `delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
 publish a local task as a GitHub issue with the operator UI's own commands. `recovery
-get|release|prepare|submit` inspect an assignment's held generations, release one that
-never sent a turn after confirmation, and submit the existing pre-turn, no-turn and
-bound-turn recovery and conversation-replacement commands from an owner-only,
-digest-bound document built from observed identity and an explicit operator evidence
-file; none resumes or dispatches work. Further CLI
+get|release|restart` inspect an assignment's held generations, release one that
+never sent a turn after confirmation, and confirm Start again once for a released held
+turn or a refused request; release dispatches no work. Further CLI
 delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/cab/issues/893).
 
 The CLI uses the running service locally or over the existing private network,
 with revocable read-only or read/write credentials. It covers everyday task
-operations, supported configuration, diagnostics and existing evidence-bearing
-recovery, retaining the service's policy, revision and receipt checks. Service
+operations, supported configuration, diagnostics and recovery, retaining the service's policy, revision and receipt checks. Service
 process management and offline backup/restore remain host-local.
 
 Dedicated authenticated instruction views reconstruct current, historical and
@@ -679,28 +676,46 @@ owned exit; this does not contain descendants or guarantee a clean drain after
 repeated signals. Awaiting exit applies only to a coordinated drain. If the service
 process dies, for example in a crash or when launchd kills it after its exit
 timeout, those children are outside its process group, are not killed with it and
-can keep running. Bound-turn recovery then refuses while the exact recorded
-process is alive, until the operator ends it.
+can keep running. A held turn of such a child is released only as below.
 
-Manual bound-turn recovery is distinct from planned shutdown: it requires verified
-exit of the exact stored process (PID, birth identity and boot identity), exact work
-revision, request sequence, thread and turn, ended callbacks, settled effects and
-an explicit preserved/reconciled workspace assertion. Missing, redacted, live,
-unknown, conflicting or stale identity refuses recovery and retains ownership.
-CLI `recovery get|prepare|submit`, Settings → Runtime → assignment recovery,
-and task detail's Recovery link use the same
-keyed `recovery.bound-turn.recover` operation. Eligibility is advisory. Review and
-confirmation precede durable, irreversible reconciliation; cancel records nothing.
-An unknown reply freezes the original body/key: read its operation receipt before
-retrying that exact command. A matching replay returns the original receipt.
-Reconciliation clears only that execution's ownership, never task Stop, project
-pause, approval or delivery holds, and starts no work. Inspect those independent
-holds before an explicit supported continuation.
+**Held-turn release** ([ADR-1032](adr/1032-cab-proves-operator-confirms.md)). For a held
+task-assignment generation with a saved thread and turn, cab interrupts exactly that
+turn once (`turn/interrupt` on Codex, `interruptTurn` on Claude) and records the
+outcome; it never stops or restarts a runtime, so a shared App Server keeps running
+other tasks' turns. A generation with a thread but no turn is interrupted when its turn
+binds. cab then releases the generation's writer ownership and capacity on the first of:
+the runtime durably reports that turn ended; the exact recorded process is verified to
+have exited (process ID, start time and boot ID; for Claude, the turn's own CLI process);
+or 30 minutes pass with no runtime event, request or cab callback for that turn. The quiet
+clock is in memory and starts again from service start after a restart, so the wait can be
+longer but never shorter. cab checks at startup before admission, whenever it wakes the
+scheduler and every minute; it checks process exit when it starts watching the turn,
+including at startup, and again at most once a minute while the turn waits.
 
-Browser recovery drafts and pending request state last only for the current page
-visit. Navigation, sign-out or a full reload discards local assertions and request
-details; it does not erase a recorded server receipt. Preserve the original command
-and key before leaving an uncertain outcome so its operation can be read back.
+The quiet period has one exception. A held generation whose turn ID was never saved
+(the runtime's reply naming the turn was lost) never releases on silence: the turn may be
+running under an ID cab never learned, so cab cannot attribute its activity to it, and the
+runtime cannot report the end of a turn cab cannot name. Such a generation releases only
+when its recorded process is verified to have exited. For a
+shared Codex App Server it therefore stays held until cab restarts the App Server.
+
+Independent holds win: an operator Stop until Resume, a task hold, a pending effect other than
+the turn's own result, a pending completion, an unfinished callback, a known survivor,
+an archived project or in-process submission keeps the generation held and its quiet
+period restarts once they clear. Drafting runs, draft turns and direct requests are not
+released this way. The release reruns every check and the exact thread and turn in one
+transaction, settles the turn's pending result as superseded, keeps the request held as
+history, and records the basis; the task then offers
+[Start again](#start-again-and-reset-task). Runtime activity or a cab callback for a
+released turn records a known survivor and an uncertainty hold on the task and retracts
+admitted successors, as for a reconciled continuation; restarting does not clear it.
+While the release waits, the task reads `uncertain` with `turn-release-pending` and
+recovery reads name when its quiet period ends unless activity continues.
+
+Browser recovery pending request state lasts only for the current page visit.
+Navigation, sign-out or a full reload discards request details; it does not erase a
+recorded server receipt. Preserve the original command and key before leaving an
+uncertain outcome so its operation can be read back.
 
 **Native harness setup.** Both harnesses preserve the service user's native homes,
 subscription login, instructions, skills, plugins, MCP connections and hooks
@@ -825,9 +840,9 @@ completed assignment.
 
 #### Delegate withdrawal
 
-A delegate that will never finish, such as one whose interrupted turn was recovered
-with no successor or whose request was refused before it started and was then
-replaced, would otherwise hold back its lead for good. Its requesting lead
+A delegate that will never finish, such as one whose held turn was released (or, from
+an earlier build, recovered with no successor) or whose request was refused before it
+started and was then replaced, would otherwise hold back its lead for good. Its requesting lead
 (`cab_withdraw_delegate`, with the assignment ID and a reason) or the operator
 (`cab assignment withdraw ASSIGNMENT_ID --reason TEXT`, or **Withdraw** on the task
 view, which asks for a reason and confirmation) can withdraw it. A lead can withdraw
@@ -835,10 +850,11 @@ only a delegate it requested; nobody can withdraw a task lead or an assignment n
 other assignment requested.
 
 Withdrawal is refused, naming the condition and its way out, while the delegate has
-a live or queued execution (wait for its result); a held or uncertain execution, or
-the task has an ownership or recovery hold (`cab recovery get` and
-`cab recovery release`); an open question or approval it asked for (answer or
-decline it in the Inbox); or unfinished delegates of its own (withdraw or finish
+a live or queued execution (wait for its result); a held or uncertain execution (the
+service releases a held turn itself; follow it with `cab recovery get`, where
+`cab recovery release` applies only to a generation that never sent a turn), or the
+task has an ownership or recovery hold (`cab recovery get` and `cab recovery release`);
+an open question or approval it asked for (answer or decline it in the Inbox); or unfinished delegates of its own (withdraw or finish
 those first). An operator Stop alone does not refuse it. Withdrawal never releases a
 hold or changes an execution, conversation or workspace.
 
@@ -878,9 +894,9 @@ proves it safe to withdraw; continuation never orphans or replays that batch.
 The operator can also clear such a refusal directly with
 [Start again](#start-again-and-reset-task).
 
-After exact-generation operator recovery, the old intent remains `reconciled` and
-its turn request remains held; the validated recovery receipt alone does not dispatch
-work. A new operator message to the same task/assignment can explicitly authorize a
+A generation an earlier build reconciled from a recorded recovery receipt keeps its
+recorded route: the old intent remains `reconciled` and its turn request remains held;
+the receipt alone does not dispatch work. A new operator message to the same task/assignment can explicitly authorize a
 fresh inbox continuation. The message transaction retains an immutable audit linking
 the recovered work, receipt, message key/event and old batch. It processes the old
 batch without replaying its events; task and assignment message views identify this
@@ -915,7 +931,7 @@ request*; or *the outcome is unknown*. A thread identity mismatch is the last, a
 in the runtime's reply rather than a cab defect. An execution already held for another
 reason (a Stop, a task hold, an unfinished callback, a known survivor or another pending
 effect) keeps that hold. A failure after `startTurn` was called, including a lost
-turn-start response, keeps the uncertain hold and the recovery below. A direct request
+turn-start response, keeps the uncertain hold until held-turn release. A direct request
 outside a task keeps the uncertain hold, since nothing can start it again.
 
 A generation held before pre-turn failures became refusals has no persisted stage, so
@@ -924,8 +940,9 @@ a generation's thread binding before it calls `startTurn`, and a failed save sto
 submission first; neither harness sends input before `startTurn`. So a held generation
 whose saved thread and turn are both null never sent a turn, on any build. cab releases
 such a generation, whatever its hold reason, when it still holds capacity and nothing
-else holds it: no pre-turn or no-turn witness, Stop, task hold, unfinished callback,
-known survivor or pending effect other than its result. A release records the same
+else holds it: no Stop, task hold, unfinished callback, known survivor or pending effect
+other than its result. A pre-turn or no-turn witness stays as evidence and does not block
+it. A release records the same
 refusal a new pre-turn failure records, with its own reason followed by the original
 hold reason as evidence, in one transaction that
 frees writer and capacity, so Start again is offered with no operator evidence; cab
@@ -935,48 +952,26 @@ generation that fails any check is left unchanged. `recovery release` (and the r
 page's Release action) reads the same checks and, after one confirmation, submits a
 release bound to the generation read. The service reruns every check and refuses,
 changing nothing, when one fails or the generation changed. A request key replays its
-recorded result. A generation with a saved thread or turn is never released this way.
+recorded result. A generation with a saved thread is released only by held-turn release.
 
 Such a generation that positively records an archived `thread/resume` rejection may
 instead hold the runtime witness captured at the time (the exact correlated RPC request,
 predecessor thread, `-32600` archived-session response and runtime process identity,
 persisted against the admitted request sequence, work revision and assignment binding),
-or an operator-adopted witness an earlier build recorded. A witnessed generation is not
-released; it recovers as below. cab no longer captures or adopts this witness, and
-receipts of the retired adoption commands still read back unchanged.
+or an operator-adopted witness an earlier build recorded. The witness is kept as
+evidence and the generation is released as above. cab no longer captures or adopts this
+witness. The pre-turn, no-turn and bound-turn recover commands, conversation replacement
+and the adoption commands are retired: they are refused, and receipts they recorded
+still read back unchanged through `operation get`.
 
-A keyed pre-turn recovery receipt requires the persisted witness, truthful null
-thread/turn identities, independent exact-process termination verification and
-settled workspace/effects. Recovery reconciles only that generation's ownership;
-it leaves the old request held and does not dispatch a successor. An explicit
-conversation replacement and a NEW operator message are then both required. The
-replacement command checks captured assignment/conversation revisions, persists
-its result and prevents duplicate revision increments on replay. The new work starts
-a fresh thread. Existing receipts and continuation audits retain their identities
-and material unchanged; the old batch is processed as `operator-reconciled` without
-replay. Admission, completion and external actions revalidate the pre-turn witness,
-receipt and continuation audit at use time. Independent holds, current admission
-gates and persistent late-callback/survivor holds remain enforced.
-
-An earlier build could also record an operator-adopted no-turn-submission witness for a
-held generation with unbound thread/turn identities. That witness does not claim thread
-noncreation, a positive archived-resume rejection or successful work.
-
-The no-turn witness and receipt discriminator bind request/work,
-conversation/writer revisions, assignment snapshots, process and immutable operator
-command material. Recovery independently verifies exact-process termination and
-requires settled current workspace/effects, preserving null identities and all
-older receipt/audit material. It leaves the request held and produces no successful
-assignment result or automatic dispatch. Existing keyed conversation replacement
-and a NEW authenticated operator message are both required for continuation. The
-old batch records `operator-reconciled` processing without replay. Admission,
-completion and actions recheck the distinct witness/receipt/audit and current gates;
-late callbacks or known survivors persist a hold and retract successors across
-restart. The advanced authenticated host routes expose bounded acknowledgement,
-with no new model tool authority or forms in the curated operator UI. The recovery
-read reports a path eligible only when the checks its command runs can pass, including
-the release checks and the termination proof for recovery, and names the failing check
-otherwise.
+A generation an earlier build reconciled from a keyed pre-turn, no-turn or bound-turn
+receipt keeps that receipt, its witness and its continuation audit unchanged. A
+pre-turn or no-turn reconciled generation continues through
+[Reset task](#start-again-and-reset-task) or, where a replacement was recorded, a NEW
+operator message; a bound-turn one through a new message. The old batch is processed as
+`operator-reconciled` without replay. Admission, completion and external actions
+revalidate the witness, receipt and continuation audit at use time, and late callbacks
+or known survivors persist a hold and retract successors across restart.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash releases neither writer ownership nor capacity. No
@@ -1205,7 +1200,7 @@ effect-free records with no recorded holds are collapsed under a settled count. 
 evidence caveat stays visible, and every record remains available in the disclosure. These
 use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
-per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the bound-turn reconciliation panel retains its exact identities and review flow. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
+per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the recovery page offers Release for a generation that never sent a turn and the same Start again as the task page once cab has released a held turn. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
@@ -2117,8 +2112,8 @@ history.
 ### Start again and Reset task
 
 Two keyed, task-versioned operator commands restart work without a force unlock: there
-is no way to release an execution that may still be writing, and interrupted, unknown,
-submitting and held work stays with the `recovery` commands.
+is no way to release an execution that may still be writing. A held turn is released
+only by [held-turn release](#execution-and-recovery); until then it stays held.
 
 - **Start again** (`task.start-again {key, taskId, expectedVersion, workId}`) queues an
   assignment's newest request again when a witness-only proof shows it was refused before
@@ -2136,6 +2131,15 @@ submitting and held work stays with the `recovery` commands.
   thread or turn, ownership, recovery evidence, Stop or pending external effect keeps
   its existing recovery authority. Readiness waits and normal pre-admission source
   revalidation keep their existing behavior.
+  A [released held turn](#execution-and-recovery) is a Start again target too: its
+  intent is `resolved-failed`, its request held with the release reason, and it keeps no
+  writer, capacity, Stop target or pending effect. Start again leaves the assignment's
+  conversation revision unchanged, so the new request resumes the last completed turn's
+  thread, or starts a thread when none completed; no conversation replacement, receipt or
+  operator message is involved. The task read reports it as `not-started` with
+  `held-turn-released`. The task page, Inbox, Home, the recovery page and
+  `cab recovery restart ASSIGNMENT_ID --yes` (the same `task.start-again` as
+  `cab task start-again`) offer it after one confirmation.
   Task and recovery reads name the refusal and Start again or its independent blocker.
   A [pre-turn refusal](#execution-and-recovery) may keep the idle thread it bound
   and its turn-less recovery identity. It does not

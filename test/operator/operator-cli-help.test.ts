@@ -127,7 +127,7 @@ test("--help --all lists every command with service and snapshot in a separate b
   assert.equal(r.err, "");
   assert.ok(r.out.includes(SERVICE_USAGE));
   // The notes and the ORIGIN definition close the full help.
-  assert.ok(r.out.includes("Recovery: recovery prepare"));
+  assert.ok(r.out.includes("Recovery: the service interrupts a held turn"));
   assert.match(r.out, /\nORIGIN is https:\/\/HOST\[:PORT\][^\n]*\n$/);
   const out = r.out.split("\n");
   const heading = out.findIndex((l) => l.startsWith("Local service commands"));
@@ -499,9 +499,12 @@ test("every expected-* flag's help names the record it checks", async (t) => {
     /--expected-revision: the comment review's revision/,
   );
   const recovery = (await h.run(["help", "recovery"])).out;
-  const pair = under(recovery, "recovery prepare") ?? "";
-  assert.ok(pair.includes("--expected-version"), pair);
-  assert.ok(pair.includes("--expected-conversation-revision"), pair);
+  assert.ok(
+    recovery.includes(
+      "recovery restart ASSIGNMENT_ID [--yes] [--work WORK_ID] [--request-id UUID]",
+    ),
+    recovery,
+  );
 
   // 4. The full help shows every line once, under its own command and nowhere else.
   const all = (await h.run(["--help", "--all"])).out;

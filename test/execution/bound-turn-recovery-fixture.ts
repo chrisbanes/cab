@@ -6,9 +6,10 @@ import { until } from "../fixtures/until.js";
 import type { TerminationVerification } from "../../src/standalone/recovery-types.js";
 import { PROCESS_STILL_PRESENT } from "../../src/standalone/termination.js";
 import type { BoundTurnRecoveryCommand } from "../../src/standalone/pre-turn-recovery.js";
+import type { HeldTurnReleaseOptions } from "../../src/standalone/held-turn-release.js";
 
 /** A genuinely submitted, bound fake turn whose observation is lost. No model or OS process. */
-class BoundRuntime extends NoTurnRuntime {
+export class BoundRuntime extends NoTurnRuntime {
   override rejectStart = false;
   complete = false;
   approval = false;
@@ -54,8 +55,15 @@ export async function boundWorld(
   excluded: string[] = [],
   approval = false,
   seedConversation = false,
+  options: {
+    runtime?: BoundRuntime;
+    /** A runtime of the other harness, started beside the bound one. */
+    foreign?: BoundRuntime;
+    mode?: "verified" | "unknown";
+    heldTurnRelease?: HeldTurnReleaseOptions;
+  } = {},
 ) {
-  const runtime = new BoundRuntime();
+  const runtime = options.runtime ?? new BoundRuntime();
   runtime.approval = approval;
   runtime.seedConversation = seedConversation;
   let mode:
@@ -64,7 +72,7 @@ export async function boundWorld(
     | "unknown"
     | "conflict"
     | "other-identity"
-    | "hang" = "verified";
+    | "hang" = options.mode ?? "verified";
   let gate: Promise<void> | undefined;
   let checks = 0;
   const verifier = {
@@ -92,13 +100,21 @@ export async function boundWorld(
     },
   };
   const s = await startCliService(t, {
-    runtimeFactory: () => runtime,
+    // The service passes the harness; only a foreign runtime makes it matter.
+    runtimeFactory: ((_context: unknown, h: string) =>
+      h === harness
+        ? runtime
+        : (options.foreign ?? runtime)) as () => BoundRuntime,
     controlPaths: excluded,
     service: {
-      runtimeHarnesses: [harness],
+      runtimeHarnesses: options.foreign
+        ? [harness, harness === "codex" ? "claude" : "codex"]
+        : [harness],
       power: { enabled: false },
       routingClient: null,
       terminationVerifier: verifier,
+      // Without options it runs as an earlier build, so tests can record legacy receipts.
+      heldTurnRelease: options.heldTurnRelease ?? false,
     },
   });
   const command = (body: Record<string, unknown>) =>
@@ -194,7 +210,6 @@ export async function boundWorld(
   assert.ok(
     record?.intent.threadId &&
       record.intent.turnId &&
-      record.processIdentity &&
       record.generation.workRevision,
   );
   const g = {
@@ -206,7 +221,8 @@ export async function boundWorld(
     turnId: record.intent.turnId,
     workRevision: record.generation.workRevision,
     requestSequence: record.generation.requestSequence,
-    processIdentity: record.processIdentity,
+    // Claude records none; the receipt helper still needs one.
+    processIdentity: record.processIdentity ?? runtime.identity,
   };
   const recovery = (key: string = randomUUID()): BoundTurnRecoveryCommand => ({
     key,

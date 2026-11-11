@@ -96,9 +96,8 @@ const documentedWrites = [
   "delivery review-comment",
   "delivery confirm-comment",
   "delivery send-comment",
-  "recovery prepare",
   "recovery release",
-  "recovery submit",
+  "recovery restart",
   "runtime enable",
   "runtime disable",
 ];
@@ -125,7 +124,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
   assert.match(help.out, /Reverse pairs: task stop\/resume/);
   assert.match(
     help.out,
-    /Release, recovery and conversation replacement cannot be undone/,
+    /Release cannot be undone and does not resume the task/,
   );
   for (const command of [...browseCommands.values(), ...writeCommands.values()])
     assert.ok(help.out.includes(command.usage), command.usage);

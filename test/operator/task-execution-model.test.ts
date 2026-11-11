@@ -85,6 +85,16 @@ test("every execution state has a status, and stopping and uncertain always need
     executionStatus(execution("waiting", {}, ["admission-blocked"])).label,
     "Waiting; blocked from admission",
   );
+  assert.equal(
+    executionStatus(
+      execution("uncertain", {}, ["recovery-held", "turn-release-pending"]),
+    ).label,
+    "Held; cab interrupted the turn and releases it when it ends",
+  );
+  assert.equal(
+    executionStatus(execution("not-started", {}, ["held-turn-released"])).label,
+    "Released; the held turn was interrupted",
+  );
 });
 
 test("a hold only a record keeps marks an idle or paused status as held", () => {

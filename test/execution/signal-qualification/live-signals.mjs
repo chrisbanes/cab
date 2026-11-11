@@ -317,34 +317,27 @@ export async function runCases(backend, journal, cases = CASES) {
         stage = "bound-held";
         await backend.held(host, deadline());
         const before = await backend.snapshot(host);
-        stage = "get-ineligible";
+        stage = "get-held";
         const get = await backend.call(host, "get");
         assert.equal(get.code, 0);
         assert.ok(
-          JSON.stringify(get.data).includes("termination-live"),
-          "live process must be ineligible",
+          JSON.stringify(get.data).includes('"restart":{"eligible":false'),
+          "a live held turn must not offer Start again",
         );
         assert.equal(
-          (await backend.call(host, "prepare")).code,
+          (await backend.call(host, "restart")).code,
           4,
-          "prepare before exit refused",
+          "restart before release refused",
         );
         stage = "end-runtime";
         await backend.endRuntime(host);
         // Independent holds come after the exact end: a Stop interrupt would otherwise end a
-        // per-turn Claude CLI itself, leaving no live process for get to refuse.
+        // per-turn Claude CLI itself, leaving no live process for the read to show held.
         stage = "holds";
         await backend.call(host, "holds");
         await backend.close(host);
         stage = "recovery-restart";
         host = await start(1, `${testCase.id}-recovery`);
-        stage = "prepare-submit-replay";
-        assert.equal((await backend.call(host, "prepare")).code, 0);
-        const recovered = await backend.call(host, "submit");
-        assert.equal(recovered.code, 0);
-        const replay = await backend.call(host, "submit");
-        assert.equal(replay.code, 0);
-        assert.deepEqual(replay.data.data.receipt, recovered.data.data.receipt);
         const held = await backend.call(host, "inspect");
         assert.equal(held.stopped, true);
         assert.equal(held.paused, true);
@@ -354,15 +347,23 @@ export async function runCases(backend, journal, cases = CASES) {
           journal.entries().filter((r) => r.kind === "reserve").length -
             startCount,
           2,
-          "recovery dispatched work",
+          "restart dispatched work",
         );
+        // Stop holds the turn until Resume; then the verified exit releases it.
         stage = "continue";
         await backend.call(host, "continue");
+        stage = "released-restart-replay";
+        assert.equal(await backend.call(host, "released"), true);
+        const restarted = await backend.call(host, "restart");
+        assert.equal(restarted.code, 0);
+        const replay = await backend.call(host, "restart");
+        assert.equal(replay.code, 0);
+        assert.deepEqual(replay.data.data.receipt, restarted.data.data.receipt);
         stage = "continuation-recorded";
         const continuations = await backend.continuations(host);
         assert.equal(
           continuations,
-          1,
+          0,
           `recovery continuations=${continuations}`,
         );
         stage = "continued";
@@ -377,8 +378,8 @@ export async function runCases(backend, journal, cases = CASES) {
         assert.ok(continued.length >= 2, "existing conversation not continued");
         assert.equal(
           final.receipts.length,
-          before.receipts.length + 1,
-          "one recovery receipt",
+          before.receipts.length,
+          "no recovery receipt",
         );
       }
       stage = "turn-count";

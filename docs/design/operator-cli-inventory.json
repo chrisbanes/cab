@@ -1320,7 +1320,7 @@
         "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-899-cli6-2026-10-12.md"
       ],
-      "effect": "Shows an assignment's recovery eligibility, holds, process identity, reason, witnesses, observations and a per-path table with blockers and required inputs.",
+      "effect": "Shows an assignment's recovery eligibility, holds, process identity, reason, witnesses, observations, the release path with its blockers, and whether Start again is offered or a held turn is still being released.",
       "denial": "n/a: read-only; an unknown assignment exits 2 and a service without recovery.read exits 7 after identity only.",
       "revision": "Eligibility is advisory; the service stays authoritative.",
       "retry": "n/a: idempotent read; no receipt",
@@ -1346,40 +1346,21 @@
       "gap": "Held generations come from the copied no-turn and pre-turn test runtimes, never a real stuck process. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
-      "id": "recovery prepare",
-      "kind": "command",
-      "area": "recovery",
-      "scenarios": ["CLI01", "CLI04"],
-      "evidence": [
-        "test/execution/operator-cli-recovery-write.test.ts",
-        "test/execution/operator-cli-recovery-journey.test.ts",
-        "docs/evidence/issue-899-cli6-2026-10-12.md"
-      ],
-      "effect": "Writes a 0600 ensemble.cli.recovery/v1 document for a recover path (no-turn, pre-turn or bound-turn) or conversation-replace from the recovery read plus a strict evidence file; sends nothing. Release and the retired adopt paths are not prepared.",
-      "denial": "n/a: prepare sends no write and works with a read-only credential; missing or malformed evidence, --yes, --confirm, --force and --attest exit 2 or are unknown options.",
-      "revision": "A replacement requires both expected values; an ineligible path exits 4 naming its blockers.",
-      "retry": "n/a: prepare is local.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Receipt assertions are operator assertions the service cannot verify. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
-    },
-    {
-      "id": "recovery submit",
+      "id": "recovery restart",
       "kind": "command",
       "area": "recovery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
         "test/execution/operator-cli-recovery-write.test.ts",
-        "test/execution/operator-cli-recovery-journey.test.ts",
-        "docs/evidence/issue-899-cli6-2026-10-12.md"
+        "test/execution/operator-cli-recovery-journey.test.ts"
       ],
-      "effect": "Submits a prepared document as a receipted recovery.* command (completed or saved); it resumes nothing and dispatches no work, and recovery and replacement are irreversible.",
-      "denial": "A read-only credential exits 3 with the digest unchanged (and the recovery command types are 403 as direct posts); tampered, group-readable, oversized, symlinked or foreign-installation documents exit 2 with nothing sent; unverified termination exits 4.",
-      "revision": "A replacement prepared before another entry point acted exits 4; a document prepared before the retained session form acted exits 4 with nothing applied.",
-      "retry": "An identical rerun replays one receipt; a lost reply exits 6 and operation get reads it recorded; two concurrent submissions reconcile once.",
+      "effect": "Without --yes previews the request Start again would queue and sends nothing; with --yes sends the same task.start-again as task start-again for a released held turn or a request refused before it ran, continuing the assignment's conversation (queued).",
+      "denial": "A read-only credential exits 3; while cab is still releasing a held turn, or anything else blocks Start again, it exits 4 naming the latest release time or the reason, and nothing is sent.",
+      "revision": "Bound to the task version and Start again target read; the service reruns every admission check.",
+      "retry": "The same --request-id with --work replays one receipt.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Real process termination was not exercised and the keyless bound-turn recovery has no route (excluded). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+      "gap": "Held turns come from fake runtimes with an injected clock, never a real stuck process. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey."
     },
     {
       "id": "result list",
@@ -1891,10 +1872,6 @@
     {
       "id": "list of pending comment reviews",
       "reason": "design excludes from first release: docs/design/operator-cli.md (Sources and delivery) lists it as not a CLI command; the CLI4 record notes there is no list of pending reviews."
-    },
-    {
-      "id": "keyless bound-turn recovery",
-      "reason": "design excludes from first release: docs/design/operator-cli.md (Recovery) states there is no route for the keyless bound-turn recovery (resolveHeldExecution); CLI6 record 'Not exposed'."
     },
     {
       "id": "operation get for task, attention, delivery and placement receipts",

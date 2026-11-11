@@ -898,6 +898,20 @@ export const projectDeletionInventory = {
     ],
     ownership: "failedWorkId/retryWorkId/chainId in W",
   },
+  execution_held_turn_releases: {
+    columns: [
+      "workId",
+      "taskId",
+      "threadId",
+      "turnId",
+      "harness",
+      "interruptState",
+      "interruptRequestedAt",
+      "basis",
+      "releasedAt",
+    ],
+    ownership: "workId in W",
+  },
   execution_shutdown_resolutions: {
     columns: [
       "interruptedWorkId",

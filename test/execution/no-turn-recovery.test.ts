@@ -6,6 +6,8 @@ import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "../fixtures/temp.js";
 import {
+  reconcileAsBefore,
+  replaceConversationAsBefore,
   adoptAsBefore,
   bindLegacyHold,
   failing,
@@ -328,7 +330,7 @@ function snapshot(service: StandaloneService, workId: string) {
   });
 }
 function replace(f: Awaited<ReturnType<typeof fixture>>, service = f.service) {
-  return service.replaceConversationCommand({
+  return replaceConversationAsBefore(service, {
     key: randomUUID(),
     assignmentId: f.assignmentId,
     expectedAssignmentVersion: 1,
@@ -355,9 +357,7 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
       true,
     );
     assert.equal(f.runtime.turnInvocations.length, 0);
-    await service.stop();
-    service = f.makeService();
-    await service.start();
+    // Reconciled in the same process, as an earlier build did; a restart now releases it.
     assert.deepEqual(
       service.recoveryView().find((r) => r.workId === f.old.workId)
         ?.noTurnSubmission,
@@ -369,7 +369,7 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
     );
     const input = recovery(f, adopted.witnessId);
     f.setVerified(false);
-    await assert.rejects(service.recoverNoTurnExecution(input), /termination/);
+    await assert.rejects(reconcileAsBefore(service, input), /termination/);
     assert.equal(
       service.recoveryView().find((r) => r.workId === f.old.workId)?.holds
         .capacity,
@@ -377,11 +377,11 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
     );
     f.setVerified(true);
     const results = await Promise.all([
-      service.recoverNoTurnExecution(input),
-      service.recoverNoTurnExecution(input),
+      reconcileAsBefore(service, input),
+      reconcileAsBefore(service, input),
     ]);
     assert.deepEqual(results[0], results[1]);
-    assert.deepEqual(await service.recoverNoTurnExecution(input), results[0]);
+    assert.deepEqual(await reconcileAsBefore(service, input), results[0]);
     assert.equal(f.runtime.turnInvocations.length, 0);
     assert.equal(
       service.turnRequests().find((r) => r.workId === f.old.workId)?.state,
@@ -417,10 +417,10 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
       expectedAssignmentVersion: 1,
       expectedConversationRevision: f.adoption.conversationRevision,
     };
-    assert.deepEqual(service.replaceConversationCommand(replacement), {
+    assert.deepEqual(replaceConversationAsBefore(service, replacement), {
       revision: 2,
     });
-    assert.deepEqual(service.replaceConversationCommand(replacement), {
+    assert.deepEqual(replaceConversationAsBefore(service, replacement), {
       revision: 2,
     });
     await service.coordinationView().postOperatorMessage({
@@ -462,8 +462,8 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(await service.recoverNoTurnExecution(input), results[0]);
-    assert.deepEqual(service.replaceConversationCommand(replacement), {
+    assert.deepEqual(await reconcileAsBefore(service, input), results[0]);
+    assert.deepEqual(replaceConversationAsBefore(service, replacement), {
       revision: 2,
     });
     await service.coordinationView().postOperatorMessage(fresh);
@@ -480,7 +480,7 @@ test("an earlier adoption's key keeps its scope and its witness keeps recovery's
     const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
     assert.throws(
       () =>
-        f.service.replaceConversationCommand({
+        replaceConversationAsBefore(f.service, {
           key: f.adoption.key,
           assignmentId: f.assignmentId,
           expectedAssignmentVersion: 1,
@@ -494,14 +494,14 @@ test("an earlier adoption's key keeps its scope and its witness keeps recovery's
       /keyed command/,
     );
     await assert.rejects(
-      f.service.recoverNoTurnExecution({
+      reconcileAsBefore(f.service, {
         ...input,
         receipt: { ...input.receipt, witnessId: randomUUID() },
       }),
       /persisted witness/,
     );
     await assert.rejects(
-      f.service.recoverPreTurnExecution({
+      reconcileAsBefore(f.service, {
         ...input,
         receipt: { ...input.receipt, kind: "pre-turn-rejection" },
       }),
@@ -537,7 +537,7 @@ test("R4 proof and current gates are revalidated after operator audit, including
       const f = await fixture();
       try {
         const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
-        await f.service.recoverNoTurnExecution(recovery(f, adopted.witnessId));
+        await reconcileAsBefore(f.service, recovery(f, adopted.witnessId));
         replace(f);
         command(f.service, {
           type: "project.configure",
@@ -658,7 +658,7 @@ test("R4 late callback and known survivor retract successors and persist hold af
       let service = f.service;
       try {
         const adopted = { witnessId: adoptAsBefore(service, f.adoption) };
-        await service.recoverNoTurnExecution(recovery(f, adopted.witnessId));
+        await reconcileAsBefore(service, recovery(f, adopted.witnessId));
         replace(f);
         f.runtime.rejectStart = false;
         f.runtime.hold = true;
@@ -715,12 +715,16 @@ test("JSON no-turn commands retain bounded witnesses in the curated API", async 
         f.adoption.evidence.invocationLedgerSha256,
       ),
     );
+    // The retired recover command is refused; its receipt is recorded only as before.
     const input = recovery(f, witness.id);
-    await api.execute({
-      type: "recovery.no-turn.recover",
-      assignmentId: f.assignmentId,
-      ...input,
-    });
+    await assert.rejects(
+      api.execute({
+        type: "recovery.no-turn.recover",
+        assignmentId: f.assignmentId,
+        ...input,
+      } as never),
+    );
+    await reconcileAsBefore(f.service, input);
   } finally {
     await close(f);
   }
@@ -730,7 +734,7 @@ test("R4 current external completion actions and terminal completion reject inva
   const f = await fixture();
   try {
     const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
-    await f.service.recoverNoTurnExecution(recovery(f, adopted.witnessId));
+    await reconcileAsBefore(f.service, recovery(f, adopted.witnessId));
     replace(f);
     let before = snapshot(f.service, f.old.workId);
     let checked = false;

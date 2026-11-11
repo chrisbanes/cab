@@ -1521,6 +1521,21 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "execution_held_turn_releases",
+      values: {
+        workId: i.workId,
+        taskId: i.taskId,
+        threadId: i.threadId,
+        turnId: i.turnId,
+        harness: "fixture-harness",
+        interruptState: "acknowledged",
+        interruptRequestedAt: 1,
+        basis: "quiet-period",
+        releasedAt: 2,
+      },
+    },
+    {
+      shared: false,
       table: "execution_shutdown_resolutions",
       values: {
         interruptedWorkId: i.workId,
