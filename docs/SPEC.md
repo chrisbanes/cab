@@ -854,7 +854,7 @@ history, and any later callback from its conversation, including
 
 Withdrawal is intentionally irreversible: there is no restore and no follow-up on a
 withdrawn assignment. A completed assignment whose results go, directly or through
-its requesters, to a withdrawn delegate cannot be followed up or resumed by a comment
+the chain of assignments its results are reported to, to a withdrawn delegate cannot be followed up or resumed by a comment
 either, since its next result would have nowhere to go; inbox events already waiting
 for that subtree become undeliverable at withdrawal. To redo the work, the lead
 delegates again.
