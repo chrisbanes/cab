@@ -412,3 +412,34 @@ test("a proposal withheld on read can be rejected", async (_t, j) => {
     "the discarded run",
   );
 });
+
+test("an unconfirmed start offers New selection, and a missing run in a read-only view is cleared, not polled", async (_t, j) => {
+  const { f, page, projectId, open } = await launch(j, desktop);
+  await open();
+  await select(page, /keyboard evidence\./);
+  // The start's response is lost, so its outcome is unknown and the run never exists.
+  await page.route("**/api/operator/commands", (route) =>
+    route.request().postData()?.includes('"instruction.draft.start"')
+      ? route.abort()
+      : route.continue(),
+  );
+  await page.getByRole("button", { name: "Request proposal" }).click();
+  await page.getByText(/Couldn.t confirm the request/).waitFor();
+  await page.getByRole("button", { name: "New selection" }).waitFor();
+  // Archived before the page reads it again: it clears the run instead of resending.
+  (f.service as unknown as { db: import("node:sqlite").DatabaseSync }).db
+    .prepare(
+      "UPDATE domain_projects SET archived=1,version=version+1 WHERE id=?",
+    )
+    .run(projectId);
+  await page.reload();
+  await page.getByText("The proposal is no longer available.").waitFor();
+  await page.getByRole("button", { name: "Request proposal" }).waitFor();
+  const starts: string[] = [];
+  page.on("request", (request) => {
+    if (request.postData()?.includes('"instruction.draft.start"'))
+      starts.push(request.url());
+  });
+  await page.waitForTimeout(3000);
+  assert.deepEqual(starts, []);
+});

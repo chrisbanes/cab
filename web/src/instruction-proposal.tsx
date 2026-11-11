@@ -101,6 +101,8 @@ export function InstructionProposalsTab(p: TabProps) {
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<InstructionRun | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  // Reads of the run are failing for a reason other than not-found.
+  const [readFailed, setReadFailed] = useState(false);
   // An archived project's proposals are read-only, like the rest of its settings.
   const readOnly = Boolean(p.readOnly);
   const latest = useRef(stored);
@@ -123,9 +125,15 @@ export function InstructionProposalsTab(p: TabProps) {
         const withheld = new Set(
           page.items.filter((item) => !item.available).map((item) => item.id),
         );
-        const kept = latest.current.refs.filter((r) => !withheld.has(r.id));
-        if (kept.length !== latest.current.refs.length) {
-          change({ refs: kept });
+        if (latest.current.refs.some((r) => withheld.has(r.id))) {
+          setStored((current) => {
+            const next = {
+              ...current,
+              refs: current.refs.filter((r) => !withheld.has(r.id)),
+            };
+            writeStored(projectId, next);
+            return next;
+          });
           setMessage(
             "Selected feedback that is now withheld was removed from the selection.",
           );
@@ -136,7 +144,7 @@ export function InstructionProposalsTab(p: TabProps) {
         if (!signal?.aborted) setListError(true);
       }
     },
-    [client, projectId, change],
+    [client, projectId],
   );
   useEffect(() => {
     const abort = new AbortController();
@@ -161,13 +169,22 @@ export function InstructionProposalsTab(p: TabProps) {
           signal,
         );
         if (read.kind === "instruction") setRun(read);
+        setReadFailed(false);
       } catch (error) {
-        if (!(error instanceof ClientError && error.code === "not-found"))
+        if (!(error instanceof ClientError && error.code === "not-found")) {
+          if (!signal?.aborted) setReadFailed(true);
           return;
-        if (startingId.current === runId || readOnlyRef.current) return;
-        // A start that may never have arrived is sent once more under its key and content.
+        }
+        if (startingId.current === runId) return;
+        // A start that may never have arrived is sent once more under its key and content,
+        // except from a read-only view, which only clears it.
         const { startKey, expectedProjectVersion } = latest.current;
-        if (startKey && expectedProjectVersion && !resent.current.has(runId)) {
+        if (
+          !readOnlyRef.current &&
+          startKey &&
+          expectedProjectVersion &&
+          !resent.current.has(runId)
+        ) {
           resent.current.add(runId);
           await sendStartRef.current({
             ...latest.current,
@@ -373,6 +390,8 @@ export function InstructionProposalsTab(p: TabProps) {
     } else setMessage("Couldn’t reject the proposal. Try again.");
   };
   const clear = () => {
+    setMessage("");
+    setReadFailed(false);
     change({
       runId: undefined,
       startKey: undefined,
@@ -389,16 +408,19 @@ export function InstructionProposalsTab(p: TabProps) {
             title="Instruction proposal"
             description="Checking the request…"
           >
-            <div className="settings-actions">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={busy}
-                onClick={clear}
-              >
-                New selection
-              </Button>
-            </div>
+            {/* Only a start that could not be confirmed, or a run that cannot be read, is left. */}
+            {(message || readFailed) && (
+              <div className="settings-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={clear}
+                >
+                  New selection
+                </Button>
+              </div>
+            )}
           </Panel>
         ) : run?.runId === runId && run ? (
           <Review
