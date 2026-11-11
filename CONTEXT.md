@@ -356,6 +356,14 @@ a result was recorded. A result's linked files are read from the workspace, or f
 that commit once the workspace has moved on; cab keeps no copy of them.
 _Avoid_: Retained evidence or workspace snapshot when referring to what a result recorded
 
+**Result review request**:
+A task lead's request, made when it reports a result, that the operator review that exact
+result: the decision needed, the lead's recommendation and any remaining uncertainty. It is
+one Inbox item until the operator marks it reviewed or sends feedback, a newer lead result
+supersedes it, the lead withdraws it or its task closes. A response never grants permission,
+merges or completes the task.
+_Avoid_: Approval or completion request when referring to a review request
+
 **Code review**:
 A batch of operator line comments and an optional summary sent together to a
 task's accountable project lead. It is local feedback, not a code host review or

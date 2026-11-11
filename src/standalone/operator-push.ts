@@ -59,7 +59,8 @@ export function pushPayload(
   switch (item.kind) {
     case "question":
     case "approval":
-    case "intervention": {
+    case "intervention":
+    case "result-review": {
       const project =
         [
           ...(item.projectName ?? "").replace(

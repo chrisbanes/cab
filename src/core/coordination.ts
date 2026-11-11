@@ -734,26 +734,28 @@ export class CoordinationStore {
     }
   }
 
-  /** Pending reviews on a task that is no longer open close with it. */
+  /**
+   * Pending reviews on a task that is no longer open close with it. Callers may already hold a
+   * transaction; resolving the episode first keeps an interrupted pass repeatable.
+   */
   reconcileResultReviews(): void {
-    transaction(this.db, () => {
-      const closed = this.db
-        .prepare(
-          `UPDATE coordination_result_reviews
+    const pending = this.db
+      .prepare(`SELECT review.reviewId, task.state FROM coordination_result_reviews review
+      JOIN domain_tasks task ON task.id = review.taskId
+      WHERE review.status = 'pending' AND task.state <> 'open'`)
+      .all() as Array<{ reviewId: string; state: string }>;
+    for (const { reviewId, state } of pending) {
+      this.inboxLifecycle().resolve(
+        reviewId,
+        state === "done" ? "Task is Done" : "Task is Cancelled",
+        true,
+      );
+      this.db
+        .prepare(`UPDATE coordination_result_reviews
         SET status = 'closed', revision = revision + 1, updatedAt = unixepoch()
-        WHERE status = 'pending' AND taskId IN (SELECT id FROM domain_tasks WHERE state <> 'open')
-        RETURNING reviewId, taskId`,
-        )
-        .all() as Array<{ reviewId: string; taskId: string }>;
-      for (const { reviewId, taskId } of closed)
-        this.inboxLifecycle().resolve(
-          reviewId,
-          this.domain.task(taskId).state === "done"
-            ? "Task is Done"
-            : "Task is Cancelled",
-          true,
-        );
-    });
+        WHERE reviewId = ? AND status = 'pending'`)
+        .run(reviewId);
+    }
   }
 
   openInteractionsForCompletion(taskId: string): CoordinationInteraction[] {

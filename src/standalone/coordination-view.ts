@@ -27,6 +27,7 @@ import type {
   CoordinationStore,
   InboxEvent,
   OperatorAttention,
+  ResultReview,
   TaskCompletionRequest,
   UnresolvedResultDestination,
 } from "../core/coordination.js";
@@ -219,6 +220,7 @@ export interface CoordinationTaskView {
     }
   >;
   approvals: CoordinationInteraction[];
+  resultReviews: ResultReview[];
   completionRequests: TaskCompletionRequest[];
   routing: {
     dispositions: CoordinationRoutingDispositionView[];
@@ -572,6 +574,7 @@ export class CoordinationView {
       approvals: interactions.filter(
         (interaction) => interaction.kind === "approval",
       ),
+      resultReviews: this.coordination.resultReviews(id),
       completionRequests,
       routing: { dispositions, attempts },
       attention: {
@@ -653,6 +656,24 @@ export class CoordinationView {
     // A record-only comment queues nothing, so there is nothing to admit.
     if (receipt.deliveries.length) await this.notifyOperatorCommand();
     return receipt;
+  }
+
+  /** Records the operator's response to a pending review; only delivered feedback wakes the scheduler. */
+  async respondToResultReview(input: {
+    taskId: string;
+    key: string;
+    reviewId: string;
+    expectedRevision: number;
+    response: "reviewed" | "feedback";
+    message?: string | undefined;
+  }): Promise<{ review: ResultReview; event: InboxEvent | null }> {
+    this.requireTask(uuid.parse(input.taskId));
+    const outcome = this.coordination.respondToResultReview({
+      actor: "operator",
+      ...input,
+    });
+    if (outcome.event) await this.notifyOperatorCommand();
+    return outcome;
   }
 
   /** The stored receipt of a comment send, or undefined while none is recorded. */

@@ -2857,6 +2857,36 @@ the exact JSON stays available. Answers do not grant unrelated permission.
 Denial persists. Replayed requests or responses cannot duplicate effects. Controls
 acknowledge persisted outcomes.
 
+A task lead asks the operator to review a completed result with an `operatorReview`
+argument on `cab_report_result`
+([ADR-1035](adr/1035-result-review-requests.md)). It is for a result that needs an
+operator decision or intervention; routine completions report without it. The request
+carries a `decision` headline under the question rules above, a `recommendation` of at
+most 2,000 characters and up to 20 optional `uncertainties`; the result's `summary`
+states what changed and why, and its `review` metadata carries the evidence. cab
+records one pending review bound to that result and its work revision in the same
+transaction and replay receipt as the result, and refuses a request from any other
+assignment, or one whose decision breaks the headline rules, without recording the
+result. The review is one actionable `result-review` Inbox item, at the urgency of
+questions, opening `/tasks/:taskId?request=:reviewId`; the task read lists it under
+`resultReviews` and its task carries the `result-review` attention code while it is
+pending and not dismissed.
+
+A review ends once. A newer result from the lead supersedes every pending review on
+the task; a delegate's result does not. The lead withdraws a pending review with
+`cab_withdraw_result_review`, giving a reason. A pending review closes when its task
+is Done or Cancelled. The operator answers a pending review with `result-review.respond`
+at its expected revision, choosing `reviewed`, with an optional note, or `feedback`,
+with required text. A note or feedback reaches the lead as operator feedback anchored
+to the result, resuming a completed lead as a follow-up does; `reviewed` without a note
+is recorded and sends nothing. A response to a review that is no longer pending, or at
+a stale revision, is refused as a conflict, so a response never covers a newer result.
+The same command key replays its receipt; with different content it conflicts.
+Viewing, dismissing or restoring the Inbox item, and an ordinary message that
+references the result, leave the review pending. A review is not an approval or a
+completion request: it authorizes no action, holds no completion and changes no task,
+assignment or delivery state.
+
 cab displays conversation history and accepts durable messages to the task-scoped lead conversation
 for the next eligible turn. They cannot bypass pause, stop or other admission
 controls. Live steering is deferred; stop is a separate control. Exact transcript

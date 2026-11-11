@@ -66,6 +66,7 @@ test("kind and action labels cover every request kind", () => {
   for (const [kind, label, action] of [
     ["question", "Question", "Answer question"],
     ["approval", "Approval", "Review material & decide"],
+    ["result-review", "Result review", "Review result"],
     ["intervention", "Intervention", "Inspect execution"],
   ] as const) {
     assert.equal(requestKindLabel(kind), label);

@@ -10,6 +10,7 @@ import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliOperator } from "../fixtures/operator-cli.js";
 import { mixedAnswers } from "../fixtures/question-data.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 import {
   finishOwnWork,
   seedOwnApproval,
@@ -168,7 +169,7 @@ test("inbox list prints and filters the runtime item", async (t) => {
   assert.equal(r.code, 2);
   assert.match(
     r.err + r.out,
-    /--kind must be question, approval, intervention, runtime\./,
+    /--kind must be question, approval, result-review, intervention, runtime\./,
   );
 
   // `runtime list` carries the same state and, as JSON, the restart facts.
@@ -182,6 +183,38 @@ test("inbox list prints and filters the runtime item", async (t) => {
   assert.equal(codex.restart.attempts.length, 3);
   const text = await o.h.run(["runtime", "list", "--connection", "ro"]);
   assert.match(text.out, /Unavailable \(retries exhausted\)/);
+});
+
+test("inbox list filters and renders a result review request", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s } = o;
+  await seedOwnQuestion(s.f);
+  const task = await seedReviewTask(s.f, "CLI review");
+  task.result("Toolbar behind a flag", undefined, undefined, {
+    decision: "Should the new toolbar ship behind the beta flag?",
+    recommendation: "Ship behind the flag.",
+  });
+  const r = await cli("ro", ["inbox", "list", "--kind", "result-review"]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const [item, ...others] = r.json().data.items;
+  assert.equal(others.length, 0);
+  assert.equal(item.kind, "result-review");
+  assert.equal(item.taskId, task.taskId);
+  const human = await o.h.run([
+    "inbox",
+    "list",
+    "--kind",
+    "result-review",
+    "--connection",
+    "ro",
+  ]);
+  assert.match(
+    human.out,
+    new RegExp(
+      `result-review\\s+${task.taskId}\\s+\\(cab task get ${task.taskId}\\)`,
+    ),
+  );
+  assert.match(human.out, /Result needs your review\s+Review result/);
 });
 
 test("question get and answer require every answer explicitly and record once", async (t) => {

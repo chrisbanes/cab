@@ -1386,12 +1386,18 @@ test("every Inbox kind has an alert key and a payload", () => {
   const samples = {
     question: { ...intervention("question"), kind: "question", id: "q1" },
     approval: { ...intervention("approval"), kind: "approval", id: "a1" },
+    "result-review": {
+      ...intervention("result-review"),
+      kind: "result-review",
+      id: "r1",
+    },
     intervention: intervention("execution-uncertain"),
     runtime: runtimeItem("codex", 7),
   } as const satisfies Record<InboxItem["kind"], InboxItem>;
   assert.deepEqual(Object.values(samples).map(inboxAlertKey), [
     "q1",
     "a1",
+    "r1",
     `intervention:${taskId}:execution-uncertain`,
     "runtime:codex:7",
   ]);
@@ -1399,11 +1405,16 @@ test("every Inbox kind has an alert key and a payload", () => {
   assert.deepEqual(
     all.map((item) => pushPayload(item, all).title),
     [
-      "Question in Relay: 3 waiting",
-      "Approval in Relay: 3 waiting",
-      "Intervention in Relay: 3 waiting",
+      "Question in Relay: 4 waiting",
+      "Approval in Relay: 4 waiting",
+      "Result review in Relay: 4 waiting",
+      "Intervention in Relay: 4 waiting",
       "Codex runtime unavailable",
     ],
+  );
+  assert.equal(
+    pushPayload(samples["result-review"], all).url,
+    `/inbox?task=${taskId}&request=r1`,
   );
   // Long names are cut and control characters never reach a title.
   assert.equal(
@@ -1411,11 +1422,11 @@ test("every Inbox kind has an alert key and a payload", () => {
       { ...samples.question, projectName: `${"x".repeat(80)}\n!` },
       all,
     ).title,
-    `Question in ${"x".repeat(64)}: 3 waiting`,
+    `Question in ${"x".repeat(64)}: 4 waiting`,
   );
   assert.equal(
     pushPayload({ ...samples.question, projectName: null }, all).title,
-    "Question in a project: 3 waiting",
+    "Question in a project: 4 waiting",
   );
 });
 

@@ -13,6 +13,7 @@ export const attentionCodes = [
   "external-action-uncertain",
   "approval",
   "question",
+  "result-review",
   "unresolved-result",
   "completion-rejected",
   "question-delivery",
@@ -69,6 +70,12 @@ export const attentionNext: Record<
     reason: "Question needs an answer",
     inboxAction: "Answer question",
   },
+  "result-review": {
+    operator: true,
+    action: "review result",
+    reason: "Result needs your review",
+    inboxAction: "Review result",
+  },
   "unresolved-result": {
     operator: true,
     action: "resolve result destination",
@@ -117,14 +124,15 @@ export function nextAttention(
 }
 
 /**
- * The operator-owned code an Inbox intervention stands for. Questions and approvals have their
- * own items, and cab-owned codes raise none.
+ * The operator-owned code an Inbox intervention stands for. Questions, approvals and result
+ * reviews have their own items, and cab-owned codes raise none.
  */
 export const interventionCode = (codes: readonly AttentionCode[]) =>
   attentionCodes.find(
     (c) =>
       c !== "question" &&
       c !== "approval" &&
+      c !== "result-review" &&
       attentionNext[c].operator &&
       codes.includes(c),
   );
@@ -135,17 +143,20 @@ export const kindLabels: Record<InboxItem["kind"], string> = {
   approval: "Approval",
   intervention: "Intervention",
   runtime: "Runtime",
+  "result-review": "Result review",
 };
 
 /**
  * The identity of one alert: what the Inbox shows, what a push notification is tagged with and
  * what the page keeps open. A question or approval is its interaction (a later delivery code is
- * not new), an intervention is its task and problem, and a runtime is one exhaustion episode.
+ * not new), a result review is its request, an intervention is its task and problem, and a
+ * runtime is one exhaustion episode.
  */
 export function inboxAlertKey(item: InboxItem): string {
   switch (item.kind) {
     case "question":
     case "approval":
+    case "result-review":
       return item.id;
     case "intervention":
       return `${item.id}:${item.attentionCode ?? ""}`;
@@ -168,6 +179,7 @@ export function inboxSelectionHref(
     case "question":
     case "approval":
     case "intervention":
+    case "result-review":
       return `/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`;
     case "runtime":
       return `/inbox?request=${encodeURIComponent(item.id)}`;

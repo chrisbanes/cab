@@ -3119,6 +3119,14 @@ export class OperatorApi {
           this.service.inboxLifecycle().required(i.interactionId),
       ).length,
     );
+    add(
+      "result-review",
+      view.resultReviews.filter(
+        (r) =>
+          r.status === "pending" &&
+          this.service.inboxLifecycle().required(r.reviewId),
+      ).length,
+    );
     add("unresolved-result", view.unresolvedResults.length);
     add(
       "completion-rejected",
@@ -3855,7 +3863,13 @@ export class OperatorApi {
           .pipe(z.number().max(100))
           .optional(),
         kind: z
-          .enum(["question", "approval", "intervention", "runtime"])
+          .enum([
+            "question",
+            "approval",
+            "intervention",
+            "runtime",
+            "result-review",
+          ])
           .optional(),
         status: z
           .enum(["actionable", "resolved", "dismissed"])
@@ -3971,6 +3985,36 @@ export class OperatorApi {
             attentionCode: delivering ? "question-delivery" : null,
             destination: `/tasks/${taskId}?request=${q.interactionId}`,
             conversation: `/tasks/${taskId}?assignment=${q.requestingAssignmentId}`,
+          });
+        }
+        for (const r of view.resultReviews) {
+          const row = this.service.inboxLifecycle().get(r.reviewId);
+          if (!row) continue;
+          const requester = this.domain()
+            .assignments(taskId)
+            .find((a) => a.id === r.requestingAssignmentId);
+          items.push({
+            ...base,
+            id: r.reviewId,
+            lifecycle: this.inboxLifecycleView(r.reviewId, excluded),
+            dismissible: row.status === "actionable",
+            headline: this.safe(r.decision, excluded),
+            kind: "result-review",
+            urgency: 1,
+            createdAt: r.createdAt * 1000, // coordination SQLite timestamps are unix seconds.
+            requestingAssignmentId: r.requestingAssignmentId,
+            requesterName: requester
+              ? this.safe(
+                  this.domain().profile(String(requester.profileId)).name,
+                  excluded,
+                )
+              : null,
+            interactionId: null,
+            revision: r.revision,
+            reason: attentionNext["result-review"].reason,
+            attentionCode: null,
+            destination: `/tasks/${taskId}?request=${r.reviewId}`,
+            conversation: `/tasks/${taskId}?assignment=${r.requestingAssignmentId}`,
           });
         }
         if (this.requireTask(taskId).version !== task.version)
@@ -4494,6 +4538,34 @@ export class OperatorApi {
       }),
       questions: view.questions.map((i) => this.interaction(i, excluded)),
       approvals: view.approvals.map((i) => this.interaction(i, excluded)),
+      resultReviews: view.resultReviews.map((r) => ({
+        lifecycle: this.inboxLifecycleView(r.reviewId, excluded),
+        reviewId: r.reviewId,
+        resultId: r.resultId,
+        workId: r.workId,
+        workRevision: r.workRevision,
+        requestingAssignmentId: r.requestingAssignmentId,
+        decision: this.safe(r.decision, excluded),
+        recommendation: this.safe(r.recommendation, excluded),
+        uncertainties:
+          r.uncertainties?.map((u) => this.safe(u, excluded)) ?? null,
+        status: r.status,
+        revision: r.revision,
+        response: r.response && {
+          ...r.response,
+          message:
+            r.response.message === null
+              ? null
+              : this.safe(r.response.message, excluded),
+        },
+        supersededByResultId: r.supersededByResultId,
+        withdrawReason:
+          r.withdrawReason === null
+            ? null
+            : this.safe(r.withdrawReason, excluded),
+        createdAt: r.createdAt * 1000, // coordination SQLite timestamps are unix seconds.
+        updatedAt: r.updatedAt * 1000,
+      })),
       completionRequests: view.completionRequests.map((c) =>
         this.completion(c, view),
       ),
@@ -10620,6 +10692,25 @@ export class OperatorApi {
         const { type: _type, ...comment } = c;
         const posted = await view.postTaskComment(comment);
         return commandReceiptSchema.parse({ ...posted, recorded: true });
+      }
+      if (c.type === "result-review.respond") {
+        const { type: _type, ...input } = c;
+        const { review, event } = await view.respondToResultReview(input);
+        return commandReceiptSchema.parse({
+          kind: "result-review",
+          key: c.key,
+          recorded: true,
+          taskId: c.taskId,
+          reviewId: review.reviewId,
+          revision: review.revision,
+          status: "responded",
+          response: c.response,
+          eventId: event?.eventId ?? null,
+          recipientAssignmentId: event?.recipientAssignmentId ?? null,
+          ...(event?.eventType === "assignment-follow-up"
+            ? { resumedLead: true }
+            : {}),
+        });
       }
       const { type, ...submitted } = c;
       let command: typeof submitted = submitted;

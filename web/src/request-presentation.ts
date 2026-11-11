@@ -1,5 +1,6 @@
 import {
   CircleQuestionMark,
+  ClipboardCheck,
   Diamond,
   ServerOff,
   TriangleAlert,
@@ -19,6 +20,7 @@ export const requestKindIcons: Record<InboxItem["kind"], LucideIcon> = {
   approval: Diamond,
   intervention: TriangleAlert,
   runtime: ServerOff,
+  "result-review": ClipboardCheck,
 };
 type Request =
   | Pick<
