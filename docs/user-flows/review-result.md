@@ -101,7 +101,7 @@ The operator CLI is outside the budget: it has no screens.
   that result and takes no response. A response sent from a page that had not refreshed is
   refused with "This review is no longer current"; nothing is recorded and the unsent draft
   stays visible. Feedback the lead cannot receive now is refused while the review stays
-  pending; the draft stays in the form, and Mark reviewed without a note still records it.
+  pending; the draft stays in the form, and clearing the note then Mark reviewed still records it.
 - A draft in the Inbox survives moving to another request and back; dismissing a review
   records no response, and Restore returns it.
 - A review the lead withdrew reads "Withdrawn by the lead" with its reason; one whose task

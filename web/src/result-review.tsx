@@ -29,8 +29,8 @@ type Outcome =
       message: string;
       details?: OutcomeField[];
     }
-  /** Refused: worded once the refreshed review shows why. */
-  | { kind: "refused" };
+  /** Refused: worded once a newer task read shows why. */
+  | { kind: "refused"; against: TaskRead["data"] };
 
 /**
  * The decision-focused review of one result: the decision and the lead's recommendation, what
@@ -121,7 +121,7 @@ export function ResultReviewPanel({
         });
       } else {
         setPending(null);
-        setOutcome({ kind: "refused" });
+        setOutcome({ kind: "refused", against: task });
         onChanged();
       }
     } finally {
@@ -287,17 +287,22 @@ export function ResultReviewPanel({
         <ActionOutcome
           tone="error"
           focus
-          {...(review.status === "pending"
+          {...(outcome.against === task
             ? {
                 title: "The response was not recorded.",
-                message:
-                  "The lead cannot receive a note or feedback now, or this view is out of date. Your draft is kept; Mark reviewed without a note records the review without sending anything.",
+                message: "Checking the review's current state…",
               }
-            : {
-                title: "This review is no longer current.",
-                message:
-                  "Nothing was recorded. Your draft is kept below; check the review's state before responding.",
-              })}
+            : review.status === "pending"
+              ? {
+                  title: "The response was not recorded.",
+                  message:
+                    "The lead cannot receive a note or feedback now. Your draft is kept; to record the review without sending anything, clear the note, then Mark reviewed.",
+                }
+              : {
+                  title: "This review is no longer current.",
+                  message:
+                    "Nothing was recorded. Your draft is kept below; check the review's state before responding.",
+                })}
         />
       )}
       <p className="metadata">
