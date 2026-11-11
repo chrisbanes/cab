@@ -157,6 +157,7 @@ import {
 } from "./task-tabs.js";
 import {
   assignmentRow,
+  blockedLeadDelegates,
   briefParts,
   criterionRows,
   deliveryApplies,
@@ -165,7 +166,12 @@ import {
   issueCommentNote,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
-import { ApplyInstructions, TaskExecution } from "./task-execution.js";
+import {
+  ApplyInstructions,
+  TaskExecution,
+  WithdrawDelegate,
+  WithdrawalRecord,
+} from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
 import { WaitReasons } from "./wait-reasons.js";
 
@@ -1753,10 +1759,23 @@ export function TaskWorkspace({
           <SkipSandboxLine generation={a.executionGeneration} />
           <PolicyDisclosure harness={execution.harness} workspace={workspace} />
         </details>
-        <ApplyInstructions
+        {a.state !== "withdrawn" && (
+          <ApplyInstructions
+            readOnly={projectReadOnly}
+            assignment={a}
+            projectId={data.task.projectId}
+            taskId={taskId}
+            client={client}
+            session={session}
+            onChanged={refreshAll}
+          />
+        )}
+        {a.withdrawal?.record && (
+          <WithdrawalRecord record={a.withdrawal.record} />
+        )}
+        <WithdrawDelegate
           readOnly={projectReadOnly}
           assignment={a}
-          projectId={data.task.projectId}
           taskId={taskId}
           client={client}
           session={session}
@@ -2048,6 +2067,7 @@ export function TaskWorkspace({
           : []),
       ].join(" · ")
     : "";
+  const blockedDelegates = blockedLeadDelegates(data);
   const assignmentsSummary = data.assignments.length
     ? data.assignments
         .map((a) => {
@@ -3146,6 +3166,32 @@ export function TaskWorkspace({
                   </section>
                 )}
                 <section id="assignments">
+                  {blockedDelegates.length > 0 && (
+                    <div data-blocked-lead className="body">
+                      <p role="status">
+                        The lead is waiting on delegates that will not finish.
+                      </p>
+                      <ul>
+                        {blockedDelegates.map((a) => {
+                          const row = assignmentRow(a, data.assignments);
+                          return (
+                            <li key={a.assignmentId}>
+                              {row.title} ({row.id} · {row.state}; no live
+                              execution){" "}
+                              <WithdrawDelegate
+                                readOnly={projectReadOnly}
+                                assignment={a}
+                                taskId={taskId}
+                                client={client}
+                                session={session}
+                                onChanged={refreshAll}
+                              />
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
                   <details
                     className="overview-disclosure"
                     {...overviewCard("assignments")}

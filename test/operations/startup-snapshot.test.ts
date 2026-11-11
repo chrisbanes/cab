@@ -855,6 +855,44 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
+/** Level 29 allowed the `withdrawn` assignment state and added the withdrawal tables. */
+function undoLevel29(db: DatabaseSync) {
+  db.exec(
+    "DROP TABLE assignment_withdrawals; DROP TABLE coordination_undeliverable_inbox_events",
+  );
+  rebuildAssignmentCheck(
+    db,
+    "CHECK(state IN ('pending','running','completed','held','withdrawn'))",
+    "CHECK(state IN ('pending','running','completed','held'))",
+  );
+}
+
+/** Rebuild `domain_assignments` with a changed CHECK, keeping its exact SQL, rows and rowids. */
+function rebuildAssignmentCheck(db: DatabaseSync, from: string, to: string) {
+  const { sql } = db
+    .prepare(
+      "SELECT sql FROM sqlite_schema WHERE type='table' AND name='domain_assignments'",
+    )
+    .get() as { sql: string };
+  assert.ok(sql.includes(from));
+  const columns = (
+    db.prepare("PRAGMA table_info(domain_assignments)").all() as Array<{
+      name: string;
+    }>
+  )
+    .map(({ name }) => name)
+    .join(", ");
+  db.exec(`PRAGMA foreign_keys = OFF;
+    CREATE TEMP TABLE assignments_copy AS SELECT rowid AS copiedRowid, ${columns} FROM domain_assignments;
+    DROP TABLE domain_assignments;
+    ${sql.replace(from, to)};
+    INSERT INTO domain_assignments (rowid, ${columns})
+      SELECT copiedRowid, ${columns} FROM temp.assignments_copy;
+    DROP TABLE temp.assignments_copy;
+    CREATE INDEX domain_assignments_taskId ON domain_assignments(taskId);
+    PRAGMA foreign_keys = ON;`);
+}
+
 /** Reconstruct the previous schema without changing its retained rows. */
 function restoreRequestSchema21(db: DatabaseSync) {
   db.exec(`DROP TABLE assignment_request_refusals;
@@ -879,6 +917,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Assignments may be withdrawn; withdrawal records and undeliverable inbox events.
+  29: "54aa9d42e9f21c6ac971dad9cbfac5b7a18404eaab06cc85bb85e365ecd57318",
   // Results record workspace state; retained result evidence tables are dropped.
   28: "7534f97c295597a77a9b7fd29640d7270581f03ba55d2def481937ad24aae8dd",
   // Data only: reversible delivery grants switch from approval to allow.
@@ -1004,6 +1044,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
           "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
         )
         .run(intentId);
+      undoLevel29(before);
       restoreRequestSchema21(before);
       restoreDraftingSchema25(before);
       before.exec(
@@ -1116,6 +1157,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     await run(dirs.data, 20);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
+    undoLevel29(before);
     restoreRequestSchema21(before);
     restoreDraftingSchema25(before);
     before.exec(
@@ -1349,6 +1391,7 @@ test("Inbox lifecycle migration snapshots level 22 and initializes both tables w
     await run(dirs.data, 22);
     const database = join(dirs.data, "standalone.sqlite"),
       before = new DatabaseSync(database);
+    undoLevel29(before);
     before.exec(
       `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
@@ -1382,6 +1425,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
   try {
     await run(dirs.data, 21);
     const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    undoLevel29(db);
     restoreRequestSchema21(db);
     restoreDraftingSchema25(db);
     db.exec(
@@ -1419,6 +1463,164 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
     );
     current.close();
     await assert.rejects(run(dirs.data, 21), refusal("startup-schema-newer"));
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("withdrawn-state migration rebuilds level 28 assignments and keeps every row", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 28);
+    const database = join(dirs.data, "standalone.sqlite");
+    const before = new DatabaseSync(database);
+    const projectId = randomUUID(),
+      taskId = randomUUID(),
+      profileId = randomUUID(),
+      children = [randomUUID(), randomUUID(), randomUUID()];
+    try {
+      undoLevel29(before);
+      const domain = new DomainStore(before);
+      domain.execute({
+        type: "profile.create",
+        actor: "operator",
+        key: randomUUID(),
+        profileId,
+        name: "Retained lead",
+        instructions: "Lead",
+        capabilities: "delegate",
+      });
+      domain.execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        name: "Retained project",
+        leadProfileId: profileId,
+      });
+      domain.execute({
+        type: "task.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        taskId,
+        title: "Retained task",
+        outcome: "Deliver",
+        ready: true,
+      });
+      const lead = String(domain.ensureLeadAssignment(taskId)?.id);
+      let requester = lead;
+      for (const id of children) {
+        domain.execute({
+          type: "assignment.create",
+          actor: "agent",
+          key: randomUUID(),
+          projectId,
+          taskId,
+          assignmentId: id,
+          profileId,
+          brief: "Retained delegate",
+          resultDestination: "requester",
+          requesterAssignmentId: requester,
+        });
+        requester = id;
+      }
+      before.exec(`UPDATE domain_assignments SET state = 'running' WHERE id = '${children[0]}';
+        UPDATE domain_assignments SET state = 'completed' WHERE id = '${children[1]}';
+        UPDATE domain_assignments SET state = 'held' WHERE id = '${children[2]}';`);
+    } finally {
+      before.close();
+    }
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[28]);
+    const rows = (file: string) => {
+      const db = new DatabaseSync(file, { readOnly: true });
+      try {
+        return db
+          .prepare(
+            "SELECT rowid AS rowid, * FROM domain_assignments ORDER BY rowid",
+          )
+          .all();
+      } finally {
+        db.close();
+      }
+    };
+    const retained = rows(database);
+    assert.deepEqual(
+      retained.map((row) => row.state),
+      ["pending", "running", "completed", "held"],
+    );
+    await run(dirs.data);
+    const snapshots = startupSnapshots(dirs.snapshots);
+    assert.equal(snapshots.length, 1);
+    const snapshot = join(dirs.snapshots, snapshots[0]!);
+    await verifySnapshot(snapshot);
+    assert.equal(schemaDigest(snapshot), SCHEMA_PINS[28]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    assert.deepEqual(rows(database), retained);
+    const current = new DatabaseSync(database);
+    try {
+      assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
+      assert.ok(
+        current
+          .prepare(
+            "SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = 'domain_assignments_taskId'",
+          )
+          .get(),
+      );
+      current
+        .prepare(
+          "UPDATE domain_assignments SET state = 'withdrawn' WHERE id = ?",
+        )
+        .run(children[0]!);
+      assert.throws(
+        () =>
+          current
+            .prepare(
+              "UPDATE domain_assignments SET state = 'cancelled' WHERE id = ?",
+            )
+            .run(children[0]!),
+        /CHECK constraint failed/,
+      );
+    } finally {
+      current.close();
+    }
+    const bytes = readFileSync(database);
+    await assert.rejects(run(dirs.data, 28), refusal("startup-schema-newer"));
+    assert.deepEqual(readFileSync(database), bytes);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("withdrawn-state migration refuses an assignment schema it does not recognize", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 28);
+    const database = join(dirs.data, "standalone.sqlite");
+    const before = new DatabaseSync(database);
+    undoLevel29(before);
+    rebuildAssignmentCheck(
+      before,
+      "CHECK(state IN ('pending','running','completed','held'))",
+      "CHECK(state IN ('pending','running','completed','held','paused'))",
+    );
+    before.close();
+    await assert.rejects(run(dirs.data), /Unrecognized assignment schema/);
+    const after = new DatabaseSync(database, { readOnly: true });
+    try {
+      assert.match(
+        (
+          after
+            .prepare(
+              "SELECT sql FROM sqlite_schema WHERE name = 'domain_assignments'",
+            )
+            .get() as { sql: string }
+        ).sql,
+        /'paused'\)\)/,
+      );
+    } finally {
+      after.close();
+    }
   } finally {
     dirs.cleanup();
   }

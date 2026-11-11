@@ -362,7 +362,8 @@ export function stopConsequences(
     (a) =>
       a.assignmentId !== data.leadAssignmentId &&
       a.state !== "completed" &&
-      a.state !== "cancelled",
+      a.state !== "cancelled" &&
+      a.state !== "withdrawn",
   ).length;
   const affected = data.lead
     ? `${data.lead.name ?? "Project lead"} (lead) and ${delegated} delegated ${delegated === 1 ? "assignment is" : "assignments are"} affected.`
@@ -376,7 +377,24 @@ const assignmentStates = {
   completed: "Completed",
   held: "Held",
   cancelled: "Cancelled",
+  withdrawn: "Withdrawn",
 } satisfies Record<TaskRead["data"]["assignments"][number]["state"], string>;
+
+/**
+ * The lead's own delegates that hold it back and that the operator can withdraw now:
+ * unfinished, with no live, held or open work of their own.
+ */
+export function blockedLeadDelegates(
+  data: Pick<Data, "leadAssignmentId" | "assignments">,
+): Assignment[] {
+  return data.assignments.filter(
+    (a) =>
+      a.assignmentId !== data.leadAssignmentId &&
+      a.requesterAssignmentId === data.leadAssignmentId &&
+      (a.state === "pending" || a.state === "running") &&
+      a.withdrawal?.available === true,
+  );
+}
 
 /** A compact delegation row: responsibility, short id, requester → result destination, wait. */
 export function assignmentRow(a: Assignment, all: readonly Assignment[]) {

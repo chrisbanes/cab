@@ -1403,6 +1403,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
       "cab_external_action",
       "cab_register_pr",
       "cab_delegate",
+      "cab_withdraw_delegate",
       "cab_report_result",
       "cab_ask_question",
       "cab_request_approval",

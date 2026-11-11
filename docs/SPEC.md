@@ -823,6 +823,47 @@ Other held or completed assignments are not implicitly revived; resolve the hold
 create explicit follow-up/recovery first. Legacy inbox events do not dispatch a
 completed assignment.
 
+#### Delegate withdrawal
+
+A delegate that will never finish, such as one whose interrupted turn was recovered
+with no successor or whose request was refused before it started and was then
+replaced, would otherwise hold back its lead for good. Its requesting lead
+(`cab_withdraw_delegate`, with the assignment ID and a reason) or the operator
+(`cab assignment withdraw ASSIGNMENT_ID --reason TEXT`, or **Withdraw** on the task
+view, which asks for a reason and confirmation) can withdraw it. A lead can withdraw
+only a delegate it requested; nobody can withdraw a task lead or an assignment no
+other assignment requested.
+
+Withdrawal is refused, naming the condition and its way out, while the delegate has
+a live or queued execution (wait for its result); a held or uncertain execution, or
+the task has an ownership or recovery hold (`cab recovery get` and
+`cab recovery release`); an open question or approval it asked for (answer or
+decline it in the Inbox); or unfinished delegates of its own (withdraw or finish
+those first). An operator Stop alone does not refuse it. Withdrawal never releases a
+hold or changes an execution, conversation or workspace.
+
+A withdrawn delegate moves to the terminal state `withdrawn`, produces no result and
+counts as finished for its lead's report, its lead's outstanding work and task
+completion. Its record keeps who withdrew it (operator or lead), when and why, and
+the task view and `cab assignment get`/`history` show it. An operator withdrawal gives the requesting assignment an Inbox event naming the delegate
+and the reason. A completed requester is never revived by an event, so the task lead gets
+it instead, and when the lead has completed too the event is kept as undeliverable history
+beside the withdrawal record. The lead's own withdrawal sends none. Undelivered inbox events addressed to the delegate become
+undeliverable and no longer wait for delivery. Its thread and workspace stay as
+history, and any later callback from its conversation, including
+`cab_report_result`, is refused as not bound to current work.
+
+Withdrawal is intentionally irreversible: there is no restore and no follow-up on a
+withdrawn assignment. A completed assignment whose results go, directly or through
+the chain of assignments its results are reported to, to a withdrawn delegate cannot be followed up or resumed by a comment
+either, since its next result would have nowhere to go; inbox events already waiting
+for that subtree become undeliverable at withdrawal. To redo the work, the lead
+delegates again.
+
+A lead's report refused while delegates are unfinished lists each blocking
+delegate with its short ID, state and way out, saying "still running" only for one
+with a live execution.
+
 A retained canonical initial assignment request positively refused for captured task or
 assignment revision mismatch before runtime admission can be continued by posting a
 fresh operator message through the existing task inbox. The original held request,
@@ -2156,6 +2197,10 @@ evidence together:
   project lead identifiable and distinguish assignments sharing an agent. Use
   durable coordination and runtime observations rather than inferring ownership,
   waiting or completion from conversation text. Unknown state stays explicit.
+  When the lead is held back by delegates that can be
+  [withdrawn](#delegate-withdrawal), the task view says the lead is waiting on
+  delegates that will not finish and offers Withdraw for each; a withdrawn
+  assignment reads Withdrawn with its record.
 - **Compact progress across tasks.** Summarize the current work state, known wait
   reason and latest available result using source-faithful text. Keep ordinary
   progress and dependency waiting separate from decisions needing the operator.
@@ -2631,7 +2676,8 @@ exact references and anchors.
   on its next eligible turn), `resume` (a completed assignment resumes as the same
   assignment through an operator follow-up) or `unavailable` with a bounded reason
   code (`task-closed`, `held`, `cancelled`, `no-resumable-result`,
-  `already-followed-up`, `unresolved-destination`). A completed delegate also needs
+  `already-followed-up`, `unresolved-destination`, `recipient-withdrawn`). A completed
+  delegate also needs
   a resolved result destination, as an agent follow-up does. The preview is
   advisory; the service decides again at commit. Absent `commentRecipients` means the
   service has no shared comments, and a client must not fall back to another send.

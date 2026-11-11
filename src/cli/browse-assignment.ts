@@ -133,6 +133,15 @@ const revisions = (area: "project" | "profile"): BrowseCommand => ({
   },
 });
 
+/** Who withdrew the assignment, when and why. */
+function withdrawalLine(record: {
+  actor: "operator" | "lead";
+  reason: string | null;
+  withdrawnAt: number;
+}): string {
+  return `Withdrawn by ${record.actor === "lead" ? "its lead" : "the operator"} at ${isoTime(record.withdrawnAt)}: ${record.reason === null ? "[reason withheld]" : oneLine(record.reason, 400)}. Final.`;
+}
+
 const assignmentGet: BrowseCommand = {
   usage: "assignment get ASSIGNMENT_ID",
   positionals: 1,
@@ -205,6 +214,14 @@ const assignmentGet: BrowseCommand = {
             ]
           : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),
+        ...(a.withdrawal?.record
+          ? ["", withdrawalLine(a.withdrawal.record)]
+          : a.withdrawal?.available
+            ? [
+                "",
+                `Withdrawable: it holds back its lead and has no live work. cab assignment withdraw ${a.assignmentId} --reason TEXT (final).`,
+              ]
+            : []),
         ...(a.state === "held" || Object.values(a.execution.holds).some(Boolean)
           ? ["", `Recovery: cab recovery get ${a.assignmentId}`]
           : []),
@@ -287,6 +304,7 @@ const assignmentHistory: BrowseCommand = {
           (o) =>
             `Turn ${o.turnId} (work ${o.workId}) omitted: ${o.reason} at ${isoTime(o.createdAt)}`,
         ),
+        ...(page.withdrawal ? [withdrawalLine(page.withdrawal)] : []),
       ].join("\n"),
     });
   },

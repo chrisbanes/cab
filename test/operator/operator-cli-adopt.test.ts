@@ -344,3 +344,123 @@ test("adopting current instructions on a completed lead keeps the follow-up", as
     Number(o.d.profile(profileId).version),
   );
 });
+
+test("assignment withdraw ends an idle delegate with a reason, once, and refuses what it cannot end", async (t) => {
+  const { s, seed, h, cli, d } = await setup(t);
+  const delegate = randomUUID();
+  d.execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: seed.projectA,
+    taskId: seed.taskA,
+    assignmentId: delegate,
+    profileId: seed.profileId,
+    brief: "Delegated work",
+    resultDestination: "requester",
+    requesterAssignmentId: seed.assignmentA,
+  });
+  const unchanged = databaseDigest(s.f);
+  for (const reason of [[], ["--reason", "  "]]) {
+    const r = await cli("rw", ["assignment", "withdraw", delegate, ...reason]);
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.err + r.out, /--reason TEXT is required/);
+  }
+  let r = await cli("ro", [
+    "assignment",
+    "withdraw",
+    delegate,
+    "--reason",
+    "Stranded",
+  ]);
+  assert.equal(r.code, 3, r.out);
+  r = await cli("rw", [
+    "assignment",
+    "withdraw",
+    seed.assignmentA,
+    "--reason",
+    "Stranded",
+  ]);
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.err + r.out, /task lead's assignment cannot be withdrawn/);
+  assert.equal(databaseDigest(s.f), unchanged);
+
+  const args = [
+    "assignment",
+    "withdraw",
+    delegate,
+    "--reason",
+    "Replaced by a new delegate",
+  ];
+  const human = await h.run([...args, "--connection", "rw"]);
+  assert.equal(human.code, 0, human.err + human.out);
+  assert.match(human.out, /Withdrew the delegate \(request /);
+  assert.match(human.out, /Reason:\s+Replaced by a new delegate/);
+  assert.match(human.out, /Withdrawal is final.*the lead delegates again/);
+  assert.equal(d.assignment(delegate).state, "withdrawn");
+  r = await cli("rw", [...args, "--request-id", randomUUID()]);
+  // A new request for a withdrawn delegate is refused before sending.
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.err + r.out, /already completed or was withdrawn/);
+
+  r = await cli("ro", ["assignment", "get", delegate]);
+  assert.equal(r.json().data.state, "withdrawn");
+  assert.equal(r.json().data.withdrawal.record.actor, "operator");
+  const get = await h.run([
+    "assignment",
+    "get",
+    delegate,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(
+    get.out,
+    /Withdrawn by the operator at .*: Replaced by a new delegate\. Final\./,
+  );
+  const history = await h.run([
+    "assignment",
+    "history",
+    delegate,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(history.out, /Withdrawn by the operator at /);
+});
+
+test("assignment withdraw replays its receipt for the same request id", async (t) => {
+  const { seed, cli, d } = await setup(t);
+  const delegate = randomUUID();
+  d.execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: seed.projectA,
+    taskId: seed.taskA,
+    assignmentId: delegate,
+    profileId: seed.profileId,
+    brief: "Delegated work",
+    resultDestination: "requester",
+    requesterAssignmentId: seed.assignmentA,
+  });
+  const key = randomUUID();
+  const args = [
+    "assignment",
+    "withdraw",
+    delegate,
+    "--reason",
+    "Stranded",
+    "--request-id",
+    key,
+  ];
+  let r = await cli("rw", args);
+  assert.equal(r.code, 0, r.err + r.out);
+  const receipt = r.json().data.receipt;
+  assert.equal(receipt.kind, "assignment-withdraw");
+  assert.equal(receipt.leadAssignmentId, seed.assignmentA);
+  assert.equal(r.json().data.effect, "saved");
+  const version = Number(d.assignment(delegate).version);
+  r = await cli("rw", args);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.deepEqual(r.json().data.receipt, receipt);
+  assert.equal(Number(d.assignment(delegate).version), version);
+});

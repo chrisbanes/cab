@@ -2240,6 +2240,28 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "assignment_withdrawals",
+      values: {
+        assignmentId: i.assignmentId,
+        taskId: i.taskId,
+        actor: "operator",
+        leadAssignmentId: i.assignmentId,
+        priorState: "running",
+        reason: "fixture-reason",
+        withdrawnAt: 1,
+      },
+    },
+    {
+      shared: false,
+      table: "coordination_undeliverable_inbox_events",
+      values: {
+        eventId: i.eventId,
+        assignmentId: i.assignmentId,
+        reason: "delegate-withdrawn",
+      },
+    },
+    {
+      shared: false,
       table: "coordination_completion_requests",
       values: {
         requestId: i.completionId,

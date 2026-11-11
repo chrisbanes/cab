@@ -50,6 +50,17 @@ import {
   type RuntimeDeliveryCaller,
 } from "./delivery.js";
 import { transaction, type Database } from "./store.js";
+import {
+  DelegateWithdrawalRefusedError,
+  DelegatesUnfinishedError,
+  delegateBlockerCodes,
+  withdrawalReasonLimit,
+  type AssignmentWithdrawal,
+  type DelegateBlocker,
+  type DelegateStatus,
+  type DelegateWithdrawalRefusal,
+  withdrawalRefusalText,
+} from "./delegate-withdrawal.js";
 import { LeadTextStore } from "./lead-text.js";
 import { LocalReviewStore } from "./local-review.js";
 import {
@@ -186,6 +197,33 @@ const completionCallSchema = z
       .strict(),
   })
   .strict();
+const withdrawCallSchema = z
+  .object({
+    ...toolIdentity,
+    tool: z.literal("cab_withdraw_delegate"),
+    arguments: z
+      .object({
+        assignmentId: uuid,
+        reason: z.string().trim().min(1).max(withdrawalReasonLimit),
+      })
+      .strict(),
+  })
+  .strict();
+const withdrawalInputSchema = z
+  .object({
+    assignmentId: uuid,
+    reason: z.string().trim().min(1).max(withdrawalReasonLimit),
+    actor: z.enum(["operator", "lead"]),
+    requesterAssignmentId: uuid.optional(),
+    expectedVersion: z.number().int().positive().optional(),
+  })
+  .strict();
+const withdrawnRecipientRefusal =
+  "Follow-up unavailable: this assignment reports to a withdrawn delegate, so its next result would have nowhere to go. Delegate the work again.";
+/** Events addressed to a withdrawn delegate stay as history and no longer wait for delivery. */
+const deliverable = (alias: string) =>
+  `NOT EXISTS (SELECT 1 FROM coordination_undeliverable_inbox_events undeliverable
+    WHERE undeliverable.eventId = ${alias}.eventId)`;
 const operatorCommandKey = z.string().uuid();
 const answerSchema = z
   .object({
@@ -574,6 +612,7 @@ export class CoordinationStore {
     isNeverAdmittedRefusedAssignmentWork?: (workId: string) => boolean,
     private readonly reconciledAssignmentProof?: (
       workId: string,
+      options?: { allowOperatorStop?: boolean },
     ) => ReconciledAssignmentProof | undefined,
     private readonly refusedBeforeStart?: (workId: string) => boolean,
   ) {
@@ -971,6 +1010,20 @@ export class CoordinationStore {
         recipientAssignmentId TEXT NOT NULL,
         eventId TEXT NOT NULL UNIQUE REFERENCES coordination_inbox_events(eventId),
         PRIMARY KEY(nodeId, generation, recipientAssignmentId)
+      );
+      CREATE TABLE IF NOT EXISTS assignment_withdrawals (
+        assignmentId TEXT PRIMARY KEY REFERENCES domain_assignments(id),
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        actor TEXT NOT NULL CHECK(actor IN ('operator','lead')),
+        leadAssignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
+        priorState TEXT NOT NULL CHECK(priorState IN ('pending','running')),
+        reason TEXT NOT NULL,
+        withdrawnAt INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS coordination_undeliverable_inbox_events (
+        eventId TEXT PRIMARY KEY REFERENCES coordination_inbox_events(eventId),
+        assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
+        reason TEXT NOT NULL CHECK(reason IN ('delegate-withdrawn'))
       );`);
       this.db.exec(taskCommentSchemaSql);
       const interactionColumns = this.db
@@ -1247,19 +1300,21 @@ export class CoordinationStore {
       const binding = this.currentBinding(call.threadId, call.turnId);
       if (!binding)
         throw new Error("Coordination callback is not bound to current work");
-      const unfinishedChild = this.one(
-        `SELECT 1 FROM domain_assignments
-        WHERE requesterAssignmentId = ? AND state <> 'completed'
-        LIMIT 1`,
-        String(binding.assignmentId),
-      );
-      if (unfinishedChild)
-        throw new Error(
-          "Assignment cannot report while delegated assignments are not completed",
-        );
+      const unfinishedChildren = (
+        this.db
+          .prepare(
+            `SELECT id FROM domain_assignments
+            WHERE requesterAssignmentId = ? AND state NOT IN ('completed','withdrawn')
+            ORDER BY rowid`,
+          )
+          .all(String(binding.assignmentId)) as Array<{ id: string }>
+      ).map(({ id }) => this.delegateStatus(id));
+      if (unfinishedChildren.length)
+        throw new DelegatesUnfinishedError(unfinishedChildren);
       const undeliveredInboxEvent = this.one(
         `SELECT 1 FROM coordination_inbox_events event
-        WHERE event.recipientAssignmentId = ? AND event.eventType <> 'source-hold' AND (
+        WHERE event.recipientAssignmentId = ? AND event.eventType <> 'source-hold'
+          AND ${deliverable("event")} AND (
           NOT EXISTS (
             SELECT 1 FROM coordination_delivery_events delivered
             WHERE delivered.eventId = event.eventId
@@ -1492,6 +1547,338 @@ export class CoordinationStore {
       this.insertToolReceipt(call, binding, response);
       return response;
     });
+  }
+
+  /**
+   * What keeps an unfinished delegate from being withdrawn; empty when it is idle. The same
+   * classification refuses a withdrawal and explains a lead's report refusal.
+   */
+  delegateStatus(assignmentId: string): DelegateStatus {
+    const id = uuid.parse(assignmentId);
+    const assignment = this.required(
+      "SELECT taskId, state FROM domain_assignments WHERE id = ?",
+      id,
+    );
+    const taskId = String(assignment.taskId);
+    // A turn recovered with no successor is proved by its validated recovery receipt; the
+    // proof requires no writer-ownership or ambiguity hold (an operator Stop alone is
+    // allowed, as for withdrawal), no pending effects and no live callbacks.
+    const settled = (workId: string) =>
+      this.isHistoricalWorkResolved(workId) ||
+      Boolean(this.refusedBeforeStart?.(workId)) ||
+      Boolean(
+        this.reconciledAssignmentProof?.(workId, { allowOperatorStop: true }),
+      );
+    const blockers = new Set<DelegateBlocker>();
+    const intents = this.db
+      .prepare(`SELECT intent.workId, intent.state,
+        EXISTS (SELECT 1 FROM task_writer_admissions admission
+          JOIN execution_recovery_identities identity ON identity.workId = admission.workId
+          WHERE admission.workId = intent.workId) AS uncertain
+      FROM execution_intents intent
+      JOIN task_execution_bindings binding ON binding.workId = intent.workId
+      WHERE binding.assignmentId = ? AND intent.state IN
+        ('ready','capacity-waiting','submitting','running','held')`)
+      .all(id) as Row[];
+    for (const intent of intents) {
+      if (intent.state === "held" && intent.uncertain)
+        blockers.add("uncertain-execution");
+      else if (!settled(String(intent.workId)))
+        blockers.add(
+          intent.state === "held" ? "held-execution" : "live-execution",
+        );
+    }
+    if (
+      this.one(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='turn_requests'",
+      )
+    )
+      for (const request of this.db
+        .prepare(`SELECT workId, state FROM turn_requests
+          WHERE assignmentId = ? AND state IN ('queued','active','held')`)
+        .all(id) as Row[])
+        if (!settled(String(request.workId)))
+          blockers.add(
+            request.state === "held" ? "held-execution" : "live-execution",
+          );
+    if (
+      assignment.state === "held" ||
+      this.one(
+        `SELECT 1 FROM execution_pending_effects effect
+        JOIN task_execution_bindings binding ON binding.workId = effect.workId
+        WHERE binding.assignmentId = ? AND effect.state = 'pending' LIMIT 1`,
+        id,
+      )
+    )
+      blockers.add("held-execution");
+    // Task-wide and conservative; an operator Stop alone does not hold a withdrawal.
+    if (
+      this.one(
+        `SELECT 1 WHERE
+          EXISTS (SELECT 1 FROM task_writer_holds WHERE taskId = ? AND holdKind IS NOT 'operator-stop')
+          OR EXISTS (SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?)`,
+        taskId,
+        taskId,
+      )
+    )
+      blockers.add("ownership-hold");
+    if (
+      this.openInteractionsForCompletion(taskId).some(
+        (interaction) => interaction.requestingAssignmentId === id,
+      )
+    )
+      blockers.add("open-request");
+    // The whole subtree, not only direct delegates: withdrawal retires its waiting events.
+    if (
+      this.one(
+        `WITH RECURSIVE subtree(id) AS (
+          SELECT id FROM domain_assignments WHERE requesterAssignmentId = ?1
+            OR resultRecipientAssignmentId = ?1
+          UNION SELECT child.id FROM domain_assignments child
+          JOIN subtree ON child.requesterAssignmentId = subtree.id
+            OR child.resultRecipientAssignmentId = subtree.id
+        ) SELECT 1 FROM domain_assignments WHERE id IN (SELECT id FROM subtree)
+          AND id <> ?1 AND state NOT IN ('completed','withdrawn') LIMIT 1`,
+        id,
+      )
+    )
+      blockers.add("unfinished-delegates");
+    return {
+      assignmentId: id,
+      state: String(assignment.state),
+      blockers: delegateBlockerCodes.filter((code) => blockers.has(code)),
+    };
+  }
+
+  /** The lead's `cab_withdraw_delegate`: only a delegate it requested. */
+  withdrawDelegate(input: CoordinationCall): CoordinationToolResponse {
+    const call = withdrawCallSchema.parse(input);
+    return transaction(this.db, () => {
+      const replay = this.cachedToolResponse(call);
+      if (replay) return replay;
+      const binding = this.currentBinding(call.threadId, call.turnId);
+      if (!binding)
+        throw new Error("Delegate withdrawal is not bound to current work");
+      this.withdrawDelegateWithinTransaction({
+        assignmentId: call.arguments.assignmentId,
+        reason: call.arguments.reason,
+        actor: "lead",
+        requesterAssignmentId: String(binding.assignmentId),
+      });
+      const response = {
+        text: `Withdrew delegate ${call.arguments.assignmentId}. This is final; delegate again to redo the work.`,
+        success: true,
+      };
+      this.insertToolReceipt(call, binding, response);
+      return response;
+    });
+  }
+
+  /**
+   * Ends an idle delegate for good. Must run inside the caller's transaction, which
+   * re-checks eligibility with the write. Refusals throw `DelegateWithdrawalRefusedError`.
+   */
+  withdrawDelegateWithinTransaction(
+    input: z.input<typeof withdrawalInputSchema>,
+  ): AssignmentWithdrawal {
+    const value = withdrawalInputSchema.parse(input);
+    const { assignment, refusal } = this.withdrawalEligibility(value);
+    if (refusal)
+      throw new DelegateWithdrawalRefusedError(refusal, value.assignmentId);
+    const taskId = String(assignment.taskId);
+    assertOwnedTaskWritable(this.db, taskId);
+    const requester = String(assignment.requesterAssignmentId);
+    const updated = this.db
+      .prepare(`UPDATE domain_assignments SET state = 'withdrawn', version = version + 1
+        WHERE id = ? AND version = ? AND state IN ('pending','running')`)
+      .run(value.assignmentId, Number(assignment.version));
+    if (Number((updated as { changes: number | bigint }).changes) !== 1)
+      throw new DelegateWithdrawalRefusedError(
+        "version-changed",
+        value.assignmentId,
+      );
+    const withdrawal: AssignmentWithdrawal = {
+      assignmentId: value.assignmentId,
+      taskId,
+      actor: value.actor,
+      leadAssignmentId: requester,
+      priorState: assignment.state === "running" ? "running" : "pending",
+      reason: value.reason,
+      withdrawnAt: Date.now(),
+    };
+    this.db
+      .prepare(`INSERT INTO assignment_withdrawals
+        (assignmentId, taskId, actor, leadAssignmentId, priorState, reason, withdrawnAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(
+        withdrawal.assignmentId,
+        taskId,
+        withdrawal.actor,
+        requester,
+        withdrawal.priorState,
+        withdrawal.reason,
+        withdrawal.withdrawnAt,
+      );
+    // A batch still queued for a request refused before it started will never be delivered:
+    // retire it, keeping its events, so they become undeliverable below.
+    for (const batch of this.db
+      .prepare(
+        "SELECT batchId, taskId, recipientAssignmentId, highWaterSequence FROM coordination_delivery_batches WHERE recipientAssignmentId = ? AND state = 'queued'",
+      )
+      .all(value.assignmentId) as Array<{
+      batchId: string;
+      taskId: string;
+      recipientAssignmentId: string;
+      highWaterSequence: number;
+    }>)
+      if (!this.deleteQueuedBatchKeepingEvents(batch))
+        throw new Error("Withdrawn delegate's queued delivery is inconsistent");
+    this.db
+      // Its completed subtree can never resume, so their waiting events go nowhere too.
+      .prepare(`WITH RECURSIVE subtree(id) AS (
+          SELECT ? UNION SELECT child.id FROM domain_assignments child
+          JOIN subtree ON child.resultRecipientAssignmentId = subtree.id
+        )
+        INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+        SELECT event.eventId, event.recipientAssignmentId, 'delegate-withdrawn'
+        FROM coordination_inbox_events event
+        LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
+        WHERE event.recipientAssignmentId IN (SELECT id FROM subtree)
+          AND delivery.eventId IS NULL AND ${deliverable("event")}`)
+      .run(value.assignmentId);
+    if (value.actor === "operator") {
+      // A completed requester is never revived by an event, so the lead is told instead;
+      // a completed lead keeps the record on the task view rather than a stranded event.
+      const requesterState = this.required(
+        "SELECT state FROM domain_assignments WHERE id = ?",
+        requester,
+      ).state;
+      const lead =
+        requesterState === "completed"
+          ? this.one(
+              `SELECT lead.assignmentId, assignment.state FROM task_lead_bindings lead
+              JOIN domain_assignments assignment ON assignment.id = lead.assignmentId
+              WHERE lead.taskId = ?`,
+              taskId,
+            )
+          : undefined;
+      const recipient = lead ? String(lead.assignmentId) : requester;
+      const event = this.newEvent(
+        taskId,
+        recipient,
+        "delegate-withdrawn",
+        null,
+        JSON.stringify({
+          message: `The operator withdrew delegate ${value.assignmentId}${recipient === requester ? "" : ` (requested by ${requester})`}: ${value.reason}`,
+          assignmentId: value.assignmentId,
+          reason: value.reason,
+        }),
+      );
+      if ((lead ? lead.state : requesterState) === "completed")
+        this.db
+          .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+            VALUES (?, ?, 'delegate-withdrawn')`)
+          .run(event.eventId, recipient);
+    }
+    return withdrawal;
+  }
+
+  /**
+   * A withdrawn delegate's leftover work is history: withdrawal refused anything live, held
+   * or uncertain, and a withdrawn assignment is never admitted again.
+   */
+  isWithdrawnWork(workId: string): boolean {
+    const id = z.string().min(1).max(512).parse(workId);
+    const requests = this.one(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='turn_requests'",
+    );
+    return Boolean(
+      this.one(
+        `SELECT 1 FROM domain_assignments assignment
+        WHERE assignment.state = 'withdrawn' AND (assignment.id IN
+          (SELECT assignmentId FROM task_execution_bindings WHERE workId = ?)
+          ${requests ? "OR assignment.id IN (SELECT assignmentId FROM turn_requests WHERE workId = ?)" : ""})
+        LIMIT 1`,
+        id,
+        ...(requests ? [id] : []),
+      ),
+    );
+  }
+
+  /** Whether the operator could withdraw this assignment now, and if not, why. */
+  withdrawalAvailability(
+    assignmentId: string,
+  ):
+    | { available: true }
+    | { available: false; code: DelegateWithdrawalRefusal; text: string } {
+    const id = uuid.parse(assignmentId);
+    const { refusal } = this.withdrawalEligibility({ assignmentId: id });
+    return refusal
+      ? {
+          available: false,
+          code: refusal,
+          text: withdrawalRefusalText(refusal, id),
+        }
+      : { available: true };
+  }
+
+  private withdrawalEligibility(value: {
+    assignmentId: string;
+    requesterAssignmentId?: string | undefined;
+    expectedVersion?: number | undefined;
+  }): { assignment: Row; refusal?: DelegateWithdrawalRefusal } {
+    const assignment = this.required(
+      `SELECT assignment.taskId, assignment.version, assignment.state,
+        assignment.requesterAssignmentId, lead.assignmentId AS leadAssignmentId
+      FROM domain_assignments assignment
+      LEFT JOIN task_lead_bindings lead ON lead.taskId = assignment.taskId
+      WHERE assignment.id = ?`,
+      value.assignmentId,
+    );
+    const refusal = ((): DelegateWithdrawalRefusal | undefined => {
+      if (assignment.leadAssignmentId === value.assignmentId)
+        return "lead-assignment";
+      if (assignment.requesterAssignmentId === null) return "not-delegate";
+      if (
+        value.requesterAssignmentId !== undefined &&
+        value.requesterAssignmentId !== assignment.requesterAssignmentId
+      )
+        return "not-requester";
+      if (assignment.state === "completed" || assignment.state === "withdrawn")
+        return "already-final";
+      if (
+        value.expectedVersion !== undefined &&
+        value.expectedVersion !== Number(assignment.version)
+      )
+        return "version-changed";
+      return (
+        this.delegateStatus(value.assignmentId).blockers[0] ??
+        (assignment.state === "pending" || assignment.state === "running"
+          ? undefined
+          : "held-execution")
+      );
+    })();
+    return refusal ? { assignment, refusal } : { assignment };
+  }
+
+  /** The withdrawal record, or undefined for an assignment never withdrawn. */
+  assignmentWithdrawal(assignmentId: string): AssignmentWithdrawal | undefined {
+    const row = this.one(
+      `SELECT assignmentId, taskId, actor, leadAssignmentId, priorState, reason, withdrawnAt
+      FROM assignment_withdrawals WHERE assignmentId = ?`,
+      uuid.parse(assignmentId),
+    );
+    return row
+      ? {
+          assignmentId: String(row.assignmentId),
+          taskId: String(row.taskId),
+          actor: row.actor === "lead" ? "lead" : "operator",
+          leadAssignmentId: String(row.leadAssignmentId),
+          priorState: row.priorState === "running" ? "running" : "pending",
+          reason: String(row.reason),
+          withdrawnAt: Number(row.withdrawnAt),
+        }
+      : undefined;
   }
 
   requestQuestion(input: CoordinationCall): CoordinationToolResponse {
@@ -3887,6 +4274,7 @@ export class CoordinationStore {
       FROM coordination_inbox_events event
       LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
       WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL
+        AND ${deliverable("event")}
       ORDER BY event.sequence`)
       .all(uuid.parse(recipientAssignmentId))
       .map((row) => this.parseEvent(row as Row));
@@ -3898,7 +4286,7 @@ export class CoordinationStore {
         .prepare(`SELECT event.recipientAssignmentId
       FROM coordination_inbox_events event
       LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
-      WHERE delivery.eventId IS NULL
+      WHERE delivery.eventId IS NULL AND ${deliverable("event")}
       GROUP BY event.recipientAssignmentId
       ORDER BY MIN(event.sequence)`)
         .all() as Array<{
@@ -3946,14 +4334,14 @@ export class CoordinationStore {
         ).some((i) => i.requestingAssignmentId === assignment) ||
         this.one(
           `SELECT 1 FROM domain_assignments
-          WHERE requesterAssignmentId = ? AND state <> 'completed' LIMIT 1`,
+          WHERE requesterAssignmentId = ? AND state NOT IN ('completed','withdrawn') LIMIT 1`,
           assignment,
         ) ||
         this.one(
           `SELECT 1 FROM coordination_inbox_events event
           LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
           WHERE event.recipientAssignmentId = ? AND event.eventType <> 'source-hold'
-            AND delivery.eventId IS NULL LIMIT 1`,
+            AND delivery.eventId IS NULL AND ${deliverable("event")} LIMIT 1`,
           assignment,
         ) ||
         this.one(
@@ -3993,7 +4381,8 @@ export class CoordinationStore {
         this.one(
           `SELECT 1 AS found FROM coordination_inbox_events event
         LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
-        WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL LIMIT 1`,
+        WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL
+          AND ${deliverable("event")} LIMIT 1`,
           assignment,
         ) ||
         this.one(
@@ -4085,6 +4474,7 @@ export class CoordinationStore {
       FROM coordination_inbox_events event
       LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
       WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL
+        AND ${deliverable("event")}
       ORDER BY event.sequence`)
       .all(recipient) as Row[];
     if (pending.length === 0) {
@@ -4996,6 +5386,11 @@ export class CoordinationStore {
         routingOperationId,
         payload,
       );
+    // A withdrawn assignment takes no further deliveries; the event stays as history.
+    this.db
+      .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+        SELECT ?, id, 'delegate-withdrawn' FROM domain_assignments WHERE id = ? AND state = 'withdrawn'`)
+      .run(eventId, recipientAssignmentId);
     return this.parseEvent(
       this.required(
         "SELECT sequence, eventId, taskId, recipientAssignmentId, eventType, resultId, interactionId, payload, createdAt FROM coordination_inbox_events WHERE eventId = ?",
@@ -5152,6 +5547,11 @@ export class CoordinationStore {
           "Follow-up unavailable: latest result is not the newest unambiguous work",
         code: "no-resumable-result",
       };
+    if (this.recipientWithdrawn(String(result.assignmentId)))
+      return {
+        refusal: withdrawnRecipientRefusal,
+        code: "recipient-withdrawn",
+      };
     // Defensive: a follow-up returns the assignment to pending; any turn that completes it again has newer work.
     if (
       this.one(
@@ -5219,6 +5619,25 @@ export class CoordinationStore {
     );
   }
 
+  /**
+   * Its next result would reach a withdrawn delegate, directly or by being reported on up
+   * the chain of result recipients; a withdrawn delegate takes no further results.
+   */
+  private recipientWithdrawn(assignmentId: string): boolean {
+    return Boolean(
+      this.one(
+        `WITH RECURSIVE chain(id) AS (
+          SELECT resultRecipientAssignmentId FROM domain_assignments WHERE id = ?
+          UNION SELECT next.resultRecipientAssignmentId FROM chain
+          JOIN domain_assignments next ON next.id = chain.id
+          WHERE next.resultRecipientAssignmentId IS NOT NULL
+        ) SELECT 1 FROM chain JOIN domain_assignments recipient ON recipient.id = chain.id
+        WHERE recipient.state = 'withdrawn' LIMIT 1`,
+        assignmentId,
+      ),
+    );
+  }
+
   /** Reopens a completed assignment at a new version with one follow-up event. */
   private resumeCompletedAssignment(
     result: Row,
@@ -5227,6 +5646,9 @@ export class CoordinationStore {
     instructions: string,
     extraPayload: Record<string, unknown>,
   ): { followUpId: string; event: InboxEvent } {
+    // Every resume (follow-up, message or comment) passes here: refuse before any write.
+    if (this.recipientWithdrawn(String(result.assignmentId)))
+      throw new DomainConflictError(withdrawnRecipientRefusal);
     const nextVersion = Number(result.version) + 1;
     const updated = this.db
       .prepare(`UPDATE domain_assignments
@@ -5441,7 +5863,8 @@ export class CoordinationStore {
       assignments.some(
         (assignment) =>
           assignment.id !== request.leadAssignmentId &&
-          assignment.state !== "completed",
+          assignment.state !== "completed" &&
+          assignment.state !== "withdrawn",
       )
     )
       reasons.push("assignments-not-complete");
@@ -5512,7 +5935,8 @@ export class CoordinationStore {
       this.one(
         `SELECT 1 AS pending FROM coordination_inbox_events event
       LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
-      WHERE event.taskId = ? AND delivery.eventId IS NULL LIMIT 1`,
+      WHERE event.taskId = ? AND delivery.eventId IS NULL
+        AND ${deliverable("event")} LIMIT 1`,
         request.taskId,
       )
     )
@@ -5527,17 +5951,26 @@ export class CoordinationStore {
       )
     )
       reasons.push("queued-inbox-delivery");
+    // Withdrawal proved a delegate's remaining work settled and no new turn can start for it.
+    const withdrawnRefusal = (item: { assignmentState: string | null }) =>
+      item.assignmentState === "withdrawn";
     const unfinishedWork = this.db
-      .prepare(`SELECT intent.workId FROM execution_intents intent
+      .prepare(`SELECT intent.workId, assignment.state AS assignmentState
+      FROM execution_intents intent
       JOIN task_execution_bindings binding ON binding.workId = intent.workId
+      LEFT JOIN domain_assignments assignment ON assignment.id = binding.assignmentId
       WHERE binding.taskId = ? AND intent.state IN
         ('ready','capacity-waiting','held','submitting','running')`)
-      .all(request.taskId) as Array<{ workId: string }>;
+      .all(request.taskId) as Array<{
+      workId: string;
+      assignmentState: string | null;
+    }>;
     if (
       unfinishedWork.some(
         (item) =>
           !(externalAction && item.workId === request.leadWorkId) &&
-          !this.isHistoricalWorkResolved(item.workId),
+          !this.isHistoricalWorkResolved(item.workId) &&
+          !withdrawnRefusal(item),
       )
     )
       reasons.push("unfinished-execution");
@@ -5604,14 +6037,20 @@ export class CoordinationStore {
       WHERE type = 'table' AND name = 'turn_requests'`)
     ) {
       const unfinishedRequests = this.db
-        .prepare(`SELECT request.workId FROM turn_requests request
+        .prepare(`SELECT request.workId, assignment.state AS assignmentState
+        FROM turn_requests request
+        LEFT JOIN domain_assignments assignment ON assignment.id = request.assignmentId
         WHERE request.taskId = ? AND request.state IN ('queued','active','held')`)
-        .all(request.taskId) as Array<{ workId: string }>;
+        .all(request.taskId) as Array<{
+        workId: string;
+        assignmentState: string | null;
+      }>;
       if (
         unfinishedRequests.some(
           (item) =>
             !(externalAction && item.workId === request.leadWorkId) &&
-            !this.isHistoricalWorkResolved(item.workId),
+            !this.isHistoricalWorkResolved(item.workId) &&
+            !withdrawnRefusal(item),
         )
       )
         reasons.push("unfinished-turn-request");

@@ -235,6 +235,7 @@ import {
   ResetUnavailableError,
   StartAgainUnavailableError,
 } from "./task-restart.js";
+import { DelegateWithdrawalRefusedError } from "../core/delegate-withdrawal.js";
 import {
   boundDetail,
   DiagnosticCursorError,
@@ -286,6 +287,7 @@ import {
   RuntimeConfigurationRefusedError,
   type StandaloneService,
   WorkspaceRecheckRefusedError,
+  withoutWithdrawn,
 } from "./service.js";
 import { refusedRevisionPrefix } from "./state.js";
 import {
@@ -2130,9 +2132,10 @@ export class OperatorApi {
       : { reason: this.safe(reason, excluded) };
   }
   private execution(task: Row): Execution {
-    const selections = this.domain()
-      .assignments(String(task.id))
-      .map((a) => this.selection(a));
+    // A withdrawn delegate owns no execution; its refused request is history.
+    const selections = withoutWithdrawn(
+      this.domain().assignments(String(task.id)),
+    ).map((a) => this.selection(a));
     const holds = {
       stop:
         this.service.isTaskStopped(String(task.id)) ||
@@ -2600,9 +2603,8 @@ export class OperatorApi {
    * assignment's current request only, so the read stays bounded by assignments.
    */
   private nextAssignments(taskId: string) {
-    return this.domain()
-      .assignments(taskId)
-      .flatMap((assignment) => {
+    return withoutWithdrawn(this.domain().assignments(taskId)).flatMap(
+      (assignment) => {
         const request = this.service.currentTurnRequest(
           String(assignment.id),
           Number(assignment.version),
@@ -2616,7 +2618,8 @@ export class OperatorApi {
         return runtime || refused || assignment.state === "held"
           ? [{ assignment, request, runtime }]
           : [];
-      });
+      },
+    );
   }
   /**
    * Runtime facts of the profiles whose turns are next: the queued or unrequested of
@@ -4364,6 +4367,7 @@ export class OperatorApi {
           ),
           version: Number(a.version),
           state: a.state,
+          withdrawal: this.withdrawal(String(a.id), excluded),
           profileRevision: Number(a.profileRevision),
           instructionsRevision: Number(a.instructionsRevision),
           currentProfileRevision: Number(
@@ -4694,6 +4698,23 @@ export class OperatorApi {
       },
       observedAt: Date.now(),
     });
+  }
+  private withdrawal(
+    assignmentId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const { record, ...availability } =
+      this.service.assignmentWithdrawal(assignmentId);
+    return {
+      ...availability,
+      record: record && {
+        actor: record.actor,
+        leadAssignmentId: record.leadAssignmentId,
+        priorState: record.priorState,
+        reason: this.safe(record.reason, excluded),
+        withdrawnAt: record.withdrawnAt,
+      },
+    };
   }
   private requireAssignment(assignmentId: string) {
     uuid.parse(assignmentId);
@@ -5406,9 +5427,11 @@ export class OperatorApi {
       this.requireTask(taskId).version !== task.version
     )
       throw new OperatorApiError(503, "unavailable");
+    const withdrawal = this.withdrawal(assignmentId, excluded).record;
     return assignmentHistorySchema.parse({
       data: {
         ...history,
+        ...(withdrawal ? { withdrawal } : {}),
         visibilityRevision: createHash("sha256")
           .update(`${visibility}:${task.version}:${workspaceVisibility}`)
           .digest("hex"),
@@ -10509,6 +10532,23 @@ export class OperatorApi {
           );
         } catch (error) {
           if (error instanceof DraftTurnUnavailableError)
+            throw new OperatorApiError(
+              409,
+              "conflict",
+              undefined,
+              undefined,
+              error.message,
+            );
+          throw error;
+        }
+      }
+      if (c.type === "assignment.withdraw") {
+        if (this.requireAssignment(c.assignmentId).taskId !== c.taskId)
+          throw new OperatorApiError(404, "not-found");
+        try {
+          return commandReceiptSchema.parse(this.service.withdrawDelegate(c));
+        } catch (error) {
+          if (error instanceof DelegateWithdrawalRefusedError)
             throw new OperatorApiError(
               409,
               "conflict",

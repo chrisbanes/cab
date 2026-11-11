@@ -767,11 +767,80 @@ export class DomainStore {
     };
   }
 
+  /**
+   * Databases created before delegate withdrawal carry a CHECK that rejects the `withdrawn`
+   * state. SQLite cannot alter a CHECK, so rebuild the table in place, keeping every row and
+   * rowid. The stored SQL is recreated verbatim (no rename), so an upgraded schema matches a
+   * fresh one and other tables' references stay untouched. `migrate()` recreates the index.
+   */
+  private allowWithdrawnAssignmentState(): void {
+    const stored = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='domain_assignments'",
+      )
+      .get() as { sql: string } | undefined;
+    if (!stored || stored.sql.includes("'withdrawn'")) return;
+    const legacyCheck =
+      "CHECK(state IN ('pending','running','completed','held'))";
+    if (!stored.sql.includes(legacyCheck))
+      throw new Error("Unrecognized assignment schema; migration refused");
+    const rebuilt = stored.sql.replace(
+      legacyCheck,
+      "CHECK(state IN ('pending','running','completed','held','withdrawn'))",
+    );
+    const columns = (
+      this.db.prepare("PRAGMA table_info(domain_assignments)").all() as Array<{
+        name: string;
+      }>
+    )
+      .map(({ name }) => `"${name}"`)
+      .join(", ");
+    const foreignKeys = (
+      this.db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }
+    ).foreign_keys;
+    this.db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      transaction(this.db, () => {
+        this.db.exec(`CREATE TEMP TABLE domain_assignments_rebuild AS
+            SELECT rowid AS rebuildRowid, ${columns} FROM domain_assignments;
+          DROP TABLE domain_assignments;
+          ${rebuilt};
+          INSERT INTO domain_assignments (rowid, ${columns})
+            SELECT rebuildRowid, ${columns} FROM temp.domain_assignments_rebuild;
+          DROP TABLE temp.domain_assignments_rebuild;`);
+        // Only what the rebuild could break: the table and the tables that reference it.
+        const references = (
+          this.db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as Array<{ name: string }>
+        )
+          .map(({ name }) => name)
+          .filter(
+            (name) =>
+              name === "domain_assignments" ||
+              (
+                this.db
+                  .prepare(`PRAGMA foreign_key_list("${name}")`)
+                  .all() as Array<{ table: string }>
+              ).some(({ table }) => table === "domain_assignments"),
+          );
+        for (const name of references)
+          if (
+            this.db.prepare(`PRAGMA foreign_key_check("${name}")`).all().length
+          )
+            throw new Error("Assignment state migration broke a foreign key");
+      });
+    } finally {
+      this.db.exec(`PRAGMA foreign_keys = ${foreignKeys}`);
+    }
+  }
+
   migrate(): void {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
     new StatusMappingStore(this.db).migrate();
     new TaskPublicationStore(this.db).migrate();
+    this.allowWithdrawnAssignmentState();
     transaction(this.db, () => {
       this.db.exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS domain_projects (
@@ -825,7 +894,7 @@ export class DomainStore {
           resultRecipientAssignmentId TEXT,
           resultRecipientDisposition TEXT NOT NULL DEFAULT 'unresolved'
             CHECK(resultRecipientDisposition IN ('resolved','unresolved')),
-          state TEXT NOT NULL CHECK(state IN ('pending','running','completed','held'))
+          state TEXT NOT NULL CHECK(state IN ('pending','running','completed','held','withdrawn'))
         );
         CREATE TABLE IF NOT EXISTS task_lead_bindings (
           taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id),
@@ -4143,6 +4212,10 @@ export class DomainStore {
         this.operator(command);
         const assignment = this.assignment(command.assignmentId);
         this.projectMatch(assignment, command.projectId);
+        if (assignment.state === "withdrawn")
+          throw new DomainConflictError(
+            "A withdrawn assignment takes no further turns",
+          );
         this.version(assignment, command.expectedVersion);
         const profile = this.activeProfile(String(assignment.profileId));
         const project = this.project(command.projectId);

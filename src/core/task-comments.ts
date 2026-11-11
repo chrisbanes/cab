@@ -13,6 +13,7 @@ export const taskCommentUnavailableReasons = [
   "no-resumable-result",
   "already-followed-up",
   "unresolved-destination",
+  "recipient-withdrawn",
 ] as const;
 export type TaskCommentUnavailableReason =
   (typeof taskCommentUnavailableReasons)[number];

@@ -1051,6 +1051,24 @@
       "gap": "Ran live before turn 2, after a follow-up under Stop. Adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935, test/operator/operator-cli-adopt.test.ts), not the live journey. The task inspector offers Apply on stale started assignments; recovery links to the exact row."
     },
     {
+      "id": "assignment withdraw",
+      "kind": "command",
+      "area": "assignment",
+      "scenarios": ["CLI02", "CLI03"],
+      "evidence": [
+        "test/operator/operator-cli-adopt.test.ts",
+        "test/coordination/delegate-withdrawal-service.test.ts",
+        "test/coordination/delegate-withdrawal.test.ts"
+      ],
+      "effect": "Ends an idle delegate for good (effect saved): it becomes withdrawn, produces no result, stops holding back its lead, and the lead gets an Inbox event. Nothing restores it.",
+      "denial": "A missing or empty --reason exits 2 with no request; a lead, a non-delegated assignment, or a delegate with live, held or uncertain execution, an ownership hold, an open request or unfinished delegates exits 4 with the condition and its way out, and nothing is sent; a read-only credential exits 3.",
+      "revision": "No --expected-version: the CLI sends the version it read; a change between read and send exits 4.",
+      "retry": "The journal key and --request-id replay the stored receipt once, even after the version moved.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI and the operator API against a real loopback service; no live journey."
+    },
+    {
       "id": "inbox list",
       "kind": "command",
       "area": "inbox/question/approval",

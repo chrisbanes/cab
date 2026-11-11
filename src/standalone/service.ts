@@ -360,6 +360,7 @@ import {
   type TaskControlReceipt,
   type WorkspaceRecheckReceipt,
   type TaskResetReceipt,
+  type AssignmentWithdrawReceipt,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
   type TaskExecutionContext,
@@ -892,8 +893,12 @@ function workspaceBase(link: StoredRepositoryLink) {
     ? {}
     : { base: { mode: baseMode, fetch: fetchBeforeProvisioning } };
 }
-/** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
+/** Assignments still able to own execution: a withdrawn delegate's records are history. */
+export const withoutWithdrawn = <T extends Record<string, unknown>>(
+  assignments: T[],
+) => assignments.filter((a) => a.state !== "withdrawn");
 
+/** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
@@ -1261,9 +1266,9 @@ export class StandaloneService {
         db,
         domain,
         (workId) => state.isNeverAdmittedRefusedAssignmentWork(workId),
-        (workId) =>
+        (workId, options) =>
           (this.callbacks.get(workId)?.size ?? 0) === 0
-            ? state.reconciledAssignmentProof(workId)
+            ? state.reconciledAssignmentProof(workId, options)
             : undefined,
         (workId) => state.refusedBeforeStart(workId),
       );
@@ -5153,7 +5158,7 @@ export class StandaloneService {
           reason: attentionNext["external-action-uncertain"].reason,
         });
     const held: string[] = [];
-    const assignments = domain.assignments(taskId);
+    const assignments = withoutWithdrawn(domain.assignments(taskId));
     for (const a of assignments) {
       const s = selectAssignmentExecution(a, this);
       const request = s.request ?? schedulerStore.latest(String(a.id));
@@ -6012,22 +6017,25 @@ export class StandaloneService {
         .parse(domain.task(taskId).state),
       sourceHeld: domain.admission(taskId).reasons.includes("source-hold"),
       nonStopHold: state.hasNonStopTaskHold(taskId),
-      assignments: domain.assignments(taskId).map((assignment) => {
-        const request = schedulerStore.latest(String(assignment.id));
-        return {
-          assignmentId: String(assignment.id),
-          held: assignment.state === "held",
-          ...(request
-            ? {
-                request: {
-                  workId: request.workId,
-                  sequence: request.sequence,
-                  kind: this.restartRequestKind(request),
-                },
-              }
-            : {}),
-        };
-      }),
+      // A withdrawn delegate's refused request stays history; it is never started again.
+      assignments: withoutWithdrawn(domain.assignments(taskId)).map(
+        (assignment) => {
+          const request = schedulerStore.latest(String(assignment.id));
+          return {
+            assignmentId: String(assignment.id),
+            held: assignment.state === "held",
+            ...(request
+              ? {
+                  request: {
+                    workId: request.workId,
+                    sequence: request.sequence,
+                    kind: this.restartRequestKind(request),
+                  },
+                }
+              : {}),
+          };
+        },
+      ),
     };
   }
 
@@ -6053,7 +6061,11 @@ export class StandaloneService {
         schedulerStore.hasOrdinaryAssignmentWork(String(lead.assignmentId)),
       unresolvedExecution: state
         .unsettledTaskWorkIds(taskId)
-        .some((workId) => !coordination.isHistoricalWorkResolved(workId)),
+        .some(
+          (workId) =>
+            !coordination.isHistoricalWorkResolved(workId) &&
+            !coordination.isWithdrawnWork(workId),
+        ),
       held:
         Boolean(state.taskHold(taskId)) ||
         domain.admission(taskId).reasons.includes("source-hold") ||
@@ -6064,6 +6076,51 @@ export class StandaloneService {
   /** Whether the operator can reset the task now, and why not. */
   resetAvailability(taskId: string) {
     return resetAvailability(this.resetFacts(taskId));
+  }
+
+  /** The withdrawal record and whether the operator could withdraw the assignment now. */
+  assignmentWithdrawal(assignmentId: string) {
+    const { coordination } = this.started();
+    const record = coordination.assignmentWithdrawal(assignmentId) ?? null;
+    const availability = coordination.withdrawalAvailability(assignmentId);
+    return {
+      record,
+      available: availability.available,
+      ...(availability.available
+        ? {}
+        : { refusal: { code: availability.code, text: availability.text } }),
+    };
+  }
+
+  /**
+   * Ends an idle delegate for good and tells its lead. Not undone: to redo the work, the lead
+   * delegates again. Refusals throw `DelegateWithdrawalRefusedError` and record nothing.
+   */
+  withdrawDelegate(command: {
+    key: string;
+    taskId: string;
+    assignmentId: string;
+    expectedVersion: number;
+    reason: string;
+  }): AssignmentWithdrawReceipt {
+    const { state, coordination } = this.started();
+    const { receipt, replayed } = state.recordAssignmentWithdrawal(
+      command,
+      () => {
+        const withdrawal = coordination.withdrawDelegateWithinTransaction({
+          assignmentId: command.assignmentId,
+          actor: "operator",
+          expectedVersion: command.expectedVersion,
+          reason: command.reason,
+        });
+        return {
+          leadAssignmentId: withdrawal.leadAssignmentId,
+          withdrawnAt: withdrawal.withdrawnAt,
+        };
+      },
+    );
+    if (!replayed) this.wakeAfterCommit();
+    return receipt;
   }
 
   /**

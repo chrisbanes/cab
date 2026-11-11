@@ -86,7 +86,7 @@ export const assignmentCommandResultSchema = z
     requesterAssignmentId: id.nullable(),
     resultRecipientAssignmentId: id.nullable(),
     resultRecipientDisposition: z.enum(["resolved", "unresolved"]),
-    state: z.enum(["pending", "running", "completed", "held"]),
+    state: z.enum(["pending", "running", "completed", "held", "withdrawn"]),
   })
   .strict();
 

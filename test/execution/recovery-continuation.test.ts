@@ -657,9 +657,9 @@ test("lead recovery candidates prove only receipt-backed reconciled turns, not o
     copies("Execution reconciled; no automatic successor", "reconciled-");
     const proved: string[] = [];
     const prove = state.reconciledAssignmentProof.bind(state);
-    state.reconciledAssignmentProof = (workId) => {
+    state.reconciledAssignmentProof = (workId, options) => {
       proved.push(workId);
-      return prove(workId);
+      return prove(workId, options);
     };
     assert.equal(
       coordination.awaitsRecoveryContinuation(f.taskId, assignmentId),

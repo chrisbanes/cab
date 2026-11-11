@@ -411,6 +411,7 @@ cab --connection home profile prepare PROFILE --instructions-file instructions.m
 cab --connection home profile apply --file change.json --request-id REQUEST
 cab --connection home profile prepare PROFILE --model MODEL --effort high --out change.json
 cab --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST
+cab --connection home assignment withdraw ASSIGNMENT --reason "Replaced by a new delegate"
 cab --connection home operation get REQUEST --scope SCOPE --output json
 ```
 
@@ -430,6 +431,12 @@ evidence and attestations as structured, version-bound input. An external agent
 may prepare it, but cannot infer attestations, manufacture independent review or
 replace missing evidence with a confirmation flag. Preserve existing staged
 review/confirm/send semantics for external comments.
+
+`assignment withdraw ASSIGNMENT_ID --reason TEXT` ends an idle delegate that will
+not finish, so it stops holding back its lead. It reads the assignment, refuses
+with exit 4 and the condition's way out when the read says it cannot be withdrawn,
+and otherwise sends the version it read. Withdrawal is final: there is no restore,
+and the lead delegates again to redo the work.
 
 ## Machine interface and retries
 
