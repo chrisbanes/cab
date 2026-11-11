@@ -254,6 +254,7 @@ export async function runClaudeGroup(
       // A query that threw or ended without a result did not run its probe: fail the run.
       if (!trace.deadline && !q.done)
         trace.failure ??= `query ${n}: ${q.error ?? "ended without a result"}`;
+      if (trace.failure) break;
     }
   } catch (error) {
     trace.failure = short(String(error?.message ?? error));

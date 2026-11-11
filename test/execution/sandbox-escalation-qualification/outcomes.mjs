@@ -368,7 +368,11 @@ function claudeAuto(trace) {
       /"tool_use_id":"([^"]+)"/.exec(e.detail ?? "")?.[1];
     return id ? [{ toolUseId: id, signalAtMs: e.t }] : [];
   });
-  if (signals.length > 0) {
+  const statusSignals = events.filter(
+    (e) => e.subtype === "permission_check_status",
+  );
+  // Partial attribution proves nothing: an unnamed signal may precede a hook.
+  if (signals.length > 0 && signals.length === statusSignals.length) {
     const order = signals.map((s) => ({
       ...s,
       hookAtMs: pre.find((h) => h.toolUseId === s.toolUseId)?.t ?? null,
@@ -380,7 +384,7 @@ function claudeAuto(trace) {
       : refuted({ order });
   } else if (query?.done)
     out.hookBeforeClassifier = untested(
-      events.some((e) => e.subtype === "permission_check_status")
+      statusSignals.length > 0
         ? "classifier signals (system:permission_check_status) not attributable per call"
         : "no classifier signal observable separately from the hook",
     );

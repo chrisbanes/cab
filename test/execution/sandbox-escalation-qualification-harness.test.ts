@@ -463,6 +463,19 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
   });
   assert.equal(unattributed.hookBeforeClassifier.outcome, "untested");
   assert.equal(unattributed.undecidedReachCanUseTool.outcome, "proved");
+  const partial = classify("claude-auto", {
+    ...trace,
+    events: [
+      {
+        t: 0,
+        kind: "message",
+        type: "system",
+        subtype: "permission_check_status",
+      },
+      ...trace.events,
+    ],
+  });
+  assert.equal(partial.hookBeforeClassifier.outcome, "untested");
 
   // A query that throws runs no probe and must fail the run.
   // biome-ignore lint/correctness/useYield: the fake fails before yielding.
