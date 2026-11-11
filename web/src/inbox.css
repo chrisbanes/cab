@@ -257,6 +257,55 @@
   line-height: 26px;
   font-weight: var(--weight-semibold);
 }
+/* Focused only after J/K: a ring for that keyboard move, none for a pointer. */
+.inbox-detail-intro h2:focus {
+  outline: none;
+}
+.inbox-detail-intro h2:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+/* After the selection leaves the queue: an explicit way on, never an automatic one. */
+.inbox-continue {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--space-8);
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 18px;
+}
+.inbox-continue:hover {
+  background: var(--raised);
+}
+.inbox-continue:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.inbox-continue-label {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  color: var(--accent-text);
+}
+.inbox-continue strong {
+  font-weight: var(--weight-medium);
+}
+.inbox-detail-intro > .inbox-continue-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
 .inbox-identity {
   font-family: var(--font-mono);
   font-size: var(--type-xs);

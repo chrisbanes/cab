@@ -9,6 +9,9 @@ budget below is asserted at 1366 × 900 and 390 × 844 by
 budget"), with Home's runtime readiness passing and one paused-project getting-started
 row above the card; each further getting-started row that needs attention pushes the
 Home card down. The browser notification and the operator CLI are outside it.
+The Inbox review-session row, each further question after a recorded answer, is
+asserted at 1366 × 900 by `test/operator/operator-inbox-browser.test.ts` ("work
+through the Inbox").
 
 ## Goal
 
@@ -34,7 +37,12 @@ they are, and gets one confirmation that the answer was recorded.
    any recommended option marked as a draft, not an answer. A single-choice question
    on the Home card is answerable there.
 3. Submit answer records the whole group once and shows "Answer recorded" with the
-   request still in view. The Inbox does not move to the next request on its own.
+   request still in view. The Inbox does not move to the next request on its own:
+   once a fresh complete read shows the request has left the queue, the pane offers
+   Next request, naming that request and its project and task, or says no requests
+   remain. On wide layouts Previous/Next request and the J and K keys also step
+   through the queue. Filters, position and unfinished answers in other requests are
+   kept.
 
 ## Budget
 
@@ -42,6 +50,7 @@ they are, and gets one confirmation that the answer was recorded.
 | --- | --- | --- |
 | Home card, single choice | 2 (choose, Submit) | the question text and its options |
 | Inbox row | 3 (row, choose, Submit) | the question text in the row |
+| Inbox, each further question after a recorded answer | 3 (Next request or J, choose, Submit) | the next request's question, project and task on the Next request control |
 | Task decision card | 3 (Answer question, choose, Submit), once at the card | explicit request links show the named question; untargeted visits show the latest conversation |
 
 The operator CLI is outside the budget: it has no screens.

@@ -15,7 +15,7 @@ import {
   noPageOverflow,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
-import { choiceForm } from "../fixtures/question-data.js";
+import { choiceForm, mixedForm } from "../fixtures/question-data.js";
 import {
   inboxReadSchema,
   taskSchema,
@@ -2431,4 +2431,429 @@ test("Inbox in-app links carry no external-link icon", async (_t, j) => {
     page.locator(".inbox-open-task"),
   ])
     assert.equal(await link.locator("svg").count(), 0);
+});
+
+/** `count` single-choice questions titled "Request N", each in its own project and task. */
+async function seedChoices(f: Fixture, count: number, from = 1) {
+  const seeded = [];
+  for (let i = from; i < from + count; i++)
+    seeded.push({
+      ...(await seedOwnQuestion(
+        f,
+        choiceForm,
+        `Request ${i}`,
+        projects[(i - 1) % projects.length],
+      )),
+      title: `Request ${i}`,
+    });
+  return seeded;
+}
+/** Every command the page posts, so a test can show navigation sent none. */
+function commandPosts(page: Page) {
+  const posts: Array<{ type: string }> = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/operator/commands"
+    )
+      posts.push(request.postDataJSON() as { type: string });
+  });
+  return posts;
+}
+/** The displayed queue's record ids. Seeded requests can share a second, so ids break the tie. */
+const displayed = (page: Page) =>
+  page
+    .locator(".inbox-row")
+    .evaluateAll((rows) =>
+      rows.map((row) => (row as HTMLElement).dataset.recordId!),
+    );
+const sent = "Answer sent. It reaches the requester on its next turn.",
+  leftQueue =
+    "This request has left the current queue. Its exact detail remains selected.",
+  continueTo = /^Next request ./;
+async function answerChoice(page: Page) {
+  const form = page.getByRole("region", { name: "Exact question response" });
+  await form.getByRole("radio", { name: /^Team owners/ }).click();
+  await form
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .click();
+  await form.getByText(sent, { exact: true }).first().waitFor();
+}
+
+test("an answered request keeps its confirmation and offers the next request; the last answer ends the queue (desktop)", async (_t, j) => {
+  const { page, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/inbox",
+    (f) => seedChoices(f, 3),
+  );
+  const posts = commandPosts(page);
+  const rows = page.locator(".inbox-row"),
+    detail = page.getByRole("region", { name: "Selected request" }),
+    heading = detail.getByRole("heading", { level: 2 }),
+    next = detail.getByRole("button", { name: continueTo }),
+    step = detail.getByRole("button", { name: "Next request", exact: true }),
+    request = () => new URL(page.url()).searchParams.get("request"),
+    title = (id: string) => more.find((s) => s.interactionId === id)!.title;
+  await rows.nth(2).waitFor();
+  const order = await displayed(page);
+  await rows.nth(1).click();
+  await detail.getByText("2 of 3", { exact: true }).waitFor();
+  const answered = await heading.textContent();
+  await answerChoice(page);
+  // The answered request stays in view with its receipt; nothing else is opened for the operator.
+  await detail.getByText(leftQueue, { exact: true }).waitFor();
+  assert.equal(await heading.textContent(), answered);
+  assert.equal(request(), order[1]);
+  assert.match((await next.textContent())!, new RegExp(title(order[2]!)));
+  assert.equal(await rows.count(), 2);
+  assert.equal(await step.isEnabled(), true);
+  await captureBrowserEvidence(page, "1366-inbox-continuation", {
+    fullPage: false,
+  });
+  await next.click();
+  await detail.getByText("2 of 2", { exact: true }).waitFor();
+  assert.equal(request(), order[2]);
+  // The last row answered: no later request, so the way on is the earlier one.
+  await answerChoice(page);
+  await detail.getByText(leftQueue, { exact: true }).waitFor();
+  assert.match((await next.textContent())!, new RegExp(title(order[0]!)));
+  assert.equal(await step.isDisabled(), true);
+  await next.click();
+  await detail.getByText("1 of 1", { exact: true }).waitFor();
+  assert.equal(request(), order[0]);
+  await answerChoice(page);
+  await detail.getByText("No actionable requests remain.").waitFor();
+  await detail
+    .getByRole("link", { name: "Back to overview", exact: true })
+    .waitFor();
+  assert.equal(await next.count(), 0);
+  // Only the three Submit actions sent anything.
+  assert.deepEqual(
+    posts.map((p) => p.type),
+    ["question.form.answer", "question.form.answer", "question.form.answer"],
+  );
+});
+
+test("a filtered queue emptied by an answer offers Clear filters, not Overview (desktop)", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/inbox",
+    (f) => seedChoices(f, 2),
+  );
+  const rows = page.locator(".inbox-row"),
+    detail = page.getByRole("region", { name: "Selected request" });
+  await rows.nth(1).waitFor();
+  await page.getByLabel("Project", { exact: true }).selectOption({ index: 1 });
+  await page.waitForFunction(
+    () => document.querySelectorAll(".inbox-row").length === 1,
+  );
+  await rows.first().click();
+  await answerChoice(page);
+  await detail.getByText("No more requests match these filters.").waitFor();
+  await detail
+    .getByRole("button", { name: "Clear filters", exact: true })
+    .click();
+  await detail.getByRole("button", { name: continueTo }).waitFor();
+  assert.equal(
+    await page.getByLabel("Project", { exact: true }).inputValue(),
+    "",
+  );
+});
+
+test("phone: an answered request offers the next request in its body; the header keeps Back and Open task only", async (_t, j) => {
+  const { page, more } = await openInbox(
+    j,
+    0,
+    { width: 390, height: 844 },
+    "/inbox",
+    (f) => seedChoices(f, 2),
+  );
+  const rows = page.locator(".inbox-row");
+  await rows.nth(1).waitFor();
+  const order = await displayed(page);
+  await rows.first().click();
+  await answerChoice(page);
+  await page.getByText(leftQueue, { exact: true }).waitFor();
+  const next = page.getByRole("button", { name: continueTo }),
+    header = page.locator("header.page-header");
+  assert.match(
+    (await next.textContent())!,
+    new RegExp(more.find((s) => s.interactionId === order[1])!.title),
+  );
+  assert.equal(
+    await header.locator("a, button").count(),
+    2,
+    "Back and Open task only",
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: /^(Previous|Next) request$/ })
+      .count(),
+    0,
+  );
+  await captureBrowserEvidence(page, "390-inbox-continuation", {
+    fullPage: false,
+  });
+  await next.click();
+  await page.waitForURL((url) => url.searchParams.get("request") === order[1]);
+  await header.getByText("Question · 1 of 1", { exact: true }).waitFor();
+  // J and K are wide-layout keys.
+  await page.keyboard.press("k");
+  await settle(page);
+  assert.equal(new URL(page.url()).searchParams.get("request"), order[1]);
+});
+
+test("J and K step through the queue with a visible focus on the request, and never act in a field or on a choice (desktop)", async (_t, j) => {
+  const { page } = await openInbox(j, 3, { width: 1366, height: 900 });
+  const posts = commandPosts(page);
+  const rows = page.locator(".inbox-row"),
+    detail = page.getByRole("region", { name: "Selected request" }),
+    heading = detail.getByRole("heading", { level: 2 }),
+    request = () => new URL(page.url()).searchParams.get("request");
+  await rows.nth(2).waitFor();
+  const order = await displayed(page);
+  await rows.first().click();
+  await detail.getByText("1 of 3", { exact: true }).waitFor();
+  await rows.first().focus();
+  await page.keyboard.press("j");
+  await detail.getByText("2 of 3", { exact: true }).waitFor();
+  assert.equal(request(), order[1]);
+  await settle(page);
+  assert.equal(
+    await heading.evaluate(
+      (el) => document.activeElement === el && el.matches(":focus-visible"),
+    ),
+    true,
+    "the moved-to request's heading has a visible focus",
+  );
+  assert.equal(await rows.nth(1).getAttribute("aria-pressed"), "true");
+  await captureBrowserEvidence(page, "1366-inbox-keyboard", {
+    fullPage: false,
+  });
+  await page.keyboard.press("k");
+  await detail.getByText("1 of 3", { exact: true }).waitFor();
+  assert.equal(request(), order[0]);
+  // Typing in a field types: the letters land and the selection stays.
+  const optional = detail.getByRole("textbox", {
+    name: "Your answer: Optional",
+    exact: true,
+  });
+  await optional.click();
+  await page.keyboard.type("jk");
+  assert.match(await optional.inputValue(), /jk$/);
+  // A choice is an input too.
+  const red = detail.getByRole("radio", { name: /^Red\b/ }),
+    checked = await red.isChecked();
+  await red.focus();
+  await page.keyboard.press("j");
+  await settle(page);
+  assert.equal(await red.isChecked(), checked);
+  assert.equal(request(), order[0]);
+  await detail.getByText("1 of 3", { exact: true }).waitFor();
+  // Modified letters are the browser's.
+  await heading.focus();
+  await page.keyboard.press("Shift+J");
+  await page.keyboard.press("Control+j");
+  await settle(page);
+  assert.equal(request(), order[0]);
+  // The buttons say which key they share.
+  const previous = detail.getByRole("button", {
+      name: "Previous request",
+      exact: true,
+    }),
+    next = detail.getByRole("button", { name: "Next request", exact: true });
+  assert.equal(await previous.getAttribute("aria-keyshortcuts"), "K");
+  assert.equal(await next.getAttribute("aria-keyshortcuts"), "J");
+  await page.getByText("J and K move between requests.").waitFor();
+  // An open menu keeps its own letters.
+  await page
+    .getByRole("button", { name: "Operator account", exact: true })
+    .press("Enter");
+  await page.getByRole("menu").getByRole("menuitem").first().waitFor();
+  await page.keyboard.press("j");
+  await settle(page);
+  assert.equal(request(), order[0]);
+  await page.keyboard.press("Escape");
+  assert.deepEqual(posts, []);
+});
+
+test("work through the Inbox: drafts, filters and position survive key moves, approval and task visits and queue changes; three interactions per further question (desktop)", async (_t, j) => {
+  const { f, page, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/inbox",
+    async (f) => {
+      const a = await seedOwnQuestion(f, mixedForm, "Request 1", "Atlas");
+      // Seven questions and an approval overflow the queue, so its scroll is a real offset.
+      const [b, ...others] = await seedChoices(f, 6, 2);
+      const approval = await seedOwnApproval(f);
+      return { a, b: b!, others, approval };
+    },
+  );
+  const posts = commandPosts(page);
+  const detail = page.getByRole("region", { name: "Selected request" }),
+    form = page.getByRole("region", { name: "Exact question response" }),
+    position = detail.locator(".inbox-position"),
+    kind = page.getByLabel("Request kind", { exact: true }),
+    project = page.getByLabel("Project", { exact: true }),
+    queue = page.locator(".inbox-rows"),
+    request = () => new URL(page.url()).searchParams.get("request"),
+    rowOf = (id: string) => page.locator(`.inbox-row[data-record-id="${id}"]`),
+    scrollQueue = () =>
+      queue.evaluate((e) => {
+        e.scrollTop = 120;
+        e.dispatchEvent(new Event("scroll"));
+        return e.scrollTop;
+      }),
+    count = (n: number) =>
+      page.waitForFunction(
+        (n) => document.querySelectorAll(".inbox-row").length === n,
+        n,
+      ),
+    optional = form.getByRole("textbox", {
+      name: "Your answer: Optional",
+      exact: true,
+    }),
+    draft = "Draft kept across the session";
+  const a = more.a.interactionId;
+  await count(8);
+  // (1) Under a filter, a draft survives J and K.
+  await kind.selectOption("question");
+  await count(7);
+  await rowOf(a).click();
+  await detail.getByRole("heading", { level: 2 }).waitFor();
+  const at = (await displayed(page)).indexOf(a),
+    place = `${at + 1} of 7`;
+  await position.getByText(place, { exact: true }).waitFor();
+  await optional.fill(draft);
+  await detail.getByRole("heading", { level: 2 }).focus();
+  const [away, back] = at < 6 ? ["j", "k"] : ["k", "j"];
+  await page.keyboard.press(away!);
+  await page.waitForURL((url) => url.searchParams.get("request") !== a);
+  await page.keyboard.press(back!);
+  await position.getByText(place, { exact: true }).waitFor();
+  assert.equal(request(), a);
+  assert.equal(await optional.inputValue(), draft);
+  // The key move keeps the heading focused over the draft's restored field, so J/K go on moving.
+  const heading = detail.getByRole("heading", { level: 2 });
+  await settle(page);
+  assert.equal(
+    await heading.evaluate((el) => document.activeElement === el),
+    true,
+  );
+  await page.keyboard.press(away!);
+  await page.waitForURL((url) => url.searchParams.get("request") !== a);
+  assert.equal(await optional.count(), 0);
+  await page.keyboard.press(back!);
+  await position.getByText(place, { exact: true }).waitFor();
+  assert.equal(await optional.inputValue(), draft);
+  // (2) The task and Back: the filter, position, queue scroll and draft are as they were.
+  const scrolled = await scrollQueue();
+  assert.ok(scrolled > 0, "the queue scrolls");
+  await detail.getByRole("link", { name: "Open task", exact: true }).click();
+  await page.waitForURL((url) => url.pathname === `/tasks/${more.a.taskId}`);
+  await page.goBack();
+  await position.getByText(place, { exact: true }).waitFor();
+  assert.equal(request(), a);
+  assert.equal(await kind.inputValue(), "question");
+  assert.equal(await optional.inputValue(), draft);
+  assert.equal(await queue.evaluate((e) => e.scrollTop), scrolled);
+  // (3) The approval decides only at its review route; Back returns to it, its place and scroll.
+  await kind.selectOption("");
+  await count(8);
+  await rowOf(more.approval.interactionId).click();
+  const approvalPlace = `${(await displayed(page)).indexOf(more.approval.interactionId) + 1} of 8`;
+  await position.getByText(approvalPlace, { exact: true }).waitFor();
+  const approvalScroll = await scrollQueue();
+  assert.equal(
+    await page.getByRole("button", { name: /^(approve|deny)\b/i }).count(),
+    0,
+  );
+  await detail
+    .getByRole("link", { name: "Review material & decide", exact: true })
+    .click();
+  await page.waitForURL(
+    (url) => url.pathname === `/tasks/${more.approval.taskId}`,
+  );
+  await page.goBack();
+  await position.getByText(approvalPlace, { exact: true }).waitFor();
+  assert.equal(request(), more.approval.interactionId);
+  assert.equal(await kind.inputValue(), "");
+  assert.equal(await project.inputValue(), "");
+  assert.equal(await queue.evaluate((e) => e.scrollTop), approvalScroll);
+  // (4) The queue changes under the selection: B is answered elsewhere and E arrives.
+  await kind.selectOption("question");
+  await count(7);
+  await rowOf(a).click();
+  await position.getByText(place, { exact: true }).waitFor();
+  assert.equal(await optional.inputValue(), draft);
+  const receipt = await new OperatorApi(f.service, [f.directory]).execute({
+    type: "question.form.answer",
+    key: randomUUID(),
+    taskId: more.b.taskId,
+    interactionId: more.b.interactionId,
+    expectedRevision: 1,
+    answers: { choice: { optionIds: ["members"], text: "" } },
+  });
+  assert.equal(receipt.kind, "coordination");
+  const e = await seedOwnQuestion(f, choiceForm, "Request 8", "Relay");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await rowOf(e.interactionId).waitFor();
+  await rowOf(more.b.interactionId).waitFor({ state: "detached" });
+  const after = await displayed(page);
+  assert.equal(after.length, 7);
+  await position
+    .getByText(`${after.indexOf(a) + 1} of 7`, { exact: true })
+    .waitFor();
+  assert.equal(request(), a);
+  assert.equal(await optional.inputValue(), draft);
+  // (5) A's answer, then each further question: Next request, choose, Submit.
+  const titles = new Map(
+      more.others.map((s) => [s.interactionId, s.title]),
+    ).set(e.interactionId, "Request 8"),
+    target =
+      after[after.indexOf(a) + 1] ?? after[after.indexOf(a) - 1] ?? "none";
+  await form
+    .getByRole("textbox", { name: "Your answer: Explain", exact: true })
+    .fill("Exact text");
+  await form.getByRole("checkbox", { name: /^Home\b/ }).check();
+  await form
+    .getByRole("button", { name: "Submit answers", exact: true })
+    .click();
+  await form.getByText(sent, { exact: true }).first().waitFor();
+  await detail.getByText(leftQueue, { exact: true }).waitFor();
+  assert.equal(request(), a);
+  const next = detail.getByRole("button", { name: continueTo });
+  assert.match((await next.textContent())!, new RegExp(titles.get(target)!));
+  let interactions = 0;
+  await next.click();
+  interactions++;
+  await page.waitForURL((url) => url.searchParams.get("request") === target);
+  await position.getByText(/^\d of 6$/).waitFor();
+  await form.getByRole("radio", { name: /^Team owners/ }).click();
+  interactions++;
+  await form
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .click();
+  interactions++;
+  await form.getByText(sent, { exact: true }).first().waitFor();
+  assert.equal(interactions, 3);
+  await captureBrowserEvidence(page, "1366-inbox-review-session", {
+    fullPage: false,
+  });
+  // Only the two Submit actions sent commands; no move answered, approved or dismissed anything.
+  assert.deepEqual(
+    posts.map((p) => p.type),
+    ["question.form.answer", "question.form.answer"],
+  );
+  assert.equal(
+    f.service.coordinationView().readTask(more.approval.taskId).approvals[0]
+      ?.status,
+    "open",
+  );
 });

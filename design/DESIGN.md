@@ -189,11 +189,19 @@ fixed application dimensions.
   key, hide the inspector and the Changes pane so the conversation takes the whole row.
   The button is a pressed toggle (`aria-pressed`, `--primary` fill when on). The key is
   ignored in editable fields and dialogs and with Ctrl, Alt or Meta held, so layouts
-  that type `\` through AltGr use the button; this is the workspace's only keyboard
-  shortcut, beside the sidebar's ⌘K. The choice is remembered per browser in
+  that type `\` through AltGr use the button; this is the task workspace's only
+  keyboard shortcut, beside the sidebar's ⌘K. The choice is remembered per browser in
   `localStorage`. A link or Changes action that needs a hidden panel shows it for that
   visit without changing the choice. Leaving focus mode restores the inspector fold as
   it was and the pane with its selection. Below 1024px nothing changes.
+- **Inbox keys:** from 761px, J and K select the next and previous request in the
+  queue's displayed order, like the Next request and Previous request buttons
+  (`aria-keyshortcuts`, titles "Next request (J)" and "Previous request (K)"); the queue
+  caption says "J and K move between requests". They follow the focus-mode key's rules,
+  and are also ignored in menus. After a key move the
+  request heading takes focus with a visible `--focus` ring and its row scrolls into
+  view. A click keeps focus where it was, except that a request with an unfinished
+  answer returns focus to the field last used in it. Phones have no keys.
 
 ## Shared components
 
@@ -280,7 +288,14 @@ details:
   input while updates arrive. Follow new messages only when already at the bottom;
   otherwise provide New updates / Jump to latest.
 - After a confirmed Inbox answer or decision, keep a confirmation visible instead
-  of automatically selecting the next request. Failed submissions retain input.
+  of automatically selecting the next request. Failed submissions retain input. Once
+  a fresh complete read shows the request has left the queue, the pane offers an
+  explicit Next request control naming the request after its former place (or the
+  one before it when it was last) with its project and task. When nothing is left it
+  says "No actionable requests remain" ("No more requests in this view" in the history
+  views) with Back to overview, or, under filters with
+  other requests loaded, "No more requests match these filters" with Clear filters.
+  Previous/Next and J/K continue from the request's former place the same way.
 - Recommended/preselected question options are not submitted answers. Show pending,
   recorded, failed, stale, cancelled, already answered, offline and unsupported
   interactions distinctly. Unsupported requests remain unresolved without a blind

@@ -5,6 +5,7 @@ import {
   focusShortcutApplies,
   rememberFocusMode,
   rememberedFocusMode,
+  shortcutApplies,
 } from "../../web/src/focus-mode.js";
 
 const press = (over = {}) => ({
@@ -52,6 +53,40 @@ test("the focus shortcut ignores fields, dialogs, modifiers, repeats and other k
       false,
       `${JSON.stringify(over)}`,
     );
+});
+
+test("the Inbox J and K keys use the same rule: bare letters outside fields, dialogs and modifiers", () => {
+  for (const key of ["j", "k"]) {
+    const letter = (over = {}) => press({ key, ...over });
+    assert.equal(shortcutApplies(key, letter(), el("DIV")), true);
+    assert.equal(shortcutApplies(key, letter(), el("BUTTON")), true);
+    assert.equal(focusShortcutApplies(letter(), el("DIV")), false);
+    assert.equal(shortcutApplies(key, press(), el("DIV")), false);
+    for (const tag of ["TEXTAREA", "INPUT", "SELECT"])
+      assert.equal(shortcutApplies(key, letter(), el(tag)), false, tag);
+    assert.equal(
+      shortcutApplies(key, letter(), el("DIV", { isContentEditable: true })),
+      false,
+    );
+    assert.equal(
+      shortcutApplies(key, letter(), el("DIV", { closest: () => ({}) })),
+      false,
+    );
+    for (const over of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { altKey: true },
+      { key: key.toUpperCase() },
+      { repeat: true },
+      { isComposing: true },
+      { defaultPrevented: true },
+    ])
+      assert.equal(
+        shortcutApplies(key, letter(over), el("DIV")),
+        false,
+        `${key} ${JSON.stringify(over)}`,
+      );
+  }
 });
 
 async function withStorage(storage: unknown, run: () => void) {

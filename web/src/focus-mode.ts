@@ -62,16 +62,23 @@ const IGNORED_ANCESTORS = [
   .map((role) => `[role="${role}"]`)
   .join(",");
 
-/** Whether a key press toggles focus mode: a bare `\` outside fields and dialogs. */
-export function focusShortcutApplies(
+/** Whether a key press is the bare single-key shortcut `key`, typed outside fields and dialogs. */
+export function shortcutApplies(
+  key: string,
   event: ShortcutEvent,
   target: ShortcutTarget | null,
 ) {
   // shortcut: Ctrl/Alt are ignored, so layouts that type `\` through AltGr use the button.
-  if (event.key !== "\\" || event.ctrlKey || event.metaKey || event.altKey)
+  if (event.key !== key || event.ctrlKey || event.metaKey || event.altKey)
     return false;
   if (event.repeat || event.isComposing || event.defaultPrevented) return false;
   if (!target) return true;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return false;
   return !target.isContentEditable && !target.closest(IGNORED_ANCESTORS);
 }
+
+/** Whether a key press toggles focus mode: a bare `\` outside fields and dialogs. */
+export const focusShortcutApplies = (
+  event: ShortcutEvent,
+  target: ShortcutTarget | null,
+) => shortcutApplies("\\", event, target);
