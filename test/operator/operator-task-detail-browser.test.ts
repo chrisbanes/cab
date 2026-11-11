@@ -2585,6 +2585,44 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     await reply.locator("#workspace-reply").inputValue(),
     "Keep this draft",
   );
+  // An unsent draft does not hold the dock open: keyboard focus moving outside compacts it and
+  // the focused link stays clear of it, with the draft still in the textarea.
+  await review.focus();
+  const draftDock = await box("section#reply");
+  assert.ok(
+    draftDock.height <= 0.12 * 844,
+    `Reply with a draft is ${draftDock.height}px`,
+  );
+  const draftReview = await box(".decision a[href*='request=']");
+  assert.ok(
+    draftReview.y >= 0 && draftReview.y + draftReview.height <= 844,
+    "the focused link is in the viewport",
+  );
+  assert.ok(
+    draftReview.y + draftReview.height <= draftDock.y,
+    "the focused link is clear of Reply with a draft",
+  );
+  assert.equal(
+    await reply.locator("#workspace-reply").inputValue(),
+    "Keep this draft",
+  );
+  // Safari and iOS leave focus off a tapped control: a press inside keeps the dock open.
+  await reply.locator("#workspace-reply").focus();
+  await reply.locator(".reply-destination").evaluate((el) => {
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    (document.activeElement as HTMLElement).blur();
+  });
+  const lead = reply.getByRole("radio", { name: "Message task lead" });
+  assert.ok(
+    await reply.getByRole("radio", { name: "Comment on task" }).isVisible(),
+    "the radios stay visible after a non-focusing tap",
+  );
+  if (await lead.count()) {
+    await lead.click();
+    assert.ok(await lead.isChecked());
+  }
   await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")

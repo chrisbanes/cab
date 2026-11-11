@@ -1438,25 +1438,30 @@ a.task-source-chip:hover {
   position: static;
 }
 
-/* On a phone, Reply docks as one textarea until focus enters it or a send, notice or uncertain
-   state needs its controls. The root's scroll padding keeps a focused control clear of the dock. */
+/* On a phone, Reply docks as one textarea until the operator engages it (focus or a press inside,
+   set in task-workspace.tsx) or a send, notice or uncertain state needs its controls. The root's scroll padding keeps a focused control clear of the dock. */
 @media (max-width: 759px) {
   :root:has(.task-workspace .reply-card) {
     --reply-dock-height: 62px;
     scroll-padding-bottom: var(--reply-dock-height);
   }
+  /* An engaged or forced-open dock can reach its 40dvh cap without holding focus. */
+  :root:has(.task-workspace .reply-card:is([data-expanded], [data-engaged])) {
+    scroll-padding-bottom: 40dvh;
+  }
   .task-workspace
     .task-columns
-    > section.reply-card:not(:focus-within, [data-expanded]) {
+    > section.reply-card:not(:focus-within, [data-expanded], [data-engaged]) {
     padding: var(--space-8);
     max-height: 12dvh;
     overflow: hidden;
   }
-  .reply-card:not(:focus-within, [data-expanded]) > :not(textarea, label, h3) {
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged])
+    > :not(textarea, label, h3) {
     display: none;
   }
-  .reply-card:not(:focus-within, [data-expanded]) > label,
-  .reply-card:not(:focus-within, [data-expanded]) > h3 {
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged]) > label,
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged]) > h3 {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -1464,7 +1469,7 @@ a.task-source-chip:hover {
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .reply-card:not(:focus-within, [data-expanded]) > textarea {
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged]) > textarea {
     height: 44px;
     min-height: 44px;
     resize: none;

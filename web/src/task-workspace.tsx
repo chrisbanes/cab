@@ -463,6 +463,57 @@ export function TaskWorkspace({
     },
     [auxSend],
   );
+  // The phone Reply dock stays open (data-engaged) from focus or a press inside it until the
+  // operator moves outside. Safari and iOS do not focus a tapped radio or button, so engagement
+  // cannot follow :focus-within. An outside click collapses it only after dispatch, so the layout
+  // never shifts between pointerdown and click.
+  useEffect(() => {
+    const dock = () => document.getElementById("reply");
+    const inside = (e: Event) =>
+      e.target instanceof Node && Boolean(dock()?.contains(e.target));
+    // Counts engagements, so a collapse queued by an earlier outside click is dropped once the
+    // operator has engaged the dock again before it runs.
+    let engagements = 0;
+    const engage = (on: boolean) => {
+      if (on) engagements++;
+      dock()?.toggleAttribute("data-engaged", on);
+    };
+    let pressing = false;
+    const onPointerDown = (e: Event) => {
+      pressing = true;
+      if (inside(e)) engage(true);
+    };
+    const onPointerEnd = () => {
+      setTimeout(() => {
+        pressing = false;
+      }, 0);
+    };
+    const onFocusIn = (e: Event) => {
+      if (inside(e)) engage(true);
+      else if (!pressing) engage(false);
+    };
+    const onClick = (e: Event) => {
+      if (inside(e)) engage(true);
+      else {
+        const seen = engagements;
+        requestAnimationFrame(() => {
+          if (engagements === seen) engage(false);
+        });
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("pointerup", onPointerEnd, true);
+    document.addEventListener("pointercancel", onPointerEnd, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("pointerup", onPointerEnd, true);
+      document.removeEventListener("pointercancel", onPointerEnd, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, []);
   const focusUnconfirmed = useRef(false);
   // The control whose replayed check just settled, focused once the commit enables it.
   const focusReplay = useRef<string | null>(null);
@@ -2201,11 +2252,7 @@ export function TaskWorkspace({
     <section
       id="reply"
       className="reply-card"
-      // An unsent draft keeps the dock open: collapsing it on blur shifts the page under the pointer
-      // and swallows the click that caused the blur.
-      data-expanded={
-        pending || state.uncertain || outcome || state.draft ? "" : undefined
-      }
+      data-expanded={pending || state.uncertain || outcome ? "" : undefined}
     >
       <h3 className="section-heading">Reply</h3>
       <fieldset className="reply-destination">
