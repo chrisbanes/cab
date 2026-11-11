@@ -8,6 +8,7 @@ import type { StatusMappingEvent } from "../../src/core/status-mapping-contracts
 import {
   deliveryActionLabel,
   grantSentence,
+  mergeBlockerSentence,
 } from "../../src/operator/delivery-action-copy.js";
 import type {
   DeliveryPolicyValues,
@@ -54,10 +55,15 @@ const mergeBlockerSentences = (
   "pr-base-change-held": `Base changed: ${codeHostName(codeHost)} moved this ${codeHost === "gitlab" ? "merge request" : "pull request"} to a base cab has not accepted, so its actions are held until it is restored or the branch it was stacked on merges.`,
 });
 /** A merge-gate code as a sentence when it has one; any other code is shown as it is. */
-export const mergeBlockerText = (code: string, codeHost?: CodeHost) =>
-  Object.hasOwn(mergeBlockerSentences(codeHost), code)
+export const mergeBlockerText = (
+  code: string,
+  codeHost?: CodeHost,
+  baseRef?: string | null,
+) =>
+  mergeBlockerSentence(code, { codeHost, baseRef }) ??
+  (Object.hasOwn(mergeBlockerSentences(codeHost), code)
     ? mergeBlockerSentences(codeHost)[code]!
-    : code;
+    : code);
 
 export const reviewHeadComparison = (matches: boolean, codeHost?: CodeHost) =>
   `${matches ? "Matches" : "Checked an earlier head than"} the current ${codeHost === "gitlab" ? "merge request" : "pull request"} head`;

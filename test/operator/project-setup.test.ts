@@ -498,7 +498,7 @@ test("guided create records the delivery default with the project, and only when
   assert.equal(delivery(signedIn).credentialRef, "gh:github.com");
   assert.equal(level(signedIn, "R_atlas"), "open-prs");
   assert.equal(level(signedIn, "42"), "open-prs");
-  assert.equal(delivery(signedIn).grants.length, 14);
+  assert.equal(delivery(signedIn).grants.length, 16);
   const read = await api.readProjectConfiguration(String(signedIn.projectId));
   assert.equal(read.data.delivery?.credentialConfigured, true);
 

@@ -222,7 +222,7 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
       .getByLabel("Action", { exact: true })
       .locator("option")
       .count(),
-    16,
+    17,
   );
   assert.equal(
     await grant(page)
@@ -1289,7 +1289,7 @@ test("a saved grant whose Project discovery does not list shows its ID with a no
 test("advanced edits use the same upward warning and refresh invalidates a pending proposal", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path);
   await levelControl(page).selectOption("merge-with-approval");
-  await grant(page, 8)
+  await grant(page, 9)
     .getByLabel("Authority", { exact: true })
     .selectOption("allow");
   await save(page).click();
@@ -1723,9 +1723,9 @@ test("Delivery offers Apply Open PRs for repositories that are Not set up, until
   assert.equal(await region.count(), 0);
   const command = body(page);
   await save(page).click();
-  assert.equal(((await command).grants as unknown[]).length, 7);
+  assert.equal(((await command).grants as unknown[]).length, 8);
   await savedOutcome(page);
-  assert.equal(f.service.delivery().configuration(ids.atlas).grants.length, 7);
+  assert.equal(f.service.delivery().configuration(ids.atlas).grants.length, 8);
   assert.equal(await apply.count(), 0);
   await read(page);
   assert.equal(await apply.count(), 0);

@@ -678,7 +678,7 @@ test("Setup states and records the Open PRs delivery default with the signed-in 
   assert.equal(policy.version, 1);
   assert.equal(policy.credentialRef, "gh:github.com");
   assert.equal(policy.mode, "reviewable-pr");
-  assert.equal(policy.grants.length, 7);
+  assert.equal(policy.grants.length, 8);
   await ready
     .getByText("Delivery: granted · GitHub CLI · @octo", { exact: true })
     .waitFor();

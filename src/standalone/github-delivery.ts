@@ -196,7 +196,7 @@ class ProviderFailure extends Error {
     readonly status: number,
     /** Set when GitHub rate-limited the request: the epoch-ms time to resume. */
     readonly resumeAt?: number,
-    /** A 409's parsed JSON body (a merge-async conflict names the pending request); undefined otherwise. */
+    /** A 405, 409 or 422's parsed JSON body (a merge-async conflict names the pending request); undefined otherwise. */
     readonly body?: unknown,
   ) {
     super(`provider-http-${status}`);
@@ -462,7 +462,9 @@ export class GitHubHttpDeliveryProvider
       throw new ProviderFailure(
         response.status,
         await githubRateLimitResumeAt(response),
-        response.status === 409 || response.status === 422
+        response.status === 405 ||
+          response.status === 409 ||
+          response.status === 422
           ? await response.json().catch(() => undefined)
           : undefined,
       );
@@ -1842,9 +1844,8 @@ export class GitHubHttpDeliveryProvider
     );
     const { hostChecks, requireThreads, allowedMethods } = branch;
     const unsupportedRules = [
-      ...(!graph.baseRef || graph.baseRef.target.oid !== raw.base.sha
-        ? ["base-ref-current-unproved"]
-        : []),
+      // A base that advanced is not itself a blocker; strict rules gate currency.
+      ...(!graph.baseRef ? ["base-ref-missing"] : []),
       ...branch.unsupportedRules,
     ];
     const strict =
@@ -2128,6 +2129,13 @@ export class GitHubHttpDeliveryProvider
               .mergeMethod)
       )
         throw new Error("provider-merge-gates-held");
+      // Only a PR an up-to-date rule holds, and that the host reports conflict-free, is updated.
+      if (
+        action.kind === "pr.update-branch" &&
+        (!observation.mergeBlockers.includes("strict-head-behind") ||
+          observation.mergeBlockers.includes("mergeability-unproved"))
+      )
+        throw new Error("provider-update-branch-held");
       if (action.kind === "pr.merge")
         await this.qualifyStackMerge(action, repo.path);
       return {
@@ -2289,6 +2297,13 @@ export class GitHubHttpDeliveryProvider
             id: a.target.nodeId,
           });
           break;
+        case "pr.update-branch":
+          await this.request(
+            `${repo.path}/pulls/${a.target.number}/update-branch`,
+            "PUT",
+            { expected_head_sha: a.target.expectedHeadSha },
+          );
+          break;
         case "pr.thread.reply":
           await this.graph(deliveryDocuments.CabDeliveryThreadReply, {
             thread: a.target.threadNodeId,
@@ -2325,6 +2340,23 @@ export class GitHubHttpDeliveryProvider
       // The write response never establishes success.
       return await this.inspectAction(readback);
     } catch (error) {
+      // GitHub refuses a merge whose head or base moved; the re-attempt re-reads the gate first.
+      if (
+        a.kind === "pr.merge" &&
+        error instanceof ProviderFailure &&
+        (error.status === 405 || error.status === 409)
+      ) {
+        const hostReason = z
+          .object({ message: z.string().min(1) })
+          .safeParse(error.body).data?.message;
+        return {
+          state: "confirmed-failure",
+          reason: "merge-target-moved",
+          receipt: null,
+          retryable: true,
+          ...(hostReason ? { hostReason: hostReason.slice(0, 500) } : {}),
+        };
+      }
       // Only a single-request rejection is definitive. Label removal is multi-effect.
       if (
         error instanceof ProviderFailure &&
@@ -2703,6 +2735,55 @@ export class GitHubHttpDeliveryProvider
           p.base.repo.node_id !== a.target.repositoryId
         )
           throw new Error("provider-pr-mismatch");
+        // GitHub updates the branch later, by merging its base: only that merge commit proves the update.
+        if (a.kind === "pr.update-branch") {
+          if (p.head.sha === a.target.expectedHeadSha)
+            return {
+              state: "uncertain",
+              reason: "provider-update-branch-pending",
+              receipt: null,
+            };
+          // Only a merge from the base the action was authorised against proves it. While the PR targets
+          // another base the outcome waits, as the other readbacks do, until the retarget is accepted or undone.
+          const base = record.acceptedBaseRef ?? a.target.baseRef;
+          if (p.base.ref !== base) throw new Error("provider-pr-mismatch");
+          const [own, merged, ...rest] = z
+            .object({ parents: z.array(z.object({ sha })) })
+            .parse(
+              (await this.request(`${repo.path}/commits/${p.head.sha}`)).json,
+            ).parents;
+          const fromBase =
+            own?.sha === a.target.expectedHeadSha &&
+            merged !== undefined &&
+            !rest.length &&
+            ["ahead", "identical"].includes(
+              z
+                .object({ status: name })
+                .parse(
+                  (
+                    await this.request(
+                      `${repo.path}/compare/${merged.sha}...${encodeURIComponent(base)}`,
+                    )
+                  ).json,
+                ).status,
+            );
+          // Any other head settles the action, so the next observation records it as an outside change.
+          return p.head.ref === a.target.headRef && fromBase
+            ? {
+                state: "confirmed-success",
+                reason: null,
+                receipt: {
+                  nodeId: p.node_id,
+                  number: p.number,
+                  headSha: p.head.sha,
+                },
+              }
+            : {
+                state: "confirmed-failure",
+                reason: "provider-update-branch-superseded",
+                receipt: null,
+              };
+        }
         const moved =
           p.head.sha !== a.target.expectedHeadSha ||
           p.head.ref !== a.target.headRef ||

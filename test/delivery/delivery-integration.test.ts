@@ -623,6 +623,47 @@ test("lost merge response becomes confirmed only after fresh readback and never 
   }
 });
 
+test("a pull request whose base advanced, with no up-to-date rule, merges", async () => {
+  const f = await createReleaseDeliveryFixture("through-merge");
+  try {
+    await f.register();
+    f.scripted.state.baseTip = "3".repeat(40);
+    f.scripted.state.mergeStateStatus = "BEHIND";
+    await f.service.coordinationView().refreshDelivery(f.taskId);
+    assert.deepEqual(
+      f.service.delivery().delivery(f.taskId)?.observation.mergeBlockers,
+      [],
+    );
+    const merged = await f.merge();
+    assert.equal(merged.success, true, merged.text);
+    assert.equal(f.scripted.state.writes, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("the lead's delivery feedback says the PR is behind its base and how to update it", async () => {
+  const f = await createReleaseDeliveryFixture("through-merge");
+  try {
+    await f.register();
+    f.scripted.state.strict = true;
+    f.scripted.state.mergeStateStatus = "BEHIND";
+    await f.service.coordinationView().refreshDelivery(f.taskId);
+    assert.deepEqual(
+      f.service.delivery().delivery(f.taskId)?.observation.mergeBlockers,
+      ["strict-head-behind"],
+    );
+    assert.match(
+      JSON.stringify(f.service.coordinationView().readTask(f.taskId).messages),
+      /Behind main: the branch rules require an up-to-date branch, and this PR is behind main\. Update the branch on GitHub, or the lead can request pr\.update-branch\./,
+    );
+    assert.equal((await f.merge()).success, false);
+    assert.equal(f.scripted.state.writes, 0);
+  } finally {
+    await f.close();
+  }
+});
+
 test("assembled active child and successful worker terminal cannot independently complete the parent", async () => {
   const f = await createReleaseDeliveryFixture();
   try {
@@ -2167,6 +2208,239 @@ test("a pull request that moved off the merge target never confirms it, but its 
     } finally {
       await waiting.f.close();
     }
+  }
+});
+
+/** A through-merge task whose own PR #7, from its task branch, is behind a base an up-to-date rule protects. */
+async function behindTaskPr() {
+  const w = await publicationWorld("allow", undefined, {
+    deliveryMode: "through-merge",
+  });
+  const state = w.f.scripted.state;
+  const sha = w.commit("one.txt");
+  assert.equal((await w.push(sha)).success, true);
+  const branch = w.f.service.delivery().taskBranch(w.f.taskId, "R1")?.branch;
+  assert.ok(branch);
+  state.headRef = branch;
+  state.head = sha;
+  const created = await w.createPr(branch, sha);
+  assert.equal(created.success, true, created.text);
+  state.strict = true;
+  state.mergeStateStatus = "BEHIND";
+  state.baseTip = "3".repeat(40);
+  await refreshDelivery(w.f);
+  assert.deepEqual(
+    w.f.service.delivery().delivery(w.f.taskId)?.observation.mergeBlockers,
+    ["strict-head-behind"],
+  );
+  const update = (operationId = randomUUID()) =>
+    w.f.call("cab_external_action", {
+      operationId,
+      action: {
+        kind: "pr.update-branch",
+        target: {
+          repositoryId: "R1",
+          nodeId: "P7",
+          number: 7,
+          headRef: branch,
+          baseRef: "main",
+          expectedHeadSha: sha,
+        },
+      },
+    });
+  const grantUpdate = () =>
+    w.f.grant(
+      { action: "branch.push", mode: "allow" },
+      { action: "pr.create", mode: "allow" },
+      { action: "pr.update-branch", mode: "allow" },
+      { action: "pr.merge", mode: "allow" },
+    );
+  return { ...w, state, sha, branch, update, grantUpdate };
+}
+
+test("pr.update-branch needs a grant, then moves the binding and the task branch to the host's new head", async () => {
+  const w = await behindTaskPr();
+  try {
+    const denied = await w.update();
+    assert.equal(denied.success, false);
+    assert.match(denied.text, /denied by project policy/);
+    assert.equal(w.state.updateBranch.writes, 0);
+    w.grantUpdate();
+    const operationId = randomUUID();
+    // GitHub accepts the request and updates the branch later.
+    assert.equal((await w.update(operationId)).success, false);
+    const pending = w.f.service.delivery().action(operationId);
+    assert.equal(pending.state, "uncertain");
+    assert.equal(pending.observation?.reason, "provider-update-branch-pending");
+    w.f.scripted.applyUpdate();
+    await refreshDelivery(w.f);
+    assert.equal(
+      w.f.service.delivery().action(operationId).state,
+      "confirmed-success",
+    );
+    assert.equal(w.state.updateBranch.writes, 1);
+    const head = w.state.updateBranch.head;
+    assert.equal(
+      w.f.service.delivery().action(operationId).observation?.receipt?.headSha,
+      head,
+    );
+    assert.equal(
+      w.f.service.delivery().delivery(w.f.taskId)?.observation.headSha,
+      head,
+    );
+    const branch = w.f.service.delivery().taskBranch(w.f.taskId, "R1");
+    assert.equal(branch?.lastPushedSha, head);
+    assert.equal(branch?.outsideHeadSha, null);
+    assert.ok(
+      !w.f.service
+        .delivery()
+        .completionBlockers(w.f.taskId, 1)
+        .includes("task-branch-outside-change"),
+    );
+    // The old head is no longer the delivery's: a merge naming it is refused before any write.
+    const stale = await w.f.call("cab_external_action", {
+      operationId: randomUUID(),
+      action: {
+        kind: "pr.merge",
+        target: {
+          repositoryId: "R1",
+          nodeId: "P7",
+          number: 7,
+          headRef: w.branch,
+          baseRef: "main",
+          expectedHeadSha: w.sha,
+        },
+        method: "squash",
+        reviewedResultIds: [],
+      },
+    });
+    assert.equal(stale.success, false);
+    assert.equal(w.state.writes, 0);
+    // Not behind any more: a second update is refused before any write.
+    assert.equal((await w.update()).success, false);
+    assert.equal(w.state.updateBranch.writes, 1);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a head that is not GitHub's update ends a pending pr.update-branch and is recorded as an outside change", async () => {
+  const w = await behindTaskPr();
+  try {
+    w.grantUpdate();
+    const operationId = randomUUID();
+    await w.update(operationId);
+    assert.equal(w.f.service.delivery().action(operationId).state, "uncertain");
+    // Someone pushes on top of the old head before GitHub's update runs.
+    const outside = "6".repeat(40);
+    w.state.parents[outside] = [w.sha];
+    w.state.head = outside;
+    w.state.refs[w.branch] = outside;
+    await refreshDelivery(w.f);
+    const record = w.f.service.delivery().action(operationId);
+    assert.equal(record.state, "confirmed-failure");
+    assert.equal(
+      record.observation?.reason,
+      "provider-update-branch-superseded",
+    );
+    await refreshDelivery(w.f);
+    const branch = w.f.service.delivery().taskBranch(w.f.taskId, "R1");
+    assert.equal(branch?.lastPushedSha, w.sha);
+    assert.equal(branch?.outsideHeadSha, outside);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a pr.update-branch whose response is lost records no outside head and is confirmed from readback after restart", async () => {
+  const w = await behindTaskPr();
+  try {
+    w.grantUpdate();
+    w.state.updateBranch.lostResponse = true;
+    w.state.commitsUnavailable = true;
+    const operationId = randomUUID();
+    assert.equal((await w.update(operationId)).success, false);
+    assert.equal(w.f.service.delivery().action(operationId).state, "uncertain");
+    // A periodic read sees the host's new head before the action is proved: not an outside push.
+    await refreshDelivery(w.f);
+    assert.equal(
+      w.f.service.delivery().delivery(w.f.taskId)?.observation.headSha,
+      w.state.updateBranch.head,
+    );
+    assert.equal(
+      w.f.service.delivery().taskBranch(w.f.taskId, "R1")?.outsideHeadSha,
+      null,
+    );
+    w.state.commitsUnavailable = false;
+    await w.f.service.stopTask(w.f.taskId);
+    await until(
+      () => !w.f.service.list().some((i) => i.state === "running"),
+      "lost-update stop",
+    );
+    await w.f.reopen();
+    await refreshDelivery(w.f);
+    assert.equal(
+      w.f.service.delivery().action(operationId).state,
+      "confirmed-success",
+    );
+    assert.equal(w.state.updateBranch.writes, 1);
+    const branch = w.f.service.delivery().taskBranch(w.f.taskId, "R1");
+    assert.equal(branch?.lastPushedSha, w.state.updateBranch.head);
+    assert.equal(branch?.outsideHeadSha, null);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a merge refused because the head moved is retryable, leaves no standing blocker, and the new head governs", async () => {
+  const moved = await asyncMerge({});
+  try {
+    moved.f.scripted.state.mergeAsync.refuse = {
+      status: 409,
+      head: "3".repeat(40),
+    };
+    assert.equal((await moved.merge()).success, false);
+    const record = moved.f.service.delivery().action(moved.operationId);
+    assert.equal(record.state, "confirmed-failure");
+    assert.equal(record.observation?.reason, "merge-target-moved");
+    assert.equal(record.observation?.retryable, true);
+    assert.deepEqual(
+      moved.f.service.delivery().actionBlockers(moved.f.taskId),
+      [],
+    );
+    // The re-attempt re-reads the gate: the head it named moved, so nothing is sent again.
+    await refreshDelivery(moved.f);
+    const again = moved.f.service.delivery().action(moved.operationId);
+    assert.equal(again.state, "confirmed-failure");
+    assert.equal(again.observation?.reason, "provider-preflight-held");
+    assert.notEqual(again.observation?.retryable, true);
+    assert.equal(moved.f.scripted.state.writes, 1);
+    assert.equal(
+      moved.f.service.delivery().delivery(moved.f.taskId)?.observation.headSha,
+      "3".repeat(40),
+    );
+    assert.deepEqual(
+      moved.f.service.delivery().actionBlockers(moved.f.taskId),
+      [],
+    );
+  } finally {
+    await moved.f.close();
+  }
+  // Only the base moved: the gate still passes, so the same head is merged.
+  const base = await asyncMerge({});
+  try {
+    base.f.scripted.state.mergeAsync.refuse = { status: 405 };
+    assert.equal((await base.merge()).success, false);
+    assert.equal(base.action().reason, "merge-target-moved");
+    await refreshDelivery(base.f);
+    assert.equal(base.action().state, "confirmed-success");
+    assert.equal(base.f.scripted.state.writes, 2);
+    assert.deepEqual(base.f.scripted.state.mergeBodies, [
+      merge.body,
+      merge.body,
+    ]);
+  } finally {
+    await base.f.close();
   }
 });
 

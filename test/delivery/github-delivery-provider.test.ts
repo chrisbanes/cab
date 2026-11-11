@@ -281,11 +281,24 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
         app: { id: 17 },
       },
     ];
+  let write = (): Response =>
+    Response.json({ status: "merged", details: { uuid: "u-1" } });
+  const sent: string[] = [];
+  let parents: string[] = [];
+  let compareStatus = "ahead";
+  const compared: string[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
-    if (init?.method === "PUT") {
+    if (init?.method && init.method !== "GET" && url.pathname !== "/graphql") {
       writes++;
-      return Response.json({ status: "merged", details: { uuid: "u-1" } });
+      sent.push(`${init.method} ${url.pathname} ${String(init.body)}`);
+      return write();
+    }
+    if (/^\/repos\/org\/repo\/commits\/[0-9a-f]{40}$/.test(url.pathname))
+      return Response.json({ parents: parents.map((sha) => ({ sha })) });
+    if (url.pathname.startsWith("/repos/org/repo/compare/")) {
+      compared.push(url.pathname);
+      return Response.json({ status: compareStatus });
     }
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
@@ -321,6 +334,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
         default_branch: "main",
       });
     if (url.pathname.endsWith("/pulls/7")) return Response.json(raw);
+    if (url.pathname === "/user") return Response.json({ node_id: "U1" });
     if (url.pathname.endsWith("/check-runs"))
       return Response.json({ total_count: checks.length, check_runs: checks });
     if (
@@ -372,6 +386,21 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     },
     setChecks: (v: unknown[]) => {
       checks = v;
+    },
+    /** How the code host answers every REST write, and each write sent. */
+    setWrite: (v: () => Response) => {
+      write = v;
+    },
+    sent,
+    /** The parents of every commit read. */
+    setParents: (v: string[]) => {
+      parents = v;
+    },
+    /** Each compare path read. */
+    compared,
+    /** How the base branch compares with any commit. */
+    setCompareStatus: (v: string) => {
+      compareStatus = v;
     },
   };
 }
@@ -623,6 +652,219 @@ test("a classic protection rule GitHub reports but cab cannot read holds the mer
     /gates-held/,
   );
   assert.equal(f.getWrites(), 0);
+});
+test("a base that advanced blocks only under an up-to-date rule, and a missing base ref blocks", async () => {
+  const advanced = {
+    mergeStateStatus: "BEHIND",
+    baseRef: { target: { oid: "3".repeat(40) }, branchProtectionRule: null },
+  };
+  const clean = prProviderFixture(advanced);
+  assert.deepEqual(
+    (await clean.provider.inspectPr(clean.identity, clean.policy))
+      .mergeBlockers,
+    [],
+  );
+  await clean.provider.preflight(mergeAction("squash"), clean.policy);
+  const classic = prProviderFixture({
+    ...advanced,
+    baseRef: {
+      target: { oid: "3".repeat(40) },
+      branchProtectionRule: {
+        requiresDeployments: false,
+        requiredDeploymentEnvironments: [],
+        requiresStrictStatusChecks: true,
+      },
+    },
+  });
+  classic.setProtection({
+    required_status_checks: { strict: true, checks: [] },
+  });
+  const ruleset = prProviderFixture(advanced);
+  ruleset.setRules([
+    {
+      type: "required_status_checks",
+      parameters: {
+        strict_required_status_checks_policy: true,
+        required_status_checks: [],
+      },
+    },
+  ]);
+  for (const f of [classic, ruleset]) {
+    assert.ok(
+      (await f.provider.inspectPr(f.identity, f.policy)).mergeBlockers.includes(
+        "strict-head-behind",
+      ),
+    );
+    await assert.rejects(
+      f.provider.preflight(mergeAction("squash"), f.policy),
+      /gates-held/,
+    );
+  }
+  const conflicting = prProviderFixture({
+    ...advanced,
+    mergeable: "CONFLICTING",
+    mergeStateStatus: "DIRTY",
+  });
+  assert.deepEqual(
+    (
+      await conflicting.provider.inspectPr(
+        conflicting.identity,
+        conflicting.policy,
+      )
+    ).mergeBlockers,
+    ["mergeability-unproved"],
+  );
+  const missing = prProviderFixture({ baseRef: null });
+  assert.ok(
+    (
+      await missing.provider.inspectPr(missing.identity, missing.policy)
+    ).mergeBlockers.includes("base-ref-missing"),
+  );
+  await assert.rejects(
+    missing.provider.preflight(mergeAction("squash"), missing.policy),
+    /gates-held/,
+  );
+  for (const f of [clean, classic, ruleset, conflicting, missing])
+    assert.equal(f.getWrites(), 0);
+});
+test("a merge GitHub refuses because its head or base moved is a retryable confirmed failure", async () => {
+  const f = prProviderFixture();
+  const refused = (status: number) =>
+    f.setWrite(() =>
+      Response.json({ message: "Head branch was modified" }, { status }),
+    );
+  for (const status of [405, 409]) {
+    refused(status);
+    const record = commentRecord();
+    record.request = {
+      operationId: record.operationId,
+      action: mergeAction("squash"),
+    };
+    assert.deepEqual(await f.provider.performAction(record), {
+      state: "confirmed-failure",
+      reason: "merge-target-moved",
+      receipt: null,
+      retryable: true,
+      hostReason: "Head branch was modified",
+    });
+  }
+  // Only the merge reads a refusal as a moved target.
+  refused(409);
+  assert.deepEqual(await f.provider.performAction(commentRecord()), {
+    state: "confirmed-failure",
+    reason: "provider-http-409",
+    receipt: null,
+  });
+});
+const updateAction: ExternalAction = {
+  kind: "pr.update-branch",
+  target: {
+    repositoryId: "R1",
+    number: 7,
+    nodeId: "P7",
+    baseRef: "main",
+    headRef: "cb/change",
+    expectedHeadSha: "1".repeat(40),
+  },
+};
+test("pr.update-branch is sent only for a conflict-free PR an up-to-date rule holds as behind", async () => {
+  const strictRule = {
+    type: "required_status_checks",
+    parameters: {
+      strict_required_status_checks_policy: true,
+      required_status_checks: [],
+    },
+  };
+  for (const [change, strict] of [
+    [{}, true],
+    [{ mergeStateStatus: "BEHIND" }, false],
+    [{ mergeStateStatus: "BEHIND", mergeable: "CONFLICTING" }, true],
+  ] as const) {
+    const f = prProviderFixture(change);
+    if (strict) f.setRules([strictRule]);
+    await assert.rejects(
+      f.provider.preflight(updateAction, f.policy),
+      /update-branch-held/,
+      JSON.stringify(change),
+    );
+    assert.equal(f.getWrites(), 0);
+  }
+  const f = prProviderFixture({ mergeStateStatus: "BEHIND" });
+  f.setRules([strictRule]);
+  await f.provider.preflight(updateAction, f.policy);
+  f.setWrite(() =>
+    Response.json(
+      { message: "Updating pull request branch." },
+      { status: 202 },
+    ),
+  );
+  const record = commentRecord();
+  record.request = { operationId: record.operationId, action: updateAction };
+  // GitHub updates the branch later, so the write alone proves nothing.
+  assert.deepEqual(await f.provider.performAction(record), {
+    state: "uncertain",
+    reason: "provider-update-branch-pending",
+    receipt: null,
+  });
+  assert.deepEqual(f.sent, [
+    `PUT /repos/org/repo/pulls/7/update-branch ${JSON.stringify({ expected_head_sha: "1".repeat(40) })}`,
+  ]);
+  const updated = "4".repeat(40);
+  f.raw.head.sha = updated;
+  // A plain commit on the old head, a merge of something off the base, or parents out of order is not the update.
+  const superseded = {
+    state: "confirmed-failure",
+    reason: "provider-update-branch-superseded",
+    receipt: null,
+  };
+  for (const [parents, status] of [
+    [["1".repeat(40)], "ahead"],
+    [["2".repeat(40), "1".repeat(40)], "ahead"],
+    [["1".repeat(40), "2".repeat(40)], "diverged"],
+  ] as const) {
+    f.setParents([...parents]);
+    f.setCompareStatus(status);
+    assert.deepEqual(
+      await f.provider.inspectAction(record),
+      superseded,
+      JSON.stringify(parents),
+    );
+  }
+  f.setCompareStatus("ahead");
+  f.setParents(["1".repeat(40), "2".repeat(40)]);
+  // Retargeted while pending: unproved until cab accepts the new base, then judged against it.
+  f.raw.base.ref = "release";
+  assert.deepEqual(await f.provider.inspectAction(record), {
+    state: "uncertain",
+    reason: "provider-readback-unavailable",
+    receipt: null,
+  });
+  assert.deepEqual(
+    await f.provider.inspectAction({ ...record, acceptedBaseRef: "release" }),
+    {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: "P7", number: 7, headSha: updated },
+    },
+  );
+  assert.match(f.compared.at(-1) ?? "", /\.\.\.release$/);
+  f.raw.base.ref = "main";
+  assert.deepEqual(await f.provider.inspectAction(record), {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "P7", number: 7, headSha: updated },
+  });
+  f.setWrite(() =>
+    Response.json(
+      { message: "expected head sha didn't match" },
+      { status: 422 },
+    ),
+  );
+  assert.deepEqual(await f.provider.performAction(record), {
+    state: "confirmed-failure",
+    reason: "provider-http-422",
+    receipt: null,
+  });
 });
 test("a merge whose method is not the repository's configured method is held before any write", async () => {
   const f = prProviderFixture();

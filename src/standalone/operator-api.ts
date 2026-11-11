@@ -6514,6 +6514,7 @@ export class OperatorApi {
             mergeBlockers: b.observation.mergeBlockers
               .slice(0, 64)
               .map((code) => this.safe(code, excluded)),
+            baseRef: this.safe(b.observation.baseRef, excluded),
             omittedFeedbackCount: Math.max(
               0,
               (b.observation.feedback?.length ?? 0) - 128,

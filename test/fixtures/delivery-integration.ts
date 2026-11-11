@@ -104,6 +104,26 @@ export function scriptedDeliveryProvider() {
     failReadsAfterWrite: false,
     /** The bound PR's base branch, and the pull request that used to be its base (null: none exists). */
     baseRef: "main",
+    /** The base branch's current tip (undefined: `base`; null: the branch is missing), and GitHub's mergeability. */
+    baseTip: undefined as string | null | undefined,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    /** A ruleset on every base branch requires an up-to-date branch. */
+    strict: false,
+    /** The bound PR's head branch. */
+    headRef: "cb/change",
+    /** Each commit's parents, read back after a branch update; `commitsUnavailable` fails those reads. */
+    parents: {} as Record<string, string[]>,
+    commitsUnavailable: false,
+    /**
+     * `PUT .../update-branch` calls and the head the host's update makes. GitHub answers 202 and updates
+     * later, as `applyUpdate()` does; a lost response is sent after the update applied.
+     */
+    updateBranch: {
+      writes: 0,
+      head: "5".repeat(40),
+      lostResponse: false,
+    },
     lower: null as null | {
       merged: boolean;
       open: boolean;
@@ -125,6 +145,8 @@ export function scriptedDeliveryProvider() {
       },
       /** A 409 that names this pending request instead. */
       conflict: undefined as string | undefined,
+      /** Refuses the next write as a stale merge, naming no request, after moving the head to `head`. */
+      refuse: undefined as undefined | { status: 405 | 409; head?: string },
       polls: [] as Array<{ status: string; message?: string } | "expired">,
     },
     sourceBody: "Deliver O",
@@ -187,6 +209,14 @@ export function scriptedDeliveryProvider() {
       : status === "merged"
         ? { message: message ?? "Pull request merged", sha: "9".repeat(40) }
         : { message: message ?? `Merge ${status}` };
+  /** The host's update lands: GitHub merges the base into the branch. */
+  const applyUpdate = () => {
+    const { head } = state.updateBranch;
+    state.parents[head] = [state.head, state.baseTip ?? state.base];
+    state.head = head;
+    state.refs[state.headRef] = head;
+    state.mergeStateStatus = "CLEAN";
+  };
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -207,7 +237,15 @@ export function scriptedDeliveryProvider() {
       });
       state.mergeBodies.push(body);
       state.writes++;
-      const { put, conflict } = state.mergeAsync;
+      const { put, conflict, refuse } = state.mergeAsync;
+      if (refuse) {
+        state.mergeAsync.refuse = undefined;
+        if (refuse.head) state.head = refuse.head;
+        return Response.json(
+          { message: "Head branch was modified" },
+          { status: refuse.status },
+        );
+      }
       if (conflict)
         return Response.json(
           { message: "Merge in progress", details: { uuid: conflict } },
@@ -224,6 +262,40 @@ export function scriptedDeliveryProvider() {
         { status: put.http },
       );
     }
+    if (route === "PUT /repos/org/repo/pulls/7/update-branch") {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        expected_head_sha: state.head,
+      });
+      state.updateBranch.writes++;
+      if (state.updateBranch.lostResponse) {
+        applyUpdate();
+        throw Error("scripted lost update response");
+      }
+      return Response.json(
+        { message: "Updating pull request branch." },
+        { status: 202 },
+      );
+    }
+    const commit = /^GET \/repos\/org\/repo\/commits\/([0-9a-f]{40})$/.exec(
+      route,
+    );
+    if (commit) {
+      if (state.commitsUnavailable) throw Error("scripted commit read failed");
+      return Response.json({
+        parents: (state.parents[commit[1]!] ?? []).map((sha) => ({ sha })),
+      });
+    }
+    // Only the base branch's tip is on it.
+    const compare =
+      /^GET \/repos\/org\/repo\/compare\/([0-9a-f]{40})\.\.\.(.+)$/.exec(route);
+    if (compare)
+      return Response.json({
+        status:
+          compare[1] === (state.baseTip ?? state.base) &&
+          decodeURIComponent(compare[2]!) === state.baseRef
+            ? "identical"
+            : "diverged",
+      });
     if (route.startsWith("GET /repos/org/repo/pulls/7/merge-async/")) {
       const uuid = route.slice(route.lastIndexOf("/") + 1);
       const { polls } = state.mergeAsync;
@@ -371,14 +443,14 @@ export function scriptedDeliveryProvider() {
               number: 7,
               repository: { id: "R1", nameWithOwner: "org/repo" },
               baseRefName: state.baseRef,
-              headRefName: "cb/change",
+              headRefName: state.headRef,
               headRefOid: state.head,
               baseRefOid: state.base,
               state: state.merged ? "MERGED" : state.closed ? "CLOSED" : "OPEN",
               isDraft: state.draft,
               merged: state.merged,
-              mergeable: "MERGEABLE",
-              mergeStateStatus: "CLEAN",
+              mergeable: state.mergeable,
+              mergeStateStatus: state.mergeStateStatus,
               reviewDecision: "APPROVED",
               isMergeQueueEnabled: false,
               closingIssuesReferences: {
@@ -391,10 +463,13 @@ export function scriptedDeliveryProvider() {
                 ],
                 pageInfo: { hasNextPage: false, endCursor: null },
               },
-              baseRef: {
-                target: { oid: state.base },
-                branchProtectionRule: null,
-              },
+              baseRef:
+                state.baseTip === null
+                  ? null
+                  : {
+                      target: { oid: state.baseTip ?? state.base },
+                      branchProtectionRule: null,
+                    },
               reviewThreads: {
                 nodes: state.thread
                   ? [
@@ -418,9 +493,21 @@ export function scriptedDeliveryProvider() {
       throw Error(`Unhandled scripted GraphQL document: ${query}`);
     }
     if (method !== "GET") throw Error(`Unhandled scripted write: ${route}`);
-    // Any base branch: no ruleset and no classic protection.
+    // Any base branch: no classic protection, and a ruleset only when `strict`.
     if (/^\/repos\/org\/repo\/rules\/branches\/[^/]+$/.test(url.pathname))
-      return Response.json([]);
+      return Response.json(
+        state.strict
+          ? [
+              {
+                type: "required_status_checks",
+                parameters: {
+                  strict_required_status_checks_policy: true,
+                  required_status_checks: [],
+                },
+              },
+            ]
+          : [],
+      );
     if (/^\/repos\/org\/repo\/branches\/[^/]+\/protection$/.test(url.pathname))
       return new Response("", { status: 404 });
     switch (url.pathname) {
@@ -444,7 +531,11 @@ export function scriptedDeliveryProvider() {
           merged: state.merged,
           stack: null,
           draft: false,
-          head: { sha: state.head, ref: "cb/change", repo: { node_id: "R1" } },
+          head: {
+            sha: state.head,
+            ref: state.headRef,
+            repo: { node_id: "R1" },
+          },
           base: {
             sha: state.base,
             ref: state.baseRef,
@@ -503,6 +594,7 @@ export function scriptedDeliveryProvider() {
   };
   return {
     state,
+    applyUpdate,
     provider: new GitHubHttpDeliveryProvider(
       "synthetic-release-marker",
       fetcher,
@@ -826,7 +918,7 @@ export async function createReleaseDeliveryFixture(
             repositoryId: "R1",
             nodeId: "P7",
             number: 7,
-            headRef: "cb/change",
+            headRef: scripted.state.headRef,
             baseRef,
             expectedHeadSha: scripted.state.head,
           },

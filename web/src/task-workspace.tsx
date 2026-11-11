@@ -3834,7 +3834,11 @@ function Changes({
                     d.binding.mergeBlockers.map((code) =>
                       code === null
                         ? "Unavailable"
-                        : mergeBlockerText(code, d.binding?.codeHost),
+                        : mergeBlockerText(
+                            code,
+                            d.binding?.codeHost,
+                            d.binding?.baseRef,
+                          ),
                     ),
                   ),
                 ].map((text) => (

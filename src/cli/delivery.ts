@@ -1,4 +1,7 @@
-import { deliveryActionLabel } from "../operator/delivery-action-copy.js";
+import {
+  deliveryActionLabel,
+  mergeBlockerSentence,
+} from "../operator/delivery-action-copy.js";
 import {
   statusMappingActionLabel,
   statusMappingAuthorityText,
@@ -188,7 +191,15 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
       ? [
           "",
           "Merge blockers:",
-          ...b.mergeBlockers.map((code) => `  ${unavailable(code)}`),
+          ...b.mergeBlockers.map((code) => {
+            const sentence =
+              code &&
+              mergeBlockerSentence(code, {
+                codeHost: b.codeHost,
+                baseRef: b.baseRef,
+              });
+            return `  ${sentence ? `${sentence} (${code})` : unavailable(code)}`;
+          }),
         ]
       : []),
     ...(d?.blockers.length
