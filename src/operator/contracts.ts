@@ -1,4 +1,5 @@
 import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
+import { delegateWithdrawalRefusalCodes } from "../core/delegate-withdrawal.js";
 import {
   maxToolPathChars,
   maxToolPaths,
@@ -1388,7 +1389,10 @@ export const assignmentSchema = z
         record: assignmentWithdrawalSchema.nullable(),
         available: z.boolean(),
         refusal: z
-          .object({ code: z.string(), text: z.string() })
+          .object({
+            code: z.enum(delegateWithdrawalRefusalCodes),
+            text: z.string(),
+          })
           .strict()
           .optional(),
       })
@@ -2410,6 +2414,7 @@ export const taskTimelineSchema = envelope(
                   "completed",
                   "held",
                   "cancelled",
+                  "withdrawn",
                 ]),
               })
               .strict(),

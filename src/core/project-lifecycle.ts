@@ -243,7 +243,7 @@ const owned = `WITH owner AS (SELECT ? AS id),
 const drainQueries: readonly [ArchiveBlocker["kind"], string, string][] = [
   [
     "assignment",
-    "SELECT id AS operationId, taskId FROM domain_assignments WHERE id IN (SELECT id FROM owned_assignments) AND state != 'completed'",
+    "SELECT id AS operationId, taskId FROM domain_assignments WHERE id IN (SELECT id FROM owned_assignments) AND state NOT IN ('completed','withdrawn')",
     "An assignment still owns work",
   ],
   [

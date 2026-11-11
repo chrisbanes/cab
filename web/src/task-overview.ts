@@ -381,8 +381,8 @@ const assignmentStates = {
 } satisfies Record<TaskRead["data"]["assignments"][number]["state"], string>;
 
 /**
- * Delegates that hold back the lead and that the operator can withdraw now: unfinished,
- * not the lead, and with no live, held or open work of their own.
+ * The lead's own delegates that hold it back and that the operator can withdraw now:
+ * unfinished, with no live, held or open work of their own.
  */
 export function blockedLeadDelegates(
   data: Pick<Data, "leadAssignmentId" | "assignments">,
@@ -390,6 +390,7 @@ export function blockedLeadDelegates(
   return data.assignments.filter(
     (a) =>
       a.assignmentId !== data.leadAssignmentId &&
+      a.requesterAssignmentId === data.leadAssignmentId &&
       (a.state === "pending" || a.state === "running") &&
       a.withdrawal?.available === true,
   );

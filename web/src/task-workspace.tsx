@@ -1759,15 +1759,17 @@ export function TaskWorkspace({
           <SkipSandboxLine generation={a.executionGeneration} />
           <PolicyDisclosure harness={execution.harness} workspace={workspace} />
         </details>
-        <ApplyInstructions
-          readOnly={projectReadOnly}
-          assignment={a}
-          projectId={data.task.projectId}
-          taskId={taskId}
-          client={client}
-          session={session}
-          onChanged={refreshAll}
-        />
+        {a.state !== "withdrawn" && (
+          <ApplyInstructions
+            readOnly={projectReadOnly}
+            assignment={a}
+            projectId={data.task.projectId}
+            taskId={taskId}
+            client={client}
+            session={session}
+            onChanged={refreshAll}
+          />
+        )}
         {a.withdrawal?.record && (
           <WithdrawalRecord record={a.withdrawal.record} />
         )}

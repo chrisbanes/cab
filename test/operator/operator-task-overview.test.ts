@@ -504,6 +504,7 @@ test("blocked-lead delegates are unfinished, withdrawable and not the lead; with
     ({
       assignmentId: id,
       state,
+      requesterAssignmentId: id === lead ? null : lead,
       ...(available === undefined
         ? {}
         : { withdrawal: { record: null, available } }),
@@ -519,6 +520,7 @@ test("blocked-lead delegates are unfinished, withdrawable and not the lead; with
     a("withdrawn", false),
     a("completed", false),
     a("pending", undefined),
+    { ...a("running", true), requesterAssignmentId: idle.assignmentId },
   ];
   assert.deepEqual(
     blockedLeadDelegates({ leadAssignmentId: lead, assignments }),
@@ -531,7 +533,7 @@ test("blocked-lead delegates are unfinished, withdrawable and not the lead; with
       assignments,
       execution: { holds: { ...holds, stop: false } },
     } as unknown as Data).affected,
-    "Mira (lead) and 5 delegated assignments are affected.",
+    "Mira (lead) and 6 delegated assignments are affected.",
   );
   assert.equal(
     assignmentRow(

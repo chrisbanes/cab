@@ -894,6 +894,10 @@ function workspaceBase(link: StoredRepositoryLink) {
     : { base: { mode: baseMode, fetch: fetchBeforeProvisioning } };
 }
 /** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
+/** Assignments still able to own execution: a withdrawn delegate's records are history. */
+const withoutWithdrawn = <T extends Record<string, unknown>>(
+  assignments: T[],
+) => assignments.filter((a) => a.state !== "withdrawn");
 
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
@@ -5154,7 +5158,7 @@ export class StandaloneService {
           reason: attentionNext["external-action-uncertain"].reason,
         });
     const held: string[] = [];
-    const assignments = domain.assignments(taskId);
+    const assignments = withoutWithdrawn(domain.assignments(taskId));
     for (const a of assignments) {
       const s = selectAssignmentExecution(a, this);
       const request = s.request ?? schedulerStore.latest(String(a.id));
@@ -6013,22 +6017,25 @@ export class StandaloneService {
         .parse(domain.task(taskId).state),
       sourceHeld: domain.admission(taskId).reasons.includes("source-hold"),
       nonStopHold: state.hasNonStopTaskHold(taskId),
-      assignments: domain.assignments(taskId).map((assignment) => {
-        const request = schedulerStore.latest(String(assignment.id));
-        return {
-          assignmentId: String(assignment.id),
-          held: assignment.state === "held",
-          ...(request
-            ? {
-                request: {
-                  workId: request.workId,
-                  sequence: request.sequence,
-                  kind: this.restartRequestKind(request),
-                },
-              }
-            : {}),
-        };
-      }),
+      // A withdrawn delegate's refused request stays history; it is never started again.
+      assignments: withoutWithdrawn(domain.assignments(taskId)).map(
+        (assignment) => {
+          const request = schedulerStore.latest(String(assignment.id));
+          return {
+            assignmentId: String(assignment.id),
+            held: assignment.state === "held",
+            ...(request
+              ? {
+                  request: {
+                    workId: request.workId,
+                    sequence: request.sequence,
+                    kind: this.restartRequestKind(request),
+                  },
+                }
+              : {}),
+          };
+        },
+      ),
     };
   }
 

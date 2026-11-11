@@ -5850,12 +5850,12 @@ export class CoordinationStore {
       .prepare(`SELECT intent.workId, assignment.state AS assignmentState
       FROM execution_intents intent
       JOIN task_execution_bindings binding ON binding.workId = intent.workId
-      JOIN domain_assignments assignment ON assignment.id = binding.assignmentId
+      LEFT JOIN domain_assignments assignment ON assignment.id = binding.assignmentId
       WHERE binding.taskId = ? AND intent.state IN
         ('ready','capacity-waiting','held','submitting','running')`)
       .all(request.taskId) as Array<{
       workId: string;
-      assignmentState: string;
+      assignmentState: string | null;
     }>;
     if (
       unfinishedWork.some(

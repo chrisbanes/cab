@@ -161,8 +161,40 @@ test("a delegate whose request was refused before it started can be withdrawn; a
     refuseQueuedTurn(f, live);
     const available = await api.readAssignment(live);
     assert.equal(available.data.withdrawal?.available, true);
+    // Delegated with cab_delegate, so the conversation timeline shows it.
+    db(f.service)
+      .prepare(
+        "INSERT INTO coordination_delegations (assignmentId, delegatedAt) VALUES (?, ?)",
+      )
+      .run(live, Date.now());
     const receipt = await api.execute(withdraw(f, live));
     assert.equal(receipt.kind, "assignment-withdraw");
+    // Its refused request is history: Start again never targets it.
+    const after = (await api.readTask(f.taskId)).data;
+    assert.notEqual(
+      after.startAgain && "assignmentId" in after.startAgain
+        ? after.startAgain.assignmentId
+        : undefined,
+      live,
+    );
+    const timeline = await api.readTaskTimeline(
+      f.taskId,
+      new URLSearchParams(),
+    );
+    assert.ok(
+      JSON.stringify(timeline.data).includes('"withdrawn"'),
+      "the timeline shows the withdrawn delegation",
+    );
+    assert.throws(
+      () =>
+        command(f.service, {
+          type: "assignment.apply",
+          projectId: f.projectId,
+          assignmentId: live,
+          expectedVersion: Number(f.service.domain().assignment(live).version),
+        }),
+      /withdrawn assignment takes no further turns/,
+    );
   } finally {
     await f.service.stop();
     rmSync(f.root, { recursive: true, force: true });

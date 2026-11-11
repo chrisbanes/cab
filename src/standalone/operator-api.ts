@@ -2131,8 +2131,10 @@ export class OperatorApi {
       : { reason: this.safe(reason, excluded) };
   }
   private execution(task: Row): Execution {
+    // A withdrawn delegate owns no execution; its refused request is history.
     const selections = this.domain()
       .assignments(String(task.id))
+      .filter((a) => a.state !== "withdrawn")
       .map((a) => this.selection(a));
     const holds = {
       stop:

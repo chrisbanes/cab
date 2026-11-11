@@ -45,6 +45,8 @@ export function withdrawalRefusalText(
   assignmentId: string,
 ): string {
   const recovery = `the operator can inspect it with cab recovery get ${assignmentId} and release it with cab recovery release ${assignmentId}`;
+  const taskRecovery =
+    "the operator can find the held assignment with cab recovery get ASSIGNMENT_ID and release it with cab recovery release";
   switch (code) {
     case "live-execution":
       return "The delegate is still running: it has a live or queued execution. Wait for its result.";
@@ -53,7 +55,7 @@ export function withdrawalRefusalText(
     case "uncertain-execution":
       return `The delegate's execution outcome is uncertain; ${recovery}.`;
     case "ownership-hold":
-      return `The task has an ownership or recovery hold; ${recovery}.`;
+      return `The task has an ownership or recovery hold; ${taskRecovery}.`;
     case "open-request":
       return "The delegate is waiting on its own open question or approval. Answer or decline it in the Inbox.";
     case "unfinished-delegates":
@@ -77,7 +79,6 @@ export class DelegateWithdrawalRefusedError extends Error {
     readonly assignmentId: string,
   ) {
     super(withdrawalRefusalText(code, assignmentId));
-    this.name = "DelegateWithdrawalRefusedError";
   }
 }
 
@@ -93,7 +94,9 @@ function blockingDelegateLine(delegate: DelegateStatus): string {
     return `${id} ${delegate.state}; waiting on its open question or approval; it is answered or declined in the Inbox`;
   if (first === "unfinished-delegates")
     return `${id} ${delegate.state}; has unfinished delegates of its own; withdraw or finish those first`;
-  return `${id} ${delegate.state}; ${first === "ownership-hold" ? "task ownership or recovery hold" : first === "uncertain-execution" ? "uncertain execution" : "held execution"}; ask the operator to recover it (cab recovery get ${delegate.assignmentId})`;
+  if (first === "ownership-hold")
+    return `${id} ${delegate.state}; task ownership or recovery hold; ask the operator to release it (cab recovery release)`;
+  return `${id} ${delegate.state}; ${first === "uncertain-execution" ? "uncertain execution" : "held execution"}; ask the operator to recover it (cab recovery get ${delegate.assignmentId})`;
 }
 
 /** The lead's report refusal while delegates remain unfinished; capped for the tool reply. */
@@ -110,7 +113,6 @@ export class DelegatesUnfinishedError extends Error {
         ...[...shown, ...more].map((line) => `- ${line}`),
       ].join("\n"),
     );
-    this.name = "DelegatesUnfinishedError";
     this.delegates = delegates.map((delegate) => ({
       ...delegate,
       withdrawable: delegate.blockers.length === 0,

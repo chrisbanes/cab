@@ -4212,6 +4212,10 @@ export class DomainStore {
         this.operator(command);
         const assignment = this.assignment(command.assignmentId);
         this.projectMatch(assignment, command.projectId);
+        if (assignment.state === "withdrawn")
+          throw new DomainConflictError(
+            "A withdrawn assignment takes no further turns",
+          );
         this.version(assignment, command.expectedVersion);
         const profile = this.activeProfile(String(assignment.profileId));
         const project = this.project(command.projectId);
