@@ -408,8 +408,20 @@ nav {
 }
 
 .nav-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
   margin-left: auto;
+  flex: none;
+  white-space: nowrap;
   color: var(--muted-foreground);
+}
+
+/* A project name stays on one line; the link's title carries the full name. */
+.nav-project .nav-label > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-chevron {

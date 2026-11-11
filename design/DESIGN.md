@@ -147,7 +147,8 @@ fixed application dimensions.
 
 - **Shell:** a 232px sidebar (cab mark, installation name, Search work field
   with ⌘K, Overview, Inbox with an amber count, Tasks, the projects list with
-  activity meta, a capacity meter and the account menu), a 48px top bar
+  activity meta — a paused project shows the paused symbol and the word "Paused" as that meta,
+  and project names stay on one line with an ellipsis, the full name in the link's title — a capacity meter and the account menu), a 48px top bar
   (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and
   New task with its key), then the page. Settings, Getting started, Approval and
   delivery forms, the Theme choice and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
