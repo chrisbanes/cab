@@ -1743,18 +1743,40 @@ export class CoordinationStore {
         WHERE event.recipientAssignmentId IN (SELECT id FROM subtree)
           AND delivery.eventId IS NULL AND ${deliverable("event")}`)
       .run(value.assignmentId);
-    if (value.actor === "operator")
-      this.newEvent(
-        taskId,
+    if (value.actor === "operator") {
+      // A completed requester is never revived by an event, so the lead is told instead;
+      // a completed lead keeps the record on the task view rather than a stranded event.
+      const requesterState = this.required(
+        "SELECT state FROM domain_assignments WHERE id = ?",
         requester,
+      ).state;
+      const lead =
+        requesterState === "completed"
+          ? this.one(
+              `SELECT lead.assignmentId, assignment.state FROM task_lead_bindings lead
+              JOIN domain_assignments assignment ON assignment.id = lead.assignmentId
+              WHERE lead.taskId = ?`,
+              taskId,
+            )
+          : undefined;
+      const recipient = lead ? String(lead.assignmentId) : requester;
+      const event = this.newEvent(
+        taskId,
+        recipient,
         "delegate-withdrawn",
         null,
         JSON.stringify({
-          message: `The operator withdrew delegate ${value.assignmentId}: ${value.reason}`,
+          message: `The operator withdrew delegate ${value.assignmentId}${recipient === requester ? "" : ` (requested by ${requester})`}: ${value.reason}`,
           assignmentId: value.assignmentId,
           reason: value.reason,
         }),
       );
+      if ((lead ? lead.state : requesterState) === "completed")
+        this.db
+          .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+            VALUES (?, ?, 'delegate-withdrawn')`)
+          .run(event.eventId, recipient);
+    }
     return withdrawal;
   }
 
@@ -5361,6 +5383,11 @@ export class CoordinationStore {
         routingOperationId,
         payload,
       );
+    // A withdrawn assignment takes no further deliveries; the event stays as history.
+    this.db
+      .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+        SELECT ?, id, 'delegate-withdrawn' FROM domain_assignments WHERE id = ? AND state = 'withdrawn'`)
+      .run(eventId, recipientAssignmentId);
     return this.parseEvent(
       this.required(
         "SELECT sequence, eventId, taskId, recipientAssignmentId, eventType, resultId, interactionId, payload, createdAt FROM coordination_inbox_events WHERE eventId = ?",

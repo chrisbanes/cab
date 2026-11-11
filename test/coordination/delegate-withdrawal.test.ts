@@ -797,3 +797,131 @@ test("a delegate with any unfinished descendant cannot be withdrawn, even severa
     f.close();
   }
 });
+
+/** A completed `parent` whose completed child was revived by the lead's follow-up. */
+function revivedChildOfCompletedParent(f: ReturnType<typeof fixture>) {
+  const parent = f.delegate(f.leadA);
+  const child = f.delegate(parent);
+  f.addWork(child, "revived");
+  const { result } = f.coordination.recordResult(
+    f.call(
+      "cab_report_result",
+      { summary: "Child done" },
+      undefined,
+      "revived",
+    ),
+  );
+  f.db
+    .prepare(
+      "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
+    )
+    .run("work-revived");
+  f.db
+    .prepare(
+      "UPDATE execution_pending_effects SET state = 'settled' WHERE workId = ?",
+    )
+    .run("work-revived");
+  // The child's result reaches its parent's turn before the parent completes.
+  const parentWork = f.addWork(parent, "parent");
+  assert.ok(f.coordination.bindDeliveryBatch(parent, parentWork));
+  f.coordination.completeDeliveryBatch(parentWork);
+  f.db
+    .prepare(
+      "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
+    )
+    .run(parentWork);
+  f.db
+    .prepare(
+      "UPDATE execution_pending_effects SET state = 'settled' WHERE workId = ?",
+    )
+    .run(parentWork);
+  f.db
+    .prepare(
+      "UPDATE domain_assignments SET state = 'completed' WHERE id IN (?, ?)",
+    )
+    .run(parent, child);
+  f.coordination.requestFollowUp(
+    f.call("cab_request_follow_up", {
+      resultId: result.resultId,
+      instructions: "Revise it",
+    }),
+  );
+  assert.equal(f.domain.assignment(child).state, "pending");
+  return { parent, child };
+}
+
+test("an operator withdrawal under a completed requester tells the running lead instead", () => {
+  const f = fixture();
+  try {
+    const { parent, child } = revivedChildOfCompletedParent(f);
+    f.operatorWithdraw(child);
+    assert.deepEqual(f.coordination.pendingEvents(parent), []);
+    const notice = f.coordination
+      .pendingEvents(f.leadA)
+      .find((event) => event.eventType === "delegate-withdrawn");
+    assert.ok(notice);
+    assert.match(
+      JSON.parse(notice.payload).message,
+      new RegExp(`withdrew delegate ${child} \\(requested by ${parent}\\)`),
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("an operator withdrawal with a completed requester and lead records its notice undeliverable", () => {
+  const f = fixture();
+  try {
+    const { child } = revivedChildOfCompletedParent(f);
+    f.db
+      .prepare("UPDATE domain_assignments SET state = 'completed' WHERE id = ?")
+      .run(f.leadA);
+    f.operatorWithdraw(child);
+    assert.deepEqual(
+      f.coordination
+        .pendingEvents(f.leadA)
+        .filter((event) => event.eventType === "delegate-withdrawn"),
+      [],
+    );
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM coordination_inbox_events WHERE eventType = 'delegate-withdrawn'",
+        )
+        .get()?.n,
+      1,
+      "the notice is kept as history",
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("an event created for a withdrawn assignment is undeliverable from the start", () => {
+  const f = fixture();
+  try {
+    const delegateId = f.delegate(f.leadA);
+    f.leadWithdraw(delegateId);
+    (
+      f.coordination as unknown as {
+        newEvent(
+          taskId: string,
+          recipient: string,
+          type: string,
+          resultId: null,
+          payload: string,
+        ): unknown;
+      }
+    ).newEvent(
+      taskA,
+      delegateId,
+      "approval-superseded",
+      null,
+      JSON.stringify({ message: "Superseded" }),
+    );
+    assert.deepEqual(f.coordination.pendingEvents(delegateId), []);
+    assert.ok(!f.coordination.pendingEventRecipients().includes(delegateId));
+  } finally {
+    f.close();
+  }
+});

@@ -845,9 +845,10 @@ hold or changes an execution, conversation or workspace.
 A withdrawn delegate moves to the terminal state `withdrawn`, produces no result and
 counts as finished for its lead's report, its lead's outstanding work and task
 completion. Its record keeps who withdrew it (operator or lead), when and why, and
-the task view and `cab assignment get`/`history` show it. An operator withdrawal
-gives the lead an Inbox event naming the delegate and the reason; the lead's own
-withdrawal sends none. Undelivered inbox events addressed to the delegate become
+the task view and `cab assignment get`/`history` show it. An operator withdrawal gives the requesting assignment an Inbox event naming the delegate
+and the reason. A completed requester is never revived by an event, so the task lead gets
+it instead, and when the lead has completed too the event is kept as undeliverable history
+beside the withdrawal record. The lead's own withdrawal sends none. Undelivered inbox events addressed to the delegate become
 undeliverable and no longer wait for delivery. Its thread and workspace stay as
 history, and any later callback from its conversation, including
 `cab_report_result`, is refused as not bound to current work.
