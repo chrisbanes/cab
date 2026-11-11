@@ -1973,6 +1973,12 @@ textarea[data-auto-grow="true"] {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.result-workspace {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
 .retained-provenance {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

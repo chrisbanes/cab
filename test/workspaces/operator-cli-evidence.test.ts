@@ -109,7 +109,7 @@ test("results and artifacts are discovered and retrieved with integrity", async 
     r.out,
     new RegExp(`Artifact ${recordedArtifact}: Recorded \\[available\\]`),
   );
-  assert.match(r.out, /Workspace\s+Workspace state was not recorded/);
+  assert.match(r.out, /Workspace:\s+Workspace state was not recorded/);
   const plain = await ok([
     "result",
     "get",
@@ -131,7 +131,7 @@ test("results and artifacts are discovered and retrieved with integrity", async 
   r = await h.run(["result", "get", native.seeded.taskId, native.resultId]);
   assert.match(
     r.out,
-    /Workspace\s+\S+: recorded at [0-9a-f]{7} on detached HEAD, with uncommitted changes/,
+    /Workspace:\s+\S+: recorded at [0-9a-f]{7} on detached HEAD, with uncommitted changes/,
   );
   const pngOut = out("proof.png");
   const artifact = await ok([

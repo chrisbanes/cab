@@ -3019,11 +3019,11 @@ export function TaskWorkspace({
                       <ShortId value={selected.assignmentId} /> · work revision{" "}
                       {selected.workRevision} · {date(selected.createdAt)}
                     </p>
-                    {resultWorkspaceLines(selected.workspace).map((line) => (
-                      <p key={line} className="metadata muted">
-                        {line}
-                      </p>
-                    ))}
+                    <ul className="result-workspace metadata muted">
+                      {resultWorkspaceLines(selected.workspace).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
                   </section>
                 )}
                 <section id="brief">
