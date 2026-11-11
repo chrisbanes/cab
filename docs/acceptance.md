@@ -865,28 +865,30 @@ does not repeat.
 | Project deletion removes both tables | `project-deletion.test.ts` |
 | A live task turn in each harness binds and serves on `127.0.0.1`, and Claude's outbound stays denied | [live evidence](evidence/2026-11-06-local-listening-live.md) |
 
-## Skip sandbox
+## Sandbox level
 
-A project's `dangerouslySkipSandbox` runs its task turns without the harness sandbox so
-they can launch browsers and Android emulators: Codex sends `dangerFullAccess` and Claude
-Code disables its sandbox, with Claude's tool policy and edit-hook confinement unchanged
+A project's sandbox level ([ADR-1034](adr/1034-harness-native-sandbox-escalation.md)) is
+`strict` by default or `unsandboxed`. At `unsandboxed` its task turns run without the harness
+sandbox so they can launch browsers and Android emulators: Codex sends `dangerFullAccess` and
+Claude Code disables its sandbox, with Claude's tool policy and edit-hook confinement unchanged
 ([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)). The service, both runtimes and the
 operator surfaces are covered by deterministic suites; the sandbox behaviour is proved by the
 [probe](evidence/skip-sandbox-probe-2026-11-09.md) and by one live service turn per harness
-and setting, recorded by `npm run skip-sandbox:live` in the [live record](evidence/2026-11-09-skip-sandbox-live.md), which CI does not repeat.
+and level, recorded by `npm run skip-sandbox:live` in the [live record](evidence/2026-11-11-sandbox-level-live.md), which CI does not repeat.
 
 | Criteria | Evidence |
 | --- | --- |
 | Under each harness's sandbox Chromium and the emulator fail; with Claude's sandbox disabled both succeed | [probe](evidence/skip-sandbox-probe-2026-11-09.md) |
-| The setting is off by default, versioned and operator-only through the API and `project prepare --dangerously-skip-sandbox` | `operator-command-network.test.ts` |
-| A task turn of either harness records the setting at its own admission and runs with it only when it was on; drafting runs, draft turns and unadmitted turns never record it | `command-network-admission.test.ts`, `draft-turn.test.ts` |
-| Codex sends `dangerFullAccess` with approval `never` and never to a read-only turn; off leaves `workspaceWrite` unchanged | `codex-runtime.test.ts` |
+| The level is `strict` by default, versioned and operator-only through the API and `project prepare --sandbox`; the retired `dangerouslySkipSandbox` field is refused and no coordination tool names it | `operator-command-network.test.ts` |
+| The startup migration maps a stored skip-sandbox `true` to `unsandboxed` and everything else to `strict`, leaves unrecorded turns unrecorded and drops the old tables; a database without them gets both tables empty | `startup-snapshot.test.ts` |
+| A task turn of either harness records the level at its own admission and runs unsandboxed only when admitted at `unsandboxed`; drafting runs and draft turns record `strict` and unadmitted turns record nothing | `command-network-admission.test.ts`, `draft-turn.test.ts` |
+| Codex sends `dangerFullAccess` with approval `never` and never to a read-only turn; `strict` leaves `workspaceWrite` unchanged | `codex-runtime.test.ts` |
 | Claude disables only the sandbox, keeps permission mode and tool lists, and still confines Write to the hook roots; the self-test does not gate such a turn and its passed probe is not consumed | `claude-runtime.test.ts` |
 | Both disclosures state the grant and the risks within the disclosure caps and neutral wording | `operator-execution-runtime.test.ts`, `neutral-runtime-copy.test.ts` |
-| Settings asks for confirmation when the setting is turned on and saves off without one; the change list and each turn's admission read from shared copy | `operator-project-config-general-browser.test.ts`, `operator-settings-presentation.test.ts`, `operator-harness-assignment-browser.test.ts` |
-| `project get` and `assignment get` show the setting and the turn's admission, and mark network access and local listening superseded when it is on | `operator-cli-browse.test.ts` |
-| The startup migration adds both tables empty, so every project stays off; project deletion removes them | `startup-snapshot.test.ts`, `project-deletion.test.ts` |
-| A live task turn in each harness with the setting on launches Chromium and boots the emulator, and with it off does neither | [live evidence](evidence/2026-11-09-skip-sandbox-live.md) |
+| Settings asks for confirmation on a change to `unsandboxed` and saves `strict` without one; the change list and each turn's admitted level read from shared copy | `operator-project-config-general-browser.test.ts`, `operator-settings-presentation.test.ts`, `operator-harness-assignment-browser.test.ts` |
+| `project get` and `assignment get` show the level and the turn's admitted level, and mark network access and local listening superseded at `unsandboxed` | `operator-cli-browse.test.ts` |
+| Project deletion removes both tables | `project-deletion.test.ts` |
+| A live task turn in each harness at `unsandboxed` launches Chromium and boots the emulator, and at `strict` does neither, with the same runtime policy as skip sandbox sent | [live evidence](evidence/2026-11-11-sandbox-level-live.md) |
 
 ## Draft turns
 
