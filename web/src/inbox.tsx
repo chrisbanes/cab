@@ -802,6 +802,7 @@ function InboxVisibility({
     [recorded, setRecorded] = useState(false),
     [revealed, setRevealed] = useState(false),
     refocus = useRef(false),
+    focusNote = useRef(false),
     noteId = useId();
   const lifecycle = item.lifecycle;
   if (!lifecycle) return null;
@@ -870,6 +871,12 @@ function InboxVisibility({
             <label htmlFor={noteId}>Dismissal note (optional)</label>
             <Textarea
               id={noteId}
+              ref={(el) => {
+                if (el && focusNote.current) {
+                  focusNote.current = false;
+                  el.focus();
+                }
+              }}
               maxLength={4096}
               value={note}
               disabled={busy || !!pending}
@@ -905,7 +912,10 @@ function InboxVisibility({
               }
             }}
             variant="secondary"
-            onClick={() => setRevealed(true)}
+            onClick={() => {
+              focusNote.current = true;
+              setRevealed(true);
+            }}
           >
             Dismiss
           </Button>

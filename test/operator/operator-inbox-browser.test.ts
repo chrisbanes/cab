@@ -2378,8 +2378,13 @@ for (const viewport of [
     assert.equal(order.submitBeforeDismiss, true);
     const note = page.getByLabel("Dismissal note (optional)");
     assert.equal(await note.count(), 0);
-    await dismiss.click();
+    await dismiss.focus();
+    await page.keyboard.press("Enter");
     await note.waitFor();
+    assert.equal(
+      await note.evaluate((el) => el === document.activeElement),
+      true,
+    );
     assert.equal(
       await page
         .locator("label", { hasText: "Dismissal note (optional)" })
