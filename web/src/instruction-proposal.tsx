@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import {
   draftingRunReadSchema,
+  projectConfigurationSchema,
   type OperatorFeedbackItem,
   operatorFeedbackPageSchema,
   profileInstructionsSchema,
@@ -100,6 +101,8 @@ export function InstructionProposalsTab(p: TabProps) {
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<InstructionRun | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  // An archived project's proposals are read-only, like the rest of its settings.
+  const readOnly = Boolean(p.readOnly);
 
   const loadPage = useCallback(
     async (after: string | null, signal?: AbortSignal) => {
@@ -214,17 +217,40 @@ export function InstructionProposalsTab(p: TabProps) {
     });
   };
 
-  const start = async (from: Stored) => {
+  /** A request from the selection; a redraft keeps the reviewed run if it cannot start. */
+  const start = async (from: Stored, redraft = false) => {
+    if (readOnly) return;
+    let version = data.project.version;
+    if (redraft) {
+      // The review may outlast the loaded configuration (an accepted save changes it).
+      try {
+        version = (
+          await client.read(
+            `/api/operator/projects/${projectId}/configuration`,
+            projectConfigurationSchema,
+          )
+        ).data.project.version;
+      } catch {
+        return setMessage("Couldn’t read the project. Try again.");
+      }
+    }
     const next = {
       ...from,
       runId: randomUUID(),
       startKey: randomUUID(),
-      expectedProjectVersion: data.project.version,
+      expectedProjectVersion: version,
     };
+    const previous = redraft
+      ? {
+          runId: from.runId,
+          startKey: from.startKey,
+          expectedProjectVersion: from.expectedProjectVersion,
+        }
+      : undefined;
     setRun(null);
     setSaved(null);
     change(next);
-    await sendStart(next);
+    await sendStart(next, previous);
   };
   sendStartRef.current = sendStart;
   async function sendStart(
@@ -233,6 +259,8 @@ export function InstructionProposalsTab(p: TabProps) {
       startKey: string;
       expectedProjectVersion: number;
     },
+    /** The run to go back to when a redraft is refused. */
+    previous?: Pick<Stored, "runId" | "startKey" | "expectedProjectVersion">,
   ) {
     setBusy(true);
     setMessage("");
@@ -260,11 +288,13 @@ export function InstructionProposalsTab(p: TabProps) {
       return setMessage(
         "Couldn’t confirm the request. It is checked again when the page reads it.",
       );
-    change({
-      runId: undefined,
-      startKey: undefined,
-      expectedProjectVersion: undefined,
-    });
+    change(
+      previous ?? {
+        runId: undefined,
+        startKey: undefined,
+        expectedProjectVersion: undefined,
+      },
+    );
     setMessage(
       result.state === "conflict"
         ? "The project changed. Try again."
@@ -321,6 +351,7 @@ export function InstructionProposalsTab(p: TabProps) {
             saved={saved}
             onSaved={async (revision) => {
               setSaved(savedLine(revision));
+              p.refreshConfiguration();
               // The target has changed now, so Accept is not offered again even if this fails.
               await settle("accept");
               await readRun();
@@ -328,7 +359,7 @@ export function InstructionProposalsTab(p: TabProps) {
             reread={() => void readRun()}
             stop={stop}
             reject={reject}
-            redraft={() => void start(stored)}
+            redraft={() => void start(stored, true)}
             clear={clear}
           />
         ) : (
@@ -339,7 +370,8 @@ export function InstructionProposalsTab(p: TabProps) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (selection.sendable && !busy) void start(stored);
+                if (selection.sendable && !busy && !readOnly)
+                  void start(stored);
               }}
             >
               <fieldset className="settings-fields">
@@ -447,7 +479,10 @@ export function InstructionProposalsTab(p: TabProps) {
                 />
               </div>
               <div className="settings-actions">
-                <Button type="submit" disabled={!selection.sendable || busy}>
+                <Button
+                  type="submit"
+                  disabled={!selection.sendable || busy || readOnly}
+                >
                   {busy ? "Requesting…" : "Request proposal"}
                 </Button>
               </div>
@@ -488,14 +523,18 @@ function Review(
   const target = run.instructionTarget;
   const current = target?.observedInstructions ?? "";
   // The edited text lives in the run's draft, so it survives leaving the tab.
-  const d = useDraft(p.drafts, `instruction-proposal:${run.runId}`);
+  const readOnly = Boolean(p.readOnly);
+  const d = useDraft(p.drafts, `instruction-proposal:${run.runId}`, readOnly);
   const finalText =
     typeof d.values.instructions === "string"
       ? d.values.instructions
       : (proposal?.instructions ?? "");
   // A sent save has frozen its body; further edits would be silently dropped.
   const locked =
-    d.phase === "pending" || d.phase === "unknown" || d.phase === "recorded";
+    readOnly ||
+    d.phase === "pending" ||
+    d.phase === "unknown" ||
+    d.phase === "recorded";
   const block = acceptBlock(run, finalText);
   const diff = useMemo(() => {
     const { current: removed, proposed: added } = lineDiff(current, finalText);
@@ -558,6 +597,11 @@ function Review(
         <StatusBadge tone="neutral">{runStateLabel(run.state)}</StatusBadge>
       }
     >
+      {readOnly && (
+        <p className="body" role="status">
+          This project is archived, so its proposals are read-only.
+        </p>
+      )}
       {(run.state === "queued" ||
         run.state === "running" ||
         run.state === "stopping") && (
@@ -568,7 +612,7 @@ function Review(
           <Button
             type="button"
             variant="secondary"
-            disabled={p.busy || run.state === "stopping"}
+            disabled={readOnly || p.busy || run.state === "stopping"}
             onClick={p.stop}
           >
             Stop
@@ -584,7 +628,12 @@ function Review(
           <p className="body">
             {p.saved ?? run.reason ?? runStateLabel(run.state)}
           </p>
-          <Button type="button" variant="secondary" onClick={p.redraft}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={readOnly}
+            onClick={p.redraft}
+          >
             Redraft
           </Button>
           <Button type="button" variant="secondary" onClick={p.clear}>
@@ -596,7 +645,12 @@ function Review(
         <p className="body" role="alert">
           This proposal holds text that cannot be shown, so it cannot be
           accepted.{" "}
-          <Button type="button" variant="secondary" onClick={p.redraft}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={readOnly}
+            onClick={p.redraft}
+          >
             Redraft
           </Button>
         </p>
@@ -713,7 +767,7 @@ function Review(
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={p.busy}
+                  disabled={readOnly || p.busy}
                   onClick={p.reject}
                 >
                   Reject
@@ -721,7 +775,7 @@ function Review(
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={p.busy}
+                  disabled={readOnly || p.busy}
                   onClick={p.redraft}
                 >
                   Redraft

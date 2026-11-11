@@ -232,6 +232,14 @@ test("instructions changed in another tab make Accept unavailable and send no co
   );
   await page.getByRole("button", { name: "Redraft" }).waitFor();
   assert.equal(commands("project.configure").length, 0);
+  // Redraft reads the project afresh, so the changed version does not refuse it.
+  await page.getByRole("button", { name: "Redraft" }).click();
+  const redrafted = await runningRun(f, new Set([runId]));
+  assert.notEqual(redrafted, runId);
+  await page
+    .getByText("The lead is drafting from the selected feedback.")
+    .waitFor();
+  assert.equal(commands("instruction.draft.start").length, 2);
 });
 
 test("a reload while drafting reattaches to the same run", async (_t, j) => {
@@ -292,4 +300,38 @@ test("edited text survives leaving the tab, and the editor is locked while a sav
     String(domain.project(projectId).instructions),
     `${current}\nEdited.`,
   );
+});
+
+test("an archived project's proposal is read-only: no Accept, Reject, Redraft or edit", async (_t, j) => {
+  const { f, page, projectId, commands, open } = await launch(j, desktop);
+  await open();
+  await select(page, /keyboard navigation evidence/);
+  await page.getByRole("button", { name: "Request proposal" }).click();
+  const runId = await runningRun(f, new Set());
+  const domain = f.service.domain();
+  await answer(
+    f,
+    runId,
+    `${String(domain.project(projectId).instructions)}\nProposed.`,
+  );
+  await page.locator("#instruction-final").waitFor();
+  // As in operator-unstack.test.ts: archive directly, since the seeded task still has assignments to drain.
+  (f.service as unknown as { db: import("node:sqlite").DatabaseSync }).db
+    .prepare(
+      "UPDATE domain_projects SET archived=1,version=version+1 WHERE id=?",
+    )
+    .run(projectId);
+  await page.reload();
+  await page
+    .getByText("This project is archived, so its proposals are read-only.")
+    .waitFor();
+  assert.equal(await page.locator("#instruction-final").isDisabled(), true);
+  for (const name of ["Accept and save", "Reject", "Redraft"])
+    assert.equal(
+      await page.getByRole("button", { name, exact: true }).isDisabled(),
+      true,
+      name,
+    );
+  assert.equal(commands("profile.configure").length, 0);
+  assert.equal(commands("project.configure").length, 0);
 });
