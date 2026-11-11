@@ -1161,7 +1161,7 @@ nav {
   height: 24px;
   margin-inline-end: 4px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
@@ -1911,7 +1911,7 @@ textarea[data-auto-grow="true"] {
   background: transparent;
 }
 .question-option input[type="checkbox"] {
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .question-option input[type="radio"]:checked {
   border-color: var(--foreground);

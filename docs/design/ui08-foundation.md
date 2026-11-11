@@ -26,7 +26,7 @@ adapted to repository imports and existing Radix Dialog usage.
 One semantic token set supplies Dark / Neutral / Default. The primitives follow
 shadcn Nova: Geist 400/500/600 is interface text and Geist Mono 400 is for
 identifiers and provenance. Desktop controls are 32px (`--radius-lg` 6px);
-cards use `--radius-xl` 14px and 16px padding; badges are 20px pills; outline
+cards use `--radius-xl` 8px and 16px padding; badges are 20px pills; outline
 and field backgrounds use `--nova-outline-bg` / `--nova-input-bg`; destructive
 buttons and badges are tinted (`--nova-destructive-bg` / `-fg`), not solid. Phone
 actions and labelled touch targets are at least 44px.
