@@ -1,8 +1,14 @@
 ---
 status: accepted
+partially_superseded_by: ADR-1034
 ---
 
 # Skip the sandbox for host tools
+
+Superseded in part: [ADR-1034](1034-harness-native-sandbox-escalation.md) replaces the
+`dangerouslySkipSandbox` field with a sandbox level whose `unsandboxed` level keeps this
+decision's scope, harness settings and threat model, and replaces the verification tool with
+harness-native escalation.
 
 A project's verification needs host tools that a harness sandbox blocks. Inside it, Chromium fails
 before opening a page with `MachPortRendezvous bootstrap permission denied`, and an Android emulator

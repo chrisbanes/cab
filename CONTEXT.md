@@ -318,7 +318,7 @@ run without the harness sandbox and can launch host tools such as browsers and A
 It is recorded when a turn is admitted and never applies to draft turns, drafting runs or turns
 without a task binding. Agents then act with the service user's full filesystem, process, network
 and credential access, and command network access and local listening are superseded while it is on.
-It is a short-term measure until the verification tool replaces it.
+The planned sandbox level (ADR-1034) will replace it.
 _Avoid_: Sandbox bypass, unsandboxed mode, when referring to the setting
 
 **Task workspace**:

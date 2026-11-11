@@ -1113,8 +1113,8 @@ confirm the dialog, or run `cab project prepare PROJECT_ID --dangerously-skip-sa
 apply the prepared file. Turn it off in Settings, which applies at once, or with
 `--dangerously-skip-sandbox false`. It is off by default and applies to task turns admitted
 after the change; a running turn keeps its policy.
-[ADR-1029](../adr/1029-skip-sandbox-for-host-tools.md) records the decision. It is a short-term
-measure until cab's own verification tool exists.
+[ADR-1029](../adr/1029-skip-sandbox-for-host-tools.md) records the decision. The sandbox level of
+[ADR-1034](../adr/1034-harness-native-sandbox-escalation.md) will replace it.
 
 - **Codex.** A task turn runs with sandbox policy `dangerFullAccess`; the approval policy stays
   `never`.
