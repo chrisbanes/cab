@@ -48,6 +48,10 @@ test("no linked repositories still states the escalation rule", () => {
   const text = leadDeliveryGuidance({ mode: "through-merge", grants: [] }, []);
   assert.match(text, /No linked repositories/);
   assert.match(text, /three unsuccessful repairs[\s\S]*conflicting direction/);
+  assert.match(
+    text,
+    /Do not ask the operator to diagnose cab refusals; fix the input from the refusal message/,
+  );
 });
 
 test("merge guidance names the repository's configured method, or says pr.merge is held without one", () => {

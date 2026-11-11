@@ -18,7 +18,7 @@ export const mixedForm: QuestionForm = {
       customAllowed: true,
       options: [
         { id: "red", label: "Red", description: "Literal description" },
-        { id: "blue", label: "Blue" },
+        { id: "blue", label: "Blue", description: "Use blue" },
       ],
       recommended: ["blue"],
       preselected: ["red"],
@@ -30,8 +30,8 @@ export const mixedForm: QuestionForm = {
       required: true,
       customAllowed: true,
       options: [
-        { id: "home", label: "Home" },
-        { id: "work", label: "Work" },
+        { id: "home", label: "Home", description: "Work from home" },
+        { id: "work", label: "Work", description: "Work at the office" },
       ],
       minSelections: 1,
       maxSelections: 2,

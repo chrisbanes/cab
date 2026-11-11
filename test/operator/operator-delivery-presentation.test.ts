@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { actionKinds } from "../../src/core/delivery.js";
 import {
+  approvalHeadlines,
   deliveryActionCopy,
   deliveryActionKinds,
   deliveryActionLabel,
@@ -787,6 +788,15 @@ test("the default branch's merge methods are guidance, and a method it doesn't a
     mergeMethodNotAllowedWarning("merge"),
     "The default branch doesn't allow merge commit, so cab holds merges into it until the method or the branch's rules change.",
   );
+});
+
+test("every action kind has a one-line approval headline", () => {
+  assert.deepEqual(
+    Object.keys(approvalHeadlines).sort(),
+    [...actionKinds].sort(),
+  );
+  for (const kind of actionKinds)
+    assert.match(approvalHeadlines[kind], /^[A-Z][^.\n]{0,79}$/, kind);
 });
 
 test("every action kind has a label and description, and an unknown kind reads as it is", () => {

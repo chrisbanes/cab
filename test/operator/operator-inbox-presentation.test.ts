@@ -171,6 +171,32 @@ test("a request leads with its question or exact action and keeps only the reaso
   );
 });
 
+test("a long or multi-line stored headline is one line with its full text kept", () => {
+  const base = {
+    taskTitle: "Guide",
+    projectName: "Docs",
+    reason: "Operator answer requested",
+    attentionCode: null,
+    kind: "question",
+  } as const;
+  const long =
+    "Please provide the provider validation detail for pr.create operation 3ac791e2-d016-41c1-a71a-1e9414bc0831 (confirmed-failure provider-http-422). The request included repositoryId R_kgDORzdwYA, baseRef main, expectedHeadSha 6d1dc6c2. ".repeat(
+      3,
+    );
+  const title = requestHeading({ ...base, headline: long }).title;
+  assert.equal(title, long.trim());
+  assert.ok(long.length > 600);
+  assert.equal(
+    requestHeading({ ...base, headline: "Ship it?\n\n\tBackground  here\r\n" })
+      .title,
+    "Ship it? Background here",
+  );
+  assert.equal(
+    requestHeading({ ...base, headline: "Release" }).title,
+    "Release",
+  );
+});
+
 test("a request with neither headline nor task title has no title, so the page words its own fallback", () => {
   assert.deepEqual(
     requestHeading({

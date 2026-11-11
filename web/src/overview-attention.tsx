@@ -205,7 +205,7 @@ function RuntimeCard({ item }: { item: RuntimeInboxItem }) {
           {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, Date.now())}
         </span>
       </div>
-      <h3 className="small-heading" id={headline}>
+      <h3 className="small-heading" id={headline} title={item.headline}>
         {item.headline}
       </h3>
       <p className="metadata muted">{item.reason}</p>
@@ -267,7 +267,7 @@ function RequestCard({
         {item.projectName ?? "Unavailable project"} /{" "}
         <span>{item.taskTitle ?? "Unavailable task"}</span>
       </p>
-      <h3 className="small-heading" id={headline}>
+      <h3 className="small-heading" id={headline} title={title ?? undefined}>
         {title ?? item.reason ?? "Exact details unavailable"}
       </h3>
       {item.requesterName && (
@@ -490,7 +490,11 @@ function ApprovalCard({
     );
   return (
     <>
-      {head(approval && !approval.materialUnavailable ? approval.action : null)}
+      {head(
+        approval && !approval.materialUnavailable
+          ? (item.headline ?? approval.action)
+          : null,
+      )}
       {state.error && !task && (
         <p role="alert" className="metadata">
           Independent holds could not be read; they remain in effect.

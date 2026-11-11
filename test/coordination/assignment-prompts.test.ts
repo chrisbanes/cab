@@ -1219,7 +1219,7 @@ test("instruction apply rebinds only a never-admitted stale inbox batch", async 
         turnId,
         callId: `s05-refusal-question-${request.taskId}`,
         tool: "cab_ask_question",
-        arguments: { question: `S05_${request.taskId}_INITIAL_QUESTION` },
+        arguments: { question: "S05_INITIAL_QUESTION" },
       });
       assert.equal(result.success, true);
     } else {
@@ -1624,7 +1624,7 @@ test("stale inbox withdrawal preserves independent stop and admission holds", as
       turnId,
       callId: `s05-hold-question-${request.taskId}`,
       tool: "cab_ask_question",
-      arguments: { question: `S05_${request.taskId}_QUESTION` },
+      arguments: { question: "S05_QUESTION" },
     });
     assert.equal(result.success, true);
   };

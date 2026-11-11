@@ -20,6 +20,10 @@ requirement, without answering it, granting approval or releasing execution owne
 the actionable view.
 _Avoid_: Notification feed or conversation history
 
+**Request headline**:
+The one-line, plain-language statement of what an Inbox question or approval asks the operator to decide, written without identifiers. Background stays as collapsed context; each option states what choosing it causes.
+_Avoid_: Title or prompt when referring to the decision line
+
 **Push subscription**:
 A browser's opt-in to attention notifications, created in Settings → Notifications and
 revocable there. Each new Inbox alert, including an exhausted runtime, becomes one

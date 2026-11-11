@@ -52,6 +52,6 @@ export function leadDeliveryGuidance(
                 : ""
             }`,
         )),
-    "At every level, ask the operator through cab_ask_question after three unsuccessful repairs of the same failure, or when reviewers give conflicting direction. This is guidance, not enforced; project instructions still apply in addition.",
+    "At every level, ask the operator through cab_ask_question after three unsuccessful repairs of the same failure, or when reviewers give conflicting direction. State the decision in one plain sentence, say what each option causes, and recommend one. Do not ask the operator to diagnose cab refusals; fix the input from the refusal message. This is guidance, not enforced; project instructions still apply in addition.",
   ].join("\n");
 }

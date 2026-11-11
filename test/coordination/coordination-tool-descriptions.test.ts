@@ -15,4 +15,17 @@ test("cab_ask_question directs decisions to structured forms", () => {
   assert.match(d, /recommended/);
   assert.match(d, /one question per decision/i);
   assert.match(d, /open-ended/i);
+  assert.match(d, /one plain sentence/i);
+  assert.match(d, /`context`/);
+  assert.match(d, /what choosing it causes/i);
+  assert.match(d, /diagnose cab refusals/i);
+});
+
+test("cab_request_approval explains the headline rule and cab's wording for known kinds", () => {
+  const d = coordinationTools.find(
+    (t) => t.name === "cab_request_approval",
+  )!.description;
+  assert.match(d, /known delivery action kind/i);
+  assert.match(d, /cab's own headline/);
+  assert.match(d, /one plain sentence of at most 120 characters/);
 });

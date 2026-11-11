@@ -13,6 +13,7 @@ import {
   seedOwnApproval,
   seedOwnIntervention,
   seedOwnQuestion,
+  seedPlainQuestion,
   startOwnWork,
   until,
 } from "../fixtures/questions.js";
@@ -154,6 +155,43 @@ test("Inbox headlines are the approval action, a plain prompt, or null for an in
     ]).readInbox();
     assert.equal(headlineOf(withheld.data.items, approval.taskId), null);
     assert.equal(JSON.stringify(withheld).includes("pull request"), false);
+  } finally {
+    await f.close();
+  }
+});
+test("stored questions that break the headline rules still list with their exact text", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const own = await seedOwnQuestion(f),
+      plain = await seedPlainQuestion(f, "Which channel?", "Plain legacy");
+    const label = `Retry 3ac791e2-d016-41c1-a71a-1e9414bc0831\n${"x".repeat(440)}`,
+      prompt = `Legacy prompt\n\n${"y".repeat(2000)}`;
+    f.seedPersistedState((db) => {
+      const form = structuredClone(own.form);
+      form.questions[0]!.label = label;
+      db.prepare(
+        "UPDATE coordination_question_forms SET schemaJson=? WHERE interactionId=?",
+      ).run(JSON.stringify(form), own.interactionId);
+      db.prepare(
+        "UPDATE coordination_interactions SET prompt=? WHERE interactionId=?",
+      ).run(prompt, plain.interactionId);
+    });
+    const api = new OperatorApi(f.service, [f.directory]);
+    const items = taskItems((await api.readInbox()).data.items);
+    assert.equal(items.find((i) => i.taskId === own.taskId)?.headline, label);
+    assert.equal(
+      items.find((i) => i.taskId === plain.taskId)?.headline,
+      prompt,
+    );
+    assert.equal(
+      (await api.readQuestion(own.taskId, own.interactionId)).data.form
+        ?.questions[0]?.label,
+      label,
+    );
+    assert.equal(
+      (await api.readQuestion(plain.taskId, plain.interactionId)).data.status,
+      "pending",
+    );
   } finally {
     await f.close();
   }

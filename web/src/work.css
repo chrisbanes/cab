@@ -220,6 +220,13 @@
   margin: 0;
 }
 
+/* The request headline is one line; the request pane shows it in full. */
+.overview-card h3 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .overview-card-top {
   display: flex;
   align-items: center;

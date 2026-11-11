@@ -216,9 +216,75 @@ export function validateQuestionAnswers(
   return answers;
 }
 export const questionToolArgumentsSchema = z.union([
-  z.object({ question: z.string().min(1).max(16000) }).strict(),
+  z
+    .object({
+      question: z.string().min(1).max(16000),
+      context: z.string().min(1).max(16000).optional(),
+    })
+    .strict(),
   z.object({ form: questionFormSchema }).strict(),
 ]);
+
+// Request headline rules for agent-written questions and approvals. They apply
+// at the cab tools only; stored forms and native runtime questions are not checked.
+const lineBreak = /[\r\n\u2028\u2029]/u;
+const identifierPatterns: ReadonlyArray<readonly [string, RegExp]> = [
+  ["a UUID", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i],
+  [
+    "a SHA (a hex run of 7–40 characters with a digit)",
+    /(?<![0-9a-z])(?=[a-f]*[0-9])[0-9a-f]{7,40}(?![0-9a-z])/i,
+  ],
+  ["a provider failure code (provider-<code>)", /\bprovider-[a-z0-9]/],
+  ["a GitHub node ID", /(?<![A-Za-z0-9_])[A-Z]{1,5}_k[A-Za-z0-9_-]{6,}/],
+];
+function headlineProblems(field: string, text: string, limit: number) {
+  const problems: string[] = [];
+  const length = [...text].length;
+  if (length > limit)
+    problems.push(
+      `\`${field}\` is ${length} characters; the limit is ${limit}.`,
+    );
+  if (lineBreak.test(text))
+    problems.push(`\`${field}\` contains a line break; keep it to one line.`);
+  const identifier = identifierPatterns.find(([, pattern]) =>
+    pattern.test(text),
+  );
+  if (identifier)
+    problems.push(`\`${field}\` contains ${identifier[0]}; name it in words.`);
+  return problems;
+}
+function headlineRefusal(problems: string[]) {
+  if (!problems.length) return null;
+  const text = `Request refused. ${problems.join(" ")} State the decision in one plain sentence without identifiers, put background in description or context, and say what each option causes.`;
+  return text.length > 1000 ? `${text.slice(0, 997)}...` : text;
+}
+export function questionToolRefusal(
+  args: z.infer<typeof questionToolArgumentsSchema>,
+): string | null {
+  if ("question" in args)
+    return headlineRefusal(headlineProblems("question", args.question, 120));
+  return headlineRefusal(
+    args.form.questions.flatMap((q, i) => {
+      const path = `form.questions[${i}]`;
+      return [
+        ...headlineProblems(`${path}.label`, q.label, 120),
+        ...(q.kind === "free-text"
+          ? []
+          : q.options.flatMap((o, j) => [
+              ...headlineProblems(`${path}.options[${j}].label`, o.label, 80),
+              ...(o.description?.trim()
+                ? []
+                : [
+                    `\`${path}.options[${j}].description\` is missing; say what choosing this option causes.`,
+                  ]),
+            ])),
+      ];
+    }),
+  );
+}
+export function approvalActionRefusal(action: string): string | null {
+  return headlineRefusal(headlineProblems("action", action, 120));
+}
 
 export function nativeQuestionForm(
   questions: import("./structured-questions.js").StructuredQuestionSet,

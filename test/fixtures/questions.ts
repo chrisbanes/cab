@@ -92,12 +92,19 @@ export function seedPlainQuestion(
   question: string,
   title = "Plain question",
   projectName = "Question project",
+  context?: string,
 ) {
-  return seedQuestionCall(f, { question }, title, projectName, []);
+  return seedQuestionCall(
+    f,
+    context ? { question, context } : { question },
+    title,
+    projectName,
+    [],
+  );
 }
 async function seedQuestionCall(
   f: Fixture,
-  args: { form: QuestionForm } | { question: string },
+  args: { form: QuestionForm } | { question: string; context?: string },
   title: string,
   projectName: string,
   repositories: TaskWorkspaceRepositoryInput[],

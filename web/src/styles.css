@@ -1788,6 +1788,13 @@ nav {
 .question-constraint {
   margin: 0 0 var(--space-8);
 }
+.question-details {
+  margin: 0 0 var(--space-8);
+}
+.question-details > summary {
+  cursor: pointer;
+  width: fit-content;
+}
 .question-field:focus {
   outline: 2px solid var(--ring);
   outline-offset: 2px;

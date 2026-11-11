@@ -384,9 +384,16 @@ export function QuestionResponse({
                       <p className="question-constraint metadata muted">
                         {constraintLine(q)}
                       </p>
-                      {q.description && (
-                        <p className="literal">{q.description}</p>
-                      )}
+                      {q.description &&
+                        // A plain question's description is the question itself.
+                        (data?.source === "plain" ? (
+                          <p className="literal">{q.description}</p>
+                        ) : (
+                          <details className="question-details">
+                            <summary>Details</summary>
+                            <p className="literal">{q.description}</p>
+                          </details>
+                        ))}
                       {q.kind === "free-text" ? (
                         <label
                           htmlFor={`${qid}-text`}

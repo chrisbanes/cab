@@ -64,14 +64,14 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
     type: "function",
     name: "cab_ask_question",
     description:
-      "Create a durable question for operator attention. For any decision with known alternatives pass `form` (version 1): one question per decision, kind single-choice or multiple-choice, concrete options (each with a short description) and a `recommended` option id; never bundle several decisions into one plain question. Pass plain `question` only for open-ended input with no fixed choices.",
+      "Create a durable question for operator attention. Write for a person: state the decision in one plain sentence (at most 120 characters, one line, no IDs, SHAs or failure codes) and put background in `description` or plain `context`. For any decision with known alternatives pass `form` (version 1): one question per decision, kind single-choice or multiple-choice, concrete options whose labels are at most 80 characters, each with a description saying what choosing it causes, and a `recommended` option id; never bundle several decisions into one plain question. Pass plain `question` only for open-ended input with no fixed choices. Do not ask the operator to diagnose cab refusals; fix the input from the refusal message. Rule-breaking questions are refused with the field to fix.",
     inputSchema: z.toJSONSchema(questionToolArgumentsSchema),
   },
   {
     type: "function",
     name: "cab_request_approval",
     description:
-      "Request operator approval for a specific action and material.",
+      "Request operator approval for a specific action and material. A known delivery action kind such as `branch.force-push` is shown with cab's own headline; any other `action` is the headline, so write it as one plain sentence of at most 120 characters with no IDs, SHAs or failure codes.",
     inputSchema: object(
       {
         action: { type: "string", minLength: 1, maxLength: 512 },

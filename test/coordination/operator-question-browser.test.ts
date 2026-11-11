@@ -293,10 +293,10 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     await form.getByRole("radio", { name: /^Blue/ }).isChecked(),
     true,
   );
-  await form.getByRole("checkbox", { name: "Home", exact: true }).focus();
+  await form.getByRole("checkbox", { name: /^Home\b/ }).focus();
   await page.keyboard.press("Space");
   assert.equal(
-    await form.getByRole("checkbox", { name: "Home", exact: true }).isChecked(),
+    await form.getByRole("checkbox", { name: /^Home\b/ }).isChecked(),
     true,
   );
   await form
@@ -1146,7 +1146,7 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
       .inputValue(),
     "Inbox retained draft",
   );
-  await form.getByRole("checkbox", { name: "Home", exact: true }).check();
+  await form.getByRole("checkbox", { name: /^Home\b/ }).check();
   await form
     .getByRole("button", { name: "Submit answers", exact: true })
     .click();
@@ -1193,8 +1193,16 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
         required: true,
         customAllowed: true,
         options: [
-          { id: "a", label: "First option" },
-          { id: "b", label: "Second option" },
+          {
+            id: "a",
+            label: "First option",
+            description: "Takes the first path",
+          },
+          {
+            id: "b",
+            label: "Second option",
+            description: "Takes the second path",
+          },
         ],
       },
       ...["x-0", "x-custom", "x-error"].map((id) => ({
@@ -1281,9 +1289,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   await uniqueIds();
   await form.getByText("First option", { exact: true }).click();
   assert.equal(
-    await form
-      .getByRole("radio", { name: "First option", exact: true })
-      .isChecked(),
+    await form.getByRole("radio", { name: /^First option\b/ }).isChecked(),
     true,
   );
   const ordinary = form.locator('[data-question-id="x-0"]');
@@ -1298,9 +1304,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   );
   await ordinary.getByRole("textbox").fill("Independent x-0");
   assert.equal(
-    await form
-      .getByRole("radio", { name: "First option", exact: true })
-      .isChecked(),
+    await form.getByRole("radio", { name: /^First option\b/ }).isChecked(),
     true,
   );
   const literalCustom = form.locator('[data-question-id="x-custom"]');
@@ -1338,9 +1342,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   );
   await form.getByText("Second option", { exact: true }).click();
   assert.equal(
-    await form
-      .getByRole("radio", { name: "Second option", exact: true })
-      .isChecked(),
+    await form.getByRole("radio", { name: /^Second option\b/ }).isChecked(),
     true,
   );
   assert.equal(
@@ -1424,4 +1426,103 @@ test("a plain question shows a visible Your answer label and a keyboard-reachabl
   await check();
   await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
   await check();
+});
+
+test("question background sits behind a keyboard Details disclosure while option consequences stay visible", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const background = "The beta channel is two releases behind stable.";
+  const own = await seedOwnQuestion(
+      f,
+      {
+        version: 1,
+        questions: [
+          {
+            id: "channel",
+            kind: "single-choice",
+            label: "Which channel should the release use?",
+            description: background,
+            required: true,
+            customAllowed: false,
+            options: [
+              {
+                id: "stable",
+                label: "Stable",
+                description: "Ships to every user today",
+              },
+              {
+                id: "beta",
+                label: "Beta",
+                description: "Ships to testers first",
+              },
+            ],
+            recommended: ["stable"],
+          },
+        ],
+      },
+      "Channel task",
+      "Docs",
+    ),
+    plain = await seedPlainQuestion(
+      f,
+      "What should the release notes lead with?",
+      "Notes task",
+      "Docs",
+      "Background: the search change is the largest.",
+    ),
+    web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(
+    `${web.origin}/tasks/${own.taskId}?request=${own.interactionId}`,
+  );
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const form = page.getByRole("region", { name: "Exact question response" });
+  await form.getByRole("radio", { name: /^Beta/ }).check();
+  const text = form.getByText(background, { exact: true });
+  assert.equal(await text.isVisible(), false);
+  assert.ok(await form.getByText("Ships to every user today").isVisible());
+  assert.ok(await form.getByText("Ships to testers first").isVisible());
+  assert.ok(await form.getByText("Recommended").first().isVisible());
+  const summary = form.locator("summary", { hasText: "Details" });
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await text.waitFor();
+  assert.equal(
+    await summary.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.keyboard.press("Enter");
+  await text.waitFor({ state: "hidden" });
+  assert.equal(
+    await form.getByRole("radio", { name: /^Beta/ }).isChecked(),
+    true,
+  );
+  await page.goto(
+    `${web.origin}/tasks/${plain.taskId}?request=${plain.interactionId}`,
+  );
+  const plainForm = page.getByRole("region", {
+    name: "Exact question response",
+  });
+  await plainForm
+    .locator("legend", { hasText: "What should the release notes lead with?" })
+    .waitFor();
+  assert.equal(
+    await plainForm
+      .getByText("Background: the search change is the largest.")
+      .isVisible(),
+    false,
+  );
 });
