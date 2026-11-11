@@ -787,6 +787,7 @@ test("project get shows the sandbox level and marks network access and local lis
   let out = await get();
   assert.match(row(out, "Sandbox level"), /:\s+Strict$/);
   assert.doesNotMatch(out, /superseded/i);
+  assert.ok(!out.includes(codexUnsandboxedLine));
   d.execute({
     type: "project.configure",
     actor: "operator",

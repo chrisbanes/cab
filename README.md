@@ -256,9 +256,9 @@ each acceptance scenario to its evidence and disposition.
   [#1265](https://github.com/chrisbanes/cab/issues/1265).
 - **Isolation.** cab relies on the execution runtime and host for isolation.
   Broad host-permitted reads remain enabled, command network access (Codex), local
-  listening for test fixtures (Claude Code) and skipping the sandbox for host tools such as
-  browsers and emulators (both harnesses) are off unless the operator enables them per
-  project, and Stop is best-effort: unresolved work
+  listening for test fixtures (Claude Code) are off, and the sandbox level is strict, unless
+  the operator changes them per project; the unsandboxed level lets host tools such as
+  browsers and emulators run (both harnesses). Stop is best-effort: unresolved work
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.

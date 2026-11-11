@@ -1104,7 +1104,7 @@ To check what a turn was admitted with, open the assignment's **Effective execut
 on the task page, or run `cab assignment get ASSIGNMENT_ID`: a Claude Code turn states
 whether it was admitted with local listening enabled.
 
-## Skipping the sandbox for host tools
+## Running host tools at the unsandboxed level
 
 A project's verification can need host tools that a harness sandbox blocks: Chromium fails
 before opening a page and an Android emulator cannot reach the hypervisor, the adb sockets or
@@ -1139,8 +1139,8 @@ for browsers. Stop one by running `adb -s emulator-NNNN emu kill` for an emulato
 checking that its PID is the leftover and stopping it with `kill PID`.
 
 To check what a turn was admitted with, open the assignment's **Effective execution policy** on
-the task page, or run `cab assignment get ASSIGNMENT_ID`: it states whether the turn was admitted
-with the sandbox skipped. `cab project get PROJECT_ID` shows the project's current setting.
+the task page, or run `cab assignment get ASSIGNMENT_ID`: it states the sandbox level the turn
+was admitted at. `cab project get PROJECT_ID` shows the project's current sandbox level.
 
 ## Startup snapshot
 

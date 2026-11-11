@@ -2265,13 +2265,17 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   assert.equal(d.sandboxLevel(ids.atlas), "strict");
   assert.equal(await level.inputValue(), "unsandboxed");
 
-  // Confirm saves it.
+  // A save that also changes another field still asks, and confirming saves both.
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas renamed");
   await save.click();
+  await dialog.waitFor();
+  assert.equal(d.sandboxLevel(ids.atlas), "strict");
   const sent = commandBody(page);
   await dialog.getByRole("button", { name: "Run unsandboxed" }).click();
   const body = await sent;
   assert.equal(body.type, "project.configure");
   assert.equal(body.sandbox, "unsandboxed");
+  assert.equal(body.name, "Atlas renamed");
   await savedOutcome(page);
   assert.equal(d.sandboxLevel(ids.atlas), "unsandboxed");
   await page
