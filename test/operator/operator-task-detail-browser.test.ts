@@ -2629,6 +2629,62 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     await lead.click();
     assert.ok(await lead.isChecked());
   }
+  // A press inside a compact dock engages it though nothing takes focus, as in Safari and iOS.
+  const dock = page.locator("section#reply");
+  await review.focus();
+  assert.equal(await dock.getAttribute("data-engaged"), null);
+  assert.equal(await dock.getAttribute("data-expanded"), null);
+  assert.ok((await box("section#reply")).height <= 0.12 * 844, "compact again");
+  await dock.locator("h3").evaluate((el) => {
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  assert.notEqual(await dock.getAttribute("data-engaged"), null);
+  assert.equal(
+    await dock.evaluate((el) => el.contains(document.activeElement)),
+    false,
+    "nothing in the dock took focus",
+  );
+  for (const shown of [
+    dock.getByRole("radio", { name: "Comment on task" }),
+    dock.getByRole("button", { name: "Send comment" }),
+  ])
+    assert.ok(
+      await shown.isVisible(),
+      "a press without focus shows the controls",
+    );
+  // A click outside an engaged dock still lands, then the dock compacts: it must not shrink
+  // between the pointerdown and the click and move the target. A viewport taller than the page,
+  // scrolled to the top, shows the shift: neither a scroll clamp nor scroll anchoring hides it.
+  await dock.locator("#workspace-reply").focus();
+  await page.setViewportSize({ width: 390, height: 4000 });
+  await page.evaluate(() => scrollTo(0, 0));
+  // Pin the element: a lazy locator would resolve to another summary once the layout shifts.
+  const fold = await page
+    .locator('aside[aria-label="Task context"] details > summary:visible')
+    .last()
+    .elementHandle();
+  assert.ok(fold, "an outside control is visible");
+  const folded = () =>
+    fold.evaluate((el) => (el.parentElement as HTMLDetailsElement).open);
+  const wasOpen = await folded();
+  await fold.click();
+  assert.equal(await folded(), !wasOpen, "the outside control ran");
+  await page.waitForFunction(
+    () =>
+      document.querySelector("section#reply")?.hasAttribute("data-engaged") ===
+      false,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(
+    (await box("section#reply")).height <= 0.12 * 844,
+    "compact after the click",
+  );
+  assert.equal(
+    await dock.locator("#workspace-reply").inputValue(),
+    "Keep this draft",
+  );
   await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")

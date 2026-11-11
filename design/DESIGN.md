@@ -245,10 +245,10 @@ Make the next decision obvious, and keep its evidence close:
   meaning, state, next actor and decision; Details holds identifiers, revisions,
   provenance and contract caveats. First arrival shows the latest conversation entry
   with Reply docked within its column; phone results and Details follow it. On a
-  phone the docked Reply is one textarea (at most 12% of the viewport) until focus is
-  engaged (focus or a press inside it, until the operator moves outside), or a send, notice
-  or uncertain state shows; an unsent draft alone stays compact. The page's
-  `scroll-padding-bottom` keeps a focused control clear of it. From 760px the strip
+  phone the docked Reply is one textarea (at most 12% of the viewport) until the
+  operator engages it (focus or a press inside it) and until they move outside, or
+  while a send, notice or uncertain state shows; an unsent draft alone stays compact.
+  The page's `scroll-padding-bottom` keeps a focused control clear of it. From 760px the strip
   stays on one line with one identity chip; on a phone it wraps instead, in strip
   order, and nothing in it is truncated. Refresh source, Focus mode, Improve with
   lead and Publish share More task options, an icon toggle (32px from 1121px, a 44px

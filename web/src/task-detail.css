@@ -1438,8 +1438,9 @@ a.task-source-chip:hover {
   position: static;
 }
 
-/* On a phone, Reply docks as one textarea until the operator engages it (focus or a press inside,
-   set in task-workspace.tsx) or a send, notice or uncertain state needs its controls. The root's scroll padding keeps a focused control clear of the dock. */
+/* On a phone, Reply docks as one textarea until the operator engages it (focus or a press
+   inside, set in task-workspace.tsx) or a send, notice or uncertain state needs its controls.
+   The root's scroll padding keeps a focused control clear of the dock. */
 @media (max-width: 759px) {
   :root:has(.task-workspace .reply-card) {
     --reply-dock-height: 62px;
