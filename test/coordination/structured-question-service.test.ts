@@ -335,6 +335,30 @@ test("cab question and approval tools refuse unreadable headlines without writin
       ],
       [
         "cab_ask_question",
+        "Project item node ID",
+        labelled("Move PVTI_lAHOAAN4ns4BatgHzhHRUOE to Done?"),
+        /contains a GitHub node ID/,
+      ],
+      [
+        "cab_ask_question",
+        "issue node ID",
+        labelled("Close I_kwDOAbc123 now?"),
+        /contains a GitHub node ID/,
+      ],
+      [
+        "cab_ask_question",
+        "named provider code",
+        labelled("Retry after provider-head-changed?"),
+        /contains a provider failure code/,
+      ],
+      [
+        "cab_ask_question",
+        "single-word provider code",
+        labelled("Retry after provider-timeout?"),
+        /contains a provider failure code/,
+      ],
+      [
+        "cab_ask_question",
         "missing description",
         choice("Stable"),
         /`form\.questions\[0\]\.options\[0\]\.description` is missing/,
@@ -387,6 +411,12 @@ test("cab question and approval tools refuse unreadable headlines without writin
       [
         "dotted action and hex word",
         labelled("Should pr.create run after the facade change?"),
+      ],
+      [
+        "provider prose and constant names",
+        labelled(
+          "Keep the provider-neutral wording and GH_CONFIG_DIR as they are?",
+        ),
       ],
       [
         "descriptions without recommended",

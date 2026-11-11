@@ -385,8 +385,8 @@ export function QuestionResponse({
                         {constraintLine(q)}
                       </p>
                       {q.description &&
-                        // A plain question's description is the question itself.
-                        (data?.source === "plain" ? (
+                        // Plain and native descriptions are the question itself; only cab-form background is collapsed.
+                        (data?.source !== "cab" ? (
                           <p className="literal">{q.description}</p>
                         ) : (
                           <details className="question-details">

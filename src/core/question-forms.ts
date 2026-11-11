@@ -234,8 +234,17 @@ const identifierPatterns: ReadonlyArray<readonly [string, RegExp]> = [
     "a SHA (a hex run of 7–40 characters with a digit)",
     /(?<![0-9a-z])(?=[a-f]*[0-9])[0-9a-f]{7,40}(?![0-9a-z])/i,
   ],
-  ["a provider failure code (provider-<code>)", /\bprovider-[a-z0-9]/],
-  ["a GitHub node ID", /(?<![A-Za-z0-9_])[A-Z]{1,5}_k[A-Za-z0-9_-]{6,}/],
+  // cab's failure codes are provider-http-<status>, a few single words, or two or more
+  // hyphenated words; prose such as "provider-neutral" is one word and passes.
+  [
+    "a provider failure code (provider-<code>)",
+    /\bprovider-(?:http-\d{3}|error|failure|timeout|[a-z]+(?:-[a-z]+)+)\b/,
+  ],
+  // A typed prefix, then base64: PVTI_lAHO…, I_kwDO…, PR_kwDO…, R_kgDO….
+  [
+    "a GitHub node ID",
+    /(?<![A-Za-z0-9_])[A-Z]{1,6}_[a-z](?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]{7,}/,
+  ],
 ];
 function headlineProblems(field: string, text: string, limit: number) {
   const problems: string[] = [];

@@ -1525,4 +1525,22 @@ test("question background sits behind a keyboard Details disclosure while option
       .isVisible(),
     false,
   );
+  // A native question's description is its question text, so it stays visible.
+  await page.route(`**/questions/${own.interactionId}`, async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as { data: { source: string } };
+    body.data.source = "native";
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(
+    `${web.origin}/tasks/${own.taskId}?request=${own.interactionId}`,
+  );
+  const nativeForm = page.getByRole("region", {
+    name: "Exact question response",
+  });
+  await nativeForm.getByText(background, { exact: true }).waitFor();
+  assert.equal(
+    await nativeForm.locator("summary", { hasText: "Details" }).count(),
+    0,
+  );
 });

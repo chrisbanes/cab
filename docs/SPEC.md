@@ -2685,9 +2685,9 @@ its input, and writes nothing. `cab_request_approval` applies the same rules to 
 `action` that is not a known delivery action kind; a known kind keeps its exact
 `action` for approval and shows a headline written by cab. Questions from the
 runtime's own question tool are not validated. Every Inbox and Overview headline is
-shown on one line with the full text in the request pane, and question descriptions
-and context sit behind a collapsed Details disclosure while option descriptions stay
-visible.
+shown on one line with the full text in the request pane. Background in a cab form
+question's description or a plain question's context sits behind a collapsed Details
+disclosure; a native question's text and option descriptions stay visible.
 
 Support a single question or a related set, free-text answers, single-choice and
 multiple-choice answers. Preserve question text, option labels and descriptions,
