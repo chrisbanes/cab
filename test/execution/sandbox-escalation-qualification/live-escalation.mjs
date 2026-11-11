@@ -54,9 +54,12 @@ const run = (file, argv) =>
 const log = (line) => process.stderr.write(`[${group}] ${line}\n`);
 
 if (!existsSync(launcher)) refuse("the approved Codex launcher is absent");
+// Launching once on the host shows the stimulus works outside any sandbox.
 const { chromium } = await import("playwright");
-if (!existsSync(chromium.executablePath()))
-  refuse("Playwright's Chromium is not installed");
+await chromium
+  .launch({ headless: true, timeout: 60_000 })
+  .then((browser) => browser.close())
+  .catch(() => refuse("Playwright's headless Chromium does not launch"));
 const evidence = {
   group,
   candidate: run("git", ["rev-parse", "HEAD"]),
