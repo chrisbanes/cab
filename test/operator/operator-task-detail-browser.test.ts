@@ -877,12 +877,15 @@ test("The strip and decision card follow the server's attention codes, not a cli
           name: e.className || "reason",
           box: e.getBoundingClientRect(),
         }));
-      return facts.every(
-        ({ box }, i) =>
-          i === 0 ||
-          box.left > facts[i - 1]!.box.left ||
-          box.top >= facts[i - 1]!.box.bottom - 1,
-      )
+      // Right of the previous fact on its line, or on a later line.
+      return facts.every(({ box }, i) => {
+        const prev = facts[i - 1]?.box;
+        if (!prev) return true;
+        const sameLine = box.top < prev.bottom - 1 && box.bottom > prev.top + 1;
+        return sameLine
+          ? box.left >= prev.right - 1
+          : box.top >= prev.bottom - 1;
+      })
         ? facts.map((f) => f.name)
         : ["out of order", ...facts.map((f) => f.name)];
     }),

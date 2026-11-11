@@ -297,7 +297,7 @@ export function TaskHeaderActions({
 /**
  * One line of state, one reason, the operator action and one identity chip.
  * Only a lead differing from the project default needs a name here. A phone wraps it
- * instead of truncating, leading with the state and the operator action.
+ * in reading order instead of truncating.
  */
 export function TaskStrip({
   data,

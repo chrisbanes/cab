@@ -1336,7 +1336,8 @@ a.task-source-chip:hover {
   box-shadow: 0 -8px 16px var(--surface);
 }
 
-/* The strip's options are a menu, not a workspace disclosure: no frame, a 32px icon toggle. */
+/* The strip's options are a menu, not a workspace disclosure: no frame, an icon toggle
+   (32px from 1121px, a 44px target below). */
 .task-workspace details.task-tools {
   position: relative;
   margin: 0;
@@ -1422,7 +1423,6 @@ a.task-source-chip:hover {
     text-overflow: clip;
     overflow-wrap: anywhere;
   }
-  .task-strip-facts > [data-task-reason],
   .task-strip-facts > .task-source-chip {
     height: auto;
   }
