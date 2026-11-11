@@ -2020,20 +2020,15 @@ export class CoordinationStore {
           !this.feedbackRecipient(command.taskId, String(lead.assignmentId))
         )
           throw new DomainConflictError("The lead cannot receive feedback now");
-        const { event, resumedLead } = this.deliverOperatorFeedback(
+        const { event } = this.deliverOperatorFeedback(
           command.taskId,
           String(lead.assignmentId),
           command.message,
           { resultId: String(row.resultId) },
         );
+        // Like a local review, it never records a recovery continuation: only an ordinary
+        // message or comment receipt can prove one.
         delivered = event;
-        // As an ordinary message does, input to a held lead continues its recovery.
-        if (!resumedLead)
-          this.recordRecoveryContinuation(
-            event,
-            command.key,
-            materialDigest(payload),
-          );
       }
       const eventId = delivered?.eventId ?? null;
       this.db
