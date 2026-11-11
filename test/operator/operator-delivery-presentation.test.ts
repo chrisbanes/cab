@@ -797,6 +797,10 @@ test("every action kind has a one-line approval headline", () => {
   );
   for (const kind of actionKinds)
     assert.match(approvalHeadlines[kind], /^[A-Z][^.\n]{0,79}$/, kind);
+  assert.equal(
+    approvalHeadlines["pr.update-branch"],
+    "Update the pull request branch from its base",
+  );
 });
 
 test("every action kind has a label and description, and an unknown kind reads as it is", () => {

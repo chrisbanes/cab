@@ -99,6 +99,7 @@ export const approvalHeadlines: Record<ActionKind, string> = {
   "pr.edit": "Edit the pull request",
   "pr.ready": "Mark the pull request ready for review",
   "pr.merge": "Merge the pull request",
+  "pr.update-branch": "Update the pull request branch from its base",
   "issue.close": "Close the issue",
   "pr.thread.reply": "Reply to a review thread",
   "pr.thread.resolve": "Resolve a review thread",
