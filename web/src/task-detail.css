@@ -1514,3 +1514,7 @@ a.task-source-chip:hover {
   opacity: 0.5;
   cursor: default;
 }
+
+[data-blocked-lead] {
+  margin-block-end: var(--space-12);
+}

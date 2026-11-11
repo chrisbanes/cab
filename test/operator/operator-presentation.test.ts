@@ -15,6 +15,7 @@ import {
 } from "../../src/operator/runtime-restart-copy.js";
 import { resultWorkspaceLines } from "../../src/operator/task-presentation.js";
 import { harnessReason } from "../../web/src/execution-runtime.js";
+import { recoveryEvidenceLabels } from "../../web/src/recovery-labels.js";
 import {
   leadFeedbackMode,
   leadReceivesNotice,
@@ -411,4 +412,43 @@ test("a result's workspace state reads as one line per repository", () => {
       "lib: recorded at 0123456 on detached HEAD, with uncommitted changes",
     ],
   );
+});
+
+test("recovery evidence labels stay distinct only as far as needed", () => {
+  const a = (
+    assignmentId: string,
+    name: string | null,
+    brief: string | null,
+  ) => ({
+    assignmentId,
+    name,
+    brief,
+  });
+  assert.deepEqual(
+    recoveryEvidenceLabels([a("a1", "Grace", "x."), a("a2", "Ada", "x.")]),
+    ["Grace: recovery evidence", "Ada: recovery evidence"],
+  );
+  assert.deepEqual(
+    recoveryEvidenceLabels([
+      a("a1", "Task lead", "Restore focus. Then more."),
+      a("a2", "Task lead", "Fix the strip."),
+    ]),
+    [
+      "Task lead: recovery evidence (Restore focus.)",
+      "Task lead: recovery evidence (Fix the strip.)",
+    ],
+  );
+  assert.deepEqual(
+    recoveryEvidenceLabels([
+      a("assignment-one-1111", "Task lead", "Same."),
+      a("assignment-two-2222", "Task lead", "Same."),
+    ]),
+    [
+      `Task lead: recovery evidence (Same.; ${shortId("assignment-one-1111")})`,
+      `Task lead: recovery evidence (Same.; ${shortId("assignment-two-2222")})`,
+    ],
+  );
+  assert.deepEqual(recoveryEvidenceLabels([a("a1", null, null)]), [
+    "Agent name unavailable: recovery evidence",
+  ]);
 });

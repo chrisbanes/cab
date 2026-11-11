@@ -211,6 +211,8 @@ test("hold lines name each assignment's recovery page when the task has several"
       `${a!.name}: recovery evidence`,
       "Grace: recovery evidence",
     ]);
+    const names = await links.allInnerTexts();
+    assert.equal(new Set(names).size, names.length);
     assert.deepEqual(
       await links.evaluateAll((l) => l.map((x) => x.getAttribute("href"))),
       [
