@@ -2143,60 +2143,71 @@ export function TaskWorkspace({
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
-      <div className="task-actions">
-        <Button
-          variant={destination === "comment" ? "primary" : "secondary"}
-          disabled={projectReadOnly || pending || state.uncertain}
-          onClick={() => {
-            // A sent lead message's outcome is read by now; leaving it would keep that destination.
-            if (
-              state.destination === "lead" &&
-              state.notice?.tone === "success"
-            )
-              state.notice = null;
-            state.destination = "comment";
-            changed();
-          }}
-        >
-          Comment on task
-        </Button>
-        {(draftTurn || state.leadInUse || destination === "lead") && (
-          <Button
-            variant={destination === "lead" ? "primary" : "secondary"}
+      <fieldset className="reply-destination">
+        <legend className="sr-only">Send to</legend>
+        <label className="reply-destination-option">
+          <input
+            type="radio"
+            name="reply-destination"
+            checked={destination === "comment"}
             disabled={projectReadOnly || pending || state.uncertain}
-            onClick={() => {
-              state.destination = "lead";
+            onChange={() => {
+              // A sent lead message's outcome is read by now; leaving it would keep that destination.
+              if (
+                state.destination === "lead" &&
+                state.notice?.tone === "success"
+              )
+                state.notice = null;
+              state.destination = "comment";
               changed();
             }}
-          >
-            {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
-          </Button>
+          />
+          <span>Comment on task</span>
+        </label>
+        {(draftTurn || state.leadInUse || destination === "lead") && (
+          <label className="reply-destination-option">
+            <input
+              type="radio"
+              name="reply-destination"
+              checked={destination === "lead"}
+              disabled={projectReadOnly || pending || state.uncertain}
+              onChange={() => {
+                state.destination = "lead";
+                changed();
+              }}
+            />
+            <span>
+              {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
+            </span>
+          </label>
         )}
         {data.source && (
-          <Button
-            variant={destination === "github" ? "primary" : "secondary"}
-            // Native `disabled` is out of the tab order; an unavailable tab stays focusable so
-            // its reason is read.
-            disabled={projectReadOnly || pending || state.uncertain}
-            aria-disabled={!comment.postable || undefined}
-            aria-describedby={comment.postable ? undefined : githubReasonId}
-            title={comment.sentence ?? undefined}
-            className="aria-disabled:opacity-50"
-            onClick={() => {
-              if (!comment.postable) return;
-              state.destination = "github";
-              changed();
-            }}
-          >
-            Post {trackerName(data.source)} comment
-          </Button>
+          <label className="reply-destination-option">
+            <input
+              type="radio"
+              name="reply-destination"
+              checked={destination === "github"}
+              // Native `disabled` is out of the tab order; an unavailable option stays focusable
+              // so its reason is read.
+              disabled={projectReadOnly || pending || state.uncertain}
+              aria-disabled={!comment.postable || undefined}
+              aria-describedby={comment.postable ? undefined : githubReasonId}
+              title={comment.sentence ?? undefined}
+              onChange={() => {
+                if (!comment.postable) return;
+                state.destination = "github";
+                changed();
+              }}
+            />
+            <span>Post {trackerName(data.source)} comment</span>
+          </label>
         )}
         {data.source && comment.sentence && (
           <span id={githubReasonId} className="sr-only">
             {comment.sentence}
           </span>
         )}
-      </div>
+      </fieldset>
       {destination === "lead" && lead && leadMode === "resumes" ? (
         <p role="status">{replyNote}</p>
       ) : (
@@ -2232,6 +2243,7 @@ export function TaskWorkspace({
       {destination === "github" && data.commentPolicy?.mode === "approval" && (
         <>
           <Button
+            variant="secondary"
             disabled={
               projectReadOnly ||
               pending ||

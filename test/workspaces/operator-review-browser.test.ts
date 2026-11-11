@@ -382,12 +382,12 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   );
   assert.match(await reply.inputValue(), /^Please review /);
   await page
-    .getByRole("button", { name: "Comment on task", exact: true })
+    .getByRole("radio", { name: "Comment on task", exact: true })
     .click();
   assert.equal(await reply.inputValue(), "Unfinished ordinary comment");
   assert.equal(await page.getByText(/^Immutable reference:/).count(), 0);
   await page
-    .getByRole("button", { name: "Message task lead", exact: true })
+    .getByRole("radio", { name: "Message task lead", exact: true })
     .click();
   await reply.fill("");
   await criterionAsk.click();

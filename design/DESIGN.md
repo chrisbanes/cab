@@ -211,6 +211,9 @@ Rules:
 - Phone screens use one of two headers: top-level (menu, title, count badge, one
   icon or outline action) or detail (back with the parent label, centred title and
   mono subtitle, at most one outline action).
+- The Reply destination (Comment on task, Message task lead, Post GitHub comment) is
+  a segmented radio group named Send to; Send is the only primary button in Reply.
+  An unavailable destination stays focusable with `aria-disabled` and its reason.
 - Use a navigation row for anything that only opens another view. Keep buttons for
   actions, with one primary action per view. Desktop buttons hug their label.
 - Stop uses the destructive treatment and confirms first; reversible states show

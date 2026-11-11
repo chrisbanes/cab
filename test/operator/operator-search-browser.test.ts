@@ -651,7 +651,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
     assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
     assert.equal(
       await page
-        .getByRole("button", { name: "Comment on task", exact: true })
+        .getByRole("radio", { name: "Comment on task", exact: true })
         .isDisabled(),
       true,
     );

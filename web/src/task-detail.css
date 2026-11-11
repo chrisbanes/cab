@@ -1410,3 +1410,49 @@ a.task-source-chip:hover {
 .task-workspace .task-columns:has([data-request-active]) > section.reply-card {
   position: static;
 }
+
+/* Reply destination: native radios drawn as a segmented control; Send stays the only primary. */
+.reply-destination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.reply-destination-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.reply-destination-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.reply-destination-option:has(input:checked) {
+  background: var(--raised);
+  border-color: var(--foreground);
+  font-weight: var(--weight-semibold);
+}
+
+.reply-destination-option:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.reply-destination-option:has(input:disabled),
+.reply-destination-option:has(input[aria-disabled="true"]) {
+  opacity: 0.5;
+  cursor: default;
+}

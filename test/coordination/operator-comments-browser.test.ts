@@ -246,17 +246,17 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
-    .getByRole("button", { name: "Post GitHub comment", exact: true })
+    .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
   await page.getByLabel("Editable reply").fill("Exact operator comment body");
   await page
-    .getByRole("button", { name: "Comment on task", exact: true })
+    .getByRole("radio", { name: "Comment on task", exact: true })
     .click();
   await page
     .getByLabel("Editable reply")
     .fill("Unfinished local message beside GitHub draft");
   await page
-    .getByRole("button", { name: "Post GitHub comment", exact: true })
+    .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
   await openOverviewCard(page, "brief");
   await page
@@ -275,14 +275,14 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     true,
   );
   await page
-    .getByRole("button", { name: "Post GitHub comment", exact: true })
+    .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Exact operator comment body",
   );
   await page
-    .getByRole("button", { name: "Comment on task", exact: true })
+    .getByRole("radio", { name: "Comment on task", exact: true })
     .click();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
@@ -309,7 +309,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     { sourceId: f.service.taskReview().sources(taskId).at(-1)!.sourceId },
   );
   await page
-    .getByRole("button", { name: "Post GitHub comment", exact: true })
+    .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),

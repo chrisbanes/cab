@@ -2830,13 +2830,13 @@ const refreshTask = async (page: Page, taskId: string) => {
   );
   await reread;
 };
-/** The text of every paragraph between the destination buttons and the reply label. */
+/** The text of every paragraph between the destination radios and the reply label. */
 const sentencesAboveReply = (page: Page) =>
   page.evaluate(() => {
     const card = document.querySelector("#reply")!;
     const out: string[] = [];
     for (
-      let node = card.querySelector(".task-actions")!.nextElementSibling;
+      let node = card.querySelector(".reply-destination")!.nextElementSibling;
       node && node.tagName !== "LABEL";
       node = node.nextElementSibling
     )
@@ -2860,7 +2860,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
     .waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
   const delivery = inspector.locator("dt", { hasText: /^Delivery$/ });
-  const github = page.getByRole("button", { name: "Post GitHub comment" });
+  const github = page.getByRole("radio", { name: "Post GitHub comment" });
   const refreshDelivery = page.getByRole("button", {
     name: "Refresh delivery status",
   });
@@ -3030,7 +3030,7 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
   // With no lead, nothing is selected: the comment is recorded for the task only.
   await page.getByText(recordOnlyText).waitFor();
   assert.equal(
-    await page.getByRole("button", { name: "Post GitHub comment" }).count(),
+    await page.getByRole("radio", { name: "Post GitHub comment" }).count(),
     0,
   );
 });
@@ -3041,7 +3041,27 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  const group = page.getByRole("group", { name: "Send to" });
+  assert.equal(await group.getByRole("radio").count(), 2);
+  assert.equal(
+    await group.getByRole("radio", { name: "Comment on task" }).isChecked(),
+    true,
+  );
+  await group.getByRole("radio", { name: "Comment on task" }).focus();
+  await page.keyboard.press("ArrowRight");
+  assert.equal(
+    await group.getByRole("radio", { name: "Post GitHub comment" }).isChecked(),
+    true,
+  );
+  // Send is the only primary-styled button in Reply.
+  assert.equal(
+    await page
+      .locator("#reply button")
+      .evaluateAll(
+        (els) => els.filter((e) => e.className.includes("bg-primary")).length,
+      ),
+    1,
+  );
   await page.getByLabel("Editable reply").fill("Exact comment body");
   assert.deepEqual(await sentencesAboveReply(page), [
     "P:You review the exact comment before it posts to the GitHub issue.",
@@ -3062,7 +3082,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   await refreshTask(page, a.taskId);
   await page.getByText(noGrant, { exact: true }).first().waitFor();
   assert.deepEqual(await sentencesAboveReply(page), [`P:${noGrant}`]);
-  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  const tab = page.getByRole("radio", { name: "Post GitHub comment" });
   assert.equal(
     await page
       .getByRole("button", { name: "Post comment", exact: true })
@@ -3137,7 +3157,7 @@ const unavailableComment = async (page: Page, sentence: string) => {
     (await inspector.innerText()).replace(/\s+/g, " "),
     /GitHub commenting unavailable/,
   );
-  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  const tab = page.getByRole("radio", { name: "Post GitHub comment" });
   assert.equal(await tab.getAttribute("aria-disabled"), "true");
   assert.equal(await tab.getAttribute("title"), sentence);
   const described = await tab.getAttribute("aria-describedby");
@@ -3155,13 +3175,13 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  const lead = page.getByRole("button", { name: "Comment on task" });
+  const lead = page.getByRole("radio", { name: "Comment on task" });
   await lead.waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
   await inspector.getByText("GitHub commenting permitted").waitFor();
   assert.equal(
     await page
-      .getByRole("button", { name: "Post GitHub comment" })
+      .getByRole("radio", { name: "Post GitHub comment" })
       .getAttribute("aria-disabled"),
     null,
   );
@@ -3174,19 +3194,23 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
     page,
     commentReasonSentences["no-comment-grant"],
   );
-  // Tab from the sibling destination reaches it, so the reason is readable by keyboard.
+  // An arrow key from the sibling destination reaches it, so the reason is readable by keyboard.
   await lead.focus();
-  await page.keyboard.press("Tab");
+  await page.keyboard.press("ArrowRight");
   assert.equal(
-    await page.evaluate(() => document.activeElement?.textContent),
+    await page.evaluate(() =>
+      document.activeElement?.closest("label")?.textContent?.trim(),
+    ),
     "Post GitHub comment",
   );
+  assert.equal(await page.getByRole("group", { name: "Send to" }).count(), 1);
   // Neither Enter, Space nor a click selects it: the lead's sentence stays above the box.
   const before = await sentencesAboveReply(page);
   await page.keyboard.press("Enter");
   await page.keyboard.press("Space");
   await tab.click({ force: true });
   assert.deepEqual(await sentencesAboveReply(page), before);
+  assert.equal(await lead.isChecked(), true);
   assert.equal(
     await page
       .getByRole("button", { name: "Post comment", exact: true })
@@ -4033,7 +4057,7 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
   await page.getByRole("button", { name: "Ask lead about brief" }).click();
   const leadText = await box.inputValue();
   assert.notEqual(leadText, "");
-  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  await page.getByRole("radio", { name: "Post GitHub comment" }).click();
   await box.fill("Original body");
   await page
     .getByRole("button", { name: "Review exact GitHub comment" })
@@ -4059,7 +4083,7 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
   await refreshTask(page, a.taskId);
   await page.getByRole("button", { name: "Send to task lead" }).waitFor();
   assert.equal(
-    await page.getByRole("button", { name: "Post GitHub comment" }).count(),
+    await page.getByRole("radio", { name: "Post GitHub comment" }).count(),
     0,
   );
   assert.equal(await box.inputValue(), leadText);
@@ -4067,13 +4091,13 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
     `P:${leadReceivesNotice("Task lead")}`,
   ]);
   // Choosing the destination that is already selected changes nothing.
-  await page.getByRole("button", { name: "Message task lead" }).click();
+  await page.getByRole("radio", { name: "Message task lead" }).click();
   assert.equal(await box.inputValue(), leadText);
 
   // The source returns: the GitHub draft is as it was, and editing it withdraws its approval.
   hasSource = true;
   await refreshTask(page, a.taskId);
-  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  await page.getByRole("radio", { name: "Post GitHub comment" }).click();
   assert.equal(await box.inputValue(), "Original body");
   assert.equal(await post.isEnabled(), true);
   await box.fill("Original body, edited");
