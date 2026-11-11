@@ -137,6 +137,9 @@ export class HeldTurnRelease {
       return this.running;
     }
     this.running = (async () => {
+      // A release can wake the scheduler, which sweeps again: yield first so `running` is
+      // set and that nested sweep is merged into this one instead of running inside it.
+      await Promise.resolve();
       do {
         this.again = false;
         try {

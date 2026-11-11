@@ -1610,18 +1610,19 @@ test("unsettled terminal comparisons hide old entries when the current policy ex
     "held private comparison contents\n",
   );
   f.runtime.fail(1);
+  // The runtime reported the failed turn, so held-turn release frees it (ADR-1032); its
+  // capture stays unsettled either way.
   await until(
     () =>
       f.service.list().find((work) => work.workId === task.firstWorkId)
-        ?.state === "held",
-    "failed work hold",
+        ?.state === "resolved-failed",
+    "failed work released",
   );
   const failedWork = f.service
     .list()
     .find((work) => work.workId === task.firstWorkId);
-  assert.equal(failedWork?.state, "held");
   const failureReason = failedWork?.reason;
-  assert.match(failureReason ?? "", /Bound turn failed or was interrupted/);
+  assert.match(failureReason ?? "", /Held turn released: the runtime reported/);
   const pending = f.service.workspaceTurnCaptureSlots(task.taskId).pending;
   assert.ok(pending?.comparison);
   assert.equal(pending.captureState, "unsettled");
@@ -1649,11 +1650,11 @@ test("unsettled terminal comparisons hide old entries when the current policy ex
     assert.ok(!hiddenText.includes("held-secret.md"));
     assert.ok(!hiddenText.includes("held private comparison contents"));
   }
-  const stillHeldWork = f.service
+  const stillReleased = f.service
     .list()
     .find((work) => work.workId === task.firstWorkId);
-  assert.equal(stillHeldWork?.state, "held");
-  assert.equal(stillHeldWork?.reason, failureReason);
+  assert.equal(stillReleased?.state, "resolved-failed");
+  assert.equal(stillReleased?.reason, failureReason);
 });
 
 test("workspace comparison awaits recheck logout, expiry, binding and changing exclusions", async (t) => {

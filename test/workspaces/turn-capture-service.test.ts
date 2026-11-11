@@ -663,7 +663,7 @@ test("completed turns retain an explicit unsettled capture when finalization ret
   }
 });
 
-test("failed terminal captures stay unsettled with the failed-work hold", async (t) => {
+test("failed terminal captures stay unsettled when the failed turn is released", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
   const store = storeFor(f.service);
@@ -676,14 +676,14 @@ test("failed terminal captures stay unsettled with the failed-work hold", async 
   await failedGate.entered;
   failedGate.resolve("failed");
   await failedAction;
-  await waitForWorkState(f.service, "failed-turn", "held");
+  // The runtime reported the failed turn, so held-turn release frees it (ADR-1032).
+  await waitForWorkState(f.service, "failed-turn", "resolved-failed");
   const failedWork = f.service
     .list()
     .find((work) => work.workId === "failed-turn");
-  assert.equal(failedWork?.state, "held");
   assert.match(
     failedWork?.reason ?? "",
-    /Bound turn failed or was interrupted/,
+    /Held turn released: the runtime reported the turn ended/,
   );
   const failed = store.latestTurnCaptures(f.taskId).pending;
   assert.ok(failed);

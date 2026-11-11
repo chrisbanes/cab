@@ -3012,13 +3012,23 @@ test("Stop persists bound execution identity before interrupt and keeps ownershi
     await recovered.start();
     assert.equal(recovered.taskHold(f.taskId), "Task stopped");
     assert.equal(recovered.capacityLimits().currentUsage.global, 1);
-    recovered.resumeTask(f.taskId);
+    // Ownership stays held while the Stop does; once Resume clears it, the runtime's
+    // reported end of the interrupted turn releases it (ADR-1032 held-turn release).
+    await recovered.resumeTask(f.taskId);
     assert.equal(recovered.taskHold(f.taskId), undefined);
-    assert.equal(
-      recovered.list().find((item) => item.workId === "stoppable")?.state,
-      "held",
-    );
-    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
+    const deadline = Date.now() + 5000;
+    while (
+      recovered.list().find((item) => item.workId === "stoppable")?.state !==
+      "resolved-failed"
+    ) {
+      assert.ok(
+        Date.now() < deadline,
+        "the ended turn is released after Resume",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(recovered.capacityLimits().currentUsage.global, 0);
+    assert.equal(recovered.heldTurnReleased("stoppable"), true);
     await recovered.stop();
   } finally {
     gate.resolve();
