@@ -1,0 +1,39 @@
+/* The result review panel: one decision, its material and the response, in reading order. */
+
+.result-review {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.result-review > * {
+  min-width: 0;
+}
+
+.result-review-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.result-review-response {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.result-review-response legend {
+  padding: 0;
+  margin-bottom: var(--space-4);
+}
+
+.result-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}

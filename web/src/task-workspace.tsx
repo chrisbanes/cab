@@ -84,7 +84,6 @@ import {
   codeHostName,
   deliveryBlockerSentence,
   mergeBlockerText,
-  reviewHeadComparison,
   pullRequestReference,
   pullRequestStateLabel,
   safePullRequestUrl,
@@ -161,7 +160,6 @@ import {
   assignmentRow,
   blockedLeadDelegates,
   briefParts,
-  criterionRows,
   deliveryApplies,
   taskNextActor,
   trackerName,
@@ -176,6 +174,15 @@ import {
 } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
 import { WaitReasons } from "./wait-reasons.js";
+import {
+  ChecklistCoverage,
+  CriteriaRows,
+  Literal,
+  ReviewEvidence,
+  sourceGap,
+} from "./result-evidence.js";
+import { ResultReviewPanel } from "./result-review.js";
+import { reviewStatus } from "./result-review-presentation.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
 const sectionIds = [
@@ -199,8 +206,6 @@ const tabSections: Record<TaskTab, string> = {
   review: "local-review",
   execution: "execution",
 };
-const sourceGap =
-  "Retained source body and checklist coverage are unavailable. Source fields are retained only up to 16,000 characters; private or missing material may also be unavailable. Consult the external source or ask the lead.";
 /** The Overview card a `source` or `result` link names when it names no section. */
 const linkedCard = (p: URLSearchParams) =>
   p.has("result") ? "review" : p.has("source") ? "brief" : null;
@@ -255,37 +260,7 @@ function holdReadingAnchor(anchor: { id: string; y: number }) {
   for (const type of inputs) addEventListener(type, stop, { passive: true });
   return stop;
 }
-function ChecklistCoverage({
-  source,
-}: {
-  source:
-    | NonNullable<TaskRead["data"]["review"]>["sources"][number]
-    | undefined;
-}) {
-  if (!source || source.body === null) return <p>{sourceGap}</p>;
-  if (source.criteriaOmittedCount === null)
-    return (
-      <p>
-        Additional literal checklist coverage is unknown for this retained
-        source.
-      </p>
-    );
-  if (source.criteriaOmittedCount > 0)
-    return (
-      <p>
-        Checklist coverage is partial: {source.criteria.length} literal
-        checklist records retained; {source.criteriaOmittedCount} additional
-        records omitted. Consult the full retained brief.
-      </p>
-    );
-  return null;
-}
 const date = (n: number) => new Date(n < 1e12 ? n * 1000 : n).toLocaleString();
-function Literal({ text }: { text: string | null | undefined }) {
-  return (
-    <pre className="literal-text">{text ?? "Unavailable or redacted"}</pre>
-  );
-}
 /** A question's own text: the exact read's first label, or the request prompt when that read withholds it or fails. */
 function RequestText({
   client,
@@ -1707,7 +1682,10 @@ export function TaskWorkspace({
   const selected = state.selectedResult
       ? data.results.find((r) => r.resultId === state.selectedResult)
       : data.results.at(-1),
-    meta = review?.results.find((r) => r.resultId === selected?.resultId);
+    meta = review?.results.find((r) => r.resultId === selected?.resultId),
+    selectedReview = data.resultReviews?.find(
+      (r) => r.resultId === selected?.resultId,
+    );
   const leadId = data.leadAssignmentId,
     lead = data.assignments.find((a) => a.assignmentId === leadId),
     leadName = data.lead?.name ?? "Project lead",
@@ -1730,7 +1708,9 @@ export function TaskWorkspace({
     ),
     deciding = inView?.kind === "approval" ? inView.interactionId : null,
     // Any status: a decided approval stays in view, read only, until the operator leaves it.
-    reviewing = data.approvals.find((a) => a.interactionId === requestId);
+    reviewing = data.approvals.find((a) => a.interactionId === requestId),
+    // Likewise a result review keeps its outcome in view once answered.
+    resultReview = data.resultReviews?.find((r) => r.reviewId === requestId);
   const attention = taskAttentionProjection(
       data,
       (inView?.kind ??
@@ -1746,6 +1726,7 @@ export function TaskWorkspace({
         [...data.questions, ...data.approvals].some(
           (request) => request.interactionId === requestId,
         )) ||
+        Boolean(resultReview) ||
         (state.inlineAnswer &&
           !openRequests.some((q) => q.interactionId === state.inlineAnswer)) ||
         startedAgain === taskId ||
@@ -1758,10 +1739,9 @@ export function TaskWorkspace({
     ),
     attentionPinned = attention.pinned || retainedAttention,
     // One rule for the banner and the collapse it toggles, so a collapsed card can always reopen.
+    decisions = attention.requests.length + attention.reviews.length,
     attentionBanner =
-      attention.requests.length > 0 ||
-      attention.actions.length > 0 ||
-      nextActor.operator,
+      decisions > 0 || attention.actions.length > 0 || nextActor.operator,
     attentionCollapsed =
       attentionBanner && state.attentionCollapsed && !requestId;
   const requesterOf = (interactionId: string | null) => {
@@ -2454,7 +2434,7 @@ export function TaskWorkspace({
         id="decisions"
         className="workspace-attention decision-card"
         hidden={!attentionPinned}
-        data-attention={attention.requests.length > 0 || undefined}
+        data-attention={decisions > 0 || undefined}
         data-pinned={attentionPinned || undefined}
         data-collapsed={attentionCollapsed || undefined}
         aria-label="Pending requests and holds"
@@ -2470,12 +2450,22 @@ export function TaskWorkspace({
               changed();
             }}
           >
-            {attention.requests.length > 0
-              ? `${count(attention.requests.length, "decision")} waiting on you`
+            {decisions > 0
+              ? `${count(decisions, "decision")} waiting on you`
               : "Waiting on you"}
           </button>
         )}
-        {reviewing ? (
+        {resultReview ? (
+          <ResultReviewPanel
+            key={resultReview.reviewId}
+            client={client}
+            session={session}
+            task={data}
+            reviewId={resultReview.reviewId}
+            onChanged={refreshAll}
+            readOnly={projectReadOnly}
+          />
+        ) : reviewing ? (
           <ApprovalReview
             readOnly={projectReadOnly}
             client={client}
@@ -2553,6 +2543,24 @@ export function TaskWorkspace({
                     : "Answer question"}
                 </ActionLink>
               )}
+            </div>
+          ))}
+        {attention.reviews
+          .filter((r) => r.reviewId !== requestId)
+          .map((r) => (
+            <div
+              key={r.reviewId}
+              className="decision"
+              data-record-id={r.reviewId}
+            >
+              <p className="small-heading">Your decision · review requested</p>
+              <Literal text={r.decision} />
+              <ActionLink
+                variant="secondary"
+                href={`/tasks/${taskId}?request=${r.reviewId}`}
+              >
+                Review result
+              </ActionLink>
             </div>
           ))}
         {state.inlineAnswer &&
@@ -2992,6 +3000,18 @@ export function TaskWorkspace({
                           aria-label={`Result R${data.results.indexOf(selected) + 1}`}
                         >
                           <Literal text={selected.summary} />
+                          {selectedReview && (
+                            <p className="metadata">
+                              Review requested ·{" "}
+                              {reviewStatus(selectedReview) ?? "Pending"} ·{" "}
+                              <ActionLink
+                                variant="secondary"
+                                href={`/tasks/${taskId}?request=${selectedReview.reviewId}`}
+                              >
+                                Open review
+                              </ActionLink>
+                            </p>
+                          )}
                           <p className="metadata">
                             <ActionLink
                               variant="secondary"
@@ -3461,312 +3481,6 @@ function CommentReview({
         </>
       )}
     </div>
-  );
-}
-/** Supplied criteria as C1/C2 rows with the result's recorded outcome; no overall pass. */
-function CriteriaRows({
-  data,
-  resultId,
-  sourceId,
-  ask,
-  more,
-}: {
-  data: TaskRead["data"];
-  resultId: string;
-  sourceId: string | undefined;
-  ask: (r: Reference, label: string) => void;
-  /** The "N more" disclosure's open state, kept on the history entry like the Overview cards. */
-  more: {
-    open: boolean;
-    onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void;
-  };
-}) {
-  const s = data.review?.sources.find((s) => s.sourceId === sourceId),
-    latest = data.review?.sources.at(-1),
-    rows = criterionRows(data, resultId, sourceId);
-  const criterionRow = (row: (typeof rows)[number]) => (
-    <div
-      key={row.criterionId}
-      className="criterion-row"
-      data-record-id={row.criterionId}
-    >
-      <p>
-        {row.label} · {row.status}
-        {row.stale ? " · stale source revision" : ""}
-      </p>
-      <p>{row.text}</p>
-      <p className="metadata muted">
-        {[
-          `Source revision ${row.revision}`,
-          row.record?.scope,
-          row.record?.provenance,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </p>
-      {row.records.length > 1 && (
-        <div>
-          <p>Duplicate criterion identity; overall outcome unknown.</p>
-          <Literal
-            text={row.records
-              .map((record) =>
-                [record.outcome, record.scope, record.provenance]
-                  .filter(Boolean)
-                  .join(" · "),
-              )
-              .join("\n")}
-          />
-        </div>
-      )}
-      <Button
-        variant="secondary"
-        onClick={() =>
-          ask(
-            {
-              resultId,
-              sourceId: sourceId as string,
-              criterionId: row.criterionId,
-            },
-            `criterion ${row.position + 1} in source revision ${row.revision}`,
-          )
-        }
-      >
-        Ask lead about criterion
-      </Button>
-    </div>
-  );
-  return (
-    <div className="criteria-rows">
-      <h4 className="small-heading">
-        {!s || s.body === null
-          ? "Supplied criteria — coverage unavailable"
-          : "Supplied criteria"}
-      </h4>
-      <ChecklistCoverage source={s} />
-      {s && s.body !== null && !s.criteria.length && (
-        <p>
-          No literal checklist records. Consult the supplied brief prose for
-          requirements.
-        </p>
-      )}
-      {rows.slice(0, 3).map(criterionRow)}
-      {rows.length > 3 && (
-        <details className="criteria-more" {...more}>
-          <summary>{rows.length - 3} more</summary>
-          {rows.slice(3).map(criterionRow)}
-        </details>
-      )}
-      {latest && s && latest.sourceId !== s.sourceId && (
-        <p>
-          Newer source revision {latest.revision} has requirements not covered
-          by this historical result.
-        </p>
-      )}
-      {latest && s && latest.sourceId !== s.sourceId && (
-        <div>
-          <h4>
-            Current supplied criteria not covered by this historical result
-          </h4>
-          {latest.criteria.map((c) => (
-            <p key={c.criterionId}>
-              {c.text} · unverified for source revision {latest.revision}
-            </p>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-function ReviewEvidence({
-  data,
-  resultId,
-  sourceId,
-  ask,
-}: {
-  data: TaskRead["data"];
-  resultId: string;
-  sourceId: string | undefined;
-  ask: (r: Reference, label: string) => void;
-}) {
-  const metadata = data.review?.results.find(
-    (r) => r.resultId === resultId,
-  )?.metadata;
-  if (!metadata) return null;
-  return (
-    <>
-      {metadata.decisions
-        .map((d, i) => ({ d, recordId: `${resultId}:decision:${i}` }))
-        .map(({ d, recordId }) => (
-          <div key={recordId} data-record-id={recordId}>
-            <h4>Recorded decision</h4>
-            <p>{d.attribution}</p>
-            <Literal text={d.text} />
-          </div>
-        ))}
-      <h4>Validation records</h4>
-      {metadata.validations.length ? (
-        metadata.validations.map((v) => {
-          const head = data.delivery?.binding?.headSha,
-            unknown =
-              !v.checkedHead || !head || data.delivery?.binding?.readError;
-          return (
-            <p key={`${v.label}:${v.scope}:${v.provenance}`}>
-              {v.label}: {v.outcome} · {v.scope} · {v.provenance} ·{" "}
-              {v.checkedHead && (
-                <>
-                  checked head <ShortId value={v.checkedHead} /> ·{" "}
-                </>
-              )}
-              {unknown
-                ? "Head comparison unknown"
-                : v.checkedHead === head
-                  ? reviewHeadComparison(true, data.delivery?.binding?.codeHost)
-                  : reviewHeadComparison(
-                      false,
-                      data.delivery?.binding?.codeHost,
-                    )}
-            </p>
-          );
-        })
-      ) : (
-        <p>No supplied validation record. No overall pass is inferred.</p>
-      )}
-      <h4>Recorded comparisons and evidence</h4>
-      {!metadata.artifacts.length && <p>No artifact evidence supplied.</p>}
-      {[
-        ...new Set(
-          metadata.artifacts.map((a) => a.pairId ?? `unpaired:${a.artifactId}`),
-        ),
-      ].map((pair) => {
-        const group = metadata.artifacts.filter(
-          (a) => (a.pairId ?? `unpaired:${a.artifactId}`) === pair,
-        );
-        return (
-          <section key={pair} data-artifact-pair={pair}>
-            <h5>
-              {pair.startsWith("unpaired:")
-                ? "Unpaired recorded evidence"
-                : `Recorded pair ${pair}`}
-            </h5>
-            <div className="artifact-comparisons">
-              {["before", "after", "evidence"].map((role) => (
-                <div key={role} data-artifact-role={role}>
-                  {group
-                    .filter((a) => a.role === role)
-                    .map((a) =>
-                      metadata.artifacts.filter(
-                        (v) => v.artifactId === a.artifactId,
-                      ).length > 1 ? (
-                        <p key={`${a.artifactId}:${role}:${a.label}`}>
-                          Duplicate artifact identity {a.artifactId}; preview
-                          and feedback unavailable.
-                        </p>
-                      ) : (
-                        <Artifact
-                          key={a.artifactId}
-                          taskId={data.task.id}
-                          artifact={a}
-                          ask={() =>
-                            ask(
-                              {
-                                resultId,
-                                artifactId: a.artifactId,
-                                ...(sourceId ? { sourceId } : {}),
-                              },
-                              `${a.role} artifact ${a.label}`,
-                            )
-                          }
-                        />
-                      ),
-                    )}
-                  {!pair.startsWith("unpaired:") &&
-                    role !== "evidence" &&
-                    !group.some((a) => a.role === role) && (
-                      <p>{role}: recorded side missing.</p>
-                    )}
-                </div>
-              ))}
-            </div>
-          </section>
-        );
-      })}
-      <p>
-        Before/after labels and pairing are producer records. Missing sides and
-        preview failures are not replaced with another revision.
-      </p>
-      {metadata.artifacts
-        .filter((a) => a.pairId)
-        .map(
-          (a) =>
-            !metadata.artifacts.some(
-              (b) => b.pairId === a.pairId && b.role !== a.role,
-            ) && (
-              <p key={a.artifactId}>
-                Pair {a.pairId}: opposite side unavailable.
-              </p>
-            ),
-        )}
-    </>
-  );
-}
-function Artifact({
-  taskId,
-  artifact,
-  ask,
-}: {
-  taskId: string;
-  artifact: NonNullable<
-    TaskRead["data"]["review"]
-  >["results"][number]["metadata"]["artifacts"][number];
-  ask: () => void;
-}) {
-  const [failed, setFailed] = useState(false),
-    [retry, setRetry] = useState(0);
-  return (
-    <figure data-record-id={artifact.artifactId}>
-      <figcaption>
-        {artifact.role}: {artifact.label} · revision {artifact.revision} · pair{" "}
-        {artifact.pairId ?? "none recorded"}
-      </figcaption>
-      {artifact.availability === "available" ? (
-        <>
-          <img
-            key={retry}
-            loading="lazy"
-            src={`/api/operator/tasks/${taskId}/artifacts/${artifact.artifactId}`}
-            alt={`${artifact.role}: ${artifact.label}`}
-            onError={() => setFailed(true)}
-            hidden={failed}
-          />
-          {failed && (
-            <>
-              <p>
-                Preview unavailable or mismatched. Recorded identity retained.
-              </p>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setFailed(false);
-                  setRetry((n) => n + 1);
-                }}
-              >
-                Retry recorded preview
-              </Button>
-            </>
-          )}
-          {artifact.url && (
-            <ActionLink href={artifact.url}>
-              Open recorded artifact link
-            </ActionLink>
-          )}
-        </>
-      ) : (
-        <p>{artifact.availability}</p>
-      )}
-      <Button variant="secondary" onClick={ask}>
-        Ask lead about artifact
-      </Button>
-    </figure>
   );
 }
 function PullRequestLine({

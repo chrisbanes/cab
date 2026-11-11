@@ -18,6 +18,7 @@ import {
 import { clockLabel, midSentence } from "./presentation.js";
 import { taskColumnOf } from "./task-overview.js";
 import { nextActor } from "./tasks.js";
+import { pendingReviews } from "./result-review-presentation.js";
 
 export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 
@@ -265,6 +266,7 @@ export function taskAttentionProjection(
       (request) =>
         request.status === "open" && request.lifecycle?.status !== "dismissed",
     ),
+    reviews = pendingReviews(task),
     normalRunning =
       // Submission reports a healthy turn start as starting, with the same writer and capacity.
       (task.execution.state === "running" ||
@@ -315,6 +317,7 @@ export function taskAttentionProjection(
         attentionNext[code].operator &&
         code !== "question" &&
         code !== "approval" &&
+        code !== "result-review" &&
         !(code === "unresolved-result" && task.unresolvedResults.length > 0),
     ),
     unresolvedResults = task.unresolvedResults,
@@ -378,6 +381,7 @@ export function taskAttentionProjection(
 
   const pinned = Boolean(
     requests.length ||
+      reviews.length ||
       actions.length ||
       cardWaits.length ||
       executionHolds.length ||
@@ -392,6 +396,11 @@ export function taskAttentionProjection(
         ...requests.map((request) => ({
           id: `request:${request.interactionId}`,
           title: `${request.kind === "approval" ? "Approval" : "Question"} pending`,
+          kind: "request" as const,
+        })),
+        ...reviews.map((review) => ({
+          id: `request:${review.reviewId}`,
+          title: "Review requested",
           kind: "request" as const,
         })),
         ...shownNotices.map((notice) => ({
@@ -413,6 +422,7 @@ export function taskAttentionProjection(
   return {
     pinned,
     requests,
+    reviews,
     waits,
     cardWaits,
     notices,

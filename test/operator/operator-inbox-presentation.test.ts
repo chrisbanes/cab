@@ -1076,6 +1076,56 @@ test("the queue groups interventions first, then questions and approvals, keepin
   assert.deepEqual(queueGroups([]), []);
 });
 
+test("a result review joins questions and approvals in server order", () => {
+  const [i1, q1, r1, a1] = [
+    item("intervention", "p"),
+    item("question", "p"),
+    item("result-review", "p"),
+    item("approval", "p"),
+  ];
+  assert.deepEqual(
+    queueGroups([i1, q1, r1, a1]).map((g) => g.items),
+    [[i1], [q1, r1, a1]],
+  );
+});
+
+test("task attention projection pins a pending review as one request row, not a generic action", () => {
+  const review = (status: string, lifecycle = "actionable") =>
+    ({
+      reviewId: randomUUID(),
+      status,
+      lifecycle: { status: lifecycle },
+    }) as never;
+  const [pending, dismissed, answered] = [
+    review("pending"),
+    review("pending", "dismissed"),
+    review("responded", "resolved"),
+  ];
+  const result = taskAttentionProjection(
+    attentionTask({
+      resultReviews: [pending, dismissed, answered],
+      attention: { codes: ["result-review"], count: 1 } as never,
+    }),
+    "answer",
+    null,
+  );
+  assert.equal(result.pinned, true);
+  assert.deepEqual(result.reviews, [pending]);
+  assert.deepEqual(result.rows, [
+    {
+      id: `request:${(pending as { reviewId: string }).reviewId}`,
+      title: "Review requested",
+      kind: "request",
+    },
+  ]);
+  assert.deepEqual(result.actions, []);
+  // A task read from an older service has no review list.
+  assert.deepEqual(
+    taskAttentionProjection(attentionTask(), "answer", null).reviews,
+    [],
+  );
+});
+
 test("a runtime item leads the Intervention group and counts in its heading", () => {
   const [r, i1, q1] = [
       runtimeItem(),

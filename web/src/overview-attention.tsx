@@ -37,6 +37,7 @@ import {
   requestActionLabel,
   requestHref,
   requestKindIcons,
+  requestKindLabel,
 } from "./request-presentation.js";
 import { useOperatorResource } from "./resource.js";
 import type { Requests } from "./task-attention.js";
@@ -248,13 +249,7 @@ function RequestCard({
           data-tone={item.kind === "intervention" ? "risk" : "attn"}
         >
           <Icon aria-hidden="true" />
-          {uncertain
-            ? "Execution uncertain"
-            : item.kind === "question"
-              ? "Question"
-              : item.kind === "approval"
-                ? "Approval"
-                : "Intervention"}
+          {uncertain ? "Execution uncertain" : requestKindLabel(item.kind)}
         </span>
         {item.createdAt !== null && (
           <span className="metadata muted identifier">
