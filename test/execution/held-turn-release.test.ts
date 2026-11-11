@@ -164,6 +164,19 @@ test("a held Codex turn is released at startup when its process is verified to h
   assert.equal(w.runtime.stops, 2);
 });
 
+test("a held turn whose process exits after cab starts watching it is released on a later check", async (t) => {
+  const w = await heldWorld(t);
+  await settle(() => w.rows().release !== null);
+  // Alive on the first check; then the process exits, for example after the interrupt.
+  assert.equal(w.rows().release?.basis, null);
+  w.setMode("verified");
+  await w.advance(minute);
+  await w.released();
+  assert.equal(w.rows().release?.basis, "process-exited");
+  assert.equal(w.rows().capacity, null);
+  assert.equal(w.rows().writer, null);
+});
+
 test("a held Codex turn is released after 30 minutes with no event for it", async (t) => {
   const w = await heldWorld(t);
   await settle(() => w.rows().release !== null);

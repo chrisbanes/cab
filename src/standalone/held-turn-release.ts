@@ -49,6 +49,8 @@ interface Watch {
   interrupted: string | null | undefined;
   quietFrom: number;
   exited: boolean;
+  /** When process exit was last checked, so wake-driven passes don't repeat it. */
+  exitCheckedAt: number | undefined;
 }
 
 /**
@@ -164,19 +166,23 @@ export class HeldTurnRelease {
         continue;
       }
       if (!watch) {
-        watch = { interrupted: undefined, quietFrom: now, exited: false };
+        watch = {
+          interrupted: undefined,
+          quietFrom: now,
+          exited: false,
+          exitCheckedAt: undefined,
+        };
         this.watches.set(candidate.workId, watch);
-        watch.exited = await this.host
-          .processExited(candidate.workId)
-          .catch(() => false);
-        if (this.controller.signal.aborted) return;
       }
-      // A turn whose ID was never saved can only release on exit, so it is checked each pass.
+      // The process may exit at any time, the interrupt among the causes, so exit is checked
+      // again on later passes, at most once a poll interval however often cab wakes.
       if (
-        watch.interrupted !== undefined &&
-        candidate.turnId === null &&
-        !watch.exited
+        !watch.exited &&
+        !this.host.turnEnded(candidate) &&
+        (watch.exitCheckedAt === undefined ||
+          now - watch.exitCheckedAt >= this.pollMs)
       ) {
+        watch.exitCheckedAt = now;
         watch.exited = await this.host
           .processExited(candidate.workId)
           .catch(() => false);

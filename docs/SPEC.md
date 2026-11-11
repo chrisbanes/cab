@@ -690,13 +690,13 @@ or 30 minutes pass with no runtime event, request or cab callback for that turn.
 clock is in memory and starts again from service start after a restart, so the wait can be
 longer but never shorter. cab checks at startup before admission, whenever it wakes the
 scheduler and every minute; it checks process exit when it starts watching the turn,
-including at startup.
+including at startup, and again at most once a minute while the turn waits.
 
 The quiet period has one exception. A held generation whose turn ID was never saved
 (the runtime's reply naming the turn was lost) never releases on silence: the turn may be
 running under an ID cab never learned, so cab cannot attribute its activity to it, and the
 runtime cannot report the end of a turn cab cannot name. Such a generation releases only
-when its recorded process is verified to have exited; cab checks that on every pass. For a
+when its recorded process is verified to have exited. For a
 shared Codex App Server it therefore stays held until cab restarts the App Server.
 
 Independent holds win: an operator Stop until Resume, a task hold, a pending effect other than
