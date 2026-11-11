@@ -714,7 +714,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      assignment version), which resumes the lead of an open task subject to
      admission, pause, Stop, dependency and capacity holds. A done task is never
      reopened.
-   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|intervention|runtime] [--project ID] [--limit N]
+   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime] [--project ID] [--limit N]
      [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`. A
      `runtime` row (an execution runtime whose automatic restarts are exhausted) names the
      runtime and `runtime list`; it has no task, so `--project` excludes it.

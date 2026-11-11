@@ -382,6 +382,27 @@ export const projectDeletionInventory = {
     ],
     ownership: "taskId in T OR assignmentId in A",
   },
+  coordination_result_reviews: {
+    columns: [
+      "reviewId",
+      "taskId",
+      "resultId",
+      "workId",
+      "workRevision",
+      "requestingAssignmentId",
+      "decision",
+      "recommendation",
+      "uncertaintiesJson",
+      "status",
+      "revision",
+      "responseJson",
+      "supersededByResultId",
+      "withdrawReason",
+      "createdAt",
+      "updatedAt",
+    ],
+    ownership: "taskId in T",
+  },
   coordination_result_workspaces: {
     columns: [
       "resultId",

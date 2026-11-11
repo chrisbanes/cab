@@ -542,6 +542,9 @@ export function Inbox({
               <option value="approval">
                 Approvals · {counts.kind.approval ?? 0}
               </option>
+              <option value="result-review">
+                Result reviews · {counts.kind["result-review"] ?? 0}
+              </option>
               <option value="intervention">
                 Interventions · {counts.kind.intervention ?? 0}
               </option>

@@ -11,6 +11,7 @@ export const deletionOperatorReceiptScopes = [
   "reconcile-result-recipient",
   "answer-runtime-question",
   "task-comment-send",
+  "result-review-response",
 ] as const;
 export const deletionPreTurnScopes = [
   "adopt",
@@ -176,7 +177,9 @@ export function seedDeletionReceiptVariants(
               recorded: true,
               deliveryState: "confirmed",
             }
-          : { eventId: i.eventId };
+          : scope === "result-review-response"
+            ? { reviewId: i.uuid("resultReviewId"), eventId: i.eventId }
+            : { eventId: i.eventId };
     db.prepare(
       "INSERT INTO coordination_operator_receipts (scope,commandKey,payloadHash,result) VALUES (?,?,?,?)",
     ).run(scope, key, hash, JSON.stringify(result));

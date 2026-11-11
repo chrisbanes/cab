@@ -5083,6 +5083,7 @@ export class StandaloneService {
   reconcileInbox(): void {
     const { domain, coordination } = this.started();
     coordination.reconcileInboxInteractions();
+    coordination.reconcileResultReviews();
     const lifecycle = coordination.inboxLifecycle();
     for (const project of domain.projects())
       for (const task of domain.tasks(String(project.id))) {

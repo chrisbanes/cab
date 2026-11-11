@@ -121,6 +121,7 @@ const workRoots = [
   ["lead_text_submissions", "workId"],
   ["retained_review_anchor_contexts", "workId"],
   ["coordination_results", "workId"],
+  ["coordination_result_reviews", "workId"],
   ["task_review_contexts", "workId"],
   ["coordination_completion_requests", "leadWorkId"],
   ["coordination_interactions", "requestingWorkId"],
@@ -214,6 +215,29 @@ function readReceipts(db: Database, owner: OwnershipParameters) {
       )
         throw new Error("Native receipt parent is unavailable");
       owned = interactions.has(result.interactionId);
+    } else if (scope === "result-review-response") {
+      const result = z
+        .object({ reviewId: uuid, eventId: uuid.nullable() })
+        .strict()
+        .parse(json(row.result));
+      const review = db
+        .prepare(
+          "SELECT taskId FROM coordination_result_reviews WHERE reviewId=?",
+        )
+        .get(result.reviewId) as Row | undefined;
+      if (
+        !review ||
+        (result.eventId !== null &&
+          (
+            db
+              .prepare(
+                "SELECT taskId FROM coordination_inbox_events WHERE eventId=?",
+              )
+              .get(result.eventId) as Row | undefined
+          )?.taskId !== review.taskId)
+      )
+        throw new Error("Result review receipt parent is unavailable");
+      owned = tasks.has(text.parse(review.taskId));
     } else if (eventScopes.has(scope)) {
       const result = z
         .object({ eventId: uuid })

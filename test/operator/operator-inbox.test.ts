@@ -18,6 +18,7 @@ import {
   until,
 } from "../fixtures/questions.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 import {
   choiceForm,
   mixedAnswers,
@@ -1495,6 +1496,97 @@ test("completion diagnostics retain the exact interaction, label legacy current 
         ),
     );
     await assert.rejects(api.readTask(a.taskId), /unavailable/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a requested result review is one urgency-1 Inbox item that filters, dismisses and restores without a response", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const question = await seedOwnQuestion(f);
+    const task = await seedReviewTask(f, "Review queue");
+    task.result("Routine completion");
+    const api = new OperatorApi(f.service, [f.directory]);
+    const reviewsIn = async (params?: URLSearchParams) =>
+      (await api.readInbox(params)).data.items.filter(
+        (i) => i.kind === "result-review",
+      );
+    assert.deepEqual(await reviewsIn(), []);
+    task.result("Toolbar behind a flag", undefined, undefined, {
+      decision: "Should the new toolbar ship behind the beta flag?",
+      recommendation: "Ship behind the flag.",
+    });
+    const review = (await api.readTask(task.taskId)).data.resultReviews![0]!;
+    const items = (await api.readInbox()).data.items;
+    const [item, ...others] = items.filter((i) => i.kind === "result-review");
+    assert.equal(others.length, 0);
+    assert.ok(item && item.kind === "result-review");
+    assert.equal(item.id, review.reviewId);
+    assert.equal(item.taskId, task.taskId);
+    assert.equal(item.urgency, 1);
+    assert.equal(
+      item.headline,
+      "Should the new toolbar ship behind the beta flag?",
+    );
+    assert.equal(item.requesterName, "Task lead");
+    assert.equal(item.revision, review.revision);
+    assert.equal(item.interactionId, null);
+    assert.equal(
+      item.destination,
+      `/tasks/${task.taskId}?request=${review.reviewId}`,
+    );
+    assert.equal(
+      item.conversation,
+      `/tasks/${task.taskId}?assignment=${task.assignmentId}`,
+    );
+    // Reviews share the questions' urgency, so age orders them together.
+    assert.equal(
+      items.find((i) => i.id === question.interactionId)?.urgency,
+      item.urgency,
+    );
+    assert.deepEqual((await api.readTask(task.taskId)).data.attention.codes, [
+      "result-review",
+    ]);
+    assert.deepEqual(
+      (
+        await api.readInbox(new URLSearchParams({ kind: "result-review" }))
+      ).data.items.map((i) => i.id),
+      [review.reviewId],
+    );
+    await f.reopen();
+    const reopened = new OperatorApi(f.service, [f.directory]);
+    assert.equal(
+      (await reopened.readInbox(new URLSearchParams({ kind: "result-review" })))
+        .data.items.length,
+      1,
+    );
+    await reopened.execute({
+      type: "inbox.dismiss",
+      key: randomUUID(),
+      itemId: item.id,
+      expectedRevision: item.lifecycle!.revision,
+    });
+    assert.equal(
+      (await reopened.readInbox(new URLSearchParams({ kind: "result-review" })))
+        .data.items.length,
+      0,
+    );
+    const hidden = (
+      await reopened.readInbox(new URLSearchParams({ status: "dismissed" }))
+    ).data.items.find((i) => i.id === item.id)!;
+    await reopened.execute({
+      type: "inbox.restore",
+      key: randomUUID(),
+      itemId: hidden.id,
+      expectedRevision: hidden.lifecycle!.revision,
+    });
+    const [restored] = (await reopened.readTask(task.taskId)).data
+      .resultReviews!;
+    assert.equal(restored?.status, "pending");
+    assert.equal(restored?.response, null);
+    assert.equal(restored?.revision, review.revision);
+    assert.equal(restored?.lifecycle?.status, "actionable");
   } finally {
     await f.close();
   }

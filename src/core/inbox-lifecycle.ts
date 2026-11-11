@@ -18,7 +18,13 @@ export const inboxLifecycleSchema = z
 const rowSchema = inboxLifecycleSchema.extend({
   id: z.string().min(1).max(128),
   taskId: z.uuid().nullable(),
-  kind: z.enum(["question", "approval", "intervention", "runtime"]),
+  kind: z.enum([
+    "question",
+    "approval",
+    "intervention",
+    "runtime",
+    "result-review",
+  ]),
   sourceKey: z.string(),
   dataJson: z.string(),
   obsolete: z.union([z.literal(0), z.literal(1)]),

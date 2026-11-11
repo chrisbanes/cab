@@ -545,7 +545,7 @@ reuse and, for Stop and Resume, whether Stop is in effect after a possible repla
 which task command produced them, so an uncertain outcome is settled by retrying
 the same command with its key and checked with `task get`, `question get` or
 `approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
-`kind` (`question|approval|intervention|runtime`), `status`
+`kind` (`question|approval|result-review|intervention|runtime`), `status`
 (`actionable|resolved|dismissed`, default `actionable`) and `project`, each at most once and
 applied before paging; a cursor from other parameters is `409`. A `runtime` item carries `harness` and `since` instead of task fields.
 Every item carries durable lifecycle status/revision and resolution/dismissal metadata.

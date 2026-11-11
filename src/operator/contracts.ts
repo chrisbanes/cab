@@ -1536,6 +1536,47 @@ const completion = z
     finalizedAt: time.nullable(),
   })
   .strict();
+/**
+ * A lead's request that the operator review one exact result. Its bound result, with its work
+ * revision and recorded workspace, is the task read's `results` entry of the same `resultId`.
+ * Everything but the identity, status and response is reported by the lead.
+ */
+export const resultReviewSchema = z
+  .object({
+    lifecycle: inboxLifecycleSchema.optional(),
+    reviewId: uuid,
+    resultId: uuid,
+    workId: z.string().min(1),
+    workRevision: revision,
+    requestingAssignmentId: uuid,
+    decision: safeText,
+    recommendation: safeText,
+    /** Null when the lead recorded none, which is not the same as an empty list. */
+    uncertainties: z.array(safeText).max(20).nullable(),
+    status: z.enum([
+      "pending",
+      "responded",
+      "superseded",
+      "withdrawn",
+      "closed",
+    ]),
+    revision,
+    response: z
+      .object({
+        response: z.enum(["reviewed", "feedback"]),
+        message: safeText,
+        /** The feedback event delivered to the lead; null when nothing was sent. */
+        eventId: uuid.nullable(),
+        respondedAt: time,
+      })
+      .strict()
+      .nullable(),
+    supersededByResultId: uuid.nullable(),
+    withdrawReason: safeText,
+    createdAt: time,
+    updatedAt: time,
+  })
+  .strict();
 export const unresolvedResultSchema = z
   .object({
     resultId: uuid,
@@ -2118,6 +2159,8 @@ export const taskSchema = envelope(
       unresolvedResults: z.array(unresolvedResultSchema),
       questions: z.array(interactionSchema),
       approvals: z.array(interactionSchema),
+      /** Result review requests, oldest first. Absent from older services: unavailable, never empty. */
+      resultReviews: z.array(resultReviewSchema).optional(),
       completionRequests: z.array(completion),
       attention: z
         .object({
@@ -3031,6 +3074,21 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedAssignmentVersion: revision,
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("result-review.respond"),
+      taskId: uuid,
+      reviewId: uuid,
+      expectedRevision: revision,
+      response: z.enum(["reviewed", "feedback"]),
+      message: z.string().trim().min(1).max(16000).optional(),
+    })
+    .strict()
+    .refine((v) => v.response !== "feedback" || v.message !== undefined, {
+      message: "Feedback needs a message",
+      path: ["message"],
+    }),
   z
     .object({
       ...base,
@@ -4460,7 +4518,7 @@ export const taskInboxItemSchema = z
     lifecycle: inboxLifecycleSchema.optional(),
     dismissible: z.boolean().optional(),
     id: z.string().min(1).max(128),
-    kind: z.enum(["question", "approval", "intervention"]),
+    kind: z.enum(["question", "approval", "intervention", "result-review"]),
     urgency: z.number().int().min(0).max(1),
     createdAt: time.nullable(),
     taskId: uuid,
@@ -4641,6 +4699,22 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   taskCommentReceiptSchema.extend({ recorded: z.literal(true) }).strict(),
+  z
+    .object({
+      kind: z.literal("result-review"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      reviewId: uuid,
+      revision,
+      status: z.literal("responded"),
+      response: z.enum(["reviewed", "feedback"]),
+      /** The feedback delivered to the lead; null for a review marked without a note. */
+      eventId: uuid.nullable(),
+      recipientAssignmentId: uuid.nullable(),
+      resumedLead: z.literal(true).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("coordination"),

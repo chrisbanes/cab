@@ -104,13 +104,13 @@ const inboxNext = (item: InboxItem) =>
 
 const inboxList: BrowseCommand = {
   usage:
-    "inbox list [--status actionable|resolved|dismissed] [--kind question|approval|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
+    "inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
   positionals: 0,
   capabilities: ["cli.identity", "attention.read"],
   async run(ctx) {
     const kind = enumArg(
       ctx.values.kind,
-      ["question", "approval", "intervention", "runtime"],
+      ["question", "approval", "result-review", "intervention", "runtime"],
       "--kind",
     );
     const status = enumArg(

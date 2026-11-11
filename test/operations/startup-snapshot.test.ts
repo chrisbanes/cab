@@ -855,6 +855,12 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
+/** Level 31 added only the result review table; then level 30 is undone. */
+function undoLevel31(db: DatabaseSync) {
+  db.exec("DROP TABLE coordination_result_reviews");
+  undoLevel30(db);
+}
+
 /** Level 30 added only the held-turn release table; then level 29 is undone. */
 function undoLevel30(db: DatabaseSync) {
   db.exec("DROP TABLE execution_held_turn_releases");
@@ -923,6 +929,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Result review requests.
+  31: "3e1f1837f1922efdeb55b28417abf39772cdf1eaa91dded882662a4d693900d6",
   // Held-turn interrupts and releases.
   30: "5bcbe72cb8692595b2e1ae1d1d6280ed2e9b05546f7e3f07b7d69fd9e8b6f32c",
   // Assignments may be withdrawn; withdrawal records and undeliverable inbox events.
@@ -1052,7 +1060,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
           "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
         )
         .run(intentId);
-      undoLevel30(before);
+      undoLevel31(before);
       restoreRequestSchema21(before);
       restoreDraftingSchema25(before);
       before.exec(
@@ -1165,7 +1173,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     await run(dirs.data, 20);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    undoLevel30(before);
+    undoLevel31(before);
     restoreRequestSchema21(before);
     restoreDraftingSchema25(before);
     before.exec(
@@ -1399,7 +1407,7 @@ test("Inbox lifecycle migration snapshots level 22 and initializes both tables w
     await run(dirs.data, 22);
     const database = join(dirs.data, "standalone.sqlite"),
       before = new DatabaseSync(database);
-    undoLevel30(before);
+    undoLevel31(before);
     before.exec(
       `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
@@ -1433,7 +1441,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
   try {
     await run(dirs.data, 21);
     const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
-    undoLevel30(db);
+    undoLevel31(db);
     restoreRequestSchema21(db);
     restoreDraftingSchema25(db);
     db.exec(
@@ -1487,7 +1495,7 @@ test("withdrawn-state migration rebuilds level 28 assignments and keeps every ro
       profileId = randomUUID(),
       children = [randomUUID(), randomUUID(), randomUUID()];
     try {
-      undoLevel30(before);
+      undoLevel31(before);
       const domain = new DomainStore(before);
       domain.execute({
         type: "profile.create",
@@ -1606,7 +1614,7 @@ test("withdrawn-state migration refuses an assignment schema it does not recogni
     await run(dirs.data, 28);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    undoLevel30(before);
+    undoLevel31(before);
     rebuildAssignmentCheck(
       before,
       "CHECK(state IN ('pending','running','completed','held'))",
