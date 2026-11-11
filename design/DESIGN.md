@@ -243,7 +243,7 @@ Make the next decision obvious, and keep its evidence close:
   provenance and contract caveats. First arrival shows the latest conversation entry
   with Reply docked within its column; phone results and Details follow it. On a
   phone the docked Reply is one textarea (at most 12% of the viewport) until focus is
-  inside it or a send, notice or uncertain state shows, and the page's
+  inside it, a draft is unsent, or a send, notice or uncertain state shows, and the page's
   `scroll-padding-bottom` keeps a focused control clear of it. The strip
   stays on one line with one identity chip. Refresh source, Focus mode and Improve
   with lead share More task options. Delegations read as collapsible

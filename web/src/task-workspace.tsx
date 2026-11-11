@@ -2144,7 +2144,11 @@ export function TaskWorkspace({
     <section
       id="reply"
       className="reply-card"
-      data-expanded={pending || state.uncertain || outcome ? "" : undefined}
+      // An unsent draft keeps the dock open: collapsing it on blur shifts the page under the pointer
+      // and swallows the click that caused the blur.
+      data-expanded={
+        pending || state.uncertain || outcome || state.draft ? "" : undefined
+      }
     >
       <h3 className="section-heading">Reply</h3>
       <fieldset className="reply-destination">
