@@ -264,6 +264,12 @@ export function ResultReviewPanel({
           </div>
         </fieldset>
       )}
+      {review.status !== "pending" && text && (
+        <div>
+          <h4 className="small-heading">Your unsent draft</h4>
+          <Literal text={draft} />
+        </div>
+      )}
       {outcome && (
         <ActionOutcome
           tone={outcome.tone}

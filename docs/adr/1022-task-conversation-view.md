@@ -14,7 +14,7 @@ why meant reassembling it across tabs, so the task view was hard to read.
 ## Decision
 
 - The task Overview is the task's conversation. A compact Decisions and holds card
-  stays pinned for open questions and approvals, execution uncertainty or Stop,
+  stays pinned for open questions, approvals and result review requests, execution uncertainty or Stop,
   active source holds, interventions, wait reasons and operator-action recovery.
   Ordinary writer and capacity holds while a turn starts or runs stay on Execution,
   and waiting for capacity is named by the strip, never pinned. The task strip shows
@@ -40,6 +40,12 @@ why meant reassembling it across tabs, so the task view was hard to read.
 - A question or approval can be answered from the attention card or from its place in
   the conversation. Both show the same request state; neither creates a second
   request.
+- A result review request is the exception to conversation-first reading: it opens a
+  decision-focused panel in the attention card, and the same panel in the Inbox
+  ([ADR-1035](1035-result-review-requests.md)). The panel carries the decision, the lead's
+  recommendation, what changed, criteria, evidence and remaining uncertainty, so the
+  operator does not reconstruct the decision from the conversation, which stays one link
+  away.
 - The service builds the conversation as one paged, per-task timeline read. It merges
   captured history, coordination records and curated tool activity, normalises
   timestamps to milliseconds, and gives each entry a stable ordering key. Records that

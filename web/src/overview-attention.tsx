@@ -317,7 +317,7 @@ function RequestCard({
         />
       ) : (
         <>
-          {head(null)}
+          {head(item.kind === "result-review" ? item.headline : null)}
           {evidence && item.kind === "intervention" && (
             <div className="overview-evidence">
               <p className="metadata">{evidence.lead}</p>
