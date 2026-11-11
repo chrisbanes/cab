@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { realpath, utimes } from "node:fs/promises";
+import { sep } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { unstackReadSchema } from "../../src/operator/unstack-contracts.js";
+import { git } from "../fixtures/publication.js";
 import { offlineStackResources } from "./github-qualification/stack-offline-resources.js";
 import { createRealStackAdapter } from "./github-qualification/stack-real-adapter.js";
 import {
@@ -323,4 +327,45 @@ test("native stack adapter refuses a non-macOS host before credential or provide
   );
   assert.deepEqual({ lookups, dispatches }, { lookups: 0, dispatches: 0 });
   assert.equal(f.guard.snapshot().closed, true);
+});
+
+test("offline source identity is run-owned and a change to it still fails closed", async (t) => {
+  const f = await offlineStackResources(t);
+  const host = f.guard.manifest.authority.host;
+  const loaded = await realpath(
+    fileURLToPath(new URL("../../../", import.meta.url)),
+  );
+  const checkoutGitDirectories = await Promise.all(
+    ["--git-common-dir", "--absolute-git-dir"].map((flag) =>
+      realpath(git(loaded, "rev-parse", "--path-format=absolute", flag)),
+    ),
+  );
+  // Checked before any mutation: no write to the checkout's ref storage can reach a pin.
+  for (const path of [host.sourceRoot, host.sourceHeadFile, host.sourceRefFile])
+    assert.ok(path.startsWith(host.runRoot + sep), path);
+  const { toolchain } = host;
+  for (const { path } of [
+    ...f.guard.readiness.source,
+    ...host.files,
+    ...host.databaseFiles,
+    toolchain.nodeExecutable,
+    toolchain.nvmrc,
+    toolchain.packageJson,
+    toolchain.lockfile,
+    host.gitExecutable,
+    host.runtimeExecutable,
+  ])
+    for (const directory of checkoutGitDirectories)
+      assert.ok(path !== directory && !path.startsWith(directory + sep), path);
+  await f.guard.open();
+  try {
+    await utimes(host.sourceRefFile, new Date(1000), new Date(1000));
+    await assert.rejects(
+      f.guard.reserve("service.refresh", { projectId: "offline" }, "refresh"),
+      /v2-source-pin-changed/,
+    );
+    assert.throws(() => f.guard.current(), /v2-authority-closed/);
+  } finally {
+    await f.guard.close();
+  }
 });

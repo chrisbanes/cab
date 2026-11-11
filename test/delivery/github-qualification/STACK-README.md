@@ -45,7 +45,12 @@ Root must capture these actual inputs for each independent pair:
   `files` ref format, and the `reftable/tables.list` of the stack holding the ref
   for `reftable`, which every ref update in that stack rewrites. An explicitly
   pinned detached HEAD is supported; a later loose override of a packed ref
-  invalidates its capture.
+  invalidates its capture. Native runs pin the loaded checkout's own ref storage.
+  Offline-only runs pin a detached source-identity repository inside the run root
+  instead, at the loaded commit and borrowing its objects through alternates, so
+  ref storage that other worktrees rewrite is outside every offline pin. Offline
+  preflight requires that source root to be a canonical directory inside the run
+  root; module and toolchain pins stay on the loaded checkout in both modes.
 - Checkpointed SQLite bytes, the build's migration level and schema fingerprint, exact
   project/task/lead/assignment configuration and immutable profile settings.
   `capturePreparedStackDatabase` computes the same readonly material. Unrelated
@@ -68,6 +73,8 @@ effects. Already-queued completion evidence finishes before the serialized close
 no later effect is released. Token caching never bypasses validity. Source/binary/input pins are
 checked before effects, using a bounded initial hash and metadata revalidation.
 Changed pins hold the run; they do not grant a retry or replacement identity.
+The first rejection that closes the authority becomes the `cause` of every later
+`v2-authority-closed` refusal; a hold, close or expiry without one has none.
 The original teardown horizon permits only owned stop/interrupt calls after a
 main authority fault. It continues to verify canonical ownership. Failed runtime
 identity capture does not revoke cleanup through that runtime's exact owned child
@@ -164,4 +171,4 @@ always labelled `offline-injected`; it cannot supply live acceptance evidence.
 
 `stack-concrete-journey.test.ts` uses the actual adapter, service, provider and orchestration with an explicit offline-only runtime/termination constructor seam. Fresh pending leads and synthetic branch/PR preconditions are prepared before authority; full in-process provider snapshots prevent invented startup feedback from minimal seed records. A pinned offline Git executable redirects only the exact synthetic repository fetch to disposable local objects and delegates every proof operation to real Git. Immediate, delayed and absent platform rebases, missing initial registration and exhausted read authority are checked without real provider requests, operator credentials or runtime processes. Optional trace export records stages, literal requests, provider instances, HTTP/direct-Git credential accesses, callbacks and final audits; these traces are offline evidence only.
 
-Concrete offline adapter tests pass an explicit offline-only runtime/termination seam and verify the same pinned resources on the local test host. The default live adapter retains macOS eligibility; in-process Linux coverage does not establish native runtime qualification.
+Concrete offline adapter tests pass an explicit offline-only runtime/termination seam and verify the same pinned resources on the local test host, except that the source identity is the run-owned repository described in Inputs and default refusal. The default live adapter retains macOS eligibility; in-process Linux coverage does not establish native runtime qualification.
