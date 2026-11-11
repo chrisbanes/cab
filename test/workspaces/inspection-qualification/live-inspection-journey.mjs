@@ -212,17 +212,6 @@ function entry(capture, path) {
   return capture.comparison?.entries.find((item) => item.path === path);
 }
 
-function retainedItem(resultId, path) {
-  const store = service().retainedEvidence();
-  const item = store
-    .result(harness.taskId, resultId)
-    ?.items.find((candidate) => candidate.path === path);
-  assert.ok(item?.state === "available", `${path} retained for ${resultId}`);
-  const bytes = store.item(harness.taskId, resultId, item.itemId)?.bytes;
-  assert.ok(bytes);
-  return { item, text: Buffer.from(bytes).toString("utf8") };
-}
-
 /** One planned completed turn (T1/T2): admit, terminal, settle, identity checks. */
 async function plannedTurn(role) {
   stage = `${role}-admit`;
@@ -370,28 +359,15 @@ async function uiPass(expected) {
     chmodSync(lastTurnShot, 0o600);
 
     await page.goto(
-      `${web.origin}/tasks/${harness.taskId}?section=review&result=${expected.r1}&evidence=${expected.r1ItemId}`,
+      `${web.origin}/tasks/${harness.taskId}?section=review&result=${expected.r1}`,
     );
-    const retained = page.locator(".retained-evidence");
-    await retained
-      .getByRole("heading", { name: "Retained result evidence", exact: true })
+    const details = page.locator("#result-details");
+    await details
+      .getByText("Workspace state was not recorded", { exact: true })
       .waitFor();
-    await retained
-      .getByText(markers.marker1A.trimEnd(), { exact: true })
-      .first()
-      .waitFor();
-    assert.equal(
-      await retained.getByText(markers.marker1B.trimEnd()).count(),
-      0,
-      "retained R1 never shows later bytes",
-    );
-    assert.ok((await retained.innerText()).includes(expected.r1));
-    const retainedShot = join(
-      attemptDirectory,
-      `ui-${viewport.width}-retained-r1.png`,
-    );
-    await retained.screenshot({ path: retainedShot });
-    chmodSync(retainedShot, 0o600);
+    const resultShot = join(attemptDirectory, `ui-${viewport.width}-r1.png`);
+    await details.screenshot({ path: resultShot });
+    chmodSync(resultShot, 0o600);
 
     // Only documented race 503s (a GET observed as 503 unavailable) are tolerated.
     const unexpected = consoleErrors.filter(
@@ -399,12 +375,11 @@ async function uiPass(expected) {
     );
     evidence.ui.race503s.push(...unavailable503s);
     evidence.ui.consoleErrors.push(...consoleErrors);
-    evidence.ui.screenshots.push(lastTurnShot, retainedShot);
+    evidence.ui.screenshots.push(lastTurnShot, resultShot);
     evidence.ui.assertions.push({
       width: viewport.width,
       lastTurnIdentity: identityText.replace(/\s+/g, " ").trim(),
-      retainedR1Visible: true,
-      laterBytesHidden: true,
+      r1WorkspaceStateShown: true,
       unexpectedConsoleErrors: unexpected.length,
     });
     assert.deepEqual(unexpected, []);
@@ -446,13 +421,12 @@ function sqliteReopen(expected) {
     );
     if (expected.slots.pendingId)
       assert.equal(captures.T3, expected.pendingCaptureState);
-    const item = database
-      .prepare(`SELECT content, sha256 FROM retained_result_evidence_items
-        WHERE resultId = ? AND path = 'marker-1.txt' AND state = 'available'`)
+    const r1Workspaces = database
+      .prepare(
+        "SELECT count(*) AS count FROM coordination_result_workspaces WHERE resultId = ?",
+      )
       .get(expected.r1);
-    assert.ok(item);
-    assert.equal(Buffer.from(item.content).toString("utf8"), markers.marker1A);
-    assert.equal(item.sha256, sha256(markers.marker1A));
+    assert.equal(r1Workspaces?.count, 0);
     const hold = database
       .prepare(`SELECT reason FROM task_writer_ambiguity_holds WHERE taskId = ?
         UNION ALL SELECT reason FROM task_writer_holds WHERE taskId = ?
@@ -463,7 +437,7 @@ function sqliteReopen(expected) {
       openedReadOnly: true,
       slot,
       captures,
-      r1Marker1Sha256: item.sha256,
+      r1WorkspaceRows: r1Workspaces.count,
       hold: hold?.reason ?? null,
     };
   } finally {
@@ -575,12 +549,6 @@ try {
   assert.ok(c1Marker);
   assert.equal(c1Marker.left, undefined);
   assert.equal(c1Marker.right?.sha256, sha256(markers.marker1A));
-  if (t1.resultId) {
-    assert.equal(
-      retainedItem(t1.resultId, "marker-1.txt").text,
-      markers.marker1A,
-    );
-  }
 
   // T2: an operator-created assignment on the same task overwrites marker-1 = B.
   stage = "T2-create";
@@ -595,10 +563,10 @@ try {
   assert.equal(c2Marker2?.left, undefined);
   assert.equal(c2Marker2?.right?.sha256, sha256(markers.marker2));
   if (!t1.resultId) throw new Error("inspection-journey-R1-unavailable");
-  // WI07: the later change leaves R1's retained bytes unchanged.
-  const r1 = retainedItem(t1.resultId, "marker-1.txt");
-  assert.equal(r1.text, markers.marker1A);
-  evidence.results.T1.marker1Sha256 = r1.item.sha256;
+  // The task has no repository, so R1 records no workspace state (ADR-1033).
+  evidence.results.T1.workspace =
+    service().resultWorkspaces(harness.taskId).get(t1.resultId) ?? [];
+  assert.deepEqual(evidence.results.T1.workspace, []);
 
   // T3: writes marker-3, then a long bounded command; Stop as soon as it runs.
   stage = "T3-create";
@@ -699,33 +667,16 @@ try {
     lastTurnWorkId = lastTurn.comparison.workId;
     lastTurnTurnId = lastTurn.comparison.turnId;
   }
-  const r1Evidence = await bounded(
+  const r1Page = await bounded(
     read(
       cookie,
-      `/api/operator/tasks/${harness.taskId}/results/${t1.resultId}/evidence`,
+      `/api/operator/tasks/${harness.taskId}/results?resultId=${t1.resultId}`,
     ),
     readsDeadline,
-    "r1-evidence-read",
+    "r1-result-read",
   );
-  assert.ok(["available", "partial", "gap"].includes(r1Evidence.state));
-  assert.equal(r1Evidence.identity.workId, harness.plan.T1.workId);
-  assert.equal(r1Evidence.identity.turnId, t1.turn.turnId);
-  const r1Listed = r1Evidence.items.find(
-    (item) => item.path === "marker-1.txt",
-  );
-  assert.equal(r1Listed?.state, "available");
-  assert.equal(r1Listed.sha256, sha256(markers.marker1A));
-  const r1Item = await bounded(
-    read(
-      cookie,
-      `/api/operator/tasks/${harness.taskId}/results/${t1.resultId}/evidence/${r1Listed.itemId}`,
-    ),
-    readsDeadline,
-    "r1-item-read",
-  );
-  assert.equal(r1Item.state, "available");
-  assert.equal(r1Item.preview.kind, "text");
-  assert.equal(r1Item.preview.text, markers.marker1A);
+  assert.equal(r1Page.results[0]?.workId, harness.plan.T1.workId);
+  assert.deepEqual(r1Page.results[0]?.workspace, []);
 
   stage = "production-ui";
   await bounded(
@@ -734,7 +685,6 @@ try {
       lastTurnWorkId,
       lastTurnTurnId,
       r1: t1.resultId,
-      r1ItemId: r1Listed.itemId,
     }),
     Math.min(
       Date.now() + budgets.uiMs,

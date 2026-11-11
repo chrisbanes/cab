@@ -78,7 +78,7 @@ export const workspaceComparisonAnchorBase = z
     repositoryId: id.nullable(),
     path: id,
     comparisonId: uuid,
-    context: z.enum(["branch", "uncommitted", "turn", "result"]),
+    context: z.enum(["branch", "uncommitted", "turn"]),
     workId: id.optional(),
     resultId: id.optional(),
     threadId: id.optional(),

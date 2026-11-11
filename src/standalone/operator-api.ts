@@ -18,7 +18,7 @@ import {
   issueTitleLimit,
 } from "../core/issue-text-limits.js";
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -163,8 +163,6 @@ import {
   questionReadSchema,
   setupHomeSchema,
   recoveryObservationSchema,
-  retainedEvidenceItemContentReadSchema,
-  retainedResultEvidenceReadSchema,
   retainedReviewAnchorReadSchema,
   reviewReadSchema,
   runtimeSettingsSchema,
@@ -290,7 +288,11 @@ import {
   WorkspaceRecheckRefusedError,
 } from "./service.js";
 import { refusedRevisionPrefix } from "./state.js";
-import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import {
+  ArtifactUnavailable,
+  artifactBytesMatch,
+  previewRecordedArtifact,
+} from "./task-review.js";
 import type { TaskChangeIds } from "./task-change-feed.js";
 import {
   compareRepository,
@@ -301,6 +303,7 @@ import {
 import {
   listWorkspaceDirectory,
   previewRetainedBytes,
+  isWithin,
   previewWorkspaceFile,
   retainedPathExcluded,
   type WorkspaceInspectionCurrent,
@@ -330,14 +333,6 @@ type RetainedReadPolicy = {
   /** File-access inputs only; review drafts survive unrelated version changes. */
   accessFingerprint: string;
 };
-type RetainedDiffPayload = {
-  version: 1;
-  repositoryId: string | null;
-  path: string;
-  previousPath?: string;
-  left: { state: "absent" } | { state: "text"; text: string };
-  right: { state: "absent" } | { state: "text"; text: string };
-};
 const relativePolicySegments = (path: string): string[] | undefined => {
   if (
     !path ||
@@ -360,50 +355,6 @@ const relativePolicySegments = (path: string): string[] | undefined => {
     ? segments
     : undefined;
 };
-function parseRetainedDiff(bytes: Buffer): RetainedDiffPayload | undefined {
-  try {
-    const value: unknown = JSON.parse(bytes.toString("utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      return undefined;
-    const source = value as Record<string, unknown>;
-    if (
-      source.version !== 1 ||
-      (source.repositoryId !== null &&
-        typeof source.repositoryId !== "string") ||
-      typeof source.path !== "string" ||
-      (source.previousPath !== undefined &&
-        typeof source.previousPath !== "string")
-    )
-      return undefined;
-    const parseSide = (
-      side: unknown,
-    ): RetainedDiffPayload["left"] | undefined => {
-      if (!side || typeof side !== "object" || Array.isArray(side))
-        return undefined;
-      const record = side as Record<string, unknown>;
-      if (record.state === "absent" && Object.keys(record).length === 1)
-        return { state: "absent" };
-      if (record.state === "text" && typeof record.text === "string")
-        return { state: "text", text: record.text };
-      return undefined;
-    };
-    const left = parseSide(source.left);
-    const right = parseSide(source.right);
-    if (!left || !right) return undefined;
-    return {
-      version: 1,
-      repositoryId: source.repositoryId as string | null,
-      path: source.path,
-      ...(source.previousPath
-        ? { previousPath: source.previousPath as string }
-        : {}),
-      left,
-      right,
-    };
-  } catch {
-    return undefined;
-  }
-}
 function retainedAnchorRange(
   source: Buffer,
   startLine: number,
@@ -1232,7 +1183,6 @@ export class OperatorApi {
   }
   private async retainedItemUnavailable(
     item: {
-      kind: "file" | "diff";
       repositoryId: string | null;
       path: string | null;
       mime?: string;
@@ -1249,40 +1199,13 @@ export class OperatorApi {
       item.path,
     );
     if (sourcePath) return sourcePath;
-    if (item.kind === "file") {
-      if (
-        (item.mime?.startsWith("text/") ||
-          item.mime === "application/json; charset=utf-8" ||
-          item.mime === "application/sql; charset=utf-8") &&
-        !isDisclosable(bytes.toString("utf8"), policy.excluded)
-      )
-        return "excluded";
-      return undefined;
-    }
-    const diff = parseRetainedDiff(bytes);
     if (
-      !diff ||
-      diff.path !== item.path ||
-      diff.repositoryId !== item.repositoryId
+      (item.mime?.startsWith("text/") ||
+        item.mime === "application/json; charset=utf-8" ||
+        item.mime === "application/sql; charset=utf-8") &&
+      !isDisclosable(bytes.toString("utf8"), policy.excluded)
     )
-      return "unavailable";
-    for (const path of [
-      diff.path,
-      ...(diff.previousPath ? [diff.previousPath] : []),
-    ]) {
-      const unavailable = await this.retainedPathUnavailable(
-        policy,
-        originRoot,
-        diff.repositoryId,
-        path,
-      );
-      if (unavailable) return unavailable;
-    }
-    const sourceText = bytes.toString("utf8");
-    if (!isDisclosable(sourceText, policy.excluded)) return "excluded";
-    for (const side of [diff.left, diff.right])
-      if (side.state === "text" && !isDisclosable(side.text, policy.excluded))
-        return "excluded";
+      return "excluded";
     return undefined;
   }
   private async workspaceInspectionCurrent(
@@ -1339,198 +1262,6 @@ export class OperatorApi {
     } catch (error) {
       return this.workspaceInspectionFailure(error);
     }
-  }
-  async readRetainedResultEvidence(taskId: string, resultId: string) {
-    uuid.parse(resultId);
-    const task = this.requireTask(taskId);
-    const policy = await this.retainedEvidencePolicy(taskId);
-    const unavailable = (reason: "not-retained" | "excluded" | "unavailable") =>
-      retainedResultEvidenceReadSchema.parse({
-        data: { taskId, resultId, state: "unavailable", reason },
-        observedAt: Date.now(),
-      });
-    if (
-      !policy ||
-      policy.projectId !== task.projectId ||
-      policy.taskVersion !== Number(task.version)
-    )
-      return unavailable("unavailable");
-    const store = this.service.retainedEvidence();
-    const manifest = store.result(taskId, resultId);
-    if (!manifest) {
-      let exists = false;
-      try {
-        exists =
-          this.service.taskReview().result(taskId, resultId) !== undefined;
-      } catch {
-        exists = false;
-      }
-      if (!exists) throw new OperatorApiError(404, "not-found");
-      const latest = await this.retainedEvidencePolicy(taskId);
-      return this.sameRetainedPolicy(latest, policy)
-        ? unavailable("not-retained")
-        : unavailable("unavailable");
-    }
-    const items = [];
-    let hidden = false;
-    for (const item of manifest.items) {
-      if (item.state === "gap") {
-        items.push({
-          itemId: item.itemId,
-          kind: item.kind,
-          state: "gap" as const,
-          reason: item.reason ?? "unavailable",
-        });
-        continue;
-      }
-      const content = store.item(taskId, resultId, item.itemId);
-      const pathReason = content
-        ? await this.retainedItemUnavailable(
-            item,
-            content.bytes,
-            content.originRoot,
-            policy,
-          )
-        : "unavailable";
-      const preview = content
-        ? previewRetainedBytes(content.bytes, item.mime ?? "")
-        : undefined;
-      if (
-        pathReason ||
-        !content ||
-        !preview ||
-        preview.sha256 !== item.sha256 ||
-        preview.size !== item.size
-      ) {
-        hidden = true;
-        items.push({
-          itemId: item.itemId,
-          kind: item.kind,
-          state: "unavailable" as const,
-          reason: pathReason ?? "unavailable",
-        });
-      } else {
-        items.push({ ...item, state: "available" as const });
-      }
-    }
-    const latest = await this.retainedEvidencePolicy(taskId);
-    if (!this.sameRetainedPolicy(latest, policy))
-      return unavailable("unavailable");
-    try {
-      return retainedResultEvidenceReadSchema.parse({
-        data: {
-          taskId,
-          resultId,
-          state: hidden ? "partial" : manifest.state,
-          evidenceId: manifest.evidenceId,
-          identity: {
-            taskVersion: manifest.taskVersion,
-            captureTaskVersion: manifest.captureTaskVersion,
-            assignmentId: manifest.assignmentId,
-            assignmentVersion: manifest.assignmentVersion,
-            workId: manifest.workId,
-            workRevision: manifest.workRevision,
-            requestSequence: manifest.requestSequence,
-            conversationRevision: manifest.conversationRevision,
-            instructionsRevision: manifest.instructionsRevision,
-            profileRevision: manifest.profileRevision,
-            profileId: manifest.profileId,
-            threadId: manifest.threadId,
-            turnId: manifest.turnId,
-          },
-          capturedAt: manifest.capturedAt,
-          sourceObservation: manifest.sourceObservation,
-          items,
-        },
-        observedAt: Date.now(),
-      });
-    } catch {
-      throw new OperatorApiError(503, "unavailable");
-    }
-  }
-  async readRetainedEvidenceItem(
-    taskId: string,
-    resultId: string,
-    itemId: string,
-  ) {
-    uuid.parse(resultId);
-    uuid.parse(itemId);
-    const task = this.requireTask(taskId);
-    const policy = await this.retainedEvidencePolicy(taskId);
-    const unavailable = (reason: "excluded" | "unavailable") =>
-      retainedEvidenceItemContentReadSchema.parse({
-        data: { taskId, resultId, itemId, state: "unavailable", reason },
-        observedAt: Date.now(),
-      });
-    if (
-      !policy ||
-      policy.projectId !== task.projectId ||
-      policy.taskVersion !== Number(task.version)
-    )
-      return unavailable("unavailable");
-    const store = this.service.retainedEvidence();
-    const manifest = store.result(taskId, resultId);
-    if (!manifest) {
-      try {
-        if (!this.service.taskReview().result(taskId, resultId))
-          throw new OperatorApiError(404, "not-found");
-      } catch (error) {
-        if (error instanceof OperatorApiError) throw error;
-        throw new OperatorApiError(404, "not-found");
-      }
-      // Re-read for its task-existence check; the answer is the same either way.
-      await this.retainedEvidencePolicy(taskId);
-      return unavailable("unavailable");
-    }
-    const item = manifest.items.find(
-      (candidate) => candidate.itemId === itemId,
-    );
-    if (!item) throw new OperatorApiError(404, "not-found");
-    if (item.state === "gap") {
-      const latest = await this.retainedEvidencePolicy(taskId);
-      if (!this.sameRetainedPolicy(latest, policy))
-        return unavailable("unavailable");
-      return retainedEvidenceItemContentReadSchema.parse({
-        data: {
-          taskId,
-          resultId,
-          itemId,
-          state: "gap",
-          reason: item.reason ?? "unavailable",
-        },
-        observedAt: Date.now(),
-      });
-    }
-    const content = store.item(taskId, resultId, itemId);
-    if (!content) return unavailable("unavailable");
-    const reason = await this.retainedItemUnavailable(
-      item,
-      content.bytes,
-      content.originRoot,
-      policy,
-    );
-    if (reason) return unavailable(reason);
-    const preview = previewRetainedBytes(content.bytes, item.mime ?? "");
-    if (
-      !preview ||
-      preview.sha256 !== item.sha256 ||
-      preview.size !== item.size
-    )
-      return unavailable("unavailable");
-    const latest = await this.retainedEvidencePolicy(taskId);
-    if (!this.sameRetainedPolicy(latest, policy))
-      return unavailable("unavailable");
-    return retainedEvidenceItemContentReadSchema.parse({
-      data: {
-        taskId,
-        resultId,
-        itemId,
-        state: "available",
-        item: { ...item, state: "available" },
-        preview,
-      },
-      observedAt: Date.now(),
-    });
   }
   private async retainedAnchorOriginRoot(
     taskId: string,
@@ -1604,38 +1335,6 @@ export class OperatorApi {
         ? "current"
         : "unavailable";
     }
-    if (anchor.sourceKind === "result-evidence") {
-      if (!anchor.resultId || !anchor.resultItemId) return "unknown";
-      const store = this.service.retainedEvidence();
-      const manifest = store.result(anchor.taskId, anchor.resultId);
-      const item = manifest?.items.find(
-        (candidate) => candidate.itemId === anchor.resultItemId,
-      );
-      const content = store.item(
-        anchor.taskId,
-        anchor.resultId,
-        anchor.resultItemId,
-      );
-      if (
-        !manifest ||
-        !item ||
-        !content ||
-        manifest.taskId !== anchor.taskId ||
-        manifest.workId !== anchor.workId ||
-        item.state !== "available" ||
-        item.kind !== "file" ||
-        item.path !== anchor.path ||
-        item.repositoryId !== anchor.repositoryId ||
-        item.sha256 !== anchor.sourceSha256 ||
-        createHash("sha256").update(content.bytes).digest("hex") !==
-          anchor.sourceSha256
-      )
-        return "unknown";
-      return exactRetainedAnchorExcerpt(anchor, content.bytes, bytes)
-        ? "current"
-        : "unavailable";
-    }
-
     if (!anchor.comparisonId || anchor.side === "file") return "unknown";
     const exported = this.service.workspaceComparisonExport(
       anchor.taskId,
@@ -1774,7 +1473,6 @@ export class OperatorApi {
     }
     const contentReason = await this.retainedItemUnavailable(
       {
-        kind: "file",
         repositoryId: anchor.repositoryId,
         path: anchor.path,
         ...(anchor.mime ? { mime: anchor.mime } : {}),
@@ -4526,6 +4224,7 @@ export class OperatorApi {
       p = d.project(projectId),
       excluded = await this.exclusions(projectId, taskId),
       view = this.coordination().readTask(taskId),
+      resultWorkspaces = this.service.resultWorkspaces(taskId),
       assignments = d.assignments(taskId),
       lead = d
         .leadBindings()
@@ -4726,6 +4425,14 @@ export class OperatorApi {
         recipientAssignmentId: r.recipientAssignmentId,
         destinationDisposition: r.destinationDisposition,
         createdAt: r.createdAt,
+        workspace: (resultWorkspaces.get(r.resultId) ?? []).map(
+          ({ repositoryId, headCommit, branch, dirty }) => ({
+            repositoryId,
+            headCommit,
+            branch,
+            dirty,
+          }),
+        ),
       })),
       unresolvedResults: view.unresolvedResults.map((u) => {
         const a = assignments.find((a) => a.id === u.assignmentId);
@@ -6929,46 +6636,6 @@ export class OperatorApi {
   async readArtifact(taskId: string, artifactId: string) {
     uuid.parse(artifactId);
     this.requireTask(taskId);
-    const owner = this.service.taskReview().artifactOwner(taskId, artifactId);
-    if (owner) {
-      const manifest = this.service
-        .retainedEvidence()
-        .result(taskId, owner.resultId);
-      if (manifest) {
-        const item = manifest.items.find(
-          (candidate) => candidate.artifactId === artifactId,
-        );
-        if (item?.state !== "available" || item.source !== "artifact-file")
-          throw new OperatorApiError(503, "unavailable");
-        const response = await this.readRetainedEvidenceItem(
-          taskId,
-          owner.resultId,
-          item.itemId,
-        );
-        const data = response.data;
-        if (
-          data.state !== "available" ||
-          data.item.artifactId !== artifactId ||
-          data.item.source !== "artifact-file"
-        )
-          throw new OperatorApiError(503, "unavailable");
-        const body =
-          data.preview.kind === "text"
-            ? Buffer.from(data.preview.text, "utf8")
-            : Buffer.from(data.preview.data, "base64");
-        if (
-          body.byteLength !== data.item.size ||
-          createHash("sha256").update(body).digest("hex") !== data.item.sha256
-        )
-          throw new OperatorApiError(503, "unavailable");
-        return {
-          body,
-          type: data.preview.mime,
-          source: "retained" as const,
-          sha256: data.item.sha256,
-        };
-      }
-    }
     try {
       const file = await previewRecordedArtifact(async () => {
         const visibility = this.visibilityToken();
@@ -7018,6 +6685,13 @@ export class OperatorApi {
       };
     } catch (error) {
       if (error instanceof OperatorApiError) throw error;
+      // The workspace copy moved on or is gone: serve the bytes the result's recorded commit holds.
+      const committed =
+        error instanceof ArtifactUnavailable &&
+        (error.reason === "unavailable" || error.reason === "mismatch")
+          ? await this.readCommittedArtifact(taskId, artifactId)
+          : undefined;
+      if (committed) return committed;
       throw new OperatorApiError(
         error instanceof ArtifactUnavailable && error.reason === "mismatch"
           ? 409
@@ -7027,6 +6701,57 @@ export class OperatorApi {
           : "not-found",
       );
     }
+  }
+  /** An artifact read from the commit its result recorded; undefined when that commit cannot supply the exact bytes. */
+  private async readCommittedArtifact(taskId: string, artifactId: string) {
+    const visibility = this.visibilityToken();
+    const task = this.requireTask(taskId),
+      record = this.service.taskReview().artifactOwner(taskId, artifactId),
+      artifact = record?.metadata.artifacts.find(
+        (a) => a.artifactId === artifactId,
+      ),
+      file = artifact?.availability === "available" ? artifact.file : undefined,
+      excluded = await this.exclusions(String(task.projectId), taskId),
+      workspace = await this.service.taskWorkspace(taskId);
+    if (
+      !record ||
+      !artifact ||
+      !file ||
+      !workspace ||
+      excluded === undefined ||
+      !this.disclosable(artifact.label, excluded)
+    )
+      return undefined;
+    const target = resolve(workspace.path, file.relativePath);
+    for (const recorded of this.service
+      .resultWorkspaces(taskId)
+      .get(record.resultId) ?? []) {
+      const root = workspace.repositories.find(
+        (repository) => repository.repositoryId === recorded.repositoryId,
+      )?.workspacePath;
+      if (!root || target === resolve(root) || !isWithin(resolve(root), target))
+        continue;
+      const body = await this.service.readCommittedFile(
+        taskId,
+        recorded.repositoryId,
+        recorded.headCommit,
+        relative(resolve(root), target).split(sep).join("/"),
+        file.size + 1,
+      );
+      if (
+        !body ||
+        !artifactBytesMatch(file, body) ||
+        visibility !== this.visibilityToken()
+      )
+        return undefined;
+      return {
+        body,
+        type: file.mime,
+        source: "recorded-commit" as const,
+        sha256: file.sha256,
+      };
+    }
+    return undefined;
   }
   /** Bounded, informational list of assignments bound to a project or profile. */
   readConfigurationImpact(

@@ -338,11 +338,11 @@ The files observed in a task workspace at an identified inspection time. They ma
 change as work continues and do not represent a historical result.
 _Avoid_: Result revision when referring to the files currently present
 
-**Retained result evidence**:
-The bounded file contents and diffs preserved for a particular recorded result,
-remaining attributable to it after the task workspace changes or is removed.
-It is not a snapshot of the whole task workspace.
-_Avoid_: Workspace snapshot when referring only to result-linked evidence
+**Result workspace identity**:
+The HEAD commit, branch and uncommitted-changes flag each task repository had when
+a result was recorded. A result's linked files are read from the workspace, or from
+that commit once the workspace has moved on; cab keeps no copy of them.
+_Avoid_: Retained evidence or workspace snapshot when referring to what a result recorded
 
 **Code review**:
 A batch of operator line comments and an optional summary sent together to a

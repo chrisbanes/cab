@@ -89,19 +89,6 @@ async function playTurn(
   return h.settle(role, Date.now() + inspectionJourneyBudgets.settleMs);
 }
 
-function retainedBytes(
-  h: InspectionJourneyHarness,
-  resultId: string,
-  path: string,
-) {
-  const store = h.fixture.service.retainedEvidence();
-  const item = store
-    .result(h.taskId, resultId)
-    ?.items.find((candidate) => candidate.path === path);
-  assert.ok(item?.state === "available", `${path} retained`);
-  return store.item(h.taskId, resultId, item.itemId)?.bytes.toString("utf8");
-}
-
 test("entry refuses without exactly --live --three-turns before any setup", (t) => {
   const root = privateDirectory(t, "cab-wi782-refusal-");
   for (const args of [[], ["--three-turns"], ["--one-attempt"]]) {
@@ -224,7 +211,7 @@ test("guard persists its checkpoint, refuses restart and fails closed on deadlin
   assert.equal(lstatSync(persisted).mode & 0o777, 0o600);
 });
 
-test("offline journey: three planned starts, retained R1 bytes, then Stop leaves a hold and a retained fixture", async (t) => {
+test("offline journey: three planned starts, then Stop leaves a hold and a retained fixture", async (t) => {
   const { harness: h, runtime } = await journey(t);
   const service = h.fixture.service;
   assert.equal(Number(service.domain().project(h.projectId).paused), 1);
@@ -240,7 +227,6 @@ test("offline journey: three planned starts, retained R1 bytes, then Stop leaves
   );
   assert.ok(t1.resultId);
   assert.equal(t1.capture?.captureState, "finished");
-  assert.equal(retainedBytes(h, t1.resultId, "marker-1.txt"), markers.marker1A);
 
   h.createPlannedAssignment("T2");
   await h.admit("T2");
@@ -256,8 +242,6 @@ test("offline journey: three planned starts, retained R1 bytes, then Stop leaves
   assert.equal(slots.latestFinished?.comparisonId, t2.capture?.comparisonId);
   assert.notEqual(t2.capture?.comparisonId, t1.capture?.comparisonId);
   assert.notEqual(t2.capture?.turnId, t1.capture?.turnId);
-  assert.equal(retainedBytes(h, t1.resultId, "marker-1.txt"), markers.marker1A);
-  assert.equal(retainedBytes(h, t2.resultId, "marker-1.txt"), markers.marker1B);
 
   h.createPlannedAssignment("T3");
   await h.admit("T3");

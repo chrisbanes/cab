@@ -1237,16 +1237,18 @@ into `STATE/data` and `cab service install` again. Service startup performs norm
 migrations and workspace/execution reconciliation before scheduler admission;
 restore itself neither clears holds nor upgrades domain state.
 
-The SQLite snapshot includes retained result-evidence and review-anchor BLOBs,
-their manifests and their draft/submitted references. Workspace archive or
-cleanup removes managed files but does not remove evidence still referenced by
-a result or submitted context. Logical retained-payload limits are 32 MiB per
-result, 128 MiB of result payload per task, 16 MiB of review context per task,
-and 512 MiB for retained result and review payloads per installation; individual
-text, image/PDF, diff and anchor limits are recorded in `docs/SPEC.md`. These
-limits count BLOB content, not SQLite pages, indexes, WAL files or filesystem
-overhead. A snapshot preserves database evidence only; it does not restore the
-managed workspace needed for live-file inspection.
+The SQLite snapshot includes review-anchor BLOBs and their draft/submitted
+references, and each result's recorded workspace state (HEAD commit, branch and
+uncommitted-changes flag). Results keep no file copies: their linked files are
+read from the workspace or from the recorded commit in the repository, which a
+snapshot does not contain. Workspace archive or cleanup removes managed files but
+does not remove anchors still referenced by a submitted context, and cleanup
+refuses while a result's uncommitted changes are neither committed nor delivered.
+Review context is limited to 16 MiB per task and 512 MiB per installation; the
+per-anchor limits are recorded in `docs/SPEC.md`. These limits count BLOB
+content, not SQLite pages, indexes, WAL files or filesystem overhead. Snapshots
+taken before this version also hold retained result evidence, which this version
+drops at startup and no longer reads.
 
 The database snapshot excludes managed worktree contents, cab's managed repositories
 under `<data>/repositories/`, repository state,

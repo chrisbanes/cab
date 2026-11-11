@@ -557,8 +557,6 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/tasks/${id}/artifacts/${id}`,
     `/api/operator/tasks/${id}/files`,
     `/api/operator/tasks/${id}/preview`,
-    `/api/operator/tasks/${id}/results/${id}/evidence`,
-    `/api/operator/tasks/${id}/results/${id}/evidence/${id}`,
     `/api/operator/tasks/${id}/review-anchors/${id}`,
     `/api/operator/tasks/${id}/review-draft`,
     `/api/operator/tasks/${id}/local-reviews`,

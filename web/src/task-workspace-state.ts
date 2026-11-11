@@ -125,7 +125,7 @@ export class TaskFilesState {
   linkNotice = "";
   /** The jump from the workspace listing to a repository root happens at most once. */
   defaultLocationApplied = false;
-  /** Explicitly opens current bytes, e.g. from retained evidence; never implied. */
+  /** Explicitly opens current bytes; never implied. */
   openCurrentFile(scope: WorkspaceDirectory["scope"], path: string[]) {
     const key = JSON.stringify([scope, path]);
     if (!this.tabs.some((tab) => tab.key === key))
@@ -289,21 +289,6 @@ export class LocalReviewState {
   inspectKey: string | null = null;
 }
 
-/** Reading state for one result's retained evidence; bytes are immutable. */
-export class RetainedEvidenceState {
-  selectedItemId: string | null = null;
-  diffLayout: "split" | "unified" = "split";
-  private readonly tabs = new Map<string, TaskFileTabState>();
-  tab(itemId: string, scope: WorkspaceDirectory["scope"], path: string[]) {
-    let tab = this.tabs.get(itemId);
-    if (!tab) {
-      tab = new TaskFileTabState(`retained:${itemId}`, scope, path);
-      this.tabs.set(itemId, tab);
-    }
-    return tab;
-  }
-}
-
 export class TaskWorkspaceState {
   constructor(
     private readonly reply = new TaskReplyState(),
@@ -311,15 +296,6 @@ export class TaskWorkspaceState {
   ) {}
   readonly files = new TaskFilesState();
   readonly changes = new TaskChangesState();
-  private readonly retainedEvidence = new Map<string, RetainedEvidenceState>();
-  retained(resultId: string) {
-    let value = this.retainedEvidence.get(resultId);
-    if (!value) {
-      value = new RetainedEvidenceState();
-      this.retainedEvidence.set(resultId, value);
-    }
-    return value;
-  }
   expanded = new Set<string>();
   /** Open Overview cards; written only by the cards' toggles and a deep link's first selection. */
   overview = new Set<OverviewCard>();

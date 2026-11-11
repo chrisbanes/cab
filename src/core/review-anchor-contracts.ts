@@ -1,14 +1,13 @@
 import { z } from "zod";
 
 /**
- * Retained-evidence identity and review-anchor shapes shared by the core store
+ * Review-anchor shapes shared by the core store
  * and the operator contract. Zod only: `web/` loads this through
  * `src/operator/contracts.ts`, so never import `node:*` or store modules here.
  *
  * Both layers start from these bases. Refinements go on the derived schema,
  * never on a base, because Zod `.omit`/`.pick` throws on a refined object.
  * The only intentional layer differences:
- * - the operator identity omits `taskId` (the route supplies it);
  * - an operator-read anchor `reason` is a bounded string, the store keeps the
  *   closed gap-reason enum;
  * - the store alone carries `originRoot` and the excerpt `bytes`.
@@ -18,36 +17,6 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const revision = z.number().int().positive().safe();
 const count = z.number().int().nonnegative().safe();
 
-export const retainedEvidenceIdentitySchema = z
-  .object({
-    taskId: uuid,
-    // taskVersion is the request's admitted revision. Capture safety uses the
-    // separately revalidated revision observed while reading workspace bytes.
-    taskVersion: revision,
-    captureTaskVersion: revision,
-    assignmentId: uuid,
-    assignmentVersion: revision,
-    workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
-    conversationRevision: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
-    profileId: uuid,
-    threadId: z.string().min(1).max(512),
-    turnId: z.string().min(1).max(512),
-  })
-  .strict();
-
-export const retainedEvidenceSourceObservationSchema = z
-  .object({
-    comparisonId: uuid.nullable(),
-    captureState: z.enum(["missing", "pending", "unsettled", "finished"]),
-    outcome: z.enum(["running", "completed", "failed", "unknown"]).nullable(),
-    observedAt: count.nullable(),
-  })
-  .strict();
-
 /** Unrefined base of a retained anchor record; derive and then refine. */
 export const reviewAnchorRecordBaseSchema = z
   .object({
@@ -55,15 +24,10 @@ export const reviewAnchorRecordBaseSchema = z
     taskId: uuid,
     repositoryId: z.string().min(1).max(512).nullable(),
     path: z.string().min(1).max(2048),
-    sourceKind: z.enum([
-      "workspace-file",
-      "comparison-side",
-      "result-evidence",
-    ]),
-    context: z.enum(["workspace", "branch", "uncommitted", "turn", "result"]),
+    sourceKind: z.enum(["workspace-file", "comparison-side"]),
+    context: z.enum(["workspace", "branch", "uncommitted", "turn"]),
     comparisonId: uuid.optional(),
     resultId: uuid.optional(),
-    resultItemId: uuid.optional(),
     workId: z.string().min(1).max(512).optional(),
     threadId: z.string().min(1).max(512).optional(),
     turnId: z.string().min(1).max(512).optional(),
@@ -102,7 +66,6 @@ export const reviewAnchorSelectionSchema = reviewAnchorRecordBaseSchema
     context: true,
     comparisonId: true,
     resultId: true,
-    resultItemId: true,
     workId: true,
     threadId: true,
     turnId: true,
@@ -119,22 +82,13 @@ export const reviewAnchorSelectionSchema = reviewAnchorRecordBaseSchema
       (selection.sourceKind === "workspace-file" &&
         (selection.context !== "workspace" ||
           selection.side !== "file" ||
-          selection.comparisonId !== undefined ||
-          selection.resultItemId !== undefined)) ||
+          selection.comparisonId !== undefined)) ||
       (selection.sourceKind === "comparison-side" &&
         (!(["branch", "uncommitted", "turn"] as const).includes(
           selection.context as "branch" | "uncommitted" | "turn",
         ) ||
           selection.side === "file" ||
-          selection.comparisonId === undefined ||
-          selection.resultItemId !== undefined)) ||
-      (selection.sourceKind === "result-evidence" &&
-        (selection.context !== "result" ||
-          selection.side !== "file" ||
-          selection.resultId === undefined ||
-          selection.resultItemId === undefined ||
-          selection.comparisonId !== undefined ||
-          selection.workId === undefined))
+          selection.comparisonId === undefined))
     )
       ctx.addIssue({
         code: "custom",
@@ -148,11 +102,7 @@ export const reviewAnchorSelectionSchema = reviewAnchorRecordBaseSchema
         code: "custom",
         message: "turn-anchor-identity-required",
       });
-    if (
-      selection.resultId !== undefined &&
-      selection.sourceKind !== "result-evidence" &&
-      !selection.workId
-    )
+    if (selection.resultId !== undefined && !selection.workId)
       ctx.addIssue({
         code: "custom",
         message: "result-anchor-work-identity-required",

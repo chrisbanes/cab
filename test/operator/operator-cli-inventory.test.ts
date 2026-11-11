@@ -7,7 +7,7 @@ import { harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
-import { captureNativeResult } from "../fixtures/retained-evidence.js";
+import { captureNativeResult } from "../fixtures/native-result.js";
 
 /** The documented CLI2 browse inventory (docs/development.md#operator-cli). */
 const documented = [
@@ -27,7 +27,6 @@ const documented = [
   "assignment instructions",
   "result list",
   "result get",
-  "result evidence",
   "artifact get",
   "capacity get",
   "execution list",
@@ -194,7 +193,6 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "assignment instructions": [assignmentId],
     "result list": [taskId],
     "result get": [taskId, native.resultId],
-    "result evidence": [taskId, native.resultId, native.textItem.itemId],
     "capacity get": [],
     "artifact get": [
       taskId,

@@ -701,9 +701,9 @@ function RasterDocumentView({
 
 /**
  * One line for the open file (path · type · size · time) and, collapsed below it, the hash and
- * read times. Shared by current Files and retained evidence; `rows` are the caller's own facts.
+ * read times. `rows` are the caller's own facts.
  */
-export function FileHeader({
+function FileHeader({
   path,
   data,
   observedAt,
@@ -748,8 +748,8 @@ export function FileHeader({
   );
 }
 
-/** Renders ready preview bytes; shared by current Files and retained evidence. */
-export function FilePreviewBody({
+/** Renders ready preview bytes. */
+function FilePreviewBody({
   data,
   name,
   tab,

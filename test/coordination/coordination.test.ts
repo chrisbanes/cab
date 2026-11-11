@@ -1884,7 +1884,7 @@ function resultEffectCounts(f: ReturnType<typeof fixture>, lead: string) {
   return {
     results: count("coordination_results"),
     receipts: count("coordination_receipts"),
-    evidence: count("retained_result_evidence"),
+    workspaces: count("coordination_result_workspaces"),
     unresolved: count("coordination_unresolved_result_destinations"),
     inbox: f.coordination.inboxEvents(lead).length,
   };

@@ -8,11 +8,7 @@ import { cliCapabilities } from "../../src/operator/contracts.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
-import {
-  captureNativeResult,
-  digest,
-  png,
-} from "../fixtures/retained-evidence.js";
+import { captureNativeResult, digest, png } from "../fixtures/native-result.js";
 import {
   seedRetainedReviewWindow,
   seedReviewTask,
@@ -45,9 +41,12 @@ async function setup(t: After) {
   return { s, h, read, ok };
 }
 
-test("results, retained evidence and artifacts are discovered and retrieved with integrity", async (t) => {
+test("results and artifacts are discovered and retrieved with integrity", async (t) => {
   const { s, h, read, ok } = await setup(t);
-  const native = await captureNativeResult(s.f, { withArtifact: true });
+  const native = await captureNativeResult(s.f, {
+    withArtifact: true,
+    repository: true,
+  });
   const seeded = await seedReviewTask(s.f, "Pages", "Many results");
   for (let i = 0; i < 119; i++) seeded.result(`Result ${i}`);
   const workspace = await s.f.service.taskWorkspace(seeded.taskId);
@@ -104,14 +103,13 @@ test("results, retained evidence and artifacts are discovered and retrieved with
     view.data.review.metadata.artifacts[0].artifactId,
     recordedArtifact,
   );
-  assert.equal(view.data.evidence.state, "unavailable");
-  assert.ok(view.coverage.gaps.includes("evidence-unavailable"));
+  assert.deepEqual(view.data.result.workspace, []);
   r = await h.run(["result", "get", seeded.taskId, recorded.resultId]);
   assert.match(
     r.out,
     new RegExp(`Artifact ${recordedArtifact}: Recorded \\[available\\]`),
   );
-  assert.match(r.out, /Evidence: unavailable \(not-retained\)/);
+  assert.match(r.out, /Workspace\s+Workspace state was not recorded/);
   const plain = await ok([
     "result",
     "get",
@@ -119,46 +117,22 @@ test("results, retained evidence and artifacts are discovered and retrieved with
     pages[0]?.data.results[0].resultId,
   ]);
   assert.equal(plain.data.review, null);
-  assert.equal(plain.data.evidence, null);
-  assert.deepEqual(plain.coverage.gaps, [
-    "review-unavailable",
-    "evidence-unavailable",
-  ]);
+  assert.deepEqual(plain.coverage.gaps, ["review-unavailable"]);
 
-  // 2. Exact retained bytes and the retained artifact.
+  // 2. A native result's recorded workspace state and its artifact.
   const nativeView = await ok([
     "result",
     "get",
     native.seeded.taskId,
     native.resultId,
   ]);
-  assert.ok(
-    nativeView.data.evidence.items.some(
-      (i: Json) => i.itemId === native.textItem.itemId,
-    ),
+  assert.equal(nativeView.data.result.workspace.length, 1);
+  assert.equal(nativeView.data.result.workspace[0].dirty, true);
+  r = await h.run(["result", "get", native.seeded.taskId, native.resultId]);
+  assert.match(
+    r.out,
+    /Workspace\s+\S+: recorded at [0-9a-f]{7} on detached HEAD, with uncommitted changes/,
   );
-  const textOut = out("proof.txt");
-  const item = await ok([
-    "result",
-    "evidence",
-    native.seeded.taskId,
-    native.resultId,
-    native.textItem.itemId,
-    "--out",
-    textOut,
-  ]);
-  assert.deepEqual(readFileSync(textOut), native.originalText);
-  assert.equal(statSync(textOut).mode & 0o777, 0o600);
-  assert.equal(item.data.item.sha256, digest(native.originalText));
-  r = await h.run([
-    "result",
-    "evidence",
-    native.seeded.taskId,
-    native.resultId,
-    native.textItem.itemId,
-  ]);
-  // Human output neutralises control characters such as CR.
-  assert.match(r.out, /first\uFFFD\nsecond/u);
   const pngOut = out("proof.png");
   const artifact = await ok([
     "artifact",
@@ -169,7 +143,8 @@ test("results, retained evidence and artifacts are discovered and retrieved with
     pngOut,
   ]);
   assert.deepEqual(readFileSync(pngOut), png);
-  assert.equal(artifact.data.source, "retained");
+  assert.equal(statSync(pngOut).mode & 0o777, 0o600);
+  assert.equal(artifact.data.source, "recorded-workspace");
   assert.equal(artifact.data.sha256, digest(png));
   const recordedOut = out("recorded.png");
   const workspaceArtifact = await ok([
@@ -242,53 +217,8 @@ test("results, retained evidence and artifacts are discovered and retrieved with
   for (const text of h.outputs) assert.ok(!text.includes(read.token));
 });
 
-test("retained gaps stay gaps and a digest mismatch keeps no file", async (t) => {
+test("an old result is found by id and a digest mismatch keeps no file", async (t) => {
   const { s, h, ok } = await setup(t);
-  // 3. A retained artifact gap is not served from a matching live file.
-  const native = await captureNativeResult(s.f, {
-    withArtifact: true,
-    createArtifact: false,
-  });
-  await writeFile(native.artifactPath!, png);
-  let r = await h.run([
-    "artifact",
-    "get",
-    native.seeded.taskId,
-    native.artifactId!,
-    "--out",
-    join(h.dir, "gap.png"),
-  ]);
-  assert.equal(r.code, 5);
-  assert.ok(!existsSync(join(h.dir, "gap.png")));
-  const gapItem = native.artifactItem!.itemId;
-  const shown = await ok([
-    "result",
-    "evidence",
-    native.seeded.taskId,
-    native.resultId,
-    gapItem,
-  ]);
-  assert.equal(shown.data.state, "gap");
-  assert.deepEqual(shown.coverage.gaps, ["evidence-gap"]);
-  r = await h.run([
-    "result",
-    "evidence",
-    native.seeded.taskId,
-    native.resultId,
-    gapItem,
-    "--out",
-    join(h.dir, "gap-item"),
-  ]);
-  assert.equal(r.code, 5);
-  assert.ok(!existsSync(join(h.dir, "gap-item")));
-  const view = await ok([
-    "result",
-    "get",
-    native.seeded.taskId,
-    native.resultId,
-  ]);
-  assert.ok(view.coverage.gaps.includes("evidence-gap"));
-
   // An older result beyond the review window is still found by its id.
   const window = await seedRetainedReviewWindow(s.f);
   const old = await ok(["result", "get", window.taskId, window.old.resultId]);
@@ -317,12 +247,12 @@ test("retained gaps stay gaps and a digest mismatch keeps no file", async (t) =>
         .writeHead(200, {
           "content-type": "image/png",
           "x-cab-sha256": digest("other"),
-          "x-cab-evidence-source": "retained",
+          "x-cab-evidence-source": "recorded-commit",
         })
         .end(png);
   });
   const read = await s.issue("read", "fake");
-  r = await h.run([
+  let r = await h.run([
     "auth",
     "login",
     "--connection",

@@ -2,20 +2,10 @@ import { assertOwnedTaskWritable } from "./project-lifecycle.js";
 import { DomainConflictError } from "./domain.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import {
-  retainedEvidenceIdentitySchema,
-  retainedEvidenceSourceObservationSchema,
-  reviewAnchorRecordBaseSchema,
-} from "./review-anchor-contracts.js";
+import { reviewAnchorRecordBaseSchema } from "./review-anchor-contracts.js";
 import { transaction, type Database } from "./store.js";
 
 export const retainedEvidenceLimits = Object.freeze({
-  maxTextBytes: 1024 * 1024,
-  maxImageOrPdfBytes: 8 * 1024 * 1024,
-  maxDiffBytes: 1024 * 1024,
-  maxFilesPerResult: 32,
-  maxResultBytes: 32 * 1024 * 1024,
-  maxTaskResultBytes: 128 * 1024 * 1024,
   maxInstallationBytes: 512 * 1024 * 1024,
   maxReviewAnchorBytes: 256 * 1024,
   maxReviewAnchorsPerTask: 128,
@@ -24,125 +14,6 @@ export const retainedEvidenceLimits = Object.freeze({
 
 const uuid = z.string().uuid();
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
-const revision = z.number().int().positive();
-const retainedMime = z.union([
-  z.enum([
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "application/pdf",
-    "application/vnd.cab.workspace-diff+json",
-  ]),
-  z
-    .string()
-    .max(128)
-    .regex(/^(text\/[a-z0-9.+-]+|application\/(json|sql)); charset=utf-8$/),
-]);
-const scalar = z.union([
-  z.string().max(4096),
-  z.number(),
-  z.boolean(),
-  z.null(),
-]);
-const itemSchema = z
-  .object({
-    itemId: uuid,
-    kind: z.enum(["file", "diff"]),
-    state: z.enum(["available", "gap"]),
-    reason: z
-      .enum([
-        "excluded",
-        "unsafe-path",
-        "too-large",
-        "binary",
-        "unsupported",
-        "missing",
-        "changing",
-        "unavailable",
-        "comparison-unavailable",
-        "comparison-unsettled",
-        "binding-changed",
-        "quota",
-        "source-mismatch",
-        "invalid-content",
-        "too-many-links",
-        "no-change",
-      ])
-      .optional(),
-    source: z.enum(["artifact-file", "change-file", "observed-diff"]),
-    sourceIndex: z.number().int().nonnegative(),
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048).nullable(),
-    originRoot: z.string().min(1).max(4096).nullable(),
-    artifactId: uuid.optional(),
-    mime: retainedMime.optional(),
-    sha256: hash.optional(),
-    size: z.number().int().nonnegative(),
-    capturedAt: z.number().int().nonnegative(),
-    observedAt: z.number().int().nonnegative().nullable(),
-    provenance: z.record(z.string().max(80), scalar),
-    bytes: z.instanceof(Uint8Array).optional(),
-  })
-  .strict()
-  .superRefine((item, ctx) => {
-    if (item.state === "available") {
-      if (
-        !item.bytes ||
-        !item.mime ||
-        !item.sha256 ||
-        !item.path ||
-        !item.originRoot
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: "available-evidence-is-incomplete",
-        });
-      else {
-        if (item.size !== item.bytes.byteLength)
-          ctx.addIssue({ code: "custom", message: "evidence-size-mismatch" });
-        if (
-          createHash("sha256").update(item.bytes).digest("hex") !== item.sha256
-        )
-          ctx.addIssue({ code: "custom", message: "evidence-hash-mismatch" });
-        const limit =
-          item.kind === "diff"
-            ? retainedEvidenceLimits.maxDiffBytes
-            : item.mime?.startsWith("text/") ||
-                item.mime === "application/json; charset=utf-8" ||
-                item.mime === "application/sql; charset=utf-8"
-              ? retainedEvidenceLimits.maxTextBytes
-              : retainedEvidenceLimits.maxImageOrPdfBytes;
-        if (item.size > limit)
-          ctx.addIssue({
-            code: "custom",
-            message: "evidence-exceeds-item-limit",
-          });
-      }
-      if (item.reason !== undefined)
-        ctx.addIssue({
-          code: "custom",
-          message: "available-evidence-has-gap-reason",
-        });
-    } else {
-      if (item.bytes || item.mime || item.sha256 || item.size !== 0)
-        ctx.addIssue({ code: "custom", message: "gap-evidence-has-bytes" });
-      if (!item.reason)
-        ctx.addIssue({ code: "custom", message: "gap-evidence-needs-reason" });
-    }
-  });
-
-const candidateSchema = z
-  .object({
-    version: z.literal(1),
-    evidenceId: uuid,
-    capturedAt: z.number().int().nonnegative(),
-    identity: retainedEvidenceIdentitySchema,
-    sourceObservation: retainedEvidenceSourceObservationSchema,
-    items: z.array(itemSchema).max(320),
-  })
-  .strict();
-
 /** The stored record plus store-only fields: the origin root and the excerpt bytes. */
 const reviewAnchorCandidateSchema = reviewAnchorRecordBaseSchema
   .extend({
@@ -157,8 +28,7 @@ const reviewAnchorCandidateSchema = reviewAnchorRecordBaseSchema
       (anchor.sourceKind === "workspace-file" &&
         anchor.context !== "workspace") ||
       (anchor.sourceKind === "comparison-side" &&
-        !["branch", "uncommitted", "turn"].includes(anchor.context)) ||
-      (anchor.sourceKind === "result-evidence" && anchor.context !== "result")
+        !["branch", "uncommitted", "turn"].includes(anchor.context))
     )
       ctx.addIssue({
         code: "custom",
@@ -171,17 +41,6 @@ const reviewAnchorCandidateSchema = reviewAnchorRecordBaseSchema
       ctx.addIssue({
         code: "custom",
         message: "anchor-comparison-identity-mismatch",
-      });
-    if (
-      (anchor.context === "result" && anchor.resultId === undefined) ||
-      (anchor.sourceKind === "result-evidence" &&
-        anchor.resultItemId === undefined) ||
-      (anchor.sourceKind !== "result-evidence" &&
-        anchor.resultItemId !== undefined)
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "anchor-result-identity-mismatch",
       });
     if (anchor.state === "available") {
       if (
@@ -312,214 +171,7 @@ export interface RetainedReviewAnchorSubmittedContext {
   anchorIds: string[];
 }
 
-export const retainedEvidenceItemRecordSchema = z
-  .object({
-    itemId: uuid,
-    kind: z.enum(["file", "diff"]),
-    state: z.enum(["available", "gap"]),
-    reason: itemSchema.shape.reason,
-    source: itemSchema.shape.source,
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048).nullable(),
-    artifactId: uuid.optional(),
-    mime: retainedMime.optional(),
-    sha256: hash.optional(),
-    size: z.number().int().nonnegative(),
-    capturedAt: z.number().int().nonnegative(),
-    observedAt: z.number().int().nonnegative().nullable(),
-    provenance: z.record(z.string().max(80), scalar),
-  })
-  .strict()
-  .superRefine((item, ctx) => {
-    if (item.state === "available") {
-      if (!item.path || !item.mime || !item.sha256 || item.reason !== undefined)
-        ctx.addIssue({
-          code: "custom",
-          message: "available-evidence-is-incomplete",
-        });
-    } else if (
-      item.path !== null ||
-      item.mime !== undefined ||
-      item.sha256 !== undefined ||
-      item.size !== 0 ||
-      item.reason === undefined
-    )
-      ctx.addIssue({ code: "custom", message: "gap-evidence-is-invalid" });
-  });
-
-export type RetainedEvidenceIdentity = z.infer<
-  typeof retainedEvidenceIdentitySchema
->;
-export type RetainedEvidenceSourceObservation = z.infer<
-  typeof retainedEvidenceSourceObservationSchema
->;
-export type RetainedEvidenceCandidate = z.input<typeof candidateSchema>;
-export type RetainedEvidenceItemInput = z.input<typeof itemSchema>;
-
-export interface RetainedEvidenceItemRecord {
-  itemId: string;
-  kind: "file" | "diff";
-  state: "available" | "gap";
-  reason?: z.infer<typeof itemSchema.shape.reason>;
-  source: "artifact-file" | "change-file" | "observed-diff";
-  repositoryId: string | null;
-  path: string | null;
-  artifactId?: string;
-  mime?: string;
-  sha256?: string;
-  size: number;
-  capturedAt: number;
-  observedAt: number | null;
-  provenance: Record<string, string | number | boolean | null>;
-}
-
-export interface RetainedEvidenceManifest {
-  version: 1;
-  resultId: string;
-  evidenceId: string;
-  taskId: string;
-  taskVersion: number;
-  captureTaskVersion: number;
-  assignmentId: string;
-  assignmentVersion: number;
-  workId: string;
-  workRevision: number;
-  requestSequence: number;
-  conversationRevision: number;
-  instructionsRevision: number;
-  profileRevision: number;
-  profileId: string;
-  threadId: string;
-  turnId: string;
-  capturedAt: number;
-  sourceObservation: RetainedEvidenceSourceObservation;
-  state: "empty" | "available" | "partial" | "gap";
-  payloadBytes: number;
-  items: RetainedEvidenceItemRecord[];
-}
-
-export interface RetainedEvidenceItemContent {
-  manifest: RetainedEvidenceManifest;
-  item: RetainedEvidenceItemRecord;
-  bytes: Buffer;
-  originRoot: string;
-}
-
-type ResultOwner = {
-  resultId: string;
-  taskId: string;
-  assignmentId: string;
-  assignmentVersion: number;
-  workId: string;
-  workRevision: number;
-};
-
 type Row = Record<string, string | number | Uint8Array | null>;
-
-export const retainedEvidenceManifestSchema = z
-  .object({
-    version: z.literal(1),
-    resultId: uuid,
-    evidenceId: uuid,
-    taskId: uuid,
-    taskVersion: revision,
-    captureTaskVersion: revision.optional(),
-    assignmentId: uuid,
-    assignmentVersion: revision,
-    workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
-    conversationRevision: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
-    profileId: uuid,
-    threadId: z.string().min(1).max(512),
-    turnId: z.string().min(1).max(512),
-    capturedAt: z.number().int().nonnegative(),
-    sourceObservation: retainedEvidenceSourceObservationSchema,
-    state: z.enum(["empty", "available", "partial", "gap"]),
-    payloadBytes: z.number().int().nonnegative(),
-    items: z.array(retainedEvidenceItemRecordSchema),
-  })
-  .strict();
-
-function parseManifest(value: unknown): RetainedEvidenceManifest {
-  const parsed = retainedEvidenceManifestSchema.parse(value);
-  return {
-    ...parsed,
-    // Older accepted callbacks required admitted and current task versions to
-    // match, so their single stored version is an exact value for both fields.
-    captureTaskVersion: parsed.captureTaskVersion ?? parsed.taskVersion,
-  } as RetainedEvidenceManifest;
-}
-
-function rowItem(row: Row): RetainedEvidenceItemRecord {
-  return {
-    itemId: String(row.itemId),
-    kind: row.kind as "file" | "diff",
-    state: row.state as "available" | "gap",
-    ...(row.reason === null
-      ? {}
-      : { reason: String(row.reason) as RetainedEvidenceItemRecord["reason"] }),
-    source: row.source as RetainedEvidenceItemRecord["source"],
-    repositoryId: row.repositoryId === null ? null : String(row.repositoryId),
-    path: row.path === null ? null : String(row.path),
-    ...(row.artifactId === null ? {} : { artifactId: String(row.artifactId) }),
-    ...(row.mime === null ? {} : { mime: String(row.mime) }),
-    ...(row.sha256 === null ? {} : { sha256: String(row.sha256) }),
-    size: Number(row.size),
-    capturedAt: Number(row.capturedAt),
-    observedAt: row.observedAt === null ? null : Number(row.observedAt),
-    provenance: JSON.parse(String(row.provenanceJson)) as Record<
-      string,
-      string | number | boolean | null
-    >,
-  };
-}
-
-function identityMatches(
-  expected: RetainedEvidenceIdentity,
-  actual: RetainedEvidenceIdentity,
-): boolean {
-  return (
-    expected.taskId === actual.taskId &&
-    expected.taskVersion === actual.taskVersion &&
-    expected.captureTaskVersion === actual.captureTaskVersion &&
-    expected.assignmentId === actual.assignmentId &&
-    expected.assignmentVersion === actual.assignmentVersion &&
-    expected.workId === actual.workId &&
-    expected.workRevision === actual.workRevision &&
-    expected.requestSequence === actual.requestSequence &&
-    expected.conversationRevision === actual.conversationRevision &&
-    expected.instructionsRevision === actual.instructionsRevision &&
-    expected.profileRevision === actual.profileRevision &&
-    expected.profileId === actual.profileId &&
-    expected.threadId === actual.threadId &&
-    expected.turnId === actual.turnId
-  );
-}
-
-function asGap(
-  item: z.infer<typeof itemSchema>,
-  reason: z.infer<typeof itemSchema.shape.reason>,
-) {
-  return {
-    itemId: item.itemId,
-    kind: item.kind,
-    state: "gap" as const,
-    reason,
-    source: item.source,
-    sourceIndex: item.sourceIndex,
-    repositoryId: item.repositoryId,
-    path: null,
-    originRoot: null,
-    ...(item.artifactId ? { artifactId: item.artifactId } : {}),
-    size: 0,
-    capturedAt: item.capturedAt,
-    observedAt: item.observedAt,
-    provenance: item.provenance,
-  };
-}
 
 function gapReviewAnchor(
   candidate: z.infer<typeof reviewAnchorCandidateSchema>,
@@ -544,79 +196,13 @@ function gapReviewAnchor(
   });
 }
 
-/** Durable bounded evidence. Write methods ending in WithinTransaction require the caller's transaction. */
+/** Durable bounded review anchors. Write methods ending in WithinTransaction require the caller's transaction. */
 export class RetainedEvidenceStore {
   constructor(private readonly db: Database) {}
 
   migrate(): void {
-    this.db.exec(`CREATE TABLE IF NOT EXISTS retained_result_evidence (
-      resultId TEXT PRIMARY KEY REFERENCES coordination_results(resultId) ON DELETE CASCADE,
-      taskId TEXT NOT NULL REFERENCES domain_tasks(id),
-      assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
-      assignmentVersion INTEGER NOT NULL CHECK(assignmentVersion > 0),
-      workId TEXT NOT NULL,
-      workRevision INTEGER NOT NULL CHECK(workRevision > 0),
-      requestSequence INTEGER NOT NULL CHECK(requestSequence > 0),
-      conversationRevision INTEGER NOT NULL CHECK(conversationRevision > 0),
-      instructionsRevision INTEGER NOT NULL CHECK(instructionsRevision > 0),
-      profileRevision INTEGER NOT NULL CHECK(profileRevision > 0),
-      profileId TEXT NOT NULL,
-      taskVersion INTEGER NOT NULL CHECK(taskVersion > 0),
-      captureTaskVersion INTEGER NOT NULL CHECK(captureTaskVersion > 0),
-      threadId TEXT NOT NULL,
-      turnId TEXT NOT NULL,
-      evidenceId TEXT NOT NULL UNIQUE,
-      capturedAt INTEGER NOT NULL CHECK(capturedAt >= 0),
-      comparisonId TEXT,
-      comparisonCaptureState TEXT NOT NULL CHECK(comparisonCaptureState IN ('missing','pending','unsettled','finished')),
-      comparisonOutcome TEXT CHECK(comparisonOutcome IS NULL OR comparisonOutcome IN ('running','completed','failed','unknown')),
-      comparisonObservedAt INTEGER,
-      state TEXT NOT NULL CHECK(state IN ('empty','available','partial','gap')),
-      payloadBytes INTEGER NOT NULL CHECK(payloadBytes >= 0),
-      manifestJson TEXT NOT NULL,
-      UNIQUE(resultId,taskId,assignmentId,assignmentVersion,workId,workRevision)
-    );
-    CREATE INDEX IF NOT EXISTS retained_result_evidence_task
-      ON retained_result_evidence(taskId,resultId);
-    CREATE TABLE IF NOT EXISTS retained_result_evidence_items (
-      itemId TEXT PRIMARY KEY,
-      resultId TEXT NOT NULL REFERENCES retained_result_evidence(resultId) ON DELETE CASCADE,
-      taskId TEXT NOT NULL REFERENCES domain_tasks(id),
-      kind TEXT NOT NULL CHECK(kind IN ('file','diff')),
-      state TEXT NOT NULL CHECK(state IN ('available','gap')),
-      reason TEXT,
-      source TEXT NOT NULL CHECK(source IN ('artifact-file','change-file','observed-diff')),
-      repositoryId TEXT,
-      path TEXT,
-      originRoot TEXT,
-      artifactId TEXT REFERENCES task_review_artifact_ids(artifactId) ON DELETE CASCADE,
-      mime TEXT,
-      sha256 TEXT,
-      size INTEGER NOT NULL CHECK(size >= 0),
-      capturedAt INTEGER NOT NULL CHECK(capturedAt >= 0),
-      observedAt INTEGER,
-      provenanceJson TEXT NOT NULL,
-      content BLOB,
-      CHECK((state = 'available' AND content IS NOT NULL AND mime IS NOT NULL AND sha256 IS NOT NULL AND path IS NOT NULL AND originRoot IS NOT NULL AND reason IS NULL) OR
-            (state = 'gap' AND content IS NULL AND mime IS NULL AND sha256 IS NULL AND path IS NULL AND originRoot IS NULL AND reason IS NOT NULL AND size = 0))
-    );
-    CREATE INDEX IF NOT EXISTS retained_result_items_result
-      ON retained_result_evidence_items(resultId,itemId);
-    CREATE INDEX IF NOT EXISTS retained_result_items_task
-      ON retained_result_evidence_items(taskId,resultId,itemId);`);
-    const evidenceColumns = this.db
-      .prepare("PRAGMA table_info(retained_result_evidence)")
-      .all() as Array<{ name: string }>;
-    if (
-      !evidenceColumns.some((column) => column.name === "captureTaskVersion")
-    ) {
-      this.db.exec(
-        "ALTER TABLE retained_result_evidence ADD COLUMN captureTaskVersion INTEGER",
-      );
-      this.db.exec(
-        "UPDATE retained_result_evidence SET captureTaskVersion=taskVersion WHERE captureTaskVersion IS NULL",
-      );
-    }
+    // The retired 'result-evidence' kind and 'result' context stay in the CHECK so fresh and migrated
+    // schemas match (SQLite cannot alter a CHECK); the record schema refuses both.
     this.db.exec(`CREATE TABLE IF NOT EXISTS retained_review_anchor_contexts (
       anchorId TEXT PRIMARY KEY,
       taskId TEXT NOT NULL REFERENCES domain_tasks(id),
@@ -694,242 +280,21 @@ export class RetainedEvidenceStore {
     );`);
   }
 
-  /** Called inside CoordinationStore.recordResult's existing BEGIN IMMEDIATE. */
-  recordResultWithinTransaction(
-    owner: ResultOwner,
-    currentIdentity: RetainedEvidenceIdentity,
-    input: RetainedEvidenceCandidate,
-  ): RetainedEvidenceManifest {
-    assertOwnedTaskWritable(this.db, owner.taskId);
-    if (this.db.isTransaction === false)
-      throw new Error(
-        "Retained result evidence requires the result transaction",
-      );
-    const candidate = candidateSchema.parse(input);
-    const identity = retainedEvidenceIdentitySchema.parse(currentIdentity);
-    if (!identityMatches(candidate.identity, identity))
-      throw new Error("Retained result evidence binding changed");
-    const preparedItems = candidate.items.map((item) => itemSchema.parse(item));
-    const prior = this.db
-      .prepare(
-        "SELECT manifestJson FROM retained_result_evidence WHERE resultId=?",
-      )
-      .get(owner.resultId) as Row | undefined;
-    if (prior) {
-      const manifest = parseManifest(JSON.parse(String(prior.manifestJson)));
-      if (
-        manifest.taskId !== owner.taskId ||
-        manifest.assignmentId !== owner.assignmentId ||
-        manifest.assignmentVersion !== owner.assignmentVersion ||
-        manifest.workId !== owner.workId ||
-        manifest.workRevision !== owner.workRevision
-      )
-        throw new Error("Retained result evidence identity mismatch");
-      return manifest;
-    }
-
-    let taskResultBytes = this.storedBytes(
-      "SELECT COALESCE(SUM(size),0) AS bytes FROM retained_result_evidence_items WHERE taskId=? AND state='available'",
-      owner.taskId,
-    );
-    let installationBytes = this.storedBytes(
-      "SELECT COALESCE(SUM(size),0) AS bytes FROM retained_result_evidence_items WHERE state='available'",
-    );
+  /**
+   * Retained result evidence (ADR-1033) is gone: drop its tables and the anchors that pointed into
+   * them. Idempotent; runs inside CoordinationStore.migrate's transaction.
+   */
+  dropResultEvidence(): void {
     if (this.tableExists("retained_review_anchor_contexts")) {
-      installationBytes += this.storedBytes(
-        "SELECT COALESCE(SUM(size),0) AS bytes FROM retained_review_anchor_contexts WHERE state='available'",
-      );
+      // Explicit ref deletes: the core Store toggles foreign_keys, so ON DELETE CASCADE may not run.
+      const anchors =
+        "SELECT anchorId FROM retained_review_anchor_contexts WHERE sourceKind='result-evidence'";
+      this.db.exec(`DELETE FROM retained_review_anchor_draft_refs WHERE anchorId IN (${anchors});
+        DELETE FROM retained_review_anchor_submitted_refs WHERE anchorId IN (${anchors});
+        DELETE FROM retained_review_anchor_contexts WHERE sourceKind='result-evidence';`);
     }
-    let payloadBytes = 0;
-    let fileCount = 0;
-    const storedItems: Array<z.infer<typeof itemSchema>> = [];
-    for (const item of preparedItems) {
-      let next = item;
-      if (item.kind === "file") {
-        fileCount++;
-        if (fileCount > retainedEvidenceLimits.maxFilesPerResult)
-          next = asGap(item, "too-many-links");
-      }
-      if (next.state === "available") {
-        const amount = next.size;
-        if (
-          payloadBytes + amount > retainedEvidenceLimits.maxResultBytes ||
-          taskResultBytes + amount >
-            retainedEvidenceLimits.maxTaskResultBytes ||
-          installationBytes + amount >
-            retainedEvidenceLimits.maxInstallationBytes
-        ) {
-          next = asGap(next, "quota");
-        } else {
-          payloadBytes += amount;
-          taskResultBytes += amount;
-          installationBytes += amount;
-        }
-      }
-      storedItems.push(next);
-    }
-
-    const state =
-      storedItems.length === 0
-        ? "empty"
-        : storedItems.every((item) => item.state === "gap")
-          ? "gap"
-          : storedItems.some((item) => item.state === "gap")
-            ? "partial"
-            : "available";
-    const manifest: RetainedEvidenceManifest = {
-      version: 1,
-      resultId: owner.resultId,
-      evidenceId: candidate.evidenceId,
-      ...identity,
-      capturedAt: candidate.capturedAt,
-      sourceObservation: candidate.sourceObservation,
-      state,
-      payloadBytes,
-      items: storedItems.map((item) => ({
-        itemId: item.itemId,
-        kind: item.kind,
-        state: item.state,
-        ...(item.reason === undefined ? {} : { reason: item.reason }),
-        source: item.source,
-        repositoryId: item.repositoryId,
-        path: item.path,
-        ...(item.artifactId === undefined
-          ? {}
-          : { artifactId: item.artifactId }),
-        ...(item.mime === undefined ? {} : { mime: item.mime }),
-        ...(item.sha256 === undefined ? {} : { sha256: item.sha256 }),
-        size: item.size,
-        capturedAt: item.capturedAt,
-        observedAt: item.observedAt,
-        provenance: item.provenance,
-      })),
-    };
-    const checkedManifest = parseManifest(manifest);
-    this.db
-      .prepare(`INSERT INTO retained_result_evidence
-      (resultId,taskId,assignmentId,assignmentVersion,workId,workRevision,
-       requestSequence,conversationRevision,instructionsRevision,profileRevision,
-       profileId,taskVersion,captureTaskVersion,threadId,turnId,evidenceId,capturedAt,comparisonId,
-       comparisonCaptureState,comparisonOutcome,comparisonObservedAt,state,payloadBytes,manifestJson)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(
-        owner.resultId,
-        owner.taskId,
-        owner.assignmentId,
-        owner.assignmentVersion,
-        owner.workId,
-        owner.workRevision,
-        identity.requestSequence,
-        identity.conversationRevision,
-        identity.instructionsRevision,
-        identity.profileRevision,
-        identity.profileId,
-        identity.taskVersion,
-        identity.captureTaskVersion,
-        identity.threadId,
-        identity.turnId,
-        candidate.evidenceId,
-        candidate.capturedAt,
-        candidate.sourceObservation.comparisonId,
-        candidate.sourceObservation.captureState,
-        candidate.sourceObservation.outcome,
-        candidate.sourceObservation.observedAt,
-        state,
-        payloadBytes,
-        JSON.stringify(checkedManifest),
-      );
-    const insert = this.db.prepare(`INSERT INTO retained_result_evidence_items
-      (itemId,resultId,taskId,kind,state,reason,source,repositoryId,path,originRoot,
-       artifactId,mime,sha256,size,capturedAt,observedAt,provenanceJson,content)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    for (const item of storedItems) {
-      insert.run(
-        item.itemId,
-        owner.resultId,
-        owner.taskId,
-        item.kind,
-        item.state,
-        item.reason ?? null,
-        item.source,
-        item.repositoryId,
-        item.path,
-        item.originRoot,
-        item.artifactId ?? null,
-        item.mime ?? null,
-        item.sha256 ?? null,
-        item.size,
-        item.capturedAt,
-        item.observedAt,
-        JSON.stringify(item.provenance),
-        item.state === "available"
-          ? Buffer.from(item.bytes as Uint8Array)
-          : null,
-      );
-    }
-    return checkedManifest;
-  }
-
-  result(
-    taskId: string,
-    resultId: string,
-  ): RetainedEvidenceManifest | undefined {
-    const row = this.db
-      .prepare(`SELECT evidence.manifestJson,evidence.assignmentId,
-        evidence.assignmentVersion,evidence.workId,evidence.workRevision,
-        evidence.captureTaskVersion,
-        result.taskId AS resultTaskId,result.assignmentId AS resultAssignmentId,
-        result.assignmentVersion AS resultAssignmentVersion,result.workId AS resultWorkId,
-        result.workRevision AS resultWorkRevision
-        FROM retained_result_evidence evidence
-        JOIN coordination_results result ON result.resultId=evidence.resultId
-        WHERE evidence.taskId=? AND evidence.resultId=?`)
-      .get(taskId, resultId) as Row | undefined;
-    if (!row) return undefined;
-    const manifest = parseManifest(JSON.parse(String(row.manifestJson)));
-    if (
-      manifest.taskId !== taskId ||
-      manifest.resultId !== resultId ||
-      manifest.assignmentId !== row.assignmentId ||
-      manifest.assignmentId !== row.resultAssignmentId ||
-      manifest.assignmentVersion !== row.assignmentVersion ||
-      manifest.assignmentVersion !== row.resultAssignmentVersion ||
-      manifest.workId !== row.workId ||
-      manifest.workId !== row.resultWorkId ||
-      manifest.workRevision !== row.workRevision ||
-      manifest.workRevision !== row.resultWorkRevision ||
-      manifest.captureTaskVersion !== row.captureTaskVersion ||
-      manifest.taskId !== row.resultTaskId
-    )
-      throw new Error("Retained result evidence lookup identity mismatch");
-    return manifest;
-  }
-
-  item(
-    taskId: string,
-    resultId: string,
-    itemId: string,
-  ): RetainedEvidenceItemContent | undefined {
-    const manifest = this.result(taskId, resultId);
-    if (!manifest) return undefined;
-    const row = this.db
-      .prepare(`SELECT itemId,resultId,taskId,kind,state,reason,source,repositoryId,path,originRoot,
-        artifactId,mime,sha256,size,capturedAt,observedAt,provenanceJson,content
-        FROM retained_result_evidence_items WHERE taskId=? AND resultId=? AND itemId=?`)
-      .get(taskId, resultId, itemId) as Row | undefined;
-    if (!row) return undefined;
-    const item = rowItem(row);
-    if (item.state !== "available" || !(row.content instanceof Uint8Array))
-      return undefined;
-    const bytes = Buffer.from(row.content);
-    if (
-      bytes.byteLength !== item.size ||
-      createHash("sha256").update(bytes).digest("hex") !== item.sha256
-    )
-      throw new Error("Retained result evidence payload integrity mismatch");
-    if (row.originRoot === null)
-      throw new Error("Retained result evidence origin is missing");
-    return { manifest, item, bytes, originRoot: String(row.originRoot) };
+    this.db.exec(`DROP TABLE IF EXISTS retained_result_evidence_items;
+      DROP TABLE IF EXISTS retained_result_evidence;`);
   }
 
   reviewAnchorOperation(
@@ -1028,9 +393,6 @@ export class RetainedEvidenceStore {
       );
       let installationBytes = this.storedBytes(
         "SELECT COALESCE(SUM(size),0) AS bytes FROM retained_review_anchor_contexts WHERE state='available'",
-      );
-      installationBytes += this.storedBytes(
-        "SELECT COALESCE(SUM(size),0) AS bytes FROM retained_result_evidence_items WHERE state='available'",
       );
       const anchorIds: string[] = [];
       const anchorStates: RetainedReviewAnchorStageResponse["anchorStates"] =
@@ -1423,7 +785,6 @@ export class RetainedEvidenceStore {
       context: anchor.context,
       ...(anchor.comparisonId ? { comparisonId: anchor.comparisonId } : {}),
       ...(anchor.resultId ? { resultId: anchor.resultId } : {}),
-      ...(anchor.resultItemId ? { resultItemId: anchor.resultItemId } : {}),
       ...(anchor.workId ? { workId: anchor.workId } : {}),
       ...(anchor.threadId ? { threadId: anchor.threadId } : {}),
       ...(anchor.turnId ? { turnId: anchor.turnId } : {}),
@@ -1484,7 +845,7 @@ export class RetainedEvidenceStore {
         candidate.context,
         candidate.comparisonId ?? null,
         candidate.resultId ?? null,
-        candidate.resultItemId ?? null,
+        null,
         candidate.workId ?? null,
         candidate.threadId ?? null,
         candidate.turnId ?? null,
@@ -1540,34 +901,4 @@ export class RetainedEvidenceStore {
       throw new Error("Retained evidence quota count is invalid");
     return bytes;
   }
-}
-
-export function emptyRetainedEvidenceCandidate(
-  identity: RetainedEvidenceIdentity,
-  sourceObservation: RetainedEvidenceSourceObservation = {
-    comparisonId: null,
-    captureState: "missing",
-    outcome: null,
-    observedAt: null,
-  },
-): RetainedEvidenceCandidate {
-  return {
-    version: 1,
-    evidenceId: randomUUID(),
-    capturedAt: Date.now(),
-    identity,
-    sourceObservation,
-    items: [],
-  };
-}
-
-/** Preserve source links and identity when payload persistence is unavailable. */
-export function unavailableRetainedEvidenceCandidate(
-  input: RetainedEvidenceCandidate,
-): RetainedEvidenceCandidate {
-  const candidate = candidateSchema.parse(input);
-  return {
-    ...candidate,
-    items: candidate.items.map((item) => asGap(item, "unavailable")),
-  };
 }

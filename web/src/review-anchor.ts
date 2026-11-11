@@ -47,33 +47,3 @@ export function comparisonSideAnchor(
     ...(selection.turnId ? { turnId: selection.turnId } : {}),
   };
 }
-
-/** Lines of a file retained with one result. */
-export function resultEvidenceAnchor(
-  taskId: string,
-  evidence: {
-    resultId: string;
-    workId: string;
-    threadId: string;
-    turnId: string;
-  },
-  item: { itemId: string; repositoryId: string | null; path: string },
-  range: LineRange,
-  contentSha256: string,
-): ReviewAnchorCandidate {
-  return {
-    taskId,
-    repositoryId: item.repositoryId,
-    path: item.path,
-    sourceKind: "result-evidence",
-    context: "result",
-    resultId: evidence.resultId,
-    resultItemId: item.itemId,
-    workId: evidence.workId,
-    threadId: evidence.threadId,
-    turnId: evidence.turnId,
-    side: "file",
-    ...range,
-    contentSha256,
-  };
-}

@@ -271,11 +271,6 @@ test("no-result draft captures exact text and comparison sides, seals, discards,
       contentSha256: digest("deleted line\nsecond deleted line\n"),
     },
   ];
-  assert.equal(
-    f.service.retainedEvidence().result(task.taskId, randomUUID()),
-    undefined,
-    "the review anchors do not require a result record",
-  );
   const operationId = randomUUID();
   const request = { taskId: task.taskId, operationId, anchors: selections };
   const staged = await f.service.stageReviewAnchorDraft(request);
@@ -475,34 +470,39 @@ test("an unrelated retained result does not become an implicit anchor result bin
     Boolean(f.service.taskReview().result(task.taskId, unrelated.resultId)),
     true,
   );
-  const resultSelection = {
+  // An explicit result association is checked against the task's recorded results.
+  const associated = {
     taskId: task.taskId,
     repositoryId: null,
     path: "current.txt",
-    sourceKind: "result-evidence" as const,
-    context: "result" as const,
+    sourceKind: "workspace-file" as const,
+    context: "workspace" as const,
     side: "file" as const,
     startLine: 1,
     endLine: 1,
     contentSha256: digest(bytes),
-    resultItemId: randomUUID(),
+    resultId: unrelated.resultId,
     workId: unrelated.workId,
   };
-  await assert.rejects(
-    f.service.stageReviewAnchorDraft({
-      taskId: task.taskId,
-      operationId: randomUUID(),
-      anchors: [resultSelection],
-    }),
+  const bound = await f.service.stageReviewAnchorDraft({
+    taskId: task.taskId,
+    operationId: randomUUID(),
+    anchors: [associated],
+  });
+  assert.equal(
+    f.service.retainedEvidence().reviewAnchor(task.taskId, bound.anchorIds[0]!)
+      ?.anchor.resultId,
+    unrelated.resultId,
   );
-  await assert.rejects(
-    f.service.stageReviewAnchorDraft({
-      taskId: task.taskId,
-      operationId: randomUUID(),
-      anchors: [{ ...resultSelection, resultId: unrelated.resultId }],
-    }),
-    /result source mismatch/,
-  );
+  for (const mismatch of [{ workId: randomUUID() }, { resultId: randomUUID() }])
+    await assert.rejects(
+      f.service.stageReviewAnchorDraft({
+        taskId: task.taskId,
+        operationId: randomUUID(),
+        anchors: [{ ...associated, ...mismatch }],
+      }),
+      /result binding mismatch/,
+    );
 });
 
 test("interrupted stage and seal roll back atomically, retry, and leave no orphan context", async (t) => {

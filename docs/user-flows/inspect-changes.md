@@ -47,7 +47,7 @@ On a phone, an untargeted task opens the conversation; Latest result follows bel
 it. A direct result target brings its Changes link into view.
 
 The reply box is reachable from the diff without scrolling past the brief or
-retained evidence. An Inbox evidence link lands on the task evidence it names (1).
+the result's evidence. An Inbox evidence link lands on the task evidence it names (1).
 Inbox requests name no diff; the diff is reached through the task (Changes, file).
 The operator CLI is outside the budget: it has no screens.
 

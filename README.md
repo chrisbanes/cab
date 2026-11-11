@@ -188,7 +188,7 @@ owns delivery scope and status.
   executable logs in to the running service with a revocable read-only or read/write
   credential issued from Settings, manages named connections and browses projects,
   agents (through `cab profile`), tasks, assignments, instruction revisions, conversation history, results
-  and retained evidence with paged, coverage-reporting reads. It prepares reviewable
+  and their recorded workspace state with paged, coverage-reporting reads. It prepares reviewable
   change documents for agent, project, routing and capacity configuration, applies
   their exact command once with a journalled request key, adopts current instructions
   for an assignment's next turn and reads receipts back. It lists task-bound

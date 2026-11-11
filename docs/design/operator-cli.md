@@ -388,7 +388,7 @@ Node.js version and package tooling; distribution follows
 | `execution`, `logs`, `doctor` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow; the service readiness checks |
 | `runtime` | List each execution runtime's setting, state and bound tasks; enable or disable one (`disable` needs `--yes` when bound tasks use it) |
 | `recovery` | Inspect eligibility/holds; release a generation that never sent a turn; prepare and submit the existing evidence-bearing operations |
-| `result`, `artifact`, `delivery` | Inspect results/retained evidence and existing delivery state; existing refresh and staged comment operations |
+| `result`, `artifact`, `delivery` | Inspect results, their recorded workspace state and existing delivery state; existing refresh and staged comment operations |
 | `operation` | Read an existing mutation receipt and reconcile an uncertain command outcome |
 
 Service administration remains the separate host-local surface. Full setup
@@ -481,11 +481,11 @@ with different filters is invalid input. A server cursor that no longer resolves
 returns `409`, which the CLI reports as `cursor-stale` (exit 4) with an instruction
 to restart without `--cursor`. A task-list page whose catalog membership changed
 since the previous page reports `catalog-changed` and `continuity: "changed"`.
-Downloaded artifacts and evidence items are written only to a new `--out` file
-(mode `0600`) after the service's `x-cab-sha256` digest, or the item's recorded
-digest and size, verify; a mismatch is `integrity-mismatch` (exit 5) and leaves no
-file. `x-cab-evidence-source` distinguishes retained bytes from a pre-retention
-result's still-matching recorded workspace file.
+Downloaded artifacts are written only to a new `--out` file (mode `0600`) after
+the service's `x-cab-sha256` digest verifies; a mismatch is `integrity-mismatch`
+(exit 5) and leaves no file. `x-cab-evidence-source` is `recorded-workspace` for a
+still-matching workspace file and `recorded-commit` for the bytes at the commit
+the result recorded.
 
 Advertise service API version and capabilities. Older clients ignore additive
 fields; unsupported operations or incompatible contracts fail explicitly.

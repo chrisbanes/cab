@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -20,10 +20,6 @@ import { seedReviewTask } from "../fixtures/task-review.js";
 
 const digest = (bytes: Uint8Array | string) =>
   createHash("sha256").update(bytes).digest("hex");
-const png = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iY9sAAAAASUVORK5CYII=",
-  "base64",
-);
 
 async function waitFor(predicate: () => boolean) {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -126,13 +122,13 @@ function replaceLatestCapture(
   return comparisonId;
 }
 
-test("retained evidence and submitted comparison context survive replacement, cleanup, restart and SQLite backup", async (t) => {
+test("submitted comparison context survives replacement, cleanup, restart and SQLite backup", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const seeded = await seedReviewTask(
     f,
-    "Integrated evidence retention",
-    "Preserve the exact callback evidence and review context",
+    "Integrated anchor retention",
+    "Preserve the exact review context",
   );
   const workspace = await f.service.taskWorkspace(seeded.taskId);
   assert.equal(workspace?.state, "ready");
@@ -147,9 +143,7 @@ test("retained evidence and submitted comparison context survive replacement, cl
     "utf8",
   );
   const textPath = join(workspace.path, "retained-proof.txt");
-  const artifactPath = join(workspace.path, "retained-proof.png");
   await writeFile(textPath, beforeBytes);
-  await writeFile(artifactPath, png);
 
   const domain = f.service.domain();
   domain.execute({
@@ -177,32 +171,16 @@ test("retained evidence and submitted comparison context survive replacement, cl
   assert.ok(work?.threadId && work.turnId);
 
   await writeFile(textPath, callbackBytes);
-  const artifactId = randomUUID();
   const callback = {
     threadId: work.threadId,
     turnId: work.turnId,
     callId: randomUUID(),
     tool: "cab_report_result",
     arguments: {
-      summary: "Retain callback evidence",
+      summary: "Report the reviewed change",
       review: {
         sourceId: seeded.source.sourceId,
         changes: { files: ["retained-proof.txt"] },
-        artifacts: [
-          {
-            artifactId,
-            label: "Original screenshot",
-            role: "evidence" as const,
-            revision: 1,
-            availability: "available" as const,
-            file: {
-              relativePath: "retained-proof.png",
-              sha256: digest(png),
-              mime: "image/png" as const,
-              size: png.byteLength,
-            },
-          },
-        ],
       },
     },
   };
@@ -214,22 +192,6 @@ test("retained evidence and submitted comparison context survive replacement, cl
     .results.find((item) => item.workId === work.workId);
   assert.ok(result);
   const retained = f.service.retainedEvidence();
-  const originalManifest = retained.result(seeded.taskId, result.resultId);
-  assert.ok(originalManifest);
-  assert.equal(originalManifest.sourceObservation.captureState, "pending");
-  const sourceComparisonId = originalManifest.sourceObservation.comparisonId;
-  assert.ok(sourceComparisonId);
-  const diffGap = originalManifest.items.find((item) => item.kind === "diff");
-  assert.equal(diffGap?.state, "gap");
-  assert.equal(diffGap?.reason, "comparison-unsettled");
-  const textItem = originalManifest.items.find(
-    (item) => item.kind === "file" && item.path === "retained-proof.txt",
-  );
-  assert.ok(textItem?.state === "available");
-  assert.deepEqual(
-    retained.item(seeded.taskId, result.resultId, textItem.itemId)?.bytes,
-    callbackBytes,
-  );
 
   f.runtime.complete(f.runtime.turns);
   await waitFor(
@@ -242,7 +204,7 @@ test("retained evidence and submitted comparison context survive replacement, cl
   if (!latest?.comparison) throw new Error("Finished comparison missing");
   if (!latest.threadId || !latest.turnId)
     throw new Error("Finished comparison runtime identity missing");
-  assert.equal(latest.comparisonId, sourceComparisonId);
+  const sourceComparisonId = latest.comparisonId;
   assert.equal(latest.comparison.state, "available");
   assert.equal(latest.comparison.outcome, "completed");
   const exported = f.service.workspaceComparisonExport(
@@ -342,15 +304,6 @@ test("retained evidence and submitted comparison context survive replacement, cl
     }),
     /turn identity mismatch/,
   );
-  await assert.rejects(
-    f.service.stageReviewAnchorDraft({
-      taskId: seeded.taskId,
-      operationId: randomUUID(),
-      anchors: [{ ...leftSelection, comparisonId: alternateComparisonId }],
-    }),
-    /result binding mismatch/,
-  );
-
   const taskBeforeAnchor = f.service.domain().task(seeded.taskId);
   f.service.domain().execute({
     type: "task.configure",
@@ -361,14 +314,8 @@ test("retained evidence and submitted comparison context survive replacement, cl
     expectedVersion: Number(taskBeforeAnchor.version),
     title: "Metadata changed after immutable result capture",
   });
-  const manifestBeforeAnchor = retained.result(seeded.taskId, result.resultId);
-  assert.deepEqual(manifestBeforeAnchor, originalManifest);
   const laterBytes = Buffer.from("newer live file content\n");
   await writeFile(textPath, laterBytes);
-  const resultItem = originalManifest.items.find(
-    (item) => item.kind === "file" && item.path === "retained-proof.txt",
-  );
-  assert.ok(resultItem?.state === "available");
 
   const staged = await f.service.stageReviewAnchorDraft({
     taskId: seeded.taskId,
@@ -393,56 +340,21 @@ test("retained evidence and submitted comparison context survive replacement, cl
         endLine: 2,
         contentSha256: digest(callbackBytes),
       },
-      {
-        taskId: seeded.taskId,
-        repositoryId: null,
-        path: "retained-proof.txt",
-        sourceKind: "result-evidence",
-        context: "result",
-        resultId: result.resultId,
-        resultItemId: resultItem.itemId,
-        workId: result.workId,
-        side: "file",
-        startLine: 1,
-        endLine: 2,
-        contentSha256: digest(callbackBytes),
-      },
     ],
   });
-  assert.equal(staged.anchorIds.length, 3);
+  assert.equal(staged.anchorIds.length, 2);
   const leftAnchor = retained.reviewAnchor(seeded.taskId, staged.anchorIds[0]!);
   const rightAnchor = retained.reviewAnchor(
     seeded.taskId,
     staged.anchorIds[1]!,
   );
-  const resultAnchor = retained.reviewAnchor(
-    seeded.taskId,
-    staged.anchorIds[2]!,
-  );
-  assert.ok(leftAnchor?.bytes && rightAnchor?.bytes && resultAnchor?.bytes);
+  assert.ok(leftAnchor?.bytes && rightAnchor?.bytes);
   assert.deepEqual(leftAnchor.bytes, beforeBytes);
   assert.deepEqual(rightAnchor.bytes, callbackBytes);
-  assert.deepEqual(resultAnchor.bytes, callbackBytes);
   assert.equal(leftAnchor.anchor.sourceKind, "comparison-side");
   assert.equal(leftAnchor.anchor.resultId, result.resultId);
   assert.equal(leftAnchor.anchor.observedAt, exported!.comparison.observedAt);
   assert.equal(rightAnchor.anchor.observedAt, exported!.comparison.observedAt);
-  assert.equal(resultAnchor.anchor.sourceKind, "result-evidence");
-  assert.equal(resultAnchor.anchor.resultId, result.resultId);
-  assert.equal(resultAnchor.anchor.resultItemId, resultItem.itemId);
-  assert.equal(resultAnchor.anchor.observedAt, textItem.observedAt);
-  assert.deepEqual(
-    retained.result(seeded.taskId, result.resultId),
-    originalManifest,
-    "later metadata and anchors do not rewrite the original result manifest",
-  );
-  assert.equal(
-    retained
-      .result(seeded.taskId, result.resultId)
-      ?.items.find((item) => item.kind === "diff")?.state,
-    "gap",
-    "completed comparison context does not backfill the result's callback-time gap",
-  );
 
   const seal = {
     taskId: seeded.taskId,
@@ -503,7 +415,6 @@ test("retained evidence and submitted comparison context survive replacement, cl
     "later file contents must not replace original context\n",
   );
   await rename(textPath, join(workspace.path, "renamed-after-review.txt"));
-  await rm(artifactPath);
   const replacementComparisonId = replaceLatestCapture(f, latest);
   assert.notEqual(replacementComparisonId, sourceComparisonId);
   assert.equal(
@@ -523,13 +434,6 @@ test("retained evidence and submitted comparison context survive replacement, cl
   const web = await f.startWeb();
   t.after(() => web.close());
   const cookie = await login(web);
-  const api =
-    web.origin +
-    "/api/operator/tasks/" +
-    seeded.taskId +
-    "/results/" +
-    result.resultId +
-    "/evidence";
   const beforeRead = {
     work: f.service
       .list()
@@ -542,53 +446,6 @@ test("retained evidence and submitted comparison context survive replacement, cl
     latestComparisonId: f.service.workspaceTurnCaptureSlots(seeded.taskId)
       .latestFinished?.comparisonId,
   };
-  const manifestResponse = await fetch(api, { headers: { cookie } });
-  assert.equal(manifestResponse.status, 200);
-  const manifest = (await manifestResponse.json()) as {
-    data: {
-      sourceObservation: { comparisonId: string; captureState: string };
-      items: Array<{
-        itemId: string;
-        kind: string;
-        state: string;
-        reason?: string;
-      }>;
-    };
-  };
-  assert.equal(
-    manifest.data.sourceObservation.comparisonId,
-    sourceComparisonId,
-  );
-  assert.equal(manifest.data.sourceObservation.captureState, "pending");
-  assert.ok(
-    manifest.data.items.some(
-      (item) =>
-        item.kind === "diff" &&
-        item.state === "gap" &&
-        item.reason === "comparison-unsettled",
-    ),
-  );
-  const textResponse = await fetch(`${api}/${textItem.itemId}`, {
-    headers: { cookie },
-  });
-  assert.equal(textResponse.status, 200);
-  const textBody = (await textResponse.json()) as {
-    data: { preview: { kind: "text"; text: string } };
-  };
-  assert.deepEqual(
-    Buffer.from(textBody.data.preview.text, "utf8"),
-    callbackBytes,
-  );
-  const artifactResponse = await fetch(
-    web.origin +
-      "/api/operator/tasks/" +
-      seeded.taskId +
-      "/artifacts/" +
-      artifactId,
-    { headers: { cookie } },
-  );
-  assert.equal(artifactResponse.status, 200);
-  assert.deepEqual(Buffer.from(await artifactResponse.arrayBuffer()), png);
   for (const [anchorId, expected] of [
     [staged.anchorIds[0]!, beforeBytes],
     [staged.anchorIds[1]!, callbackBytes],
@@ -661,16 +518,6 @@ test("retained evidence and submitted comparison context survive replacement, cl
     assert.equal(Object.values(check)[0], "ok");
     assert.deepEqual(restoredDb.prepare("PRAGMA foreign_key_check").all(), []);
     const restored = new RetainedEvidenceStore(restoredDb);
-    const restoredManifest = restored.result(seeded.taskId, result.resultId);
-    assert.ok(restoredManifest);
-    assert.equal(
-      restoredManifest.items.find((item) => item.kind === "diff")?.state,
-      "gap",
-    );
-    assert.deepEqual(
-      restored.item(seeded.taskId, result.resultId, textItem.itemId)?.bytes,
-      callbackBytes,
-    );
     assert.deepEqual(
       restored.reviewAnchor(seeded.taskId, staged.anchorIds[0]!)?.bytes,
       beforeBytes,
@@ -679,16 +526,12 @@ test("retained evidence and submitted comparison context survive replacement, cl
       restored.reviewAnchor(seeded.taskId, staged.anchorIds[1]!)?.bytes,
       callbackBytes,
     );
-    assert.deepEqual(
-      restored.reviewAnchor(seeded.taskId, staged.anchorIds[2]!)?.bytes,
-      callbackBytes,
-    );
     assert.equal(
       restored.reviewAnchorSubmittedContext(
         seeded.taskId,
         sealed.submittedContextId,
       )?.anchorIds.length,
-      3,
+      2,
     );
   } finally {
     restoredDb.close();

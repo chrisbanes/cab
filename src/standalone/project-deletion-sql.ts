@@ -463,11 +463,6 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM project_task_sources WHERE projectId = :projectId",
   },
   {
-    table: "retained_result_evidence_items",
-    where: "taskId IN (SELECT value FROM json_each(:tasks))",
-    sql: "DELETE FROM retained_result_evidence_items WHERE taskId IN (SELECT value FROM json_each(:tasks))",
-  },
-  {
     table: "retained_review_anchor_draft_refs",
     where:
       "draftId IN (SELECT value FROM json_each(:anchorDrafts)) OR anchorId IN (SELECT value FROM json_each(:anchors))",
@@ -779,12 +774,6 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM lead_text_submissions WHERE taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
   },
   {
-    table: "retained_result_evidence",
-    where:
-      "taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
-    sql: "DELETE FROM retained_result_evidence WHERE taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
-  },
-  {
     table: "retained_review_anchor_contexts",
     where:
       "taskId IN (SELECT value FROM json_each(:tasks)) OR workId IN (SELECT value FROM json_each(:work))",
@@ -833,6 +822,11 @@ export const projectDeletionStatements = [
     table: "task_review_results",
     where: "taskId IN (SELECT value FROM json_each(:tasks))",
     sql: "DELETE FROM task_review_results WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
+    table: "coordination_result_workspaces",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM coordination_result_workspaces WHERE taskId IN (SELECT value FROM json_each(:tasks))",
   },
   {
     table: "coordination_results",

@@ -25,6 +25,22 @@ const same = (
   a.dev === b.dev &&
   a.size === b.size &&
   a.mtimeMs === b.mtimeMs;
+/** The recorded size and SHA-256, and PNG/JPEG magic for those types. */
+export function artifactBytesMatch(
+  file: NonNullable<Artifact["file"]>,
+  bytes: Buffer,
+): boolean {
+  const png = bytes
+      .subarray(0, 8)
+      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+    jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  return (
+    bytes.length === file.size &&
+    createHash("sha256").update(bytes).digest("hex") === file.sha256 &&
+    (file.mime !== "image/png" || png) &&
+    (file.mime !== "image/jpeg" || jpeg)
+  );
+}
 /** No client pathname or remote fetch. Revalidate live task binding and recorded material after every async read. */
 export async function previewRecordedArtifact(
   current: () => Promise<PreviewBinding | undefined>,
@@ -103,14 +119,7 @@ export async function previewRecordedArtifact(
       createHash("sha256").update(bytes).digest("hex") !== artifact.file.sha256
     )
       throw new ArtifactUnavailable("mismatch");
-    const png = bytes
-        .subarray(0, 8)
-        .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
-      jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-    if (
-      (artifact.file.mime === "image/png" && !png) ||
-      (artifact.file.mime === "image/jpeg" && !jpeg)
-    )
+    if (!artifactBytesMatch(artifact.file, bytes))
       throw new ArtifactUnavailable("unsupported");
     return { body: bytes, type: artifact.file.mime };
   } finally {

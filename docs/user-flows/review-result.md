@@ -61,6 +61,7 @@ The operator CLI is outside the budget: it has no screens.
 
 - A result superseded by a newer revision is labelled as earlier, with the newer
   one above it.
-- Unavailable or unretained evidence is stated in a sentence; current files are
-  never shown in its place.
+- A result that recorded no workspace state says so; a linked file that neither
+  the workspace nor the recorded commit holds unchanged is stated as unavailable,
+  and other bytes are never shown in its place.
 - A failed message keeps its draft; a sent one shows its receipt.

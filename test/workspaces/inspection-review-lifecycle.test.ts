@@ -185,11 +185,6 @@ test("three-start lifecycle: paused review, reporting repair, then a stopped rev
     .readTask(task.taskId)
     .results.find((item) => item.workId === third.workId);
   assert.ok(result);
-  const retained = f.service.retainedEvidence();
-  const original = retained
-    .result(task.taskId, result.resultId)
-    ?.items.find((item) => item.path === "marker.txt");
-  assert.ok(original?.state === "available");
   const stopped = f.service.stopTask(task.taskId);
   f.runtime.fail(3);
   await stopped;
@@ -200,12 +195,8 @@ test("three-start lifecycle: paused review, reporting repair, then a stopped rev
   const hold = f.service.taskHold(task.taskId);
   assert.ok(hold, "Stop leaves a task hold");
 
-  // Later bytes never replace the retained result; nothing starts a fourth turn.
+  // Later bytes start nothing: no fourth turn.
   await writeFile(marker, "after the journey\n");
-  assert.deepEqual(
-    retained.item(task.taskId, result.resultId, original.itemId)?.bytes,
-    Buffer.from("turn three\n"),
-  );
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(f.runtime.turns, 3, "no fourth start");
   assert.equal(f.service.taskHold(task.taskId), hold);
